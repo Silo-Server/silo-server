@@ -290,6 +290,11 @@ type Dependencies struct {
 	// Watch answers watch detail and marks items watched
 	// (*handlers.ItemsHandler).
 	Watch WatchService
+	// Trickplay reads published seek-bar previews (*trickplay.Reader).
+	Trickplay TrickplayService
+	// AdminTrickplay reports and regenerates seek-bar previews
+	// (*trickplay.Admin).
+	AdminTrickplay AdminTrickplayService
 	// Profiles applies profile updates (*handlers.ProfileHandler).
 	Profiles ProfileService
 	// Libraries answers which library identifiers exist

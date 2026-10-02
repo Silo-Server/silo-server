@@ -29,7 +29,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `branding/…` | branding assets |
 | `collection-images/…` | collection artwork |
 | `library-posters/…` | library posters |
-| `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w300.webp` per chapter, the key `thumbnail_path` holds |
+| `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
 | `diagnostics/…` | diagnostic bundles |
@@ -49,6 +49,43 @@ explicitly and refuses an empty one, because `parseArtworkObjectKey` accepts any
 Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 `diagnostics/<user id>/<report id>.tar.gz`, so artwork from a provider slugged
 `diagnostics` is never swept.
+
+Images generated from a media file (chapter thumbnails, under
+`chapter-images/<media_files.id>/`) are deleted with their file
+(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
+check constraint admits the supported file, image, and trickplay prefixes. The Clean
+Removed Media Images task deletes due groups whose namespace reports them
+unreferenced. Directory groups use prefix deletion and listing; individual
+chapter-image keys use exact deletion and `Stat`. The queue entry is removed
+only after storage confirms absence, since an S3 batch delete can fail per
+key without failing the call. The weekly Sweep
+Orphaned Media Images task lists each namespace and queues prefixes whose
+row is gone and whose newest object is over a day old; it queues nothing
+when more than half the prefixes it sees look orphaned, the signature of a
+broken liveness check rather than of real orphans. `media_files` ids are
+never reused, so a file prefix is dead for good once its row is gone.
+
+Cleanup queries use the connection already held for the operation: the
+collector's row-locking transaction or the sweep's advisory-lock session.
+Namespace liveness checks use that same connection, so neither operation
+requires a second connection when the database pool is limited to one.
+
+`playback.preview_image_width` replaces chapter images while their file lives.
+New keys include the encoded WebP's SHA-256:
+`chapter-images/<id>/<chapter>-<sha256>/w<width>.webp`; legacy numeric
+chapter directories remain valid. Uploads postpone an existing queue entry
+before writing, wait for an active collector, and preserve later deadlines.
+A database trigger queues displaced keys in the same transaction as the
+chapter update, at least 48 hours after replacement. The service also schedules
+retirement idempotently. URL resolution records each exact key's actual expiry
+before returning it, and retirement never shortens that protection. File deletion
+carries the latest child deadline into the file-prefix entry.
+
+The queue constraint admits both single-image key forms as well as file and
+trickplay revision prefixes. The collector deletes a chapter image only when
+no chapter of its file references it (`chapterthumbs.ImageBlobNamespace`). The
+sweep lists by file: an image's storage time does not show when it was replaced.
 
 Only the Assets store is wrapped to record the storage identity. When Operational
 shares it, a first write through any caller records it. A private S3 bucket stays

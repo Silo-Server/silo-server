@@ -4,6 +4,7 @@ import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
@@ -70,6 +71,9 @@ export default function MovieContent({
   // Movies have no re-detect action on an API node without redetect-markers
   // or movie credits.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMovieCredits =
     markerCapabilities.data?.redetect_markers === true &&
     markerCapabilities.data?.movie_credits === true;
@@ -312,6 +316,7 @@ export default function MovieContent({
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
               onSplitItem={

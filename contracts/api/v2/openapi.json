@@ -6348,6 +6348,22 @@
         },
         "type": "object"
       },
+      "AdminItemTrickplay": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "description": "Every media file of the item; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminTrickplayFile"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "type": "object"
+      },
       "AdminJellyfinCompatSettingsPatch": {
         "additionalProperties": false,
         "properties": {
@@ -16235,6 +16251,189 @@
         },
         "required": [
           "target_language"
+        ],
+        "type": "object"
+      },
+      "AdminTrickplayFile": {
+        "additionalProperties": false,
+        "properties": {
+          "failures": {
+            "description": "Consecutive failures since the last success",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "42"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "generated_at": {
+            "description": "When the served previews were published",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "interval_ms": {
+            "examples": [
+              10000
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "last_error": {
+            "description": "Why the last attempt failed",
+            "type": "string"
+          },
+          "servable": {
+            "description": "Players are served previews now; a regeneration keeps serving the previous ones until it publishes",
+            "type": "boolean"
+          },
+          "sheet_bytes": {
+            "description": "Storage the published sheets take",
+            "examples": [
+              2100000
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "description": "off when the file's library does not generate previews; unusable when the file cannot yield them until it changes",
+            "enum": [
+              "off",
+              "pending",
+              "running",
+              "ready",
+              "unusable"
+            ],
+            "type": "string"
+          },
+          "thumbnail_count": {
+            "examples": [
+              720
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "thumbnail_width": {
+            "description": "Pixels",
+            "examples": [
+              300
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_id",
+          "state",
+          "servable",
+          "failures"
+        ],
+        "type": "object"
+      },
+      "AdminTrickplayLibraries": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminTrickplayLibrary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "AdminTrickplayLibrary": {
+        "additionalProperties": false,
+        "properties": {
+          "library_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Movies"
+            ],
+            "type": "string"
+          },
+          "pending": {
+            "description": "Files waiting for previews, including those backing off after a failure",
+            "examples": [
+              12
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "ready": {
+            "examples": [
+              840
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "running": {
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "sheet_bytes": {
+            "description": "Storage the library's sheets take",
+            "examples": [
+              1800000000
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "unusable": {
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "library_id",
+          "name",
+          "pending",
+          "running",
+          "ready",
+          "unusable",
+          "sheet_bytes"
+        ],
+        "type": "object"
+      },
+      "AdminTrickplayRegeneration": {
+        "additionalProperties": false,
+        "properties": {
+          "requeued": {
+            "description": "Files queued ahead of the backlog; a file whose previews are being made is left to finish",
+            "examples": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requeued"
         ],
         "type": "object"
       },
@@ -27372,6 +27571,20 @@
             },
             "type": "array"
           },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images for the library's video files",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "trickplay_supported": {
+            "description": "Whether the server can produce seek-bar previews (public asset storage is configured)",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "type": {
             "description": "Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)",
             "examples": [
@@ -27391,6 +27604,8 @@
           "chapter_thumbnails_enabled",
           "chapter_thumbnails_supported",
           "intro_detection_enabled",
+          "trickplay_enabled",
+          "trickplay_supported",
           "trailer_kinds",
           "realtime_monitoring",
           "sort_order"
@@ -27424,10 +27639,26 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "trickplay": {
+            "description": "This build supports the per-library trickplay_enabled setting, which generates seek-bar previews",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "trickplay_supported": {
+            "description": "Whether public asset storage is configured so seek previews can be enabled, including before the first library is created",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "realtime_monitoring",
+          "trickplay",
+          "trickplay_supported",
           "revision",
           "state",
           "allowed"
@@ -27672,6 +27903,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images; requires public asset storage",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "type": {
             "description": "Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)",
@@ -28458,6 +28696,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "trickplay_enabled": {
+            "description": "Generate seek-bar preview images; turning it off deletes the library's previews",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "type": {
             "examples": [
@@ -43107,6 +43352,10 @@
             },
             "type": "array"
           },
+          "trickplay_available": {
+            "description": "Whether seek-bar previews are published for this file; read them with getWatchTrickplay",
+            "type": "boolean"
+          },
           "video_tracks": {
             "items": {
               "$ref": "#/components/schemas/WatchVideoTrack"
@@ -43125,7 +43374,8 @@
           "duration_seconds",
           "bitrate",
           "added_at",
-          "marker_segments"
+          "marker_segments",
+          "trickplay_available"
         ],
         "type": "object"
       },
@@ -45479,6 +45729,116 @@
           "genres",
           "keywords",
           "status"
+        ],
+        "type": "object"
+      },
+      "WatchTrickplay": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "description": "When the sheet URLs stop working; read the previews again for fresh ones",
+            "examples": [
+              "2026-01-02T03:04:05.000Z"
+            ],
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "42"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "interval_ms": {
+            "description": "Media time each thumbnail covers: thumbnail i shows what plays from i*interval_ms to (i+1)*interval_ms",
+            "examples": [
+              10000
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "sheets": {
+            "description": "Every sheet, in order. Sheet s holds thumbnails s*tile_columns*tile_rows onward, left to right and top to bottom; every sheet has the full grid, black after the last thumbnail",
+            "items": {
+              "$ref": "#/components/schemas/WatchTrickplaySheet"
+            },
+            "type": "array"
+          },
+          "thumbnail_count": {
+            "examples": [
+              720
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "thumbnail_height": {
+            "description": "Pixels",
+            "examples": [
+              126
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "thumbnail_width": {
+            "description": "Pixels",
+            "examples": [
+              300
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_columns": {
+            "description": "Thumbnails across a sheet",
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_rows": {
+            "description": "Thumbnails down a sheet",
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_id",
+          "interval_ms",
+          "thumbnail_width",
+          "thumbnail_height",
+          "tile_columns",
+          "tile_rows",
+          "thumbnail_count",
+          "sheets",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "WatchTrickplaySheet": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "url": {
+            "description": "A JPEG image; the URL carries its own authorization",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "url"
         ],
         "type": "object"
       },
@@ -72288,6 +72648,332 @@
           "admin-catalog"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/items/{id}/trickplay": {
+      "get": {
+        "operationId": "getAdminItemTrickplay",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie, an episode, or a series (every episode file)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie, an episode, or a series (every episode file)",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminItemTrickplay"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Report the seek-bar previews of an item's files.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/items/{id}/trickplay/regenerate": {
+      "post": {
+        "operationId": "regenerateAdminItemTrickplay",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie, an episode, or a series (every episode file)",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie, an episode, or a series (every episode file)",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTrickplayRegeneration"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Queue an item's seek-bar previews to be made again ahead of the backlog. The previous previews keep serving until the new ones publish.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -108650,6 +109336,148 @@
         "x-silo-demo-restricted": true,
         "x-silo-guarded": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/trickplay/libraries": {
+      "get": {
+        "operationId": "listAdminTrickplayLibraries",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTrickplayLibraries"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the libraries that generate seek-bar previews, with their files' progress and storage.",
+        "tags": [
+          "admin-catalog"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -189554,6 +190382,190 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/watch/{id}/trickplay": {
+      "get": {
+        "operationId": "getWatchTrickplay",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The stable device identifier used to resolve playback preferences",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The stable device identifier used to resolve playback preferences",
+              "examples": [
+                "tv-1"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "A movie or episode",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "A movie or episode",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The file being played, one of the item's versions",
+            "explode": false,
+            "in": "query",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "description": "The file being played, one of the item's versions",
+              "examples": [
+                "42"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchTrickplay"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get the seek-bar previews of one of an item's files. Versions whose trickplay_available is true have them.",
+        "tags": [
+          "watch"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/watched/{id}": {
       "delete": {
         "operationId": "unmarkWatched",
@@ -193250,6 +194262,87 @@
               }
             },
             "description": "Node, input authority or GPU admission unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "retry_safety": "non_retryable",
+        "listener": "transcode_node",
+        "method": "POST",
+        "path": "/trickplay/extract",
+        "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Result"
+                }
+              }
+            },
+            "description": "The run's sheets"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Invalid request or unapproved input path"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              }
+            },
+            "description": "Sampling failed; permanent names a cause in the file itself"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Node busy with another trickplay run, re-probing, or unconfigured"
           }
         }
       },
@@ -199028,6 +200121,9 @@
           "samples": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Samples"
           },
+          "sheets": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetsOutput"
+          },
           "stats": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_StatsOutput"
           },
@@ -199074,6 +200170,19 @@
             },
             "type": "array"
           },
+          "sheet_frames": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetFrames"
+          },
+          "sheet_tile_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sheets": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Sheet"
+            },
+            "type": "array"
+          },
           "silences": {
             "items": {
               "$ref": "#/x-silo-worker-protocols/schemas/mediasample_Interval"
@@ -199092,6 +200201,9 @@
       "mediasample_Samples": {
         "additionalProperties": false,
         "properties": {
+          "read_through": {
+            "type": "boolean"
+          },
           "seconds": {
             "items": {
               "format": "double",
@@ -199102,6 +200214,86 @@
         },
         "required": [
           "seconds"
+        ],
+        "type": "object"
+      },
+      "mediasample_Sheet": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "jpeg": {
+            "contentEncoding": "base64",
+            "type": "string"
+          },
+          "thumbnails": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "thumbnails",
+          "jpeg"
+        ],
+        "type": "object"
+      },
+      "mediasample_SheetFrames": {
+        "additionalProperties": false,
+        "properties": {
+          "decoded": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "filled": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "decoded",
+          "filled"
+        ],
+        "type": "object"
+      },
+      "mediasample_SheetsOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "quality": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "rows": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_height": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tile_width": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map": {
+            "$ref": "#/x-silo-worker-protocols/schemas/mediasample_ToneMap"
+          },
+          "use_input_aspect": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "tile_width",
+          "tile_height",
+          "columns",
+          "rows",
+          "quality"
         ],
         "type": "object"
       },
@@ -200349,6 +201541,24 @@
         "required": [
           "session_id",
           "status"
+        ],
+        "type": "object"
+      },
+      "trickplay_ExtractError": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "permanent": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ],
         "type": "object"
       }

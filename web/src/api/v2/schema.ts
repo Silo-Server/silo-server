@@ -1802,6 +1802,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/trickplay": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report the seek-bar previews of an item's files. */
+    get: operations["getAdminItemTrickplay"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/items/{id}/trickplay/regenerate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Queue an item's seek-bar previews to be made again ahead of the backlog. The previous previews keep serving until the new ones publish. */
+    post: operations["regenerateAdminItemTrickplay"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/jellyfin-compat/settings": {
     parameters: {
       query?: never;
@@ -4557,6 +4591,23 @@ export interface paths {
     get: operations["getAdminTaskSchedule"];
     /** Replace a captured schedule and apply it on this process. Other processes reload on restart. */
     put: operations["updateAdminTaskSchedule"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/trickplay/libraries": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the libraries that generate seek-bar previews, with their files' progress and storage. */
+    get: operations["listAdminTrickplayLibraries"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -10737,6 +10788,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/watch/{id}/trickplay": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get the seek-bar previews of one of an item's files. Versions whose trickplay_available is true have them. */
+    get: operations["getWatchTrickplay"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/watched/{id}": {
     parameters: {
       query?: never;
@@ -13152,6 +13220,10 @@ export interface components {
       tvdb_id?: string | null;
       /** Format: int64 */
       year?: number | null;
+    };
+    AdminItemTrickplay: {
+      /** @description Every media file of the item; empty, never null */
+      files: components["schemas"]["AdminTrickplayFile"][];
     };
     AdminJellyfinCompatSettingsPatch: {
       emulated_server_version?: string;
@@ -16603,6 +16675,103 @@ export interface components {
       /** @description Defaults true for item targets; ignored for season and episode targets. */
       include_children?: boolean | null;
       target_language: string;
+    };
+    AdminTrickplayFile: {
+      /**
+       * Format: int64
+       * @description Consecutive failures since the last success
+       * @example 0
+       */
+      failures: number;
+      /**
+       * @description Opaque identifier
+       * @example 42
+       */
+      file_id: string;
+      /**
+       * Format: date-time
+       * @description When the served previews were published
+       */
+      generated_at?: string;
+      /**
+       * Format: int64
+       * @example 10000
+       */
+      interval_ms?: number;
+      /** @description Why the last attempt failed */
+      last_error?: string;
+      /** @description Players are served previews now; a regeneration keeps serving the previous ones until it publishes */
+      servable: boolean;
+      /**
+       * Format: int64
+       * @description Storage the published sheets take
+       * @example 2100000
+       */
+      sheet_bytes?: number;
+      /**
+       * @description off when the file's library does not generate previews; unusable when the file cannot yield them until it changes
+       * @enum {string}
+       */
+      state: "off" | "pending" | "running" | "ready" | "unusable";
+      /**
+       * Format: int64
+       * @example 720
+       */
+      thumbnail_count?: number;
+      /**
+       * Format: int64
+       * @description Pixels
+       * @example 300
+       */
+      thumbnail_width?: number;
+    };
+    AdminTrickplayLibraries: {
+      /** @description Empty, never null */
+      items: components["schemas"]["AdminTrickplayLibrary"][];
+    };
+    AdminTrickplayLibrary: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      /** @example Movies */
+      name: string;
+      /**
+       * Format: int64
+       * @description Files waiting for previews, including those backing off after a failure
+       * @example 12
+       */
+      pending: number;
+      /**
+       * Format: int64
+       * @example 840
+       */
+      ready: number;
+      /**
+       * Format: int64
+       * @example 1
+       */
+      running: number;
+      /**
+       * Format: int64
+       * @description Storage the library's sheets take
+       * @example 1800000000
+       */
+      sheet_bytes: number;
+      /**
+       * Format: int64
+       * @example 2
+       */
+      unusable: number;
+    };
+    AdminTrickplayRegeneration: {
+      /**
+       * Format: int64
+       * @description Files queued ahead of the backlog; a file whose previews are being made is left to finish
+       * @example 1
+       */
+      requeued: number;
     };
     AdminUnmatchedFile: {
       container: string;
@@ -20982,6 +21151,16 @@ export interface components {
        */
       trailer_kinds: string[];
       /**
+       * @description Generate seek-bar preview images for the library's video files
+       * @example false
+       */
+      trickplay_enabled: boolean;
+      /**
+       * @description Whether the server can produce seek-bar previews (public asset storage is configured)
+       * @example true
+       */
+      trickplay_supported: boolean;
+      /**
        * @description Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga); free-form until the vocabulary is ratified (#135)
        * @example movies
        */
@@ -21002,6 +21181,16 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description This build supports the per-library trickplay_enabled setting, which generates seek-bar previews
+       * @example true
+       */
+      trickplay: boolean;
+      /**
+       * @description Whether public asset storage is configured so seek previews can be enabled, including before the first library is created
+       * @example true
+       */
+      trickplay_supported: boolean;
     };
     LibraryCollection: {
       /** @description The page's items; empty, never null */
@@ -21100,6 +21289,11 @@ export interface components {
        *     ]
        */
       trailer_kinds?: string[];
+      /**
+       * @description Generate seek-bar preview images; requires public asset storage
+       * @example false
+       */
+      trickplay_enabled?: boolean;
       /**
        * @description Library kind (movies, series, mixed, audiobooks, ebooks, podcasts, manga)
        * @example movies
@@ -21449,6 +21643,11 @@ export interface components {
        *     ]
        */
       trailer_kinds?: string[];
+      /**
+       * @description Generate seek-bar preview images; turning it off deletes the library's previews
+       * @example false
+       */
+      trickplay_enabled?: boolean;
       /** @example movies */
       type?: string;
     };
@@ -27515,6 +27714,8 @@ export interface components {
       /** @example 1080p */
       resolution: string;
       subtitle_tracks?: components["schemas"]["WatchSubtitleTrack"][];
+      /** @description Whether seek-bar previews are published for this file; read them with getWatchTrickplay */
+      trickplay_available: boolean;
       video_tracks?: components["schemas"]["WatchVideoTrack"][];
     };
     WatchlistCollection: {
@@ -28556,6 +28757,65 @@ export interface components {
        * @example 1995
        */
       year?: number;
+    };
+    WatchTrickplay: {
+      /**
+       * Format: date-time
+       * @description When the sheet URLs stop working; read the previews again for fresh ones
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      expires_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 42
+       */
+      file_id: string;
+      /**
+       * Format: int64
+       * @description Media time each thumbnail covers: thumbnail i shows what plays from i*interval_ms to (i+1)*interval_ms
+       * @example 10000
+       */
+      interval_ms: number;
+      /** @description Every sheet, in order. Sheet s holds thumbnails s*tile_columns*tile_rows onward, left to right and top to bottom; every sheet has the full grid, black after the last thumbnail */
+      sheets: components["schemas"]["WatchTrickplaySheet"][];
+      /**
+       * Format: int64
+       * @example 720
+       */
+      thumbnail_count: number;
+      /**
+       * Format: int64
+       * @description Pixels
+       * @example 126
+       */
+      thumbnail_height: number;
+      /**
+       * Format: int64
+       * @description Pixels
+       * @example 300
+       */
+      thumbnail_width: number;
+      /**
+       * Format: int64
+       * @description Thumbnails across a sheet
+       * @example 10
+       */
+      tile_columns: number;
+      /**
+       * Format: int64
+       * @description Thumbnails down a sheet
+       * @example 10
+       */
+      tile_rows: number;
+    };
+    WatchTrickplaySheet: {
+      /**
+       * Format: int64
+       * @example 0
+       */
+      index: number;
+      /** @description A JPEG image; the URL carries its own authorization */
+      url: string;
     };
     WatchUserData: {
       /**
@@ -46462,6 +46722,233 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminItemTrickplay: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie, an episode, or a series (every episode file) */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminItemTrickplay"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  regenerateAdminItemTrickplay: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description A movie, an episode, or a series (every episode file) */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTrickplayRegeneration"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -71413,6 +71900,112 @@ export interface operations {
       };
       /** @description Precondition Required */
       428: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminTrickplayLibraries: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTrickplayLibraries"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -124117,6 +124710,120 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WatchDetail"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getWatchTrickplay: {
+    parameters: {
+      query: {
+        /** @description The file being played, one of the item's versions */
+        file_id: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+        /** @description The stable device identifier used to resolve playback preferences */
+        "X-Silo-Device-Id"?: string;
+      };
+      path: {
+        /** @description A movie or episode */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WatchTrickplay"];
         };
       };
       /** @description Bad Request */

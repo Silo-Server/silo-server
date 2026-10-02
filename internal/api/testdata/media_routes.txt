@@ -149,6 +149,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -346,6 +348,7 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
@@ -806,6 +809,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media
@@ -1347,6 +1351,8 @@ POST /api/v2/admin/items/{id}/redetect-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-markers	non-media
 POST /api/v2/admin/items/{id}/refresh-metadata	non-media
 POST /api/v2/admin/items/{id}/split	non-media
+GET /api/v2/admin/items/{id}/trickplay	non-media
+POST /api/v2/admin/items/{id}/trickplay/regenerate	non-media
 PATCH /api/v2/admin/jellyfin-compat/settings	non-media
 GET /api/v2/admin/jellyfin-compat/status	non-media
 POST /api/v2/admin/jellyfin-compat/web/install	non-media
@@ -1544,6 +1550,7 @@ GET /api/v2/admin/tasks/{key}/metrics	non-media
 POST /api/v2/admin/tasks/{key}/run	non-media
 GET /api/v2/admin/tasks/{key}/triggers	non-media
 PUT /api/v2/admin/tasks/{key}/triggers	non-media
+GET /api/v2/admin/trickplay/libraries	non-media
 GET /api/v2/admin/unmatched	non-media
 GET /api/v2/admin/users	non-media
 POST /api/v2/admin/users	non-media
@@ -2004,6 +2011,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
+GET /api/v2/watch/{id}/trickplay	non-media
 DELETE /api/v2/watched/{id}	non-media
 POST /api/v2/watched/{id}	non-media
 GET /api/v2/watchlist	non-media

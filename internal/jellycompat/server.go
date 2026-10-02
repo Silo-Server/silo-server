@@ -141,6 +141,8 @@ type Dependencies struct {
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// Trickplay serves seek-bar preview sheets; nil answers 404.
+	Trickplay TrickplaySheets
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling

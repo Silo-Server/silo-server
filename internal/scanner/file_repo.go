@@ -1237,7 +1237,9 @@ func (r *FileRepository) UpdateChapterThumbnailState(
 		}
 	}
 
-	row := r.pool.QueryRow(ctx, `
+	// Commit through the session holding the chapter lock. If that session
+	// dies during extraction, its former owner cannot save after takeover.
+	row := r.chapterStateWriter(ctx, fileID).QueryRow(ctx, `
 		UPDATE media_files
 		SET chapters = $2,
 		    chapter_thumbnail_retry_after = CASE WHEN $3 THEN $4 ELSE chapter_thumbnail_retry_after END,
@@ -1271,7 +1273,7 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	if lastError != "" {
 		lastErrorPtr = &lastError
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.chapterStateWriter(ctx, fileID).Exec(ctx, `
 		UPDATE media_files
 		SET chapter_thumbnail_retry_after = $2,
 		    chapter_thumbnail_failure_count = $3,
@@ -4032,8 +4034,9 @@ func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episode
 
 // ListMissingChapterThumbnails returns present media files in enabled,
 // opted-in libraries that either have no chapter probe data yet or still have
-// chapters missing thumbnail assets.
-func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int) ([]*models.MediaFile, error) {
+// chapters missing thumbnail assets. A thumbnail whose path does not end in
+// currentSuffix was made at another width and counts as missing.
+func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + mfFileColumns + ` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.missing_since IS NULL
@@ -4051,7 +4054,10 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 				AND EXISTS (
 					SELECT 1
 					FROM jsonb_array_elements(mf.chapters) AS chapter
-					WHERE COALESCE(chapter->>'thumbnail_path', '') = ''
+					WHERE (
+						COALESCE(chapter->>'thumbnail_path', '') = ''
+						OR right(chapter->>'thumbnail_path', length($2)) <> $2
+					  )
 					  AND (
 						COALESCE(chapter->>'thumbnail_retry_after', '') = ''
 						OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW()
@@ -4061,13 +4067,100 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 		  )
 		ORDER BY mf.probe_updated_at ASC NULLS FIRST, mf.id ASC
 		LIMIT $1`
-	rows, err := r.pool.Query(ctx, query, limit)
+	rows, err := r.pool.Query(ctx, query, limit, currentSuffix)
 	if err != nil {
 		return nil, fmt.Errorf("querying files missing chapter thumbnails: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// chapterHDRFileSQL matches files whose chapter frames need HDR tone
+// mapping, as tonemap.NeedsToneMap decides: flagged HDR or a Dolby Vision
+// video track.
+const chapterHDRFileSQL = `(mf.hdr OR EXISTS (
+	SELECT 1 FROM jsonb_array_elements(
+		CASE WHEN jsonb_typeof(mf.video_tracks) = 'array' THEN mf.video_tracks ELSE '[]'::jsonb END
+	) AS track
+	WHERE btrim(COALESCE(track->>'dolby_vision', '')) <> ''))`
+
+// ListChapterThumbnailsAtOtherWidths pages chapters without the current image
+// width by file ID. A zero retry time means complete; otherwise the final page
+// returns the earliest time any stale image can become retryable. Missing
+// images stay pending until an in-flight first extraction reaches this width.
+// skipHDR leaves out files that need tone mapping, which chapter extraction
+// skips while the HDR policy is disabled.
+func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.id > $3
+		  AND mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND (mf.chapter_thumbnail_retry_after IS NULL OR mf.chapter_thumbnail_retry_after <= NOW())
+		  AND NOT ($4::boolean AND `+chapterHDRFileSQL+`)
+		  AND EXISTS (
+			SELECT 1 FROM jsonb_array_elements(
+				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			) AS chapter
+			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($2)) <> $2
+			  AND (COALESCE(chapter->>'thumbnail_retry_after', '') = ''
+			       OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW())
+		  )
+		ORDER BY mf.id
+		LIMIT $1`, limit, currentSuffix, afterID, skipHDR)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
+	}
+	files, err := scanMediaFiles(rows)
+	rows.Close()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if len(files) > 0 {
+		// The page already proves work is eligible now. Do not expand the
+		// catalog again to compute cooldowns while these requests are pending.
+		return files, time.Now(), nil
+	}
+	// File and chapter cooldowns both apply, so each stale image becomes
+	// eligible at their later deadline. The earliest such deadline schedules
+	// the next scan without repeatedly expanding JSON during the cooldown.
+	var nextRetry *time.Time
+	err = r.pool.QueryRow(ctx, `SELECT min(GREATEST(
+		COALESCE(mf.chapter_thumbnail_retry_after, NOW()),
+		COALESCE(NULLIF(chapter->>'thumbnail_retry_after', '')::timestamptz, NOW())
+	))
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		CROSS JOIN LATERAL jsonb_array_elements(
+			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+		) AS chapter
+		WHERE mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND NOT ($2::boolean AND `+chapterHDRFileSQL+`)
+		  AND right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1`, currentSuffix, skipHDR).Scan(&nextRetry)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
+	}
+	if nextRetry == nil {
+		return files, time.Time{}, nil
+	}
+	return files, *nextRetry, nil
+}
+
+// ChapterThumbnailLibraryKey fingerprints only the eligible library IDs. Once
+// a width backfill completes, polling this small table avoids expanding every
+// media file's chapter JSON while still noticing library enable and opt-in edits.
+func (r *FileRepository) ChapterThumbnailLibraryKey(ctx context.Context) (string, error) {
+	var key string
+	err := r.pool.QueryRow(ctx, `SELECT md5(COALESCE(string_agg(id::text, ',' ORDER BY id), ''))
+		FROM media_folders WHERE enabled AND chapter_thumbnails_enabled`).Scan(&key)
+	if err != nil {
+		return "", fmt.Errorf("checking chapter thumbnail library eligibility: %w", err)
+	}
+	return key, nil
 }
 
 // nilIfEmpty returns nil if the string is empty, otherwise a pointer to it.

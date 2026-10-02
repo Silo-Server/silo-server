@@ -589,7 +589,7 @@ describe("AdminAccessGroups", () => {
     const dialog = await screen.findByRole("alertdialog");
     await waitFor(() =>
       expect(dialog).toHaveTextContent(
-        "3 members will move to the default group, Everyone, and be signed out",
+        "3 members will move to the default group, Everyone, and get its access right away, without being signed out",
       ),
     );
     expect(dialog).not.toHaveTextContent("no group");
@@ -615,7 +615,7 @@ describe("AdminAccessGroups", () => {
     const dialog = await screen.findByRole("alertdialog");
     await waitFor(() =>
       expect(dialog).toHaveTextContent(
-        "Any members (none when this list last loaded) will move to the default group, Everyone, and be signed out",
+        "Any members (none when this list last loaded) will move to the default group, Everyone, and get its access right away, without being signed out",
       ),
     );
     expect(dialog).not.toHaveTextContent("This group has no members");

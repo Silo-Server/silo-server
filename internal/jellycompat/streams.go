@@ -2705,6 +2705,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			return errUpstreamReplaced
 		}
 		current.UpstreamSessionID = session.ID
+		current.UpstreamMediaFileID = source.FileID
 		current.UpstreamPlayMethod = method
 		current.TranscodeStarted = false
 		// A new upstream session has no committed HLS route yet. Retaining the

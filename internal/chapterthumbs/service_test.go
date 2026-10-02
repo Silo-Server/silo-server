@@ -145,6 +145,7 @@ func TestQueuePriorityPromotesExistingFile(t *testing.T) {
 type testFileRepo struct {
 	file           *models.MediaFile
 	updateCalls    int
+	missingSuffix  string
 	failureUpdates []struct {
 		retryAfter   time.Time
 		failureCount int
@@ -168,8 +169,21 @@ func (r *testFileRepo) GetByID(_ context.Context, id int) (*models.MediaFile, er
 	return r.cloneFile(), nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int) ([]*models.MediaFile, error) {
+func (r *testFileRepo) TryLockChapterThumbnails(ctx context.Context, _ int) (context.Context, func(), bool, error) {
+	return ctx, func() {}, true, nil
+}
+
+func (r *testFileRepo) ListMissingChapterThumbnails(_ context.Context, _ int, currentSuffix string) ([]*models.MediaFile, error) {
+	r.missingSuffix = currentSuffix
 	return nil, nil
+}
+
+func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, string, int, bool) ([]*models.MediaFile, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
+func (r *testFileRepo) ChapterThumbnailLibraryKey(context.Context) (string, error) {
+	return "test-libraries", nil
 }
 
 func (r *testFileRepo) UpdateChapterThumbnailState(

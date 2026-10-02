@@ -89,6 +89,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/taskmanager/repository"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
+	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
@@ -196,6 +197,9 @@ type Dependencies struct {
 	ScanRegistry              *evt.ScanRegistry
 	LibraryScanQueue          *scanqueue.Service
 	LibraryMonitor            interface{ Poke() }            // real-time library monitor, reconciled after library mutations (nil when this node runs none)
+	Trickplay                 interface{ ReconcileSoon() }   // seek preview service, reconciled after a library's trickplay setting changes (nil when not configured)
+	TrickplayReader           *trickplay.Reader              // published seek previews for players (nil when not configured)
+	TrickplayAdmin            *trickplay.Admin               // seek preview status and regeneration for administrators (nil when not configured)
 	LibraryMonitoring         apiv2.LibraryMonitoringService // real-time monitoring status for the v2 admin read (may be nil)
 	ActivityLogWriter         activitylog.Writer
 	ActivityLogRepo           *activitylog.Repo
@@ -663,6 +667,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryHandler.ScanRegistry = deps.ScanRegistry
 		libraryHandler.ScanQueue = deps.LibraryScanQueue
 		libraryHandler.RealtimeMonitor = deps.LibraryMonitor
+		libraryHandler.Trickplay = deps.Trickplay
 		libraryHandler.MovieMatchQueueRepo = deps.MovieMatchQueueRepo
 		libraryHandler.SeriesMatchQueueRepo = deps.SeriesRootMatchQueueRepo
 		libraryHandler.RawMatchBacklogRepo = deps.FileRepo
@@ -809,6 +814,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		detailSvc.SetLiteraryWorkLinker(literaryService)
 		detailSvc.SetProbeEnsurer(deps.ProbeEnsurer)
 		detailSvc.SetChapterThumbnailQueuer(deps.ChapterThumbnailQueuer)
+		if deps.TrickplayReader != nil {
+			detailSvc.SetTrickplayAvailability(deps.TrickplayReader)
+		}
 		if deps.ImageResolver != nil {
 			detailSvc.SetImageResolver(deps.ImageResolver)
 		}
@@ -1501,7 +1509,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if accessGroupStore != nil {
 		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
-		accessGroupHandler.OnUserSessionsRevoked = deps.OnUserSessionsRevoked
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
@@ -2412,6 +2419,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if itemsHandler != nil {
 		v2deps.Watch = itemsHandler
+		if deps.TrickplayReader != nil {
+			v2deps.Trickplay = deps.TrickplayReader
+		}
+	}
+	if deps.TrickplayAdmin != nil {
+		v2deps.AdminTrickplay = deps.TrickplayAdmin
 	}
 	if profileHandler != nil {
 		v2deps.Profiles = profileHandler
@@ -3152,6 +3165,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 						historyImportSvc,
 					)
 					eventsHandler.SetNotificationsSystem(deps.Notifications)
+					if sessionRepo != nil {
+						eventsHandler.SetSessionRoles(sessionRepo)
+					}
 					r.Get("/events/ws", eventsHandler.HandleWebSocket)
 					r.Get("/events/capability", eventsHandler.HandleCapability)
 				}
@@ -4636,11 +4652,14 @@ func resolveOptionalPluginAccessUser(
 	if claims.PasswordChangeRequired {
 		return false, false, 0, ""
 	}
-	valid, err := sessionRepo.IsValid(r.Context(), claims.SessionID)
-	if err != nil || !valid {
+	// Plugin launch tokens copy the role of the access token they were minted
+	// from, and a role change keeps the session, so admin access follows the
+	// account's current role rather than the token's.
+	role, active, err := sessionRepo.ActiveSessionRole(r.Context(), claims.SessionID)
+	if err != nil || !active {
 		return false, false, 0, ""
 	}
-	return true, claims.Role == "admin", claims.UserID, claims.ProfileID
+	return true, role == "admin", claims.UserID, claims.ProfileID
 }
 
 // NewTMDBCollectionFetcher creates a TMDBCollectionFetcher from an API key.
