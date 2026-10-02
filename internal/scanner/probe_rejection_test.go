@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"os"
 	"os/exec"
@@ -544,5 +545,82 @@ func TestPlaybackProbeEnsurerRejectionRacePostgres(t *testing.T) {
 	}
 	if stored, err := repo.GetByID(ctx, replaced.ID); err != nil || stored.ProbeFailedAt != nil {
 		t.Fatalf("repaired row marked failed: %+v %v", stored, err)
+	}
+}
+
+// stubProbeReadable replaces the storage check and its bounds for one test.
+func stubProbeReadable(t *testing.T, check func(string) error, timeout time.Duration, slots int) {
+	t.Helper()
+	prevCheck, prevTimeout, prevSlots := probeReadableCheck, probeReadableTimeout, probeReadableSlots
+	probeReadableCheck, probeReadableTimeout, probeReadableSlots = check, timeout, make(chan struct{}, slots)
+	t.Cleanup(func() {
+		probeReadableCheck, probeReadableTimeout, probeReadableSlots = prevCheck, prevTimeout, prevSlots
+	})
+}
+
+// A storage check stuck in the kernel (a stalled mount) must not hold the
+// caller past its bound, and the failure is then not blamed on the file.
+func TestIsProbeRejectionBoundsAStalledStorageCheck(t *testing.T) {
+	ctx := t.Context()
+	media := filepath.Join(t.TempDir(), "S01E10.mkv")
+	if err := os.WriteFile(media, []byte("bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	stubProbeReadable(t, func(string) error { <-release; return nil }, 50*time.Millisecond, 1)
+	defer close(release)
+
+	_, err := ProbeFile(ctx, writeRejectingFFprobe(t), media)
+	started := time.Now()
+	if IsProbeRejection(ctx, media, err) {
+		t.Fatal("a storage check that never answered was treated as a rejection")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("IsProbeRejection blocked for %v, want it bounded by the check timeout", elapsed)
+	}
+
+	// The stalled check still holds its slot, so the next one is skipped
+	// immediately instead of queueing behind it.
+	started = time.Now()
+	if IsProbeRejection(ctx, media, err) {
+		t.Fatal("a skipped storage check was treated as a rejection")
+	}
+	if elapsed := time.Since(started); elapsed > 40*time.Millisecond {
+		t.Fatalf("saturated check waited %v, want an immediate skip", elapsed)
+	}
+}
+
+// The caller's context bounds the check as well as the timeout.
+func TestIsProbeRejectionAbandonsStorageCheckWithContext(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	stubProbeReadable(t, func(string) error { <-release; return nil }, time.Minute, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	time.AfterFunc(20*time.Millisecond, cancel)
+	started := time.Now()
+	if err := boundedProbeInputReadable(ctx, "unused"); err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("abandoned check = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("check outlived its context by %v", elapsed)
+	}
+}
+
+// Within the bound, the check's own answer decides as before, and a finished
+// check frees its slot.
+func TestBoundedProbeInputReadablePassesThroughTheCheck(t *testing.T) {
+	stubProbeReadable(t, probeInputReadable, time.Minute, 1)
+	dir := t.TempDir()
+	readable := filepath.Join(dir, "readable.mkv")
+	if err := os.WriteFile(readable, []byte("bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := boundedProbeInputReadable(t.Context(), readable); err != nil {
+			t.Fatalf("readable file: %v", err)
+		}
+	}
+	if err := boundedProbeInputReadable(t.Context(), filepath.Join(dir, "missing.mkv")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing file = %v, want os.ErrNotExist", err)
 	}
 }

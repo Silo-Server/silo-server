@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
@@ -129,7 +130,7 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	}
 	accessErr := probeStderrAccessFailure(exitErr.Stderr)
 	if accessErr == nil {
-		accessErr = probeInputReadable(filePath)
+		accessErr = boundedProbeInputReadable(ctx, filePath)
 	}
 	if accessErr != nil {
 		slog.WarnContext(ctx, "scanner: ffprobe failed because the file could not be read; check its permissions and the storage it lives on",
@@ -178,6 +179,60 @@ func probeStderrAccessFailure(stderr []byte) error {
 		}
 	}
 	return nil
+}
+
+// The storage check after a failed probe touches the same storage ffprobe just
+// failed on, so on a stalled network mount its open or read can block in the
+// kernel indefinitely. It therefore runs off the caller's goroutine, bounded by
+// the caller's context and probeReadableTimeout. A check that does not answer
+// in time is reported as a storage problem: the failure is not blamed on the
+// file and stays retryable.
+//
+// A blocked syscall cannot be canceled, so the goroutine of a timed-out check
+// lingers until the kernel returns. probeReadableSlots caps how many such
+// goroutines can exist: a check holds its slot until its syscalls return, not
+// until its caller gives up, and when every slot is taken the check is skipped
+// and the failure is treated as a storage problem rather than queueing more
+// work behind the stall.
+var (
+	probeReadableTimeout = 5 * time.Second
+	probeReadableSlots   = make(chan struct{}, 4)
+	// probeReadableCheck is the check itself; tests substitute it.
+	probeReadableCheck = probeInputReadable
+)
+
+var (
+	errProbeReadableTimeout = errors.New("storage check did not finish in time; the storage may be stalled")
+	errProbeReadableBusy    = errors.New("storage checks are already waiting on stalled storage; skipped")
+)
+
+// boundedProbeInputReadable runs probeReadableCheck within the bounds above
+// and returns its error, or a storage-problem error when it was skipped,
+// timed out, or abandoned because ctx ended.
+func boundedProbeInputReadable(ctx context.Context, filePath string) error {
+	// One read of each setting: the lingering goroutine must release the slot
+	// it took, not whatever the variables hold by the time its syscall returns.
+	slots, check, timeout := probeReadableSlots, probeReadableCheck, probeReadableTimeout
+	select {
+	case slots <- struct{}{}:
+	default:
+		return errProbeReadableBusy
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer func() { <-slots }()
+		done <- check(filePath)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return errProbeReadableTimeout
+	case <-ctx.Done():
+		return fmt.Errorf("storage check abandoned: %w", ctx.Err())
+	}
 }
 
 // probeInputReadableBytes is how much probeInputReadable reads at each end of
