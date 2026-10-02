@@ -248,7 +248,7 @@ func (qb *QueryBuilder) BuildSortPlan(sortConfig QuerySort) (result QuerySortPla
 
 	titleExpr := qb.normalizedTitleExpr()
 	plan := QuerySortPlan{}
-	if isEpisodeCatalogScope(qb.mediaScope) && (sortConfig.Field == "release_date" || sortConfig.Field == "last_air_date") {
+	if isEpisodeCatalogScope(qb.mediaScope) && (sortConfig.Field == "release_date" || sortConfig.Field == querySortLastAirDate) {
 		qb.cursorTerms = []queryCursorTerm{
 			{expression: qb.alias + ".episode_air_date", descending: dir == "DESC", nullsLast: true},
 			{expression: qb.alias + ".episode_series_id"},
