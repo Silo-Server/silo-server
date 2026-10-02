@@ -2,7 +2,7 @@ package scanner
 
 import (
 	"context"
-	"crypto/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,8 +69,10 @@ func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 	if err := os.WriteFile(empty, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// A fixed seed keeps the bytes the same on every run: freshly random bytes
+	// occasionally look like a format ffprobe accepts, which made this flaky.
 	random := make([]byte, 256<<10)
-	if _, err := rand.Read(random); err != nil {
+	if _, err := rand.NewChaCha8([32]byte{0x19, 0x17, 0x91}).Read(random); err != nil {
 		t.Fatal(err)
 	}
 	corrupt := filepath.Join(dir, "corrupt.mkv")
