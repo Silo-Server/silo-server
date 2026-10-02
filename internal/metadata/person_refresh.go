@@ -11,6 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -189,7 +191,7 @@ func (s *PersonRefreshService) refreshPersonSince(
 		}
 		consulted++
 		if err != nil {
-			if !isProvider404(err) {
+			if !providerDoesNotKnow(err) {
 				failed = true
 			}
 			slog.WarnContext(ctx, "person refresh: provider detail lookup failed", "component", "metadata",
@@ -462,4 +464,11 @@ func personCacheContentID(
 		}
 	}
 	return strconv.FormatInt(person.ID, 10)
+}
+
+// providerDoesNotKnow reports a lookup error that says the provider doesn't
+// know the person: a built-in provider's HTTP 404, or a plugin's NotFound
+// status, which PluginProvider passes through as is.
+func providerDoesNotKnow(err error) bool {
+	return isProvider404(err) || status.Code(err) == codes.NotFound
 }

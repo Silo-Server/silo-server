@@ -156,6 +156,11 @@ func (w *PersonRefreshWorker) processBatch() bool {
 
 	done := map[int64]struct{}{}
 	w.runManual(done)
+	if w.stopped() {
+		// Claiming now would lease a batch no one looks up until the lease
+		// runs out.
+		return false
+	}
 	claimedAt := w.now()
 	lastStart := claimedAt.Add(w.config.ClaimLease - w.config.RefreshTimeout)
 	batch, err := w.service.ClaimCandidates(context.Background(), w.config.BatchSize)
