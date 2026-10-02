@@ -115,6 +115,19 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	return nil
 }
 
+func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[contentID]
+	if !ok || strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return false, nil
+	}
+	cp := *item
+	cp.Status = status
+	r.items[contentID] = &cp
+	return true, nil
+}
+
 func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -2006,6 +2019,23 @@ func TestPendingItemLifecycle_UnmatchedTransition(t *testing.T) {
 	}
 	if item.Status != "unmatched" {
 		t.Errorf("expected status=unmatched, got %q", item.Status)
+	}
+}
+
+// A provisional status never replaces an accepted match: the item may have
+// been matched after the caller read it.
+func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
+	for _, status := range []string{"unmatched", "pending", "ambiguous"} {
+		t.Run(status, func(t *testing.T) {
+			h := newTestHarness()
+			h.itemRepo.items["matched-item"] = &models.MediaItem{ContentID: "matched-item", Type: "movie", Title: "Matched", Status: "matched"}
+			if err := h.service.updateItemStatus(t.Context(), "matched-item", status); err != nil {
+				t.Fatalf("updateItemStatus(%s): %v", status, err)
+			}
+			if got := h.itemRepo.items["matched-item"].Status; got != "matched" {
+				t.Fatalf("status = %q, want matched", got)
+			}
+		})
 	}
 }
 

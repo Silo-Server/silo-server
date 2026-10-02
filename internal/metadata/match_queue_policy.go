@@ -50,7 +50,26 @@ func matchQueueBackoffExpr(basePlaceholder, maxPlaceholder string) string {
 
 // movieMatchQueueFileIdentitySQL includes the scanned group key: a rescan that
 // changes a file's parsed identity must wake a row backed off on the old one.
-const movieMatchQueueFileIdentitySQL = "mf.file_path || '|' || mf.content_group_key"
+// It also includes the group's operator override, for the same reason.
+var movieMatchQueueFileIdentitySQL = "mf.file_path || '|' || mf.content_group_key || " + matchQueueGroupOverrideSQL("mf")
+
+// matchQueueGroupOverrideSQL returns a SQL expression for the forced values of
+// the operator override on a media_files row's content group. The matcher
+// reads those values, so saving, changing, or removing an override must wake a
+// match that was parked or backed off without it. The expression is empty for
+// a group with no override, which keeps every other row's fingerprint as it
+// was. The note is left out because it cannot change a match.
+func matchQueueGroupOverrideSQL(fileAlias string) string {
+	return fmt.Sprintf(`COALESCE((
+		SELECT '|override:' || md5(jsonb_build_array(
+			group_override.forced_type, group_override.forced_title, group_override.forced_year,
+			group_override.forced_tmdb_id, group_override.forced_imdb_id, group_override.forced_tvdb_id)::text)
+		FROM media_group_overrides group_override
+		WHERE group_override.media_folder_id = %[1]s.media_folder_id
+		  AND group_override.group_key_version = %[1]s.group_key_version
+		  AND group_override.content_group_key = %[1]s.content_group_key
+	), '')`, fileAlias)
+}
 
 // matchQueueInputFingerprintSQL returns a deterministic SQL expression for
 // inputs that can change a result without changing the queue key. Arguments
@@ -78,18 +97,19 @@ func matchQueueInputFingerprintSQL(pathExpression, typeExpression, folderIDExpre
 // seriesMatchQueueInputFingerprintSQL includes the active file-path set because
 // episode validation derives both coordinates and episode-title evidence from
 // those paths. Adding, removing, or renaming an episode wakes a parked match,
-// as does a rescan that changes an episode's scanned group identity.
+// as does a rescan that changes an episode's scanned group identity or a
+// change to the operator override on its group.
 func seriesMatchQueueInputFingerprintSQL(rootExpression, folderIDExpression, languageExpression string) string {
 	shapeExpression := fmt.Sprintf(`(COALESCE(%s, '') || '|shape:' || COALESCE((
 		SELECT md5(string_agg(
-			md5(shape_file.file_path || '|' || shape_file.content_group_key), '' ORDER BY shape_file.file_path
+			md5(shape_file.file_path || '|' || shape_file.content_group_key || %s), '' ORDER BY shape_file.file_path
 		))
 		FROM media_files shape_file
 		WHERE shape_file.media_folder_id = %s
 		  AND shape_file.observed_root_path = %s
 		  AND shape_file.missing_since IS NULL
 		  AND shape_file.extra_id IS NULL
-	), ''))`, rootExpression, folderIDExpression, rootExpression)
+	), ''))`, rootExpression, matchQueueGroupOverrideSQL("shape_file"), folderIDExpression, rootExpression)
 	return matchQueueInputFingerprintSQL(shapeExpression, "'series'", folderIDExpression, languageExpression, seriesMatcherRevision)
 }
 

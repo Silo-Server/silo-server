@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -88,6 +89,36 @@ type queuedIdentityGroupOverrideRepo struct {
 
 func (r queuedIdentityGroupOverrideRepo) Get(context.Context, int, int, string) (*models.MediaGroupOverride, error) {
 	return r.override, nil
+}
+
+// keyedGroupOverrideRepo holds one override and returns it only for its own
+// folder, group key version and content group key.
+type keyedGroupOverrideRepo struct {
+	folderID, version int
+	key               string
+	override          *models.MediaGroupOverride
+}
+
+func (r keyedGroupOverrideRepo) Get(_ context.Context, folderID, version int, key string) (*models.MediaGroupOverride, error) {
+	if folderID != r.folderID || version != r.version || key != r.key {
+		return nil, nil
+	}
+	return r.override, nil
+}
+
+// failFirstGroupOverrideRepo fails its first lookup and answers the later
+// ones, so a caller that drops the first error is caught by what it does next.
+type failFirstGroupOverrideRepo struct {
+	keyedGroupOverrideRepo
+	calls *int
+}
+
+func (r failFirstGroupOverrideRepo) Get(ctx context.Context, folderID, version int, key string) (*models.MediaGroupOverride, error) {
+	*r.calls++
+	if *r.calls == 1 {
+		return nil, errors.New("lookup failed")
+	}
+	return r.keyedGroupOverrideRepo.Get(ctx, folderID, version, key)
 }
 
 func TestQueuedMovieIdentityPreservesActiveGroupOverride(t *testing.T) {
@@ -279,5 +310,101 @@ func TestLinkedSeriesQueueRequiresRescanBeforeMatchingStaleGroup(t *testing.T) {
 	queueErr := queue.errors[fmt.Sprintf("%d:%s", job.MediaFolderID, job.ObservedRootPath)]
 	if err != nil || !strings.Contains(queueErr, "rescan") || processed != 0 || len(queue.deleted) != 0 {
 		t.Fatalf("stale series did not retain rescan error: processed=%d err=%v queue=%+v", processed, err, queue)
+	}
+}
+
+// A file already linked to a provisional item is re-evaluated from that item,
+// not through createOrFindSkeleton, and must get the same override. An item
+// that is already matched keeps its own identity.
+func TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem(t *testing.T) {
+	for _, tt := range []struct {
+		status, wantStatus string
+		wantOverride       bool
+	}{
+		{"unmatched", "unmatched", true},
+		{"pending", "pending", true},
+		{"ambiguous", "pending", true},
+		{"matched", "matched", false},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			h := newTestHarness()
+			file := &models.MediaFile{
+				ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999).mkv",
+				GroupKeyVersion: 1, ContentGroupKey: "linked-group", ContentID: "local-linked",
+				BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
+			}
+			h.itemRepo.items[file.ContentID] = &models.MediaItem{
+				ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: tt.status,
+			}
+			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+				MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: file.ContentGroupKey,
+				BaseTitle: file.BaseTitle, BaseYear: file.BaseYear, InferredType: "movie", State: "resolved", OverrideSource: "none",
+			})
+			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
+				ForcedTitle: "Manual selection", ForcedYear: 1987, ForcedType: "movie", ForcedTmdbID: "335984",
+			}}
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+			// A rerun also reuses a matched item.
+			skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, true)
+			if err != nil || !reused || skeleton == nil {
+				t.Fatalf("linked item was not reused: skeleton=%+v reused=%t error=%v", skeleton, reused, err)
+			}
+			wantTitle, wantYear, wantTmdbID := "Old Name", 1999, ""
+			if tt.wantOverride {
+				wantTitle, wantYear, wantTmdbID = "Manual selection", 1987, "335984"
+			}
+			if skeleton.ContentID != file.ContentID || skeleton.Title != wantTitle || skeleton.Year != wantYear ||
+				skeleton.TmdbID != wantTmdbID || skeleton.ItemStatus != tt.wantStatus {
+				t.Fatalf("skeleton = %+v, want title %q year %d tmdb %q status %q", skeleton, wantTitle, wantYear, wantTmdbID, tt.wantStatus)
+			}
+			// The match merges into the stored item, so a settled status is stored too.
+			if got := h.itemRepo.items[file.ContentID].Status; got != tt.wantStatus {
+				t.Fatalf("stored item status = %q, want %q", got, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// A failed override lookup must fail the queued file, not match it without
+// the override.
+func TestQueuedIdentityReportsGroupOverrideLookupFailure(t *testing.T) {
+	h := newTestHarness()
+	file := &models.MediaFile{
+		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999).mkv",
+		GroupKeyVersion: 1, ContentGroupKey: "linked-group", ContentID: "local-linked",
+		BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
+	}
+	h.itemRepo.items[file.ContentID] = &models.MediaItem{
+		ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: "unmatched",
+	}
+	h.service.groupOverrideRepo = failFirstGroupOverrideRepo{calls: new(int), keyedGroupOverrideRepo: keyedGroupOverrideRepo{
+		folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{ForcedType: "movie", ForcedTmdbID: "335984"},
+	}}
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+	if skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false); err == nil {
+		t.Fatalf("queuedMovieSkeleton() = %+v, want the lookup error", skeleton)
+	}
+}
+
+func TestQueuedIdentityPathTagBeatsGroupOverrideOnLinkedProvisionalItem(t *testing.T) {
+	h := newTestHarness()
+	file := &models.MediaFile{
+		ID: 1, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999) {tmdb-111}.mkv",
+		GroupKeyVersion: 1, ContentGroupKey: "linked-group", ContentID: "local-linked",
+		BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
+	}
+	h.itemRepo.items[file.ContentID] = &models.MediaItem{
+		ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: "unmatched",
+	}
+	h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: file.ContentGroupKey, override: &models.MediaGroupOverride{
+		ForcedType: "movie", ForcedTmdbID: "222", ForcedImdbID: "tt0000222",
+	}}
+	worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+	skeleton, reused, err := worker.queuedMovieSkeleton(t.Context(), file, false)
+	if err != nil || !reused || skeleton == nil {
+		t.Fatalf("linked provisional item was not reused: skeleton=%+v reused=%t error=%v", skeleton, reused, err)
+	}
+	if skeleton.TmdbID != "111" || skeleton.ImdbID != "tt0000222" {
+		t.Fatalf("want the path tag's tmdb ID and the override's imdb ID, got skeleton=%+v", skeleton)
 	}
 }

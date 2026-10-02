@@ -530,6 +530,48 @@ func (r *ItemRepository) InsertIfAbsent(ctx context.Context, item *models.MediaI
 	return inserted, nil
 }
 
+// SetStatusUnlessMatched sets an item's status and leaves a matched item, or a
+// missing one, untouched. It reports whether a row changed. The condition is
+// part of the UPDATE, so a match another writer stores at the same time is
+// kept; reading the item and then calling Upsert would write the stale copy
+// over it.
+func (r *ItemRepository) SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error) {
+	if r.searchIndexEvents.disabledByActiveProvider() {
+		return r.setStatusUnlessMatched(ctx, r.pool, contentID, status)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin media item status tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	changed, err := r.setStatusUnlessMatched(ctx, tx, contentID, status)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit media item status tx: %w", err)
+	}
+	return changed, nil
+}
+
+func (r *ItemRepository) setStatusUnlessMatched(ctx context.Context, execer itemExecer, contentID, status string) (bool, error) {
+	tag, err := execer.Exec(ctx, `
+		UPDATE media_items
+		SET status = $2, updated_at = NOW()
+		WHERE content_id = $1 AND lower(trim(status)) <> 'matched'`, contentID, status)
+	if err != nil {
+		return false, fmt.Errorf("setting media item status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, execer, contentID); err != nil {
+		return false, fmt.Errorf("enqueueing catalog search upsert: %w", err)
+	}
+	return true, nil
+}
+
 func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *models.MediaItem) error {
 	_, err := r.writeItem(ctx, execer, item, true)
 	return err
