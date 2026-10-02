@@ -84,7 +84,7 @@ func buildEpisodeExactTierSQL(parsed parsedSearchQuery, filter AccessFilter, cur
 		LIMIT $%d
 	) ece`, strings.Join(conditions, " AND "), strings.Join(policyConditions, " AND "), limitIdx)
 	scored := buildMixedSearchCandidateBranch("ece.episode_id", "'episode'::text", episodeSearchTitleExpr, "ece.year",
-		episodeSearchTitleVector, episodeSearchOverviewVector, []string{"ece.search_title_normalized"}, entries,
+		episodeSearchTitleVector, episodeSearchOverviewVector, []string{"ece.search_title_normalized"}, "", entries,
 		[]string{"$1::text IS NOT NULL"}, exactIdx, yearIdx, phraseIdx, nil, false, false)
 	return fmt.Sprintf(`/* exact episode tier */ WITH scored AS (%s), page AS (SELECT * FROM scored)
 		SELECT %s%s

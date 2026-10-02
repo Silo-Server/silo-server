@@ -716,9 +716,14 @@ func (s *Service) loadSource(ctx context.Context, job *Job) ([]SubtitleCue, stri
 		if !isParsableTextFormat(string(dl.Format)) {
 			return nil, "", fmt.Errorf("%w: downloaded %s", ErrSourceUnsupported, dl.Format)
 		}
-		_, data, err := s.store.GetSubtitleContent(ctx, dl.ID)
+		source, data, err := s.store.GetSubtitleContent(ctx, dl.ID)
 		if err != nil {
 			return nil, "", fmt.Errorf("fetch source subtitle: %w", err)
+		}
+		// Translate the corrected timing clients see, so the output inherits it.
+		data, err = subtitles.DeliveryBytes(source, data)
+		if err != nil {
+			return nil, "", err
 		}
 		cues, err := ParseCues(data)
 		if err != nil {

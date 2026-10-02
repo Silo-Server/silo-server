@@ -62,6 +62,7 @@ type SubtitleSearchHandler struct {
 	repo           subtitles.Repository
 	mediaResolver  SubtitleMediaResolver
 	FileAuthorizer *MediaFileAuthorizer
+	sync           SubtitleSyncService
 }
 
 // NewSubtitleSearchHandler creates a new SubtitleSearchHandler.

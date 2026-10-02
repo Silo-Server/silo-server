@@ -92,6 +92,8 @@ type Result struct {
 	Frames []FrameStats `json:"frames,omitempty"`
 	// Images holds the decoded images when the request asked for Images.
 	Images []Image `json:"images,omitempty"`
+	// Speech holds the speech levels when the request asked for them.
+	Speech *SpeechLevels `json:"speech,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -203,7 +205,7 @@ type attemptRun struct {
 // samples from.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 	header := &inputHeaderParser{}
-	if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
+	if failure := a.exec(req, probeArgs(req.Input), nil, nil, header.line); failure != nil {
 		return Result{}, failure
 	}
 	if header.info.seeksToKeyframes() {
@@ -243,14 +245,27 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 		}
 		handlers = append(handlers, stats.line)
 	}
-	stdout, failure := a.exec(req, args, stdinBytes, req.Audio != nil && req.Audio.Fingerprint, handlers...)
-	if failure != nil {
+	var stdout io.Writer
+	var fingerprint *bytes.Buffer
+	var speech *speechWriter
+	switch {
+	case req.speech() != nil:
+		speech = newSpeechWriter(req.Window.DurationSeconds)
+		stdout = speech
+	case req.Audio != nil && req.Audio.Fingerprint:
+		fingerprint = &bytes.Buffer{}
+		stdout = fingerprint
+	}
+	if failure := a.exec(req, args, stdinBytes, stdout, handlers...); failure != nil {
 		return Result{}, failure
 	}
 
 	result := Result{Decoder: a.decoder}
-	if stdout != nil {
-		result.Fingerprint = DecodeRawFingerprint(stdout.Bytes())
+	if fingerprint != nil {
+		result.Fingerprint = DecodeRawFingerprint(fingerprint.Bytes())
+	}
+	if speech != nil {
+		result.Speech = speech.result(req.Window.StartSeconds)
 	}
 	if silences != nil {
 		result.Silences = silences.result()
@@ -262,18 +277,12 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 }
 
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin
-// when that is not nil and routing its log to handlers. It returns the
-// process's stdout when captureStdout is set.
-func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureStdout bool, handlers ...func(string)) (*bytes.Buffer, *AttemptError) {
+// when that is not nil, writing its stdout to stdout when that is not nil,
+// and routing its log to handlers.
+func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)
-	}
-	var stdout *bytes.Buffer
-	var stdoutWriter io.Writer
-	if captureStdout {
-		stdout = &bytes.Buffer{}
-		stdoutWriter = stdout
 	}
 	router := newStderrRouter(handlers...)
 	stderr, waitStderr := router.start()
@@ -312,7 +321,7 @@ func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureS
 		case !replaced && state == nil:
 			failure.Reason = ReasonStart
 		}
-		return nil, failure
+		return failure
 	}
-	return stdout, nil
+	return nil
 }

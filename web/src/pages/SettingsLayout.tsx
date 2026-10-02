@@ -186,7 +186,7 @@ const NAV_SECTIONS: NavSection[] = [
         path: "interface",
         label: "Navigation & Cards",
         icon: PanelTop,
-        description: "Your primary menu, poster size, and card captions.",
+        description: "Your primary menu, poster size, card captions, and title art.",
         keywords: [
           "navigation",
           "menu",
@@ -197,6 +197,9 @@ const NAV_SECTIONS: NavSection[] = [
           "hide year",
           "artwork only",
           "preset",
+          "title art",
+          "logo",
+          "clearlogo",
         ],
         settings: settingIndex(
           "Card preset",
@@ -205,6 +208,9 @@ const NAV_SECTIONS: NavSection[] = [
           "Title & metadata",
           "Title only",
           "Artwork only",
+          "Title pages",
+          "Show title art",
+          "Apply to all devices",
           "Primary menu",
           "Choose destination or shortcut",
           "Add to menu",

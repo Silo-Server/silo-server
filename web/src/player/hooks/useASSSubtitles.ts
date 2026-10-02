@@ -97,6 +97,9 @@ export function useASSSubtitles(
   onLoadState?: (state: "idle" | "loading" | "ready" | "error") => void,
   videoFit: VideoFitMode = "contain",
   coverCrop: CoverCrop = NO_COVER_CROP,
+  // Bumped when the server retimed the active track behind an unchanged URL
+  // (subtitle sync or a timing reset); changing it reloads the track.
+  cueRevision = 0,
 ): { isActive: boolean } {
   const onLoadStateRef = useRef(onLoadState);
   onLoadStateRef.current = onLoadState;
@@ -338,7 +341,7 @@ export function useASSSubtitles(
     // videoRef is a stable ref object. streamOriginSeconds is read from
     // streamOriginRef inside the async function to always get the latest value.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached]);
+  }, [activeUrl, activeLanguage, activeFontBundleUrl, isDetached, cueRevision]);
 
   // Update JASSUB's time offset when either the media timeline remaps or
   // the user nudges subtitle sync. Avoids destroying and recreating the

@@ -79,13 +79,16 @@ type At struct {
 }
 
 // AudioOutput selects audio features. Fingerprint and Silence may be combined
-// in one run.
+// in one run; Speech takes the run to itself.
 type AudioOutput struct {
 	// Fingerprint returns raw Chromaprint points for the sampled audio.
 	Fingerprint bool `json:"fingerprint,omitempty"`
 	// Silence returns the silences silencedetect finds, in absolute media
 	// seconds.
 	Silence *SilenceParams `json:"silence,omitempty"`
+	// Speech returns the speech-band level of one audio stream every 10 ms
+	// (see speech.go). It needs a window and no other output.
+	Speech *SpeechParams `json:"speech,omitempty"`
 }
 
 // SilenceParams configures silence detection.
@@ -199,6 +202,20 @@ func (r Request) Validate() error {
 			return err
 		}
 	}
+	if r.Audio != nil && r.Audio.Speech != nil {
+		if err := r.Audio.Speech.validate(); err != nil {
+			return err
+		}
+		if r.Window == nil || r.Window.KeyframesOnly {
+			return errors.New("speech needs a window")
+		}
+		if r.Window.DurationSeconds > maxSpeechWindowSeconds {
+			return fmt.Errorf("speech window must be at most %d seconds", maxSpeechWindowSeconds)
+		}
+		if r.Audio.Fingerprint || r.Audio.Silence != nil || r.Stats != nil {
+			return errors.New("speech takes no other output")
+		}
+	}
 	if r.Stats != nil {
 		if err := r.Stats.validate(); err != nil {
 			return err
@@ -229,7 +246,7 @@ func (r Request) hasOutput() bool {
 }
 
 func (r Request) hasAudioOutput() bool {
-	return r.Audio != nil && (r.Audio.Fingerprint || r.Audio.Silence != nil)
+	return r.Audio != nil && (r.Audio.Fingerprint || r.Audio.Silence != nil || r.Audio.Speech != nil)
 }
 
 // attempts returns the attempts to make, defaulting to one software attempt.
@@ -238,6 +255,14 @@ func (r Request) attempts() []Attempt {
 		return []Attempt{{}}
 	}
 	return r.Attempts
+}
+
+// speech returns the request's speech output, nil when it has none.
+func (r Request) speech() *SpeechParams {
+	if r.Audio == nil {
+		return nil
+	}
+	return r.Audio.Speech
 }
 
 // parsesStderr reports whether an output is read from ffmpeg's log, which
@@ -310,6 +335,8 @@ func (s SilenceParams) validate() error {
 	}
 	return nil
 }
+
+var errAudioStreamRange = fmt.Errorf("audio stream must be between 0 and %d", maxAudioStream)
 
 // countSet counts the true values.
 func countSet(values ...bool) int {

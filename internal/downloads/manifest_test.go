@@ -101,7 +101,7 @@ func TestManifestBuilderAssembles(t *testing.T) {
 		{Path: "/media/sub.en.srt", Language: "en", Format: "srt", Forced: true},
 	}}
 	subs := fakeSubtitleSource{downloaded: []subtitles.DownloadedSubtitle{
-		{ID: 7, MediaFileID: 99, Language: "fr", Format: subtitles.SubtitleFormat("vtt")},
+		{ID: 7, MediaFileID: 99, Language: "fr", Format: subtitles.SubtitleFormat("vtt"), Revision: 4},
 	}}
 	b := NewManifestBuilder(fakeManifestSource{detail: detail}, subs, fakeFileResolver{file: file}, nil)
 
@@ -143,6 +143,10 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	}
 	if m.Subtitles[1].FetchURL != "/api/v2/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
 		t.Fatalf("downloaded subtitle = %+v", m.Subtitles[1])
+	}
+	// Only downloaded subtitles carry a revision; their bytes change with timing.
+	if m.Subtitles[0].Revision != "" || m.Subtitles[1].Revision != "4" {
+		t.Fatalf("subtitle revisions = %q, %q", m.Subtitles[0].Revision, m.Subtitles[1].Revision)
 	}
 	if m.StableIdentity.ProviderIDs["imdb"] != "tt123" || m.StableIdentity.ProviderIDs["tmdb"] != "456" {
 		t.Fatalf("stable identity = %+v", m.StableIdentity)
@@ -340,4 +344,49 @@ func TestServeEmbeddedSubtitleOnlyServesSidecarTracks(t *testing.T) {
 		}
 	}()
 	_ = s.serveEmbeddedSubtitle(httptest.NewRecorder(), req, dl, 1)
+}
+
+// A downloaded subtitle is served with its timing correction, revalidated on
+// every use, and answers a matching If-None-Match with 304.
+func TestServeDownloadedSubtitleTimingAndRevalidation(t *testing.T) {
+	const stored = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	sub := &subtitles.DownloadedSubtitle{ID: 7, MediaFileID: 99, Format: subtitles.FormatSRT, Revision: 3,
+		Timing: subtitles.Timing{OffsetMS: 500}}
+
+	rr := httptest.NewRecorder()
+	if err := serveDownloadedSubtitle(rr, httptest.NewRequest(http.MethodGet, "/", nil), sub, []byte(stored)); err != nil {
+		t.Fatal(err)
+	}
+	etag := rr.Header().Get("ETag")
+	if rr.Code != http.StatusOK || rr.Body.String() != "1\n00:00:01,500 --> 00:00:02,500\nHello\n" {
+		t.Fatalf("GET = %d %q", rr.Code, rr.Body.String())
+	}
+	if etag != `"downloaded-7-3"` || rr.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("headers = %v", rr.Header())
+	}
+
+	for _, header := range []string{etag, "W/" + etag, `"other", ` + etag, "*"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("If-None-Match", header)
+		rr = httptest.NewRecorder()
+		if err := serveDownloadedSubtitle(rr, req, sub, []byte(stored)); err != nil {
+			t.Fatal(err)
+		}
+		if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 || rr.Header().Get("ETag") != etag {
+			t.Fatalf("If-None-Match %s = %d %q", header, rr.Code, rr.Body.String())
+		}
+	}
+
+	// A timing change bumps the revision, so the old validator no longer matches.
+	changed := *sub
+	changed.Revision, changed.Timing = 4, subtitles.Timing{}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("If-None-Match", etag)
+	rr = httptest.NewRecorder()
+	if err := serveDownloadedSubtitle(rr, req, &changed, []byte(stored)); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || rr.Body.String() != stored || rr.Header().Get("ETag") != `"downloaded-7-4"` {
+		t.Fatalf("stale validator = %d %q %q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
+	}
 }

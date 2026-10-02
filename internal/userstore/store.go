@@ -95,6 +95,13 @@ type UserStore interface {
 	// past the key between calls are neither repeated nor cause gaps, which the
 	// offset form cannot promise while playback keeps reordering the set.
 	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
+	// ListCompletedProgressSince returns at most limit completed rows, with the
+	// hidden-item exclusion, whose updated_at at whole-second precision (the
+	// precision WatchProgress.UpdatedAt carries) is after since and, when until
+	// is non-zero, not after until, newest first. It replaces offset paging for
+	// walks bounded by a cutoff; until lets a walk extend to an older cutoff
+	// without re-reading the rows it already holds.
+	ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]WatchProgress, error)
 	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
 	// the backing catalog item's type and/or library, so the watched-items path
 	// no longer scans the whole status set before discarding non-matching rows.

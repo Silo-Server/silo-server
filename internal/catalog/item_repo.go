@@ -1252,12 +1252,19 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	return page, total, hi < total, !fuzzyTruncated, nil
 }
 
+// searchBlockHasExactTitle mirrors exact_title_match for a block's titles,
+// including yearSuffixedTitleSQL for non-episode items.
 func searchBlockHasExactTitle(items []*models.MediaItem, normalizedTitle string) bool {
 	if normalizedTitle == "" {
 		return false
 	}
 	for _, item := range items {
-		if item != nil && normalizeTitleForComparison(item.Title) == normalizedTitle {
+		if item == nil {
+			continue
+		}
+		title := normalizeTitleForComparison(item.Title)
+		if title == normalizedTitle ||
+			(item.Type != recentTVTypeEpisode && item.Year > 0 && title == normalizedTitle+" "+strconv.Itoa(item.Year)) {
 			return true
 		}
 	}

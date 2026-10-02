@@ -92,6 +92,10 @@ func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
 }
 
+func TestSQLiteHistoryEntryOnce(t *testing.T) {
+	storetest.RunHistoryEntryOnce(t, newConformanceStore(t))
+}
+
 func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {
 	storetest.RunDatedMarkWatchedBatch(t, newConformanceStore(t))
 }

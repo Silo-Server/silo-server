@@ -73,6 +73,14 @@ The description retains both media types for the shared statuses. Extraction
 has no durable request identity or replay receipt and is classified
 `non_retryable`; no new retry behavior is added to the existing worker client.
 
+`POST /media-samples/run` on the transcode listener takes a
+`mediasample.Request` and returns its `mediasample.Result` as JSON (see
+[media sampling](media-sampling.md#remote-runs)). It requires the node bearer
+and approved-input-path authority, refuses hardware attempts with `400`, and
+reports a failed run as `422` with a `mediasample.RemoteFailure`. Sampling only
+reads the file, so the operation is classified `natural_idempotent`; a repeated
+request decodes again. Subtitle sync is its caller.
+
 Prepared artifacts retain GET, HEAD and DELETE at
 `/downloads/artifacts/{artifact_id}` on the transcode listener. The node bearer
 protects all three operations; the identifier is an opaque bounded handle, not a

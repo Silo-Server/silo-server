@@ -230,3 +230,18 @@ func TestSubtitleDownloadFilename(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 }
+
+// The frozen v1 admin list serializes AdminDownloadedSubtitle; the stored
+// timing correction must stay out of it.
+func TestAdminDownloadedSubtitleV1JSONOmitsTiming(t *testing.T) {
+	row := AdminDownloadedSubtitle{ID: 1, MediaFileID: 2, Provider: "upload", Language: "en", Format: "srt",
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Timing: subtitles.Timing{OffsetMS: 1200, Scale: 1.001}}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":1,"media_file_id":2,"provider":"upload","language":"en","format":"srt","release_name":"","score":0,"hearing_impaired":false,"created_at":"2026-01-02T03:04:05Z","uploader_username":"","media_title":"","media_type":"","file_path":""}`
+	if string(encoded) != want {
+		t.Fatalf("v1 JSON changed:\n%s\nwant\n%s", encoded, want)
+	}
+}

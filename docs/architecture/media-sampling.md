@@ -65,7 +65,7 @@ Supported today:
 | Part | Values |
 |---|---|
 | Sampling mode | `Window` (start and duration; `KeyframesOnly` decodes only video keyframes and needs `Stats`), `Samples` (the keyframe at or before each of a list of times; `Stats` only), `At` (the frame at a time; `Images` only) |
-| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
+| Outputs | `Audio.Fingerprint` (raw Chromaprint points), `Audio.Silence` (silencedetect intervals), `Audio.Speech` (speech-band level every 10 ms), `Stats` (per-frame picture statistics), `Images` (JPEG images) |
 | Attempts | software; hardware (QSV, VAAPI, VideoToolbox) for requests with a video output (`Images` or `Stats`); see [Hardware decode](#hardware-decode) |
 
 Audio and `Stats` may share one run: ffmpeg reads the input once and writes
@@ -130,6 +130,32 @@ Outputs read from ffmpeg's log run at `-loglevel repeat+info`: without
 `repeat`, ffmpeg folds identical consecutive lines into "Last message
 repeated N times" and per-frame values would be lost. Fingerprint-only runs
 keep `-loglevel warning`.
+
+`Audio.Speech` takes a `Window` and no other output. It maps one audio
+stream (`AudioStream`, ffmpeg's `0:a:N`), optionally only its front-centre
+channel (`CenterChannel`, which fails on a stream without one), band-limits it
+to 200-3400 Hz, and resamples it to 8 kHz mono with
+`aresample=async=1:first_pts=0`, so a stream that starts after the window
+start is padded with silence and level `i` always covers window start plus
+`i` × 10 ms. ffmpeg writes raw samples to stdout and the runner reduces them
+to one level per frame as they arrive (whole dB above -100 dBFS), so no window
+is held as PCM. Subtitle sync is its consumer.
+
+## Remote runs
+
+`POST /media-samples/run` on the transcode-node listener runs one `Request`
+with the node's ffmpeg and returns its `Result` as JSON
+(`mediasample.RemoteClient` is the caller). The node requires its bearer
+secret and an input path it is allowed to read, accepts software attempts
+only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
+the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
+whether running the request elsewhere may succeed: an unreachable node, a 5xx,
+or a node lacking a capability, but not a file that has no stream or cannot be
+decoded. Callers choose and reserve nodes themselves
+(`nodepool.Reservations`); the node also admits at most
+`subtitles.sync_node_capacity` runs at once across every caller; a request
+over the limit waits up to two minutes for a slot (`MaxRemoteAdmissionWait`)
+and is then refused with `503` and `node_unavailable`.
 
 ## Hardware decode
 
@@ -313,23 +339,27 @@ that is never idle, switch to the lowest best-effort level (7) instead.
 
 Per-file analysis results are stored in `media_intro_fingerprints`, one row
 per file and artifact. The table name predates generalization; renaming it
-waits for a schema maintenance window. `intromarkers.Repository` reads and
-writes it through `LoadArtifact`, `LoadArtifacts`, `UpsertArtifact`, and
-`RecordArtifactFailure`; it moves to its own package when a second feature
-stores artifacts.
+waits for a schema maintenance window. `internal/mediaartifact` owns the
+table: `mediaartifact.Store` reads and writes it through `Load`, `LoadMany`,
+`Upsert`, and `RecordFailure`, and `Artifact.State` interprets a stored row.
+Features consume it by kind; intro detection (`internal/intromarkers`) is one
+consumer and stores the `intro_fingerprint`, `credits_fingerprint`, and
+`credits_tail` kinds.
 
 - **Key.** The primary key is `(media_file_id, algorithm_version,
   config_hash)`. A row also has a `kind`, such as `intro_fingerprint`. Kinds
   never share a key because each derives its `config_hash` with
-  `intromarkers.ArtifactConfigHash`, a hash of the kind and its parameters.
-  Intro fingerprints keep `Config.ConfigHash`, which predates the namespacing
-  and is pinned by a test. An upsert never takes over another kind's row.
+  `mediaartifact.ConfigHash`, a hash of the kind and its parameters. Intro
+  fingerprints keep `intromarkers.Config.ConfigHash`, which predates the
+  namespacing and is pinned by a test. An upsert never takes over another
+  kind's row.
 - **Identity.** Each row records the file hash, size, duration, and analysis
   window it was computed from. A row applies only while all of them match the
   file.
 - **Payload.** `points` holds the payload bytes and `point_count` the number
-  of items in it; `fingerprint_format` names the encoding. The consuming kind
-  owns the encoding.
+  of items in it; `fingerprint_format` names the encoding. Each kind owns its
+  payload encoding and lives with the feature that consumes it;
+  `mediaartifact` stores the bytes without interpreting them.
 
 Status rules, applied by `Artifact.State`:
 

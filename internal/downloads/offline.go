@@ -331,11 +331,57 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 		if sub == nil || sub.MediaFileID != dl.MediaFileID {
 			return ErrAssetNotFound
 		}
-		writeSubtitle(w, string(sub.Format), data)
-		return nil
+		return serveDownloadedSubtitle(w, r, sub, data)
 	default:
 		return ErrInvalidSubtitleRef
 	}
+}
+
+// downloadedSubtitleETag names one delivered representation of a stored
+// subtitle. Its bytes are immutable, so the row revision, which changes with
+// the timing correction, identifies the timed bytes.
+func downloadedSubtitleETag(sub *subtitles.DownloadedSubtitle) string {
+	return fmt.Sprintf(`"downloaded-%d-%d"`, sub.ID, sub.Revision)
+}
+
+// serveDownloadedSubtitle writes a stored subtitle with its timing correction.
+// Unlike sidecar assets it is revalidated on every use, since a timing change
+// alters the bytes behind the same ref.
+func serveDownloadedSubtitle(w http.ResponseWriter, r *http.Request, sub *subtitles.DownloadedSubtitle, data []byte) error {
+	etag := downloadedSubtitleETag(sub)
+	if ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "private, no-cache")
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	timed, err := subtitles.DeliveryBytes(sub, data)
+	if err != nil {
+		return fmt.Errorf("applying downloaded subtitle timing: %w", err)
+	}
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Content-Type", subtitles.SubtitleContentType(subtitles.SubtitleFormat(strings.ToLower(string(sub.Format)))))
+	_, _ = w.Write(timed)
+	return nil
+}
+
+// ifNoneMatchMatches applies the weak comparison RFC 9110 requires for
+// If-None-Match to a comma-separated list, including "*".
+func ifNoneMatchMatches(header, etag string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false
+	}
+	if header == "*" {
+		return true
+	}
+	for candidate := range strings.SplitSeq(header, ",") {
+		if strings.TrimPrefix(strings.TrimSpace(candidate), "W/") == etag {
+			return true
+		}
+	}
+	return false
 }
 
 // serveEmbeddedSubtitle serves one complete embedded ASS/SSA script or PGS

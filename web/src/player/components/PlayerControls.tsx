@@ -33,7 +33,9 @@ import type {
   VideoFitMode,
 } from "../types";
 import type { VersionInfo } from "./QualityMenu";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
+import type { StoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -77,6 +79,7 @@ interface PlayerControlsProps {
   onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
+  storedSubtitleSync?: StoredSubtitleSync;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -84,6 +87,7 @@ interface PlayerControlsProps {
   // Quality
   qualityOptions: QualityOption[];
   activeQualityId: string;
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   qualityError: string | null;
   onQualitySelect: (id: string) => void;
@@ -147,11 +151,13 @@ export function PlayerControls({
   onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
+  storedSubtitleSync,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
   qualityOptions,
   activeQualityId,
+  deliveredRecipe,
   isTranscoding,
   qualityError,
   onQualitySelect,
@@ -336,11 +342,13 @@ export function PlayerControls({
               onSubtitleJobAccepted={onSubtitleJobAccepted}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
+              storedSubtitleSync={storedSubtitleSync}
               audioTracks={audioTracks}
             />
             <QualityMenu
               options={qualityOptions}
               activeId={activeQualityId}
+              deliveredRecipe={deliveredRecipe}
               isTranscoding={isTranscoding}
               error={qualityError}
               onSelect={onQualitySelect}
@@ -511,12 +519,14 @@ export function PlayerControls({
                 onSubtitleJobAccepted={onSubtitleJobAccepted}
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
+                storedSubtitleSync={storedSubtitleSync}
                 audioTracks={audioTracks}
               />
 
               <QualityMenu
                 options={qualityOptions}
                 activeId={activeQualityId}
+                deliveredRecipe={deliveredRecipe}
                 isTranscoding={isTranscoding}
                 error={qualityError}
                 onSelect={onQualitySelect}

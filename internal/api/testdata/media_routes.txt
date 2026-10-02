@@ -754,6 +754,10 @@ GET /api/v2/subtitles/providers/status	non-media
 POST /api/v2/subtitles/search	non-media
 DELETE /api/v2/subtitles/stored/{id}	non-media
 GET /api/v2/subtitles/stored/{id}/metadata	non-media
+GET /api/v2/subtitles/stored/{id}/sync	non-media
+POST /api/v2/subtitles/stored/{id}/sync	non-media
+PUT /api/v2/subtitles/stored/{id}/timing	non-media
+GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
 POST /api/v2/sync/progress	non-media
@@ -1948,6 +1952,10 @@ GET /api/v2/subtitles/providers/status	non-media
 POST /api/v2/subtitles/search	non-media
 DELETE /api/v2/subtitles/stored/{id}	non-media
 GET /api/v2/subtitles/stored/{id}/metadata	non-media
+GET /api/v2/subtitles/stored/{id}/sync	non-media
+POST /api/v2/subtitles/stored/{id}/sync	non-media
+PUT /api/v2/subtitles/stored/{id}/timing	non-media
+GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
 POST /api/v2/sync/progress	non-media
