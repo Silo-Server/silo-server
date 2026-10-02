@@ -913,6 +913,9 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.Mov
 
 func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.MediaFile, allowMatched bool, libraryRoots ...string) (*skeletonResult, bool, error) {
 	if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, file, allowMatched, libraryRoots...); ok {
+		if err := w.applyQueuedGroupOverride(ctx, file, skeleton, false, libraryRoots...); err != nil {
+			return nil, false, err
+		}
 		if err := w.validateReusedGroupIdentity(ctx, file, skeleton, libraryRoots...); err != nil {
 			return nil, false, err
 		}
@@ -1061,6 +1064,92 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		ImdbID:           imdbID,
 		TvdbID:           tvdbID,
 	}, true
+}
+
+// applyQueuedGroupOverride forces the operator override on a queued file's
+// content group onto the skeleton rebuilt from the provisional item the file
+// already links to, as createOrFindSkeleton does when it first links a file. A
+// matched item and an item pinned unmatched by a split keep their identity,
+// and a structured path ID still beats a forced ID for the same provider.
+//
+// seriesRoot is set when a series root is matched as one unit. A group key
+// can be shared by roots that are different shows (two bare "Season" folders,
+// or one title with no year), each on its own item, and the override row does
+// not record which root it was saved for. It therefore reaches a series item
+// only when that item holds the whole group and nothing else.
+func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, seriesRoot bool, libraryRoots ...string) error {
+	if !isProvisionalOwnershipStatus(skeleton.ItemStatus) || file.ContentGroupKey == "" || w.service.groupOverrideRepo == nil {
+		return nil
+	}
+	override, err := w.service.groupOverrideRepo.Get(ctx, file.MediaFolderID, file.GroupKeyVersion, file.ContentGroupKey)
+	if err != nil {
+		return fmt.Errorf("loading queued group override: %w", err)
+	}
+	if override == nil {
+		return nil
+	}
+	if pinned, err := w.service.pinnedUnmatchedBySplit(ctx, skeleton.ContentID); err != nil || pinned {
+		return err
+	}
+	if seriesRoot {
+		owned, err := w.seriesItemOwnsContentGroup(ctx, file)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			slog.WarnContext(ctx, "metadata: group override not applied to linked series root because its item and its content group hold different files", "component", "metadata",
+				"folder_id", file.MediaFolderID,
+				"observed_root_path", file.ObservedRootPath,
+				"content_id", skeleton.ContentID,
+				"group_key_version", file.GroupKeyVersion,
+				"content_group_key", file.ContentGroupKey,
+			)
+			return nil
+		}
+	}
+
+	wasAmbiguous := skeleton.ItemStatus == "ambiguous" //nolint:goconst // Item statuses are literals throughout this package.
+	applyGroupOverride(skeleton, override)
+	applyFolderIDHints(skeleton, trustedStructuredIDsForSkeleton(file.FilePath, skeleton.ObservedRootPath, skeleton.RootPath, libraryRoots...))
+	if wasAmbiguous {
+		// The match merges provider metadata into the stored item, and keeps
+		// the title of an item that is still ambiguous. Store the settled
+		// status so the item takes the provider's title like any other
+		// provisional item.
+		if err := w.service.updateItemStatus(ctx, skeleton.ContentID, skeleton.ItemStatus); err != nil {
+			return fmt.Errorf("settling overridden ambiguous item: %w", err)
+		}
+	}
+	return nil
+}
+
+// seriesItemOwnsContentGroup reports whether the item file links to and file's
+// content group hold the same present files.
+func (w *MatchWorker) seriesItemOwnsContentGroup(ctx context.Context, file *models.MediaFile) (bool, error) {
+	lister, ok := w.service.fileRepo.(metadataContentFileLister)
+	if !ok {
+		return false, nil
+	}
+	groupFiles, err := w.service.fileRepo.ListByGroupKey(ctx, file.MediaFolderID, file.GroupKeyVersion, file.ContentGroupKey)
+	if err != nil {
+		return false, fmt.Errorf("listing queued group files: %w", err)
+	}
+	for _, groupFile := range groupFiles {
+		if groupFile != nil && groupFile.ContentID != file.ContentID {
+			return false, nil
+		}
+	}
+	itemFiles, err := lister.GetByContentID(ctx, file.ContentID)
+	if err != nil {
+		return false, fmt.Errorf("listing queued item files: %w", err)
+	}
+	for _, itemFile := range itemFiles {
+		if itemFile != nil && (itemFile.MediaFolderID != file.MediaFolderID ||
+			itemFile.GroupKeyVersion != file.GroupKeyVersion || itemFile.ContentGroupKey != file.ContentGroupKey) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // reparseQueuedFileIdentity refreshes the in-memory scanner identity from the
@@ -1216,7 +1305,23 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	}
 	if !hasUnlinkedGroupFile(groupFiles) {
 		if strings.TrimSpace(representative.ContentID) != "" {
-			if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative, job.RerunRequested, folder.paths...); ok && skeleton.ItemStatus != "ambiguous" {
+			skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative, job.RerunRequested, folder.paths...)
+			if ok {
+				if err := w.applyQueuedGroupOverride(ctx, representative, skeleton, true, folder.paths...); err != nil {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
+						return 0, updateErr
+					}
+					// The queue row records the failure. Returning it would
+					// cancel sibling jobs.
+					slog.WarnContext(ctx, "metadata: series root group override failed", "component", "metadata",
+						"folder_id", job.MediaFolderID,
+						"observed_root_path", job.ObservedRootPath,
+						"error", err,
+					)
+					return 0, nil
+				}
+			}
+			if ok && skeleton.ItemStatus != "ambiguous" {
 				if err := w.validateReusedGroupIdentity(ctx, representative, skeleton, folder.paths...); err != nil {
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr

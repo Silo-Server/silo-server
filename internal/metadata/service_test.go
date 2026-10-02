@@ -2009,6 +2009,23 @@ func TestPendingItemLifecycle_UnmatchedTransition(t *testing.T) {
 	}
 }
 
+// A provisional status never replaces an accepted match: the item may have
+// been matched after the caller read it.
+func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
+	for _, status := range []string{"unmatched", "pending", "ambiguous"} {
+		t.Run(status, func(t *testing.T) {
+			h := newTestHarness()
+			h.itemRepo.items["matched-item"] = &models.MediaItem{ContentID: "matched-item", Type: "movie", Title: "Matched", Status: "matched"}
+			if err := h.service.updateItemStatus(t.Context(), "matched-item", status); err != nil {
+				t.Fatalf("updateItemStatus(%s): %v", status, err)
+			}
+			if got := h.itemRepo.items["matched-item"].Status; got != "matched" {
+				t.Fatalf("status = %q, want matched", got)
+			}
+		})
+	}
+}
+
 // TestCreateOrFindSkeleton_MovieIgnoresGroupClaimDedup verifies that scanner
 // group claims do not merge movie files before metadata confirmation.
 func TestCreateOrFindSkeleton_MovieIgnoresGroupClaimDedup(t *testing.T) {

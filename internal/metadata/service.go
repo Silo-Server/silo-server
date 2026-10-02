@@ -6144,6 +6144,36 @@ func applyFolderIDHints(res *skeletonResult, hints *naming.FolderIDHints) {
 	}
 }
 
+// applyGroupOverride forces an operator's group override onto a skeleton.
+// The override settles the group's identity, so an ambiguous skeleton becomes
+// matchable again; any other status is the item's own and is kept.
+func applyGroupOverride(res *skeletonResult, override *models.MediaGroupOverride) {
+	if res == nil || override == nil {
+		return
+	}
+	if override.ForcedType != "" {
+		res.Type = override.ForcedType
+	}
+	if override.ForcedTitle != "" {
+		res.Title = override.ForcedTitle
+	}
+	if override.ForcedYear > 0 {
+		res.Year = override.ForcedYear
+	}
+	if override.ForcedTmdbID != "" {
+		res.TmdbID = override.ForcedTmdbID
+	}
+	if override.ForcedImdbID != "" {
+		res.ImdbID = override.ForcedImdbID
+	}
+	if override.ForcedTvdbID != "" {
+		res.TvdbID = override.ForcedTvdbID
+	}
+	if res.ItemStatus == "ambiguous" { //nolint:goconst // Item statuses are literals throughout this package.
+		res.ItemStatus = "pending" //nolint:goconst // queueStatePending is a test-local constant.
+	}
+}
+
 func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 	if res == nil {
 		return nil
@@ -6358,25 +6388,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			)
 		} else if override != nil {
 			hasGroupOverride = true
-			if override.ForcedType != "" {
-				res.Type = override.ForcedType
-			}
-			if override.ForcedTitle != "" {
-				res.Title = override.ForcedTitle
-			}
-			if override.ForcedYear > 0 {
-				res.Year = override.ForcedYear
-			}
-			if override.ForcedTmdbID != "" {
-				res.TmdbID = override.ForcedTmdbID
-			}
-			if override.ForcedImdbID != "" {
-				res.ImdbID = override.ForcedImdbID
-			}
-			if override.ForcedTvdbID != "" {
-				res.TvdbID = override.ForcedTvdbID
-			}
-			res.ItemStatus = "pending"
+			applyGroupOverride(res, override)
 		}
 	}
 	if res.Type == "" {
@@ -6908,9 +6920,10 @@ func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, statu
 	if err != nil {
 		return fmt.Errorf("loading item %s before status update: %w", contentID, err)
 	}
-	// A failed enrichment retry does not invalidate an accepted catalog match.
-	// Keep its metadata and ownership while the queue records the retry failure.
-	if status == "unmatched" && existing.Status == "matched" { //nolint:goconst // unmatchedStatus is a test-local constant.
+	// Neither a failed enrichment retry nor an override settled a moment too
+	// late invalidates an accepted catalog match. Keep its metadata and
+	// ownership while the queue records the retry failure.
+	if isProvisionalOwnershipStatus(status) && isConfirmedOwnershipStatus(existing.Status) {
 		return nil
 	}
 	existing.Status = status
