@@ -1,6 +1,7 @@
 package subtitles
 
 import (
+	"html"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -39,7 +40,7 @@ func MarkLTRAuthoredLines(data []byte) []byte {
 	if !utf8.Valid(data) {
 		return data
 	}
-	lines := strings.SplitAfter(string(data), "\n")
+	lines := splitLinesKeepingEnds(string(data))
 
 	var rightToLeft []int
 	ltrSignals, logicalSignals := 0, 0
@@ -66,16 +67,41 @@ func MarkLTRAuthoredLines(data []byte) []byte {
 	return []byte(strings.Join(lines, ""))
 }
 
+// splitLinesKeepingEnds splits at LF, CRLF and lone CR, keeping each line's
+// ending so joining the result restores the input exactly.
+func splitLinesKeepingEnds(text string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\n':
+			lines = append(lines, text[start:i+1])
+			start = i + 1
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				continue
+			}
+			lines = append(lines, text[start:i+1])
+			start = i + 1
+		}
+	}
+	if start < len(text) {
+		lines = append(lines, text[start:])
+	}
+	return lines
+}
+
 // cueTextLines returns the indexes of cue payload lines: those after a timing
 // line, up to the blank line that ends the cue. Indexes, headers, NOTE and
-// STYLE blocks are never payload.
+// STYLE blocks are never payload, and dialog containing "-->" is.
 func cueTextLines(lines []string) []int {
 	var out []int
 	inCue := false
 	for i, raw := range lines {
 		line := strings.TrimRight(raw, "\r\n")
+		_, _, timingErr := parseTimingLine(line)
 		switch {
-		case strings.Contains(line, "-->"):
+		case timingErr == nil:
 			inCue = true
 		case strings.TrimSpace(line) == "":
 			inCue = false
@@ -101,7 +127,8 @@ func markLine(line string) string {
 }
 
 // visibleSubtitleText drops markup (<i>, <font ...>, WebVTT tags, {\...}
-// override blocks) and surrounding whitespace, leaving the text a viewer sees.
+// override blocks), decodes character references such as &nbsp; and &rlm;,
+// and trims surrounding whitespace, leaving the text a viewer sees.
 func visibleSubtitleText(line string) string {
 	var b strings.Builder
 	var closing rune
@@ -119,7 +146,7 @@ func visibleSubtitleText(line string) string {
 			b.WriteRune(r)
 		}
 	}
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(html.UnescapeString(b.String()))
 }
 
 func firstStrongIsRightToLeft(text string) bool {
@@ -164,9 +191,9 @@ func hasLogicalPunctuation(line string) bool {
 		return true
 	}
 	if last, _ := utf8.DecodeLastRuneInString(line); isSentencePunctuation(last) {
-		rest := strings.TrimRightFunc(line, isSentencePunctuation)
-		before, _ := utf8.DecodeLastRuneInString(rest)
-		return rest != "" && !unicode.IsSpace(before)
+		return strings.IndexFunc(line, func(r rune) bool {
+			return !unicode.IsSpace(r) && !isSentencePunctuation(r)
+		}) >= 0
 	}
 	return false
 }

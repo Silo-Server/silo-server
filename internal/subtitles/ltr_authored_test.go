@@ -76,3 +76,26 @@ func TestMarkLTRAuthoredLinesCountsAMovedArabicComma(t *testing.T) {
 		t.Fatalf("marked SRT\n got %q\nwant %q", got, want)
 	}
 }
+
+func TestMarkLTRAuthoredLinesHandlesCROnlyArrowsAndEntities(t *testing.T) {
+	input := "1\r00:00:01,000 --> 00:00:02,000\rاذهب --> هناك -\r\r" +
+		"2\r00:00:03,000 --> 00:00:04,000\r&nbsp;لقد انفجر -\r\r" +
+		"3\r00:00:05,000 --> 00:00:06,000\r...لأنه بالنسبة إليهم\r"
+	want := "1\r00:00:01,000 --> 00:00:02,000\r\u200eاذهب --> هناك -\r\r" +
+		"2\r00:00:03,000 --> 00:00:04,000\r\u200e&nbsp;لقد انفجر -\r\r" +
+		"3\r00:00:05,000 --> 00:00:06,000\r\u200e...لأنه بالنسبة إليهم\r"
+	if got := string(MarkLTRAuthoredLines([]byte(input))); got != want {
+		t.Fatalf("marked SRT\n got %q\nwant %q", got, want)
+	}
+}
+
+func TestMarkLTRAuthoredLinesCountsASentenceEndAfterASpace(t *testing.T) {
+	input := "1\n00:00:01,000 --> 00:00:02,000\n...ثم\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n...وبعد ذلك\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\n...لكن\n\n" +
+		"4\n00:00:07,000 --> 00:00:08,000\nمرحبا ...\n\n" +
+		"5\n00:00:09,000 --> 00:00:10,000\nنعم !\n"
+	if got := string(MarkLTRAuthoredLines([]byte(input))); got != input {
+		t.Fatalf("logical file changed:\n got %q", got)
+	}
+}
