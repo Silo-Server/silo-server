@@ -385,3 +385,64 @@ func TestPlaybackProbeEnsurerDoesNotMarkUnreadableAccess(t *testing.T) {
 		t.Fatalf("unreadable access was marked as a damaged file (mark calls %d)", repo.markCalls)
 	}
 }
+
+// writeStderrFFprobe is a fake ffprobe that prints stderr and exits 1.
+func writeStderrFFprobe(t *testing.T, stderr string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, path, "#!/bin/sh\ncat >&2 <<'EOF'\n"+stderr+"\nEOF\nexit 1\n")
+	return path
+}
+
+// ffprobe can open a file and still fail to read it partway through, as on a
+// flaky network mount. Its error output names the operating-system failure;
+// that is a storage problem, not damaged content.
+func TestIsProbeRejectionIgnoresReadFailuresFFprobeReports(t *testing.T) {
+	ctx := t.Context()
+	media := filepath.Join(t.TempDir(), "S01E08.mkv")
+	if err := os.WriteFile(media, []byte("readable header bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, stderr := range []string{
+		"S01E08.mkv: Input/output error",
+		"[matroska,webm @ 0x1] Read error at pos. 1048576 (0x100000)\nS01E08.mkv: Connection timed out",
+		"S01E08.mkv: Stale file handle",
+	} {
+		_, err := ProbeFile(ctx, writeStderrFFprobe(t, stderr), media)
+		if err == nil || IsProbeRejection(ctx, media, err) {
+			t.Fatalf("stderr %q: %v, want a non-rejection", stderr, err)
+		}
+	}
+	for _, stderr := range []string{
+		"S01E08.mkv: Invalid data found when processing input",
+		"[mov,mp4,m4a,3gp,3g2,mj2 @ 0x1] moov atom not found\nS01E08.mkv: Invalid data found when processing input",
+	} {
+		_, err := ProbeFile(ctx, writeStderrFFprobe(t, stderr), media)
+		if err == nil || !IsProbeRejection(ctx, media, err) {
+			t.Fatalf("stderr %q: %v, want a rejection", stderr, err)
+		}
+	}
+}
+
+// The readability check covers the end of the file, where an MP4 written
+// without faststart keeps its index, as well as the start.
+func TestProbeInputReadableReadsBothEnds(t *testing.T) {
+	dir := t.TempDir()
+	large := filepath.Join(dir, "large.mp4")
+	if err := os.WriteFile(large, make([]byte, 3*probeInputReadableBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := probeInputReadable(large); err != nil {
+		t.Fatalf("readable file: %v", err)
+	}
+	empty := filepath.Join(dir, "empty.mp4")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := probeInputReadable(empty); err != nil {
+		t.Fatalf("an empty file is readable, got %v", err)
+	}
+	if err := probeInputReadable(dir); err == nil {
+		t.Fatal("a directory reported as a readable media file")
+	}
+}

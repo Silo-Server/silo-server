@@ -64,8 +64,10 @@ type ffprobeDisp = mediaprobe.Disposition
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
 func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
+	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
+	// can tell an unreadable source from damaged content; stdout stays JSON.
 	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "quiet",
+		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
@@ -103,16 +105,20 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath
 // under ctx, means ffprobe ran to completion and refused the file's content:
 // a non-zero exit status while the caller's context was still live, for a file
-// this process can open and read. Zero-byte, corrupt, and truncated media end
-// this way.
+// this process can read, with no sign that ffprobe itself hit a read failure.
+// Zero-byte, corrupt, and truncated media end this way.
 //
-// ffprobe exits the same way when it cannot read the file at all (permission
-// denied, an I/O error on a network mount, a stale handle, a file that
-// vanished). Those say nothing about the content, so the file is read here
-// before the failure is blamed on it; an access failure is logged and is not a
-// rejection. A canceled or timed-out probe, a process killed by a signal, a
-// missing binary, or unparseable output is not a rejection either. Everything
-// that is not a rejection stays retryable.
+// ffprobe exits the same way when it cannot read the file (permission denied,
+// an I/O error or timeout on a network mount, a stale handle, a file that
+// vanished). Those say nothing about the content and stay retryable, so two
+// independent checks run before the failure is blamed on the file: ffprobe's
+// own error output is searched for operating-system access errors, which
+// catches a read that failed anywhere in the file; and the file is opened and
+// read at its start and its end, where container indexes live, which catches
+// the failure without depending on ffprobe's wording. Either one finding an
+// access problem logs it and answers false. A canceled or timed-out probe, a
+// process killed by a signal, a missing binary, or unparseable output is not a
+// rejection either.
 func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
@@ -121,7 +127,11 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
 		return false
 	}
-	if accessErr := probeInputReadable(filePath); accessErr != nil {
+	accessErr := probeStderrAccessFailure(exitErr.Stderr)
+	if accessErr == nil {
+		accessErr = probeInputReadable(filePath)
+	}
+	if accessErr != nil {
 		slog.WarnContext(ctx, "scanner: ffprobe failed because the file could not be read; check its permissions and the storage it lives on",
 			"component", "scanner",
 			"path", filePath,
@@ -132,12 +142,52 @@ func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
 	return true
 }
 
-// probeInputReadableBytes is how much of the file probeInputReadable reads:
-// enough to touch real storage, small enough to cost nothing next to ffprobe.
-const probeInputReadableBytes = 4096
+// probeAccessFailureMarkers are operating-system error strings (strerror text,
+// lowercased) that mean ffprobe could not read its input, as opposed to
+// reading it and finding the content invalid.
+var probeAccessFailureMarkers = []string{
+	"input/output error",
+	"permission denied",
+	"operation not permitted",
+	"no such file or directory",
+	"stale file handle",
+	"stale nfs file handle",
+	"timed out",
+	"transport endpoint is not connected",
+	"host is down",
+	"no route to host",
+	"network is unreachable",
+	"network is down",
+	"connection reset",
+	"connection refused",
+	"resource temporarily unavailable",
+	"too many open files",
+	"cannot allocate memory",
+	"no such device",
+}
+
+// probeStderrAccessFailure returns the first ffprobe error line that names an
+// access failure, or nil when its output only describes the content.
+func probeStderrAccessFailure(stderr []byte) error {
+	for _, line := range strings.Split(string(stderr), "\n") {
+		lower := strings.ToLower(line)
+		for _, marker := range probeAccessFailureMarkers {
+			if strings.Contains(lower, marker) {
+				return fmt.Errorf("ffprobe: %s", strings.TrimSpace(line))
+			}
+		}
+	}
+	return nil
+}
+
+// probeInputReadableBytes is how much probeInputReadable reads at each end of
+// the file: enough to touch real storage, small next to ffprobe's own reads.
+const probeInputReadableBytes = 64 << 10
 
 // probeInputReadable reports why this process cannot read filePath, or nil
-// when it can. An empty file is readable: its emptiness is a content problem.
+// when it can. It reads the start and the end of the file, where container
+// headers and indexes (an MP4 moov atom written last) live. An empty file is
+// readable: its emptiness is a content problem.
 func probeInputReadable(filePath string) error {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -151,8 +201,14 @@ func probeInputReadable(filePath string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", filePath)
 	}
-	if _, err := f.Read(make([]byte, probeInputReadableBytes)); err != nil && !errors.Is(err, io.EOF) {
+	buf := make([]byte, probeInputReadableBytes)
+	if _, err := f.ReadAt(buf, 0); err != nil && !errors.Is(err, io.EOF) {
 		return err
+	}
+	if tail := info.Size() - probeInputReadableBytes; tail > 0 {
+		if _, err := f.ReadAt(buf, tail); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
 	}
 	return nil
 }
