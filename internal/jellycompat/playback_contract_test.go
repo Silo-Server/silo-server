@@ -209,6 +209,23 @@ func TestSubtitleTimingRequestTransformsOutput(t *testing.T) {
 	}
 }
 
+func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
+	const srt = "1\n00:00:01,000 --> 00:00:02,000\nماذا حدث للتو؟ -\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n...لأنه بالنسبة إليهم\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\nلقد انفجر -\n"
+	for _, format := range []string{"srt", "vtt"} {
+		r := httptest.NewRequest("GET", "/subtitle", nil)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("routeFormat", format)
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+		rr := httptest.NewRecorder()
+		(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte(srt))
+		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
+			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
+		}
+	}
+}
+
 func TestBitmapSubtitleInventoryAndUnsupportedBurnIn(t *testing.T) {
 	version := catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264"}}, SubtitleTracks: []catalog.VersionSubtitleTrack{{Index: 1, Codec: "hdmv_pgs_subtitle"}}}
 	streams := buildMediaStreams("item", "source", version)
