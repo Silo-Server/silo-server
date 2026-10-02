@@ -142,6 +142,7 @@ type Dependencies struct {
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
 	Scanner           *scanner.Scanner              // scanner instance (may be nil)
@@ -568,6 +569,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				authService,
 				mail.NewSMTPSender(settingsRepo),
 				settingsRepo,
+				deps.EmailBrand,
 				"",
 			)
 			passwordResetService = passwordreset.NewService(
@@ -576,6 +578,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				authService,
 				mail.NewSMTPSender(settingsRepo),
 				settingsRepo,
+				deps.EmailBrand,
 				"",
 			)
 			passwordResetService.OnSessionsRevoked(deps.OnUserSessionsRevoked)
@@ -2657,7 +2660,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	var emailHandler *handlers.EmailHandler
 	if settingsRepo != nil {
-		emailHandler = handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo))
+		emailHandler = handlers.NewEmailHandler(mail.NewSMTPSender(settingsRepo), deps.EmailBrand)
 		v2deps.AdminEmailTests = emailHandler
 	}
 	v2deps.AdminResourceSampler = deps.ResourceSampler

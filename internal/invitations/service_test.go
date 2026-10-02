@@ -231,6 +231,9 @@ func TestSendEmailsClaimLink(t *testing.T) {
 	if !strings.Contains(msg.TextBody, result.ClaimURL) {
 		t.Error("text body missing claim URL")
 	}
+	if len(msg.Inline) != 1 || !strings.Contains(msg.HTMLBody, "cid:"+msg.Inline[0].ContentID) {
+		t.Error("email does not carry the header logo it references")
+	}
 	if !strings.Contains(result.ClaimURL, "https://silo.example.com/invite/") {
 		t.Errorf("claim URL = %q", result.ClaimURL)
 	}
