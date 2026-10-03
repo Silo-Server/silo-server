@@ -41,6 +41,9 @@ const (
 	TokenTypeRefresh      = "refresh"
 	TokenTypeAPIKey       = "api_key"
 	TokenTypePluginAccess = "plugin_access"
+	// TokenTypeStream is synthesized only by the route-scoped playback transport
+	// middleware after it verifies a signed session capability.
+	TokenTypeStream = "stream"
 	// TokenTypeApplePushDisplay is a long-lived, profile-scoped credential
 	// issued at Apple push registration. It is only accepted by the
 	// notification display endpoint the iOS Notification Service extension

@@ -1,0 +1,251 @@
+package handlers
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
+)
+
+type transportCapabilityBearerValidator struct{}
+
+func (transportCapabilityBearerValidator) ValidateToken(string) (*auth.Claims, error) {
+	return nil, errors.New("expired access token")
+}
+
+// transportCapabilitySessionValidator treats only the capability's login
+// session as active, so the expired bearer on the same request cannot pass.
+type transportCapabilitySessionValidator struct{}
+
+func (transportCapabilitySessionValidator) ActiveSessionRole(_ context.Context, sessionID string) (string, bool, error) {
+	return "", sessionID == "capability-login-1", nil
+}
+
+func TestVerifiedStreamCardFromRequestUsesHeaderCapabilityForReconstruction(t *testing.T) {
+	const secret = "transport-capability-reconstruction-secret"
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:       "playback-1",
+		AuthSessionID:   "capability-login-1",
+		MediaPath:       "/media/movie.mkv",
+		PlayMethod:      "transcode",
+		TargetCodec:     "h264",
+		OutputSubdir:    "playback-1-plan-1",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		MediaFileID:     42,
+		TargetRes:       "1920x1080",
+		SegmentDuration: 6,
+	}, secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authMiddleware := apimw.NewAuthMiddleware(
+		transportCapabilityBearerValidator{},
+		transportCapabilitySessionValidator{},
+		nil,
+		nil,
+	)
+	router := chi.NewRouter()
+	router.With(authMiddleware.RequireTransportAuth(secret)).Get("/stream/{session_id}", func(w http.ResponseWriter, r *http.Request) {
+		card, claims := verifiedStreamCardFromRequest(r, "playback-1", secret)
+		if card == nil || claims == nil {
+			t.Fatal("header capability did not provide a reconstruction recipe")
+		}
+		if card.SessionID != "playback-1" || card.UserID != 7 || card.MediaFileID != 42 || card.InputPath != "/media/movie.mkv" || card.TargetCodecVideo != "h264" {
+			t.Fatalf("reconstruction card = %#v", card)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/stream/playback-1", nil)
+	req.Header.Set(streamtoken.Header, token)
+	req.Header.Set("Authorization", "Bearer expired-access-token")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestApplyPreparedTransportToPlanV3DoesNotRewritePreviousPlanCapability(t *testing.T) {
+	audioIndex := 1
+	previous := playback.PlanV3{
+		ProtocolVersion: playback.ProtocolV3, PlanID: "plan:previous",
+		Delivery: playback.DeliveryRemuxHLSV3,
+		Stream: playback.StreamV3{
+			Protocol: playback.StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", HeaderRefresh: playback.HeaderRefreshSessionV3,
+			URL:     "/playback/transcode/playback-1/master.m3u8",
+			Headers: map[string]string{streamtoken.Header: "previous-generation-capability"},
+		},
+		SelectedTracks:  playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(42, "audio", audioIndex), Index: &audioIndex}},
+		EffectiveRecipe: playback.EffectiveRecipeV3{VideoCodec: "h264", AudioCodec: "aac", DynamicRange: "sdr"},
+		Subtitle:        playback.SubtitleDecisionV3{Mode: playback.SubtitleOffV3},
+		Transformations: []playback.TransformationV3{}, AppliedQuirks: []playback.AppliedQuirkV3{}, RuntimeCorrections: []string{},
+		RequestedMediaFileID: 42, EffectiveMediaFileID: 42,
+	}
+	operational := playback.PlannerResultV3{Plan: &previous, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
+	record := &playback.AttemptRecordV3{
+		PlaybackAttemptID: "attempt-capability-0001", RequestedMediaFileID: 42, EffectiveMediaFileID: 42,
+		CurrentPlanID: previous.PlanID, CurrentPlan: previous, FrozenRecipe: playback.FreezeExecutableRecipeV3(operational),
+	}
+
+	// A seek reanchor starts from a by-value copy of the current plan. Installing
+	// the seek generation's capability must not reach the stored plan before the
+	// transport commits, or a rolled-back seek would leave its recipe behind.
+	result, err := frozenSeekReanchorResultV3(record, 600, time.Unix(1_786_000_000, 0))
+	if err != nil || result.Plan == nil {
+		t.Fatalf("frozen reanchor: result=%#v err=%v", result, err)
+	}
+	applyPreparedTransportToPlanV3(result.Plan, preparedTransportV3{
+		url:     "/playback/transcode/playback-1/master.m3u8",
+		headers: map[string]string{streamtoken.Header: "discarded-seek-capability"},
+	})
+
+	if got := result.Plan.Stream.Headers[streamtoken.Header]; got != "discarded-seek-capability" {
+		t.Fatalf("candidate capability = %q", got)
+	}
+	if got := record.CurrentPlan.Stream.Headers[streamtoken.Header]; got != "previous-generation-capability" {
+		t.Fatalf("previous plan capability = %q after an uncommitted seek", got)
+	}
+}
+
+func TestPlannerMediaAuthModeMatchesSessionCapabilityTransport(t *testing.T) {
+	req := playback.StartRequestV3{ClientFeatures: []string{
+		playback.FeatureHeaderAuthenticatedMediaV3,
+		playback.FeatureAuthorizedMediaOriginsV3,
+		playback.FeatureDeviceQuirksV3,
+	}}
+	req.ClientPlaybackContext.Device.Platform = "tvos"
+	if featureOnly := headerAuthenticatedMediaV3(req.ClientFeatures); !featureOnly.proxyEgress {
+		t.Fatalf("feature-only mode = %#v, want proxy egress", featureOnly)
+	}
+	start := mediaAuthModeForStartV3(context.Background(), req, "31")
+	if !start.sessionHeaderCapability || start.proxyEgress {
+		t.Fatalf("build 31 start mode = %#v", start)
+	}
+
+	// The planner must see the transport's mode, not the feature-only default,
+	// or it can choose a proxy route the pinned transport will refuse.
+	if _, ok := plannerMediaAuthModeFromContextV3(context.Background()); ok {
+		t.Fatal("planner mode present without being set")
+	}
+	planned, ok := plannerMediaAuthModeFromContextV3(withPlannerMediaAuthModeV3(context.Background(), start))
+	if !ok || planned != start {
+		t.Fatalf("planner mode = %#v, ok = %v, want %#v", planned, ok, start)
+	}
+}
+
+func TestApplyPreparedTransportToPlanV3LeavesHeadersUntouchedWithoutCapability(t *testing.T) {
+	plan := &playback.PlanV3{}
+	applyPreparedTransportToPlanV3(plan, preparedTransportV3{url: "/stream/playback-1"})
+	if plan.Stream.URL != "/stream/playback-1" || plan.Stream.Headers != nil {
+		t.Fatalf("stream = %#v", plan.Stream)
+	}
+}
+
+func TestSessionCapabilityIsNotMintedForNativeAPIV2(t *testing.T) {
+	req := playback.StartRequestV3{ClientFeatures: []string{
+		playback.FeatureHeaderAuthenticatedMediaV3,
+		playback.FeatureAuthorizedMediaOriginsV3,
+		playback.FeatureDeviceQuirksV3,
+	}}
+	req.ClientPlaybackContext.Device.Platform = "ios"
+	v2 := WithNativeAPIV2(context.Background())
+
+	// v2 media URLs authenticate with the account token alone, so a v2 start
+	// keeps the ordinary feature-derived mode.
+	if got, want := mediaAuthModeForStartV3(v2, req, "31"), headerAuthenticatedMediaV3(req.ClientFeatures); got != want {
+		t.Fatalf("v2 start mode = %#v, want %#v", got, want)
+	}
+
+	currentPlan := playback.PlanV3{Stream: playback.StreamV3{Headers: map[string]string{streamtoken.Header: "session-capability"}}}
+	replan := mediaAuthModeForReplanV3(v2, req, currentPlan)
+	if !replan.headerAuth || replan.proxyEgress || replan.sessionHeaderCapability {
+		t.Fatalf("v2 replan mode = %#v, want header auth pinned without a new capability", replan)
+	}
+}
+
+// The capability is bound to the requester's login session so revoking that
+// session stops it. A caller without one never receives a capability.
+func TestSessionCapabilityHeadersBindTheLoginSession(t *testing.T) {
+	const secret = "transport-capability-binding-secret"
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = secret
+	mode := mediaAuthModeV3{headerAuth: true, sessionHeaderCapability: true}
+	card := playback.NewRemuxRecipeCard("playback-1", 7, "profile-1", 42, false, 0)
+	request := func(claims *auth.Claims) *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+		if claims != nil {
+			req = req.WithContext(apimw.SetClaims(req.Context(), claims))
+		}
+		return req
+	}
+
+	headers := handler.sessionCapabilityHeadersV3(request(&auth.Claims{UserID: 7, SessionID: "login-session-9", TokenType: auth.TokenTypeAccess}), mode, card)
+	claims, err := streamtoken.Verify(headers[streamtoken.Header], secret)
+	if err != nil {
+		t.Fatalf("minted capability: %v (headers %v)", err, headers)
+	}
+	if claims.AuthSessionID != "login-session-9" || claims.SessionID != "playback-1" {
+		t.Fatalf("capability claims = %#v, want the requester's login session", claims)
+	}
+
+	for name, caller := range map[string]*auth.Claims{
+		"api key":            {UserID: 7, TokenType: auth.TokenTypeAPIKey, APIKeyID: 3},
+		"no caller":          nil,
+		"access without sid": {UserID: 7, TokenType: auth.TokenTypeAccess},
+	} {
+		if headers := handler.sessionCapabilityHeadersV3(request(caller), mode, card); headers != nil {
+			t.Fatalf("%s: minted %v, want no capability", name, headers)
+		}
+	}
+}
+
+// Subtitle and font URLs negotiated with a header capability carry no st
+// query token, so sidecar reconstruction must use the capability the transport
+// middleware verified, or a restart or another replica answers 404.
+func TestSidecarReconstructionUsesHeaderCapability(t *testing.T) {
+	const secret = "transport-capability-sidecar-secret"
+	token, err := streamtoken.Sign(streamtoken.Claims{
+		SessionID:     "playback-1",
+		AuthSessionID: "capability-login-1",
+		MediaPath:     "/media/movie.mkv",
+		PlayMethod:    "direct",
+		UserID:        7,
+		ProfileID:     "profile-1",
+		MediaFileID:   42,
+	}, secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authMiddleware := apimw.NewAuthMiddleware(transportCapabilityBearerValidator{}, transportCapabilitySessionValidator{}, nil, nil)
+	router := chi.NewRouter()
+	router.With(authMiddleware.RequireTransportAuth(secret)).Get("/stream/{session_id}/subtitles/{track}", func(w http.ResponseWriter, r *http.Request) {
+		card, claims := sidecarStreamCard(r.Context(), r.URL.Query().Get(streamTokenParam), "playback-1", secret)
+		if card == nil || claims == nil || card.SessionID != "playback-1" || card.MediaFileID != 42 || card.InputPath != "/media/movie.mkv" {
+			t.Fatalf("sidecar reconstruction card = %#v, claims = %#v", card, claims)
+		}
+		if other, _ := sidecarStreamCard(r.Context(), "", "playback-other", secret); other != nil {
+			t.Fatalf("capability for playback-1 reconstructed another session: %#v", other)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/stream/playback-1/subtitles/2.vtt", nil)
+	req.Header.Set(streamtoken.Header, token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}

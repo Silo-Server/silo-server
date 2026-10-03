@@ -25,6 +25,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -58,6 +59,9 @@ const (
 	// first manifest became ready.
 	transportStartupReadyV3 = "ready"
 	seekRestorationPlayerV3 = "player_position"
+	applePlatformIOSV3      = "ios"
+	applePlatformTVOSV3     = "tvos"
+	applePlatformMacOSV3    = "macos"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -110,6 +114,7 @@ type v3NodeCapabilityCache struct {
 
 type preparedTransportV3 struct {
 	url                string
+	headers            map[string]string
 	nodeURL            string
 	transportID        string
 	hwAccel            string
@@ -185,10 +190,17 @@ type playbackStartSideEffectsStateV3 struct {
 // it. Both bits are resolved once from the attempt's (pinned) feature list and
 // threaded down every branch rather than re-derived per URL builder.
 type mediaAuthModeV3 struct {
-	// headerAuth is header_authenticated_media_v1: no client-visible URL
-	// carries a signed playback credential, and the client authenticates every
-	// media request with its own access token instead.
+	// headerAuth is header_authenticated_media_v1: no client-visible URL carries
+	// a signed playback credential. Ordinarily the client authenticates media
+	// requests with its own access token; sessionHeaderCapability is the bounded
+	// compatibility exception described below.
 	headerAuth bool
+	// sessionHeaderCapability keeps the signed, session-bound credential in a
+	// plan-supplied header. It is used only for clients whose media engine freezes
+	// request headers at load time, so a stale bearer cannot interrupt bytes while
+	// the API client independently refreshes. The URL remains credential-free and
+	// the response continues to honor header_authenticated_media_v1.
+	sessionHeaderCapability bool
 	// proxyEgress is authorized_media_origins_v1 negotiated on top of
 	// headerAuth: the client also honors credential-free absolute URLs on
 	// server-designated proxy origins, so media bytes need not all egress from
@@ -209,6 +221,107 @@ func headerAuthenticatedMediaV3(clientFeatures []string) mediaAuthModeV3 {
 	return mediaAuthModeV3{
 		headerAuth:  headerAuth,
 		proxyEgress: headerAuth && playback.HasFeatureV3(clientFeatures, playback.FeatureAuthorizedMediaOriginsV3),
+	}
+}
+
+// mediaAuthModeForStartV3 keeps Apple build 31 media requests independent of
+// the short-lived access token. The shared iOS/tvOS/macOS AetherEngine snapshots
+// HTTP headers when an item loads and reuses them for range reads and internal
+// reloads. An automatic episode transition can therefore retain the old bearer
+// and begin receiving 401s while buffered playback continues. A session-bound
+// header capability preserves the selected playback route and is accepted
+// before any stale Authorization header.
+//
+// The capability is accepted only on the v1 playback media routes. A start
+// through /api/v2 is projected onto v2 media URLs, which authenticate with the
+// account token alone, so it never receives one.
+func mediaAuthModeForStartV3(ctx context.Context, req playback.StartRequestV3, resolvedClientBuild string) mediaAuthModeV3 {
+	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
+	if isNativeAPIV2(ctx) {
+		return mode
+	}
+	clientContext := req.ClientPlaybackContext
+	platform := strings.ToLower(strings.TrimSpace(clientContext.Device.Platform))
+	isApplePlatform := platform == applePlatformIOSV3 || platform == applePlatformTVOSV3 || platform == applePlatformMacOSV3
+	clientBuild := strings.TrimSpace(resolvedClientBuild)
+	if clientBuild == "" {
+		clientBuild = strings.TrimSpace(clientContext.AppBuild)
+	}
+	if mode.headerAuth &&
+		playback.HasFeatureV3(req.ClientFeatures, playback.FeatureDeviceQuirksV3) &&
+		isApplePlatform &&
+		clientBuild == "31" {
+		mode.proxyEgress = false
+		mode.sessionHeaderCapability = true
+	}
+	return mode
+}
+
+func mediaAuthModeForReplanV3(ctx context.Context, req playback.StartRequestV3, currentPlan playback.PlanV3) mediaAuthModeV3 {
+	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
+	if currentPlan.Stream.Headers[streamtoken.Header] != "" {
+		// Header authentication stays pinned on every surface so a replan can
+		// never downgrade to a credential-bearing URL; only a v1 replan mints a
+		// fresh capability for the v1 media routes that accept it.
+		mode.headerAuth = true
+		mode.proxyEgress = false
+		mode.sessionHeaderCapability = !isNativeAPIV2(ctx)
+	}
+	return mode
+}
+
+// sessionCapabilityHeadersV3 mints the session-bound transport capability. It
+// is bound to the caller's login session so RequireTransportAuth can stop it as
+// soon as that session is revoked; a caller without one (an API key) gets no
+// capability and keeps authenticating media with its own credential.
+func (h *PlaybackHandler) sessionCapabilityHeadersV3(r *http.Request, mode mediaAuthModeV3, card playback.RecipeCard) map[string]string {
+	if !mode.sessionHeaderCapability || r == nil {
+		return nil
+	}
+	caller := apimw.GetClaims(r.Context())
+	if caller == nil || caller.TokenType != auth.TokenTypeAccess || caller.SessionID == "" {
+		return nil
+	}
+	claims := card.ToClaims()
+	claims.AuthSessionID = caller.SessionID
+	token := h.signStreamClaims(claims)
+	if token == "" {
+		return nil
+	}
+	return map[string]string{streamtoken.Header: token}
+}
+
+type plannerMediaAuthModeKeyV3 struct{}
+
+// withPlannerMediaAuthModeV3 lets route planning see the same media auth mode
+// transport preparation will use. Without it the planner derives the mode from
+// client features alone and can offer a proxy route to a session-capability
+// client whose transport is pinned to this origin.
+func withPlannerMediaAuthModeV3(ctx context.Context, mode mediaAuthModeV3) context.Context {
+	return context.WithValue(ctx, plannerMediaAuthModeKeyV3{}, mode)
+}
+
+func plannerMediaAuthModeFromContextV3(ctx context.Context) (mediaAuthModeV3, bool) {
+	mode, ok := ctx.Value(plannerMediaAuthModeKeyV3{}).(mediaAuthModeV3)
+	return mode, ok
+}
+
+func applyPreparedTransportToPlanV3(plan *playback.PlanV3, transport preparedTransportV3) {
+	if plan == nil {
+		return
+	}
+	plan.Stream.URL = transport.url
+	if len(transport.headers) == 0 {
+		return
+	}
+	// Candidate plans are by-value copies of the attempt's current plan, so
+	// they share its header map. Write into a private copy so an uncommitted
+	// replan cannot replace the stored plan's capability.
+	headers := make(map[string]string, len(plan.Stream.Headers)+len(transport.headers))
+	maps.Copy(headers, plan.Stream.Headers)
+	plan.Stream.Headers = headers
+	for name, value := range transport.headers {
+		plan.Stream.Headers[name] = value
 	}
 }
 
@@ -1244,7 +1357,10 @@ func retryIncompletePlaybackSettingsV3(result playback.PlannerResultV3, settings
 }
 
 func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, input playback.PlannerInputV3) (playback.PlannerResultV3, error) {
-	mode := headerAuthenticatedMediaV3(input.Request.ClientFeatures)
+	mode, ok := plannerMediaAuthModeFromContextV3(ctx)
+	if !ok {
+		mode = headerAuthenticatedMediaV3(input.Request.ClientFeatures)
+	}
 	proxyAllowed := !mode.headerAuth && h.JWTSecret != "" || mode.proxyEgress && h.proxyEgressOriginsAvailableV3()
 	snapshot := &hlsPlanningSnapshotV3{
 		handler: h, ctx: ctx, settings: input.Settings, localRegistry: input.Registry, proxyAllowed: proxyAllowed,
@@ -1707,6 +1823,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForStartV3(r.Context(), req, playbackClientInfoForStartV3(r, req.ClientPlaybackContext).Build)))
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
 		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
@@ -1795,7 +1912,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	// A refused progressive remux is escalated before the decision is logged or
 	// a session is opened, so the logged route is the one that will actually run.
-	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures),
+	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), mediaAuthModeForStartV3(r.Context(), req, clientInfo.Build),
 		func() playback.PlannerInputV3 {
 			return h.plannerInputV3(r.Context(), req, requestedFile, effectiveFile, audioIndex, nil)
 		}, result)
@@ -1947,7 +2064,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := headerAuthenticatedMediaV3(req.ClientFeatures)
+	mode := mediaAuthModeForStartV3(r.Context(), req, clientInfo.Build)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
@@ -2012,7 +2129,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
 	}
-	result.Plan.Stream.URL = transport.url
+	applyPreparedTransportToPlanV3(result.Plan, transport)
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe, req.ClientFeatures); err != nil {
 		transport.rollback()
 		abort()
@@ -2794,8 +2911,10 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		releaseLifecycle()
 		return nil
 	}
+	capabilityHeaders := h.sessionCapabilityHeadersV3(r, mode, identityRecipeCard(&routeSession))
 	return preparedTransportV3{
 		url:                streamURL,
+		headers:            capabilityHeaders,
 		nodeURL:            nodeURL,
 		transportID:        transportID,
 		routingWorkload:    workload,
@@ -3811,15 +3930,15 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 			}
 		}
 	}
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
+	card.OriginalStartedAt = session.StartedAt
+	card.StreamLocation = session.StreamLocation
+	card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
+	card.RoutingWorkload = string(routingWorkloadV3(result))
+	card.RoutingExecution = string(noderouting.ExecutionAPI)
+	card.RoutingEgress = string(noderouting.EgressAPI)
 	url := fmt.Sprintf("/playback/transcode/%s/master.m3u8", session.ID)
 	if !mode.headerAuth {
-		card := playback.NewRecipeCard(session.UserID, session.ProfileID, file.ID, "", ts.Opts())
-		card.OriginalStartedAt = session.StartedAt
-		card.StreamLocation = session.StreamLocation
-		card.RoutingNetworkProvider = new(netaccess.PathFromContext(r.Context()).Provider)
-		card.RoutingWorkload = string(routingWorkloadV3(result))
-		card.RoutingExecution = string(noderouting.ExecutionAPI)
-		card.RoutingEgress = string(noderouting.EgressAPI)
 		url = appendStreamToken(url, h.signSessionToken(card, mode.headerAuth))
 	}
 	committed := false
@@ -3827,6 +3946,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	previousTransportID := remoteTransportID(session)
 	return preparedTransportV3{
 		url:              url,
+		headers:          h.sessionCapabilityHeadersV3(r, mode, card),
 		hwAccel:          ts.Opts().EffectiveEncoderHWAccel(),
 		toneMapMode:      ts.Opts().ToneMapMode,
 		routingWorkload:  routingWorkloadV3(result),
@@ -4112,7 +4232,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if routingWorkloadV3(result) == noderouting.WorkloadRemux {
 		rollbackRequired = func() error { return rollbackTransport(true) }
 	}
-	return preparedTransportV3{url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
+	return preparedTransportV3{url: url, headers: h.sessionCapabilityHeadersV3(r, mode, card), nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
 		routingEgress: routingEgress, routingEgressID: egressNodeID, routingEgressURL: egressNodeURL, commit: func() *transportErrorV3 {
 			if committed {
@@ -4758,6 +4878,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}()
 	start := record.NormalizedRequest
+	r = r.WithContext(withPlannerMediaAuthModeV3(r.Context(), mediaAuthModeForReplanV3(r.Context(), start, record.CurrentPlan)))
 	operation := req.EffectiveOperation()
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
@@ -5083,7 +5204,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
 	// so this mode always equals the one the attempt started under: a reused
 	// transport cannot change the session's media security contract.
-	mode := headerAuthenticatedMediaV3(start.ClientFeatures)
+	mode := mediaAuthModeForReplanV3(r.Context(), start, record.CurrentPlan)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor
@@ -5203,7 +5324,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// fallible subtitle-identity freeze after authority publication.
 		artifactRecipe.ToneMapMode = result.ToneMapMode
 	}
-	result.Plan.Stream.URL = transport.url
+	applyPreparedTransportToPlanV3(result.Plan, transport)
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID

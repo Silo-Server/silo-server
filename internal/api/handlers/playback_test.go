@@ -381,9 +381,13 @@ func newPlaybackTestStore(t *testing.T) userstore.UserStore {
 
 func newAuthorizedPlaybackContext() context.Context {
 	ctx := context.Background()
-	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess})
+	ctx = apimw.SetClaims(ctx, &auth.Claims{UserID: 1, Role: "user", SessionID: testPlaybackLoginSessionID, TokenType: auth.TokenTypeAccess})
 	return apimw.SetProfileID(ctx, "profile-1")
 }
+
+// testPlaybackLoginSessionID is the login session of newAuthorizedPlaybackContext.
+// Real access tokens always carry one; session capabilities are bound to it.
+const testPlaybackLoginSessionID = "login-session-test-1"
 
 func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 	manager := playback.NewSessionManager(0, 0)

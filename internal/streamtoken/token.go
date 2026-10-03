@@ -8,6 +8,14 @@ import (
 )
 
 const (
+	// QueryParameter carries an integrated-server playback capability. Keeping
+	// the name here lets the API auth middleware and serve handlers agree without
+	// either package depending on the other.
+	QueryParameter = "st"
+	// Header carries the same session-bound capability when a client must keep
+	// credentials out of media URLs but cannot refresh a bearer captured by its
+	// media engine. It is checked before ordinary Authorization fallback.
+	Header = "X-Silo-Stream-Token"
 	// PlayMethodDownload identifies a token minted only after the API has
 	// authorized a file download. Proxy download routes reject playback tokens.
 	PlayMethodDownload = "download"
@@ -46,7 +54,12 @@ const (
 // (uid/pid/mfid) are lookup keys re-resolved against the authority on
 // reconstruct; they are never trusted on their own.
 type Claims struct {
-	SessionID              string  `json:"sid"`
+	SessionID string `json:"sid"`
+	// AuthSessionID binds a client-presented transport capability to the login
+	// session that requested it, so revoking that session stops the capability
+	// on its next request. Tokens without it are reconstruction recipes only and
+	// never authenticate a request on their own.
+	AuthSessionID          string  `json:"asid,omitempty"`
 	MediaPath              string  `json:"path"`
 	PlayMethod             string  `json:"method"`
 	TranscodeAudio         bool    `json:"ta,omitempty"`

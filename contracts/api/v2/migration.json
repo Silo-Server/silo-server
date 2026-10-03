@@ -18983,7 +18983,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 17,
+      "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19452,7 +19452,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 18,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19631,7 +19631,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 19,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19848,7 +19848,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 21,
+      "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20631,7 +20631,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 22,
+      "middleware_chain": 23,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20805,7 +20805,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 23,
+      "middleware_chain": 24,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20918,7 +20918,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 16,
+      "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -27946,7 +27946,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 20,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -28058,7 +28058,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 20,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -31706,7 +31706,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 24,
+      "middleware_chain": 25,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
@@ -33565,12 +33565,11 @@
       "handler": "(*internal/api/handlers.PlaybackHandler).HandleGetTranscodeManifest",
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
-      "route_group": "/api/v1/playback",
-      "middleware_chain": 5,
+      "route_group": "/api/v1",
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -33578,7 +33577,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "playbackHandler != nil"
       ],
       "delegates_to": null,
@@ -33654,12 +33653,11 @@
       "handler": "(*internal/api/handlers.PlaybackHandler).HandleGetTranscodeSegment",
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
-      "route_group": "/api/v1/playback",
-      "middleware_chain": 5,
+      "route_group": "/api/v1",
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -33667,7 +33665,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "playbackHandler != nil"
       ],
       "delegates_to": null,
@@ -39933,11 +39931,10 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -39945,7 +39942,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "streamHandler != nil"
       ],
       "delegates_to": null,
@@ -40022,11 +40019,10 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -40034,7 +40030,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "streamHandler != nil"
       ],
       "delegates_to": null,
@@ -40111,11 +40107,10 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -40123,7 +40118,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "streamHandler != nil"
       ],
       "delegates_to": null,
@@ -40209,11 +40204,10 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -40221,7 +40215,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "streamHandler != nil"
       ],
       "delegates_to": null,
@@ -40307,11 +40301,10 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 5,
+      "middleware_chain": 16,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
-        "demo_guarded",
         "rate_limited",
         "viewer_access"
       ],
@@ -40319,7 +40312,7 @@
       "admin_required": false,
       "conditional": true,
       "conditions": [
-        "authMiddleware != nil",
+        "authMiddleware != nil && (playbackHandler != nil || streamHandler != nil)",
         "streamHandler != nil"
       ],
       "delegates_to": null,
@@ -45337,7 +45330,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45397,7 +45390,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45450,7 +45443,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45503,7 +45496,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45562,7 +45555,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45615,7 +45608,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45668,7 +45661,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45743,7 +45736,7 @@
       "handler_kind": "expression",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45787,7 +45780,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45840,7 +45833,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45894,7 +45887,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45948,7 +45941,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45993,7 +45986,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46038,7 +46031,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46099,7 +46092,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46160,7 +46153,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46221,7 +46214,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46282,7 +46275,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46343,7 +46336,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46404,7 +46397,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46449,7 +46442,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46494,7 +46487,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46547,7 +46540,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46600,7 +46593,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46661,7 +46654,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46722,7 +46715,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46782,7 +46775,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46835,7 +46828,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46888,7 +46881,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46941,7 +46934,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46994,7 +46987,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47054,7 +47047,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47113,7 +47106,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47165,7 +47158,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47274,7 +47267,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47326,7 +47319,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47379,7 +47372,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47431,7 +47424,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47483,7 +47476,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47537,7 +47530,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47611,7 +47604,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47705,7 +47698,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47764,7 +47757,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47823,7 +47816,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47867,7 +47860,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47929,7 +47922,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47982,7 +47975,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48056,7 +48049,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48130,7 +48123,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48205,7 +48198,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 28,
+      "middleware_chain": 29,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
