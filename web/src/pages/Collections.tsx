@@ -59,7 +59,6 @@ import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import {
   buildUserCollectionCatalogHref,
   buildUserCollectionEditorPath,
-  isCollectionReadOnly,
 } from "./userCollectionsShared";
 
 type ImportedCollectionType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
@@ -78,27 +77,34 @@ function CollectionList() {
   const { data: groupsData } = useCollectionGroups();
   const { data: capabilities } = useCollectionCapabilities();
   const { profile } = useCurrentProfile();
+  const profileID = profile?.id;
+  // Until the current profile resolves (a hard refresh before the profiles
+  // query answers), no collection counts as its own, so none can be dragged.
   const ownIDs = useMemo(
     () =>
       new Set(
-        (data ?? [])
-          .filter((item) => !isCollectionReadOnly(item, profile?.id))
-          .map((item) => item.id),
+        profileID === undefined
+          ? []
+          : (data ?? [])
+              .filter((item) => item.creator_profile_id === profileID)
+              .map((item) => item.id),
       ),
-    [data, profile?.id],
+    [data, profileID],
   );
   // A profile orders only the collections it created, so those come first.
   // Collections other profiles shared follow, grouped by owner in a fixed
-  // order, each group in its owner's order.
+  // order, each group in its owner's order. The server's order stands until
+  // the profile resolves.
   const collections = useMemo(() => {
     const all = data ?? [];
+    if (profileID === undefined) return all;
     const shared = all.filter((item) => !ownIDs.has(item.id));
     const owners = [...new Set(shared.map((item) => item.creator_profile_id))].sort();
     return [
       ...all.filter((item) => ownIDs.has(item.id)),
       ...owners.flatMap((owner) => shared.filter((item) => item.creator_profile_id === owner)),
     ];
-  }, [data, ownIDs]);
+  }, [data, ownIDs, profileID]);
   const groups = useMemo(() => groupsData ?? [], [groupsData]);
   const [confirmDeleteCollection, setConfirmDeleteCollection] =
     useState<CollectionEditSnapshot | null>(null);
