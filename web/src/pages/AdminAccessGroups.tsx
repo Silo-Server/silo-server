@@ -46,7 +46,7 @@ import {
   useUpdateAccessGroup,
 } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { AccessGroupMembers } from "./AdminAccessGroupMembers";
 import {
   useRequestGroupLimit,
   useRequestSettings,
@@ -399,6 +399,7 @@ interface AccessGroupEditorProps {
 function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEditorProps) {
   const [editor, setEditor] = useState(initialEditor);
   const group = editor.group;
+  const groups = useAccessGroups();
   const busy = useRef(false);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -831,7 +832,12 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
         )}
       </section>
 
-      <AccessGroupMembers groupId={group.id} />
+      <AccessGroupMembers
+        group={group}
+        groups={groups.data ?? []}
+        groupsReady={groups.isSuccess}
+        onRetryGroups={groups.isError ? () => void groups.refetch() : undefined}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
@@ -912,48 +918,6 @@ interface ToggleRowProps {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
-}
-
-/** Read-only list of a group's members, each linking to their user page. */
-function AccessGroupMembers({ groupId }: { groupId: number | string }) {
-  const users = useAdminUsers();
-  const members = (users.data ?? [])
-    .filter((user) => user.role !== "admin" && String(user.access_group_id) === String(groupId))
-    .sort((a, b) => a.username.localeCompare(b.username));
-  return (
-    <section className="surface-panel space-y-3 rounded-2xl border-0 p-5" aria-label="Members">
-      <div>
-        <h2 className="text-sm font-semibold">Members</h2>
-        <p className="text-muted-foreground mt-0.5 text-xs">
-          Change a member&apos;s group from their user page.
-        </p>
-      </div>
-      {users.isPending && <p className="text-muted-foreground text-sm">Loading members...</p>}
-      {users.isError && (
-        <p role="alert" className="text-sm">
-          Could not load members.{" "}
-          <Button variant="link" className="h-auto p-0" onClick={() => void users.refetch()}>
-            Retry
-          </Button>
-        </p>
-      )}
-      {users.isSuccess && members.length === 0 && (
-        <p className="text-muted-foreground text-sm">No members yet.</p>
-      )}
-      {members.length > 0 && (
-        <ul className="divide-border divide-y text-sm">
-          {members.map((member) => (
-            <li key={member.id} className="flex items-center justify-between gap-3 py-2">
-              <Link to={`/admin/users/${member.id}`} className="font-medium hover:underline">
-                {member.username}
-              </Link>
-              <span className="text-muted-foreground truncate">{member.email}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
 }
 
 function ToggleRow({ label, description, checked, onCheckedChange, disabled }: ToggleRowProps) {
