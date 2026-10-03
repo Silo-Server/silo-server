@@ -570,3 +570,59 @@ func TestCreateOrFindSkeletonForcedIDBeatsHeuristicFolderID(t *testing.T) {
 		t.Fatalf("skeleton IMDb ID = %q, want the forced tt0000222", skeleton.ImdbID)
 	}
 }
+
+// An override establishes identity regardless of how the filename parses now,
+// but only when the worker applies it. When it declines because the group is
+// shared with another item, a filename that changed since the scan still
+// requires a rescan.
+func TestQueuedMovieDeclinedOverrideStillRequiresRescan(t *testing.T) {
+	const groupKey = "v1|movie|old name|1999"
+	for _, tt := range []struct {
+		name       string
+		shared     bool
+		wantRescan bool
+		wantTmdbID string
+	}{
+		{name: "override applied", wantTmdbID: "948"},
+		{name: "override declined", shared: true, wantRescan: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHarness()
+			file := &models.MediaFile{
+				ID: 1, MediaFolderID: 10, FilePath: "/movies/New Name (2001)/New Name (2001).mkv",
+				GroupKeyVersion: 1, ContentGroupKey: groupKey, ContentID: "local-linked", BaseType: "movie", BaseTitle: "Old Name", BaseYear: 1999,
+			}
+			groupFiles := []*models.MediaFile{file}
+			if tt.shared {
+				groupFiles = append(groupFiles, &models.MediaFile{
+					ID: 2, MediaFolderID: 10, FilePath: "/movies/Old Name (1999)/Old Name (1999).mkv", GroupKeyVersion: 1, ContentGroupKey: groupKey, ContentID: "local-other",
+				})
+			}
+			for _, f := range groupFiles {
+				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.ContentID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.fileRepo.setGroupFiles(10, 1, groupKey, groupFiles...)
+			h.itemRepo.items[file.ContentID] = &models.MediaItem{ContentID: file.ContentID, Type: "movie", Title: "Old Name", Year: 1999, Status: "unmatched"}
+			h.scannedGroupRepo.setGroup(&models.ScannedMediaGroup{
+				MediaFolderID: 10, GroupKeyVersion: 1, ContentGroupKey: groupKey,
+				BaseTitle: "Old Name", BaseYear: 1999, InferredType: "movie", State: "resolved", OverrideSource: "none",
+			})
+			h.service.groupOverrideRepo = keyedGroupOverrideRepo{folderID: 10, version: 1, key: groupKey, override: &models.MediaGroupOverride{
+				ForcedType: "movie", ForcedTmdbID: "948",
+			}}
+			worker := NewMatchWorker(h.service, h.fileRepo, 1, 1, 0)
+			skeleton, _, err := worker.queuedMovieSkeleton(t.Context(), file, false)
+			if tt.wantRescan {
+				if err == nil || !strings.Contains(err.Error(), "rescan") {
+					t.Fatalf("queuedMovieSkeleton() = %+v, %v; want the rescan error", skeleton, err)
+				}
+				return
+			}
+			if err != nil || skeleton.TmdbID != tt.wantTmdbID {
+				t.Fatalf("queuedMovieSkeleton() = %+v, %v; want the override applied", skeleton, err)
+			}
+		})
+	}
+}

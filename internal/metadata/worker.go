@@ -917,10 +917,11 @@ func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.Medi
 		if err != nil {
 			return nil, false, err
 		}
-		if err := w.applyQueuedGroupOverride(ctx, file, skeleton, override, libraryRoots...); err != nil {
+		overridden, err := w.applyQueuedGroupOverride(ctx, file, skeleton, override, libraryRoots...)
+		if err != nil {
 			return nil, false, err
 		}
-		if err := w.validateReusedGroupIdentity(ctx, file, skeleton, override != nil, libraryRoots...); err != nil {
+		if err := w.validateReusedGroupIdentity(ctx, file, skeleton, overridden, libraryRoots...); err != nil {
 			return nil, false, err
 		}
 		if skeleton.ItemStatus == "ambiguous" {
@@ -946,10 +947,11 @@ func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.Medi
 
 // Reusing a provisional item must obey the same rescan boundary as creating
 // one: files linked by an older parser still share that item's identity.
-// hasOverride reports whether the file's group has an operator override, which
-// establishes identity independently of how the filename currently parses.
-func (w *MatchWorker) validateReusedGroupIdentity(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, hasOverride bool, libraryRoots ...string) error {
-	if skeleton.ItemStatus == string(MatchOutcomeMatched) || file.ContentGroupKey == "" || hasOverride {
+// overridden reports that an operator override was applied to the skeleton,
+// which establishes identity independently of how the filename currently
+// parses. An override the worker declined to apply does not.
+func (w *MatchWorker) validateReusedGroupIdentity(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, overridden bool, libraryRoots ...string) error {
+	if skeleton.ItemStatus == string(MatchOutcomeMatched) || file.ContentGroupKey == "" || overridden {
 		return nil
 	}
 	if w.service.scannedGroupRepo == nil {
@@ -1086,17 +1088,17 @@ func (w *MatchWorker) queuedGroupOverride(ctx context.Context, file *models.Medi
 // "Season" folders, or one title with no year), each on its own item, and the
 // override row does not record which root it was saved for. A match can move
 // the whole item, so the override reaches an item only when that item holds
-// the whole group and nothing else.
-func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, override *models.MediaGroupOverride, libraryRoots ...string) error {
+// the whole group and nothing else. It reports whether it applied override.
+func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, override *models.MediaGroupOverride, libraryRoots ...string) (bool, error) {
 	if override == nil || !isProvisionalOwnershipStatus(skeleton.ItemStatus) {
-		return nil
+		return false, nil
 	}
 	if pinned, err := w.service.pinnedUnmatchedBySplit(ctx, skeleton.ContentID); err != nil || pinned {
-		return err
+		return false, err
 	}
 	owned, err := w.itemOwnsContentGroup(ctx, file)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !owned {
 		slog.WarnContext(ctx, "metadata: group override not applied to linked item because the item and its content group hold different files", "component", "metadata",
@@ -1106,7 +1108,7 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 			"group_key_version", file.GroupKeyVersion,
 			"content_group_key", file.ContentGroupKey,
 		)
-		return nil
+		return false, nil
 	}
 
 	wasAmbiguous := skeleton.ItemStatus == "ambiguous" //nolint:goconst // Item statuses are literals throughout this package.
@@ -1119,15 +1121,15 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 		// provisional item.
 		changed, err := w.service.updateItemStatus(ctx, skeleton.ContentID, skeleton.ItemStatus)
 		if err != nil {
-			return fmt.Errorf("settling overridden ambiguous item: %w", err)
+			return false, fmt.Errorf("settling overridden ambiguous item: %w", err)
 		}
 		if !changed {
 			// Another writer matched the item after it was read. Leave the
 			// match alone; the retry reads the matched item.
-			return fmt.Errorf("item %s was matched while its group override was applied", skeleton.ContentID)
+			return false, fmt.Errorf("item %s was matched while its group override was applied", skeleton.ContentID)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // itemOwnsContentGroup reports whether the item file links to and file's
@@ -1313,12 +1315,11 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	if !hasUnlinkedGroupFile(groupFiles) {
 		if strings.TrimSpace(representative.ContentID) != "" {
 			skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative, job.RerunRequested, folder.paths...)
-			var override *models.MediaGroupOverride
+			overridden := false
 			if ok {
-				var err error
-				override, err = w.queuedGroupOverride(ctx, representative, skeleton)
+				override, err := w.queuedGroupOverride(ctx, representative, skeleton)
 				if err == nil {
-					err = w.applyQueuedGroupOverride(ctx, representative, skeleton, override, folder.paths...)
+					overridden, err = w.applyQueuedGroupOverride(ctx, representative, skeleton, override, folder.paths...)
 				}
 				if err != nil {
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
@@ -1335,7 +1336,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				}
 			}
 			if ok && skeleton.ItemStatus != "ambiguous" {
-				if err := w.validateReusedGroupIdentity(ctx, representative, skeleton, override != nil, folder.paths...); err != nil {
+				if err := w.validateReusedGroupIdentity(ctx, representative, skeleton, overridden, folder.paths...); err != nil {
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr
 					}
