@@ -429,6 +429,8 @@ type episodeResponse struct {
 	ImdbID         string                  `json:"imdb_id,omitempty"`
 	TmdbID         string                  `json:"tmdb_id,omitempty"`
 	TvdbID         string                  `json:"tvdb_id,omitempty"`
+	RatingIMDB     *float64                `json:"rating_imdb,omitempty"`
+	RatingTMDB     *float64                `json:"rating_tmdb,omitempty"`
 	StillURL       string                  `json:"still_url,omitempty"`
 	StillThumbhash string                  `json:"still_thumbhash,omitempty"`
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
@@ -1169,6 +1171,8 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		ImdbID:         ep.ImdbID,
 		TmdbID:         ep.TmdbID,
 		TvdbID:         ep.TvdbID,
+		RatingIMDB:     ep.RatingIMDB,
+		RatingTMDB:     ep.RatingTMDB,
 		StillThumbhash: stillThumbhash,
 	}
 

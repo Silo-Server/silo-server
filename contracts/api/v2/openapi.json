@@ -26210,6 +26210,16 @@
           "overview": {
             "type": "string"
           },
+          "rating_imdb": {
+            "description": "IMDb rating, 0-10",
+            "format": "double",
+            "type": "number"
+          },
+          "rating_tmdb": {
+            "description": "TMDB rating, 0-10",
+            "format": "double",
+            "type": "number"
+          },
           "runtime": {
             "description": "Minutes",
             "format": "int64",
