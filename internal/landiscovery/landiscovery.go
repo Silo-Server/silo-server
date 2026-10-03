@@ -52,6 +52,10 @@ type Config struct {
 	ServerID string
 	// Port is the TCP port the API listener accepts plain HTTP on.
 	Port int
+	// BindIP is the address the API listener is bound to. When it names one
+	// address rather than all of them, only that address is advertised, on
+	// the interface that holds it.
+	BindIP net.IP
 }
 
 // ErrLoopbackOnly reports that the API listener is bound to a loopback
@@ -74,19 +78,30 @@ func PortFromAddr(addr net.Addr) (int, error) {
 
 var quietLibraryLog sync.Once
 
-// Advertise announces cfg on every multicast-capable interface and answers
-// queries for it until ctx is canceled, then sends goodbye packets and
-// returns ctx.Err(). It returns earlier only when the responder cannot start,
-// for example when no interface supports multicast.
-func Advertise(ctx context.Context, cfg Config) error {
+// Advertise announces cfg on every multicast-capable interface (or only the
+// one holding cfg.BindIP) and answers queries for it until ctx is canceled,
+// then sends goodbye packets and returns ctx.Err(). It returns earlier only
+// when the responder cannot start, for example when no interface supports
+// multicast.
+func Advertise(ctx context.Context, cfg Config) (err error) {
 	quietLibraryLog.Do(func() {
 		// The library logs to stdout by default; Silo logs through slog.
 		dnssdlog.Info.SetOutput(io.Discard)
 		dnssdlog.Debug.SetOutput(io.Discard)
 	})
+	// Discovery is optional; a fault in the DNS-SD library must not take the
+	// API process down with it.
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("lan discovery: responder panicked: %v", p)
+		}
+	}()
 	srvCfg, err := serviceConfig(cfg)
 	if err != nil {
 		return err
+	}
+	if len(dnssd.MulticastInterfaces(srvCfg.Ifaces...)) == 0 {
+		return errors.New("lan discovery: no multicast-capable network interface")
 	}
 	service, err := dnssd.NewService(srvCfg)
 	if err != nil {
@@ -117,7 +132,7 @@ func serviceConfig(cfg Config) (dnssd.Config, error) {
 	if cfg.Port <= 0 || cfg.Port > 65535 {
 		return dnssd.Config{}, fmt.Errorf("lan discovery: invalid port %d", cfg.Port)
 	}
-	return dnssd.Config{
+	srvCfg := dnssd.Config{
 		Name: instanceName(cfg.Name),
 		Type: ServiceType,
 		Host: hostLabel(id),
@@ -126,24 +141,58 @@ func serviceConfig(cfg Config) (dnssd.Config, error) {
 			TXTKeyVersion:  TXTVersion,
 			TXTKeyServerID: id,
 		},
-	}, nil
+	}
+	if cfg.BindIP != nil && !cfg.BindIP.IsUnspecified() {
+		iface, err := interfaceHolding(cfg.BindIP)
+		if err != nil {
+			return dnssd.Config{}, err
+		}
+		srvCfg.IPs = []net.IP{cfg.BindIP}
+		srvCfg.Ifaces = []string{iface}
+	}
+	return srvCfg, nil
+}
+
+// interfaceHolding returns the name of the interface that has ip assigned.
+func interfaceHolding(ip net.IP) (string, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", fmt.Errorf("lan discovery: list interfaces: %w", err)
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if prefix, ok := addr.(*net.IPNet); ok && prefix.IP.Equal(ip) {
+				return iface.Name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("lan discovery: no interface holds the listener address %s", ip)
 }
 
 // instanceName trims name to a DNS label, falling back to defaultInstanceName.
+// A trailing "()" is dropped: the responder's conflict-suffix parser panics on
+// an empty pair of parentheses at the end of a name.
 func instanceName(name string) string {
 	name = strings.TrimSpace(name)
+	if len(name) > maxInstanceNameBytes {
+		// Cut on a rune boundary so a multi-byte name stays valid UTF-8.
+		cut := maxInstanceNameBytes
+		for cut > 0 && !utf8.RuneStart(name[cut]) {
+			cut--
+		}
+		name = strings.TrimSpace(name[:cut])
+	}
+	for strings.HasSuffix(name, "()") {
+		name = strings.TrimSpace(strings.TrimSuffix(name, "()"))
+	}
 	if name == "" {
 		return defaultInstanceName
 	}
-	if len(name) <= maxInstanceNameBytes {
-		return name
-	}
-	// Cut on a rune boundary so a multi-byte name stays valid UTF-8.
-	cut := maxInstanceNameBytes
-	for cut > 0 && !utf8.RuneStart(name[cut]) {
-		cut--
-	}
-	return strings.TrimSpace(name[:cut])
+	return name
 }
 
 // hostLabel returns "silo-" plus the first eight alphanumerics of the server

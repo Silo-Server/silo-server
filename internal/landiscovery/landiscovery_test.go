@@ -44,6 +44,33 @@ func TestInstanceName(t *testing.T) {
 	}
 }
 
+func TestInstanceNameDropsEmptyParentheses(t *testing.T) {
+	// dnssd's conflict-suffix parser panics on a name ending in "()".
+	for in, want := range map[string]string{"Room ()": "Room", "Room()": "Room", "()": defaultInstanceName, " Den () () ": "Den", "Den (2)": "Den (2)"} {
+		if got := instanceName(in); got != want {
+			t.Errorf("instanceName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestServiceConfigLimitsABoundListenerToItsAddress(t *testing.T) {
+	loopback := net.ParseIP("127.0.0.1")
+	cfg, err := serviceConfig(Config{Name: "Silo", ServerID: "abc", Port: 8080, BindIP: loopback})
+	if err != nil {
+		t.Fatalf("serviceConfig: %v", err)
+	}
+	if len(cfg.IPs) != 1 || !cfg.IPs[0].Equal(loopback) || len(cfg.Ifaces) != 1 {
+		t.Fatalf("bound listener advertised IPs %v on %v, want only %v on its interface", cfg.IPs, cfg.Ifaces, loopback)
+	}
+	if _, err := serviceConfig(Config{Name: "Silo", ServerID: "abc", Port: 8080, BindIP: net.ParseIP("192.0.2.77")}); err == nil {
+		t.Fatal("expected an error for an address no interface holds")
+	}
+	all, err := serviceConfig(Config{Name: "Silo", ServerID: "abc", Port: 8080, BindIP: net.IPv6zero})
+	if err != nil || len(all.IPs) != 0 || len(all.Ifaces) != 0 {
+		t.Fatalf("unspecified bind = %+v, %v; want every interface", all, err)
+	}
+}
+
 func TestPortFromAddr(t *testing.T) {
 	cases := []struct {
 		addr    net.Addr

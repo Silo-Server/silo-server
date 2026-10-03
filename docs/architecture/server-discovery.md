@@ -33,9 +33,11 @@ Rules a client relies on:
 - **Connect by resolved address.** Build the URL from the address the
   platform resolver returns (IPv4 preferred, IPv6 in brackets). `.local` names
   do not resolve on every Android release.
-- **Instance names are not unique.** Two servers named `Silo` on one link are
-  renamed by the responder (`Silo (2)`); clients label entries with the name
-  from `GET /api/v2/theme/branding` and tell servers apart by `id`.
+- **Instance names are not unique or current.** Two servers named `Silo` on
+  one link are renamed by the responder (`Silo (2)`), and the instance name is
+  read when the process starts, so a later rename shows after a restart.
+  Clients label entries with the live name from `GET /api/v2/theme/branding`
+  and tell servers apart by `id`.
 - **Several entries can share one `id`.** Each API replica of a deployment
   advertises itself, and a host with several interfaces is resolved once per
   interface. Group by `id`.
@@ -52,7 +54,8 @@ unicast queries (`dig -p 5353`).
 advertisement off. It is also skipped, with one log line, when the API
 listener is bound to loopback only, and any failure to start (no multicast
 interface, port 5353 unavailable) is logged once without affecting the
-server. The advertisement reaches only the networks the process itself is
+server. A listener bound to one address advertises only that address, on the
+interface that holds it. The advertisement reaches only the networks the process itself is
 attached to, and it carries the port the process listens on, not a port a
 container runtime publishes it under.
 

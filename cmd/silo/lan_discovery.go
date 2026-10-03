@@ -12,7 +12,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 )
 
-// advertiseOnLAN announces the bound API listener with DNS-SD until ctx ends.
+// advertiseOnLAN announces the bound API listener with DNS-SD until ctx ends,
+// then returns once the goodbye packets are sent.
 // Discovery is a convenience: any failure is logged once and the server keeps
 // serving clients that already know its address.
 func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serveridentity.Service, settings interface {
@@ -36,7 +37,11 @@ func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serverid
 	if err != nil || strings.TrimSpace(name) == "" {
 		name = branding.DefaultServerName
 	}
-	err = landiscovery.Advertise(ctx, landiscovery.Config{Name: name, ServerID: serverID, Port: port})
+	var bindIP net.IP
+	if tcp, ok := listenAddr.(*net.TCPAddr); ok {
+		bindIP = tcp.IP
+	}
+	err = landiscovery.Advertise(ctx, landiscovery.Config{Name: name, ServerID: serverID, Port: port, BindIP: bindIP})
 	if err != nil && ctx.Err() == nil {
 		slog.WarnContext(ctx, "LAN discovery stopped", "error", err)
 	}
