@@ -1218,7 +1218,7 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 	case SectionReturningShows:
 		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionProfileActivityFeed:
-		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
+		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionWatchlist, SectionFavorites:
 		return f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	default:
@@ -3131,6 +3131,12 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 	args = append(args, scope.interval)
 	argIdx++
 
+	if scope.userID > 0 {
+		conditions = append(conditions, fmt.Sprintf("uwh.user_id = $%d", argIdx))
+		args = append(args, scope.userID)
+		argIdx++
+	}
+
 	if scope.profileID != "" {
 		op := "="
 		if scope.excludeProfile {
@@ -3172,6 +3178,8 @@ func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, fil
 type watchActivityScope struct {
 	interval string // Postgres interval, e.g. "7 days"
 	rank     watchActivityRank
+	// userID, when set, keeps only that account's history.
+	userID int
 	// profileID, when set, keeps only that profile's history, or with
 	// excludeProfile every other profile's history.
 	profileID      string
@@ -3219,24 +3227,28 @@ func (f *Fetcher) queryWatchActivity(ctx context.Context, rail, query string, ar
 	return items, len(items), nil
 }
 
-func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+// fetchProfileActivityFeed lists recent watches by the caller's other profiles
+// (household mode) or by one pinned profile. Both modes read only the caller's
+// account, so a pinned profile from another account lists nothing.
+func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.ProfileActivityFeedParams
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
 	}
 	target := p.ProfileID
 
-	// Household mode (target == "") leaks all history when caller is unauthenticated.
-	if target == "" && profileID == "" {
+	// Without an account there's no household to read, and household mode
+	// (target == "") without a profile would list the whole account.
+	if userID <= 0 || (target == "" && profileID == "") {
 		return []*models.MediaItem{}, 0, nil
 	}
 
 	// Household mode lists the last week of every other profile's plays; a
 	// named profile shows its last month. Each title appears once, ordered by
 	// its most recent play.
-	scope := watchActivityScope{interval: "7 days", rank: rankByLatest, profileID: profileID, excludeProfile: true}
+	scope := watchActivityScope{interval: "7 days", rank: rankByLatest, userID: userID, profileID: profileID, excludeProfile: true}
 	if target != "" {
-		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, profileID: target}
+		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, userID: userID, profileID: target}
 	}
 	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, scope)
 	return f.queryWatchActivity(ctx, "profile activity feed", query, args)

@@ -134,7 +134,7 @@ func TestWatchActivityRailsCountEpisodePlaysTowardSeries(t *testing.T) {
 	activityFeed := func(viewer, config string) func(context.Context, ResolvedSection, *int, []int, catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 		return func(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 			s.Config = json.RawMessage(config)
-			return fetcher.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, viewer, filter)
+			return fetcher.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, userID, viewer, filter)
 		}
 	}
 	tests := []struct {
