@@ -263,7 +263,7 @@ func TestClaimRefreshCandidatesOrderPostgres(t *testing.T) {
 // An API server older than the outcome columns records only the attempt.
 // Once that attempt is a retry interval old the person is a candidate again,
 // as the older server would have made them; a recent one waits (#1606).
-func TestFindRefreshCandidatesRetriesAttemptsWithoutAnOutcomePostgres(t *testing.T) {
+func TestClaimRefreshCandidatesRetriesAttemptsWithoutAnOutcomePostgres(t *testing.T) {
 	repo, pool := personRefreshTestRepo(t)
 	ctx := context.Background()
 
@@ -277,7 +277,7 @@ func TestFindRefreshCandidatesRetriesAttemptsWithoutAnOutcomePostgres(t *testing
 		}
 	}
 
-	ids, err := repo.FindRefreshCandidates(ctx, 100_000)
+	ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1277,18 +1277,19 @@ func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int
 			// attempt with no outcome or due time. Retry those as it would
 			// have, PersonRefreshRetryAfter after the attempt.
 			name: "attempted without an outcome",
-			sql: `
-				SELECT id
+			pick: `
+				SELECT id, extract(epoch FROM metadata_refresh_attempted_at)::double precision AS sort_key
 				FROM people
 				WHERE metadata_refresh_attempted_at IS NOT NULL
 					AND metadata_refresh_outcome IS NULL
 					AND metadata_refresh_due_at IS NULL
-					AND metadata_refresh_attempted_at <= $2
+					AND metadata_refresh_attempted_at <= $3
 					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
 				ORDER BY metadata_refresh_attempted_at, id
-				LIMIT $1`,
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
 			args: func(remaining int) []any {
-				return []any{remaining, time.Now().Add(-PersonRefreshRetryAfter)}
+				return []any{remaining, PersonRefreshAttemptLease.Seconds(), time.Now().Add(-PersonRefreshRetryAfter)}
 			},
 		},
 	}
