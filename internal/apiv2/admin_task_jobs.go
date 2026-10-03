@@ -191,7 +191,10 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 			}
 			out.LibraryName = request.LibraryName
 		}
-		if job.Status == adminjob.StatusCompleted {
+		// A canceled image cache cleanup keeps the totals deleted before the
+		// cancel, so report them the same way as a completed job.
+		if job.Status == adminjob.StatusCompleted ||
+			(job.JobType == adminjob.JobTypeImageCacheCleanup && job.Status == adminjob.StatusCancelled) {
 			var result AdminTaskJobLibraryResult
 			if json.Unmarshal(job.ResultPayload, &result) == nil {
 				out.LibraryResult = &result

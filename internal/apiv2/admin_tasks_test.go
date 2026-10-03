@@ -185,10 +185,18 @@ func TestImageCacheCleanupJobCanBeCanceled(t *testing.T) {
 		t.Fatalf("pending cleanup cancellation: %d %s", response.Code, response.Body)
 	}
 	job.Status = adminjob.StatusCancelled
+	job.ProgressCurrent, job.ProgressTotal = 3, 8
+	job.ResultPayload = []byte(`{"deleted_prefixes":3,"deleted_s3_objects":5}`)
 	response = do(t, h, http.MethodPost, cancel, "", bearer(adminToken))
 	decodeJSON(t, response.Body, &body)
 	if response.Code != http.StatusOK || body.State != "canceled" || body.Cancelable {
 		t.Fatalf("already canceled cleanup: %d %s", response.Code, response.Body)
+	}
+	if body.LibraryResult == nil || body.LibraryResult.DeletedPrefixes != 3 || body.LibraryResult.DeletedS3Objects != 5 {
+		t.Fatalf("canceled cleanup lost its partial totals: %s", response.Body)
+	}
+	if body.Progress == nil || body.Progress.Current != 3 || body.Progress.Total != 8 {
+		t.Fatalf("canceled cleanup progress: %s", response.Body)
 	}
 }
 
