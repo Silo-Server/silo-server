@@ -208,9 +208,9 @@ func TestNetworkPreviewBoundsThePluginCall(t *testing.T) {
 	}
 }
 
-// Concurrent misses for one peer share one plugin call. Every caller misses
-// the cache while the first call is still in the plugin, so none can pass by
-// finding its answer cached.
+// Concurrent misses for one peer share one plugin call. Every caller joins
+// the shared lookup while the first call is still in the plugin, so none can
+// pass by finding its answer cached.
 func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
 	const callers = 8
 	plugin := &peerPlugin{
@@ -224,7 +224,7 @@ func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
 		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
 	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
 	joined := make(chan struct{}, callers)
-	svc.previews.joining = func() { joined <- struct{}{} }
+	svc.previews.joined = func() { joined <- struct{}{} }
 	ctx := overlayContext(t.Context(), 5, "100.64.0.7")
 	previews := make(chan *NetworkIdentityPreview, callers)
 	lookup := func() { previews <- svc.networkPreview(ctx, provider) }
