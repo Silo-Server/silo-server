@@ -39,7 +39,7 @@ import { OverviewTab } from "./admin-users/detail/overview/OverviewTab";
 import { PreferencesTab } from "./admin-users/detail/preferences/PreferencesTab";
 import { UnsavedCardGuard } from "./admin-users/detail/UnsavedCardGuard";
 import { UserDetailHeader } from "./admin-users/detail/UserDetailHeader";
-import { UserDetailTabs } from "./admin-users/detail/UserDetailTabs";
+import { UserDetailTabBar } from "./admin-users/detail/UserDetailTabBar";
 import { parseUserDetailTab, userDetailTabSearch } from "./admin-users/detail/userDetailTabs";
 
 export default function AdminUserDetail() {
@@ -212,7 +212,7 @@ function AdminUserDetailPage() {
         />
 
         <Tabs value={tab} onValueChange={selectTab} className="min-w-0 gap-4">
-          <UserDetailTabs user={account} active={tab} />
+          <UserDetailTabBar user={account} active={tab} />
           <TabsContent value="overview" className="min-w-0">
             <OverviewTab user={account} />
           </TabsContent>
