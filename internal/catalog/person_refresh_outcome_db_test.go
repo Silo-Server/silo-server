@@ -260,6 +260,35 @@ func TestClaimRefreshCandidatesOrderPostgres(t *testing.T) {
 	}
 }
 
+// An API server older than the outcome columns records only the attempt.
+// Once that attempt is a retry interval old the person is a candidate again,
+// as the older server would have made them; a recent one waits (#1606).
+func TestClaimRefreshCandidatesRetriesAttemptsWithoutAnOutcomePostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+
+	stale := seedRefreshPerson(t, pool, "older-server-stale")
+	recent := seedRefreshPerson(t, pool, "older-server-recent")
+	for id, attempted := range map[int64]time.Duration{stale: 8 * 24 * time.Hour, recent: 24 * time.Hour} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE people SET metadata_refresh_attempted_at = NOW() - make_interval(secs => $2)
+			WHERE id = $1`, id, attempted.Seconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(ids, stale) {
+		t.Error("a week-old attempt without an outcome is not a candidate")
+	}
+	if slices.Contains(ids, recent) {
+		t.Error("a day-old attempt without an outcome is already a candidate")
+	}
+}
+
 // Two outcomes recorded at once for the same person must both count. The
 // second write waits on the first's row lock, then must build its streak from
 // the row the first wrote, not from the statement's older snapshot.
@@ -391,5 +420,50 @@ func TestClaimRefreshCandidatesConcurrentClaimsAreDisjointPostgres(t *testing.T)
 	}
 	if !slices.Contains(again, expired) {
 		t.Fatalf("person %d not claimed again after the lease ran out", expired)
+	}
+}
+
+// A person the providers didn't know under their old id is looked up again
+// once an admin corrects it; an update that keeps the ids keeps the outcome
+// (#1606).
+func TestPersonIDChangeResetsRefreshOutcomePostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+
+	id := seedRefreshPerson(t, pool, "corrected-id")
+	if _, err := pool.Exec(ctx, `
+		UPDATE people SET metadata_refresh_attempted_at = NOW() - interval '1 day',
+			metadata_refresh_outcome = 'not_found', metadata_refresh_failures = 3,
+			metadata_refresh_due_at = NULL
+		WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	person, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	person.Name += " (renamed)"
+	if err := repo.Update(ctx, *person); err != nil {
+		t.Fatal(err)
+	}
+	if state := readRefreshState(t, pool, id); state.outcome == nil || *state.outcome != "not_found" || state.dueIn != nil {
+		t.Fatalf("an update keeping the ids changed the outcome: %+v", state)
+	}
+
+	person.TmdbID += "-corrected"
+	if err := repo.Update(ctx, *person); err != nil {
+		t.Fatal(err)
+	}
+	state := readRefreshState(t, pool, id)
+	if state.outcome != nil || state.failures != 0 || state.dueIn == nil || *state.dueIn > time.Minute {
+		t.Fatalf("after correcting the id: %+v, want no outcome, no failures, due now", state)
+	}
+	ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(ids, id) {
+		t.Fatal("the person with a corrected id is not a candidate")
 	}
 }
