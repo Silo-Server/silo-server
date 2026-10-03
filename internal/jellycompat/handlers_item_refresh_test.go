@@ -174,6 +174,30 @@ func TestItemRefreshScansOnlyTheRequestedSeason(t *testing.T) {
 	assertQueuedScans(t, queue, want)
 }
 
+// Browsing synthesizes a season from live episodes when the series has no
+// stored season rows; refreshing that season scans its files, and one with no
+// matching files is still 404.
+func TestItemRefreshScansASynthesizedSeason(t *testing.T) {
+	root := t.TempDir()
+	s1e1 := writeMediaFile(t, root, "Show", "Season 01", "Show S01E01.mkv")
+	queue := &fakeAutoscanQueue{}
+	files := &fakeItemRefreshFiles{byContentID: map[string][]*models.MediaFile{
+		"series-tvdb-200": {{ID: 1, ContentID: "series-tvdb-200", SeasonNumber: 1, FilePath: s1e1}},
+	}}
+	handler := newItemRefreshHandler(root, "tv", queue, files, &fakeItemRefreshSeasons{})
+
+	rec := serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDSeason, "series-tvdb-200-S01"))
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertQueuedScans(t, queue, []queuedScan{{libraryID: 7, mode: scantrigger.ModeSubtree, path: filepath.Dir(s1e1), trigger: itemRefreshTrigger}})
+
+	rec = serveItemRefresh(handler, handler.codec.EncodeStringID(EncodedIDSeason, "series-tvdb-200-S02"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("season with no files: expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestItemRefreshScansLibrary(t *testing.T) {
 	root := t.TempDir()
 	queue := &fakeAutoscanQueue{}

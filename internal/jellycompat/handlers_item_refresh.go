@@ -181,20 +181,30 @@ func (h *AutoscanHandler) seasonRefreshFiles(ctx context.Context, seasonID strin
 	if h.seasons == nil {
 		return nil, errSeasonRefreshUnavailable
 	}
+	var seriesID string
+	var seasonNumber int
 	season, err := h.seasons.GetByID(ctx, seasonID)
-	if err != nil {
-		if errors.Is(err, catalog.ErrSeasonNotFound) {
+	switch {
+	case err == nil:
+		seriesID, seasonNumber = season.SeriesID, season.SeasonNumber
+	case errors.Is(err, catalog.ErrSeasonNotFound):
+		// A series with live episodes but no stored season rows is browsed
+		// through seasons synthesized from its episodes ("<series>-S01"),
+		// which a client can then ask to refresh.
+		var ok bool
+		if seriesID, seasonNumber, ok = catalog.ParseSyntheticSeasonID(seasonID); !ok {
 			return nil, nil
 		}
+	default:
 		return nil, err
 	}
-	seriesFiles, err := h.files.GetByContentID(ctx, season.SeriesID)
+	seriesFiles, err := h.files.GetByContentID(ctx, seriesID)
 	if err != nil {
 		return nil, err
 	}
 	files := make([]*models.MediaFile, 0, len(seriesFiles))
 	for _, file := range seriesFiles {
-		if file != nil && file.SeasonNumber == season.SeasonNumber {
+		if file != nil && file.SeasonNumber == seasonNumber {
 			files = append(files, file)
 		}
 	}
