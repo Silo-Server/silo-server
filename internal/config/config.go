@@ -196,6 +196,9 @@ type PlaybackConfig struct {
 	SubtitleSyncNodeCapacity int                   `yaml:"-"`
 	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
 	Routing                  PlaybackRoutingPolicy `yaml:"-"`
+	// KeyframePlaylist is playback.copy_keyframe_playlist: copy-remux HLS
+	// from one complete keyframe-planned playlist (#1466).
+	KeyframePlaylist bool `yaml:"-"`
 }
 
 // RedisConfig holds Redis connection settings.

@@ -204779,6 +204779,9 @@
           "input_path": {
             "type": "string"
           },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
           "require_ready": {
             "type": "boolean"
           },
@@ -204914,6 +204917,9 @@
           },
           "hw_accel": {
             "type": "string"
+          },
+          "keyframe_playlist": {
+            "type": "boolean"
           },
           "session_id": {
             "type": "string"
