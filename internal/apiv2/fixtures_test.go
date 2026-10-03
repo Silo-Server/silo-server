@@ -54,6 +54,10 @@ type fixtureCase struct {
 // request produces.
 func fixtureRequestID(i int) string { return fmt.Sprintf("%024x", i+1) }
 
+// fixtureContractDigest stands in for the served contract_digest: the same
+// 64-hex shape with a value no real OpenAPI artifact hashes to.
+var fixtureContractDigest = strings.Repeat("0", 64)
+
 func fixtureCases() []fixtureCase {
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
 	problem := "#/components/schemas/Problem"
@@ -2016,8 +2020,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 		} else {
 			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
+			// The real digest changes with every contract edit, so committing
+			// it would make any two API pull requests conflict on this line.
+			raw := bytes.ReplaceAll(rec.Body.Bytes(), []byte(contractDigest), []byte(fixtureContractDigest))
 			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, bytes.TrimSpace(rec.Body.Bytes()), "", "  "); err != nil {
+			if err := json.Indent(&pretty, bytes.TrimSpace(raw), "", "  "); err != nil {
 				t.Fatalf("%s: body is not JSON: %v", c.name, err)
 			}
 			pretty.WriteByte('\n')
