@@ -10,19 +10,24 @@ ALTER TABLE public.people
     ADD COLUMN IF NOT EXISTS metadata_refresh_failures integer NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS metadata_refresh_due_at timestamptz;
 
--- A refresh writes the person, moving updated_at past the attempt, only when a
--- provider returned them. Those people were answered: recheck them once their
--- metadata is 90 days old, like any answered person.
+-- Nothing records whether an earlier lookup was answered: credit enrichment
+-- and photo caching also move updated_at past an attempt. Only a person whose
+-- bio, photo and birth date are all filled lacks nothing a recheck would
+-- fill, so only they wait the 90 days of an answered person.
 UPDATE public.people
 SET metadata_refresh_outcome = 'answered',
     metadata_refresh_failures = 0,
     metadata_refresh_due_at = updated_at + interval '90 days'
 WHERE metadata_refresh_attempted_at IS NOT NULL
   AND metadata_refresh_outcome IS NULL
-  AND updated_at >= metadata_refresh_attempted_at;
+  AND updated_at >= metadata_refresh_attempted_at
+  AND COALESCE(bio, '') <> ''
+  AND COALESCE(photo_path, '') <> ''
+  AND birth_date IS NOT NULL;
 
--- The rest found nothing or failed, and the old rule would retry them a week
--- after the attempt. Keep that one retry; its outcome then decides the next.
+-- The rest may have found nothing, failed, or been answered without filling a
+-- gap, and the old rule would retry them a week after the attempt. Keep that
+-- one retry; its outcome then decides the next.
 UPDATE public.people
 SET metadata_refresh_outcome = 'failed',
     metadata_refresh_failures = 1,
@@ -43,7 +48,7 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_index i ON i.indexrelid = c.oid
         WHERE n.nspname = 'public'
-          AND c.relname IN ('idx_people_refresh_never_attempted', 'idx_people_refresh_due_at')
+          AND c.relname IN ('idx_people_refresh_never_attempted', 'idx_people_refresh_due_at', 'idx_people_refresh_unrecorded')
           AND NOT i.indisvalid
     LOOP
         EXECUTE format('DROP INDEX public.%I', index_name);
@@ -64,6 +69,15 @@ ON public.people (metadata_refresh_due_at, id)
 WHERE metadata_refresh_due_at IS NOT NULL
   AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '');
 
+-- During a rolling upgrade an older API server records an attempt without an
+-- outcome or due time; the sweep retries those a week later, as it used to.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_people_refresh_unrecorded
+ON public.people (metadata_refresh_attempted_at, id)
+WHERE metadata_refresh_attempted_at IS NOT NULL
+  AND metadata_refresh_outcome IS NULL
+  AND metadata_refresh_due_at IS NULL
+  AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '');
+
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_people_metadata_refresh_due;
 
 -- +goose Down
@@ -74,6 +88,7 @@ ON public.people (
 )
 WHERE tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '';
 
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_people_refresh_unrecorded;
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_people_refresh_due_at;
 DROP INDEX CONCURRENTLY IF EXISTS public.idx_people_refresh_never_attempted;
 

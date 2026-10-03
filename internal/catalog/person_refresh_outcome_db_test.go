@@ -204,6 +204,35 @@ func TestFindRefreshCandidatesOrderPostgres(t *testing.T) {
 	}
 }
 
+// An API server older than the outcome columns records only the attempt.
+// Once that attempt is a retry interval old the person is a candidate again,
+// as the older server would have made them; a recent one waits (#1606).
+func TestFindRefreshCandidatesRetriesAttemptsWithoutAnOutcomePostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+
+	stale := seedRefreshPerson(t, pool, "older-server-stale")
+	recent := seedRefreshPerson(t, pool, "older-server-recent")
+	for id, attempted := range map[int64]time.Duration{stale: 8 * 24 * time.Hour, recent: 24 * time.Hour} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE people SET metadata_refresh_attempted_at = NOW() - make_interval(secs => $2)
+			WHERE id = $1`, id, attempted.Seconds()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ids, err := repo.FindRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(ids, stale) {
+		t.Error("a week-old attempt without an outcome is not a candidate")
+	}
+	if slices.Contains(ids, recent) {
+		t.Error("a day-old attempt without an outcome is already a candidate")
+	}
+}
+
 // Two outcomes recorded at once for the same person must both count. The
 // second write waits on the first's row lock, then must build its streak from
 // the row the first wrote, not from the statement's older snapshot.

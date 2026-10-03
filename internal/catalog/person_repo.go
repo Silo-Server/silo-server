@@ -1236,6 +1236,25 @@ func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int)
 				LIMIT $1`,
 			args: func(remaining int) []any { return []any{remaining} },
 		},
+		{
+			// An older API server, during a rolling upgrade, records an
+			// attempt with no outcome or due time. Retry those as it would
+			// have, PersonRefreshRetryAfter after the attempt.
+			name: "attempted without an outcome",
+			sql: `
+				SELECT id
+				FROM people
+				WHERE metadata_refresh_attempted_at IS NOT NULL
+					AND metadata_refresh_outcome IS NULL
+					AND metadata_refresh_due_at IS NULL
+					AND metadata_refresh_attempted_at <= $2
+					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+				ORDER BY metadata_refresh_attempted_at, id
+				LIMIT $1`,
+			args: func(remaining int) []any {
+				return []any{remaining, time.Now().Add(-PersonRefreshRetryAfter)}
+			},
+		},
 	}
 	for _, query := range queries {
 		remaining := limit - len(ids)
