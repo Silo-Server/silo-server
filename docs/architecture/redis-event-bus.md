@@ -22,24 +22,24 @@ own connection to the name it gives Redis:
 | `redis://host:6379` or `redis://host:6379/0` | `silo:admin` |
 | `redis://host:6379/3` | `silo:admin@db3` |
 
-Database 0 keeps the bare name. Builds from before the scoping use the bare
-name on every database number.
+Installs that share one Redis server on different database numbers then keep
+both their keys and their events apart.
 
-## Rules for operators
+## Invariants
 
-- Installs that share one Redis server each need their own database number.
-  Two installs on the same number share keys and events.
-- All nodes of one install use the same database number.
-- An install on a non-zero database number upgrades all its nodes together
-  when it moves from a build without scoping to one with it. While the builds
-  are mixed, events do not cross between old and new nodes. Events with no
-  other delivery path are then missed: a node that does not receive
-  `user_sessions_revoked` keeps serving its cached Jellyfin-compatible
-  sessions for that account, and one that does not receive `node_pool_changed`
-  keeps its old node list until it restarts or a node change is made through
-  it.
-- A build without scoping still shares events with an install on database 0,
-  whatever its own database number.
-- A Redis ACL user needs channel access to the scoped names. `&silo:*` covers
-  them. A list of the five bare names does not, and a node that is refused a
-  subscription exits at startup.
+- Publish and subscribe through `RedisEventBus` only. A `PUBLISH` or
+  `SUBSCRIBE` sent on a go-redis client directly uses the bare name and reaches
+  every install on the server.
+- Database 0 keeps the bare name. Builds from before the scoping use the bare
+  name on every database number, so nodes of a database 0 install on old and
+  new builds still exchange events. Scoping database 0 would end that.
+- Changing the name a database number maps to splits an install whose nodes
+  run mixed builds: events stop crossing between old and new nodes for as long
+  as the builds differ. Two events have no other delivery path. A node that
+  misses `user_sessions_revoked` keeps serving its cached Jellyfin-compatible
+  sessions for that account, and one that misses `node_pool_changed` keeps its
+  old node list until it restarts or a node change is made through it. The
+  scoping itself had this effect on installs on a non-zero database number.
+- Keep every Redis channel name under `silo:`. A Redis ACL user can be granted
+  channels by pattern (`&silo:*`), and a node that is refused a subscription
+  exits at startup.
