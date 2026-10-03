@@ -139,7 +139,7 @@ describe("SectionItemCard", () => {
     );
 
     expect(markup).toContain("Series A");
-    expect(markup).toContain("Season Premiere");
+    expect(markup).toContain("New Season");
     expect(markup).toContain("Season 2 · Back Again");
     expect(markup).toContain("Wed, Apr 8");
     expect(markup).toContain("8:00 PM");
