@@ -726,11 +726,22 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 }
 
 // execPersonUpdate writes all non-key person fields and returns the rows affected.
+// execPersonUpdate writes a person's fields. When their provider ids change,
+// the last lookup's outcome was about another identity: it is cleared and the
+// person is due now, so one the providers didn't know under the old id isn't
+// left out of the sweep for good. The attempt time stays, so the person isn't
+// taken for one never looked up. The SET list reads the row's old ids.
 func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE people SET name=$2, sort_name=$3, bio=$4, birth_date=$5, death_date=$6,
 			birthplace=$7, homepage=$8, photo_path=$9, photo_source_path=$10, photo_thumbhash=$11,
-			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now()
+			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now(),
+			metadata_refresh_outcome = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN NULL ELSE metadata_refresh_outcome END,
+			metadata_refresh_failures = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN 0 ELSE metadata_refresh_failures END,
+			metadata_refresh_due_at = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN NOW() ELSE metadata_refresh_due_at END
 		WHERE id = $1`,
 		p.ID, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate,
 		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash,

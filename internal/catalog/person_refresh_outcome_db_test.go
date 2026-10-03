@@ -283,3 +283,48 @@ func TestRecordRefreshOutcomeConcurrentWritesBothCountPostgres(t *testing.T) {
 		t.Fatalf("failures after two concurrent failed outcomes = %d, want 2", state.failures)
 	}
 }
+
+// A person the providers didn't know under their old id is looked up again
+// once an admin corrects it; an update that keeps the ids keeps the outcome
+// (#1606).
+func TestPersonIDChangeResetsRefreshOutcomePostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+
+	id := seedRefreshPerson(t, pool, "corrected-id")
+	if _, err := pool.Exec(ctx, `
+		UPDATE people SET metadata_refresh_attempted_at = NOW() - interval '1 day',
+			metadata_refresh_outcome = 'not_found', metadata_refresh_failures = 3,
+			metadata_refresh_due_at = NULL
+		WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	person, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	person.Name += " (renamed)"
+	if err := repo.Update(ctx, *person); err != nil {
+		t.Fatal(err)
+	}
+	if state := readRefreshState(t, pool, id); state.outcome == nil || *state.outcome != "not_found" || state.dueIn != nil {
+		t.Fatalf("an update keeping the ids changed the outcome: %+v", state)
+	}
+
+	person.TmdbID += "-corrected"
+	if err := repo.Update(ctx, *person); err != nil {
+		t.Fatal(err)
+	}
+	state := readRefreshState(t, pool, id)
+	if state.outcome != nil || state.failures != 0 || state.dueIn == nil || *state.dueIn > time.Minute {
+		t.Fatalf("after correcting the id: %+v, want no outcome, no failures, due now", state)
+	}
+	ids, err := repo.FindRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(ids, id) {
+		t.Fatal("the person with a corrected id is not a candidate")
+	}
+}
