@@ -17,8 +17,10 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/brutella/dnssd"
@@ -85,16 +87,91 @@ func PortFromAddr(addr net.Addr) (int, error) {
 
 var quietLibraryLog sync.Once
 
+// interfaceCheckInterval is how often Advertise compares the multicast
+// interfaces with the ones its responder joined.
+const interfaceCheckInterval = 30 * time.Second
+
 // Advertise announces cfg on every multicast-capable interface and answers
 // queries for it until ctx is canceled, then sends goodbye packets and
-// returns ctx.Err(). It returns earlier only when the responder cannot start,
-// for example when no interface supports multicast.
-func Advertise(ctx context.Context, cfg Config) (err error) {
+// returns ctx.Err(). It returns earlier only when cfg is invalid.
+//
+// The responder joins the multicast groups of the interfaces present when it
+// starts and never joins later ones, so Advertise replaces it whenever the
+// multicast interfaces or their addresses change (a cable plugged in, a DHCP
+// lease, a container network created after Silo started), and waits while
+// there is none.
+func Advertise(ctx context.Context, cfg Config) error {
 	quietLibraryLog.Do(func() {
 		// The library logs to stdout by default; Silo logs through slog.
 		dnssdlog.Info.SetOutput(io.Discard)
 		dnssdlog.Debug.SetOutput(io.Discard)
 	})
+	srvCfg, err := serviceConfig(cfg)
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(interfaceCheckInterval)
+	defer ticker.Stop()
+	// The last problem logged, so a condition that persists is logged once.
+	lastProblem := ""
+	isNew := func(problem string) bool {
+		if problem == lastProblem {
+			return false
+		}
+		lastProblem = problem
+		return true
+	}
+	for {
+		key := interfaceKey()
+		if key == "" {
+			if isNew("no interface") {
+				slog.WarnContext(ctx, "LAN discovery waiting: no multicast-capable network interface")
+			}
+		} else if err := respondWhileUnchanged(ctx, srvCfg, key, ticker.C); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if isNew(err.Error()) {
+				slog.WarnContext(ctx, "LAN discovery responder stopped; retrying", "error", err)
+			}
+		} else {
+			// The interfaces changed: serve the new set right away.
+			lastProblem = ""
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+// respondWhileUnchanged runs one responder until ctx ends, the responder
+// fails, or the multicast interfaces stop matching key. It returns nil only
+// for an interface change, after the responder has sent its goodbyes.
+func respondWhileUnchanged(ctx context.Context, srvCfg dnssd.Config, key string, ticks <-chan time.Time) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- respond(runCtx, srvCfg) }()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticks:
+			if interfaceKey() != key {
+				cancel()
+				<-done
+				return nil
+			}
+		}
+	}
+}
+
+// respond registers the service on a new responder and answers queries until
+// ctx ends.
+func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
 	// Discovery is optional; a fault in the DNS-SD library must not take the
 	// API process down with it.
 	defer func() {
@@ -102,13 +179,6 @@ func Advertise(ctx context.Context, cfg Config) (err error) {
 			err = fmt.Errorf("lan discovery: responder panicked: %v", p)
 		}
 	}()
-	srvCfg, err := serviceConfig(cfg)
-	if err != nil {
-		return err
-	}
-	if len(dnssd.MulticastInterfaces()) == 0 {
-		return errors.New("lan discovery: no multicast-capable network interface")
-	}
 	service, err := dnssd.NewService(srvCfg)
 	if err != nil {
 		return fmt.Errorf("lan discovery: %w", err)
@@ -123,6 +193,23 @@ func Advertise(ctx context.Context, cfg Config) (err error) {
 	slog.InfoContext(ctx, "advertising Silo on the local network",
 		"service", ServiceType, "name", srvCfg.Name, "host", srvCfg.Host+".local", "port", srvCfg.Port)
 	return responder.Respond(ctx)
+}
+
+// interfaceKey describes the multicast-capable interfaces and their addresses,
+// or "" when there is none.
+func interfaceKey() string {
+	var parts []string
+	for _, iface := range dnssd.MulticastInterfaces() {
+		addrs, _ := iface.Addrs()
+		names := make([]string, 0, len(addrs))
+		for _, addr := range addrs {
+			names = append(names, addr.String())
+		}
+		sort.Strings(names)
+		parts = append(parts, iface.Name+"="+strings.Join(names, ","))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ";")
 }
 
 // serviceConfig builds the DNS-SD registration for cfg.

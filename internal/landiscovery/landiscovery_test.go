@@ -75,3 +75,11 @@ func TestPortFromAddr(t *testing.T) {
 		t.Error("expected an error for a non-TCP address")
 	}
 }
+
+func TestInterfaceKeyIsStable(t *testing.T) {
+	// Advertise replaces its responder whenever the key changes, so the same
+	// interfaces must always produce the same key.
+	if a, b := interfaceKey(), interfaceKey(); a != b {
+		t.Fatalf("interfaceKey changed without an interface change: %q vs %q", a, b)
+	}
+}

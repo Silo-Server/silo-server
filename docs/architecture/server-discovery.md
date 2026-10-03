@@ -54,9 +54,10 @@ unicast queries (`dig -p 5353`).
 advertisement off. It is also skipped, with one log line, when the API
 listener is bound to loopback or to any single address: the responder
 answers queries on every multicast interface and cannot be confined to the
-one holding that address. Any failure to start (no multicast
-interface, port 5353 unavailable) is logged once without affecting the
-server. The advertisement reaches only the networks the process itself is
+one holding that address. A failure to start (no multicast interface yet,
+port 5353 unavailable) is logged without affecting the server, and the
+responder is replaced whenever the multicast interfaces or their addresses
+change, because it only joins the interfaces present when it starts. The advertisement reaches only the networks the process itself is
 attached to, and it carries the port the process listens on, not a port a
 container runtime publishes it under.
 
