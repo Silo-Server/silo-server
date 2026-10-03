@@ -1,0 +1,160 @@
+package landiscovery
+
+import (
+	"net"
+	"net/netip"
+	"strings"
+	"testing"
+
+	"github.com/miekg/dns"
+)
+
+var testService = service{
+	instance: "Living Room (Den)", host: "silo-6f1c2a9b-abcdef", serverID: "6f1c2a9b-0d4e",
+	port: 8080, ipv4: true, ipv6: true,
+}
+
+var testIPs = []net.IP{net.ParseIP("192.168.1.20"), net.ParseIP("fe80::1"), net.ParseIP("2001:db8::20")}
+
+// roundTrip packs and unpacks a message, as it travels on the wire.
+func roundTrip(t *testing.T, m *dns.Msg) *dns.Msg {
+	t.Helper()
+	b, err := m.Pack()
+	if err != nil {
+		t.Fatalf("pack: %v", err)
+	}
+	var out dns.Msg
+	if err := out.Unpack(b); err != nil {
+		t.Fatalf("unpack: %v", err)
+	}
+	return &out
+}
+
+func query(name string, qtype uint16) *dns.Msg {
+	m := new(dns.Msg)
+	m.Question = []dns.Question{{Name: name, Qtype: qtype, Qclass: dns.ClassINET}}
+	return m
+}
+
+func TestBrowseAnswer(t *testing.T) {
+	resp := roundTrip(t, testService.answer(roundTrip(t, query(serviceDomain, dns.TypePTR)), testIPs))
+	ptr, ok := resp.Answer[0].(*dns.PTR)
+	if !ok || len(resp.Answer) != 1 || !strings.EqualFold(ptr.Ptr, testService.instanceName()) {
+		t.Fatalf("answer = %v", resp.Answer)
+	}
+	var txt string
+	var srvPort uint16
+	var a, aaaa []string
+	for _, rr := range resp.Extra {
+		switch r := rr.(type) {
+		case *dns.TXT:
+			txt = strings.Join(r.Txt, " ")
+		case *dns.SRV:
+			srvPort = r.Port
+		case *dns.A:
+			a = append(a, r.A.String())
+		case *dns.AAAA:
+			aaaa = append(aaaa, r.AAAA.String())
+		}
+	}
+	if txt != "v=1 id=6f1c2a9b-0d4e" || srvPort != 8080 {
+		t.Fatalf("TXT %q, SRV port %d", txt, srvPort)
+	}
+	// Link-local IPv6 needs a zone a URL cannot carry, so it is never offered.
+	if strings.Join(a, ",") != "192.168.1.20" || strings.Join(aaaa, ",") != "2001:db8::20" {
+		t.Fatalf("A %v, AAAA %v", a, aaaa)
+	}
+}
+
+func TestAnswersOnlyTheListenersFamilies(t *testing.T) {
+	ipv4Only := testService
+	ipv4Only.ipv6 = false
+	resp := ipv4Only.answer(query(testService.hostName(), dns.TypeANY), testIPs)
+	for _, rr := range resp.Answer {
+		if _, ok := rr.(*dns.AAAA); ok {
+			t.Fatalf("IPv4-only listener advertised %v", rr)
+		}
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("answer = %v", resp.Answer)
+	}
+}
+
+func TestInstanceNamesSurviveTheWire(t *testing.T) {
+	// Spaces, parentheses, dots and UTF-8 must stay one label and compare
+	// equal after a round trip, or the responder would ignore questions about
+	// its own name.
+	for _, name := range []string{"Living Room (Den)", "Silo v1.0", "Wohnzimmer – Ö", `quote"back\slash`} {
+		svc := testService
+		svc.instance = name
+		q := roundTrip(t, query(svc.instanceName(), dns.TypeSRV))
+		if !svc.asksAbout(q) || svc.answer(q, testIPs) == nil {
+			t.Errorf("%q: question about own name not recognized (wire name %q)", name, q.Question[0].Name)
+		}
+	}
+}
+
+func TestIgnoresOtherQuestions(t *testing.T) {
+	q := query("_googlecast._tcp.local.", dns.TypePTR)
+	if testService.asksAbout(q) || testService.answer(q, testIPs) != nil {
+		t.Fatal("answered a question about another service")
+	}
+}
+
+func TestKnownAnswerSuppression(t *testing.T) {
+	q := query(serviceDomain, dns.TypePTR)
+	q.Answer = []dns.RR{testService.ptr(serviceTTL)}
+	if testService.answer(q, testIPs) != nil {
+		t.Fatal("repeated a PTR the querier already holds")
+	}
+	q.Answer = []dns.RR{testService.ptr(10)}
+	if testService.answer(q, testIPs) == nil {
+		t.Fatal("a nearly expired known answer must be refreshed")
+	}
+}
+
+func TestGoodbyeHasZeroTTL(t *testing.T) {
+	for _, rr := range testService.announcement(testIPs, 0).Answer {
+		if rr.Header().Ttl != 0 {
+			t.Fatalf("goodbye record %v keeps a TTL", rr)
+		}
+	}
+}
+
+func TestConflicts(t *testing.T) {
+	other := testService
+	other.host = "someone-else"
+	resp := responseMsg()
+	resp.Answer = []dns.RR{other.srv(serviceTTL)}
+	if inst, _ := testService.conflicts(roundTrip(t, resp)); !inst {
+		t.Fatal("another host's SRV for our instance name is a conflict")
+	}
+	same := responseMsg()
+	same.Answer = []dns.RR{testService.srv(serviceTTL)}
+	if inst, host := testService.conflicts(roundTrip(t, same)); inst || host {
+		t.Fatal("identical SRV data is not a conflict")
+	}
+	hostClaim := responseMsg()
+	hostClaim.Answer = testService.addresses(testIPs[:1], hostTTL)
+	if _, host := testService.conflicts(roundTrip(t, hostClaim)); !host {
+		t.Fatal("another responder's address for our host name is a conflict")
+	}
+}
+
+func TestOnLink(t *testing.T) {
+	_, lan, _ := net.ParseCIDR("192.168.1.20/24")
+	_, v6, _ := net.ParseCIDR("2001:db8::20/64")
+	addrs := []net.Addr{&net.IPNet{IP: net.ParseIP("192.168.1.20"), Mask: lan.Mask}, &net.IPNet{IP: net.ParseIP("2001:db8::20"), Mask: v6.Mask}}
+	for addr, want := range map[string]bool{
+		"192.168.1.77":   true,
+		"192.168.2.77":   false,
+		"203.0.113.9":    false,
+		"fe80::1234":     true,
+		"2001:db8::99":   true,
+		"2001:db8:1::99": false,
+	} {
+		if got := onLink(netip.MustParseAddr(addr), addrs); got != want {
+			t.Errorf("onLink(%s) = %v, want %v", addr, got, want)
+		}
+	}
+}

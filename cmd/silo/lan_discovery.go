@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/landiscovery"
@@ -13,13 +12,11 @@ import (
 )
 
 // advertiseOnLAN announces the bound API listener with DNS-SD until ctx ends,
-// then returns once the goodbye packets are sent.
-// Discovery is a convenience: any failure is logged once and the server keeps
-// serving clients that already know its address.
-func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serveridentity.Service, settings interface {
-	Get(ctx context.Context, key string) (string, error)
-}) {
-	port, err := landiscovery.PortFromAddr(listenAddr)
+// then returns once the advertisement is withdrawn. Discovery is a
+// convenience: the advertiser retries its own failures, and nothing here
+// stops the server from serving clients that already know its address.
+func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serveridentity.Service, brand *branding.Service) {
+	port, ipv4, ipv6, err := landiscovery.Listener(listenAddr)
 	if err != nil {
 		switch {
 		case errors.Is(err, landiscovery.ErrLoopbackOnly):
@@ -31,16 +28,13 @@ func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serverid
 		}
 		return
 	}
-	serverID, err := identity.ServerID(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "LAN discovery off: server identity unavailable", "error", err)
-		return
-	}
-	name, err := settings.Get(ctx, branding.KeyServerName)
-	if err != nil || strings.TrimSpace(name) == "" {
-		name = branding.DefaultServerName
-	}
-	err = landiscovery.Advertise(ctx, landiscovery.Config{Name: name, ServerID: serverID, Port: port})
+	err = landiscovery.Advertise(ctx, landiscovery.Options{
+		Port:     port,
+		IPv4:     ipv4,
+		IPv6:     ipv6,
+		ServerID: identity.ServerID,
+		Name:     brand.ServerName,
+	})
 	if err != nil && ctx.Err() == nil {
 		slog.WarnContext(ctx, "LAN discovery stopped", "error", err)
 	}

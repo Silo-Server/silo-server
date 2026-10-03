@@ -15,9 +15,10 @@ service once its API listener is bound (`internal/landiscovery`):
 | Field | Value |
 |---|---|
 | Service type | `_silo._tcp` in `local.` |
-| Instance name | `branding.server_name` (default `Silo`), trimmed to 56 bytes so a conflict suffix fits the 63-byte label |
-| Host | `silo-<first 8 alphanumerics of the server ID>.local` |
+| Instance name | `branding.server_name`, trimmed to 56 bytes so a conflict suffix fits the 63-byte label |
+| Host | `silo-<first 8 alphanumerics of the server ID>-<6 random hex>.local`, one per API process |
 | Port | the port the API process listens on; it speaks plain HTTP |
+| Addresses | A and AAAA records for the families the API listener accepts, from the interface the query arrived on; never link-local IPv6 |
 | TXT `v` | `1`; changes only if an existing key changes meaning |
 | TXT `id` | the native server ID from `GET /api/v2/system/identity` |
 
@@ -33,38 +34,44 @@ Rules a client relies on:
 - **Connect by resolved address.** Build the URL from the address the
   platform resolver returns (IPv4 preferred, IPv6 in brackets). `.local` names
   do not resolve on every Android release.
-- **Instance names are not unique or current.** Two servers named `Silo` on
-  one link are renamed by the responder (`Silo (2)`), and the instance name is
-  read when the process starts, so a later rename shows after a restart.
-  Clients label entries with the live name from `GET /api/v2/theme/branding`
-  and tell servers apart by `id`.
-- **Several entries can share one `id`.** Each API replica of a deployment
-  advertises itself, and a host with several interfaces is resolved once per
-  interface. Group by `id`.
+- **Instance names are not unique.** Two servers named `Silo` on one link
+  probe and the later one becomes `Silo (2)`. A rename in the admin settings
+  is picked up within the check interval below. Clients label entries with the
+  live name from `GET /api/v2/theme/branding` and tell servers apart by `id`.
+- **Several entries can share one `id`.** Each API process of a deployment
+  advertises itself under its own host label, and a host with several
+  interfaces is resolved once per interface. Group by `id`.
 - **Unknown TXT keys are ignored.** New keys are added without bumping `v`.
 
-The host name is derived from the server ID rather than the machine's
-hostname, so the responder never contends with the operating system's own
-mDNS daemon (avahi, mDNSResponder) for `<hostname>.local`. The two share UDP
-5353. The responder answers standard multicast queries, which is what Apple's
-`NWBrowser` and Android's `NsdManager` send; it does not answer legacy one-shot
-unicast queries (`dig -p 5353`).
+The responder is Silo's own (`internal/landiscovery/responder.go`), not a
+general mDNS library, and it is deliberately narrow:
+
+- It shares UDP 5353 with the operating system's mDNS daemon (avahi,
+  mDNSResponder) and never claims the machine's own `<hostname>.local`.
+- It answers only multicast queries sent from port 5353 by an address on the
+  receiving interface's own link (RFC 6762 §11), and answers by multicast on
+  that link. Legacy unicast queries (`dig -p 5353 @host`) and anything from
+  off the link get no reply, so the listener cannot reflect or amplify
+  traffic toward another address. Apple's `NWBrowser` and Android's
+  `NsdManager` send multicast queries from port 5353.
+- It probes its names once before announcing, announces twice, and sends
+  goodbyes (TTL 0) on every interface when it stops.
+- Every check interval (30 seconds) it joins the mDNS groups on any
+  multicast interface that appeared and announces there. The service is never
+  withdrawn because another interface came or went, and addresses are read
+  when a query is answered, so address changes need no re-announcement.
+  Point-to-point interfaces (VPN and overlay tunnels) are skipped.
+- It owns its sockets and goroutines; stopping it releases both.
 
 `server.lan_discovery` (default `true`, restart required) turns the
 advertisement off. It is also skipped, with one log line, when the API
-listener is bound to loopback or to any single address: the responder
-answers queries on every multicast interface and cannot be confined to the
-one holding that address. A failure to start (no multicast interface yet,
-port 5353 unavailable) is logged without affecting the server, and the
-responder is replaced whenever the multicast interfaces or their addresses
-change, because it only joins the interfaces present when it starts. The advertisement reaches only the networks the process itself is
-attached to, and it carries the port the process listens on, not a port a
-container runtime publishes it under.
-
-The responder announces on every multicast-capable interface, including
-overlay interfaces such as `tailscale0`. Overlay networks do not carry
-multicast, so that costs nothing and finds nobody; overlay discovery is the
-provider's (below).
+listener is bound to loopback or to a single address: mDNS answers per link,
+and a listener on one address serves only one link. A listener on
+`0.0.0.0` advertises IPv4 addresses only. A failure (server identity or name
+unavailable, port 5353 taken) is logged once without affecting the server and
+retried every check interval. The advertisement reaches only the networks the
+process itself is attached to, and it carries the port the process listens
+on, not a port a container runtime publishes it under.
 
 ## Overlay network: the provider's short name
 

@@ -3617,7 +3617,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), settingsRepo)
+				advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginService != nil {

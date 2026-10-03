@@ -8,23 +8,22 @@
 // found address with GET /api/v2/system/identity before using it. Overlay
 // networks do not carry multicast, so a provider such as Tailscale is found
 // through its own DNS name, not through this package.
+//
+// The package carries its own small responder (responder.go) rather than a
+// general mDNS library: it answers only on-link multicast queries, follows
+// interfaces as they come and go without withdrawing the service, and owns
+// its sockets and goroutines so stopping it leaves nothing behind.
 package landiscovery
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/brutella/dnssd"
-	dnssdlog "github.com/brutella/dnssd/log"
 )
 
 // ServiceType is the DNS-SD service type clients browse for.
@@ -39,22 +38,26 @@ const (
 )
 
 // maxInstanceNameBytes keeps an instance name within the 63-byte DNS label
-// limit after the responder appends a conflict suffix such as " (2)".
+// limit after a conflict suffix such as " (2)" is appended.
 const maxInstanceNameBytes = 63 - len(" (9999)")
 
-// defaultInstanceName matches branding's default server name.
-const defaultInstanceName = "Silo"
+// checkInterval is how often Advertise looks for new interfaces and a
+// changed server name, and how often it retries after a failure.
+const checkInterval = 30 * time.Second
 
-// Config describes the one service an API process advertises.
-type Config struct {
-	// Name is the instance name browsers show, normally the branding server
-	// name. A name another host already uses on the link is renamed by the
-	// responder ("Silo (2)"); clients tell servers apart by ServerID.
-	Name string
-	// ServerID is the deployment's native server identity.
-	ServerID string
+// Options describes what an API process advertises. ServerID and Name are
+// read live, so a failed read is retried and a rename is picked up.
+type Options struct {
 	// Port is the TCP port the API listener accepts plain HTTP on.
 	Port int
+	// IPv4 and IPv6 are the address families the API listener accepts; only
+	// those families' addresses are advertised.
+	IPv4, IPv6 bool
+	// ServerID returns the deployment's native server identity.
+	ServerID func(context.Context) (string, error)
+	// Name returns the instance name browsers show, normally the branding
+	// server name.
+	Name func(context.Context) (string, error)
 }
 
 // ErrLoopbackOnly reports that the API listener is bound to a loopback
@@ -62,223 +65,143 @@ type Config struct {
 var ErrLoopbackOnly = errors.New("lan discovery: API listener is bound to loopback")
 
 // ErrSingleAddress reports that the API listener is bound to one address.
-// The responder answers queries on every multicast interface and cannot be
-// confined to the one holding that address, so advertising would offer the
-// server on networks it does not serve.
+// mDNS answers per link, and a listener on one address is reachable on only
+// one of them; advertising it would offer the server where it is not
+// serving.
 var ErrSingleAddress = errors.New("lan discovery: API listener is bound to a single address")
 
-// PortFromAddr returns the port to advertise for the bound API listener
-// address. Only a listener on every address is advertised: it returns
-// ErrLoopbackOnly or ErrSingleAddress otherwise.
-func PortFromAddr(addr net.Addr) (int, error) {
+// Listener returns the port and address families to advertise for the bound
+// API listener. Only a listener on every address is advertised: "0.0.0.0"
+// accepts IPv4 only, "::" (Go's ":port") both families.
+func Listener(addr net.Addr) (port int, ipv4, ipv6 bool, err error) {
 	tcp, ok := addr.(*net.TCPAddr)
 	if !ok || tcp.Port == 0 {
-		return 0, fmt.Errorf("lan discovery: unsupported listener address %v", addr)
+		return 0, false, false, fmt.Errorf("lan discovery: unsupported listener address %v", addr)
 	}
 	switch {
-	case tcp.IP == nil || tcp.IP.IsUnspecified():
-		return tcp.Port, nil
+	case tcp.IP == nil || tcp.IP.Equal(net.IPv6unspecified):
+		return tcp.Port, true, true, nil
+	case tcp.IP.Equal(net.IPv4zero):
+		return tcp.Port, true, false, nil
 	case tcp.IP.IsLoopback():
-		return 0, ErrLoopbackOnly
+		return 0, false, false, ErrLoopbackOnly
 	default:
-		return 0, ErrSingleAddress
+		return 0, false, false, ErrSingleAddress
 	}
 }
 
-var quietLibraryLog sync.Once
-
-// interfaceCheckInterval is how often Advertise compares the multicast
-// interfaces with the ones its responder joined.
-const interfaceCheckInterval = 30 * time.Second
-
-// Advertise announces cfg on every multicast-capable interface and answers
-// queries for it until ctx is canceled, then sends goodbye packets and
-// returns ctx.Err(). It returns earlier only when cfg is invalid.
-//
-// The responder joins the multicast groups of the interfaces present when it
-// starts and never joins later ones, so Advertise replaces it whenever the
-// multicast interfaces or their addresses change (a cable plugged in, a DHCP
-// lease, a container network created after Silo started), and waits while
-// there is none.
-func Advertise(ctx context.Context, cfg Config) error {
-	quietLibraryLog.Do(func() {
-		// The library logs to stdout by default; Silo logs through slog.
-		dnssdlog.Info.SetOutput(io.Discard)
-		dnssdlog.Debug.SetOutput(io.Discard)
-	})
-	srvCfg, err := serviceConfig(cfg)
-	if err != nil {
-		return err
+// Advertise announces the service until ctx is canceled, then withdraws it
+// and returns ctx.Err(). Failures (identity unavailable, port 5353 taken) are
+// logged once and retried every check interval.
+func Advertise(ctx context.Context, opts Options) error {
+	if opts.Port <= 0 || opts.Port > 65535 || opts.ServerID == nil || opts.Name == nil {
+		return errors.New("lan discovery: incomplete options")
 	}
-	ticker := time.NewTicker(interfaceCheckInterval)
-	defer ticker.Stop()
-	// The last problem logged, so a condition that persists is logged once.
 	lastProblem := ""
-	isNew := func(problem string) bool {
-		if problem == lastProblem {
-			return false
-		}
-		lastProblem = problem
-		return true
-	}
 	for {
-		key := interfaceKey()
-		if key == "" {
-			if isNew("no interface") {
-				slog.WarnContext(ctx, "LAN discovery waiting: no multicast-capable network interface")
-			}
-		} else if err := respondWhileUnchanged(ctx, srvCfg, key, ticker); err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if isNew(err.Error()) {
-				slog.WarnContext(ctx, "LAN discovery responder stopped; retrying", "error", err)
-			}
-		} else {
-			// The interfaces changed: serve the new set right away.
-			lastProblem = ""
-			continue
+		err := advertise(ctx, opts)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err.Error() != lastProblem {
+			lastProblem = err.Error()
+			slog.WarnContext(ctx, "LAN discovery unavailable; retrying", "error", err)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-time.After(checkInterval):
 		}
 	}
 }
 
-// respondWhileUnchanged runs one responder until ctx ends, the responder
-// fails, or the multicast interfaces stop matching key. It returns nil only
-// for an interface change, after the responder has sent its goodbyes.
-func respondWhileUnchanged(ctx context.Context, srvCfg dnssd.Config, key string, ticker *time.Ticker) error {
-	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- respond(runCtx, srvCfg) }()
-	// Start the interval over and drop a tick that fired while the previous
-	// responder shut down, so the first interface check is a full interval
-	// after this responder starts and is unlikely to cancel it while it
-	// registers (see respond).
-	ticker.Reset(interfaceCheckInterval)
-	select {
-	case <-ticker.C:
-	default:
+// advertise runs one responder until ctx ends or it cannot continue.
+func advertise(ctx context.Context, opts Options) error {
+	id, err := opts.ServerID(ctx)
+	if err != nil {
+		return fmt.Errorf("server identity: %w", err)
 	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("server identity is empty")
+	}
+	name, err := currentName(ctx, opts)
+	if err != nil {
+		return err
+	}
+	r, err := openResponder()
+	if err != nil {
+		return err
+	}
+	defer r.close()
+
+	if len(r.joinInterfaces()) == 0 {
+		slog.InfoContext(ctx, "LAN discovery waiting for a multicast-capable network interface")
+	}
+	svc := service{instance: name, host: newHostLabel(id), serverID: id, port: opts.Port, ipv4: opts.IPv4, ipv6: opts.IPv6}
+	if svc, err = r.claim(ctx, svc); err != nil {
+		return err
+	}
+	r.activate(svc)
+	r.announce(svc, r.servedInterfaces())
+	slog.InfoContext(ctx, "advertising Silo on the local network",
+		"service", ServiceType, "name", svc.instance, "host", svc.hostName(), "port", svc.port)
+
+	// RFC 6762 §8.3: announce at least twice, a second apart.
+	repeat := time.After(time.Second)
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case err := <-done:
-			return err
+		case <-ctx.Done():
+			r.goodbye(r.deactivate())
+			return ctx.Err()
+		case <-repeat:
+			r.announce(svc, r.servedInterfaces())
 		case <-ticker.C:
-			if interfaceKey() != key {
-				cancel()
-				<-done
-				return nil
+			// New interfaces are joined and announced on; the others keep
+			// their service untouched.
+			r.announce(svc, r.joinInterfaces())
+			renamed, err := currentName(ctx, opts)
+			if err != nil || renamed == name {
+				continue
 			}
+			r.goodbye(r.deactivate())
+			svc.instance = renamed
+			if svc, err = r.claim(ctx, svc); err != nil {
+				return err
+			}
+			name = renamed
+			r.activate(svc)
+			r.announce(svc, r.servedInterfaces())
+			repeat = time.After(time.Second)
+			slog.InfoContext(ctx, "LAN discovery renamed the advertisement", "name", svc.instance)
 		}
 	}
 }
 
-// respond registers the service on a new responder and answers queries until
-// ctx ends.
-func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
-	// Discovery is optional; a fault in the DNS-SD library must not take the
-	// API process down with it.
-	defer func() {
-		if p := recover(); p != nil {
-			err = fmt.Errorf("lan discovery: responder panicked: %v", p)
-		}
-	}()
-	service, err := dnssd.NewService(srvCfg)
+func currentName(ctx context.Context, opts Options) (string, error) {
+	raw, err := opts.Name(ctx)
 	if err != nil {
-		return fmt.Errorf("lan discovery: %w", err)
+		return "", fmt.Errorf("server name: %w", err)
 	}
-	// Probe before opening the responder: dnssd's Respond returns a failed
-	// registration without closing the responder's sockets, and the library
-	// offers no Close, so a name that cannot be claimed must fail here, where
-	// ProbeService closes its own connection. Respond probes the claimed name
-	// again, and a cancellation during that second probe still leaves the
-	// responder's sockets open. Interface checks start a full interval after a
-	// responder starts, so in practice only shutdown or a registration slowed
-	// past that interval by new conflicts can hit it; the complete fix is in
-	// dnssd (close the connection whenever Respond returns).
-	service, err = dnssd.ProbeService(ctx, service)
-	if err != nil {
-		return fmt.Errorf("lan discovery: probe: %w", err)
+	name := instanceName(raw)
+	if name == "" {
+		return "", errors.New("server name is empty")
 	}
-	responder, err := dnssd.NewResponder()
-	if err != nil {
-		return fmt.Errorf("lan discovery: %w", err)
-	}
-	if _, err := responder.Add(service); err != nil {
-		return fmt.Errorf("lan discovery: %w", err)
-	}
-	slog.InfoContext(ctx, "advertising Silo on the local network",
-		"service", ServiceType, "name", service.Name, "host", service.Host+".local", "port", service.Port)
-	return responder.Respond(ctx)
+	return name, nil
 }
 
-// interfaceKey describes the multicast-capable interfaces, their indexes and
-// their addresses, or "" when there is none.
-func interfaceKey() string {
-	var parts []string
-	for _, iface := range dnssd.MulticastInterfaces() {
-		addrs, _ := iface.Addrs()
-		names := make([]string, 0, len(addrs))
-		for _, addr := range addrs {
-			names = append(names, addr.String())
-		}
-		sort.Strings(names)
-		// The index changes when an interface is removed and recreated under
-		// the same name, which the responder must also rejoin.
-		parts = append(parts, fmt.Sprintf("%d:%s=%s", iface.Index, iface.Name, strings.Join(names, ",")))
-	}
-	sort.Strings(parts)
-	return strings.Join(parts, ";")
-}
-
-// serviceConfig builds the DNS-SD registration for cfg.
-//
-// The host name is derived from the server ID rather than the machine's
-// hostname, so the responder never contends with the operating system's own
-// mDNS daemon for "<hostname>.local" records.
-func serviceConfig(cfg Config) (dnssd.Config, error) {
-	id := strings.TrimSpace(cfg.ServerID)
-	if id == "" {
-		return dnssd.Config{}, errors.New("lan discovery: server ID is required")
-	}
-	if cfg.Port <= 0 || cfg.Port > 65535 {
-		return dnssd.Config{}, fmt.Errorf("lan discovery: invalid port %d", cfg.Port)
-	}
-	return dnssd.Config{
-		Name: instanceName(cfg.Name),
-		Type: ServiceType,
-		Host: hostLabel(id),
-		Port: cfg.Port,
-		Text: map[string]string{
-			TXTKeyVersion:  TXTVersion,
-			TXTKeyServerID: id,
-		},
-	}, nil
-}
-
-// instanceName trims name to a DNS label, falling back to defaultInstanceName.
-// A trailing "()" is dropped: the responder's conflict-suffix parser panics on
-// an empty pair of parentheses at the end of a name.
+// instanceName trims name to fit a DNS label with room for a conflict
+// suffix, cutting on a rune boundary.
 func instanceName(name string) string {
 	name = strings.TrimSpace(name)
 	if len(name) > maxInstanceNameBytes {
-		// Cut on a rune boundary so a multi-byte name stays valid UTF-8.
 		cut := maxInstanceNameBytes
 		for cut > 0 && !utf8.RuneStart(name[cut]) {
 			cut--
 		}
 		name = strings.TrimSpace(name[:cut])
-	}
-	for strings.HasSuffix(name, "()") {
-		name = strings.TrimSpace(strings.TrimSuffix(name, "()"))
-	}
-	if name == "" {
-		return defaultInstanceName
 	}
 	return name
 }
