@@ -154,12 +154,127 @@ function queryKeyStartsWith(queryKey: readonly unknown[], prefix: readonly unkno
   );
 }
 
+// Only these shapes are narrowed by itemId. episodeKeys.byItem is left out on
+// purpose: it is invalidated only through watchedKeys, and mapping it here
+// would change which episode lists a refresh touches.
+export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefined {
+  if (!Array.isArray(queryKey) || queryKey.length < 2) return undefined;
+  if (
+    queryKey[0] === "items" &&
+    (queryKey[1] === "detail" || queryKey[1] === "watchDetail" || queryKey[1] === "markers") &&
+    typeof queryKey[2] === "string"
+  ) {
+    return queryKey[2];
+  }
+  if (queryKey[0] === "catalog" && queryKey[1] === "items" && typeof queryKey[2] === "string") {
+    return queryKey[2];
+  }
+  // ratingKeys.list() shares the ["ratings", x] shape; "list" is not an item ID.
+  if (queryKey[0] === "ratings" && typeof queryKey[1] === "string" && queryKey[1] !== "list") {
+    return queryKey[1];
+  }
+  return undefined;
+}
+
+// The item whose episodes or seasons a cached list query holds: an episode
+// list belongs to its season (or series), a season list to its series.
+function listOwnerId(queryKey: readonly unknown[]): string | undefined {
+  if (queryKey[0] === "catalog" && queryKey[1] === "series" && typeof queryKey[2] === "string") {
+    return queryKey[2];
+  }
+  return getQueryKeyItemId(queryKey);
+}
+
+function listedChildIds(data: unknown): string[] {
+  if (typeof data !== "object" || data === null) return [];
+  const ids: string[] = [];
+  for (const field of ["episodes", "seasons"] as const) {
+    const list = (data as Record<string, unknown>)[field];
+    if (!Array.isArray(list)) continue;
+    for (const entry of list) {
+      const id = (entry as { content_id?: unknown } | null)?.content_id;
+      if (typeof id === "string") ids.push(id);
+    }
+  }
+  return ids;
+}
+
+// relatedItemIds is itemId plus the items whose cached state derives from it,
+// as far as the cache shows: its parents (the series named by its detail, and
+// the season or series whose cached list holds it, and theirs) and its
+// children (the episodes or seasons its own cached lists hold, the cached
+// details that name it as their series, and theirs).
+// Realtime events and watched marks name only the item itself, so narrowing
+// to that one ID would leave an open season grid, series watched totals or a
+// marked season's episodes stale.
+export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<string> {
+  // Index the cache's parent/child links in one pass, then walk them, so a
+  // series with many cached seasons and episodes costs one scan, not one per
+  // item.
+  const childrenOf = new Map<string, string[]>();
+  const parentsOf = new Map<string, string[]>();
+  const add = (edges: Map<string, string[]>, from: string, to: string) => {
+    const list = edges.get(from);
+    if (list) list.push(to);
+    else edges.set(from, [to]);
+  };
+  const link = (parent: string, child: string) => {
+    if (parent === child) return;
+    add(childrenOf, parent, child);
+    add(parentsOf, child, parent);
+  };
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const owner = listOwnerId(query.queryKey);
+    if (!owner) continue;
+    for (const child of listedChildIds(query.state.data)) link(owner, child);
+    if (isItemDetailQueryKey(query.queryKey, owner)) {
+      const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
+      // A detail names its series, and derives its series title, backdrop
+      // and credits from it. A season page opened directly has no cached
+      // season list, so this edge is how a series change reaches it.
+      if (seriesId) link(seriesId, owner);
+    }
+  }
+
+  const related = new Set([itemId]);
+  const walk = (edges: Map<string, string[]>) => {
+    const pending = [itemId];
+    while (pending.length > 0) {
+      for (const next of edges.get(pending.pop() as string) ?? []) {
+        if (!related.has(next)) {
+          related.add(next);
+          pending.push(next);
+        }
+      }
+    }
+  };
+  walk(parentsOf);
+  walk(childrenOf);
+  return related;
+}
+
 function shouldInvalidateMediaSurfaceQuery(
   queryKey: readonly unknown[],
   options: InvalidateMediaSurfaceOptions,
+  relatedIds?: ReadonlySet<string>,
 ) {
   if (options.skipItemDetail && options.itemId && isItemDetailQueryKey(queryKey, options.itemId)) {
     return false;
+  }
+
+  if (options.itemId) {
+    const targetItemId = getQueryKeyItemId(queryKey);
+    // Keys for related items (see relatedItemIds) or named in watchedKeys (a
+    // watched episode's season or series, say) belong to other item IDs by
+    // design; don't narrow them away.
+    if (
+      targetItemId &&
+      targetItemId !== options.itemId &&
+      !relatedIds?.has(targetItemId) &&
+      !isWatchedKey(queryKey, options)
+    ) {
+      return false;
+    }
   }
 
   if (queryKeyStartsWith(queryKey, catalogKeys.all)) {
@@ -179,7 +294,24 @@ function shouldInvalidateMediaSurfaceQuery(
     return true;
   }
 
-  return (options.watchedKeys ?? []).some((key) => queryKeyStartsWith(queryKey, key));
+  return isWatchedKey(queryKey, options);
+}
+
+// isWatchedKey is a prefix match on purpose: everything under a watched key
+// (a watched season's or episode's detail variants) changes with it, so it is
+// exempt from the itemId narrowing too. Don't tighten it to an exact match.
+// An item key also matches a watched key for the same item in any library:
+// watched keys carry the "default" library segment, while an item opened
+// through its library caches under that library's ID.
+function isWatchedKey(queryKey: readonly unknown[], options: InvalidateMediaSurfaceOptions) {
+  const targetItemId = getQueryKeyItemId(queryKey);
+  return (options.watchedKeys ?? []).some(
+    (key) =>
+      queryKeyStartsWith(queryKey, key) ||
+      (targetItemId !== undefined &&
+        getQueryKeyItemId(key) === targetItemId &&
+        queryKeyStartsWith(queryKey, key.slice(0, 2))),
+  );
 }
 
 export async function invalidateMediaSurfaceQueries(
@@ -190,8 +322,9 @@ export async function invalidateMediaSurfaceQueries(
   // `cancelRefetch: false` — reusing an in-flight request would let a response
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
+  const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
   await queryClient.invalidateQueries({
-    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options),
+    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options, relatedIds),
   });
 }
 
