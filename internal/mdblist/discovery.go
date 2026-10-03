@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 const defaultBaseURL = "https://api.mdblist.com"
@@ -110,14 +112,17 @@ func (c *Client) fetchLists(ctx context.Context, path string, q url.Values) ([]L
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
+	// Redact the key this request sent: the setting can be replaced or
+	// cleared while it's in flight, and the error quotes the key it sent.
+	sentKey := q.Get("apikey")
 	u := c.baseURL + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", err)
+		return nil, fmt.Errorf("creating mdblist request: %w", sanitizeAPIKeyError(err, sentKey))
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("calling mdblist: %w", err)
+		return nil, fmt.Errorf("calling mdblist: %w", sanitizeAPIKeyError(err, sentKey))
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
@@ -150,4 +155,44 @@ func canonicalListURL(user, slug string) string {
 		return ""
 	}
 	return fmt.Sprintf("https://mdblist.com/lists/%s/%s", user, slug)
+}
+
+// sanitizeAPIKeyError keeps the API key out of a request or transport
+// error. logredact masks the apikey parameter in any *url.Error; the key can
+// still appear elsewhere in the text (a transport or proxy quoting the whole
+// request URL), so any remaining raw or query-escaped form is masked too.
+func sanitizeAPIKeyError(err error, apiKey string) error {
+	if err == nil {
+		return nil
+	}
+	err = logredact.SanitizeURLError(err)
+	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
+		err = redactedError{message: redactAPIKey(msg, apiKey), cause: err}
+	}
+	return err
+}
+
+// redactedError carries a masked message. It has no Unwrap, so walking the
+// chain with errors.Unwrap cannot reach the unmasked text; errors.Is and
+// errors.As still see the cause, which keeps sentinel matching and net.Error
+// timeout classification working at any depth.
+type redactedError struct {
+	message string
+	cause   error
+}
+
+func (e redactedError) Error() string        { return e.message }
+func (e redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
+func (e redactedError) As(target any) bool   { return errors.As(e.cause, target) }
+
+// redactAPIKey masks every occurrence of the API key, raw or query-escaped.
+func redactAPIKey(text, apiKey string) string {
+	if apiKey == "" {
+		return text
+	}
+	text = strings.ReplaceAll(text, apiKey, logredact.Placeholder)
+	if escaped := url.QueryEscape(apiKey); escaped != apiKey {
+		text = strings.ReplaceAll(text, escaped, logredact.Placeholder)
+	}
+	return text
 }
