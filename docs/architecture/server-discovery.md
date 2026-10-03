@@ -35,7 +35,8 @@ Rules a client relies on:
   platform resolver returns (IPv4 preferred, IPv6 in brackets). `.local` names
   do not resolve on every Android release.
 - **Instance names are not unique.** Two servers named `Silo` on one link
-  probe and the later one becomes `Silo (2)`. A rename in the admin settings
+  probe and one becomes `Silo (2)`: the later one, or the tiebreak loser when
+  both start together. A rename in the admin settings
   is picked up within the check interval below. Clients label entries with the
   live name from `GET /api/v2/theme/branding` and tell servers apart by `id`.
 - **Several entries can share one `id`.** Each API process of a deployment
@@ -53,13 +54,19 @@ general mDNS library, and it is deliberately narrow:
   that link. Legacy unicast queries (`dig -p 5353 @host`) and anything from
   off the link get no reply, so the listener cannot reflect or amplify
   traffic toward another address. Apple's `NWBrowser` and Android's
-  `NsdManager` send multicast queries from port 5353.
-- It probes its names once before announcing, announces twice, and sends
-  goodbyes (TTL 0) on every interface when it stops.
+  `NsdManager` send multicast queries from port 5353. The one unicast packet
+  it accepts is an on-link response while it probes, the defense its
+  unicast-response probes ask for.
+- It probes its names before announcing, announces twice, and sends goodbyes
+  (TTL 0) on every interface when it stops. Two processes probing one name at
+  once settle it with the RFC 6762 §8.2 tiebreak. A response that later claims
+  one of its names with other data starts the probe over, renaming if the
+  other responder keeps the name. Each record is multicast at most once a
+  second per link and address family.
 - Every check interval (30 seconds) it joins the mDNS groups on any
-  multicast interface that appeared and announces there. The service is never
-  withdrawn because another interface came or went, and addresses are read
-  when a query is answered, so address changes need no re-announcement.
+  multicast interface that appeared, probes, and announces there, and
+  re-announces on interfaces whose addresses changed so caches replace them.
+  The service is never withdrawn because another interface came or went.
   Point-to-point interfaces (VPN and overlay tunnels) are skipped.
 - It owns its sockets and goroutines; stopping it releases both.
 

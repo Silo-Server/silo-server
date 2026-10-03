@@ -41,8 +41,9 @@ const (
 // limit after a conflict suffix such as " (2)" is appended.
 const maxInstanceNameBytes = 63 - len(" (9999)")
 
-// checkInterval is how often Advertise looks for new interfaces and a
-// changed server name, and how often it retries after a failure.
+// checkInterval is how often Advertise looks for new interfaces, changed
+// addresses and a changed server name, and how often it retries after a
+// failure.
 const checkInterval = 30 * time.Second
 
 // Options describes what an API process advertises. ServerID and Name are
@@ -149,6 +150,25 @@ func advertise(ctx context.Context, opts Options) error {
 
 	// RFC 6762 §8.3: announce at least twice, a second apart.
 	repeat := time.After(time.Second)
+	// reclaim withdraws the current names and claims svc afresh.
+	reclaim := func(next service) error {
+		r.goodbye(r.deactivate())
+		// A conflict reported for the names being withdrawn is settled by
+		// this claim.
+		select {
+		case <-r.conflicts():
+		default:
+		}
+		claimed, err := r.claim(ctx, next)
+		if err != nil {
+			return err
+		}
+		svc = claimed
+		r.activate(svc)
+		r.announce(svc, r.servedInterfaces())
+		repeat = time.After(time.Second)
+		return nil
+	}
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 	for {
@@ -158,24 +178,44 @@ func advertise(ctx context.Context, opts Options) error {
 			return ctx.Err()
 		case <-repeat:
 			r.announce(svc, r.servedInterfaces())
-		case <-ticker.C:
-			// New interfaces are joined and announced on; the others keep
-			// their service untouched.
-			r.announce(svc, r.joinInterfaces())
-			renamed, err := currentName(ctx, opts)
-			if err != nil || renamed == name {
-				continue
-			}
-			r.goodbye(r.deactivate())
-			svc.instance = renamed
-			if svc, err = r.claim(ctx, svc); err != nil {
+		case <-r.conflicts():
+			// Another responder answers for one of our names: probe again,
+			// renaming if it keeps them (RFC 6762 §9).
+			if err := reclaim(svc); err != nil {
 				return err
 			}
-			name = renamed
-			r.activate(svc)
-			r.announce(svc, r.servedInterfaces())
-			repeat = time.After(time.Second)
-			slog.InfoContext(ctx, "LAN discovery renamed the advertisement", "name", svc.instance)
+			slog.InfoContext(ctx, "LAN discovery resolved a name conflict", "name", svc.instance, "host", svc.hostName())
+		case <-ticker.C:
+			renamed, err := currentName(ctx, opts)
+			if err == nil && renamed != name {
+				next := svc
+				next.instance = renamed
+				if err := reclaim(next); err != nil {
+					return err
+				}
+				name = renamed
+				slog.InfoContext(ctx, "LAN discovery renamed the advertisement", "name", svc.instance)
+				continue
+			}
+			// A newly joined link may already have our names: probe there
+			// before announcing (RFC 6762 §8.1). Interfaces already served
+			// keep their service untouched.
+			if fresh := r.joinInterfaces(); len(fresh) > 0 {
+				result, err := r.probe(ctx, svc)
+				if err != nil {
+					return err
+				}
+				if result.instanceTaken || result.hostTaken || result.lostTiebreak {
+					if err := reclaim(svc); err != nil {
+						return err
+					}
+					continue
+				}
+				r.announce(svc, fresh)
+			}
+			// Changed addresses are announced so caches drop the old ones
+			// (RFC 6762 §8.4); the cache-flush bit replaces them.
+			r.announce(svc, r.changedAddresses())
 		}
 	}
 }

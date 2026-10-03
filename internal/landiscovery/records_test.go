@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -122,22 +123,69 @@ func TestGoodbyeHasZeroTTL(t *testing.T) {
 }
 
 func TestConflicts(t *testing.T) {
+	local := func(ip net.IP) bool { return ip.Equal(testIPs[0]) }
 	other := testService
 	other.host = "someone-else"
 	resp := responseMsg()
 	resp.Answer = []dns.RR{other.srv(serviceTTL)}
-	if inst, _ := testService.conflicts(roundTrip(t, resp)); !inst {
+	if inst, _ := testService.conflicts(roundTrip(t, resp), local); !inst {
 		t.Fatal("another host's SRV for our instance name is a conflict")
 	}
-	same := responseMsg()
-	same.Answer = []dns.RR{testService.srv(serviceTTL)}
-	if inst, host := testService.conflicts(roundTrip(t, same)); inst || host {
-		t.Fatal("identical SRV data is not a conflict")
+	// Our own announcement, looped back or heard on a second interface.
+	own := roundTrip(t, testService.announcement(testIPs[:1], serviceTTL))
+	if inst, host := testService.conflicts(own, local); inst || host {
+		t.Fatal("our own records are not a conflict")
 	}
 	hostClaim := responseMsg()
-	hostClaim.Answer = testService.addresses(testIPs[:1], hostTTL)
-	if _, host := testService.conflicts(roundTrip(t, hostClaim)); !host {
-		t.Fatal("another responder's address for our host name is a conflict")
+	hostClaim.Answer = testService.addresses([]net.IP{net.ParseIP("192.168.1.99")}, hostTTL)
+	if _, host := testService.conflicts(roundTrip(t, hostClaim), local); !host {
+		t.Fatal("another machine's address for our host name is a conflict")
+	}
+}
+
+func TestMentions(t *testing.T) {
+	if !testService.mentions(roundTrip(t, testService.announcement(testIPs, serviceTTL))) {
+		t.Fatal("announcement mentions the service")
+	}
+	resp := responseMsg()
+	resp.Answer = []dns.RR{&dns.PTR{Hdr: header("_googlecast._tcp.local.", dns.TypePTR, 120, false), Ptr: "tv._googlecast._tcp.local."}}
+	if testService.mentions(resp) {
+		t.Fatal("another service's records do not mention ours")
+	}
+}
+
+func TestSimultaneousProbeTiebreak(t *testing.T) {
+	// Two replicas of one deployment probe the same instance name with
+	// different host labels; exactly one must yield.
+	a, b := testService, testService
+	a.host, b.host = "silo-6f1c2a9b-aaaaaa", "silo-6f1c2a9b-bbbbbb"
+	aLoses := a.losesTiebreak(roundTrip(t, b.probe(testIPs)))
+	bLoses := b.losesTiebreak(roundTrip(t, a.probe(testIPs)))
+	if aLoses == bLoses {
+		t.Fatalf("tiebreak must pick one winner: a loses %v, b loses %v", aLoses, bLoses)
+	}
+	if !aLoses {
+		t.Fatal("the lexicographically later SRV target wins")
+	}
+	if a.losesTiebreak(roundTrip(t, a.probe(testIPs))) {
+		t.Fatal("our own probe, looped back, is no contest")
+	}
+}
+
+func TestRateLimitIsPerRecordAndFamily(t *testing.T) {
+	r := &responder{lastSent: map[sentKey]time.Time{}}
+	srv, txt := testService.srv(serviceTTL), testService.txt(serviceTTL)
+	if got := r.allow(1, false, []dns.RR{srv}); len(got) != 1 {
+		t.Fatal("first SRV answer is sent")
+	}
+	if got := r.allow(1, false, []dns.RR{srv, txt}); len(got) != 1 || got[0] != txt {
+		t.Fatalf("a recent SRV holds back only itself, got %v", got)
+	}
+	if got := r.allow(1, true, []dns.RR{srv}); len(got) != 1 {
+		t.Fatal("an IPv4 answer does not hold back an IPv6 one")
+	}
+	if got := r.allow(2, false, []dns.RR{srv}); len(got) != 1 {
+		t.Fatal("another interface is limited separately")
 	}
 }
 

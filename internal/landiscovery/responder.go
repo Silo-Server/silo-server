@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,32 +38,46 @@ const (
 // sockets and goroutines: close releases both. It answers only multicast
 // queries from the receiving interface's own link, joins interfaces as they
 // appear without withdrawing the service elsewhere, and computes addresses
-// when it answers, so address changes need no polling.
+// when it answers.
 type responder struct {
 	v4 *ipv4.PacketConn // nil when the host has no IPv4 mDNS socket
 	v6 *ipv6.PacketConn // nil when the host has no IPv6 mDNS socket
 
 	sendMu sync.Mutex // SetMulticastInterface and WriteTo go together
 
-	mu         sync.Mutex
-	svc        service
-	active     bool                    // answering queries for svc
-	served     map[int]net.Interface   // interfaces whose groups are joined
-	probes     chan *dns.Msg           // responses seen while probing
-	lastAnswer map[answerKey]time.Time // per-link rate limit (RFC 6762 §6)
+	mu       sync.Mutex
+	svc      service
+	active   bool                  // answering queries for svc
+	served   map[int]net.Interface // interfaces whose groups are joined
+	probing  service               // the names a running probe claims
+	probes   chan *dns.Msg         // messages about them while probing
+	conflict chan struct{}         // another responder took an active name
+	// lastSent rate-limits each record per link and family (RFC 6762 §6).
+	lastSent map[sentKey]time.Time
+	// addrKeys and allAddrs track interface addresses, so a change is
+	// announced (RFC 6762 §8.4) without listing every interface each tick.
+	addrKeys map[int]string
+	allAddrs string
 
 	wg sync.WaitGroup
 }
 
-type answerKey struct {
+type sentKey struct {
 	ifIndex int
+	ipv6    bool
 	name    string
+	rrtype  uint16
 }
 
 // openResponder binds the mDNS sockets and starts reading. It fails only
 // when neither IPv4 nor IPv6 can be bound.
 func openResponder() (*responder, error) {
-	r := &responder{served: map[int]net.Interface{}, lastAnswer: map[answerKey]time.Time{}}
+	r := &responder{
+		served:   map[int]net.Interface{},
+		conflict: make(chan struct{}, 1),
+		lastSent: map[sentKey]time.Time{},
+		addrKeys: map[int]string{},
+	}
 	lc := net.ListenConfig{Control: shareMDNSPort}
 	pc4, err4 := lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("0.0.0.0:%d", mdnsPort))
 	if err4 == nil {
@@ -123,11 +138,8 @@ func (r *responder) read4() {
 		if err != nil {
 			return
 		}
-		if cm == nil || !cm.Dst.Equal(group4.IP) {
-			continue
-		}
-		if udp, ok := src.(*net.UDPAddr); ok {
-			r.handle(buf[:n], cm.IfIndex, udp, false)
+		if udp, ok := src.(*net.UDPAddr); ok && cm != nil {
+			r.handle(buf[:n], cm.IfIndex, udp, false, cm.Dst.Equal(group4.IP))
 		}
 	}
 }
@@ -140,20 +152,19 @@ func (r *responder) read6() {
 		if err != nil {
 			return
 		}
-		if cm == nil || !cm.Dst.Equal(group6.IP) {
-			continue
-		}
-		if udp, ok := src.(*net.UDPAddr); ok {
-			r.handle(buf[:n], cm.IfIndex, udp, true)
+		if udp, ok := src.(*net.UDPAddr); ok && cm != nil {
+			r.handle(buf[:n], cm.IfIndex, udp, true, cm.Dst.Equal(group6.IP))
 		}
 	}
 }
 
-// handle answers one packet. Only multicast queries from mDNS port 5353 on
-// the receiving interface's link are considered: legacy unicast queriers
-// (any other source port) get nothing, so the responder cannot be used to
-// reflect traffic, and responses go only to the link's multicast group.
-func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6 bool) {
+// handle processes one packet from mDNS port 5353 on the receiving
+// interface's own link; anything else is dropped, so the responder cannot be
+// used to reflect traffic. Queries are answered only when they arrive by
+// multicast, and answers go only to the link's multicast group. A unicast
+// response is accepted only while probing, as a defense of a name we asked
+// about with the unicast-response bit (RFC 6762 §5.4).
+func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6, multicast bool) {
 	defer func() {
 		if p := recover(); p != nil {
 			slog.Warn("LAN discovery dropped a packet it could not handle", "panic", fmt.Sprint(p))
@@ -167,14 +178,18 @@ func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6
 		return
 	}
 	r.mu.Lock()
-	svc, active, probes := r.svc, r.active, r.probes
+	svc, active, probing, probes := r.svc, r.active, r.probing, r.probes
 	r.mu.Unlock()
 	// Most mDNS traffic on a busy link is about other services; settle that
 	// before looking up the interface.
-	switch {
-	case msg.Response && probes == nil:
-		return
-	case !msg.Response && (!active || msg.Opcode != dns.OpcodeQuery || !svc.asksAbout(&msg)):
+	probeRelevant := probes != nil && probing.mentions(&msg)
+	var relevant bool
+	if msg.Response {
+		relevant = probeRelevant || (multicast && active && svc.mentions(&msg))
+	} else {
+		relevant = multicast && msg.Opcode == dns.OpcodeQuery && (probeRelevant || (active && svc.asksAbout(&msg)))
+	}
+	if !relevant {
 		return
 	}
 	iface, err := net.InterfaceByIndex(ifIndex)
@@ -189,30 +204,82 @@ func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6
 	if !ok || !onLink(from, addrs) {
 		return
 	}
-	if msg.Response {
+	if probeRelevant {
+		// Responses defend a name; queries with authority records are
+		// another host probing at the same time.
 		select {
 		case probes <- &msg:
 		default:
 		}
+	}
+	if msg.Response {
+		// After the probe, a response that claims an active name with other
+		// data means another responder has it: start over (RFC 6762 §9).
+		if inst, host := svc.conflicts(&msg, isLocalAddress); active && (inst || host) {
+			select {
+			case r.conflict <- struct{}{}:
+			default:
+			}
+		}
+		return
+	}
+	if !active || !svc.asksAbout(&msg) {
 		return
 	}
 	resp := svc.answer(&msg, ipsOf(addrs))
-	if resp == nil || !r.allow(ifIndex, resp.Answer[0].Header().Name) {
+	if resp == nil {
+		return
+	}
+	if resp.Answer = r.allow(ifIndex, viaIPv6, resp.Answer); len(resp.Answer) == 0 {
 		return
 	}
 	r.send(*iface, resp, !viaIPv6, viaIPv6)
 }
 
-// allow rate-limits answers per link and name to one a second.
-func (r *responder) allow(ifIndex int, name string) bool {
+// conflicts signals that another responder claimed an active name.
+func (r *responder) conflicts() <-chan struct{} { return r.conflict }
+
+// allow drops answer records already multicast on this link and family in
+// the last second (RFC 6762 §6). Each record set is limited on its own, so
+// an SRV answer does not hold back a TXT one, nor an IPv4 answer an IPv6 one.
+func (r *responder) allow(ifIndex int, viaIPv6 bool, answers []dns.RR) []dns.RR {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := answerKey{ifIndex, strings.ToLower(name)}
-	if time.Since(r.lastAnswer[key]) < time.Second {
-		return false
+	now := time.Now()
+	if len(r.lastSent) > 512 {
+		for k, t := range r.lastSent {
+			if now.Sub(t) >= time.Second {
+				delete(r.lastSent, k)
+			}
+		}
 	}
-	r.lastAnswer[key] = time.Now()
-	return true
+	var out []dns.RR
+	for _, rr := range answers {
+		key := sentKey{ifIndex, viaIPv6, strings.ToLower(rr.Header().Name), rr.Header().Rrtype}
+		if now.Sub(r.lastSent[key]) < time.Second {
+			continue
+		}
+		r.lastSent[key] = now
+		out = append(out, rr)
+	}
+	return out
+}
+
+// isLocalAddress reports whether ip belongs to this machine, so our own
+// address records, looped back or heard on a second interface, are not
+// mistaken for another host's. It lists addresses only when a response
+// carries an address record for our host name.
+func isLocalAddress(ip net.IP) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return true // cannot tell; do not start a rename on a guess
+	}
+	for _, ip2 := range ipsOf(addrs) {
+		if ip2.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // send multicasts msg on one interface over the requested families.
@@ -291,27 +358,93 @@ func (r *responder) joinInterfaces() []net.Interface {
 	}
 	r.mu.Lock()
 	r.served = current
+	for index := range r.addrKeys {
+		if _, ok := current[index]; !ok {
+			delete(r.addrKeys, index)
+		}
+	}
 	r.mu.Unlock()
+	for _, iface := range fresh {
+		r.addressesChanged(iface)
+	}
 	return fresh
+}
+
+// changedAddresses returns the served interfaces whose addresses changed
+// since they were last announced. One address listing tells whether
+// anything changed; only then is each interface looked at.
+func (r *responder) changedAddresses() []net.Interface {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	all := addressKey(addrs)
+	r.mu.Lock()
+	unchanged := all == r.allAddrs
+	r.allAddrs = all
+	r.mu.Unlock()
+	if unchanged {
+		return nil
+	}
+	var changed []net.Interface
+	for _, iface := range r.servedInterfaces() {
+		if r.addressesChanged(iface) {
+			changed = append(changed, iface)
+		}
+	}
+	return changed
+}
+
+// addressesChanged records an interface's current addresses and reports
+// whether they differ from the last record.
+func (r *responder) addressesChanged(iface net.Interface) bool {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+	key := addressKey(addrs)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old, known := r.addrKeys[iface.Index]
+	r.addrKeys[iface.Index] = key
+	return known && old != key
+}
+
+func addressKey(addrs []net.Addr) string {
+	parts := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		parts = append(parts, a.String())
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 // claim probes for svc's names and returns the service as it may be
 // announced: renamed "Name (2)", "Name (3)" … while another host answers for
 // the instance name, and with a new host label if the host name is taken.
+// Losing a simultaneous-probe tiebreak waits a second and probes again
+// (RFC 6762 §8.2); the winner's announcement then shows as a conflict.
 func (r *responder) claim(ctx context.Context, svc service) (service, error) {
-	base := svc.instance
-	for rename := 1; rename <= maxRenames; rename++ {
-		instanceTaken, hostTaken, err := r.probe(ctx, svc)
+	base, suffix := svc.instance, 1
+	for try := 0; try < maxRenames; try++ {
+		result, err := r.probe(ctx, svc)
 		if err != nil {
 			return svc, err
 		}
-		if !instanceTaken && !hostTaken {
+		switch {
+		case result.lostTiebreak:
+			if err := sleep(ctx, time.Second); err != nil {
+				return svc, err
+			}
+			continue
+		case !result.instanceTaken && !result.hostTaken:
 			return svc, nil
 		}
-		if instanceTaken {
-			svc.instance = fmt.Sprintf("%s (%d)", base, rename+1)
+		if result.instanceTaken {
+			suffix++
+			svc.instance = fmt.Sprintf("%s (%d)", base, suffix)
 		}
-		if hostTaken {
+		if result.hostTaken {
 			svc.host = newHostLabel(svc.serverID)
 		}
 	}
@@ -319,16 +452,21 @@ func (r *responder) claim(ctx context.Context, svc service) (service, error) {
 	return svc, nil
 }
 
-func (r *responder) probe(ctx context.Context, svc service) (instanceTaken, hostTaken bool, err error) {
+type probeResult struct {
+	instanceTaken, hostTaken, lostTiebreak bool
+}
+
+func (r *responder) probe(ctx context.Context, svc service) (probeResult, error) {
 	responses := make(chan *dns.Msg, 32)
 	r.mu.Lock()
-	r.probes = responses
+	r.probing, r.probes = svc, responses
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		r.probes = nil
 		r.mu.Unlock()
 	}()
+	var result probeResult
 	for i := 0; i < probeCount; i++ {
 		r.sendAll(svc.probe)
 		timer := time.NewTimer(probeInterval)
@@ -337,20 +475,36 @@ func (r *responder) probe(ctx context.Context, svc service) (instanceTaken, host
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return false, false, ctx.Err()
+				return probeResult{}, ctx.Err()
 			case msg := <-responses:
-				inst, host := svc.conflicts(msg)
-				instanceTaken = instanceTaken || inst
-				hostTaken = hostTaken || host
+				inst, host := svc.conflicts(msg, isLocalAddress)
+				if msg.Response {
+					result.instanceTaken = result.instanceTaken || inst
+				} else {
+					// A competing probe's SRV is a contest, not a claim.
+					result.lostTiebreak = result.lostTiebreak || svc.losesTiebreak(msg)
+				}
+				result.hostTaken = result.hostTaken || host
 			case <-timer.C:
 				break wait
 			}
 		}
-		if instanceTaken || hostTaken {
-			return instanceTaken, hostTaken, nil
+		if result.instanceTaken || result.hostTaken || result.lostTiebreak {
+			return result, nil
 		}
 	}
-	return false, false, nil
+	return result, nil
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // activate starts answering for svc.

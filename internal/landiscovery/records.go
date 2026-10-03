@@ -1,8 +1,10 @@
 package landiscovery
 
 import (
+	"bytes"
 	"net"
 	"net/netip"
+	"sort"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -201,28 +203,109 @@ func dedupe(answer, extra []dns.RR) []dns.RR {
 	return out
 }
 
-// conflicts reports whether a response from another responder claims our
-// instance or host name with different data (RFC 6762 §8.2, §9).
-func (s service) conflicts(response *dns.Msg) (instance, host bool) {
-	records := append(append([]dns.RR{}, response.Answer...), response.Extra...)
-	records = append(records, response.Ns...)
-	for _, rr := range records {
-		name := strings.ToLower(rr.Header().Name)
-		switch {
-		case name == strings.ToLower(s.instanceName()):
-			if srv, ok := rr.(*dns.SRV); ok && (!strings.EqualFold(srv.Target, s.hostName()) || int(srv.Port) != s.port) {
-				instance = true
+// mentions reports whether a message carries a record for one of the
+// service's own names; nothing else can conflict with it.
+func (s service) mentions(msg *dns.Msg) bool {
+	instance, host := strings.ToLower(s.instanceName()), strings.ToLower(s.hostName())
+	for _, section := range [][]dns.RR{msg.Answer, msg.Ns, msg.Extra} {
+		for _, rr := range section {
+			if name := strings.ToLower(rr.Header().Name); name == instance || name == host {
+				return true
 			}
-		case name == strings.ToLower(s.hostName()):
-			if _, ok := rr.(*dns.A); ok {
-				host = true
-			}
-			if _, ok := rr.(*dns.AAAA); ok {
-				host = true
+		}
+	}
+	return false
+}
+
+// conflicts reports whether records from another responder claim our
+// instance or host name with different data (RFC 6762 §8.2, §9). An SRV for
+// our instance name that points elsewhere takes the instance name; an
+// address record for our host name that is not one of this machine's
+// addresses takes the host name. Our own records, looped back or seen on a
+// second interface, match and are not conflicts.
+func (s service) conflicts(msg *dns.Msg, isLocal func(net.IP) bool) (instance, host bool) {
+	instanceName, hostName := strings.ToLower(s.instanceName()), strings.ToLower(s.hostName())
+	for _, section := range [][]dns.RR{msg.Answer, msg.Ns, msg.Extra} {
+		for _, rr := range section {
+			switch strings.ToLower(rr.Header().Name) {
+			case instanceName:
+				if srv, ok := rr.(*dns.SRV); ok && (!strings.EqualFold(srv.Target, s.hostName()) || int(srv.Port) != s.port) {
+					instance = true
+				}
+			case hostName:
+				switch r := rr.(type) {
+				case *dns.A:
+					host = host || !isLocal(r.A)
+				case *dns.AAAA:
+					host = host || !isLocal(r.AAAA)
+				}
 			}
 		}
 	}
 	return instance, host
+}
+
+// losesTiebreak reports whether a probe query from another host, claiming
+// our instance name at the same time as we do, wins the simultaneous-probe
+// tiebreak (RFC 6762 §8.2): the side whose proposed records sort
+// lexicographically later keeps the name. Identical records, such as our own
+// probe looped back, are no contest.
+func (s service) losesTiebreak(query *dns.Msg) bool {
+	name := strings.ToLower(s.instanceName())
+	var theirs []dns.RR
+	for _, rr := range query.Ns {
+		if strings.ToLower(rr.Header().Name) == name {
+			theirs = append(theirs, rr)
+		}
+	}
+	if len(theirs) == 0 {
+		return false
+	}
+	return compareRecordSets(theirs, []dns.RR{s.srv(serviceTTL), s.txt(serviceTTL)}) > 0
+}
+
+// compareRecordSets orders two proposed record sets as RFC 6762 §8.2 does:
+// each sorted by class, type and raw rdata, compared pairwise, and a set
+// that is a prefix of the other sorts first.
+func compareRecordSets(a, b []dns.RR) int {
+	a, b = sortedRecords(a), sortedRecords(b)
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if c := compareRecords(a[i], b[i]); c != 0 {
+			return c
+		}
+	}
+	return len(a) - len(b)
+}
+
+func sortedRecords(rrs []dns.RR) []dns.RR {
+	out := append([]dns.RR(nil), rrs...)
+	sort.Slice(out, func(i, j int) bool { return compareRecords(out[i], out[j]) < 0 })
+	return out
+}
+
+func compareRecords(a, b dns.RR) int {
+	ca, cb := a.Header().Class&^cacheFlush, b.Header().Class&^cacheFlush
+	switch {
+	case ca != cb:
+		return int(ca) - int(cb)
+	case a.Header().Rrtype != b.Header().Rrtype:
+		return int(a.Header().Rrtype) - int(b.Header().Rrtype)
+	}
+	return bytes.Compare(rdata(a), rdata(b))
+}
+
+// rdata returns a record's uncompressed wire-format data.
+func rdata(rr dns.RR) []byte {
+	buf := make([]byte, 1024)
+	end, err := dns.PackRR(rr, buf, 0, nil, false)
+	if err != nil {
+		return nil
+	}
+	nameEnd, err := dns.PackDomainName(rr.Header().Name, make([]byte, 256), 0, nil, false)
+	if err != nil {
+		return nil
+	}
+	return buf[nameEnd+10 : end] // type, class, TTL and rdlength take 10 bytes
 }
 
 // probe is the query that claims the instance and host names before they are
