@@ -385,6 +385,9 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		for {
 			select {
 			case <-readCtx.Done():
+				// The authority deadline or a closing handler ended the context.
+				// Close the socket so no later frame is handled under it.
+				_ = conn.Close()
 				return
 			case <-ticker.C:
 				checkCtx, stop := context.WithTimeout(readCtx, 2*time.Second)
@@ -401,6 +404,7 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}()
+	snapshotStarted := false
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -413,7 +417,9 @@ func (h *PlaybackControlSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		}
 		if err := h.Playback.handleRealtimeClientMessage(sessionID, data); err != nil {
 			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			continue
 		}
+		h.Playback.afterRealtimeClientMessage(readCtx, registration, sessionID, data, &snapshotStarted)
 	}
 }
 
