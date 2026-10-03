@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Collection } from "@/api/types";
 import Collections from "./Collections";
 
@@ -49,11 +49,16 @@ vi.mock("@/components/CollectionTemplateGallery", () => ({
   CollectionTemplateGallery: () => null,
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
+const current = vi.hoisted(() => ({ profile: { id: "me" } as { id: string } | null }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
-  useCurrentProfile: () => ({ profile: { id: "me" } }),
+  useCurrentProfile: () => ({ profile: current.profile }),
 }));
 
 describe("collection order on the Collections page", () => {
+  beforeEach(() => {
+    current.profile = { id: "me" };
+  });
+
   it("lists the profile's own collections first, then each owner's shared ones together", () => {
     render(
       <MemoryRouter>
@@ -77,5 +82,21 @@ describe("collection order on the Collections page", () => {
     expect(screen.getByRole("button", { name: "Drag Mine 2" })).toBeTruthy();
     for (const name of ["Theirs 1", "Theirs 2", "Other 1"])
       expect(screen.queryByRole("button", { name: `Drag ${name}` })).toBeNull();
+  });
+
+  it("keeps the server's order and offers no dragging until the profile resolves", () => {
+    current.profile = null;
+    render(
+      <MemoryRouter>
+        <Collections />
+      </MemoryRouter>,
+    );
+    const names = screen
+      .getAllByRole("link")
+      .map((link) => link.textContent)
+      .filter((name) => listed.some((item) => item.name === name));
+    expect(names).toEqual(listed.map((item) => item.name));
+    for (const item of listed)
+      expect(screen.queryByRole("button", { name: `Drag ${item.name}` })).toBeNull();
   });
 });
