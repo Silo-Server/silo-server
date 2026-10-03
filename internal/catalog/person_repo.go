@@ -1,10 +1,12 @@
 package catalog
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,7 +98,7 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 // Anything that is not a cached key is still replaceable by a real image: an
 // empty column, the "-" no-photo sentinel, and a provider URL that never made
 // it through the cache. Keeping URLs replaceable is what stops a person with
-// no external id — FindRefreshCandidates skips them, so no refresh will ever
+// no external id — ClaimRefreshCandidates skips them, so no refresh will ever
 // revisit the row — from being stuck with a dead URL forever. The
 // LIKE '%://%' test for "not a cached key" is the same one the artwork GC
 // trigger and the image cache sweep use.
@@ -726,11 +728,22 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 }
 
 // execPersonUpdate writes all non-key person fields and returns the rows affected.
+// execPersonUpdate writes a person's fields. When their provider ids change,
+// the last lookup's outcome was about another identity: it is cleared and the
+// person is due now, so one the providers didn't know under the old id isn't
+// left out of the sweep for good. The attempt time stays, so the person isn't
+// taken for one never looked up. The SET list reads the row's old ids.
 func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, error) {
 	tag, err := tx.Exec(ctx, `
 		UPDATE people SET name=$2, sort_name=$3, bio=$4, birth_date=$5, death_date=$6,
 			birthplace=$7, homepage=$8, photo_path=$9, photo_source_path=$10, photo_thumbhash=$11,
-			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now()
+			tmdb_id=$12, imdb_id=$13, tvdb_id=$14, plex_guid=$15, updated_at=now(),
+			metadata_refresh_outcome = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN NULL ELSE metadata_refresh_outcome END,
+			metadata_refresh_failures = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN 0 ELSE metadata_refresh_failures END,
+			metadata_refresh_due_at = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
+				THEN NOW() ELSE metadata_refresh_due_at END
 		WHERE id = $1`,
 		p.ID, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate,
 		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash,
@@ -1051,14 +1064,16 @@ func (r *PersonRepository) UpdatePhotoIfSourceMatches(ctx context.Context, perso
 	return tag.RowsAffected() > 0, nil
 }
 
-// MarkRefreshAttempt records a provider lookup without changing the person's
-// metadata timestamp. Failed and partial lookups therefore receive the same
-// durable refresh backoff as successful lookups.
+// MarkRefreshAttempt records that a provider lookup is starting, without
+// changing the person's metadata timestamp. The lookup's outcome replaces the
+// short due time set here; if the process dies before recording it, the sweep
+// tries the person again once PersonRefreshAttemptLease has passed.
 func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE people
-		SET metadata_refresh_attempted_at = NOW()
-		WHERE id = $1`, id)
+		SET metadata_refresh_attempted_at = NOW(),
+			metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+		WHERE id = $1`, id, PersonRefreshAttemptLease.Seconds())
 	if err != nil {
 		return fmt.Errorf("mark person %d refresh attempt: %w", id, err)
 	}
@@ -1068,34 +1083,133 @@ func (r *PersonRepository) MarkRefreshAttempt(ctx context.Context, id int64) err
 	return nil
 }
 
-// Person metadata refresh policy. FindRefreshCandidates (SQL) and
-// PersonRefreshDue (Go) are two views of the same rule; keep them in sync.
+// StartRefreshAttemptUnlessStartedSince records that a provider lookup is
+// starting, like MarkRefreshAttempt, unless another lookup for the person
+// started after since. The check and the stamp are one statement, so of two
+// API nodes starting a lookup for the same person after since, only one
+// proceeds. It reports whether this lookup should go ahead.
+func (r *PersonRepository) StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_attempted_at = NOW(),
+			metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+		WHERE id = $1
+			AND (metadata_refresh_attempted_at IS NULL OR metadata_refresh_attempted_at <= $3)`,
+		id, PersonRefreshAttemptLease.Seconds(), since)
+	if err != nil {
+		return false, fmt.Errorf("start person %d refresh attempt: %w", id, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// PersonRefreshOutcome is what a provider lookup for a person found.
+type PersonRefreshOutcome string
+
 const (
-	// PersonMetadataStaleAfter is how long complete person metadata is trusted
-	// before another provider lookup is attempted.
+	// PersonRefreshAnswered means a provider returned the person, whichever
+	// fields it filled. An empty bio is an answer, not a gap to retry.
+	PersonRefreshAnswered PersonRefreshOutcome = "answered"
+	// PersonRefreshNotFound means every provider consulted reported the person
+	// missing or had nothing for them.
+	PersonRefreshNotFound PersonRefreshOutcome = "not_found"
+	// PersonRefreshFailed means a provider errored or timed out, or none was
+	// available, so the lookup learned nothing about the person.
+	PersonRefreshFailed PersonRefreshOutcome = "failed"
+)
+
+// RecordRefreshOutcome stores a lookup's outcome and when the sweep may look
+// the person up again. An answer is trusted for PersonMetadataStaleAfter.
+// metadata_refresh_failures counts consecutive lookups with the outcome just
+// recorded; an answer resets it to 0, and a different unanswered outcome
+// starts it again at 1. Failures back off from PersonRefreshFailureBackoff,
+// doubling up to PersonRefreshRetryAfter. A person the providers do not know
+// is retried every PersonRefreshRetryAfter until PersonRefreshNotFoundAttempts
+// not-found lookups in a row, then only on demand, so failures and
+// unavailable providers never use up that budget.
+func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, outcome PersonRefreshOutcome) error {
+	switch outcome {
+	case PersonRefreshAnswered, PersonRefreshNotFound, PersonRefreshFailed:
+	default:
+		return fmt.Errorf("record person %d refresh outcome: unknown outcome %q", id, outcome)
+	}
+	// Every SET expression reads the row being updated, which Postgres
+	// re-reads after waiting on a concurrent writer's lock, so two outcomes
+	// recorded at once both count. The SET list sees the old column values.
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE people
+		SET metadata_refresh_outcome = $2,
+			metadata_refresh_failures = `+personRefreshStreak+`,
+			metadata_refresh_due_at = CASE
+				WHEN $2 = 'answered' THEN NOW() + make_interval(secs => $3)
+				WHEN $2 = 'not_found' AND `+personRefreshStreak+` >= $4 THEN NULL
+				WHEN $2 = 'not_found' THEN NOW() + make_interval(secs => $5)
+				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(`+personRefreshStreak+` - 1, 30)), $5))
+			END
+		WHERE id = $1`,
+		id,
+		string(outcome),
+		PersonMetadataStaleAfter.Seconds(),
+		PersonRefreshNotFoundAttempts,
+		PersonRefreshRetryAfter.Seconds(),
+		PersonRefreshFailureBackoff.Seconds(),
+	)
+	if err != nil {
+		return fmt.Errorf("record person %d refresh outcome: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// personRefreshStreak is the SQL for a person's streak after recording outcome
+// $2, computed from the row's current outcome and count.
+const personRefreshStreak = `(CASE
+	WHEN $2 = 'answered' THEN 0
+	WHEN metadata_refresh_outcome IS DISTINCT FROM $2 THEN 1
+	ELSE metadata_refresh_failures + 1
+END)`
+
+// Person metadata refresh policy. The sweep (ClaimRefreshCandidates) follows
+// each person's recorded outcome; a detail-page view (PersonRefreshDue) looks
+// a person up on demand at most once per PersonRefreshRetryAfter.
+const (
+	// PersonMetadataStaleAfter is how long an answered lookup, or never-looked-up
+	// complete metadata, is trusted before the sweep looks the person up again.
 	PersonMetadataStaleAfter = 90 * 24 * time.Hour
 
-	// PersonRefreshRetryAfter bounds how often one person may be sent to a
-	// provider. It applies to every candidate, so a person the providers simply
-	// have no bio or birth date for is retried on this cadence instead of on
-	// every sweep.
+	// PersonRefreshRetryAfter bounds how often a detail-page view sends one
+	// person to a provider, and is the longest wait between unanswered sweep
+	// lookups.
 	PersonRefreshRetryAfter = 7 * 24 * time.Hour
+
+	// PersonRefreshFailureBackoff is the sweep's wait after a first failed
+	// lookup. It doubles with each consecutive failure, up to
+	// PersonRefreshRetryAfter.
+	PersonRefreshFailureBackoff = time.Hour
+
+	// PersonRefreshNotFoundAttempts is how many consecutive unanswered lookups
+	// the sweep makes for a person before it stops looking them up.
+	PersonRefreshNotFoundAttempts = 3
+
+	// PersonRefreshAttemptLease is how long the sweep waits before retrying a
+	// person whose lookup started but never recorded an outcome.
+	PersonRefreshAttemptLease = time.Hour
 )
 
 // PersonMetadataIncomplete reports whether a provider could still fill in
 // metadata Silo does not have. A photo_path of "-" is the "provider has no
 // photo" sentinel — an answer, not a gap — so it counts as complete, matching
-// the SQL predicate in FindRefreshCandidates.
+// the SQL predicate in ClaimRefreshCandidates.
 func PersonMetadataIncomplete(person models.Person) bool {
 	return person.Bio == "" || person.PhotoPath == "" || person.BirthDate == nil
 }
 
-// PersonRefreshDue reports whether a person is due for a provider lookup: they
-// carry an external id, no lookup has been attempted within
-// PersonRefreshRetryAfter, and their metadata is either incomplete or older
-// than PersonMetadataStaleAfter. Callers that already hold the row use this
-// instead of re-querying; the worker sweep uses FindRefreshCandidates, which
-// encodes the same rule in SQL.
+// PersonRefreshDue reports whether a detail-page view should queue a provider
+// lookup: the person carries an external id, no lookup has been attempted
+// within PersonRefreshRetryAfter, and their metadata is either incomplete or
+// older than PersonMetadataStaleAfter. The background sweep does not use this
+// rule; it follows each person's recorded outcome (ClaimRefreshCandidates).
 func PersonRefreshDue(person models.Person, now time.Time) bool {
 	if person.TmdbID == "" && person.ImdbID == "" && person.TvdbID == "" {
 		return false
@@ -1108,55 +1222,131 @@ func PersonRefreshDue(person models.Person, now time.Time) bool {
 		person.UpdatedAt.Before(now.Add(-PersonMetadataStaleAfter))
 }
 
-// FindRefreshCandidates returns people who are due for a provider metadata
-// lookup, least recently touched first. See PersonRefreshDue for the rule.
+// ClaimRefreshCandidates claims up to limit people due for a background
+// provider lookup and returns them in lookup order: first people never looked
+// up whose metadata is incomplete or stale, newest first, so the cast of a new
+// scan goes next; then people whose recorded outcome made their next lookup
+// due, earliest due first.
 //
-// Gating on metadata_refresh_attempted_at rather than on updated_at is what
-// keeps this from becoming a hot loop: a person the providers cannot complete
-// is retried once per PersonRefreshRetryAfter instead of on every sweep, while
-// a person nobody has ever looked up is eligible immediately, so freshly
-// ingested credits are backfilled without waiting out a staleness window.
-func (r *PersonRepository) FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
+// Claiming stamps a PersonRefreshAttemptLease due time in the same statement
+// that selects the rows, skipping rows another node holds, so API nodes
+// sweeping at once never look up the same person. A claim the lookup never
+// completes expires with the lease and the person is due again. The claim
+// leaves metadata_refresh_attempted_at alone: the lookup stamps it when it
+// starts, so a person claimed but not reached still gets a lookup when their
+// page is opened (PersonRefreshDue).
+func (r *PersonRepository) ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error) {
 	if limit <= 0 {
 		return []int64{}, nil
 	}
 
-	now := time.Now()
-	rows, err := r.pool.Query(ctx, `
-		SELECT id
-		FROM people
-		WHERE
-			(tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
-			AND (metadata_refresh_attempted_at IS NULL OR metadata_refresh_attempted_at < $2)
-			AND (
-				COALESCE(bio, '') = ''
-				OR COALESCE(photo_path, '') = ''
-				OR birth_date IS NULL
-				OR updated_at < $3
-			)
-		ORDER BY GREATEST(updated_at, COALESCE(metadata_refresh_attempted_at, updated_at)) ASC, id ASC
-		LIMIT $1`,
-		limit,
-		now.Add(-PersonRefreshRetryAfter),
-		now.Add(-PersonMetadataStaleAfter),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("query refresh candidates: %w", err)
-	}
-	defer rows.Close()
-
 	ids := make([]int64, 0, limit)
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan refresh candidate: %w", err)
+	steps := []struct {
+		name string
+		// pick selects id and a sort key (lower sorts first) for up to $1 rows.
+		pick string
+		args func(remaining int) []any
+	}{
+		{
+			name: "never looked up",
+			pick: `
+				SELECT id, -id::double precision AS sort_key
+				FROM people
+				WHERE metadata_refresh_attempted_at IS NULL
+					-- A claim not yet looked up has a due time and comes back
+					-- through the next step once its lease runs out.
+					AND metadata_refresh_due_at IS NULL
+					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+					AND (
+						COALESCE(bio, '') = ''
+						OR COALESCE(photo_path, '') = ''
+						OR birth_date IS NULL
+						OR updated_at < $3
+					)
+				ORDER BY id DESC
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
+			args: func(remaining int) []any {
+				return []any{remaining, PersonRefreshAttemptLease.Seconds(), time.Now().Add(-PersonMetadataStaleAfter)}
+			},
+		},
+		{
+			name: "due again",
+			pick: `
+				SELECT id, extract(epoch FROM metadata_refresh_due_at)::double precision AS sort_key
+				FROM people
+				WHERE metadata_refresh_due_at IS NOT NULL
+					AND metadata_refresh_due_at <= NOW()
+					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+				ORDER BY metadata_refresh_due_at, id
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
+			args: func(remaining int) []any { return []any{remaining, PersonRefreshAttemptLease.Seconds()} },
+		},
+		{
+			// An older API server, during a rolling upgrade, records an
+			// attempt with no outcome or due time. Retry those as it would
+			// have, PersonRefreshRetryAfter after the attempt.
+			name: "attempted without an outcome",
+			pick: `
+				SELECT id, extract(epoch FROM metadata_refresh_attempted_at)::double precision AS sort_key
+				FROM people
+				WHERE metadata_refresh_attempted_at IS NOT NULL
+					AND metadata_refresh_outcome IS NULL
+					AND metadata_refresh_due_at IS NULL
+					AND metadata_refresh_attempted_at <= $3
+					AND (tmdb_id <> '' OR imdb_id <> '' OR tvdb_id <> '')
+				ORDER BY metadata_refresh_attempted_at, id
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED`,
+			args: func(remaining int) []any {
+				return []any{remaining, PersonRefreshAttemptLease.Seconds(), time.Now().Add(-PersonRefreshRetryAfter)}
+			},
+		},
+	}
+	type claimed struct {
+		id      int64
+		sortKey float64
+	}
+	for _, step := range steps {
+		remaining := limit - len(ids)
+		if remaining <= 0 {
+			break
 		}
-		ids = append(ids, id)
+		rows, err := r.pool.Query(ctx, `
+			WITH picked AS (`+step.pick+`)
+			UPDATE people p
+			SET metadata_refresh_due_at = NOW() + make_interval(secs => $2)
+			FROM picked
+			WHERE p.id = picked.id
+			RETURNING p.id, picked.sort_key`, step.args(remaining)...)
+		if err != nil {
+			return nil, fmt.Errorf("claim %s refresh candidates: %w", step.name, err)
+		}
+		var batch []claimed
+		for rows.Next() {
+			var c claimed
+			if err := rows.Scan(&c.id, &c.sortKey); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan %s refresh candidate: %w", step.name, err)
+			}
+			batch = append(batch, c)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate %s refresh candidates: %w", step.name, err)
+		}
+		// UPDATE ... RETURNING has no order of its own.
+		slices.SortFunc(batch, func(a, b claimed) int {
+			if c := cmp.Compare(a.sortKey, b.sortKey); c != 0 {
+				return c
+			}
+			return cmp.Compare(a.id, b.id)
+		})
+		for _, c := range batch {
+			ids = append(ids, c.id)
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate refresh candidates: %w", err)
-	}
-
 	return ids, nil
 }
 

@@ -233,7 +233,7 @@ func TestPersonCreditEnrichmentPhotoRules(t *testing.T) {
 		}
 	})
 
-	// Nothing refreshes a person without an external id (FindRefreshCandidates
+	// Nothing refreshes a person without an external id (ClaimRefreshCandidates
 	// skips them), so an uncached URL has to stay replaceable from a credit.
 	t.Run("uncached url is replaceable", func(t *testing.T) {
 		seeded := seed(t, "url", "https://images.example/dead-%d.jpg", "https://images.example/dead-source.jpg")
