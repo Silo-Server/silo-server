@@ -511,10 +511,18 @@ describe("bitmap (PGS) codec deprioritization", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("prefers an embedded PGS track the player renders over an external text track", () => {
+  it("prefers an external text track over an embedded PGS track, which the web player burns in", () => {
     const tracks = [
-      makeSub({ index: 0, source: "external", language: "en", codec: "srt" }),
-      makeSub({ index: 1, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("ranks embedded PGS as burn-in even when the server offers it as a sidecar", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: false }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
@@ -557,9 +565,15 @@ describe("bitmap (PGS) codec deprioritization", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("trusts the server's burn_in_only flag over the codec", () => {
+  it("honors the server's burn_in_only flag on a text track", () => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: true }),
+      makeSub({
+        index: 0,
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        burn_in_only: true,
+      }),
       makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);

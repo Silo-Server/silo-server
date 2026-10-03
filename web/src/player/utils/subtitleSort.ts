@@ -1,6 +1,6 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
 import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
-import { isBitmapCodec, isPGSCodec } from "./subtitleCodecs";
+import { isBitmapCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
 // playback.audio_language stores the original-language choice as this
@@ -22,15 +22,13 @@ function sourcePriority(track: PlayerSubtitleInfo): number {
 }
 
 /**
- * Whether the track can only be shown by burning it into a transcode. Uses the
- * server's delivery class when the track carries one, and otherwise mirrors
- * it: text tracks and embedded PGS reach the player as sidecars, while every
- * other bitmap track (external or downloaded files, embedded DVD/DVB) does not.
+ * Whether showing the track forces a burn-in transcode. The web player renders
+ * no bitmap subtitles (`client-context-v3.ts` declares no bitmap support), so
+ * every PGS/DVD/DVB track is burned in, even one the server could deliver as a
+ * sidecar. The server's `burn_in_only` flag covers the rest.
  */
-function isBurnInOnly(track: PlayerSubtitleInfo): boolean {
-  if (track.burn_in_only !== undefined) return track.burn_in_only;
-  if (!isBitmapCodec(track.codec)) return false;
-  return !((track.source ?? "embedded") === "embedded" && isPGSCodec(track.codec));
+function needsBurnIn(track: PlayerSubtitleInfo): boolean {
+  return isBitmapCodec(track.codec) || track.burn_in_only === true;
 }
 
 /**
@@ -39,19 +37,17 @@ function isBurnInOnly(track: PlayerSubtitleInfo): boolean {
  * 1. a track the player renders itself beats one that forces a burn-in;
  * 2. full dialogue beats forced, and plain beats SDH, so a file's own forced
  *    or SDH track never displaces the full track the viewer asked for;
- * 3. embedded beats external beats downloaded;
- * 4. text beats bitmap (PGS), which is heavier to render and can't be styled.
- * A bitmap track still wins when it's the only match for the language.
+ * 3. embedded beats external beats downloaded.
+ * A burn-in track still wins when it's the only match for the language.
  */
 function trackPriority(track: PlayerSubtitleInfo): number {
-  // Source (0-2) times 2 plus bitmap (0-1) stays below 8, so each flag
-  // weight outranks every lower tier combined.
+  // Source (0-2) stays below 4, so each flag weight outranks every lower
+  // tier combined.
   return (
-    (isBurnInOnly(track) ? 32 : 0) +
-    (track.forced ? 16 : 0) +
-    (track.hearing_impaired ? 8 : 0) +
-    sourcePriority(track) * 2 +
-    (isBitmapCodec(track.codec) ? 1 : 0)
+    (needsBurnIn(track) ? 16 : 0) +
+    (track.forced ? 8 : 0) +
+    (track.hearing_impaired ? 4 : 0) +
+    sourcePriority(track)
   );
 }
 
