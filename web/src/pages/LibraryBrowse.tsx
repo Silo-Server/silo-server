@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
 import AudiobookGroupsView from "@/components/audiobooks/AudiobookGroupsView";
 import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import ItemGrid from "@/components/ItemGrid";
+import LibraryEmptyState from "@/components/LibraryEmptyState";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
-import { useCatalogWindow } from "@/hooks/queries/catalog";
+import { useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
 import { cn } from "@/lib/utils";
 import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
@@ -100,6 +101,23 @@ function AudiobookAxisTabs({
   );
 }
 
+function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
+  return (
+    <div className="text-muted-foreground flex flex-col items-center gap-3 py-12 text-center">
+      <p>No items match your current filters.</p>
+      {onClearFilters ? (
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="text-primary text-sm font-medium hover:underline"
+        >
+          Clear filters
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export default function LibraryBrowse({
   libraryId,
   libraryType,
@@ -181,7 +199,38 @@ export default function LibraryBrowse({
   });
   const totalItems = catalogQuery.data?.totalItems ?? 0;
   const pages = catalogQuery.data?.pages ?? new Map();
-  const isLoading = catalogQuery.isLoading;
+  // An empty result only says the current view matched nothing. Ask whether
+  // the library holds anything at all before calling it empty, so an
+  // over-filtered view keeps pointing at its filters.
+  const browseCameBackEmpty =
+    !isGroupedAxis && !catalogQuery.isLoading && !catalogQuery.isError && totalItems === 0;
+  const libraryHasItemsQuery = useLibraryHasItems(libraryId, { enabled: browseCameBackEmpty });
+  const isLoading =
+    catalogQuery.isLoading || (browseCameBackEmpty && libraryHasItemsQuery.isLoading);
+  const hasClearableFilters =
+    queryDefinition.groups.length > 0 ||
+    (showMediaScopeSelector && queryDefinition.media_scope !== undefined);
+  let emptyState: ReactNode;
+  if (browseCameBackEmpty && libraryHasItemsQuery.data === false) {
+    emptyState = <LibraryEmptyState libraryId={libraryId} />;
+  } else if (browseCameBackEmpty && libraryHasItemsQuery.data === true) {
+    emptyState = (
+      <NoMatchingItems
+        onClearFilters={
+          hasClearableFilters
+            ? () =>
+                onQueryDefinitionChange({
+                  ...queryDefinition,
+                  library_ids: [],
+                  media_scope: showMediaScopeSelector ? undefined : queryDefinition.media_scope,
+                  match: "all",
+                  groups: [],
+                })
+            : undefined
+        }
+      />
+    );
+  }
 
   if (isGroupedAxis) {
     const groupedAxis = audiobookAxis as Exclude<AudiobookBrowseAxis, "books">;
@@ -258,6 +307,7 @@ export default function LibraryBrowse({
         loading={isLoading}
         onVisibleRangeChange={handleVisibleRangeChange}
         sortField={scopedQueryDefinition.sort.field}
+        emptyState={emptyState}
       />
       <ScrollToTopButton />
     </div>

@@ -19,6 +19,18 @@ const mockUseLibraryLayout = vi.fn();
 const mockFetchLibrarySectionItems = vi.fn();
 const mockUseSidebarPins = vi.fn();
 const mockUseLibraryCollectionItems = vi.fn();
+const mockUseLibraryHasItems = vi.fn();
+
+vi.mock("@/hooks/queries/catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/catalog")>()),
+  useLibraryHasItems: (...args: unknown[]) => mockUseLibraryHasItems(...args),
+}));
+
+vi.mock("@/components/LibraryEmptyState", () => ({
+  default: ({ libraryId }: { libraryId: number }) => (
+    <div data-kind="library-empty">Library {libraryId} is empty</div>
+  ),
+}));
 
 vi.mock("@/hooks/queries/sections", () => ({
   useLibraryLayout: (...args: unknown[]) => mockUseLibraryLayout(...args),
@@ -188,6 +200,8 @@ describe("LibraryRecommended", () => {
     );
     mockUseSidebarPins.mockReturnValue({ pins: {} });
     mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
+    mockUseLibraryHasItems.mockReset();
+    mockUseLibraryHasItems.mockReturnValue({ data: undefined });
   });
 
   afterEach(async () => {
@@ -397,5 +411,63 @@ describe("LibraryRecommended", () => {
     await render(<LibraryRecommended libraryId={42} />);
 
     expect(container.textContent).not.toContain("Pinned Horror");
+  });
+
+  describe("empty library", () => {
+    function emptySection(id: string, title: string, sectionType: string) {
+      return {
+        ...makeSection({ id, title, section_type: sectionType }),
+        total_count: 0,
+        items: [],
+      };
+    }
+
+    beforeEach(() => {
+      mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) =>
+        Promise.resolve({
+          section:
+            sectionId === "cw"
+              ? emptySection("cw", "Continue Watching", "continue_watching")
+              : emptySection("recent", "Recently Added", "recently_added"),
+        }),
+      );
+    });
+
+    it("shows the empty-library state once every section resolves empty", async () => {
+      mockUseLibraryHasItems.mockImplementation(
+        (_libraryId: number, options: { enabled: boolean }) => ({
+          data: options.enabled ? false : undefined,
+        }),
+      );
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      await waitFor(() => {
+        expect(container.querySelector('[data-kind="library-empty"]')).not.toBeNull();
+      });
+      expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
+      expect(container.textContent).not.toContain("Recently Added");
+    });
+
+    it("does not claim the library is empty while it still holds items", async () => {
+      mockUseLibraryHasItems.mockReturnValue({ data: true });
+
+      await render(<LibraryRecommended libraryId={42} />);
+
+      await waitFor(() => {
+        expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: true });
+      });
+      expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
+    });
+  });
+
+  it("does not check library emptiness while sections have items", async () => {
+    await render(<LibraryRecommended libraryId={42} />);
+
+    await waitFor(() => {
+      expect(container.textContent).toContain("Recently Added");
+    });
+    expect(mockUseLibraryHasItems).toHaveBeenLastCalledWith(42, { enabled: false });
+    expect(container.querySelector('[data-kind="library-empty"]')).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { HomeSectionItemsResponse, ResolvedSection } from "@/api/types";
+import { useLibraryHasItems } from "@/hooks/queries/catalog";
 import { useLibraryCollectionItems } from "@/hooks/queries/libraryCollections";
 import { fetchLibrarySectionItems, useLibraryLayout } from "@/hooks/queries/sections";
 import { useSidebarPins } from "@/hooks/queries/sidebarPins";
@@ -9,6 +10,7 @@ import MediaCarousel from "@/components/MediaCarousel";
 import ItemCard from "@/components/ItemCard";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import HeroBanner from "@/components/HeroBanner";
+import LibraryEmptyState from "@/components/LibraryEmptyState";
 import NowListeningHero from "@/components/NowListeningHero";
 import SectionRow from "@/components/SectionRow";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -176,6 +178,17 @@ export default function LibraryRecommended({
     onHeroStateChange?.(hasRenderedHero);
   }, [hasRenderedHero, onHeroStateChange]);
 
+  // Every section resolving empty is not proof on its own (watch-state rows are
+  // empty for a new viewer), so confirm the library holds nothing before
+  // replacing the blank page with the empty-library state.
+  const sectionsSettledEmpty =
+    !isLoading &&
+    (viewModel.hero === null || viewModel.hero.state === "empty") &&
+    viewModel.rows.every((slot) => slot.state === "empty");
+  const { data: libraryHasItems } = useLibraryHasItems(libraryId, {
+    enabled: sectionsSettledEmpty,
+  });
+
   const retrySection = (sectionId: string) => {
     queryClient.removeQueries({ queryKey: sectionKeys.libraryItems(libraryId, sectionId) });
     setFailedIds((prev) => {
@@ -194,6 +207,14 @@ export default function LibraryRecommended({
 
   if (isLoading && layout.length === 0) {
     return null;
+  }
+
+  if (sectionsSettledEmpty && libraryHasItems === false) {
+    return (
+      <div className="px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">
+        <LibraryEmptyState libraryId={libraryId} />
+      </div>
+    );
   }
 
   return (

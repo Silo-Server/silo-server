@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import type { BrowseItem } from "@/api/types";
 import ItemCard from "./ItemCard";
@@ -16,6 +16,8 @@ interface SharedItemGridProps {
   selectionMode?: boolean;
   selectedIds?: ReadonlySet<string>;
   onToggleSelect?: (item: BrowseItem) => void;
+  /** Replaces the default "No items found." message when there are no items. */
+  emptyState?: ReactNode;
 }
 
 interface WindowedItemGridProps extends SharedItemGridProps {
@@ -49,6 +51,7 @@ export default function ItemGrid(props: ItemGridProps) {
     selectionMode = false,
     selectedIds,
     onToggleSelect,
+    emptyState,
   } = props;
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
@@ -198,7 +201,9 @@ export default function ItemGrid(props: ItemGridProps) {
           ))}
         </div>
       ) : totalItems === 0 ? (
-        <div className="text-muted-foreground py-12 text-center">No items found.</div>
+        (emptyState ?? (
+          <div className="text-muted-foreground py-12 text-center">No items found.</div>
+        ))
       ) : (
         <div
           style={{
