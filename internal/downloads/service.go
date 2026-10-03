@@ -853,7 +853,9 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 	}
 	var inserted []*Download
 	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, len(newIdx)); err != nil {
+		// Managed originals register as 'ready' and never count as active, so
+		// only the period quota applies; the client queues the transfers.
+		if err := s.limiter.CheckPeriod(ctx, userID, len(newIdx)); err != nil {
 			return err
 		}
 		toInsert := make([]*Download, 0, len(newIdx))

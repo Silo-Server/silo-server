@@ -42,6 +42,17 @@ func (l *QuantityLimiter) Reload(maxConcurrent, maxPerPeriod int, periodDuration
 // The batchSize parameter accounts for series batch downloads where
 // multiple records will be created at once.
 func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) error {
+	return l.check(ctx, userID, batchSize, true)
+}
+
+// CheckPeriod verifies only the per-period quota. Managed original entries use
+// it: they register as 'ready' and the client queues their transfers, so the
+// concurrent cap must not reject a season or series larger than the cap.
+func (l *QuantityLimiter) CheckPeriod(ctx context.Context, userID int, batchSize int) error {
+	return l.check(ctx, userID, batchSize, false)
+}
+
+func (l *QuantityLimiter) check(ctx context.Context, userID int, batchSize int, concurrent bool) error {
 	if l == nil {
 		return nil
 	}
@@ -52,7 +63,7 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 	period := l.periodDuration
 	l.mu.RUnlock()
 
-	if maxConc > 0 {
+	if concurrent && maxConc > 0 {
 		active, err := l.repo.CountActiveByUser(ctx, userID)
 		if err != nil {
 			return err

@@ -1512,7 +1512,7 @@ operations use:
 | 422  | `validation_failed`      | A well-formed request with an invalid domain value: quality, status, revision guard, device identity, subtitle ref, subscription option, non-canonical decimal ID, or an unknown/duplicated query parameter. `errors[].location` names the member. |
 | 428  | `precondition_required`  | A subscription mutation without `If-Match`.                               |
 | 412  | `precondition_failed`    | A stale `If-Match` validator.                                             |
-| 429  | `rate_limited`           | Concurrent download cap or period quota hit.                              |
+| 429  | `rate_limited`           | Concurrent download cap or period quota hit. Managed original entries (single, season, or series) check only the period quota; the client queues their transfers. |
 | 500  | `internal_error`         | Unexpected server error.                                                  |
 | 501  | `capability_unsupported` | The requested delivery is not supported by configuration or policy — tone mapping disabled or disallowed, a non-original bulk quality, or a missing prepare pipeline. |
 | 503  | `dependency_unavailable` | Downloads, offline assets, series monitoring, or capability discovery is temporarily unavailable; retry the same request. |

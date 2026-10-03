@@ -206,3 +206,35 @@ func TestConcurrentArtifactCreatesCannotBypassQuotaDB(t *testing.T) {
 		t.Fatalf("rejected requests enqueued artifact jobs: %d, want 1", jobs)
 	}
 }
+
+// TestManagedBatchLargerThanConcurrentCapRegisters pins that a managed season
+// or series batch larger than the concurrent cap registers every episode: the
+// rows are 'ready' and the client queues the transfers. The period quota still
+// rejects a batch that would exceed it.
+func TestManagedBatchLargerThanConcurrentCapRegisters(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+
+	files := &monitorFileResolver{fileID: f.fileID, seriesID: f.contentID}
+	items := make([]managedItem, 5)
+	for i := range items {
+		episodeID := fmt.Sprintf("%s-ep-%d", f.contentID, i+1)
+		items[i] = managedItem{file: files.file(episodeID), contentID: f.contentID, episodeID: episodeID}
+	}
+	req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA}
+
+	limiter := NewQuantityLimiter(f.repo, 2, 0, 0)
+	svc := NewService(f.repo, nil, limiter, nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	rows, err := svc.ensureManaged(ctx, f.userID, req, items[:4], originalDecision(), "season-batch")
+	if err != nil {
+		t.Fatalf("season batch over the concurrent cap: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("registered %d rows, want 4", len(rows))
+	}
+
+	limiter.Reload(2, 4, time.Hour)
+	if _, err := svc.ensureManaged(ctx, f.userID, req, items, originalDecision(), "season-batch"); !errors.Is(err, ErrPeriodLimitReached) {
+		t.Fatalf("batch over the period quota error = %v, want ErrPeriodLimitReached", err)
+	}
+}
