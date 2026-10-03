@@ -41,8 +41,8 @@ describe("collection capability controls", () => {
       data: { imports: false, groups: false, artwork: false, item_reorder: false },
     });
     show();
-    expect(screen.getByRole("button", { name: "New Collection" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Browse Templates" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Create from scratch" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start from a template" })).toBeNull();
     expect(screen.queryByText("Import gallery")).toBeNull();
   });
   it("shows import entry points when the store supports them", () => {
@@ -50,7 +50,16 @@ describe("collection capability controls", () => {
       data: { imports: true, groups: true, artwork: true, item_reorder: true },
     });
     show();
-    expect(screen.getByRole("button", { name: "Browse Templates" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Start from a template" })).toBeTruthy();
     expect(screen.getByText("Import gallery")).toBeTruthy();
+  });
+  it("shows only the empty-state create actions when there are no collections", () => {
+    capability.mockReturnValue({
+      data: { imports: true, groups: true, artwork: true, item_reorder: true },
+    });
+    show();
+    expect(screen.queryByRole("button", { name: "New Collection" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browse Templates" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Create from scratch" })).toBeTruthy();
   });
 });

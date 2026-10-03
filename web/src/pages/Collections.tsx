@@ -199,16 +199,18 @@ function CollectionList() {
             grouping.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {capabilities?.imports && (
-            <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)}>
-              <Sparkles className="mr-1 h-4 w-4" /> Browse Templates
+        {collections.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {capabilities?.imports && (
+              <Button size="sm" variant="outline" onClick={() => setGalleryOpen(true)}>
+                <Sparkles className="mr-1 h-4 w-4" /> Browse Templates
+              </Button>
+            )}
+            <Button size="sm" onClick={() => navigate(buildUserCollectionEditorPath("new"))}>
+              <Plus className="mr-1 h-4 w-4" /> New Collection
             </Button>
-          )}
-          <Button size="sm" onClick={() => navigate(buildUserCollectionEditorPath("new"))}>
-            <Plus className="mr-1 h-4 w-4" /> New Collection
-          </Button>
-        </div>
+          </div>
+        )}
       </div>
 
       <section className="space-y-4">
