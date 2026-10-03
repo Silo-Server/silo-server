@@ -187,7 +187,9 @@ func (s *DetailService) ProbedDurationsByEpisodeIDs(ctx context.Context, ids []s
 type ItemDetail struct {
 	ContentID     string `json:"content_id"`
 	PlayContentID string `json:"play_content_id,omitempty"`
-	Type          string `json:"type"`
+	// PlaySeasonNumber is the season of PlayContentID on a series.
+	PlaySeasonNumber *int   `json:"play_season_number,omitempty"`
+	Type             string `json:"type"`
 
 	// Metadata (served inline from Postgres).
 	Title         string `json:"title"`
