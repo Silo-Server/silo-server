@@ -214,6 +214,12 @@ is seen (best effort, no hard refusal). The census runs once per start, so
 the warning appears in the log of whichever replica starts second, not the
 one already running. Proxy nodes scale freely because each has its own scope.
 
+## Discovery
+
+A provider's API host also answers plain HTTP on overlay port 80 with a
+redirect to its HTTPS API origin, so a client can find the server by its bare
+overlay name; see [server-discovery.md](server-discovery.md#overlay-network-the-providers-short-name).
+
 ## Security notes
 
 - `auth_url` is admin-only and never logged.

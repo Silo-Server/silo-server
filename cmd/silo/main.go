@@ -110,6 +110,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -3609,6 +3610,9 @@ func main() {
 				slog.Error("post-restart storage transition reconciliation paused; it will resume on the next start", "error", reconcileErr)
 			}
 		}()
+		if cfg.Server.LANDiscovery && (mode == "integrated" || mode == "api") {
+			go advertiseOnLAN(appCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), settingsRepo)
+		}
 		if pluginService != nil {
 			pluginService.StartResidents(appCtx)
 			if mode == "api" {
