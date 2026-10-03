@@ -503,6 +503,8 @@ type Episode struct {
 	ImdbID         string              `json:"imdb_id,omitempty"`
 	TmdbID         string              `json:"tmdb_id,omitempty"`
 	TvdbID         string              `json:"tvdb_id,omitempty"`
+	RatingIMDB     *float64            `json:"rating_imdb,omitempty" doc:"IMDb rating, 0-10"`
+	RatingTMDB     *float64            `json:"rating_tmdb,omitempty" doc:"TMDB rating, 0-10"`
 	StillURL       string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
 	StillThumbhash string              `json:"still_thumbhash,omitempty"`
 	UserData       *WatchRollup        `json:"user_data,omitempty"`
@@ -1367,7 +1369,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
-			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, RatingIMDB: e.RatingIMDB, RatingTMDB: e.RatingTMDB, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
