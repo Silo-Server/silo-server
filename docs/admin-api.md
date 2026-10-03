@@ -1311,7 +1311,8 @@ estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
-row; a profile with no such row falls back to its profile id. Ties are broken on
+row with a nonempty profile name; a profile with no such row falls back to its
+profile id, even if it has unnamed rows. Ties are broken on
 a stable key (`media_item_id`, or `user_id`/`profile_id`) so equal rows keep their order between refreshes. No
 poster URLs are returned — the bar-list widgets do not need them, and it keeps
 the query cheap.

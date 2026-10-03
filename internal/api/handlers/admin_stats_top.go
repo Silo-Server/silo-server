@@ -286,8 +286,8 @@ func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days
 
 	// Profile display names live in the per-user stores, not in
 	// user_watch_history, so they are read back from the most recent admin
-	// playback-history row for that profile. A profile with no such row falls
-	// back to its id.
+	// playback-history row for that profile with a nonempty name. A profile
+	// whose rows are all unnamed, or that has none, falls back to its id.
 	//
 	// The ranking groups on (user_id, profile_id) alone: a profile that was
 	// renamed mid-window would otherwise split into two rows. The name lookup
