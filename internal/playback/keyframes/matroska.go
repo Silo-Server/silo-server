@@ -135,6 +135,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		video     uint64
 		frameNS   uint64
 		cuesAt    int64 = -1
+		infoAt    int64 = -1
 		cues      []byte
 		haveInfo  bool
 		haveTrack bool
@@ -156,6 +157,9 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			}
 			if p, ok := seekPosition(data, idCues); ok {
 				cuesAt = segStart + p
+			}
+			if p, ok := seekPosition(data, idInfo); ok {
+				infoAt = segStart + p
 			}
 		case idInfo:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
@@ -206,7 +210,25 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			return matroskaIndex{}, err
 		}
 	}
-	if cues == nil || !haveTrack {
+	// Info may also come after the clusters, found through the seek head.
+	// Its timestamp scale converts every cue time, so an index without it
+	// isn't trusted.
+	if !haveInfo && infoAt >= 0 {
+		id, dataSize, headerLen, err := readElementHeader(r, infoAt)
+		if err != nil {
+			return matroskaIndex{}, fmt.Errorf("keyframes: read info at %d: %w", infoAt, err)
+		}
+		if id != idInfo {
+			return matroskaIndex{}, fmt.Errorf("keyframes: seek head points at element %#x, not Info", id)
+		}
+		data, err := readElementData(r, infoAt+headerLen, dataSize, maxMetadataSize)
+		if err != nil {
+			return matroskaIndex{}, err
+		}
+		timescale, duration = parseInfo(data)
+		haveInfo = true
+	}
+	if cues == nil || !haveTrack || !haveInfo {
 		return matroskaIndex{}, ErrNoIndex
 	}
 

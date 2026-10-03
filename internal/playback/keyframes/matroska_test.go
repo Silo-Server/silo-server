@@ -180,6 +180,30 @@ func TestReadMatroskaCuesAfterClustersThroughSeekHead(t *testing.T) {
 	wantIndex(t, got, err)
 }
 
+// Info may come after the clusters too. Its timestamp scale, here 2ms per
+// tick, must still convert the cue times.
+func TestReadMatroskaInfoAfterClustersThroughSeekHead(t *testing.T) {
+	scaledInfo := el(idInfo, uintEl(idTimestampScale, 2_000_000), floatEl(idDuration, 6_250))
+	seekHead := func(cuesPos, infoPos uint64) []byte {
+		return el(idSeekHead,
+			el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, cuesPos)),
+			el(idSeek, uintEl(idSeekID, idInfo), uintEl(idSeekPosition, infoPos)))
+	}
+	posA := uint64(len(seekHead(0, 0)) + len(tracks))
+	posB := posA + uint64(len(clusterA))
+	cues := cuesFor(layout{}, posA, posB)
+	cuesPos := posB + uint64(len(clusterB))
+	infoPos := cuesPos + uint64(len(cues))
+	segment := el(idSegment, seekHead(cuesPos, infoPos), tracks, clusterA, clusterB, cues, scaledInfo)
+	got, err := read(slices.Concat(ebmlHeader, segment))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []float64{0, 4.432, 8.436}; !slices.Equal(got.Keyframes, want) || got.Duration != 12.5 {
+		t.Fatalf("keyframes %v, duration %v; want %v and 12.5", got.Keyframes, got.Duration, want)
+	}
+}
+
 func TestReadMatroskaUnknownSizeSegment(t *testing.T) {
 	got, err := read(file(layout{unknownSize: true}))
 	wantIndex(t, got, err)
@@ -208,6 +232,8 @@ func TestReadMatroskaWithoutIndex(t *testing.T) {
 		"no cues":        el(idSegment, info, tracks, clusterA),
 		"no video cue":   el(idSegment, info, tracks, el(idCues, el(idCuePoint, uintEl(idCueTime, 0), el(idCueTrackPos, uintEl(idCueTrack, audioTrack))))),
 		"no video track": el(idSegment, info, audioOnlyTracks, clusterA),
+		// Without Info the cue times can't be converted.
+		"no info": el(idSegment, tracks, cuesFor(layout{}, 0, 0), clusterA),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := read(slices.Concat(ebmlHeader, segment))

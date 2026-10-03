@@ -15,15 +15,24 @@ func PlanSegments(keyframes []float64, segmentSeconds float64) []float64 {
 		return nil
 	}
 	starts := []float64{keyframes[0]}
-	target := keyframes[0] + segmentSeconds
+	// Targets are measured from the first keyframe, and a keyframe within
+	// targetSlack of one counts as reaching it: FFmpeg compares integer
+	// timestamps, where a keyframe exactly on a target reaches it, but a
+	// nonzero origin leaves float error ("2.28 - 0.28" isn't quite 2).
+	target := segmentSeconds
 	for _, k := range keyframes[1:] {
-		if k >= target {
+		if k-keyframes[0] >= target-targetSlack {
 			starts = append(starts, k)
 			target += segmentSeconds
 		}
 	}
 	return starts
 }
+
+// targetSlack is the float error PlanSegments allows when comparing a
+// keyframe with a target: a microsecond, FFmpeg's finest time base and well
+// under any frame's duration.
+const targetSlack = 1e-6
 
 // SegmentDurations returns each planned segment's duration: up to the next
 // segment's start, and for the last one up to the media's end. A last segment
