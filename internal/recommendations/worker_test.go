@@ -539,3 +539,144 @@ func TestClaimProfileRefreshDedupesUntilCleared(t *testing.T) {
 		t.Fatal("a cleared profile refresh could not be claimed")
 	}
 }
+
+// recordingStaleMarker records stale marks and how many refreshes were
+// already queued when each one happened.
+type recordingStaleMarker struct {
+	w            *Worker
+	calls        int
+	queuedBefore []int
+	ctxErrs      []error
+	err          error
+}
+
+func (m *recordingStaleMarker) MarkProfileStale(ctx context.Context, _ int, _ string) error {
+	m.calls++
+	m.ctxErrs = append(m.ctxErrs, ctx.Err())
+	if m.w != nil {
+		m.queuedBefore = append(m.queuedBefore, len(m.w.profileRefreshCh))
+	}
+	return m.err
+}
+
+func newRefreshTestWorker() (*Worker, *recordingStaleMarker) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = &Engine{}
+	marker := &recordingStaleMarker{w: w}
+	w.staleMarker = marker
+	return w, marker
+}
+
+// takeQueued drains one queued refresh, failing when none is queued, and
+// releases its pending key as the refresh loop would.
+func takeQueued(t *testing.T, w *Worker) profileRefreshRequest {
+	t.Helper()
+	select {
+	case req := <-w.profileRefreshCh:
+		w.clearProfileRefreshPending(profileRefreshKey(req.userID, req.profileID))
+		return req
+	default:
+		t.Fatal("no profile refresh was queued")
+		return profileRefreshRequest{}
+	}
+}
+
+func assertNothingQueued(t *testing.T, w *Worker, stage string) {
+	t.Helper()
+	select {
+	case req := <-w.profileRefreshCh:
+		t.Fatalf("%s: queued %+v, want nothing", stage, req)
+	default:
+	}
+}
+
+// NotifySignalsChanged writes the durable stale mark before it queues the
+// in-memory refresh, so a server that dies with the request queued still
+// leaves the mark for another server's sweep. A failed mark still queues.
+func TestNotifySignalsChangedMarksStaleThenQueues(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	w.NotifySignalsChanged(t.Context(), 7, "p")
+	if marker.calls != 1 || marker.queuedBefore[0] != 0 {
+		t.Fatalf("marks = %d, refreshes queued before the mark = %v; want one mark before any refresh", marker.calls, marker.queuedBefore)
+	}
+	if req := takeQueued(t, w); req.userID != 7 || req.profileID != "p" {
+		t.Fatalf("queued %+v", req)
+	}
+
+	marker.err = errors.New("database down")
+	w.NotifySignalsChanged(t.Context(), 7, "p")
+	if marker.calls != 2 {
+		t.Fatalf("marks = %d, want 2", marker.calls)
+	}
+	takeQueued(t, w)
+
+	for _, bad := range []struct {
+		userID    int
+		profileID string
+	}{{0, "p"}, {7, ""}} {
+		w.NotifySignalsChanged(t.Context(), bad.userID, bad.profileID)
+	}
+	if marker.calls != 2 {
+		t.Fatalf("marks for invalid profiles = %d, want none", marker.calls-2)
+	}
+	assertNothingQueued(t, w, "invalid profiles")
+
+	// Callers hold a nil *Worker when recommendations are disabled.
+	var disabled *Worker
+	disabled.NotifySignalsChanged(t.Context(), 7, "p")
+	disabled.RequestReadRefresh(t.Context(), 7, "p")
+}
+
+// Reads that find a profile's rows missing queue at most one refresh per
+// profile per interval on a server; signal changes are not throttled.
+func TestRequestReadRefreshThrottlesEachProfile(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	w.readRefreshes.now = func() time.Time { return now }
+	ctx := t.Context()
+
+	w.RequestReadRefresh(ctx, 7, "p")
+	takeQueued(t, w)
+	now = now.Add(time.Minute)
+	w.RequestReadRefresh(ctx, 7, "p")
+	assertNothingQueued(t, w, "second read within the interval")
+
+	// Another profile has its own allowance.
+	w.RequestReadRefresh(ctx, 7, "q")
+	if req := takeQueued(t, w); req.profileID != "q" {
+		t.Fatalf("queued %+v, want profile q", req)
+	}
+	// A signal change goes straight through.
+	w.NotifySignalsChanged(ctx, 7, "p")
+	takeQueued(t, w)
+
+	now = now.Add(readRefreshInterval)
+	w.RequestReadRefresh(ctx, 7, "p")
+	takeQueued(t, w)
+	// The expired entry for q was pruned; p was just let through again.
+	w.readRefreshes.mu.Lock()
+	remembered := len(w.readRefreshes.last)
+	w.readRefreshes.mu.Unlock()
+	if remembered != 1 {
+		t.Fatalf("throttle remembers %d profiles, want only the one let through this interval", remembered)
+	}
+}
+
+// A refresh that fails marks the profile stale again, with a live context
+// even when the refresh's own context ended, so the stale sweep retries it.
+func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	marker.w = nil
+	w.engine = closedPoolEngine(t)
+	if err := w.refreshProfile(t.Context(), 7, "p"); err == nil {
+		t.Fatal("refresh against a closed database succeeded")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := w.refreshProfile(ctx, 7, "p"); err == nil {
+		t.Fatal("refresh with an ended context succeeded")
+	}
+	if marker.calls != 2 || marker.ctxErrs[0] != nil || marker.ctxErrs[1] != nil {
+		t.Fatalf("marks = %d with context errors %v; want two marks with live contexts", marker.calls, marker.ctxErrs)
+	}
+}

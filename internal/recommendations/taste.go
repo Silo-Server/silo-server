@@ -151,6 +151,18 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 // a profile. It writes nothing when the profile has no signals or none of its
 // signaled titles has an embedding.
 func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID string) (bool, error) {
+	started, err := e.repo.Now(ctx)
+	if err != nil {
+		return false, err
+	}
+	return e.rebuildTasteProfile(ctx, userID, profileID, started)
+}
+
+// rebuildTasteProfile is refreshTasteProfile for a refresh that started at
+// started, database time, before any of its signal reads. The profile is
+// stored as updated at started, so a stale mark set while it reads stays newer
+// than the profile and the stale sweep refreshes it again.
+func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID string, started time.Time) (bool, error) {
 	store, err := e.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
@@ -387,7 +399,7 @@ func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID 
 		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
 	}
 
-	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating); err != nil {
+	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
 		return false, fmt.Errorf("upsert taste profile: %w", err)
 	}
 

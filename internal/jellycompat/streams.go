@@ -2506,7 +2506,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if refreshTasteProfile && playSession.ItemID != "" {
-		triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+		notifySignalsChanged(r.Context(), h.signalsNotifier, session.StreamAppUserID, session.ProfileID)
 	}
 	// ID-less players still supply a final resume sample on Stopped. Persist
 	// it above, but do not use an item/source match to tear down a play: a

@@ -54,12 +54,11 @@ type ProgressLibraryLookup interface {
 
 // ProgressHandler handles watch progress and sync endpoints.
 type ProgressHandler struct {
-	storeProvider           userstore.UserStoreProvider
-	LibraryLookup           ProgressLibraryLookup
-	SettingsRepo            PlaybackSettingsReader
-	EventsHub               *evt.Hub
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
+	storeProvider   userstore.UserStoreProvider
+	LibraryLookup   ProgressLibraryLookup
+	SettingsRepo    PlaybackSettingsReader
+	EventsHub       *evt.Hub
+	signalsNotifier SignalsChangedNotifier
 }
 
 // NewProgressHandler creates a new ProgressHandler.
@@ -67,14 +66,10 @@ func NewProgressHandler(provider userstore.UserStoreProvider) *ProgressHandler {
 	return &ProgressHandler{storeProvider: provider}
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *ProgressHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *ProgressHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *ProgressHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 // --- Request/Response types ---
@@ -524,7 +519,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 	}
 
 	if hadSuccessfulUpdate {
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 		for i, item := range updates {
 			if item.CheckAccess && results[i].Status != "ok" {
 				continue

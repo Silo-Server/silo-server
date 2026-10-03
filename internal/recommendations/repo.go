@@ -653,8 +653,20 @@ func (r *Repo) CacheEntryCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// Now returns the database's current time. Refresh start times come from
+// here, so they compare correctly with stale marks the database stamps.
+func (r *Repo) Now(ctx context.Context) (time.Time, error) {
+	var now time.Time
+	if err := r.pool.QueryRow(ctx, `SELECT NOW()`).Scan(&now); err != nil {
+		return time.Time{}, fmt.Errorf("read database time: %w", err)
+	}
+	return now, nil
+}
+
 // UpsertTasteProfile stores or updates a user's precomputed taste profile.
-func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID string, embedding []float32, signalCounts map[string]int, maxContentRating string) error {
+// updatedAt is when the refresh that built it started reading signals, so a
+// stale mark written after that stays newer than the profile.
+func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID string, embedding []float32, signalCounts map[string]int, maxContentRating string, updatedAt time.Time) error {
 	countsJSON, err := json.Marshal(signalCounts)
 	if err != nil {
 		return fmt.Errorf("marshaling signal counts: %w", err)
@@ -663,13 +675,13 @@ func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID str
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO user_taste_profiles
 			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (user_id, profile_id) DO UPDATE
 			SET embedding          = EXCLUDED.embedding,
 			    signal_counts      = EXCLUDED.signal_counts,
 			    max_content_rating = EXCLUDED.max_content_rating,
-			    updated_at         = NOW()
-	`, userID, profileID, pgvector.NewVector(embedding), countsJSON, maxContentRating)
+			    updated_at         = EXCLUDED.updated_at
+	`, userID, profileID, pgvector.NewVector(embedding), countsJSON, maxContentRating, updatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert taste profile for user %d profile %s: %w", userID, profileID, err)
 	}
@@ -1072,19 +1084,51 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 
 // --- Staleness Operations ---
 
-// MarkProfileStale sets stale_at = NOW() on a user's taste profile. A profile
-// already waiting for a refresh (stale_at > updated_at) keeps its pending
-// mark, so a repeat mark writes nothing.
+// MarkProfileStale sets stale_at = NOW() on a user's taste profile. It always
+// advances the mark, even over a pending one: a refresh that started reading
+// before this change must not clear it (see ClearStaleAt). A profile with no
+// taste profile row has nothing to mark.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE user_taste_profiles SET stale_at = NOW()
-		WHERE  user_id = $1 AND profile_id = $2
-		  AND  (stale_at IS NULL OR stale_at <= updated_at)`,
+		WHERE  user_id = $1 AND profile_id = $2`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)
 	}
 	return nil
+}
+
+// MarkProfilesStaleForItems marks stale every taste profile whose progress,
+// history, rating, favorite or watchlist entry points at one of itemIDs or at
+// an episode of a series among them. Catalog merges and splits call it after
+// they move user state onto itemIDs. It returns how many profiles it marked.
+func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error) {
+	if len(itemIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		WITH ids AS (
+			SELECT unnest($1::text[]) AS id
+			UNION
+			SELECT content_id FROM episodes WHERE series_id = ANY($1::text[])
+		)
+		UPDATE user_taste_profiles tp SET stale_at = NOW()
+		WHERE EXISTS (SELECT 1 FROM user_watch_progress s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_watch_history s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_ratings s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_favorites s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_watchlist s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)`,
+		itemIDs)
+	if err != nil {
+		return 0, fmt.Errorf("mark profiles stale for items: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // StaleProfile represents a taste profile that needs refreshing.
@@ -1093,12 +1137,15 @@ type StaleProfile struct {
 	ProfileID string
 }
 
-// GetStaleProfiles returns profiles where stale_at > updated_at.
+// GetStaleProfiles returns profiles where stale_at > updated_at, oldest mark
+// first. A refresh that fails marks its profile again, so a profile that keeps
+// failing moves behind the others instead of taking the whole batch.
 func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id
 		FROM   user_taste_profiles
 		WHERE  stale_at IS NOT NULL AND stale_at > updated_at
+		ORDER  BY stale_at, user_id, profile_id
 		LIMIT  $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get stale profiles: %w", err)
@@ -1116,11 +1163,14 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	return profiles, rows.Err()
 }
 
-// ClearStaleAt resets stale_at to NULL after refreshing a profile.
-func (r *Repo) ClearStaleAt(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE user_taste_profiles SET stale_at = NULL WHERE user_id = $1 AND profile_id = $2`,
-		userID, profileID)
+// ClearStaleAt resets stale_at to NULL after a refresh that started reading
+// signals at started. A mark newer than that records a change the refresh may
+// have missed, so it stays for the stale sweep.
+func (r *Repo) ClearStaleAt(ctx context.Context, userID int, profileID string, started time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_taste_profiles SET stale_at = NULL
+		WHERE  user_id = $1 AND profile_id = $2 AND stale_at <= $3`,
+		userID, profileID, started)
 	if err != nil {
 		return fmt.Errorf("clear stale_at: %w", err)
 	}
@@ -1692,6 +1742,40 @@ func (r *Repo) ListCacheRefreshCandidates(ctx context.Context) ([]StaleProfile, 
 		return nil, fmt.Errorf("list cache refresh candidates: %w", err)
 	}
 	return candidates, nil
+}
+
+// HasSignalRows reports whether the profile has a rating or ebook reading
+// progress, the signals that always live in Postgres. With includeStoreTables
+// it also checks the Postgres user store's watch progress, favorites and
+// watchlist tables, which hold those signals unless the user store lives
+// elsewhere.
+func (r *Repo) HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM user_ratings WHERE user_id = $1 AND profile_id = $2)
+		    OR EXISTS (SELECT 1 FROM ebook_reader_progress WHERE user_id = $1 AND profile_id = $2)
+		    OR ($3 AND (
+		           EXISTS (SELECT 1 FROM user_watch_progress WHERE user_id = $1 AND profile_id = $2)
+		        OR EXISTS (SELECT 1 FROM user_favorites WHERE user_id = $1 AND profile_id = $2)
+		        OR EXISTS (SELECT 1 FROM user_watchlist WHERE user_id = $1 AND profile_id = $2)))`,
+		userID, profileID, includeStoreTables).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check signals for user %d profile %s: %w", userID, profileID, err)
+	}
+	return exists, nil
+}
+
+// ListUserIDs returns every account's ID in ascending order.
+func (r *Repo) ListUserIDs(ctx context.Context) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id FROM users ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list user ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("list user ids: %w", err)
+	}
+	return ids, nil
 }
 
 // HasGlobalRecommendationCache reports whether any unexpired global row is

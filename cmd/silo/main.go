@@ -1992,6 +1992,11 @@ func main() {
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		// Catalog merges and splits mark stale the recommendations of the
+		// profiles whose user state they moved.
+		if cfg.Recommendations.Enabled && deps.DB != nil {
+			metadataService.SetRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
 		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
 		// disabled, updated, or uninstalled. The installation-enabled check is
 		// served from the plugins service's in-memory cache (invalidated on the
@@ -2421,7 +2426,7 @@ func main() {
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
-			WithRatingStore(catalog.NewRatingsRepo(deps.DB), recommendations.NewRepo(deps.DB)).
+			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).
 			WithDroppedStore(notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), notificationSystem))
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if compatTerminalRecoveryReady != nil {
@@ -2585,7 +2590,8 @@ func main() {
 			catalog.NewPersonRepository(deps.DB),
 			userStoreProvider,
 			cfg.Recommendations,
-		).WithUnratedContentPolicy(unratedContent)
+		).WithUnratedContentPolicy(unratedContent).
+			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -2603,6 +2609,11 @@ func main() {
 		} else {
 			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB))
 			deps.RecWorker = recWorker
+			// Watch-provider syncs rebuild a profile's recommendations once
+			// per run that imported something.
+			if watchProviderService != nil {
+				watchProviderService.WithSignalsChangedNotifier(recWorker)
+			}
 		}
 	}
 
@@ -3140,7 +3151,11 @@ func main() {
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)
 		historyResolver := watchstate.NewStableIdentityResolver(nil, reconcileEpisodeRepo, reconcileProviderIDRepo)
 		historyReconciler := watchstate.NewHistoryReconciler(deps.DB, historyResolver)
-		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(metadata.NewProviderIDIntegrityRepairer(deps.DB), historyReconciler))
+		providerIDRepairer := metadata.NewProviderIDIntegrityRepairer(deps.DB)
+		if recWorker != nil {
+			providerIDRepairer.WithRecommendationStaler(recommendations.NewRepo(deps.DB))
+		}
+		taskMgr.Register(tasks.NewRepairProviderIDIntegrityTask(providerIDRepairer, historyReconciler))
 		taskMgr.Register(tasks.NewReconcileWatchHistoryTask(historyReconciler))
 		taskMgr.Register(tasks.NewSyncPodcastFeedsTask(podcastfeed.New(), podcastfeed.NewDBStore(deps.DB)))
 		if audiobookEnricher != nil {

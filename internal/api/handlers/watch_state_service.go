@@ -128,7 +128,7 @@ func (h *ItemsHandler) SetWatchedState(ctx context.Context, userID int, profileI
 		return WatchedStateView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update watched state")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, "", "watched", userStateEventState{
 		Played: boolPtr(played),
 	})

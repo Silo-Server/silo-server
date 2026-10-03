@@ -18,6 +18,16 @@ type fakeSignalRepo struct {
 	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
+
+	// signalRows answers HasSignalRows, which records each call's
+	// includeStoreTables argument.
+	signalRows      bool
+	signalRowsCalls []bool
+}
+
+func (r *fakeSignalRepo) HasSignalRows(_ context.Context, _ int, _ string, includeStoreTables bool) (bool, error) {
+	r.signalRowsCalls = append(r.signalRowsCalls, includeStoreTables)
+	return r.signalRows, nil
 }
 
 func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
@@ -79,9 +89,38 @@ func (p fakeSignalProvider) Close() error {
 type fakeSignalStore struct {
 	userstore.UserStore
 
-	progress []userstore.WatchProgress
-	history  []userstore.WatchHistoryEntry
-	profile  *userstore.Profile
+	progress  []userstore.WatchProgress
+	history   []userstore.WatchHistoryEntry
+	profile   *userstore.Profile
+	favorites []userstore.Favorite
+	watchlist []userstore.WatchlistEntry
+}
+
+func (s *fakeSignalStore) ListFavorites(_ context.Context, profileID string, limit, offset int) ([]userstore.Favorite, error) {
+	var rows []userstore.Favorite
+	for _, f := range s.favorites {
+		if f.ProfileID == profileID {
+			rows = append(rows, f)
+		}
+	}
+	return pageOf(rows, limit, offset), nil
+}
+
+func (s *fakeSignalStore) ListWatchlist(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
+	var rows []userstore.WatchlistEntry
+	for _, w := range s.watchlist {
+		if w.ProfileID == profileID {
+			rows = append(rows, w)
+		}
+	}
+	return pageOf(rows, limit, offset), nil
+}
+
+func pageOf[T any](rows []T, limit, offset int) []T {
+	if offset >= len(rows) {
+		return nil
+	}
+	return rows[offset:min(offset+limit, len(rows))]
 }
 
 func (s *fakeSignalStore) ListProgress(_ context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
@@ -472,5 +511,42 @@ func TestSignalReaderRecentCompletedResolvesTiesAcrossPages(t *testing.T) {
 	}
 	if want := []string{"series-a"}; !slices.Equal(got, want) {
 		t.Fatalf("recent completed = %v, want %v", got, want)
+	}
+}
+
+// On the Postgres user store one query answers; on a store outside Postgres
+// the query covers only ratings and reading progress and the store is asked
+// for the rest.
+func TestSignalReaderHasSignals(t *testing.T) {
+	ctx := t.Context()
+	repo := &fakeSignalRepo{signalRows: true}
+	if has, err := NewSignalReader(repo, fakeSignalProvider{store: &fakeSignalStore{}}).HasSignals(ctx, 7, "p1"); err != nil || !has {
+		t.Fatalf("postgres store with signal rows: has=%v err=%v", has, err)
+	}
+	if len(repo.signalRowsCalls) != 1 || !repo.signalRowsCalls[0] {
+		t.Fatalf("signal row queries = %v, want one including the store tables", repo.signalRowsCalls)
+	}
+
+	for name, tc := range map[string]struct {
+		store *fakeSignalStore
+		want  bool
+	}{
+		"empty":     {&fakeSignalStore{favorites: []userstore.Favorite{{ProfileID: "other", MediaItemID: "m"}}}, false},
+		"favorite":  {&fakeSignalStore{favorites: []userstore.Favorite{{ProfileID: "p1", MediaItemID: "m"}}}, true},
+		"watchlist": {&fakeSignalStore{watchlist: []userstore.WatchlistEntry{{ProfileID: "p1", MediaItemID: "m"}}}, true},
+		"progress":  {&fakeSignalStore{progress: []userstore.WatchProgress{{ProfileID: "p1", MediaItemID: "m", PositionSeconds: 1, DurationSeconds: 100}}}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeSignalRepo{}
+			reader := NewSignalReader(repo, fakeSignalProvider{store: tc.store})
+			reader.storeOutsidePostgres = true
+			has, err := reader.HasSignals(ctx, 7, "p1")
+			if err != nil || has != tc.want {
+				t.Fatalf("has=%v err=%v, want %v", has, err, tc.want)
+			}
+			if len(repo.signalRowsCalls) != 1 || repo.signalRowsCalls[0] {
+				t.Fatalf("signal row queries = %v, want one without the store tables", repo.signalRowsCalls)
+			}
+		})
 	}
 }

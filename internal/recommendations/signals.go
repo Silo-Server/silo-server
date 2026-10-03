@@ -19,6 +19,7 @@ type signalRepo interface {
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
 	ResolveCanonicalItemIDs(ctx context.Context, contentIDs []string) (map[string]string, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
+	HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error)
 }
 
 // SignalReader centralizes profile-scoped recommendation signals. userstore is
@@ -27,6 +28,10 @@ type signalRepo interface {
 type SignalReader struct {
 	repo          signalRepo
 	storeProvider userstore.UserStoreProvider
+	// storeOutsidePostgres marks a user store that keeps watch progress,
+	// favorites and watchlist outside the Postgres tables (the SQLite
+	// backend), so checks that would query those tables ask the store.
+	storeOutsidePostgres bool
 }
 
 func NewSignalReader(repo signalRepo, storeProvider userstore.UserStoreProvider) *SignalReader {
@@ -49,6 +54,46 @@ func (s *SignalReader) storeForUser(ctx context.Context, userID int) (userstore.
 		return nil, false, nil
 	}
 	return store, true, nil
+}
+
+// storeIsSeparate reports whether the profile signals the user store holds
+// live outside the Postgres tables.
+func (s *SignalReader) storeIsSeparate() bool {
+	return s != nil && s.storeProvider != nil && s.storeOutsidePostgres
+}
+
+// HasSignals reports whether the profile has anything a taste profile is
+// built from: a rating, favorite, watchlist entry, or watch or reading
+// progress. It checks existence only, so it stays cheap on every read.
+func (s *SignalReader) HasSignals(ctx context.Context, userID int, profileID string) (bool, error) {
+	separate := s.storeIsSeparate()
+	found, err := s.repo.HasSignalRows(ctx, userID, profileID, !separate)
+	if err != nil || found || !separate {
+		return found, err
+	}
+	store, ok, err := s.storeForUser(ctx, userID)
+	if err != nil || !ok {
+		return false, err
+	}
+	favorites, err := store.ListFavorites(ctx, profileID, 1, 0)
+	if err != nil {
+		return false, fmt.Errorf("list favorites from store: %w", err)
+	}
+	if len(favorites) > 0 {
+		return true, nil
+	}
+	watchlist, err := store.ListWatchlist(ctx, profileID, 1, 0)
+	if err != nil {
+		return false, fmt.Errorf("list watchlist from store: %w", err)
+	}
+	if len(watchlist) > 0 {
+		return true, nil
+	}
+	progress, err := store.ListProgress(ctx, profileID, "all", 1, 0)
+	if err != nil {
+		return false, fmt.Errorf("list progress from store: %w", err)
+	}
+	return len(progress) > 0, nil
 }
 
 func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {

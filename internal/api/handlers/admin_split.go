@@ -47,6 +47,15 @@ type AdminSplitHandler struct {
 	scanner      *scanner.Scanner
 	folderRepo   *catalog.FolderRepository
 	overrideRepo *scanner.MediaIdentityOverrideRepository
+	recsStaler   metadata.RecommendationStaler // may be nil
+}
+
+// SetRecommendationStaler installs what marks recommendations stale after a
+// split moves user state onto its target.
+func (h *AdminSplitHandler) SetRecommendationStaler(staler metadata.RecommendationStaler) {
+	if h != nil {
+		h.recsStaler = staler
+	}
 }
 
 // NewAdminSplitHandler wires the split/merge endpoints. metadataSvc, merger,
@@ -285,6 +294,7 @@ func (h *AdminSplitHandler) SplitAdminItem(ctx context.Context, sourceID string,
 			"history_ambiguous", report.HistoryAmbiguous,
 			"progress_moved", report.ProgressMoved,
 		)
+		metadata.MarkRecommendationsStale(ctx, h.recsStaler, metadata.MovedStateTargets(report, target.contentID, episodePairs)...)
 		h.runPostSplitFollowUps(sourceID, target, moved)
 	}
 

@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -41,6 +42,17 @@ type Engine struct {
 func (e *Engine) WithUnratedContentPolicy(policy access.UnratedContentPolicy) *Engine {
 	if e != nil {
 		e.unrated = policy
+	}
+	return e
+}
+
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the engine. The nightly taste job then finds those profiles through
+// the store, and signal checks read the store instead of the Postgres tables.
+func (e *Engine) WithUserStoreOutsidePostgres(outside bool) *Engine {
+	if e != nil && e.signals != nil {
+		e.signals.storeOutsidePostgres = outside
 	}
 	return e
 }
@@ -143,6 +155,29 @@ func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID 
 		filter.AllowedLibraryIDs = append([]int(nil), profile.AllowedLibraryIDs...)
 	}
 	return filter
+}
+
+// storeProfiles lists the IDs of an account's profiles from the user store.
+func (e *Engine) storeProfiles(ctx context.Context, userID int) ([]string, error) {
+	if e.storeProvider == nil {
+		return nil, nil
+	}
+	store, err := e.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store for user %d: %w", userID, err)
+	}
+	if store == nil {
+		return nil, nil
+	}
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list profiles for user %d: %w", userID, err)
+	}
+	ids := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		ids = append(ids, p.ID)
+	}
+	return ids, nil
 }
 
 func scoredItemIDsFromSet(set map[string]struct{}) []string {

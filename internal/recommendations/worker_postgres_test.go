@@ -11,7 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	taskrepository "github.com/Silo-Server/silo-server/internal/taskmanager/repository"
+	"github.com/Silo-Server/silo-server/internal/userdb"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Two workers on separate pools stand in for two API servers sharing one
@@ -147,7 +150,7 @@ func TestListCacheRefreshCandidatesOldestFirstPostgres(t *testing.T) {
 
 	repo := NewRepo(pool)
 	for _, profile := range []string{"recent", "never", "old"} {
-		if err := repo.UpsertTasteProfile(ctx, userID, profile, make([]float32, dims), map[string]int{}, ""); err != nil {
+		if err := repo.UpsertTasteProfile(ctx, userID, profile, make([]float32, dims), map[string]int{}, "", time.Now()); err != nil {
 			t.Fatalf("seed taste profile %s: %v", profile, err)
 		}
 	}
@@ -268,5 +271,60 @@ func TestExtendGlobalRecommendationCachePostgres(t *testing.T) {
 	}
 	if got := expiry(&userID, base+"p_a"); !got.Equal(soon) {
 		t.Fatalf("account row extended to %v", got)
+	}
+}
+
+// On a user store outside Postgres, the nightly taste job finds profiles
+// whose only signals live in the store, and skips the store's profiles with
+// none. On the Postgres store its subject query alone decides.
+func TestTasteProfileSubjectsReadTheSQLiteStorePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		"taste-subjects-"+uuid.NewString()).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID) })
+
+	provider := userdb.NewSQLiteProvider(userdb.NewUserDBPool(userdb.PoolConfig{DataDir: t.TempDir()}))
+	t.Cleanup(func() { _ = provider.Close() })
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"with-signals", "empty"} {
+		if err := store.CreateProfile(ctx, userstore.Profile{ID: id, Name: id}); err != nil {
+			t.Fatalf("create profile %s: %v", id, err)
+		}
+	}
+	if err := store.AddFavorite(ctx, "with-signals", "movie-only-in-sqlite"); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(pool, nil, nil, nil, provider, config.RecommendationsConfig{})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	subjectsOf := func() []string {
+		t.Helper()
+		subjects, failed, err := w.tasteProfileSubjects(ctx)
+		if err != nil || failed != 0 {
+			t.Fatalf("list subjects: failed=%d err=%v", failed, err)
+		}
+		var profiles []string
+		for _, s := range subjects {
+			if s.UserID == userID {
+				profiles = append(profiles, s.ProfileID)
+			}
+		}
+		return profiles
+	}
+
+	if got := subjectsOf(); len(got) != 0 {
+		t.Fatalf("subjects on the Postgres store = %v, want none: the SQLite rows are invisible to the query", got)
+	}
+	engine.WithUserStoreOutsidePostgres(true)
+	if got := subjectsOf(); len(got) != 1 || got[0] != "with-signals" {
+		t.Fatalf("subjects on the SQLite store = %v, want [with-signals]", got)
 	}
 }

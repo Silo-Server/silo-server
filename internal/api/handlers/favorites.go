@@ -34,17 +34,16 @@ type LocalListEventDispatcher interface {
 
 // PersonalDataHandler handles favorites, watchlist, and history endpoints.
 type PersonalDataHandler struct {
-	storeProvider           userstore.UserStoreProvider
-	itemRepo                personalDataItemRepository
-	episodeRepo             *catalog.EpisodeRepository
-	seasonRepo              *catalog.SeasonRepository
-	detailSvc               *catalog.DetailService
-	EventsHub               *evt.Hub
-	localListDispatcher     LocalListEventDispatcher
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	ebookProgressStore      EbookReaderProgressLister
-	watchlistTitles         *watchlist.Titles
+	storeProvider       userstore.UserStoreProvider
+	itemRepo            personalDataItemRepository
+	episodeRepo         *catalog.EpisodeRepository
+	seasonRepo          *catalog.SeasonRepository
+	detailSvc           *catalog.DetailService
+	EventsHub           *evt.Hub
+	localListDispatcher LocalListEventDispatcher
+	signalsNotifier     SignalsChangedNotifier
+	ebookProgressStore  EbookReaderProgressLister
+	watchlistTitles     *watchlist.Titles
 }
 
 // NewPersonalDataHandler creates a new PersonalDataHandler.
@@ -64,14 +63,10 @@ func (h *PersonalDataHandler) SetEbookReaderProgressStore(store EbookReaderProgr
 	h.ebookProgressStore = store
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *PersonalDataHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *PersonalDataHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *PersonalDataHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *PersonalDataHandler) SetEpisodeRepo(repo *catalog.EpisodeRepository) {
@@ -244,7 +239,7 @@ func (h *PersonalDataHandler) AddFavorite(ctx context.Context, viewer PersonalLi
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add favorite")
 	}
 	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
 	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
 		IsFavorite: boolPtr(true),
 	})
@@ -264,7 +259,7 @@ func (h *PersonalDataHandler) RemoveFavorite(ctx context.Context, viewer Persona
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove favorite")
 	}
 	h.dispatchLocalListEvent(ctx, watchsync.ListKindFavorites, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
 	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "favorite", userStateEventState{
 		IsFavorite: boolPtr(false),
 	})
@@ -493,7 +488,7 @@ func (h *PersonalDataHandler) AddToWatchlist(ctx context.Context, viewer Persona
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add to watchlist")
 	}
 	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeAdded, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
 	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
 		InWatchlist: boolPtr(true),
 	})
@@ -513,7 +508,7 @@ func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer Pe
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove from watchlist")
 	}
 	h.dispatchLocalListEvent(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer.UserID, viewer.ProfileID, itemID)
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, viewer.UserID, viewer.ProfileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, viewer.UserID, viewer.ProfileID)
 	publishUserStateEvent(ctx, h.EventsHub, viewer.UserID, viewer.ProfileID, itemID, "", "watchlist", userStateEventState{
 		InWatchlist: boolPtr(false),
 	})
@@ -747,7 +742,7 @@ func (h *PersonalDataHandler) RemoveHistory(ctx context.Context, userID int, pro
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove history")
 	}
 
-	triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	for _, mediaItemID := range mediaItemIDs {
 		publishUserStateEvent(
 			ctx,

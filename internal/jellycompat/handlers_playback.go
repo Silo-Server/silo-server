@@ -316,8 +316,7 @@ type PlaybackHandler struct {
 	ScopeResolver           ScopeResolver
 	NodePlanner             nodepool.SessionPlanner
 	JWTSecret               string
-	profileStaler           profileStaler
-	profileRefreshRequester profileRefreshRequester
+	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string

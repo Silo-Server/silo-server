@@ -92,6 +92,13 @@ type Report struct {
 	AmbiguousHistory []AmbiguousHistoryRow `json:"ambiguous_history,omitempty"`
 }
 
+// MovedUserState reports whether the run moved any watch progress, history
+// or item-level intent (favorites, watchlist, ratings, ...), the state a
+// profile's recommendations are built from. A nil report moved nothing.
+func (r *Report) MovedUserState() bool {
+	return r != nil && r.ProgressMoved+r.ProgressConflicts+r.HistoryMoved+r.IntentMoved > 0
+}
+
 // AmbiguousHistoryRow identifies one history row left behind for lack of
 // decisive evidence.
 type AmbiguousHistoryRow struct {

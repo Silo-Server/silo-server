@@ -31,7 +31,24 @@ const (
 
 	staleSweepInterval = 5 * time.Minute
 	staleSweepBatch    = 50
+
+	// profileRefreshTimeout bounds one profile's refresh.
+	profileRefreshTimeout = 2 * time.Minute
+	// staleMarkTimeout bounds marking a profile stale after its refresh
+	// failed, which may happen after the refresh's own deadline passed.
+	staleMarkTimeout = 10 * time.Second
+	// readRefreshInterval spaces the refreshes that reads request for one
+	// profile on one server. A read cannot tell a row that was never built
+	// from one that came out empty, so without it every page load of such a
+	// profile would queue another rebuild.
+	readRefreshInterval = 15 * time.Minute
 )
+
+// profileStaleMarker marks a profile's taste profile stale. *Repo implements
+// it.
+type profileStaleMarker interface {
+	MarkProfileStale(ctx context.Context, userID int, profileID string) error
+}
 
 // Worker runs scheduled recommendation jobs.
 type Worker struct {
@@ -39,10 +56,12 @@ type Worker struct {
 	cron                  *cron.Cron
 	locker                jobLocker
 	history               JobHistory
+	staleMarker           profileStaleMarker
 	mu                    sync.Mutex
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
+	readRefreshes         refreshThrottle
 	cancelFunc            context.CancelFunc
 	embeddingsJobTimeout  time.Duration
 }
@@ -69,6 +88,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		engine:                engine,
 		cron:                  cron.New(),
 		locker:                pgJobLocker{pool: engine.pool},
+		staleMarker:           engine.repo,
 		running:               make(map[JobName]bool),
 		profileRefreshCh:      make(chan profileRefreshRequest, 256),
 		profileRefreshPending: make(map[string]struct{}),
@@ -212,6 +232,43 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 	}
 }
 
+// NotifySignalsChanged records that a profile's recommendation signals
+// changed: a rating, favorite, watchlist entry, watch progress or history. It
+// marks the taste profile stale, which the stale sweep on any server picks up,
+// then queues a refresh on this server. Call it once per change event or
+// import run, not once per record. It does nothing on a nil Worker, which is
+// what callers hold when recommendations are disabled.
+func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	if w == nil || userID <= 0 || profileID == "" {
+		return
+	}
+	w.markProfileStale(ctx, userID, profileID)
+	w.RequestProfileRefresh(ctx, userID, profileID)
+}
+
+// RequestReadRefresh queues a refresh for a profile whose cached rows a read
+// found missing, at most once per readRefreshInterval per profile on this
+// server. Signal changes go through NotifySignalsChanged, which is not
+// throttled.
+func (w *Worker) RequestReadRefresh(ctx context.Context, userID int, profileID string) {
+	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
+		return
+	}
+	if !w.readRefreshes.allow(profileRefreshKey(userID, profileID), readRefreshInterval) {
+		return
+	}
+	w.RequestProfileRefresh(ctx, userID, profileID)
+}
+
+func (w *Worker) markProfileStale(ctx context.Context, userID int, profileID string) {
+	if w.staleMarker == nil {
+		return
+	}
+	if err := w.staleMarker.MarkProfileStale(ctx, userID, profileID); err != nil {
+		slog.WarnContext(ctx, "marking taste profile stale failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+	}
+}
+
 // StatusCounts returns counts used by the admin status endpoint.
 func (w *Worker) StatusCounts(ctx context.Context) (embedded, totalItems, tasteProfiles, cacheEntries, cowatchPairs int, err error) {
 	repo := w.engine.repo
@@ -261,25 +318,10 @@ func (r tasteProfilesResult) failures() int { return r.Failed }
 
 func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, error) {
 	var res tasteProfilesResult
-	// Read every subject before refreshing, so the query's connection is not
-	// held for the whole job.
-	rows, err := w.engine.pool.Query(ctx, tasteProfileRefreshSubjectsQuery)
+	subjects, failed, err := w.tasteProfileSubjects(ctx)
+	res.Failed += failed
 	if err != nil {
-		return res, fmt.Errorf("list taste profile subjects: %w", err)
-	}
-	var subjects []StaleProfile
-	for rows.Next() {
-		var s StaleProfile
-		if err := rows.Scan(&s.UserID, &s.ProfileID); err != nil {
-			res.Failed++
-			slog.WarnContext(ctx, "reading a taste profile subject failed", "component", "recommendations", "error", err)
-			continue
-		}
-		subjects = append(subjects, s)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return res, fmt.Errorf("list taste profile subjects: %w", err)
+		return res, err
 	}
 
 	res.Profiles = len(subjects)
@@ -304,6 +346,72 @@ func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, erro
 		slog.WarnContext(ctx, "taste profile job wrote no profiles; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
 	}
 	return res, nil
+}
+
+// tasteProfileSubjects lists the profiles the taste job refreshes: those with
+// a taste profile or any signal. failed counts subjects that could not be
+// read.
+func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProfile, failed int, err error) {
+	// Read every subject before refreshing, so the query's connection is not
+	// held for the whole job.
+	rows, err := w.engine.pool.Query(ctx, tasteProfileRefreshSubjectsQuery)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list taste profile subjects: %w", err)
+	}
+	seen := make(map[StaleProfile]struct{})
+	for rows.Next() {
+		var s StaleProfile
+		if err := rows.Scan(&s.UserID, &s.ProfileID); err != nil {
+			failed++
+			slog.WarnContext(ctx, "reading a taste profile subject failed", "component", "recommendations", "error", err)
+			continue
+		}
+		seen[s] = struct{}{}
+		subjects = append(subjects, s)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, failed, fmt.Errorf("list taste profile subjects: %w", err)
+	}
+	if !w.engine.signalReader().storeIsSeparate() {
+		return subjects, failed, nil
+	}
+
+	// The query above sees ratings and taste profiles, but a user store
+	// outside Postgres holds the progress, favorites and watchlist. Ask it
+	// for every account's profiles that have signals.
+	userIDs, err := w.engine.repo.ListUserIDs(ctx)
+	if err != nil {
+		return nil, failed, fmt.Errorf("list taste profile subjects: %w", err)
+	}
+	for _, userID := range userIDs {
+		if err := ctx.Err(); err != nil {
+			return nil, failed, fmt.Errorf("list taste profile subjects: %w", err)
+		}
+		profiles, err := w.engine.storeProfiles(ctx, userID)
+		if err != nil {
+			failed++
+			slog.WarnContext(ctx, "listing an account's profiles for the taste job failed", "component", "recommendations", "user_id", userID, "error", err)
+			continue
+		}
+		for _, profileID := range profiles {
+			s := StaleProfile{UserID: userID, ProfileID: profileID}
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			has, err := w.engine.signalReader().HasSignals(ctx, userID, profileID)
+			if err != nil {
+				failed++
+				slog.WarnContext(ctx, "checking a profile's signals for the taste job failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+				continue
+			}
+			if has {
+				seen[s] = struct{}{}
+				subjects = append(subjects, s)
+			}
+		}
+	}
+	return subjects, failed, nil
 }
 
 type cowatchResult struct {
@@ -641,25 +749,39 @@ func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID st
 	}
 }
 
-// refreshProfile rebuilds one profile's taste profile and cached rows. It
-// clears the profile's stale mark only when every step succeeded.
+// refreshProfile rebuilds one profile's taste profile and cached rows. When
+// every step succeeds it clears the stale marks set before the refresh
+// started; a mark set while it ran stays for the stale sweep. When a step
+// fails it marks the profile stale again, so the sweep retries it.
 func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) (runErr error) {
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
 	defer workmetrics.Profile(ctx)()
 	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
-	refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer func() {
+		if runErr == nil {
+			return
+		}
+		// The rebuild may have stored the taste profile, consuming the mark
+		// that queued this refresh, before a later step failed.
+		markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+		defer cancel()
+		w.markProfileStale(markCtx, userID, profileID)
+	}()
+	refreshCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
 	defer cancel()
 
-	start := time.Now()
-	if err := w.engine.RefreshTasteProfile(refreshCtx, userID, profileID); err != nil {
+	repo := w.engine.repo
+	started, err := repo.Now(refreshCtx)
+	if err != nil {
+		return err
+	}
+	if _, err := w.engine.rebuildTasteProfile(refreshCtx, userID, profileID, started); err != nil {
 		return fmt.Errorf("refresh taste profile: %w", err)
 	}
-
-	repo := w.engine.repo
-	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(start)); built.failed > 0 {
+	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(started)); built.failed > 0 {
 		return fmt.Errorf("rebuild recommendation cache: %d steps failed", built.failed)
 	}
-	if err := repo.ClearStaleAt(refreshCtx, userID, profileID); err != nil {
+	if err := repo.ClearStaleAt(refreshCtx, userID, profileID, started); err != nil {
 		slog.WarnContext(ctx, "failed to clear stale profile marker", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
 	return nil
@@ -685,4 +807,41 @@ func (w *Worker) clearProfileRefreshPending(key string) {
 
 func profileRefreshKey(userID int, profileID string) string {
 	return fmt.Sprintf("%d:%s", userID, profileID)
+}
+
+// refreshThrottle lets each key through at most once per interval. The zero
+// value is ready to use.
+type refreshThrottle struct {
+	mu        sync.Mutex
+	now       func() time.Time // nil means time.Now
+	last      map[string]time.Time
+	lastPrune time.Time
+}
+
+// allow reports whether key may go ahead now, and records it when it may.
+func (t *refreshThrottle) allow(key string, interval time.Duration) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	if t.now != nil {
+		now = t.now()
+	}
+	if t.last == nil {
+		t.last = make(map[string]time.Time)
+	}
+	// Forget expired keys once per interval, so the map holds only the
+	// profiles let through recently.
+	if now.Sub(t.lastPrune) >= interval {
+		for k, at := range t.last {
+			if now.Sub(at) >= interval {
+				delete(t.last, k)
+			}
+		}
+		t.lastPrune = now
+	}
+	if at, ok := t.last[key]; ok && now.Sub(at) < interval {
+		return false
+	}
+	t.last[key] = now
+	return true
 }
