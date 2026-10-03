@@ -23,10 +23,22 @@ const (
 	JobRecommendations JobName = "recommendations"
 )
 
+const (
+	tasteProfilesJobTimeout = 20 * time.Minute
+	cowatchJobTimeout       = 30 * time.Minute
+	cacheJobTimeout         = 45 * time.Minute
+	globalRowsJobTimeout    = 10 * time.Minute
+
+	staleSweepInterval = 5 * time.Minute
+	staleSweepBatch    = 50
+)
+
 // Worker runs scheduled recommendation jobs.
 type Worker struct {
 	engine                *Engine
 	cron                  *cron.Cron
+	locker                jobLocker
+	history               JobHistory
 	mu                    sync.Mutex
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
@@ -56,23 +68,26 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 	w := &Worker{
 		engine:                engine,
 		cron:                  cron.New(),
+		locker:                pgJobLocker{pool: engine.pool},
 		running:               make(map[JobName]bool),
 		profileRefreshCh:      make(chan profileRefreshRequest, 256),
 		profileRefreshPending: make(map[string]struct{}),
 		embeddingsJobTimeout:  embeddingsJobTimeout,
 	}
 
-	if _, err := w.cron.AddFunc(embeddingsCron, w.runEmbeddings); err != nil {
-		return nil, err
-	}
-	if _, err := w.cron.AddFunc(tasteProfilesCron, w.runTasteProfiles); err != nil {
-		return nil, err
-	}
-	if _, err := w.cron.AddFunc(cowatchCron, w.runCowatch); err != nil {
-		return nil, err
-	}
-	if _, err := w.cron.AddFunc(recommendationsCron, w.runRecommendations); err != nil {
-		return nil, err
+	for _, schedule := range []struct {
+		spec string
+		name JobName
+	}{
+		{embeddingsCron, JobEmbeddings},
+		{tasteProfilesCron, JobTasteProfiles},
+		{cowatchCron, JobCowatch},
+		{recommendationsCron, JobRecommendations},
+	} {
+		name := schedule.name
+		if _, err := w.cron.AddFunc(schedule.spec, func() { w.runScheduled(name) }); err != nil {
+			return nil, err
+		}
 	}
 
 	return w, nil
@@ -86,6 +101,7 @@ func (w *Worker) Start() {
 	w.cancelFunc = cancel
 	go w.profileRefreshLoop(ctx)
 	go w.stalenessLoop(ctx)
+	go w.ensureGlobalRows(ctx, w.engine.repo)
 
 	slog.Info("recommendation worker started")
 }
@@ -124,63 +140,49 @@ func (w *Worker) tryStart(name JobName) bool {
 	return true
 }
 
-// TriggerEmbeddings starts an embedding job if one is not already running.
+// jobFor returns the scheduled body of the named job.
+func (w *Worker) jobFor(name JobName) job {
+	switch name {
+	case JobEmbeddings:
+		return job{name: name, timeout: w.embeddingsJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doEmbeddings(ctx) }}
+	case JobTasteProfiles:
+		return job{name: name, timeout: tasteProfilesJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doTasteProfiles(ctx) }}
+	case JobCowatch:
+		return job{name: name, timeout: cowatchJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doCowatch(ctx) }}
+	default:
+		return job{name: JobRecommendations, timeout: cacheJobTimeout, run: func(ctx context.Context) (jobResult, error) { return w.doRecommendations(ctx) }}
+	}
+}
+
+// TriggerEmbeddings starts an embedding job unless one is already running on
+// this server or another.
 func (w *Worker) TriggerEmbeddings() error {
-	if !w.tryStart(JobEmbeddings) {
-		return fmt.Errorf("embeddings job is already running")
-	}
-	go func() {
-		defer w.setRunning(JobEmbeddings, false)
-		ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
-		defer cancel()
-		slog.Info("starting embedding job (manual trigger)", "timeout", w.embeddingsJobTimeout)
-		ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
-		defer workmetrics.Profile(ctx)()
-		count, err := w.engine.EmbedAll(ctx)
-		observation.Finish(telemetry.Outcome(err))
-		if err != nil {
-			slog.Error("embedding job failed", "error", err, "embedded", count)
-			return
-		}
-		slog.Info("embedding job completed", "embedded", count)
-	}()
-	return nil
+	return w.runJob(w.jobFor(JobEmbeddings), true)
 }
 
-// TriggerTasteProfiles starts a taste profile refresh if one is not already running.
+// TriggerTasteProfiles starts a taste profile refresh unless one is already
+// running on this server or another.
 func (w *Worker) TriggerTasteProfiles() error {
-	if !w.tryStart(JobTasteProfiles) {
-		return fmt.Errorf("taste profiles job is already running")
-	}
-	go func() {
-		defer w.setRunning(JobTasteProfiles, false)
-		w.doTasteProfiles()
-	}()
-	return nil
+	return w.runJob(w.jobFor(JobTasteProfiles), true)
 }
 
-// TriggerCowatch starts a co-watch matrix computation if one is not already running.
+// TriggerCowatch starts a co-watch matrix computation unless one is already
+// running on this server or another.
 func (w *Worker) TriggerCowatch() error {
-	if !w.tryStart(JobCowatch) {
-		return fmt.Errorf("cowatch job is already running")
-	}
-	go func() {
-		defer w.setRunning(JobCowatch, false)
-		w.doCowatch()
-	}()
-	return nil
+	return w.runJob(w.jobFor(JobCowatch), true)
 }
 
-// TriggerRecommendations starts a recommendation cache refresh if one is not already running.
+// TriggerRecommendations starts a recommendation cache refresh unless one is
+// already running on this server or another.
 func (w *Worker) TriggerRecommendations() error {
-	if !w.tryStart(JobRecommendations) {
-		return fmt.Errorf("recommendations job is already running")
+	return w.runJob(w.jobFor(JobRecommendations), true)
+}
+
+// RunEmbeddingsNow triggers an immediate embedding run (for first-run setup).
+func (w *Worker) RunEmbeddingsNow() {
+	if err := w.TriggerEmbeddings(); err != nil {
+		slog.Info("initial embedding run not started", "component", "recommendations", "reason", err)
 	}
-	go func() {
-		defer w.setRunning(JobRecommendations, false)
-		w.doRecommendations()
-	}()
-	return nil
 }
 
 type profileRefreshRequest struct {
@@ -196,18 +198,12 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
-
-	w.mu.Lock()
-	if _, exists := w.profileRefreshPending[key]; exists {
-		w.mu.Unlock()
+	if !w.claimProfileRefresh(key) {
 		return
 	}
-	w.profileRefreshPending[key] = struct{}{}
-	ch := w.profileRefreshCh
-	w.mu.Unlock()
 
 	select {
-	case ch <- req:
+	case w.profileRefreshCh <- req:
 	case <-ctx.Done():
 		w.clearProfileRefreshPending(key)
 	case <-time.After(10 * time.Millisecond):
@@ -218,7 +214,7 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 
 // StatusCounts returns counts used by the admin status endpoint.
 func (w *Worker) StatusCounts(ctx context.Context) (embedded, totalItems, tasteProfiles, cacheEntries, cowatchPairs int, err error) {
-	repo := NewRepo(w.engine.pool)
+	repo := w.engine.repo
 
 	embedded, err = repo.EmbeddingCount(ctx)
 	if err != nil {
@@ -240,253 +236,340 @@ func (w *Worker) StatusCounts(ctx context.Context) (embedded, totalItems, tasteP
 	return
 }
 
-func (w *Worker) runEmbeddings() {
-	if !w.tryStart(JobEmbeddings) {
-		slog.Warn("embedding job already running, skipping scheduled run")
-		return
-	}
-	defer w.setRunning(JobEmbeddings, false)
+type embeddingsResult struct {
+	Embedded int `json:"embedded"`
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
-	defer cancel()
-	slog.Info("starting embedding job", "timeout", w.embeddingsJobTimeout)
-	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
-	defer workmetrics.Profile(ctx)()
+func (embeddingsResult) failures() int { return 0 }
+
+func (w *Worker) doEmbeddings(ctx context.Context) (embeddingsResult, error) {
 	count, err := w.engine.EmbedAll(ctx)
-	observation.Finish(telemetry.Outcome(err))
-	if err != nil {
-		slog.Error("embedding job failed", "error", err, "embedded", count)
-		return
-	}
-	slog.Info("embedding job completed", "embedded", count)
+	return embeddingsResult{Embedded: count}, err
 }
 
-func (w *Worker) runTasteProfiles() {
-	if !w.tryStart(JobTasteProfiles) {
-		slog.Warn("taste profile job already running, skipping scheduled run")
-		return
-	}
-	defer w.setRunning(JobTasteProfiles, false)
-	w.doTasteProfiles()
+type tasteProfilesResult struct {
+	Profiles  int `json:"profiles"`
+	Refreshed int `json:"refreshed"`
+	// NoOp counts profiles whose refresh wrote nothing: no signals, or none
+	// of their titles has an embedding yet.
+	NoOp      int `json:"no_op"`
+	Failed    int `json:"failed"`
+	Remaining int `json:"remaining"`
 }
 
-func (w *Worker) runCowatch() {
-	if !w.tryStart(JobCowatch) {
-		slog.Warn("cowatch job already running, skipping scheduled run")
-		return
-	}
-	defer w.setRunning(JobCowatch, false)
-	w.doCowatch()
-}
+func (r tasteProfilesResult) failures() int { return r.Failed }
 
-func (w *Worker) runRecommendations() {
-	if !w.tryStart(JobRecommendations) {
-		slog.Warn("recommendations job already running, skipping scheduled run")
-		return
-	}
-	defer w.setRunning(JobRecommendations, false)
-	w.doRecommendations()
-}
-
-func (w *Worker) doTasteProfiles() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
-	slog.Info("starting taste profile refresh")
-
+func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, error) {
+	var res tasteProfilesResult
+	// Read every subject before refreshing, so the query's connection is not
+	// held for the whole job.
 	rows, err := w.engine.pool.Query(ctx, tasteProfileRefreshSubjectsQuery)
 	if err != nil {
-		slog.Error("taste profile query failed", "error", err)
-		return
+		return res, fmt.Errorf("list taste profile subjects: %w", err)
 	}
-	defer rows.Close()
-
-	var refreshed int
+	var subjects []StaleProfile
 	for rows.Next() {
-		var userID int
-		var profileID string
-		if err := rows.Scan(&userID, &profileID); err != nil {
+		var s StaleProfile
+		if err := rows.Scan(&s.UserID, &s.ProfileID); err != nil {
+			res.Failed++
+			slog.WarnContext(ctx, "reading a taste profile subject failed", "component", "recommendations", "error", err)
 			continue
 		}
-		if err := w.engine.RefreshTasteProfile(ctx, userID, profileID); err != nil {
-			slog.Error("taste profile refresh failed", "user_id", userID, "profile_id", profileID, "error", err)
-			continue
-		}
-		refreshed++
+		subjects = append(subjects, s)
 	}
-	slog.Info("taste profile refresh completed", "refreshed", refreshed)
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return res, fmt.Errorf("list taste profile subjects: %w", err)
+	}
+
+	res.Profiles = len(subjects)
+	for i, s := range subjects {
+		if err := ctx.Err(); err != nil {
+			res.Remaining = len(subjects) - i
+			slog.WarnContext(ctx, "taste profile job ran out of time", "component", "recommendations", "processed", i, "remaining", res.Remaining)
+			return res, fmt.Errorf("taste profile refresh stopped after %d of %d profiles: %w", i, len(subjects), err)
+		}
+		written, err := w.engine.refreshTasteProfile(ctx, s.UserID, s.ProfileID)
+		switch {
+		case err != nil:
+			res.Failed++
+			slog.WarnContext(ctx, "taste profile refresh failed", "component", "recommendations", "user_id", s.UserID, "profile_id", s.ProfileID, "error", err)
+		case written:
+			res.Refreshed++
+		default:
+			res.NoOp++
+		}
+	}
+	if res.Refreshed == 0 && res.NoOp > 0 {
+		slog.WarnContext(ctx, "taste profile job wrote no profiles; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
+	}
+	return res, nil
 }
 
-func (w *Worker) doCowatch() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	slog.Info("starting co-watch matrix computation")
+type cowatchResult struct {
+	Items int `json:"items"`
+	Pairs int `json:"pairs"`
+}
 
-	repo := NewRepo(w.engine.pool)
+func (cowatchResult) failures() int { return 0 }
+
+func (w *Worker) doCowatch(ctx context.Context) (cowatchResult, error) {
+	var res cowatchResult
+	repo := w.engine.repo
 	watchers, err := repo.GetItemWatchers(ctx, DefaultMinWatchers, DefaultMaxWatchesPerUser)
 	if err != nil {
-		slog.Error("co-watch: failed to get item watchers", "error", err)
-		return
+		return res, fmt.Errorf("get item watchers: %w", err)
 	}
-
+	res.Items = len(watchers)
 	if len(watchers) == 0 {
-		slog.Info("co-watch: no items with enough watchers, skipping")
-		return
+		return res, nil
 	}
 
 	pairs := computeCowatchMatrix(watchers, DefaultMinWatchers, DefaultMinShared, DefaultTopN)
-	if len(pairs) == 0 {
-		slog.Info("co-watch: no pairs met threshold")
-		return
-	}
 
 	// Batch insert in chunks of 1000.
 	const batchSize = 1000
 	for i := 0; i < len(pairs); i += batchSize {
-		end := i + batchSize
-		if end > len(pairs) {
-			end = len(pairs)
-		}
+		end := min(i+batchSize, len(pairs))
 		if err := repo.UpsertCowatchPairs(ctx, pairs[i:end]); err != nil {
-			slog.Error("co-watch: failed to upsert pairs", "error", err, "batch_start", i)
+			return res, fmt.Errorf("upsert co-watch pairs from %d: %w", i, err)
+		}
+		res.Pairs = end
+	}
+	return res, nil
+}
+
+type cacheResult struct {
+	// GlobalOnly marks the startup run that builds only the global rows.
+	GlobalOnly     bool  `json:"global_only,omitempty"`
+	Cleaned        int64 `json:"cleaned"`
+	CleanFailed    bool  `json:"clean_failed,omitempty"`
+	GlobalRows     int   `json:"global_rows"`
+	GlobalFailures int   `json:"global_failures"`
+	Profiles       int   `json:"profiles"`
+	Processed      int   `json:"processed"`
+	Remaining      int   `json:"remaining"`
+	CachedRows     int   `json:"cached_rows"`
+	FailedProfiles int   `json:"failed_profiles"`
+	BuildErrors    int   `json:"build_errors"`
+}
+
+func (r cacheResult) failures() int {
+	n := r.GlobalFailures + r.BuildErrors
+	if r.CleanFailed {
+		n++
+	}
+	return n
+}
+
+func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
+	var res cacheResult
+	expires := cacheExpiry(time.Now())
+	repo := w.engine.repo
+
+	cleaned, err := repo.CleanExpiredCache(ctx)
+	if err != nil {
+		res.CleanFailed = true
+		slog.WarnContext(ctx, "cleaning expired recommendation cache failed", "component", "recommendations", "error", err)
+	}
+	res.Cleaned = cleaned
+
+	res.GlobalRows, res.GlobalFailures = w.cacheGlobalRows(ctx, repo, expires)
+
+	// Least recently cached first, so a run that runs out of time leaves the
+	// profiles refreshed most recently for last.
+	profiles, err := repo.ListCacheRefreshCandidates(ctx)
+	if err != nil {
+		return res, fmt.Errorf("list profiles to cache: %w", err)
+	}
+	res.Profiles = len(profiles)
+
+	for i, p := range profiles {
+		if err := ctx.Err(); err != nil {
+			res.Remaining = len(profiles) - i
+			slog.WarnContext(ctx, "recommendation cache job ran out of time", "component", "recommendations", "processed", i, "remaining", res.Remaining)
+			return res, fmt.Errorf("cache refresh stopped after %d of %d profiles: %w", i, len(profiles), err)
+		}
+		built := w.cacheUserRows(ctx, repo, p.UserID, p.ProfileID, expires)
+		res.Processed++
+		res.CachedRows += built.cached
+		res.BuildErrors += built.failed
+		if built.failed > 0 {
+			res.FailedProfiles++
+		}
+	}
+	return res, nil
+}
+
+// globalRowStore is the part of Repo that builds and caches the global rows.
+type globalRowStore interface {
+	GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
+	GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
+	GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]ScoredItem, error)
+	GetTopGenres(ctx context.Context, limit int) ([]string, error)
+	GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error)
+	UpsertRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string, items []ScoredItem, expiresAt string) error
+	ExtendGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, expiresAt string) (int64, error)
+}
+
+// cacheGlobalRows generates and caches non-personalized rows. A row whose
+// query or write fails keeps its previously cached version until the new
+// rows' expiry, so one failed run does not empty it.
+func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expires string) (written, failed int) {
+	// keep extends the cached rows of recType (every type starting with it
+	// when prefix is set) after their rebuild failed with cause.
+	keep := func(recType string, prefix bool, cause error) {
+		failed++
+		slog.WarnContext(ctx, "building global recommendation row failed; keeping the cached row", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", cause)
+		if _, err := store.ExtendGlobalRecommendationCache(ctx, recType, prefix, expires); err != nil {
+			slog.WarnContext(ctx, "extending the cached global recommendation row failed", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", err)
+		}
+	}
+	put := func(recType string, items []ScoredItem, err error) {
+		if err == nil && len(items) == 0 {
 			return
 		}
+		if err == nil {
+			err = store.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, recType, "", items, expires)
+		}
+		if err != nil {
+			keep(recType, false, err)
+			return
+		}
+		written++
 	}
-	slog.Info("co-watch matrix computation completed", "pairs", len(pairs))
+
+	popular, err := store.GetPopularItems(ctx, 30, CacheCandidateLimit)
+	put(RecTypePopular, popular, err)
+	recentlyAdded, err := store.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit)
+	put(RecTypeRecentlyAdded, recentlyAdded, err)
+	topRated, err := store.GetTopRatedItems(ctx, 5, CacheCandidateLimit)
+	put(RecTypeTopRated, topRated, err)
+
+	topGenres, err := store.GetTopGenres(ctx, 8)
+	if err != nil {
+		keep(RecTypeGenreSamplerPrefix, true, err)
+		return written, failed
+	}
+	for _, genre := range topGenres {
+		items, err := store.GetGenreSamplerItems(ctx, genre, CacheCandidateLimit)
+		put(RecTypeGenreSamplerPrefix+genre, items, err)
+	}
+	return written, failed
 }
 
-func (w *Worker) doRecommendations() {
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
-	defer cancel()
-	slog.Info("starting recommendation cache refresh")
+// globalRowCache is a globalRowStore that can tell whether any global row is
+// cached.
+type globalRowCache interface {
+	globalRowStore
+	HasGlobalRecommendationCache(ctx context.Context) (bool, error)
+}
 
-	repo := NewRepo(w.engine.pool)
-	cleaned, _ := repo.CleanExpiredCache(ctx)
-	if cleaned > 0 {
-		slog.Info("cleaned expired cache entries", "count", cleaned)
-	}
-
-	expires := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-
-	// Generate global (non-personalized) cache rows.
-	w.cacheGlobalRows(ctx, repo, expires)
-
-	// Generate per-user cached rows.
-	profiles, err := repo.GetAllUsersWithTasteProfiles(ctx)
+// ensureGlobalRows builds the global rows when none is cached, so cold-start
+// rows exist before the first nightly cache job. It runs under the cache job's
+// claim, so it never overlaps that job on any server.
+func (w *Worker) ensureGlobalRows(ctx context.Context, store globalRowCache) {
+	cached, err := store.HasGlobalRecommendationCache(ctx)
 	if err != nil {
-		slog.Error("recommendation cache query failed", "error", err)
+		slog.WarnContext(ctx, "checking for global recommendation rows failed", "component", "recommendations", "error", err)
 		return
 	}
-
-	var cached int
-	for _, p := range profiles {
-		cached += w.cacheUserRows(ctx, repo, p.UserID, p.ProfileID, expires)
+	if cached {
+		return
 	}
-	slog.Info("recommendation cache refresh completed", "cached_entries", cached)
+	slog.InfoContext(ctx, "no global recommendation rows cached; building them now", "component", "recommendations")
+	err = w.runJob(job{name: JobRecommendations, timeout: globalRowsJobTimeout, run: func(ctx context.Context) (jobResult, error) {
+		res := cacheResult{GlobalOnly: true}
+		res.GlobalRows, res.GlobalFailures = w.cacheGlobalRows(ctx, store, cacheExpiry(time.Now()))
+		return res, nil
+	}}, false)
+	if err != nil {
+		slog.InfoContext(ctx, "global recommendation rows not built at startup", "component", "recommendations", "reason", err)
+	}
 }
 
-// cacheGlobalRows generates and caches non-personalized rows.
-func (w *Worker) cacheGlobalRows(ctx context.Context, repo *Repo, expires string) {
-	popular, _ := repo.GetPopularItems(ctx, 30, CacheCandidateLimit)
-	if len(popular) > 0 {
-		if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypePopular, "", popular, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		}
-	}
-
-	recentlyAdded, _ := repo.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit)
-	if len(recentlyAdded) > 0 {
-		if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "", recentlyAdded, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		}
-	}
-
-	topRated, _ := repo.GetTopRatedItems(ctx, 5, CacheCandidateLimit)
-	if len(topRated) > 0 {
-		if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeTopRated, "", topRated, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		}
-	}
-
-	topGenres, _ := repo.GetTopGenres(ctx, 8)
-	for _, genre := range topGenres {
-		items, _ := repo.GetGenreSamplerItems(ctx, genre, CacheCandidateLimit)
-		if len(items) > 0 {
-			if err := repo.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeGenreSamplerPrefix+genre, "", items, expires); err != nil {
-				slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-			}
-		}
-	}
+// userRowsResult counts one profile's cache build.
+type userRowsResult struct {
+	cached int
+	// failed counts the build steps and cache writes that failed.
+	failed int
 }
 
 // cacheUserRows generates and caches personalized rows for a single user.
-func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, profileID, expires string) int {
-	var cached int
+func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, profileID, expires string) userRowsResult {
+	var res userRowsResult
+	fail := func(step string, err error, attrs ...any) {
+		res.failed++
+		slog.WarnContext(ctx, "recommendation cache build step failed", append([]any{
+			"component", "recommendations", "step", step, "user_id", userID, "profile_id", profileID, "error", err,
+		}, attrs...)...)
+	}
+	put := func(recType, sourceItemID string, items []ScoredItem) {
+		if err := repo.UpsertRecommendationCache(ctx, userID, profileID, recType, sourceItemID, items, expires); err != nil {
+			fail("write_cache", err, "rec_type", recType, "source_item_id", sourceItemID)
+			return
+		}
+		res.cached++
+	}
+
 	watchedSet, err := w.engine.watchedItemIDSet(ctx, userID, profileID)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to load watched items for recommendation cache", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		fail("watched_items", err)
 		watchedSet = nil
 	}
 	watchedIDs := scoredItemIDsFromSet(watchedSet)
 	accessFilter := w.engine.profileAccessFilter(ctx, userID, profileID)
 
-	if aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter); err == nil && aggregatedRow != nil && len(aggregatedRow.Items) > 0 {
-		if err := repo.UpsertRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "", aggregatedRow.Items, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		} else {
-			cached++
-		}
+	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter)
+	if err != nil {
+		fail("main_row", err)
+	} else if aggregatedRow != nil && len(aggregatedRow.Items) > 0 {
+		put(RecTypeForYouMain, "", aggregatedRow.Items)
 	}
 
-	// Cache per-cluster ForYou rows.
-	clusterRows, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter)
+	// Cache per-cluster ForYou rows. buildClusterRows logs each cluster whose
+	// candidate query failed.
+	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter)
+	res.failed += failedClusters
 	if err != nil {
-		slog.WarnContext(ctx, "failed to build cluster recommendations for cache", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		fail("cluster_rows", err)
 	}
 	for _, row := range clusterRows {
 		if len(row.Items) == 0 {
 			continue
 		}
-
-		recType := fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex)
-		if err := repo.UpsertRecommendationCache(ctx, userID, profileID, recType, "", row.Items, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		}
-		cached++
+		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
 	}
 
-	// Cache similar users liked.
 	items, err := w.engine.SimilarUsersLiked(ctx, userID, profileID, CacheCandidateLimit)
-	if err == nil && len(items) > 0 {
-		if err := repo.UpsertRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "", items, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err)
-		} else {
-			cached++
-		}
+	if err != nil {
+		fail("similar_users", err)
+	} else if len(items) > 0 {
+		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
 	recentCompleted, err := w.engine.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to load recent completed items for recommendation cache", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
-		return cached
+		fail("recent_completed", err)
+		return res
 	}
 	for _, sourceItemID := range recentCompleted {
 		items, err := w.engine.BecauseYouWatched(ctx, userID, profileID, sourceItemID, CacheCandidateLimit)
-		if err != nil || len(items) == 0 {
+		if err != nil {
+			fail("because_you_watched", err, "source_item_id", sourceItemID)
 			continue
 		}
-		if err := repo.UpsertRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceItemID, items, expires); err != nil {
-			slog.WarnContext(ctx, "failed to cache recommendations", "component", "recommendations", "error", err, "rec_type", RecTypeBecauseWatched, "source_item_id", sourceItemID)
-			continue
+		if len(items) > 0 {
+			put(RecTypeBecauseWatched, sourceItemID, items)
 		}
-		cached++
 	}
 
-	return cached
+	return res
 }
 
-// stalenessLoop checks for stale taste profiles every 5 minutes and refreshes them.
+// stalenessLoop refreshes stale taste profiles every few minutes.
 func (w *Worker) stalenessLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(staleSweepInterval)
 	defer ticker.Stop()
 
 	for {
@@ -499,10 +582,24 @@ func (w *Worker) stalenessLoop(ctx context.Context) {
 	}
 }
 
-// refreshStaleProfiles finds profiles marked stale and refreshes them.
+// refreshStaleProfiles refreshes the profiles marked stale. One server sweeps
+// at a time: the sweep holds its cluster lock until its refreshes finish, so a
+// server whose tick lands meanwhile skips instead of rebuilding the same
+// profiles.
 func (w *Worker) refreshStaleProfiles(ctx context.Context) {
-	repo := NewRepo(w.engine.pool)
-	stale, err := repo.GetStaleProfiles(ctx, 50)
+	lockCtx, cancel := context.WithTimeout(ctx, jobLockTimeout)
+	unlock, acquired, err := w.locker.TryLock(lockCtx, staleSweepLock)
+	cancel()
+	if err != nil {
+		slog.WarnContext(ctx, "stale profile sweep could not take its lock", "component", "recommendations", "error", err)
+		return
+	}
+	if !acquired {
+		return
+	}
+	defer unlock()
+
+	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
 	if err != nil {
 		slog.ErrorContext(ctx, "staleness check failed", "component", "recommendations", "error", err)
 		return
@@ -513,13 +610,15 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 
 	slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
 	for _, p := range stale {
-		w.RequestProfileRefresh(ctx, p.UserID, p.ProfileID)
+		if ctx.Err() != nil {
+			return
+		}
+		key := profileRefreshKey(p.UserID, p.ProfileID)
+		if !w.claimProfileRefresh(key) {
+			continue // already queued or refreshing on this server
+		}
+		w.runProfileRefresh(ctx, p.UserID, p.ProfileID)
 	}
-}
-
-// RunEmbeddingsNow triggers an immediate embedding run (for first-run setup).
-func (w *Worker) RunEmbeddingsNow() {
-	_ = w.TriggerEmbeddings()
 }
 
 func (w *Worker) profileRefreshLoop(ctx context.Context) {
@@ -528,14 +627,22 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			if err := w.refreshProfile(ctx, req.userID, req.profileID); err != nil {
-				slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", req.userID, "profile_id", req.profileID, "error", err)
-			}
-			w.clearProfileRefreshPending(profileRefreshKey(req.userID, req.profileID))
+			w.runProfileRefresh(ctx, req.userID, req.profileID)
 		}
 	}
 }
 
+// runProfileRefresh refreshes a profile whose pending key the caller claimed,
+// then releases the key.
+func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string) {
+	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
+	if err := w.refreshProfile(ctx, userID, profileID); err != nil {
+		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+	}
+}
+
+// refreshProfile rebuilds one profile's taste profile and cached rows. It
+// clears the profile's stale mark only when every step succeeded.
 func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) (runErr error) {
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
 	defer workmetrics.Profile(ctx)()
@@ -543,17 +650,31 @@ func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID strin
 	refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
+	start := time.Now()
 	if err := w.engine.RefreshTasteProfile(refreshCtx, userID, profileID); err != nil {
 		return fmt.Errorf("refresh taste profile: %w", err)
 	}
 
-	repo := NewRepo(w.engine.pool)
-	expires := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-	w.cacheUserRows(refreshCtx, repo, userID, profileID, expires)
+	repo := w.engine.repo
+	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(start)); built.failed > 0 {
+		return fmt.Errorf("rebuild recommendation cache: %d steps failed", built.failed)
+	}
 	if err := repo.ClearStaleAt(refreshCtx, userID, profileID); err != nil {
 		slog.WarnContext(ctx, "failed to clear stale profile marker", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
 	return nil
+}
+
+// claimProfileRefresh marks a profile's refresh pending on this server. It
+// returns false when one is already queued or running.
+func (w *Worker) claimProfileRefresh(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, exists := w.profileRefreshPending[key]; exists {
+		return false
+	}
+	w.profileRefreshPending[key] = struct{}{}
+	return true
 }
 
 func (w *Worker) clearProfileRefreshPending(key string) {

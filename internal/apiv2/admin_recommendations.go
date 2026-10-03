@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -56,7 +57,14 @@ func registerAdminRecommendations(reg *Registry) {
 				return nil, unavailable("recommendations")
 			}
 			if err := action.start(reg.deps.AdminRecommendations); err != nil {
-				return nil, NewProblem(TypeConflict, "This recommendation job is already running on this process.")
+				switch {
+				case errors.Is(err, recommendations.ErrJobRunningElsewhere):
+					return nil, NewProblem(TypeConflict, "This recommendation job is already running on another server.")
+				case errors.Is(err, recommendations.ErrJobRunning):
+					return nil, NewProblem(TypeConflict, "This recommendation job is already running on this process.")
+				default:
+					return nil, serviceProblem(err)
+				}
 			}
 			return &AdminRecommendationStartedOutput{Body: AdminRecommendationStarted{Status: "started"}}, nil
 		})

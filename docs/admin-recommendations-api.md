@@ -18,12 +18,14 @@ when nonzero. Counts come from persisted catalog/recommendation data. Running
 flags describe the responding process and are sampled separately from counts.
 They do not form a consistent cluster-wide snapshot.
 
-Trigger success means the existing worker claimed its process-local running flag
-and launched background work. It does not mean that work completed or that a
-job was persisted. There is no job ID, Location header, durable acceptance,
-cluster-wide exclusion, or automatic recovery promise. A duplicate trigger while
-the same kind is running in that process returns `409`. Another process may
-start the same kind independently; a restart loses the local running flag.
+Trigger success means the responding process claimed its running flag and the
+job kind's cluster-wide lock, then launched background work. It does not mean
+that work completed. There is no job ID, Location header, durable acceptance, or
+automatic recovery promise. A trigger returns `409` while the same kind is
+running in that process or on another server; the problem detail says which.
+Failing to take the lock returns `500`. Scheduled runs take the same lock, so
+each kind runs on one server at a time. A restart loses the local running flag
+and releases any lock the process held.
 
 All four triggers are non-retryable. The web disables both TanStack mutation
 retries and authentication refresh/replay for these actions, including after

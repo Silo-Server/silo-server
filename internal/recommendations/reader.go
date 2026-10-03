@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -349,14 +350,17 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 	return rows, missing, nil
 }
 
+// clusterRow titles a cached cluster row from its items, which carry the title
+// of the build that cached them; the cluster table may have been rebuilt since.
+// Items cached without a cluster title fall back to the cluster's label.
 func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
-	label := cluster.Label
-	if label == "" {
-		label = "For You"
+	title := clusterTitle(cluster.Label)
+	if len(items) > 0 && len(items[0].Reason) > len(clusterTitlePrefix) && strings.HasPrefix(items[0].Reason, clusterTitlePrefix) {
+		title = items[0].Reason
 	}
 	return ForYouRow{
 		Type:         "cluster",
-		Label:        "Because you enjoy " + label,
+		Label:        title,
 		ClusterIndex: cluster.ClusterIdx,
 		Items:        items,
 	}

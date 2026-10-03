@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -63,10 +64,24 @@ func TestAdminRecommendationsTransport(t *testing.T) {
 		if rec.Code != 200 || f.calls != before+1 || f.last != tc.job || rec.Header().Get("Location") != "" || !strings.Contains(rec.Body.String(), `"status":"started"`) {
 			t.Fatalf("start %s: %d %s %#v", tc.path, rec.Code, rec.Body, f)
 		}
-		f.err = errors.New("private worker detail")
+		for _, busy := range []struct {
+			err   error
+			where string
+		}{
+			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunning), "this process"},
+			{fmt.Errorf("private worker detail: %w", recommendations.ErrJobRunningElsewhere), "another server"},
+		} {
+			f.err = busy.err
+			rec = do(t, h, "POST", path, "", bearer(adminToken))
+			if rec.Code != 409 || !strings.Contains(rec.Body.String(), busy.where) || strings.Contains(rec.Body.String(), "private worker") {
+				t.Fatalf("conflict %s (%s): %d %s", tc.path, busy.where, rec.Code, rec.Body)
+			}
+		}
+		// Failing to take the cluster lock is not a conflict.
+		f.err = errors.New("private lock detail")
 		rec = do(t, h, "POST", path, "", bearer(adminToken))
-		if rec.Code != 409 || strings.Contains(rec.Body.String(), "private worker") {
-			t.Fatalf("conflict %s: %d %s", tc.path, rec.Code, rec.Body)
+		if rec.Code != 500 || strings.Contains(rec.Body.String(), "private lock") {
+			t.Fatalf("lock failure %s: %d %s", tc.path, rec.Code, rec.Body)
 		}
 		before = f.calls
 		rec = do(t, h, "POST", path, "", bearer(memberToken))
