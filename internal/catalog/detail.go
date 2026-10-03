@@ -3393,7 +3393,7 @@ func (s *DetailService) effectiveSubtitleDefaults(
 		return defaults
 	}
 
-	rc := settingsresolve.Context{ProfileID: filter.ProfileID, DeviceID: filter.DeviceID}
+	rc := settingsresolve.Context{ProfileID: filter.ProfileID}
 	if libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID); libraryID > 0 {
 		rc.LibraryIDs = []int{libraryID}
 	}

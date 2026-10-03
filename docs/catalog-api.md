@@ -135,6 +135,16 @@ marks an episode only when every one of its files is unreadable, since any
 readable version still plays. `/api/v1` episode listings do not carry the
 field.
 
+## Episode ratings
+
+Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` carries
+`ratings`, its IMDb and TMDB ratings in the same `CatalogRating` shape a title
+page's `ratings` uses: a 0-100 `score`, the source's own `display`, and the
+source's `name`. They are built from the episode's stored rating columns by the
+same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
+scale is left out, and an episode with no rating omits the field. `/api/v1`
+episode listings do not carry ratings.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,

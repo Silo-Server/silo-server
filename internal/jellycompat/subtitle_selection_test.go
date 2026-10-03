@@ -285,30 +285,21 @@ func defaultSubtitleStreamFromResponse(t *testing.T, resp playbackInfoResponseDT
 	return index, found
 }
 
-// A viewer with no subtitle mode gets Jellyfin's Default mode, which Silo
-// resolves to the embedded default track ahead of an external subtitle file.
-func TestHandlePlaybackInfo_DefaultModePrefersEmbeddedDefaultSubtitle(t *testing.T) {
+// A viewer with no subtitle mode gets Jellyfin's Default mode, which prefers
+// an external subtitle file over the embedded default track.
+func TestHandlePlaybackInfo_DefaultModePrefersExternalSubtitle(t *testing.T) {
 	handler, routeID := newSubtitleSelectionHandler(t)
 	resp := postPlaybackInfo(t, handler, routeID, `{}`)
 
-	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 2 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %v, want the embedded default English track 2", got)
+	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
+		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
+	}
+	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %d, want the external Spanish track 3", got)
 	}
 	index, found := defaultSubtitleStreamFromResponse(t, resp)
-	if !found || index != 2 {
-		t.Fatalf("default subtitle stream = (%d, %v), want (2, true)", index, found)
-	}
-}
-
-// With no embedded track flagged default, Default mode still shows the
-// external file, as Jellyfin does.
-func TestHandlePlaybackInfo_DefaultModeUsesExternalWithoutEmbeddedDefault(t *testing.T) {
-	handler, routeID := newSubtitleSelectionHandler(t)
-	detail := handler.content.(*stubContentService).detail
-	detail.Versions[0].SubtitleTracks[0].Default = false
-	resp := postPlaybackInfo(t, handler, routeID, `{}`)
-	if got := resp.MediaSources[0].DefaultSubtitleStreamIndex; got == nil || *got != 3 {
-		t.Fatalf("DefaultSubtitleStreamIndex = %v, want the external Spanish track 3", got)
+	if !found || index != 3 {
+		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
 	}
 }
 

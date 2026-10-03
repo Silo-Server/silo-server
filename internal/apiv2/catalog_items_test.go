@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // fakeCatalog backs the catalog-items operations: it records the request
@@ -147,8 +148,12 @@ func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id st
 }
 
 func fakeEpisode(n int) handlers.EpisodeView {
-	return handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
+	ep := handlers.EpisodeView{ContentID: "episode:severance-s01e0" + string(rune('0'+n)), SeasonNumber: 1, EpisodeNumber: n, Title: "Good News About Hell", AirDate: "2022-02-18", Runtime: 57,
 		Files: []handlers.EpisodeFileView{{FileID: 200 + n, Resolution: "1080p", FileSize: 1}}, UserData: &catalogpkg.SeasonUserData{Played: n == 1, WatchedCount: 1}}
+	if n == 1 {
+		ep.RatingIMDB, ep.RatingTMDB = new(8.7), new(8.25)
+	}
+	return ep
 }
 
 func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id string) ([]handlers.EpisodeView, error) {
@@ -651,6 +656,48 @@ func TestGetCatalogItemScopesVersionsToLibraryWhenEnabled(t *testing.T) {
 	}
 }
 
+// An episode states its ratings as a title page does: on a 0-100 score with
+// the source's own display, IMDb before TMDB. A stored 0 (unrated) or a value
+// off the 0-10 scale is dropped, and an episode with no rating omits the field.
+func TestEpisodesOfStatesRatings(t *testing.T) {
+	episodes := episodesOf([]handlers.EpisodeView{
+		{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.25)},
+		{ContentID: "episode:2", RatingIMDB: new(0.0), RatingTMDB: new(42.0)},
+		{ContentID: "episode:3"},
+	}, ratingsources.Selection{})
+	want := []CatalogRating{
+		{Source: "imdb", Name: "IMDb", Score: 87, Display: "8.7"},
+		{Source: "tmdb", Name: "TMDB", Score: 82.5, Display: "8.3"},
+	}
+	if !reflect.DeepEqual(episodes[0].Ratings, want) {
+		t.Fatalf("ratings = %+v, want %+v", episodes[0].Ratings, want)
+	}
+	for _, ep := range episodes[1:] {
+		body, err := json.Marshal(ep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(body, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := fields["ratings"]; ok {
+			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
+		}
+	}
+}
+
+// The episode's rating columns stay off the frozen /api/v1 wire.
+func TestEpisodeViewKeepsRatingsOffV1(t *testing.T) {
+	body, err := json.Marshal(handlers.EpisodeView{ContentID: "episode:1", RatingIMDB: new(8.7), RatingTMDB: new(8.2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "rating") {
+		t.Fatalf("v1 episode = %s", body)
+	}
+}
+
 // An unreadable episode file is flagged on the v2 wire and the flag is
 // omitted for every readable file.
 func TestEpisodesOfFlagsUnreadableFiles(t *testing.T) {
@@ -660,7 +707,7 @@ func TestEpisodesOfFlagsUnreadableFiles(t *testing.T) {
 			{FileID: 1, Unreadable: true},
 			{FileID: 2, Resolution: "1080p"},
 		},
-	}})
+	}}, ratingsources.Selection{})
 	body, err := json.Marshal(episodes[0].Files)
 	if err != nil {
 		t.Fatal(err)
