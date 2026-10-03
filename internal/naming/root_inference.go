@@ -30,6 +30,7 @@ type RootAssignment struct {
 	LegacyRootPath         string
 	LegacyType             string
 	HasFolderIDs           bool
+	HasFileIDs             bool
 	HasSeasonStructure     bool
 	HasMovieEvidence       bool
 	HasEpisodePattern      bool
@@ -263,6 +264,11 @@ func inferFileRootAssignment(
 
 	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
 		assignment.HasFolderIDs = true
+	}
+	// A movie file's own provider tag identifies its root. An episode's tag
+	// cannot vouch for the whole series, so series roots ignore it.
+	if assignment.InferredType == "movie" {
+		assignment.HasFileIDs = FileNameHasProviderTag(filePath)
 	}
 
 	return assignment

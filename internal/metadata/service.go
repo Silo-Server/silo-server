@@ -6481,7 +6481,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			res.ItemStatus = "pending"
 		}
 	}
-	if effectiveExternalIDs == nil && !splitPinned {
+	if effectiveExternalIDs == nil && !splitPinned && !s.movieRootHasTaggedFile(ctx, folderID, observedRootPath, res.Type) {
 		// Record for admin diagnostics only — no longer bail out.
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonMissingFolderIDs, file.FilePath)
 	}
@@ -6761,6 +6761,24 @@ func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID in
 // recordSkippedRoot records the root of file for admin diagnostics in
 // skipped_media_roots. Failures are logged and swallowed: diagnostics must
 // never block skeleton creation.
+// movieRootHasTaggedFile reports whether another file of a movie root carries a
+// provider tag in its own name. A scan counts such a root as tagged, so an
+// untagged sibling version must not flag it again.
+func (s *MetadataService) movieRootHasTaggedFile(ctx context.Context, folderID int, observedRootPath, contentType string) bool {
+	if s == nil || s.fileRepo == nil || contentType != matchContentTypeMovie {
+		return false
+	}
+	files, err := s.fileRepo.ListByObservedRootPath(ctx, folderID, observedRootPath)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to list root files for skipped-root check", "component", "metadata",
+			"folder_id", folderID,
+			"root_path", observedRootPath,
+			"error", err)
+		return false
+	}
+	return naming.AnyFileNameHasProviderTag(files)
+}
+
 func (s *MetadataService) recordSkippedRoot(ctx context.Context, folderID int, rootPath, reason, sampleFilePath string) {
 	if s == nil || s.skippedRootRepo == nil {
 		return

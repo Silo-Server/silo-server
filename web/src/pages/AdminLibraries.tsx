@@ -1901,7 +1901,7 @@ function SkippedRootsSection() {
   return (
     <CollapsibleDiagnosticsSection
       title="Troubleshooting"
-      description="Roots where the inferred canonical folder lacks embedded provider IDs."
+      description="Roots with no provider IDs in the folder name or, for movies, in a file name."
       count={data?.pages[0]?.total}
       icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
       open={open}
