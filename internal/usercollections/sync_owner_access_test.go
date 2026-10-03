@@ -127,6 +127,21 @@ func TestRunSyncFailsWhenTheOwnerScopeCannotBeResolved(t *testing.T) {
 	}
 }
 
+func TestRunSyncFailsWithoutTheOwnerAccessChecks(t *testing.T) {
+	fetcher := &recordingTMDBListFetcher{}
+	svc := NewService(nil, nil, nil, nil, slog.New(slog.DiscardHandler))
+	svc.TMDBLists = fetcher
+	collection := &userstore.Collection{ID: "c", CreatorProfileID: "kid", SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310"}`}
+
+	_, _, err := svc.RunSync(t.Context(), 1, nil, collection)
+	if !errors.Is(err, errOwnerAccessUnavailable) {
+		t.Fatalf("error = %v, want the sync refused without owner-access checks", err)
+	}
+	if fetcher.gotID != 0 {
+		t.Fatal("fetched the source list without a way to check the owner's access")
+	}
+}
+
 type fixedTMDBListFetcher struct{ entries []catalog.TMDBCollectionEntry }
 
 func (f fixedTMDBListFetcher) GetList(context.Context, int, int) ([]catalog.TMDBCollectionEntry, error) {

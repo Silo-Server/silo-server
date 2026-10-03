@@ -2,6 +2,7 @@ package usercollections
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -133,13 +134,18 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 	}
 }
 
+// errOwnerAccessUnavailable fails a sync on a service built without the
+// owner-access checks, rather than filling the collection from the whole
+// catalog.
+var errOwnerAccessUnavailable = errors.New("the collection owner's access can't be checked")
+
 // ownerAccessFilter resolves the catalog access of the collection's creator
-// profile, the same scope that profile's own reads use. It returns nil when no
-// resolver is wired. A resolution failure fails the sync rather than filling
-// the collection from the whole catalog.
+// profile, the same scope that profile's own reads use. A missing resolver or
+// a resolution failure fails the sync rather than filling the collection from
+// the whole catalog.
 func (s *Service) ownerAccessFilter(ctx context.Context, userID int, collection *userstore.Collection) (*catalog.AccessFilter, error) {
 	if s.ScopeResolver == nil || s.accessible == nil {
-		return nil, nil
+		return nil, errOwnerAccessUnavailable
 	}
 	scope, err := s.ScopeResolver.Resolve(ctx, access.ResolveInput{
 		UserID:              userID,
