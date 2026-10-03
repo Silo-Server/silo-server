@@ -65,8 +65,8 @@ var SensitiveSettingKeys = map[string]bool{
 	// It is machine-managed and cleared when the transition commits.
 	"storage.transition.target": true,
 
-	// Redis — url may embed credentials (redis://:pass@host); sentinel_password
-	// is read at db_loader L334 and was MISSING from the old redaction map.
+	// Redis — url may embed credentials (redis://:pass@host). sentinel_password
+	// is no longer read, but rows written by older builds stay encrypted.
 	"redis.url":               true,
 	"redis.sentinel_password": true,
 
