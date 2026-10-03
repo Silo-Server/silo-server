@@ -20054,6 +20054,11 @@
             "description": "The item to play when the card is a series or season; absent when the item plays itself",
             "type": "string"
           },
+          "play_season_number": {
+            "description": "On a series, the season of play_content_id",
+            "format": "int64",
+            "type": "integer"
+          },
           "playback_variants": {
             "items": {
               "$ref": "#/components/schemas/PlaybackVariant"

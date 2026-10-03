@@ -266,6 +266,12 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 		playTargets := h.items.resolvePlayableTargetInputs(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)
 		detail.PlayContentID = playTargets[input.Key()]
 	}
+	if detail.Type == "series" && detail.PlayContentID != "" && h.items.episodeRepo != nil {
+		if ep, err := h.items.episodeRepo.GetByID(ctx, detail.PlayContentID); err == nil && ep != nil {
+			season := ep.SeasonNumber
+			detail.PlaySeasonNumber = &season
+		}
+	}
 
 	switch detail.Type {
 	case "season":
