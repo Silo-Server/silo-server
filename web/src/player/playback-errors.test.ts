@@ -184,6 +184,17 @@ describe("describePlaybackTransportError", () => {
     });
   });
 
+  it("does not call a failed change to a playing stream a failure to start", () => {
+    const error = new PlayerFetchError(502, "Bad Gateway");
+
+    expect(describePlaybackTransportError(error)?.message).toBe(
+      "Silo could not start playback right now. Please try again.",
+    );
+    expect(describePlaybackTransportError(error, "update")?.message).toBe(
+      "Silo could not update playback right now. Please try again.",
+    );
+  });
+
   it("ignores 4xx statuses it has nothing specific to say about", () => {
     expect(
       describePlaybackTransportError(new PlayerFetchError(409, "Conflict", "stale_playback_plan")),
