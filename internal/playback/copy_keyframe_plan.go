@@ -211,11 +211,17 @@ func (p *copySegmentPlan) segmentOfKeyframe(k int) int {
 // start, which is at or before the first keyframe, so measuring from the
 // first keyframe can only land earlier.
 func (p *copySegmentPlan) restartSeekSeconds(n int) float64 {
+	return max(p.keyframes[p.restartKeyframe(n)]-p.keyframes[0], 0)
+}
+
+// restartKeyframe is the keyframe a run started for segment n aims its seek
+// at: the one before the segment's first, or the first keyframe for a run
+// from the start. FFmpeg's seek lands there or earlier, never later.
+func (p *copySegmentPlan) restartKeyframe(n int) int {
 	if n <= 0 || n >= len(p.firstKey) {
 		return 0
 	}
-	k := max(p.firstKey[n]-1, 0)
-	return max(p.keyframes[k]-p.keyframes[0], 0)
+	return max(p.firstKey[n]-1, 0)
 }
 
 // plannedWaitSegments is how far past the assembled head a missing segment
@@ -241,7 +247,9 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
 		decision.Reason = segmentReasonRestarting
-	case progress.Running && segNum >= progress.StartSegmentNumber &&
+	// A missing segment at or behind the produced head was pruned: the
+	// running FFmpeg has passed it and won't write it again.
+	case progress.Running && segNum > progress.ProducedHead && segNum >= progress.StartSegmentNumber &&
 		segNum <= progress.ProducedHead+plannedWaitSegments:
 		s.mu.Lock()
 		if segNum > s.lastRequestedSegment {

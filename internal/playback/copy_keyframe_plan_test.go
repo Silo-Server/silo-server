@@ -195,6 +195,10 @@ func TestPlannedSegmentRecoveryDecision(t *testing.T) {
 		"far ahead":            {400, SegmentProgress{Running: true, StartSegmentNumber: 10, ProducedHead: 20}},
 		"behind the run start": {5, SegmentProgress{Running: true, StartSegmentNumber: 10, ProducedHead: 20}},
 		"FFmpeg stopped":       {15, SegmentProgress{Running: false, StartSegmentNumber: 10, ProducedHead: 20}},
+		// Missing at or behind the head: pruned, and the run won't write it
+		// again.
+		"pruned behind the head": {15, SegmentProgress{Running: true, StartSegmentNumber: 10, ProducedHead: 20}},
+		"pruned at the head":     {20, SegmentProgress{Running: true, StartSegmentNumber: 10, ProducedHead: 20}},
 	} {
 		if got := decide(c.seg, c.progress); got.Wait || !got.RestartOnTimeout {
 			t.Fatalf("%s: %+v, want a restart at the segment", name, got)
@@ -420,7 +424,20 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		"-map", "1:v", "-map", "0:a", "-c", "copy", lateVideo).CombinedOutput(); err != nil {
 		t.Fatalf("delay the test file's video: %v: %s", err, out)
 	}
-	for _, src := range []string{source, shifted, lateVideo} {
+	// The first keyframes are closer together than FFmpeg's B-frame shift,
+	// so the first group's time is past the second and third keyframes.
+	closeKeys := filepath.Join(dir, "close-keyframes.mkv")
+	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=25:duration=40",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=40",
+		"-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=60",
+		"-map", "0", "-map", "1", "-map", "2",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "1000", "-bf", "2",
+		"-sc_threshold", "0", "-force_key_frames", "0,0.04,0.12,2.2,2.6,5.2,7.2,7.6,8.9,12.6,13,15,17.6,18.5,25,26.1,31,33.3,38",
+		"-c:a", "aac", closeKeys).CombinedOutput(); err != nil {
+		t.Fatalf("make the close-keyframe file: %v: %s", err, out)
+	}
+	for _, src := range []string{source, shifted, lateVideo, closeKeys} {
 		t.Run(filepath.Base(src), func(t *testing.T) {
 			checkPlannedCopySession(t, ctx, ffmpeg, src)
 		})

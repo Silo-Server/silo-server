@@ -203,8 +203,12 @@ func (a *copyGroupAssembler) mapGroupLocked(run *copyGroupRun, path string, data
 		// The first group starts at the keyframe FFmpeg's seek landed on: the
 		// last keyframe at or before it, since the run's timestamps are the
 		// source's shifted later, never earlier (a B-frame delay, the gap
-		// between the file's start and its first keyframe, or none).
+		// between the file's start and its first keyframe, or none). The
+		// seek lands on the keyframe it aimed at or an earlier one, which
+		// bounds the choice when keyframes are closer together than the
+		// shift; a run from the start is anchored at the first keyframe.
 		i := sort.SearchFloat64s(keys, at+groupTimeTolerance) - 1
+		i = min(i, a.plan.restartKeyframe(run.startSegment))
 		if i < 0 {
 			return fmt.Errorf("first group at %.3fs precedes every keyframe", at)
 		}
