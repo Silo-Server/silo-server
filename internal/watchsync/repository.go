@@ -36,7 +36,7 @@ type Repository interface {
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
 	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
-	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
+	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int, after HistoryExportCursor) ([]HistoryExport, error)
 	ListPendingHistoryExportsByHistoryIDs(ctx context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
@@ -1269,20 +1269,38 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 	return nil
 }
 
-func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error) {
+// pendingHistoryExportsQuery pages a connection's unsent exports in a stable
+// order. A NULL cursor starts at the oldest; (watched_at, id) breaks the tie
+// between plays stored with the same watch time, so paging cannot skip or
+// repeat one.
+const pendingHistoryExportsQuery = `
+	SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
+		provider_item_key, status, attempt_count, last_attempt_at, last_error, created_at, updated_at
+	FROM watch_provider_history_exports
+	WHERE connection_id = $1::uuid
+	  AND status IN ('pending', 'failed')
+	  AND attempt_count < 5
+	  AND ($3::timestamptz IS NULL OR (watched_at, id) > ($3::timestamptz, $4::uuid))
+	ORDER BY watched_at ASC, id ASC
+	LIMIT $2
+`
+
+// ListPendingHistoryExports returns the oldest exports still worth sending,
+// starting after the given cursor. A caller draining the backlog pages forward
+// with the cursor rather than re-reading from the start, since an export the
+// provider rejected keeps its remaining attempts and so would otherwise be all
+// a repeated read returns, hiding the rest of the backlog behind it.
+func (r *PostgresRepository) ListPendingHistoryExports(ctx context.Context, connectionID string, limit int, after HistoryExportCursor) ([]HistoryExport, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, connection_id::text, history_id, media_item_id, watched_at,
-			provider_item_key, status, attempt_count, last_attempt_at, last_error, created_at, updated_at
-		FROM watch_provider_history_exports
-		WHERE connection_id = $1::uuid
-		  AND status IN ('pending', 'failed')
-		  AND attempt_count < 5
-		ORDER BY watched_at ASC
-		LIMIT $2
-	`, connectionID, limit)
+	var afterWatchedAt *time.Time
+	var afterID *string
+	if after.ID != "" {
+		afterWatchedAt = &after.WatchedAt
+		afterID = &after.ID
+	}
+	rows, err := r.pool.Query(ctx, pendingHistoryExportsQuery, connectionID, limit, afterWatchedAt, afterID)
 	if err != nil {
 		return nil, fmt.Errorf("list pending history exports: %w", err)
 	}

@@ -42,7 +42,7 @@ func TestServiceExportWatchedConsumesEachRemotePlayOnce(t *testing.T) {
 			}
 			repo := newServiceFakeRepo()
 			service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
-			conn := Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1"}
+			conn := seedTestConnection(t, repo, Connection{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1"})
 			result, err := service.ExportWatched(t.Context(), conn, ServerConfig{}, provider)
 			if err != nil {
 				t.Fatal(err)

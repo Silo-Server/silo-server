@@ -1614,8 +1614,16 @@ func (s *Service) ExportWatched(
 	for _, play := range local {
 		localByHistoryID[play.HistoryID] = play
 	}
+	// An export the provider rejected stays selectable until it runs out of
+	// attempts, so a run that re-read the backlog from the start would spend
+	// every attempt of a failing export within seconds of the first one, and a
+	// page full of rejected ones would hide the rest of the backlog behind it.
+	// Page forward with a cursor instead: a rejection is left for a later run,
+	// which is what gives a provider that is only briefly unhappy a chance to
+	// accept it.
+	var cursor HistoryExportCursor
 	for {
-		pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, 100)
+		pending, err := s.repo.ListPendingHistoryExports(ctx, conn.ID, 100, cursor)
 		if err != nil {
 			return result, err
 		}
@@ -1623,6 +1631,7 @@ func (s *Service) ExportWatched(
 			break
 		}
 		pendingPlays := make([]LocalPlay, 0, len(pending))
+		pendingExports := make([]HistoryExport, 0, len(pending))
 		exportByHistoryID := make(map[string]HistoryExport, len(pending))
 		progressed := false
 		for _, export := range pending {
@@ -1635,12 +1644,22 @@ func (s *Service) ExportWatched(
 				continue
 			}
 			pendingPlays = append(pendingPlays, play)
+			pendingExports = append(pendingExports, export)
 			exportByHistoryID[export.HistoryID] = export
 		}
 		if len(pendingPlays) == 0 {
+			// Every row on this page was resolved locally, so the next read
+			// returns different rows without the cursor having to move.
 			continue
 		}
-		pendingPlays, singleBatch := limitWatchedExportBatch(exporter, pendingPlays)
+		pendingPlays, _ = limitWatchedExportBatch(exporter, pendingPlays)
+		// One batch can be smaller than one page, so the cursor stops at the
+		// last play actually sent: the rest of the page is still unattempted
+		// and the next read has to return it.
+		cursor = HistoryExportCursor{
+			WatchedAt: pendingExports[len(pendingPlays)-1].WatchedAt,
+			ID:        pendingExports[len(pendingPlays)-1].ID,
+		}
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
@@ -1699,9 +1718,24 @@ func (s *Service) ExportWatched(
 			// Leave unmentioned events pending for a later retry.
 			return result, err
 		}
-		if !progressed || singleBatch {
+		// Keep draining while the provider accepts work. One batch is bounded
+		// by limitWatchedExportBatch above, and for a plugin provider every
+		// batch is its own RPC with its own deadline, so a backlog costs more
+		// calls rather than one longer one. The run's own deadline, not a
+		// one-batch cap, is what bounds the whole export: a canceled run
+		// leaves the rest pending for the next one.
+		if !progressed {
 			break
 		}
+		// A plugin can rotate its credentials in a batch's response, which the
+		// provider persists but cannot write back into this snapshot. Re-read
+		// the connection so the next batch authenticates with what was stored,
+		// and so the write below does not restore the superseded token.
+		fresh, err := s.reloadConnection(ctx, conn)
+		if err != nil {
+			return result, err
+		}
+		conn = fresh
 	}
 
 	now := s.now()

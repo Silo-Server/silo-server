@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,6 +128,17 @@ func (r *serviceFakeRepo) GetAuthSession(_ context.Context, id string) (DeviceAu
 		return DeviceAuthSession{}, errors.New("missing auth session")
 	}
 	return session, nil
+}
+
+// seedTestConnection stores a connection the way a real deployment already
+// has one: an export re-reads its connection while it runs, so a test that
+// exercises one starts from a stored row rather than a bare literal.
+func seedTestConnection(t *testing.T, repo *serviceFakeRepo, conn Connection) Connection {
+	t.Helper()
+	if _, err := repo.UpsertConnection(context.Background(), conn); err != nil {
+		t.Fatalf("seed connection: %v", err)
+	}
+	return conn
 }
 
 func (r *serviceFakeRepo) UpsertConnection(
@@ -368,18 +380,41 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 	return nil
 }
 
-func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int) ([]HistoryExport, error) {
-	var exports []HistoryExport
+func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int, after HistoryExportCursor) ([]HistoryExport, error) {
+	selectable := make([]HistoryExport, 0, len(r.historyExports))
 	for _, export := range r.historyExports {
-		if export.ConnectionID == connectionID &&
-			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
-			exports = append(exports, export)
-			if limit > 0 && len(exports) >= limit {
-				break
-			}
+		if export.ConnectionID != connectionID ||
+			(export.Status != historyExportStatusPending && export.Status != historyExportStatusFailed) ||
+			export.AttemptCount >= 5 {
+			continue
+		}
+		selectable = append(selectable, export)
+	}
+	// The query orders by (watched_at, id) so a cursor can page through it.
+	sort.Slice(selectable, func(i, j int) bool {
+		if !selectable[i].WatchedAt.Equal(selectable[j].WatchedAt) {
+			return selectable[i].WatchedAt.Before(selectable[j].WatchedAt)
+		}
+		return selectable[i].ID < selectable[j].ID
+	})
+	var exports []HistoryExport
+	for _, export := range selectable {
+		if after.ID != "" && !afterHistoryExportCursor(export, after) {
+			continue
+		}
+		exports = append(exports, export)
+		if limit > 0 && len(exports) >= limit {
+			break
 		}
 	}
 	return exports, nil
+}
+
+func afterHistoryExportCursor(export HistoryExport, after HistoryExportCursor) bool {
+	if export.WatchedAt.Equal(after.WatchedAt) {
+		return export.ID > after.ID
+	}
+	return export.WatchedAt.After(after.WatchedAt)
 }
 
 func (r *serviceFakeRepo) ListPendingHistoryExportsByHistoryIDs(_ context.Context, connectionID string, historyIDs []string, limit int) ([]HistoryExport, error) {
@@ -2476,12 +2511,12 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
 		store: userdb.NewSQLiteUserStore(db),
 	})
-	result, err := service.ExportWatched(context.Background(), Connection{
+	result, err := service.ExportWatched(context.Background(), seedTestConnection(t, repo, Connection{
 		ID:        "conn-1",
 		Provider:  "simkl",
 		UserID:    7,
 		ProfileID: "profile-1",
-	}, ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
+	}), ServerConfig{}, watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl})
 	if err != nil {
 		t.Fatalf("ExportWatched: %v", err)
 	}
@@ -2492,6 +2527,323 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 		if export.Status != historyExportStatusSent {
 			t.Fatalf("history exports = %+v, want all sent", repo.historyExports)
 		}
+	}
+}
+
+// batchedWatchedExportStub reports a per-call batch size, as a plugin provider
+// does, and records the size of every ExportHistory call it receives.
+type batchedWatchedExportStub struct {
+	watchedImportExportStub
+	batchSize int
+	calls     *[]int
+}
+
+func (p batchedWatchedExportStub) ExportBatchSize() int { return p.batchSize }
+
+func (p batchedWatchedExportStub) ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error) {
+	*p.calls = append(*p.calls, len(plays))
+	return p.watchedImportExportStub.ExportHistory(ctx, cfg, conn, plays)
+}
+
+// A provider that bounds one call to a batch, which every plugin provider
+// does, still has its whole backlog exported by one run: the batch bounds the
+// call, not the run.
+func TestServiceExportWatchedDrainsBacklogInBatchedCalls(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	for i := range 25 {
+		id := strconv.Itoa(i)
+		if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+			ID:              "history-" + id,
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-" + id,
+			WatchedAt:       "2026-05-04T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourcePlayback,
+			Identity: userstore.WatchIdentity{
+				StableType:  "movie",
+				ProviderIDs: map[string]string{"tmdb": "60" + id},
+			},
+		}); err != nil {
+			t.Fatalf("AddHistory %d: %v", i, err)
+		}
+	}
+
+	var calls []int
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	result, err := service.ExportWatched(context.Background(), seedTestConnection(t, repo, Connection{
+		ID:        "conn-1",
+		Provider:  "simkl",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}), ServerConfig{}, batchedWatchedExportStub{
+		watchedImportExportStub: watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+		batchSize:               10,
+		calls:                   &calls,
+	})
+	if err != nil {
+		t.Fatalf("ExportWatched: %v", err)
+	}
+	if result.Sent != 25 {
+		t.Fatalf("sent = %d, want 25 (result=%+v)", result.Sent, result)
+	}
+	if len(calls) < 3 {
+		t.Fatalf("ExportHistory calls = %v, want the backlog split across at least 3 calls", calls)
+	}
+	for _, size := range calls {
+		if size > 10 {
+			t.Fatalf("ExportHistory calls = %v, want every call bounded to the batch size", calls)
+		}
+	}
+	for _, export := range repo.historyExports {
+		if export.Status != historyExportStatusSent {
+			t.Fatalf("history exports = %+v, want all sent", repo.historyExports)
+		}
+	}
+}
+
+// rejectingWatchedExportStub reports a batch size, as a plugin provider does,
+// and rejects one history ID on every call while accepting the rest.
+type rejectingWatchedExportStub struct {
+	watchedImportExportStub
+	batchSize int
+	reject    map[string]struct{}
+	attempts  map[string]int
+}
+
+func (p rejectingWatchedExportStub) ExportBatchSize() int { return p.batchSize }
+
+func (p rejectingWatchedExportStub) ExportHistory(_ context.Context, _ ServerConfig, _ Connection, plays []LocalPlay) (ExportResult, error) {
+	result := ExportResult{Sent: make([]string, 0, len(plays)), Failed: map[string]string{}}
+	for _, play := range plays {
+		if _, rejected := p.reject[play.HistoryID]; rejected {
+			p.attempts[play.HistoryID]++
+			result.Failed[play.HistoryID] = "provider rejected the play"
+			continue
+		}
+		result.Sent = append(result.Sent, play.HistoryID)
+	}
+	return result, nil
+}
+
+// addTestCompletedHistory adds count completed movie plays a watched export can
+// pick up, named history-0 upward.
+func addTestCompletedHistory(t *testing.T, db *sql.DB, count int, tmdbPrefix string) {
+	t.Helper()
+	for i := range count {
+		id := strconv.Itoa(i)
+		if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+			ID:              "history-" + id,
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-" + id,
+			WatchedAt:       "2026-05-04T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourcePlayback,
+			Identity: userstore.WatchIdentity{
+				StableType:  "movie",
+				ProviderIDs: map[string]string{"tmdb": tmdbPrefix + id},
+			},
+		}); err != nil {
+			t.Fatalf("AddHistory %d: %v", i, err)
+		}
+	}
+}
+
+// A failed export keeps its remaining attempts for later runs: draining the
+// backlog must not spend them all in the run that first saw the failure.
+func TestServiceExportWatchedRetriesAFailedExportOncePerRun(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	addTestCompletedHistory(t, db, 25, "60")
+
+	attempts := map[string]int{}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	result, err := service.ExportWatched(context.Background(), seedTestConnection(t, repo, Connection{
+		ID:        "conn-1",
+		Provider:  "simkl",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}), ServerConfig{}, rejectingWatchedExportStub{
+		watchedImportExportStub: watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+		batchSize:               10,
+		reject:                  map[string]struct{}{"history-0": {}},
+		attempts:                attempts,
+	})
+	if err != nil {
+		t.Fatalf("ExportWatched: %v", err)
+	}
+	if attempts["history-0"] != 1 {
+		t.Fatalf("rejected export attempted %d times in one run, want 1", attempts["history-0"])
+	}
+	if result.Sent != 24 {
+		t.Fatalf("sent = %d, want 24 (result=%+v)", result.Sent, result)
+	}
+}
+
+// Held-back failures are excluded from the pending query, so a whole page of
+// them cannot stand in front of the rest of the backlog.
+func TestServiceExportWatchedDrainsPastAFullPageOfFailures(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	const total = 120
+	addTestCompletedHistory(t, db, total, "80")
+
+	// The provider rejects a full pending page's worth of plays.
+	reject := make(map[string]struct{}, 100)
+	for i := range 100 {
+		reject["history-"+strconv.Itoa(i)] = struct{}{}
+	}
+	attempts := map[string]int{}
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	result, err := service.ExportWatched(context.Background(), seedTestConnection(t, repo, Connection{
+		ID:        "conn-1",
+		Provider:  "simkl",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}), ServerConfig{}, rejectingWatchedExportStub{
+		watchedImportExportStub: watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+		batchSize:               10,
+		reject:                  reject,
+		attempts:                attempts,
+	})
+	if err != nil {
+		t.Fatalf("ExportWatched: %v", err)
+	}
+	if result.Sent != total-len(reject) {
+		t.Fatalf("sent = %d, want %d (result=%+v)", result.Sent, total-len(reject), result)
+	}
+	for id, count := range attempts {
+		if count != 1 {
+			t.Fatalf("%s attempted %d times in one run, want 1", id, count)
+		}
+	}
+}
+
+// rotatingWatchedExportStub stands in for a plugin provider that rotates the
+// connection's credentials while applying a batch: it stores the new token the
+// way PluginProvider.persistUpdatedCredentials does and records the token each
+// call was handed.
+type rotatingWatchedExportStub struct {
+	watchedImportExportStub
+	repo      *serviceFakeRepo
+	seen      *[]string
+	newToken  string
+	batchSize int
+}
+
+func (p rotatingWatchedExportStub) ExportBatchSize() int { return p.batchSize }
+
+func (p rotatingWatchedExportStub) ExportHistory(ctx context.Context, _ ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error) {
+	*p.seen = append(*p.seen, conn.AccessToken)
+	if conn.AccessToken != p.newToken {
+		rotated := conn
+		rotated.AccessToken = p.newToken
+		if _, err := p.repo.UpsertConnection(ctx, rotated); err != nil {
+			return ExportResult{}, err
+		}
+	}
+	sent := make([]string, 0, len(plays))
+	for _, play := range plays {
+		sent = append(sent, play.HistoryID)
+	}
+	return ExportResult{Sent: sent}, nil
+}
+
+// Each batch is its own provider call, so a batch that rotates the connection's
+// credentials has to be visible to the next one.
+func TestServiceExportWatchedReloadsCredentialsBetweenBatches(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	for i := range 25 {
+		id := strconv.Itoa(i)
+		if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+			ID:              "history-" + id,
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-" + id,
+			WatchedAt:       "2026-05-04T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourcePlayback,
+			Identity: userstore.WatchIdentity{
+				StableType:  "movie",
+				ProviderIDs: map[string]string{"tmdb": "70" + id},
+			},
+		}); err != nil {
+			t.Fatalf("AddHistory %d: %v", i, err)
+		}
+	}
+
+	conn := Connection{
+		ID:          "conn-1",
+		Provider:    "simkl",
+		UserID:      7,
+		ProfileID:   "profile-1",
+		AccessToken: "old-token",
+	}
+	repo := newServiceFakeRepo()
+	seedTestConnection(t, repo, conn)
+	seen := make([]string, 0, 3)
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	if _, err := service.ExportWatched(context.Background(), conn, ServerConfig{}, rotatingWatchedExportStub{
+		watchedImportExportStub: watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+		repo:                    repo,
+		seen:                    &seen,
+		newToken:                "rotated-token",
+		batchSize:               10,
+	}); err != nil {
+		t.Fatalf("ExportWatched: %v", err)
+	}
+	if len(seen) < 2 {
+		t.Fatalf("provider calls = %d, want at least 2 (tokens=%v)", len(seen), seen)
+	}
+	for i, token := range seen[1:] {
+		if token != "rotated-token" {
+			t.Fatalf("call %d used token %q, want the rotated one (tokens=%v)", i+2, token, seen)
+		}
+	}
+	stored, ok, err := repo.GetConnectionByID(context.Background(), "conn-1")
+	if err != nil || !ok {
+		t.Fatalf("GetConnectionByID: %v, ok=%v", err, ok)
+	}
+	if stored.AccessToken != "rotated-token" {
+		t.Fatalf("stored token = %q, want the rotated one", stored.AccessToken)
 	}
 }
 

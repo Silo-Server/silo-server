@@ -698,6 +698,16 @@ type HistoryExport struct {
 	UpdatedAt       time.Time
 }
 
+// HistoryExportCursor is how far through a connection's pending exports a drain
+// has already looked, ordered the way the pending query returns them. A failed
+// export keeps its remaining attempts and so stays selectable; paging past it
+// is what stops one run from spending every attempt at once, without having to
+// name the rejected rows in the next query.
+type HistoryExportCursor struct {
+	WatchedAt time.Time
+	ID        string
+}
+
 // ListItemState is the per-connection, per-list shadow record tracking whether
 // an item is present locally and/or remotely, used to drive incremental
 // export/removal reconciliation. It serves both the favorites and watchlist

@@ -18,6 +18,17 @@ func TestMediaDurationQueryUsesActiveMediaFilesPredicate(t *testing.T) {
 	}
 }
 
+func TestPendingHistoryExportsQueryPagesInAStableOrder(t *testing.T) {
+	// Losing either half of this leaves a drain re-reading rejected exports
+	// instead of paging past them.
+	if !strings.Contains(pendingHistoryExportsQuery, "(watched_at, id) > ($3::timestamptz, $4::uuid)") {
+		t.Fatalf("pending history export query must page past a cursor:\n%s", pendingHistoryExportsQuery)
+	}
+	if !strings.Contains(pendingHistoryExportsQuery, "ORDER BY watched_at ASC, id ASC") {
+		t.Fatalf("pending history export query must order by the full cursor key:\n%s", pendingHistoryExportsQuery)
+	}
+}
+
 func TestPluginCredentialBundleRoundTrip(t *testing.T) {
 	cipher, err := secret.New([]byte("01234567890123456789012345678901"))
 	if err != nil {
