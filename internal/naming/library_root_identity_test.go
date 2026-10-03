@@ -164,3 +164,113 @@ func TestConfiguredRootDistinguishesNumericShowsFromSeasons(t *testing.T) {
 		})
 	}
 }
+
+func TestBareSeasonFolderJoinsParentShow(t *testing.T) {
+	show := "/media/tv/Example Show (2013) {tvdb-123456}"
+	paths := []string{
+		show + "/Season/Example Show - S01E01.mkv",
+		show + "/Season 2/Example Show - S02E01.mkv",
+		show + "/Staffel/Example Show - S03E01.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "series", 1, nil, "/media/tv")
+	for _, p := range paths {
+		assignment := assignments[p]
+		if assignment.RootPath != show {
+			t.Errorf("%s: root %q, want %q", p, assignment.RootPath, show)
+		}
+		group := InferGroupIdentity(p, "series", assignment)
+		if group.BaseTitle != "Example Show" || group.TvdbID != "123456" {
+			t.Errorf("%s: identity %+v", p, group)
+		}
+	}
+}
+
+func TestBareSeasonLabelsExcludeCategoryFolders(t *testing.T) {
+	for _, name := range []string{"Season", "season", "Staffel", "Temporada"} {
+		if !isBareSeasonDirectory(name) {
+			t.Errorf("%q should be a bare season folder", name)
+		}
+	}
+	for _, name := range []string{"Series", "S", "Seasons", "Season 2", "Show"} {
+		if isBareSeasonDirectory(name) {
+			t.Errorf("%q should not be a bare season folder", name)
+		}
+	}
+}
+
+func TestBareSeasonFolderAtLibraryRootIsNotLifted(t *testing.T) {
+	filePath := "/media/tv/Season/Example Show - S01E01.mkv"
+	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/media/tv")
+	if got := assignments[filePath].RootPath; got == "/media/tv" {
+		t.Errorf("bare season folder at library root lifted to the library root: %q", got)
+	}
+}
+
+func TestBareSeasonFolderOnlyCountsAsImmediateParent(t *testing.T) {
+	cases := map[string]string{
+		"/tv/Genres/Season/Shows/Example Show/Example.Show.S01E01.mkv": "/tv/Genres/Season/Shows/Example Show",
+		"/tv/Season/Example.Show.S01E01.mkv":                           "/tv/Season",
+	}
+	for filePath, want := range cases {
+		root, ok := deriveSeriesRoot(filePath, true, false, "/tv")
+		if !ok || root.RootPath != want {
+			t.Errorf("%s: root %+v ok=%v, want %q", filePath, root, ok, want)
+		}
+	}
+	// A show named "Season" with a numbered season folder keeps its own name.
+	root, ok := deriveSeriesRoot("/tv/Season/Season 1/Season.S01E01.mkv", true, false, "/tv")
+	if !ok || root.RootPath != "/tv/Season" {
+		t.Errorf("show named Season: root %+v ok=%v", root, ok)
+	}
+}
+
+func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
+	filePath := "/tv/Example Show/Season/Example.Show.S01E01.mkv"
+	ctx := ResolvePathContext(filePath, "series", "/tv")
+	if !ctx.HasSeasonStructure {
+		t.Errorf("ResolvePathContext: HasSeasonStructure=false for bare season folder")
+	}
+	if ctx.RootPath != "/tv/Example Show" {
+		t.Errorf("ResolvePathContext root %q", ctx.RootPath)
+	}
+	evidence := extractPathEvidence(filePath, "series", "/tv")
+	if !evidence.HasSeasonStructure {
+		t.Errorf("extractPathEvidence: HasSeasonStructure=false for bare season folder")
+	}
+	if _, ok := firstSeasonNumber([]string{"Example Show", "Season"}, true, true); ok {
+		t.Errorf("bare season folder must not supply a season number")
+	}
+	// A bare folder higher up is not season structure.
+	if found, _ := detectSeasonStructure([]string{"Genres", "Season", "Shows", "Example Show"}, true, true); found {
+		t.Errorf("ancestor bare season folder counted as season structure")
+	}
+	_, assignments := InferRootAssignments([]string{filePath}, "series", 1, nil, "/tv")
+	group := InferGroupIdentity(filePath, "series", assignments[filePath])
+	if group.Confidence != "high" {
+		t.Errorf("group confidence %q, want high", group.Confidence)
+	}
+}
+
+func TestBareSeasonFolderInsideNumberedSeasonKeepsShow(t *testing.T) {
+	shows := []string{"/media/tv/Example Show (2013) {tvdb-123456}", "/media/tv/Other Show (2015) {tvdb-654321}"}
+	paths := []string{
+		shows[0] + "/Season 2/Season/Example Show - S02E01.mkv",
+		shows[1] + "/Season 2/Season/Other Show - S02E01.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "series", 1, nil, "/media/tv")
+	keys := map[string]bool{}
+	for i, p := range paths {
+		assignment := assignments[p]
+		if assignment.RootPath != shows[i] {
+			t.Errorf("%s: root %q, want %q", p, assignment.RootPath, shows[i])
+		}
+		group := InferGroupIdentity(p, "series", assignment)
+		if group.TvdbID == "" || keys[group.ContentGroupKey] {
+			t.Errorf("%s: identity %+v", p, group)
+		}
+		keys[group.ContentGroupKey] = true
+	}
+	if number, ok := firstSeasonNumber([]string{"Example Show", "Season 2", "Season"}, true, true); !ok || number != 2 {
+		t.Errorf("season number %d ok=%v, want 2 from the numbered ancestor", number, ok)
+	}
+}
