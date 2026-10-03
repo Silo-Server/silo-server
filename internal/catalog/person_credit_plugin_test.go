@@ -59,7 +59,11 @@ func pluginCreditPeople(count int, duplicates bool) []models.ItemPerson {
 }
 
 func TestPersonCreditPhotosThroughPluginResolver(t *testing.T) {
-	for _, size := range []imagesize.Size{imagesize.Unset, imagesize.Medium} {
+	for _, tc := range []struct {
+		size    imagesize.Size
+		variant string
+	}{{imagesize.Unset, "large"}, {imagesize.Medium, "featured"}} {
+		size := tc.size
 		t.Run(string(size), func(t *testing.T) {
 			resolver := metadata.NewPluginImageResolver()
 			t.Cleanup(resolver.Close)
@@ -82,7 +86,7 @@ func TestPersonCreditPhotosThroughPluginResolver(t *testing.T) {
 					if i == 99 {
 						path = "different.jpg"
 					}
-					if want := "https://example.invalid/featured/" + path; credit.PhotoURL != want {
+					if want := "https://example.invalid/" + tc.variant + "/" + path; credit.PhotoURL != want {
 						t.Fatalf("credit %d URL=%q, want %q", i, credit.PhotoURL, want)
 					}
 				}
