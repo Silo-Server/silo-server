@@ -68,7 +68,6 @@ export default tseslint.config(
       "src/pages/Recommendations.tsx",
       "src/pages/RecommendationsSection.tsx",
       "src/components/RecommendationGrid.tsx",
-      "src/pages/ProfileCustomizeHome.tsx",
       "src/pages/setup-wizard/steps/ProfileStep.tsx",
       "src/player/utils/subtitleChoicePersistence.ts",
       "src/hooks/queries/catalogRead.ts",

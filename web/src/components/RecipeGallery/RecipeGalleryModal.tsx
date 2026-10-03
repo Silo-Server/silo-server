@@ -35,9 +35,8 @@ interface Props {
   onClose: () => void;
   onPick: (def: RecipeDefinition, preset: GalleryPreset) => void;
   /**
-   * Hide recipes flagged admin_only by the backend. Set on profile-facing
-   * surfaces (customize home, home settings); the admin sections page shows
-   * everything.
+   * Hide recipes flagged admin_only by the backend. Set on the profile-facing
+   * Settings > Home Screen; the admin sections page shows everything.
    */
   hideAdminOnly?: boolean;
 }

@@ -158,7 +158,6 @@ const WatchPartyHub = lazy(() => import("@/pages/watchtogether/WatchPartyHub"));
 const WatchPartyInvite = lazy(() => import("@/pages/watchtogether/WatchPartyInvite"));
 const WatchTogetherRoomPage = lazy(() => import("@/pages/watchtogether/WatchTogetherRoomPage"));
 const WatchRoute = lazy(() => import("@/pages/WatchRoute"));
-const ProfileCustomizeHome = lazy(() => import("@/pages/ProfileCustomizeHome"));
 
 /**
  * Routes a browsing session reaches within the first few interactions. Home
@@ -709,9 +708,10 @@ function AppRoutes() {
                           />
                           <Route path="/calendar" element={<Calendar />} />
                           <Route path="/notifications" element={<Notifications />} />
+                          {/* Retired second profile Home editor; keep old links working. */}
                           <Route
                             path="/profile/customize-home"
-                            element={<ProfileCustomizeHome />}
+                            element={<Navigate to="/settings/home-screen" replace />}
                           />
                           <Route path="*" element={<Navigate to="/" replace />} />
                         </Routes>
