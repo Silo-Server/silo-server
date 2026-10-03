@@ -22,6 +22,9 @@ func TestPlanSegments(t *testing.T) {
 		{name: "catching up", keyframes: []float64{0, 7.0, 7.4, 7.8, 9.9}, want: []float64{0, 7.0, 7.4, 7.8, 9.9}},
 		// Targets count from the first keyframe, where FFmpeg's output starts.
 		{name: "late start", keyframes: []float64{0.5, 1.5, 2.5, 3.5}, want: []float64{0.5, 2.5}},
+		// A keyframe exactly on a target cuts there, though a nonzero origin
+		// leaves float error in the subtraction.
+		{name: "exact targets after a nonzero origin", keyframes: []float64{0.28, 2.28, 4.28, 6.28, 8.28}, want: []float64{0.28, 2.28, 4.28, 6.28, 8.28}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := PlanSegments(tc.keyframes, 2); !slices.Equal(got, tc.want) {
