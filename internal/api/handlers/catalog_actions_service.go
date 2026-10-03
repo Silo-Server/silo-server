@@ -259,7 +259,7 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64)
 	if err != nil || person == nil {
 		return apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
 	}
-	h.refreshQueue.Enqueue(id)
+	h.refreshQueue.Enqueue(id, person.MetadataRefreshAttemptedAt)
 	return nil
 }
 

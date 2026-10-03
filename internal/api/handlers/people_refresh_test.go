@@ -13,7 +13,7 @@ type recordingPersonRefreshQueue struct {
 	ids []int64
 }
 
-func (q *recordingPersonRefreshQueue) Enqueue(id int64) {
+func (q *recordingPersonRefreshQueue) Enqueue(id int64, _ *time.Time) {
 	q.ids = append(q.ids, id)
 }
 

@@ -24,7 +24,10 @@ type peopleRepository interface {
 }
 
 type PersonRefreshQueue interface {
-	Enqueue(id int64)
+	// Enqueue asks for a lookup of person id. lastAttempt is the person's
+	// MetadataRefreshAttemptedAt as read; the request is dropped if a lookup
+	// started after it.
+	Enqueue(id int64, lastAttempt *time.Time)
 }
 
 type PersonRefresher interface {
@@ -279,7 +282,7 @@ func (h *PeopleHandler) enqueuePersonRefreshIfDue(person models.Person) {
 	}
 
 	if catalog.PersonRefreshDue(person, time.Now()) {
-		h.refreshQueue.Enqueue(person.ID)
+		h.refreshQueue.Enqueue(person.ID, person.MetadataRefreshAttemptedAt)
 	}
 }
 

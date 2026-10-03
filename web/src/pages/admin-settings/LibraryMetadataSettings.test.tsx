@@ -215,6 +215,7 @@ describe("LibraryMetadataSettings", () => {
         "matcher.workers",
         "matcher.batch_size",
         "metadata.image_workers",
+        "metadata.person_refresh_per_minute",
         "markers.mode",
         "markers.lazy_playback",
         "markers.online_storage",
@@ -231,6 +232,18 @@ describe("LibraryMetadataSettings", () => {
     expect(keys).not.toContain("catalog.search.meilisearch.embedder");
     expect(keys).not.toContain("catalog.search.meilisearch.binary_quantized");
     expect(keys).not.toContain("catalog.search.meilisearch.rebuild_batch_size");
+  });
+
+  it("offers the background person lookup rate in the advanced scanning settings", () => {
+    // The Advanced section opens on its own when one of its fields is edited.
+    const rendered = render({ "catalog.search.provider": "postgres" }, [
+      "metadata.person_refresh_per_minute",
+    ]);
+
+    expect(text(rendered)).toContain("Person lookups per minute");
+    expect(text(rendered)).toContain(
+      "How many cast and crew members each server looks up per minute in the background.",
+    );
   });
 
   it("offers the server-wide real-time monitoring switch, on by default", () => {
