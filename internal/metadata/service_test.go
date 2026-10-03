@@ -119,7 +119,10 @@ func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, stat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	item, ok := r.items[contentID]
-	if !ok || strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+	if !ok {
+		return false, fmt.Errorf("%w: %s", catalog.ErrItemNotFound, contentID)
+	}
+	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
 		return false, nil
 	}
 	cp := *item
@@ -2011,7 +2014,9 @@ func TestPendingItemLifecycle_UnmatchedTransition(t *testing.T) {
 	})
 
 	// Call updateItemStatus to simulate what the worker does on failure.
-	h.service.updateItemStatus(ctx, contentID, "unmatched")
+	if _, err := h.service.updateItemStatus(ctx, contentID, "unmatched"); err != nil {
+		t.Fatalf("updateItemStatus: %v", err)
+	}
 
 	item, err := h.itemRepo.GetByID(ctx, contentID)
 	if err != nil {
@@ -2029,8 +2034,9 @@ func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			h := newTestHarness()
 			h.itemRepo.items["matched-item"] = &models.MediaItem{ContentID: "matched-item", Type: "movie", Title: "Matched", Status: "matched"}
-			if err := h.service.updateItemStatus(t.Context(), "matched-item", status); err != nil {
-				t.Fatalf("updateItemStatus(%s): %v", status, err)
+			changed, err := h.service.updateItemStatus(t.Context(), "matched-item", status)
+			if err != nil || changed {
+				t.Fatalf("updateItemStatus(%s) = %v, %v; want unchanged", status, changed, err)
 			}
 			if got := h.itemRepo.items["matched-item"].Status; got != "matched" {
 				t.Fatalf("status = %q, want matched", got)

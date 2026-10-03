@@ -913,10 +913,14 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.Mov
 
 func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.MediaFile, allowMatched bool, libraryRoots ...string) (*skeletonResult, bool, error) {
 	if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, file, allowMatched, libraryRoots...); ok {
-		if err := w.applyQueuedGroupOverride(ctx, file, skeleton, false, libraryRoots...); err != nil {
+		override, err := w.queuedGroupOverride(ctx, file, skeleton)
+		if err != nil {
 			return nil, false, err
 		}
-		if err := w.validateReusedGroupIdentity(ctx, file, skeleton, libraryRoots...); err != nil {
+		if err := w.applyQueuedGroupOverride(ctx, file, skeleton, override, libraryRoots...); err != nil {
+			return nil, false, err
+		}
+		if err := w.validateReusedGroupIdentity(ctx, file, skeleton, override != nil, libraryRoots...); err != nil {
 			return nil, false, err
 		}
 		if skeleton.ItemStatus == "ambiguous" {
@@ -942,18 +946,11 @@ func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.Medi
 
 // Reusing a provisional item must obey the same rescan boundary as creating
 // one: files linked by an older parser still share that item's identity.
-func (w *MatchWorker) validateReusedGroupIdentity(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, libraryRoots ...string) error {
-	if skeleton.ItemStatus == string(MatchOutcomeMatched) || file.ContentGroupKey == "" {
+// hasOverride reports whether the file's group has an operator override, which
+// establishes identity independently of how the filename currently parses.
+func (w *MatchWorker) validateReusedGroupIdentity(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, hasOverride bool, libraryRoots ...string) error {
+	if skeleton.ItemStatus == string(MatchOutcomeMatched) || file.ContentGroupKey == "" || hasOverride {
 		return nil
-	}
-	if w.service.groupOverrideRepo != nil {
-		override, err := w.service.groupOverrideRepo.Get(ctx, file.MediaFolderID, file.GroupKeyVersion, file.ContentGroupKey)
-		if err != nil {
-			return fmt.Errorf("loading queued group override: %w", err)
-		}
-		if override != nil {
-			return nil
-		}
 	}
 	if w.service.scannedGroupRepo == nil {
 		return nil
@@ -1052,7 +1049,7 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 
 	return &skeletonResult{
 		ContentID:        item.ContentID,
-		ItemStatus:       item.Status,
+		ItemStatus:       status,
 		RootPath:         rootPath,
 		ObservedRootPath: observedRootPath,
 		GroupKeyVersion:  file.GroupKeyVersion,
@@ -1066,46 +1063,50 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 	}, true
 }
 
-// applyQueuedGroupOverride forces the operator override on a queued file's
-// content group onto the skeleton rebuilt from the provisional item the file
-// already links to, as createOrFindSkeleton does when it first links a file. A
-// matched item and an item pinned unmatched by a split keep their identity,
-// and a structured path ID still beats a forced ID for the same provider.
-//
-// seriesRoot is set when a series root is matched as one unit. A group key
-// can be shared by roots that are different shows (two bare "Season" folders,
-// or one title with no year), each on its own item, and the override row does
-// not record which root it was saved for. It therefore reaches a series item
-// only when that item holds the whole group and nothing else.
-func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, seriesRoot bool, libraryRoots ...string) error {
-	if !isProvisionalOwnershipStatus(skeleton.ItemStatus) || file.ContentGroupKey == "" || w.service.groupOverrideRepo == nil {
-		return nil
+// queuedGroupOverride loads the operator override on a queued file's content
+// group. A matched item keeps its identity, so it is not loaded for one.
+func (w *MatchWorker) queuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult) (*models.MediaGroupOverride, error) {
+	if skeleton.ItemStatus == string(MatchOutcomeMatched) || file.ContentGroupKey == "" || w.service.groupOverrideRepo == nil {
+		return nil, nil
 	}
 	override, err := w.service.groupOverrideRepo.Get(ctx, file.MediaFolderID, file.GroupKeyVersion, file.ContentGroupKey)
 	if err != nil {
-		return fmt.Errorf("loading queued group override: %w", err)
+		return nil, fmt.Errorf("loading queued group override: %w", err)
 	}
-	if override == nil {
+	return override, nil
+}
+
+// applyQueuedGroupOverride forces override onto the skeleton rebuilt from the
+// provisional item a queued file already links to, as createOrFindSkeleton
+// does when it first links a file. A matched item and an item pinned unmatched
+// by a split keep their identity, and a structured path ID still beats a forced
+// ID for the same provider.
+//
+// A group key can be shared by roots that are different titles (two bare
+// "Season" folders, or one title with no year), each on its own item, and the
+// override row does not record which root it was saved for. A match can move
+// the whole item, so the override reaches an item only when that item holds
+// the whole group and nothing else.
+func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models.MediaFile, skeleton *skeletonResult, override *models.MediaGroupOverride, libraryRoots ...string) error {
+	if override == nil || !isProvisionalOwnershipStatus(skeleton.ItemStatus) {
 		return nil
 	}
 	if pinned, err := w.service.pinnedUnmatchedBySplit(ctx, skeleton.ContentID); err != nil || pinned {
 		return err
 	}
-	if seriesRoot {
-		owned, err := w.seriesItemOwnsContentGroup(ctx, file)
-		if err != nil {
-			return err
-		}
-		if !owned {
-			slog.WarnContext(ctx, "metadata: group override not applied to linked series root because its item and its content group hold different files", "component", "metadata",
-				"folder_id", file.MediaFolderID,
-				"observed_root_path", file.ObservedRootPath,
-				"content_id", skeleton.ContentID,
-				"group_key_version", file.GroupKeyVersion,
-				"content_group_key", file.ContentGroupKey,
-			)
-			return nil
-		}
+	owned, err := w.itemOwnsContentGroup(ctx, file)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		slog.WarnContext(ctx, "metadata: group override not applied to linked item because the item and its content group hold different files", "component", "metadata",
+			"folder_id", file.MediaFolderID,
+			"observed_root_path", file.ObservedRootPath,
+			"content_id", skeleton.ContentID,
+			"group_key_version", file.GroupKeyVersion,
+			"content_group_key", file.ContentGroupKey,
+		)
+		return nil
 	}
 
 	wasAmbiguous := skeleton.ItemStatus == "ambiguous" //nolint:goconst // Item statuses are literals throughout this package.
@@ -1116,19 +1117,25 @@ func (w *MatchWorker) applyQueuedGroupOverride(ctx context.Context, file *models
 		// the title of an item that is still ambiguous. Store the settled
 		// status so the item takes the provider's title like any other
 		// provisional item.
-		if err := w.service.updateItemStatus(ctx, skeleton.ContentID, skeleton.ItemStatus); err != nil {
+		changed, err := w.service.updateItemStatus(ctx, skeleton.ContentID, skeleton.ItemStatus)
+		if err != nil {
 			return fmt.Errorf("settling overridden ambiguous item: %w", err)
+		}
+		if !changed {
+			// Another writer matched the item after it was read. Leave the
+			// match alone; the retry reads the matched item.
+			return fmt.Errorf("item %s was matched while its group override was applied", skeleton.ContentID)
 		}
 	}
 	return nil
 }
 
-// seriesItemOwnsContentGroup reports whether the item file links to and file's
+// itemOwnsContentGroup reports whether the item file links to and file's
 // content group hold the same present files.
-func (w *MatchWorker) seriesItemOwnsContentGroup(ctx context.Context, file *models.MediaFile) (bool, error) {
+func (w *MatchWorker) itemOwnsContentGroup(ctx context.Context, file *models.MediaFile) (bool, error) {
 	lister, ok := w.service.fileRepo.(metadataContentFileLister)
 	if !ok {
-		return false, nil
+		return false, errors.New("file repository cannot list files by content id")
 	}
 	groupFiles, err := w.service.fileRepo.ListByGroupKey(ctx, file.MediaFolderID, file.GroupKeyVersion, file.ContentGroupKey)
 	if err != nil {
@@ -1306,8 +1313,14 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	if !hasUnlinkedGroupFile(groupFiles) {
 		if strings.TrimSpace(representative.ContentID) != "" {
 			skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative, job.RerunRequested, folder.paths...)
+			var override *models.MediaGroupOverride
 			if ok {
-				if err := w.applyQueuedGroupOverride(ctx, representative, skeleton, true, folder.paths...); err != nil {
+				var err error
+				override, err = w.queuedGroupOverride(ctx, representative, skeleton)
+				if err == nil {
+					err = w.applyQueuedGroupOverride(ctx, representative, skeleton, override, folder.paths...)
+				}
+				if err != nil {
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr
 					}
@@ -1322,7 +1335,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				}
 			}
 			if ok && skeleton.ItemStatus != "ambiguous" {
-				if err := w.validateReusedGroupIdentity(ctx, representative, skeleton, folder.paths...); err != nil {
+				if err := w.validateReusedGroupIdentity(ctx, representative, skeleton, override != nil, folder.paths...); err != nil {
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr
 					}
@@ -1660,7 +1673,7 @@ func (w *MatchWorker) logStatusUpdateFailure(ctx context.Context, contentID, sta
 	if w == nil || w.service == nil {
 		return
 	}
-	if err := w.service.updateItemStatus(ctx, contentID, status); err != nil {
+	if _, err := w.service.updateItemStatus(ctx, contentID, status); err != nil {
 		args := append([]any{"content_id", contentID, "status", status, "error", err}, attrs...)
 		slog.WarnContext(ctx, "metadata: failed to update item status", append([]any{"component", "metadata"}, args...)...)
 	}

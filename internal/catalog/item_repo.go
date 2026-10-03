@@ -530,11 +530,11 @@ func (r *ItemRepository) InsertIfAbsent(ctx context.Context, item *models.MediaI
 	return inserted, nil
 }
 
-// SetStatusUnlessMatched sets an item's status and leaves a matched item, or a
-// missing one, untouched. It reports whether a row changed. The condition is
-// part of the UPDATE, so a match another writer stores at the same time is
-// kept; reading the item and then calling Upsert would write the stale copy
-// over it.
+// SetStatusUnlessMatched sets an item's status and leaves a matched item
+// untouched. It reports whether a row changed, and returns ErrItemNotFound when
+// no item has contentID. The condition is part of the UPDATE, so a match
+// another writer stores at the same time is kept; reading the item and then
+// calling Upsert would write the stale copy over it.
 func (r *ItemRepository) SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error) {
 	if r.searchIndexEvents.disabledByActiveProvider() {
 		return r.setStatusUnlessMatched(ctx, r.pool, contentID, status)
@@ -555,21 +555,36 @@ func (r *ItemRepository) SetStatusUnlessMatched(ctx context.Context, contentID, 
 	return changed, nil
 }
 
-func (r *ItemRepository) setStatusUnlessMatched(ctx context.Context, execer itemExecer, contentID, status string) (bool, error) {
-	tag, err := execer.Exec(ctx, `
-		UPDATE media_items
-		SET status = $2, updated_at = NOW()
-		WHERE content_id = $1 AND lower(trim(status)) <> 'matched'`, contentID, status)
+// setStatusUnlessMatched's outer SELECT reads the snapshot taken before the
+// UPDATE, so it finds an item the UPDATE changed as well as one it skipped.
+func (r *ItemRepository) setStatusUnlessMatched(ctx context.Context, querier itemStatusQuerier, contentID, status string) (bool, error) {
+	var exists, changed bool
+	err := querier.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE media_items
+			SET status = $2, updated_at = NOW()
+			WHERE content_id = $1 AND lower(trim(status)) <> 'matched'
+			RETURNING content_id
+		)
+		SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1), EXISTS (SELECT 1 FROM updated)`, contentID, status).Scan(&exists, &changed)
 	if err != nil {
 		return false, fmt.Errorf("setting media item status: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if !exists {
+		return false, ErrItemNotFound
+	}
+	if !changed {
 		return false, nil
 	}
-	if err := r.searchIndexEvents.EnqueueUpsert(ctx, execer, contentID); err != nil {
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, querier, contentID); err != nil {
 		return false, fmt.Errorf("enqueueing catalog search upsert: %w", err)
 	}
 	return true, nil
+}
+
+type itemStatusQuerier interface {
+	itemExecer
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *models.MediaItem) error {

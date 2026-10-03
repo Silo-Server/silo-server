@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -131,7 +132,8 @@ func TestItemInsertIfAbsentKeepsExistingRow(t *testing.T) {
 }
 
 // TestItemSetStatusUnlessMatched verifies that the status write changes only
-// the status of an unmatched row and leaves a matched or missing row alone.
+// the status of an unmatched row, leaves a matched row alone, and reports a
+// missing row as ErrItemNotFound.
 func TestItemSetStatusUnlessMatched(t *testing.T) {
 	ctx := context.Background()
 	pool := newRestampTestPool(t)
@@ -147,9 +149,6 @@ func TestItemSetStatusUnlessMatched(t *testing.T) {
 		if err != nil || changed != wantChanged {
 			t.Fatalf("%s: changed = %v, %v; want %v", step, changed, err, wantChanged)
 		}
-		if !wantChanged && wantStatus == "" {
-			return
-		}
 		got, err := repo.GetByID(ctx, contentID)
 		if err != nil {
 			t.Fatalf("%s: get item: %v", step, err)
@@ -159,7 +158,9 @@ func TestItemSetStatusUnlessMatched(t *testing.T) {
 		}
 	}
 
-	check("missing item", false, "unmatched", "", "")
+	if changed, err := repo.SetStatusUnlessMatched(ctx, contentID, "unmatched"); changed || !errors.Is(err, ErrItemNotFound) {
+		t.Fatalf("missing item: changed = %v, %v; want ErrItemNotFound", changed, err)
+	}
 
 	item := &models.MediaItem{
 		ContentID: contentID,
