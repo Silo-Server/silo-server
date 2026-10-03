@@ -104,7 +104,7 @@ func TestPersonCreditPhotoBatchPreservesCredits(t *testing.T) {
 					reference := &DetailService{imageResolver: &creditPhotoResolver{}}
 					want := make([]PersonCredit, len(people))
 					for i, person := range people {
-						photo := reference.PresignURL(t.Context(), person.PhotoPath, imagesize.PluginVariantFeatured)
+						photo := reference.PresignURL(t.Context(), person.PhotoPath, imagesize.PluginVariantLarge)
 						if size != imagesize.Unset {
 							photo = reference.PresignImageURL(t.Context(), person.PhotoPath, "profile", string(size))
 						}

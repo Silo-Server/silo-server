@@ -12,7 +12,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
@@ -414,13 +414,17 @@ export default function MovieContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {item.cast && item.cast.length > 0 && (
-        <DetailSection title="Cast">
-          <CastCarousel cast={item.cast} prefetchPeople />
+      {((item.cast?.length ?? 0) > 0 ||
+        buildCrewGroups(item.crew ?? [], "Director").some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel
+            cast={item.cast ?? []}
+            crewGroups={buildCrewGroups(item.crew ?? [], "Director")}
+            limit={12}
+            prefetchPeople
+          />
         </DetailSection>
       )}
-
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
 
       {/* More Like This */}
       {similarLoading ? (

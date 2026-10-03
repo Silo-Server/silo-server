@@ -12,7 +12,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useMissingSeasonsRequestable } from "@/hooks/useCanRequest";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import CastCarousel from "@/components/CastCarousel";
-import CrewList from "@/components/CrewList";
+import { buildCrewGroups } from "@/components/castCrewGroups";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import SplitItemDialog from "@/components/SplitItemDialog";
@@ -246,12 +246,17 @@ export default function SeriesContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {item.cast && item.cast.length > 0 && (
-        <DetailSection title="Cast">
-          <CastCarousel cast={item.cast} prefetchPeople />
+      {((item.cast?.length ?? 0) > 0 ||
+        buildCrewGroups(item.crew ?? [], "Creator").some((g) => g.members.length > 0)) && (
+        <DetailSection title="Cast & Crew">
+          <CastCarousel
+            cast={item.cast ?? []}
+            crewGroups={buildCrewGroups(item.crew ?? [], "Creator")}
+            limit={12}
+            prefetchPeople
+          />
         </DetailSection>
       )}
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
 
       {similarLoading ? (
         <RecommendationGridSkeleton />
