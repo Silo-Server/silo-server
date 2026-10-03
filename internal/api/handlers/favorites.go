@@ -868,6 +868,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
 		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
+		resp.LogoURL = h.presignURL(ctx, sizedLogoPath(mi.LogoPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
 

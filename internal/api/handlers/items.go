@@ -329,6 +329,7 @@ type itemListResponse struct {
 	PosterThumbhash   string                      `json:"poster_thumbhash,omitempty"`
 	BackdropURL       string                      `json:"backdrop_url,omitempty"`
 	BackdropThumbhash string                      `json:"backdrop_thumbhash,omitempty"`
+	LogoURL           string                      `json:"logo_url,omitempty"`
 	ReleaseDate       *string                     `json:"release_date,omitempty"`
 	LastAirDate       *string                     `json:"last_air_date,omitempty"`
 	AddedAt           *time.Time                  `json:"added_at,omitempty"`
@@ -358,6 +359,7 @@ type sortMetricsResponse struct {
 type itemListImageURLs struct {
 	posterURL   string
 	backdropURL string
+	logoURL     string
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -954,6 +956,7 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(ctx context.Context, v Item
 	hint := requestVariantHint("card", size)
 	resp.PosterURL = h.presignURLCtx(ctx, sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size), hint)
 	resp.BackdropURL = h.presignURLCtx(ctx, sizedCardBackdropPath(item.BackdropPath, size), hint)
+	resp.LogoURL = h.presignURLCtx(ctx, sizedLogoPath(item.LogoPath, size), hint)
 	return resp
 }
 
@@ -1022,11 +1025,12 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 		contentID    string
 		posterPath   string
 		backdropPath string
+		logoPath     string
 	}
 
 	pending := make([]pendingImages, 0, len(items))
-	paths := make([]string, 0, len(items)*2)
-	seenPaths := make(map[string]struct{}, len(items)*2)
+	paths := make([]string, 0, len(items)*3)
+	seenPaths := make(map[string]struct{}, len(items)*3)
 	addPath := func(path string) {
 		if path == "" || path == "-" {
 			return
@@ -1046,10 +1050,12 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 			contentID:    item.ContentID,
 			posterPath:   sizedCardPath(item.PosterPath, artworkkey.ImagePoster, size),
 			backdropPath: sizedCardBackdropPath(item.BackdropPath, size),
+			logoPath:     sizedLogoPath(item.LogoPath, size),
 		}
 		pending = append(pending, images)
 		addPath(images.posterPath)
 		addPath(images.backdropPath)
+		addPath(images.logoPath)
 	}
 
 	resolved := h.detailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("card", size))
@@ -1057,6 +1063,7 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 		urls[images.contentID] = itemListImageURLs{
 			posterURL:   resolved[images.posterPath].URL,
 			backdropURL: resolved[images.backdropPath].URL,
+			logoURL:     resolved[images.logoPath].URL,
 		}
 	}
 	return urls
