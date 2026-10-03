@@ -81,7 +81,11 @@ media type's fallback route (no conditions) comes last. A route with no
 destination for a tier lets that tier fall through; `skip_uhd` stops a matching
 title from getting a 4K copy at all, even with `force_dual_quality`, and so
 does Everything else with no 4K server: "no 4K copy" means the same on a rule
-and on the fallback. The admin preview explains a decision route by route: the
+and on the fallback. Everything else with no HD server makes no HD copy when
+the title's 4K copy goes to a server, so a media type whose servers are all
+marked 4K gets its 4K versions without a failed HD tier; when the 4K copy goes
+nowhere too (a requester without 4K), HD stays undecided and fails, so a
+request is never sent nowhere. The admin preview explains a decision route by route: the
 conditions each failed and what it did per tier (sent, skipped, passed on, did
 not match, came after the tier was decided).
 
@@ -151,7 +155,9 @@ server marked 4K (the Sonarr/Radarr plugin's `is_4k` switch), with each
 server's own settings: Everything else's overrides do not apply. Anime series
 (see "Routing facts") go to the same servers with Sonarr's anime series type,
 as Seerr sends them. With no server
-marked 4K there is no 4K copy, even with `force_dual_quality`. A media type
+marked 4K there is no 4K copy, even with `force_dual_quality`; with only a
+server marked 4K there is no HD copy, and a requester without 4K gets a failed
+HD tier, as under Advanced. A media type
 whose server is another plugin (Seerr) keeps that plugin's own routing. Targets
 record the route as "Standard".
 
