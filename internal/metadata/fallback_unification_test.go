@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -12,6 +13,8 @@ type fakePersonRefreshRepo struct {
 	persons           map[int64]models.Person
 	refreshAttempts   []int64
 	refreshAttemptErr error
+	updateErr         error
+	outcomes          []catalog.PersonRefreshOutcome
 }
 
 func newFakePersonRefreshRepo(persons ...models.Person) *fakePersonRefreshRepo {
@@ -32,6 +35,9 @@ func (r *fakePersonRefreshRepo) Get(_ context.Context, id int64) (*models.Person
 }
 
 func (r *fakePersonRefreshRepo) Update(_ context.Context, person models.Person) error {
+	if r.updateErr != nil {
+		return r.updateErr
+	}
 	r.persons[person.ID] = person
 	return nil
 }
@@ -43,6 +49,11 @@ func (r *fakePersonRefreshRepo) FindRefreshCandidates(_ context.Context, _ int) 
 func (r *fakePersonRefreshRepo) MarkRefreshAttempt(_ context.Context, id int64) error {
 	r.refreshAttempts = append(r.refreshAttempts, id)
 	return r.refreshAttemptErr
+}
+
+func (r *fakePersonRefreshRepo) RecordRefreshOutcome(_ context.Context, _ int64, outcome catalog.PersonRefreshOutcome) error {
+	r.outcomes = append(r.outcomes, outcome)
+	return nil
 }
 
 type stubPersonProvider struct {

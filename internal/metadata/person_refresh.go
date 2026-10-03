@@ -25,6 +25,7 @@ type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
 	Update(ctx context.Context, person models.Person) error
 	MarkRefreshAttempt(ctx context.Context, id int64) error
+	RecordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) error
 	FindRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
@@ -120,6 +121,11 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 	photoProviderID := ""
 	hasMetadata := false
+	// consulted and failed decide the outcome of a lookup that found nothing:
+	// a 404 or an empty answer is the provider not knowing the person, while an
+	// error, a timeout, or no provider that supports person lookup says nothing
+	// about them.
+	consulted, failed := 0, false
 
 	for _, provider := range providers {
 		personProvider, ok := provider.(PersonProvider)
@@ -131,7 +137,14 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			ProviderIDs: accumulator.ProviderIDs,
 			Language:    "en",
 		})
+		if errors.Is(err, ErrPersonDetailUnsupported) {
+			continue
+		}
+		consulted++
 		if err != nil {
+			if !isProvider404(err) {
+				failed = true
+			}
 			slog.WarnContext(ctx, "person refresh: provider detail lookup failed", "component", "metadata",
 				"provider", provider.Slug(),
 				"person_id", id,
@@ -151,6 +164,11 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 
 	if !hasMetadata {
+		outcome := catalog.PersonRefreshNotFound
+		if failed || consulted == 0 {
+			outcome = catalog.PersonRefreshFailed
+		}
+		s.recordRefreshOutcome(ctx, id, outcome)
 		return nil, ErrPersonMetadataNotFound
 	}
 
@@ -169,8 +187,12 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	MergePersonDetail(&accumulator, &existingDetail, MergeReplaceUnlocked)
 	accumulator = existingDetail
 
+	// A provider answer that can't be stored records a failure, so a
+	// deterministic error (an unparseable date) backs off like any other
+	// failure instead of coming back every time the attempt's lease runs out.
 	refreshed, err := mergePersonIntoRecord(*person, accumulator)
 	if err != nil {
+		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
 		return nil, err
 	}
 
@@ -180,11 +202,29 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			// longer anything to refresh under this id.
 			return nil, ErrPersonNotFound
 		}
+		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
+	s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshAnswered)
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)
 
 	return &refreshed, nil
+}
+
+// recordRefreshOutcome stores a finished lookup's outcome, which decides when
+// the sweep looks the person up again. Like the attempt mark it is
+// bookkeeping: a failed write is logged, and the attempt's short lease then
+// brings the person back. It runs even when the refresh ran out of time.
+func (s *PersonRefreshService) recordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) {
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := s.repo.RecordRefreshOutcome(recordCtx, id, outcome); err != nil {
+		slog.WarnContext(ctx, "person refresh: failed to record refresh outcome", "component", "metadata",
+			"person_id", id,
+			"outcome", outcome,
+			"error", err,
+		)
+	}
 }
 
 func (s *PersonRefreshService) enqueuePersonPhoto(ctx context.Context, person models.Person, providerIDs map[string]string, photoProviderID string) {
