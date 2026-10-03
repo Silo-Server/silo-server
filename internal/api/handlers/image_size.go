@@ -86,6 +86,12 @@ func sizedCardBackdropPath(path string, size imagesize.Size) string {
 	return sizedCardPath(path, imageTypeForBackdropPath(path), size)
 }
 
+// sizedLogoPath is a title's wordmark at the request's size; unsized, the
+// stored original, since a logo has no card thumbnail.
+func sizedLogoPath(path string, size imagesize.Size) string {
+	return sizedImagePath(path, artworkkey.ImageLogo, size, path)
+}
+
 // sizedPosterPath is featuredPosterPath with the request's size applied.
 func sizedPosterPath(path string, size imagesize.Size) string {
 	return sizedImagePath(path, "poster", size, featuredPosterPath(path))

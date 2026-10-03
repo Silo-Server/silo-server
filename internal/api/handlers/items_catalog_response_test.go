@@ -72,6 +72,7 @@ func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
 			ContentID:    "movie-1",
 			PosterPath:   "plugin://poster-1/original.jpg",
 			BackdropPath: "plugin://backdrop-1/original.jpg",
+			LogoPath:     "plugin://logo-1/original.png",
 		},
 		{
 			ContentID:    "movie-2",
@@ -94,11 +95,17 @@ func TestItemListCardImageURLsUsesBatchResolver(t *testing.T) {
 	if got := urls["movie-1"].backdropURL; got != "batch:card:plugin://backdrop-1/original.jpg" {
 		t.Fatalf("movie-1 backdrop URL = %q", got)
 	}
+	if got := urls["movie-1"].logoURL; got != "batch:card:plugin://logo-1/original.png" {
+		t.Fatalf("movie-1 logo URL = %q", got)
+	}
 	if got := urls["movie-2"].posterURL; got != "https://cdn.example/poster-2.jpg" {
 		t.Fatalf("movie-2 poster URL = %q", got)
 	}
-	if got := len(resolver.batchPaths); got != 2 {
-		t.Fatalf("batch resolver path count = %d, want 2", got)
+	if got := urls["movie-2"].logoURL; got != "" {
+		t.Fatalf("movie-2 logo URL = %q, want none", got)
+	}
+	if got := len(resolver.batchPaths); got != 3 {
+		t.Fatalf("batch resolver path count = %d, want 3", got)
 	}
 }
 
