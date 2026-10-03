@@ -1184,6 +1184,56 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	}
 }
 
+// A file the scanner stored without any stream metadata is either waiting for
+// its first probe or was rejected by ffprobe. Only the first is worth retrying.
+func TestPlanPlaybackV3SeparatesUnprobedFromUnreadableSources(t *testing.T) {
+	req := validStartRequestV3()
+	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
+	bare := func() *models.MediaFile {
+		return &models.MediaFile{ID: 7, FilePath: "/library/show/S01E03.mkv", FileSize: 0, SubtitleTracks: []models.SubtitleTrack{}}
+	}
+
+	unprobed := bare()
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: unprobed, EffectiveFile: unprobed, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" || !result.Terminal.Retryable {
+		t.Fatalf("unprobed result = %s", ExplainPlannerResultV3(result))
+	}
+
+	failedAt := time.Date(2026, time.October, 2, 12, 1, 3, 0, time.UTC)
+	rejected := bare()
+	rejected.ProbeFailedAt = &failedAt
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: rejected, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != TerminalSourceUnreadableV3 || result.Terminal.Retryable {
+		t.Fatalf("rejected result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Terminal.Message != TerminalSourceUnreadableMessageV3 {
+		t.Fatalf("message = %q", result.Terminal.Message)
+	}
+
+	// The server bitrate cap renames refusals it causes; it must not claim
+	// an unreadable file.
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: rejected, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3(), ServerBitrateCapKbps: 4000})
+	if result.Terminal == nil || result.Terminal.Reason != TerminalSourceUnreadableV3 {
+		t.Fatalf("capped rejected result = %s", ExplainPlannerResultV3(result))
+	}
+
+	// The effective file decides: a rejected requested file whose effective
+	// version is readable plans normally.
+	readable := detailedFixtureFileV3()
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: readable, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal != nil && (result.Terminal.Reason == TerminalSourceUnreadableV3 || result.Terminal.Reason == "source_metadata_incomplete") {
+		t.Fatalf("readable effective file result = %s", ExplainPlannerResultV3(result))
+	}
+
+	// A stale failure mark never hides metadata from a successful probe.
+	probed := detailedFixtureFileV3()
+	probed.ProbeFailedAt = &failedAt
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: probed, EffectiveFile: probed, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal != nil && (result.Terminal.Reason == TerminalSourceUnreadableV3 || result.Terminal.Reason == "source_metadata_incomplete") {
+		t.Fatalf("probed file with failure mark result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3TranscodesVP9WithUnknownCodecLevel(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.CodecVideo = "vp9"

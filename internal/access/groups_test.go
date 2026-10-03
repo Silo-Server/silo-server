@@ -388,7 +388,7 @@ func TestEffectivePolicyForUserQueriesProviderWhenGrouped(t *testing.T) {
 }
 
 // An admin row that still carries a group (written before admins were kept
-// ungrouped) resolves as ungrouped without consulting the provider.
+// ungrouped) resolves to the admin defaults without consulting the provider.
 func TestEffectivePolicyForUserIgnoresGroupOnAdmin(t *testing.T) {
 	groupID := int64(7)
 	user := &models.User{ID: 3, Role: models.RoleAdmin, AccessGroupID: &groupID}
@@ -396,7 +396,51 @@ func TestEffectivePolicyForUserIgnoresGroupOnAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EffectivePolicyForUser() error = %v", err)
 	}
-	if !reflect.DeepEqual(got, ApplyGroupPolicy(user, nil)) {
-		t.Fatalf("EffectivePolicyForUser(admin) = %#v, want the no-group policy %#v", got, ApplyGroupPolicy(user, nil))
+	if want := adminFullAccess(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("EffectivePolicyForUser(admin) = %#v, want full access %#v", got, want)
+	}
+}
+
+func adminFullAccess() EffectiveUserPolicy {
+	return EffectiveUserPolicy{
+		DownloadAllowed:          true,
+		DownloadTranscodeAllowed: true,
+		TranscodeAllowed:         true,
+		AudioTranscodeAllowed:    true,
+		RequestsAllowed:          true,
+	}
+}
+
+// An admin with no overrides has full access, including server-prepared
+// downloads, which the no-group defaults for a regular account deny (#1403).
+func TestApplyGroupPolicyAdminDefaultsToFullAccess(t *testing.T) {
+	admin := &models.User{ID: 1, Role: models.RoleAdmin}
+	if got, want := ApplyGroupPolicy(admin, nil), adminFullAccess(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ApplyGroupPolicy(admin) = %#v, want %#v", got, want)
+	}
+	regular := &models.User{ID: 2, Role: models.RoleUser}
+	if ApplyGroupPolicy(regular, nil).DownloadTranscodeAllowed {
+		t.Fatal("ApplyGroupPolicy(ungrouped regular).DownloadTranscodeAllowed = true, want the no-group default false")
+	}
+}
+
+func TestApplyGroupPolicyAdminOverridesStillRestrict(t *testing.T) {
+	admin := &models.User{ID: 1, Role: models.RoleAdmin, DownloadTranscodeAllowed: ptr(false), MaxStreams: ptr(2)}
+	got := ApplyGroupPolicy(admin, nil)
+	if got.DownloadTranscodeAllowed || got.MaxStreams != 2 {
+		t.Fatalf("ApplyGroupPolicy(restricted admin) = %#v, want the overrides to win", got)
+	}
+}
+
+// The resolver itself keeps a group off an admin, not only GroupApplies at
+// each call site.
+func TestApplyGroupPolicyIgnoresGroupOnAdmin(t *testing.T) {
+	admin := &models.User{ID: 1, Role: models.RoleAdmin, Permissions: []string{"marker_edit"}}
+	group := &GroupPolicy{ID: 4, LibraryIDs: []int{1}, MaxStreams: 1, AllowedPermissions: []string{}}
+	got := ApplyGroupPolicy(admin, group)
+	want := adminFullAccess()
+	want.Permissions = []string{"marker_edit"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ApplyGroupPolicy(admin, group) = %#v, want %#v", got, want)
 	}
 }

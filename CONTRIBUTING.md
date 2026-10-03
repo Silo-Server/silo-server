@@ -116,6 +116,7 @@ make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
+make verify-case-collisions
 ```
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated

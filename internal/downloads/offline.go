@@ -15,6 +15,8 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -195,47 +197,24 @@ func (s *Service) artworkHTTPClient() *http.Client {
 func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *http.Request, imageURL string) error {
 	fetchCtx, stopFetch := context.WithCancel(ctx)
 	defer stopFetch()
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, imageURL, nil)
-	if err != nil {
-		// Not wrapped: the parse error quotes the presigned URL.
-		return errors.New("building artwork request: invalid artwork URL")
-	}
-	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
-		// Local artwork storage signs server-relative URLs, which can't be
-		// fetched over HTTP. Retrying won't help.
-		return errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
-	}
-	resp, err := s.artworkHTTPClient().Do(req)
+	image, err := s.openArtwork(fetchCtx, imageURL)
 	if err != nil {
 		if ctx.Err() != nil {
 			// The client went away; the store isn't at fault.
 			return ctx.Err()
 		}
-		// A failed request's error text repeats the presigned URL; keep only
-		// the cause.
-		if urlErr, ok := errors.AsType[*url.Error](err); ok {
-			err = urlErr.Err
-		}
-		return fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
+		return err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
-		// Also ErrAssetNotFound, which the frozen v1 route answers with 404
-		// as it always has.
-		return fmt.Errorf("%w: %w: %w", artworkStatusError(resp.StatusCode), ErrAssetUnavailable, ErrAssetNotFound)
+	defer func() { _ = image.body.Close() }()
+	if image.contentType != "" {
+		w.Header().Set("Content-Type", image.contentType)
 	}
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%w: %w", artworkStatusError(resp.StatusCode), ErrAssetNotFound)
-	}
-	if ct := resp.Header.Get("Content-Type"); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	if cl := resp.Header.Get("Content-Length"); cl != "" {
-		w.Header().Set("Content-Length", cl)
+	if image.contentLength != "" {
+		w.Header().Set("Content-Length", image.contentLength)
 	}
 	// Artwork is immutable for a stored manifest; let the client cache it once.
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	store := &storeReader{Reader: resp.Body, stall: time.AfterFunc(artworkStallTimeout, stopFetch)}
+	store := &storeReader{Reader: image.body, stall: time.AfterFunc(artworkStallTimeout, stopFetch)}
 	defer store.stall.Stop()
 	if written, err := io.Copy(w, store); err != nil {
 		if written == 0 {
@@ -256,6 +235,80 @@ func (s *Service) streamArtwork(ctx context.Context, w http.ResponseWriter, _ *h
 		return fmt.Errorf("streaming artwork: %w", err)
 	}
 	return nil
+}
+
+// artworkImage is an opened artwork body and the headers to send with it.
+type artworkImage struct {
+	body          io.ReadCloser
+	contentType   string
+	contentLength string
+}
+
+// openArtwork opens imageURL. Local artwork storage resolves images to this
+// server's signed artwork route, which is read from the store directly; any
+// other URL is fetched over HTTP.
+func (s *Service) openArtwork(ctx context.Context, imageURL string) (artworkImage, error) {
+	if s.artworkStore != nil && s.artworkSigner != nil {
+		if key, ok := s.artworkSigner.SignedKey(imageURL, time.Now()); ok {
+			return s.openStoredArtwork(ctx, key)
+		}
+	}
+	return s.fetchArtwork(ctx, imageURL)
+}
+
+func (s *Service) openStoredArtwork(ctx context.Context, key string) (artworkImage, error) {
+	body, info, err := s.artworkStore.Get(ctx, key)
+	if errors.Is(err, blobstore.ErrNotFound) {
+		if s.artworkRepair != nil && artworkkey.Revision(key) != "" {
+			_, _ = s.artworkRepair.EnqueueArtworkRepair(ctx, []string{artworkkey.OriginalOf(key)}, 1)
+		}
+		return artworkImage{}, fmt.Errorf("reading artwork: %w", ErrAssetNotFound)
+	}
+	if err != nil {
+		return artworkImage{}, fmt.Errorf("reading artwork: %w: %w", ErrAssetUnavailable, err)
+	}
+	image := artworkImage{body: body, contentType: blobstore.MediaType(key)}
+	if info.Size > 0 {
+		image.contentLength = strconv.FormatInt(info.Size, 10)
+	}
+	return image, nil
+}
+
+func (s *Service) fetchArtwork(ctx context.Context, imageURL string) (artworkImage, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		// Not wrapped: the parse error quotes the presigned URL.
+		return artworkImage{}, errors.New("building artwork request: invalid artwork URL")
+	}
+	if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.Host == "" {
+		// A relative URL that isn't a valid signed artwork route can't be
+		// fetched over HTTP. Retrying won't help.
+		return artworkImage{}, errors.New("fetching artwork: artwork URL is not an absolute http(s) URL")
+	}
+	resp, err := s.artworkHTTPClient().Do(req)
+	if err != nil {
+		// A failed request's error text repeats the presigned URL; keep only
+		// the cause.
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+		return artworkImage{}, fmt.Errorf("fetching artwork: %w: %w", ErrAssetUnavailable, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+		_ = resp.Body.Close()
+		// Also ErrAssetNotFound, which the frozen v1 route answers with 404
+		// as it always has.
+		return artworkImage{}, fmt.Errorf("%w: %w: %w", artworkStatusError(resp.StatusCode), ErrAssetUnavailable, ErrAssetNotFound)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return artworkImage{}, fmt.Errorf("%w: %w", artworkStatusError(resp.StatusCode), ErrAssetNotFound)
+	}
+	return artworkImage{
+		body:          resp.Body,
+		contentType:   resp.Header.Get("Content-Type"),
+		contentLength: resp.Header.Get("Content-Length"),
+	}, nil
 }
 
 // storeReader reads the artwork store's response. It gives up on a read that

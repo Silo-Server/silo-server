@@ -1,17 +1,39 @@
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { QueryDefinition } from "@/api/types";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 
 const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
+  useLibraryHasItems: vi.fn(),
+  itemGridEmptyState: undefined as ReactNode,
 }));
 
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
+  useLibraryHasItems: (...args: unknown[]) => mocks.useLibraryHasItems(...args),
 }));
 
 vi.mock("@/components/ItemGrid", () => ({
-  default: () => <div>Grid</div>,
+  default: ({
+    totalItems,
+    loading,
+    emptyState,
+  }: {
+    totalItems: number;
+    loading?: boolean;
+    emptyState?: ReactNode;
+  }) => {
+    mocks.itemGridEmptyState = emptyState;
+    if (loading) return <div>Grid loading</div>;
+    if (totalItems === 0) return <div>{emptyState ?? "No items found."}</div>;
+    return <div>Grid</div>;
+  },
+}));
+
+vi.mock("@/components/LibraryEmptyState", () => ({
+  default: ({ libraryId }: { libraryId: number }) => <div>Library {libraryId} is empty</div>,
 }));
 
 vi.mock("@/components/ScrollToTopButton", () => ({
@@ -46,6 +68,9 @@ describe("LibraryBrowse", () => {
       },
       isLoading: false,
     });
+    mocks.useLibraryHasItems.mockReset();
+    mocks.useLibraryHasItems.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.itemGridEmptyState = undefined;
   });
 
   it("loads library browse data through the catalog query hook", () => {
@@ -252,5 +277,108 @@ describe("LibraryBrowse", () => {
       mocks.useCatalogWindow.mock.calls.length - 1
     ] as [CatalogSearchState, Record<string, unknown>];
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
+  });
+
+  describe("empty results", () => {
+    const filteredQuery: QueryDefinition = {
+      library_ids: [],
+      match: "all",
+      groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Western" }] }],
+      sort: { field: "title", order: "asc" },
+    };
+    const unfilteredQuery: QueryDefinition = {
+      library_ids: [],
+      match: "all",
+      groups: [],
+      sort: { field: "title", order: "asc" },
+    };
+
+    function renderBrowse(
+      queryDefinition: QueryDefinition,
+      onQueryDefinitionChange: (next: QueryDefinition) => void = () => {},
+    ) {
+      return renderToStaticMarkup(
+        <LibraryBrowse
+          libraryId={7}
+          libraryType="movie"
+          browseType="series"
+          queryDefinition={queryDefinition}
+          onBrowseTypeChange={() => {}}
+          onQueryDefinitionChange={onQueryDefinitionChange}
+        />,
+      );
+    }
+
+    beforeEach(() => {
+      mocks.useCatalogWindow.mockReturnValue({
+        data: { totalItems: 0, pages: new Map() },
+        isLoading: false,
+        isError: false,
+      });
+    });
+
+    it("says the library is empty when it holds no items at all", () => {
+      mocks.useLibraryHasItems.mockReturnValue({ data: false, isLoading: false });
+
+      const markup = renderBrowse(unfilteredQuery);
+
+      expect(mocks.useLibraryHasItems).toHaveBeenCalledWith(7, { enabled: true });
+      expect(markup).toContain("Library 7 is empty");
+      expect(markup).not.toContain("No items found.");
+      expect(markup).not.toContain("match your current filters");
+    });
+
+    it("keeps a filter message and a clear action when filters match nothing", () => {
+      mocks.useLibraryHasItems.mockReturnValue({ data: true, isLoading: false });
+      const onQueryDefinitionChange = vi.fn();
+
+      const markup = renderBrowse(filteredQuery, onQueryDefinitionChange);
+
+      expect(markup).toContain("No items match your current filters.");
+      expect(markup).toContain("Clear filters");
+      expect(markup).not.toContain("is empty");
+
+      const emptyState = mocks.itemGridEmptyState;
+      expect(isValidElement(emptyState)).toBe(true);
+      (emptyState as ReactElement<{ onClearFilters?: () => void }>).props.onClearFilters?.();
+      expect(onQueryDefinitionChange).toHaveBeenCalledWith(
+        expect.objectContaining({ groups: [], match: "all", sort: filteredQuery.sort }),
+      );
+    });
+
+    it("does not offer to clear filters when none are set", () => {
+      mocks.useLibraryHasItems.mockReturnValue({ data: true, isLoading: false });
+
+      const markup = renderBrowse(unfilteredQuery);
+
+      expect(markup).toContain("No items match your current filters.");
+      expect(markup).not.toContain("Clear filters");
+    });
+
+    it("stays in the loading state while the library check is pending", () => {
+      mocks.useLibraryHasItems.mockReturnValue({ data: undefined, isLoading: true });
+
+      const markup = renderBrowse(filteredQuery);
+
+      expect(markup).toContain("Grid loading");
+      expect(markup).not.toContain("is empty");
+    });
+
+    it("leaves a non-empty library untouched and skips the library check", () => {
+      mocks.useCatalogWindow.mockReturnValue({
+        data: {
+          totalItems: 1,
+          pages: new Map([[0, [{ content_id: "movie-1", title: "Heat", type: "movie" }]]]),
+        },
+        isLoading: false,
+        isError: false,
+      });
+
+      const markup = renderBrowse(unfilteredQuery);
+
+      expect(markup).toContain("Grid");
+      expect(mocks.useLibraryHasItems).toHaveBeenCalledWith(7, { enabled: false });
+      expect(mocks.itemGridEmptyState).toBeUndefined();
+    });
   });
 });

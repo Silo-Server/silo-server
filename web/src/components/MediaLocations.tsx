@@ -132,7 +132,7 @@ export default function MediaLocations({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="text-sm font-medium">{location.versionLabel}</div>
-                <div className="min-w-0 font-mono text-xs leading-relaxed sm:text-[12px]">
+                <div className="min-w-0 font-mono text-xs leading-relaxed sm:text-[0.75rem]">
                   {location.folderName ? (
                     <span
                       className="text-muted-foreground"

@@ -403,6 +403,33 @@
         ],
         "type": "object"
       },
+      "AccountIdentityNetworkLinkInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "installation_id": {
+            "description": "The network identity auth plugin installation, as listAuthProviders shows it",
+            "examples": [
+              "5"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "description": "The account's current local password",
+            "examples": [
+              "correct horse battery staple"
+            ],
+            "maxLength": 1024,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "installation_id",
+          "password"
+        ],
+        "type": "object"
+      },
       "AccountPasswordCapability": {
         "additionalProperties": false,
         "properties": {
@@ -1092,6 +1119,10 @@
             "description": "Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL",
             "type": "boolean"
           },
+          "policy_defaults": {
+            "description": "Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override",
+            "type": "boolean"
+          },
           "request_usage": {
             "description": "Whether getAdminRequestUserUsage can report an account's request quota use",
             "type": "boolean"
@@ -1128,6 +1159,7 @@
           "watch_summary",
           "account_downloads",
           "request_usage",
+          "policy_defaults",
           "revision",
           "state",
           "allowed"
@@ -5026,6 +5058,476 @@
         "required": [
           "used_gb",
           "total_gb"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "content_id": {
+            "description": "The movie, or the series an episode belongs to",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "episode_id": {
+            "type": "string"
+          },
+          "episode_name": {
+            "type": "string"
+          },
+          "episode_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "description": "Last attempt's failure, when there was one",
+            "type": "string"
+          },
+          "failed_at": {
+            "description": "Present only when state is failed",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "remux",
+              "transcode"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "Prepared artifact id; one job can serve many downloads",
+            "type": "string"
+          },
+          "log_session_id": {
+            "description": "playback_session_id under which this job's FFmpeg output appears in the operational logs, across every attempt",
+            "type": "string"
+          },
+          "max_attempts": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "media_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "media_title": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "description": "Present only when state is retrying",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "output": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationOutput"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationProgress",
+            "description": "Latest reading of a running attempt, written about every 5 seconds; absent until the first one"
+          },
+          "progress_unavailable": {
+            "description": "The running attempt's worker cannot report progress, so progress will stay absent",
+            "type": "boolean"
+          },
+          "queue_position": {
+            "description": "1-based position among queued jobs; present only when state is queued",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "requesters": {
+            "description": "Download rows waiting on this job, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparationRequester"
+            },
+            "type": "array"
+          },
+          "season_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_name": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationSource"
+          },
+          "started_at": {
+            "description": "When the current or last attempt started",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "state": {
+            "description": "running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). failed: attempts are exhausted; listed for 24 hours after failing.",
+            "enum": [
+              "running",
+              "queued",
+              "retrying",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationWorker",
+            "description": "Where the current or last attempt ran; absent before a worker was chosen"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "format",
+          "log_session_id",
+          "media_file_id",
+          "media_title",
+          "media_type",
+          "source",
+          "output",
+          "attempts",
+          "max_attempts",
+          "created_at",
+          "progress_unavailable",
+          "requesters"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationAudioTrack": {
+        "additionalProperties": false,
+        "properties": {
+          "channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "AdminDownloadPreparationCapabilitiesOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "failed_window_seconds": {
+            "description": "How long a failed job stays listed",
+            "format": "int64",
+            "type": "integer"
+          },
+          "live_progress": {
+            "description": "Running jobs report progress",
+            "type": "boolean"
+          },
+          "realtime_channel": {
+            "description": "Admin realtime channel carrying download_preparation.changed and download_preparation.progress",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "realtime_channel",
+          "failed_window_seconds",
+          "live_progress",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationCounts": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_recent": {
+            "description": "Jobs that failed in the last 24 hours",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "queued": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retrying": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "running": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "running",
+          "queued",
+          "retrying",
+          "failed_recent"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationOutput": {
+        "additionalProperties": false,
+        "properties": {
+          "all_audio_tracks": {
+            "description": "Every source audio track is kept, in source order",
+            "type": "boolean"
+          },
+          "audio_codec": {
+            "description": "Target audio codec, or copy",
+            "type": "string"
+          },
+          "bitrate_kbps": {
+            "description": "Video bitrate cap of a transcode",
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "tone_map_mode": {
+            "description": "Present when HDR is tone-mapped to SDR",
+            "type": "string"
+          },
+          "tone_map_source_kind": {
+            "type": "string"
+          },
+          "video_codec": {
+            "description": "Target video codec, or copy for a remux",
+            "type": "string"
+          }
+        },
+        "required": [
+          "container",
+          "video_codec",
+          "audio_codec",
+          "all_audio_tracks"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_seconds": {
+            "description": "Length progress is measured against; 0 when unknown",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "encoded_seconds": {
+            "description": "Output timeline written so far",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "speed": {
+            "description": "Encode rate as a multiple of realtime; 0 when not reported yet",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "updated_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "encoded_seconds",
+          "duration_seconds",
+          "speed",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationRequester": {
+        "additionalProperties": false,
+        "properties": {
+          "device_id": {
+            "description": "Absent for a one-off web download",
+            "type": "string"
+          },
+          "device_name": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "profile_name": {
+            "type": "string"
+          },
+          "status": {
+            "description": "The download row's status",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "profile_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationSource": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_tracks": {
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparationAudioTrack"
+            },
+            "type": "array"
+          },
+          "bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "file_size": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "hdr": {
+            "type": "boolean"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "video_codec": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hdr",
+          "audio_tracks",
+          "file_size",
+          "duration_seconds"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationWorker": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "description": "server: an API server. node: a transcode node.",
+            "enum": [
+              "server",
+              "node"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "Node name, or the API server's node id, when the attempt started",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "Transcode node id when kind is node",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationsOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/AdminDownloadPreparationCounts"
+          },
+          "items": {
+            "description": "Running jobs, then jobs waiting to retry, then the queue in claim order, then recent failures, newest first",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparation"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "counts",
+          "items"
         ],
         "type": "object"
       },
@@ -9934,10 +10436,11 @@
             "type": "string"
           },
           "sign_in_mode": {
-            "description": "How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC) or credentials (a username and password form, such as LDAP). Omitted for other capability types",
+            "description": "How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types",
             "enum": [
               "oauth",
-              "credentials"
+              "credentials",
+              "network"
             ],
             "examples": [
               "oauth"
@@ -17923,6 +18426,24 @@
         ],
         "type": "object"
       },
+      "AdminUserPolicyDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "$ref": "#/components/schemas/PolicyDefaults",
+            "description": "What an admin account's unset policy fields resolve to: full access. Admin accounts never belong to an access group"
+          },
+          "ungrouped": {
+            "$ref": "#/components/schemas/PolicyDefaults",
+            "description": "What a regular account with no access group resolves its unset policy fields to"
+          }
+        },
+        "required": [
+          "admin",
+          "ungrouped"
+        ],
+        "type": "object"
+      },
       "AdminUserWatchSummary": {
         "additionalProperties": false,
         "properties": {
@@ -18873,7 +19394,7 @@
             "type": "string"
           },
           "mode": {
-            "description": "How the provider authenticates: credentials (login) or oauth (the OAuth handshake)",
+            "description": "How the provider authenticates: credentials (login), oauth (the OAuth handshake) or network (signInWithNetworkIdentity: the provider's network says who owns the device; listed only to a request that arrived through that network). Clients ignore modes they do not know",
             "examples": [
               "credentials"
             ],
@@ -18883,6 +19404,17 @@
             "description": "Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in",
             "examples": [
               "/api/v2/auth/oauth/3/native/start"
+            ],
+            "type": "string"
+          },
+          "network_identity": {
+            "$ref": "#/components/schemas/AuthProviderNetworkIdentity",
+            "description": "Who the network provider says owns the device that sent this request, for a Continue as label; present only for a network provider. It authorizes nothing: signInWithNetworkIdentity asks the provider again"
+          },
+          "network_sign_in_path": {
+            "description": "Path of signInWithNetworkIdentity below the server base, for a network provider; absent for other modes. An app appends it to its saved server base URL and POSTs {} to sign in, with no password and no browser",
+            "examples": [
+              "/api/v2/auth/network/5/sign-in"
             ],
             "type": "string"
           }
@@ -18920,6 +19452,30 @@
         "required": [
           "password_login",
           "items"
+        ],
+        "type": "object"
+      },
+      "AuthProviderNetworkIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "description": "Name at the provider; may be empty",
+            "examples": [
+              "Alice Example"
+            ],
+            "type": "string"
+          },
+          "username": {
+            "description": "Login name at the provider; may be empty",
+            "examples": [
+              "alice@example.test"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "display_name",
+          "username"
         ],
         "type": "object"
       },
@@ -26308,6 +26864,10 @@
           },
           "resolution": {
             "type": "string"
+          },
+          "unreadable": {
+            "description": "Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -26527,6 +27087,10 @@
             "description": "Whether auth binding and auth plugin changes apply without a server restart",
             "type": "boolean"
           },
+          "network_sign_in": {
+            "description": "Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network",
+            "type": "boolean"
+          },
           "provider_recheck": {
             "description": "Whether refreshSession re-checks sessions opened through the external provider with that provider (auth.provider_recheck_interval, auth.provider_recheck_outage_policy), and admin identities report last_check_status",
             "type": "boolean"
@@ -26555,6 +27119,7 @@
           "live_provider_changes",
           "provider_recheck",
           "credentials_linking",
+          "network_sign_in",
           "revision",
           "state"
         ],
@@ -31616,6 +32181,10 @@
         ],
         "type": "object"
       },
+      "NetworkSignInInputBody": {
+        "additionalProperties": false,
+        "type": "object"
+      },
       "NodeHWAccel": {
         "additionalProperties": false,
         "properties": {
@@ -36433,6 +37002,117 @@
           "revision",
           "state",
           "allowed"
+        ],
+        "type": "object"
+      },
+      "PolicyDefaults": {
+        "additionalProperties": false,
+        "properties": {
+          "audio_transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "download_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "download_transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "library_ids": {
+            "description": "Libraries the account may see; null means every library, empty means none",
+            "examples": [
+              [
+                "1",
+                "2"
+              ]
+            ],
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "max_local_stream_bitrate_kbps": {
+            "description": "Local per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_playback_quality": {
+            "description": "Playback ceiling; empty means none",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "max_remote_stream_bitrate_kbps": {
+            "description": "Remote per-stream bitrate limit in kbps; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_streams": {
+            "description": "Concurrent stream limit; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_transcodes": {
+            "description": "Concurrent transcode limit; 0 means unlimited",
+            "examples": [
+              0
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "requests_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "transcode_allowed": {
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "library_ids",
+          "max_playback_quality",
+          "max_streams",
+          "max_transcodes",
+          "max_remote_stream_bitrate_kbps",
+          "max_local_stream_bitrate_kbps",
+          "transcode_allowed",
+          "audio_transcode_allowed",
+          "download_allowed",
+          "download_transcode_allowed",
+          "requests_allowed"
         ],
         "type": "object"
       },
@@ -48099,6 +48779,183 @@
           }
         ],
         "summary": "Link a directory (LDAP) identity to the caller's account with the directory username and password.",
+        "tags": [
+          "account"
+        ],
+        "x-silo-class": "authenticated",
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/account/identities/link-network": {
+      "post": {
+        "description": "Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking (local password sign-in turns off unless the account is break-glass; audited). listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in.",
+        "operationId": "linkAccountIdentityWithNetwork",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountIdentityNetworkLinkInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountIdentity"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Link the network identity of this device (such as its Tailscale login) to the caller's account.",
         "tags": [
           "account"
         ],
@@ -64710,6 +65567,362 @@
         "x-silo-class": "acting_admin",
         "x-silo-raw-protocol": "diagnostic-bundle",
         "x-silo-raw-reason": "The existing administrator consumer downloads a gzip archive; bytes must not pass through JSON encoding or response buffering.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations": {
+      "get": {
+        "operationId": "listAdminDownloadPreparations",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum items; counts always cover every listed job",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 200,
+              "description": "Maximum items; counts always cover every listed job",
+              "format": "int64",
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationsOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the offline-download preparation queue: running, queued and retrying jobs with live progress, and failures from the last 24 hours.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations/capabilities": {
+      "get": {
+        "operationId": "getAdminDownloadPreparationCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover the admin view of offline-download preparation.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
     },
@@ -112388,6 +113601,147 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/users/policy-defaults": {
+      "get": {
+        "operationId": "getAdminUserPolicyDefaults",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserPolicyDefaults"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The policy values an admin account, or a regular account without an access group, uses for fields it does not override.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin"
+      }
+    },
     "/api/v2/admin/users/{id}": {
       "delete": {
         "description": "Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required.",
@@ -119113,6 +120467,178 @@
         ],
         "x-silo-class": "authenticated",
         "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/auth/network/{id}/sign-in": {
+      "post": {
+        "description": "For a network provider (mode network in listAuthProviders), such as the Tailscale network access plugin: the provider's network already knows who owns the device a request came from, so there is no password and no browser. Only a request that arrived through that provider's own network address can sign in; listAuthProviders lists the provider, with the owner's name, only to such a request. The provider's plugin is asked who the device belongs to, and the answer goes through the same account resolution as other providers: a linked account signs in, an unknown person gets a new account while the binding's account creation is on, and the provider may set the account's role. The session is re-checked with the provider like other provider sessions. Send an empty JSON object as the body. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out, or the account's OIDC or LDAP provider refuses the account); 403 account_required; 403 permission_denied (the account is disabled); 409 email_in_use or identity_linked_elsewhere; 404 not_found (not an enabled network provider); 429 rate_limited; 503 provider_unavailable. Spends the login rate-limit budget.",
+        "operationId": "signInWithNetworkIdentity",
+        "parameters": [
+          {
+            "description": "The network provider's plugin installation, as listAuthProviders shows it",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The network provider's plugin installation, as listAuthProviders shows it",
+              "examples": [
+                "5"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NetworkSignInInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPair"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Sign in the owner of this device through a network identity provider and open a login session.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -136248,6 +137774,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -136256,6 +137796,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -136284,6 +137838,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -136397,6 +137958,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -136405,6 +137980,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -136433,6 +138022,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -137030,6 +138626,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -137038,6 +138648,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -137066,6 +138690,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -137179,6 +138810,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -137187,6 +138832,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -137215,6 +138874,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -180776,6 +182442,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -180784,6 +182464,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -180812,6 +182506,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -180921,6 +182622,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -180929,6 +182644,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -180957,6 +182686,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -198931,6 +200667,57 @@
       {
         "parameters": [
           {
+            "in": "path",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Read the in-memory progress of a prepare attempt running on this node. An id with no encode in flight answers running=false, never 404, so callers can treat 404 as a node that predates this operation. Readings are not durable and say nothing about a completed artifact.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/downloads/prepare/{artifact_id}/progress",
+        "handler": "(*internal/transcodenode.Server).handleDownloadPrepareProgress",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/downloadprepare_Progress"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        }
+      },
+      {
+        "parameters": [
+          {
             "description": "Signed download authority, including local path or remote artifact and optional exact execution attestation.",
             "in": "path",
             "name": "token",
@@ -200362,6 +202149,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -200370,6 +202171,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -200398,6 +202213,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -200511,6 +202333,20 @@
                   "type": "string"
                 }
               },
+              "video/3gpp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/3gpp2": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "video/mp2t": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
@@ -200519,6 +202355,20 @@
                 }
               },
               "video/mp4": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/mpeg": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/ogg": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -200547,6 +202397,13 @@
                 }
               },
               "video/x-matroska": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "video/x-ms-asf": {
                 "schema": {
                   "contentMediaType": "application/octet-stream",
                   "format": "binary",
@@ -203206,6 +205063,40 @@
         ],
         "type": "object"
       },
+      "downloadprepare_Progress": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "type": "string"
+          },
+          "duration_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "encoded_seconds": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "running": {
+            "type": "boolean"
+          },
+          "speed": {
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "running",
+          "encoded_seconds",
+          "duration_seconds",
+          "speed"
+        ],
+        "type": "object"
+      },
       "downloadprepare_Request": {
         "additionalProperties": true,
         "properties": {
@@ -203221,6 +205112,9 @@
             "type": "integer"
           },
           "input_path": {
+            "type": "string"
+          },
+          "log_session_id": {
             "type": "string"
           },
           "prepared_tracks": {

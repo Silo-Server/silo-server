@@ -247,6 +247,47 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 	}, nil
 }
 
+// NetworkSignInInput is a network identity sign-in as the transport received
+// it. The overlay peer travels on the request context (netaccess.Path).
+type NetworkSignInInput struct {
+	InstallationID int
+	DeviceName     string
+	IP             string
+}
+
+// NetworkSignIn signs in the overlay peer of the request through a network
+// identity provider (auth.Service.NetworkSignIn) and opens a login session.
+// v2 signInWithNetworkIdentity calls it; a failure is an *APIError.
+func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) (TokenPairView, error) {
+	pair, err := h.service.NetworkSignIn(ctx, auth.NetworkSignInInput{
+		InstallationID: in.InstallationID, DeviceName: in.DeviceName, IP: in.IP,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrUnknownAuthInstallation):
+			return TokenPairView{}, apiError(http.StatusNotFound, "not_found", "No enabled network sign-in provider has this installation")
+		case errors.Is(err, auth.ErrNetworkIdentityRequired):
+			return TokenPairView{}, apiError(http.StatusForbidden, "network_identity_required", "Open this server through the provider's network address to sign in this way")
+		case errors.Is(err, auth.ErrInvalidCredentials):
+			// The plugin could not identify the peer; there is no credential
+			// the person could correct.
+			return TokenPairView{}, apiError(http.StatusForbidden, "not_permitted", "This device is not permitted to sign in to this server")
+		case errors.Is(err, auth.ErrUserDisabled):
+			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
+	}, nil
+}
+
 // externalSignInError maps the refusals of the local-password policy and of
 // external sign-in (docs/architecture/external-sign-in.md) to their codes,
 // or returns nil for any other error.

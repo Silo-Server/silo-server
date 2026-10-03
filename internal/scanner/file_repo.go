@@ -74,7 +74,7 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 	multi_episode_start, multi_episode_end,
 	multiple_pps, multiple_pps_scan_size, multiple_pps_scan_mtime,
-	probe_source, probe_updated_at, match_attempted_at, missing_since,
+	probe_source, probe_updated_at, probe_failed_at, match_attempted_at, missing_since,
 	first_seen_scan_run_id, created_at, updated_at`
 
 const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
@@ -99,7 +99,7 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.presentation_kind, mf.presentation_group_key, mf.presentation_part_index, mf.presentation_part_total,
 	mf.multi_episode_start, mf.multi_episode_end,
 	mf.multiple_pps, mf.multiple_pps_scan_size, mf.multiple_pps_scan_mtime,
-	mf.probe_source, mf.probe_updated_at, mf.match_attempted_at, mf.missing_since,
+	mf.probe_source, mf.probe_updated_at, mf.probe_failed_at, mf.match_attempted_at, mf.missing_since,
 	mf.first_seen_scan_run_id, mf.created_at, mf.updated_at`
 
 // scanMediaFile scans a single row into a *models.MediaFile.
@@ -221,6 +221,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.MultiplePPSScanMtime,
 		&probeSource,
 		&f.ProbeUpdatedAt,
+		&f.ProbeFailedAt,
 		&f.MatchAttemptedAt,
 		&f.MissingSince,
 		&firstSeenScanRunID,
@@ -540,6 +541,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.MultiplePPSScanMtime,
 			&probeSource,
 			&f.ProbeUpdatedAt,
+			&f.ProbeFailedAt,
 			&f.MatchAttemptedAt,
 			&f.MissingSince,
 			&firstSeenScanRunID,
@@ -955,7 +957,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		edition_raw, edition_key, edition_confidence, edition_source,
 		presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 		multi_episode_start, multi_episode_end,
-		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id
+		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id, probe_failed_at
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
@@ -967,7 +969,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		$39, $40, $41, $42,
 		$43, $44, $45, $46,
 		$47, $48,
-		$49, $50, $51, $52
+		$49, $50, $51, $52, $53
 	)
 	ON CONFLICT (file_path) DO UPDATE SET
 		content_id = CASE
@@ -1025,6 +1027,20 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		multi_episode_end = EXCLUDED.multi_episode_end,
 		probe_source = EXCLUDED.probe_source,
 		probe_updated_at = EXCLUDED.probe_updated_at,
+		-- A successful probe clears the rejection and a new rejection
+		-- replaces it. A write that carries neither (the probe was skipped,
+		-- timed out, or could not read the file) keeps the stored rejection
+		-- while the bytes it describes are unchanged; changed bytes drop it.
+		-- media_files.* here are the row's values before this update.
+		probe_failed_at = CASE
+			WHEN EXCLUDED.probe_updated_at IS NOT NULL THEN NULL
+			WHEN EXCLUDED.probe_failed_at IS NOT NULL THEN EXCLUDED.probe_failed_at
+			WHEN media_files.file_size IS NOT DISTINCT FROM EXCLUDED.file_size
+				AND date_trunc('microseconds', media_files.file_modified_at)
+					IS NOT DISTINCT FROM date_trunc('microseconds', EXCLUDED.file_modified_at)
+				THEN media_files.probe_failed_at
+			ELSE NULL
+		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
 		updated_at = NOW()
@@ -1083,6 +1099,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		mf.ProbeUpdatedAt,
 		mf.MissingSince,
 		nilIfEmpty(scanbatch.RunID(ctx)),
+		mf.ProbeFailedAt,
 	)
 	if _, ok := queryer.(*fileUpsertCapture); ok {
 		return nil, nil
@@ -1290,6 +1307,41 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrFileNotFound
+	}
+	return nil
+}
+
+// MarkProbeFailed records that ffprobe rejected a file whose row is otherwise
+// left untouched. Only rows with no successful probe are marked, so a probe
+// that succeeded concurrently, or valid metadata from an earlier probe, is never
+// overridden, and a row already marked is not rewritten. The next successful
+// probe clears the mark through Upsert.
+//
+// probedSize and probedMtime describe the bytes ffprobe rejected, and the row
+// is marked only while it still carries them. A scan that replaced the file
+// and wrote the new revision without a probe result before this update landed
+// would otherwise have the old rejection blamed on the replacement. The mtime
+// comparison is normalized to microseconds, as in UpdateMultiplePPS.
+func (r *FileRepository) MarkProbeFailed(ctx context.Context, fileID int, probedSize int64, probedMtime *time.Time) error {
+	var normalizedMtime *time.Time
+	if probedMtime != nil {
+		normalized := models.NormalizeFileModifiedAt(*probedMtime)
+		normalizedMtime = &normalized
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET probe_failed_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND probe_updated_at IS NULL
+		  AND probe_failed_at IS NULL
+		  AND file_size = $2
+		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz`,
+		fileID,
+		probedSize,
+		normalizedMtime,
+	); err != nil {
+		return fmt.Errorf("recording probe failure: %w", err)
 	}
 	return nil
 }

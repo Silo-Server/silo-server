@@ -16,6 +16,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 
 import AdminUserDetail from "./AdminUserDetail";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 interface UpdateArg {
   editor: { etag: string; user: { id: number } };
@@ -91,6 +92,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useViewerIsOwner: () => mocks.viewerIsOwner,
   useTransferOwnership: () => ({ mutate: mocks.transfer, isPending: false }),
   useAdminUserCapabilities: () => ({

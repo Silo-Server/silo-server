@@ -33,7 +33,7 @@ function edgeMask({ left, right }: { left: boolean; right: boolean }): string | 
  * scrolls sideways on a narrow screen, fades the edge that has more tabs past
  * it, and keeps the active tab in view. Render it inside the page's `Tabs`.
  */
-export function UserDetailTabs({ user, active }: { user: AdminUser; active: UserDetailTab }) {
+export function UserDetailTabBar({ user, active }: { user: AdminUser; active: UserDetailTab }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
   const measure = useCallback(() => {

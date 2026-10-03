@@ -194,7 +194,9 @@ function BadgeStack({
           columnGap: length(preset.iconGap, POSTER_VARS.iconGap),
           paddingInline: length(preset.paddingInline, POSTER_VARS.paddingInline),
           paddingBlock: length(preset.paddingBlock, POSTER_VARS.paddingBlock),
-          fontSize: length(preset.fontSize, POSTER_VARS.fontSize),
+          // The inline size beats the preset's rem class, so it carries the
+          // text size itself: browser default and in-app scale (#1796).
+          fontSize: `calc(${length(preset.fontSize, POSTER_VARS.fontSize)} * var(--ui-root-text-ratio, 1))`,
           borderRadius:
             preset.borderRadius === "full"
               ? "9999px"

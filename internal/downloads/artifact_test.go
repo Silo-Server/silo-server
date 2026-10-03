@@ -732,6 +732,21 @@ func TestCapabilityQualityPresetsGating(t *testing.T) {
 		t.Fatalf("quality presets with transcode gated = %q, want original", got)
 	}
 
+	// An admin with no overrides gets the full ladder (#1403); an ungrouped
+	// regular account with no overrides keeps the no-group deny.
+	svc = newSvc(&models.User{Role: models.RoleAdmin}, true)
+	svc.SetArtifactManager(&ArtifactManager{})
+	capInfo, _ = svc.Capability(context.Background(), 1)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original,20mbps,10mbps,5mbps,2mbps,1mbps" {
+		t.Fatalf("quality presets for an admin without overrides = %q, want full ladder", got)
+	}
+	svc = newSvc(&models.User{Role: models.RoleUser}, true)
+	svc.SetArtifactManager(&ArtifactManager{})
+	capInfo, _ = svc.Capability(context.Background(), 1)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
+		t.Fatalf("quality presets for an ungrouped user without overrides = %q, want original", got)
+	}
+
 	// Download permission revoked → an EMPTY array, never nil: the capability
 	// contract documents quality_presets as an array, and a nil slice would
 	// serialize as JSON null and break typed clients.

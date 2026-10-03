@@ -54,7 +54,7 @@ function renderScreen(props: Partial<ComponentProps<typeof PlayingNextScreen>> =
         title: "Episode Two",
         seasonNumber: 1,
         episodeNumber: 2,
-        runtime: 1800,
+        runtime: 48,
       }}
       continueWatchingItems={[]}
       videoEnded={false}
@@ -133,6 +133,26 @@ describe("PlayingNextScreen auto-play toggle", () => {
         identity: { scope: "profile_device" },
       }),
     );
+  });
+});
+
+describe("PlayingNextScreen next-episode details", () => {
+  beforeEach(() => {
+    mocks.useEffectiveSettings.mockReset().mockReturnValue({ data: {}, isLoading: false });
+    mocks.useSetSettingValue
+      .mockReset()
+      .mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+    mocks.useClearSettingValue
+      .mockReset()
+      .mockReturnValue({ isPending: false, mutateAsync: vi.fn() });
+  });
+
+  afterEach(cleanup);
+
+  it("shows the episode runtime as minutes, the unit the catalog sends", () => {
+    renderScreen();
+
+    expect(screen.getByText("48m")).toBeTruthy();
   });
 });
 

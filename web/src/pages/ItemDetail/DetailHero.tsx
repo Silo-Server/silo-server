@@ -279,7 +279,7 @@ export default function DetailHero({
                 {/* Tagline (italic) — falls back to subtitle */}
                 {(tagline || subtitle) && (
                   <div
-                    className={`text-muted-foreground mb-4 text-[13px] ${
+                    className={`text-muted-foreground mb-4 text-[0.8125rem] ${
                       tagline
                         ? "text-foreground/72 italic"
                         : "text-muted-foreground text-base font-medium not-italic"

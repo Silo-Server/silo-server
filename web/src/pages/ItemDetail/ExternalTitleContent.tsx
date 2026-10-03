@@ -122,7 +122,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
                 </div>
               )}
             </div>
-            <p className="truncate px-0.5 pt-2.5 text-[13px] font-semibold">
+            <p className="truncate px-0.5 pt-2.5 text-[0.8125rem] font-semibold">
               {season.name || name}
             </p>
             <p className="text-muted-foreground truncate px-0.5 text-xs">

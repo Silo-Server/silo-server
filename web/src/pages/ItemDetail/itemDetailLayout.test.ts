@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ItemDetail, Season } from "@/api/types";
 import {
   formatSeasonMeta,
+  formatSeasonProgress,
   getSeasonDisplayTitle,
   resolveLeafPrimaryAction,
   resolveEpisodeSiblingSeason,
@@ -195,6 +196,20 @@ describe("formatSeasonMeta", () => {
     expect(formatSeasonMeta(makeSeason({ episode_count: 8, user_data: undefined }))).toBe(
       "8 episodes",
     );
+  });
+
+  it("uses the singular for a one-episode season", () => {
+    expect(formatSeasonMeta(makeSeason({ episode_count: 1 }))).toBe("1 episode");
+  });
+});
+
+describe("formatSeasonProgress", () => {
+  it("uses the singular when the season has one episode", () => {
+    expect(formatSeasonProgress(makeSeason({ episode_count: 1 }), 1)).toBe("1 of 1 episode");
+  });
+
+  it("uses the plural when the season has several episodes", () => {
+    expect(formatSeasonProgress(makeSeason({ episode_count: 2 }), 1)).toBe("1 of 2 episodes");
   });
 });
 

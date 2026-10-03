@@ -13,6 +13,7 @@ import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/Us
 import { CardEditingProvider } from "../cardEditing";
 import { inheritContextFor } from "./policySources";
 import { RequestsCard } from "./RequestsCard";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 const mocks = vi.hoisted(() => ({
   updateUser: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   getAdminUser: async () => ({ user: mocks.user!, etag: '"account-2"', profileContext: CONTEXT }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useAdminUserCapabilities: () => ({ data: { available: true, request_usage: true } }),
   useUpdateUser: () => ({ mutateAsync: mocks.updateUser, isPending: false }),
 }));
@@ -187,7 +189,12 @@ function mount(user: AdminUser = USER) {
             ctx={inheritContextFor(user, groups)}
             hints={savedUserPolicyInheritHints(
               user,
-              policyInheritHints(user.role === "admin" ? null : user.access_group_id, groups),
+              policyInheritHints(
+                user.role,
+                user.role === "admin" ? null : user.access_group_id,
+                groups,
+                POLICY_DEFAULTS,
+              ),
             )}
           />
         </CardEditingProvider>

@@ -1206,6 +1206,12 @@ type fakeSessionService struct {
 	localLoginOff bool
 	// lastLogin is the input the most recent Login received.
 	lastLogin handlers.LoginInput
+	// networkPeer makes discovery list the network provider (installation
+	// 5), as for a request that came through that provider's overlay.
+	// NetworkSignIn signs laura in at installation 5 and answers installation
+	// 7 as a request from off the overlay; lastNetwork is its last input.
+	networkPeer bool
+	lastNetwork handlers.NetworkSignInInput
 }
 
 func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
@@ -1251,13 +1257,35 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 
 func (f *fakeSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
 	sso := auth.LoginProviderInfo{ID: "plugin-3", DisplayName: "Example SSO", Mode: auth.ProviderModeOAuth, IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3}
+	var discovery auth.ProviderDiscovery
 	if f.localLoginOff {
 		sso.Default = true
-		return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}, nil
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}
+	} else {
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
+			{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
+		}, PasswordLogin: true}
 	}
-	return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
-		{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
-	}, PasswordLogin: true}, nil
+	if f.networkPeer {
+		discovery.Providers = append(discovery.Providers, auth.LoginProviderInfo{
+			ID: "plugin:5:tailscale", DisplayName: "Tailscale", Mode: auth.ProviderModeNetwork, InstallationID: 5,
+			NetworkIdentity: &auth.NetworkIdentityPreview{DisplayName: "Laura Example", Username: "laura@example.test"},
+		})
+	}
+	return discovery, nil
+}
+
+func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error) {
+	f.lastNetwork = in
+	switch in.InstallationID {
+	case 5:
+	case 7:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "network_identity_required", Message: "Open this server through the provider's network address to sign in this way"}
+	default:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {

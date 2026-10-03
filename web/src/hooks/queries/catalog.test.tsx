@@ -21,7 +21,12 @@ vi.mock("@/api/v2/request", () => ({
 }));
 
 import type { CatalogResponse } from "@/api/types";
-import { createCatalogSearchState, useCatalogWindow, type CatalogPage } from "./catalog";
+import {
+  createCatalogSearchState,
+  useCatalogWindow,
+  useLibraryHasItems,
+  type CatalogPage,
+} from "./catalog";
 
 function makePage(offset: number, limit = 60): CatalogResponse {
   return {
@@ -517,5 +522,53 @@ describe("useCatalogWindow", () => {
       body: { limit, skip_total: true, seek: 120, cursor: page0Data.snapshot },
       signal,
     });
+  });
+});
+
+describe("useLibraryHasItems", () => {
+  beforeEach(() => {
+    mocks.v2.mockReset();
+    mocks.useQuery.mockReset();
+    mocks.useQuery.mockReturnValue({ data: undefined });
+  });
+
+  it("reads one unfiltered item of the library without a total", async () => {
+    mocks.v2.mockResolvedValue({ items: [], total: 0, total_exact: false });
+
+    renderHook(() => useLibraryHasItems(7, { enabled: true }));
+
+    const options = mocks.useQuery.mock.calls[0]?.[0] as {
+      queryKey: readonly unknown[];
+      queryFn: (context: { signal: AbortSignal }) => Promise<CatalogPage>;
+      select: (page: CatalogPage) => boolean;
+      enabled: boolean;
+    };
+    expect(options.enabled).toBe(true);
+    expect(options.queryKey).toEqual([
+      "catalog",
+      "list",
+      expect.objectContaining({ library_id: 7, include_total: false, limit: 1, offset: 0 }),
+    ]);
+
+    const page = await options.queryFn({ signal: new AbortController().signal });
+    expect(mocks.v2).toHaveBeenCalledWith(
+      "POST /api/v2/catalog/query",
+      expect.objectContaining({
+        body: expect.objectContaining({
+          library_id: "7",
+          limit: 1,
+          skip_total: true,
+          groups: [],
+        }),
+      }),
+    );
+    expect(options.select(page)).toBe(false);
+    expect(options.select({ ...page, items: makePage(0, 1).items })).toBe(true);
+  });
+
+  it("stays idle until enabled", () => {
+    renderHook(() => useLibraryHasItems(7, { enabled: false }));
+
+    expect(mocks.useQuery.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ enabled: false }));
   });
 });

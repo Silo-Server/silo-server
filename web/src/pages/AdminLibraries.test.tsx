@@ -1022,7 +1022,7 @@ describe("AdminLibraries", () => {
 
     expect(markup).toContain("Troubleshooting");
     expect(markup).toContain(
-      "Roots where the inferred canonical folder lacks embedded provider IDs.",
+      "Roots with no provider IDs in the folder name or, for movies, in a file name.",
     );
     expect(markup).not.toContain("Filter by path, library, or reason");
     expect(markup).not.toContain("Unknown Movie");

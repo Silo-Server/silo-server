@@ -144,6 +144,31 @@ func (s *Signer) Verify(key string, exp int64, sig string, now time.Time) error 
 	return nil
 }
 
+// SignedKey returns the key named by rawURL when it is a root-relative URL
+// this signer minted and its signature still verifies. Server code that holds
+// such a URL can then read the object from the store instead of requesting its
+// own route over HTTP.
+func (s *Signer) SignedKey(rawURL string, now time.Time) (string, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "", false
+	}
+	rest, ok := strings.CutPrefix(u.Path, s.route)
+	if !ok {
+		return "", false
+	}
+	key, ok := strings.CutSuffix(rest, s.suffix())
+	if !ok || blobstore.ValidateKey(key) != nil {
+		return "", false
+	}
+	query := u.Query()
+	exp, err := strconv.ParseInt(query.Get("exp"), 10, 64)
+	if err != nil || s.Verify(key, exp, query.Get("sig"), now) != nil {
+		return "", false
+	}
+	return key, true
+}
+
 type Resolver interface {
 	ResolveURLs(context.Context, []string) map[string]catalog.ResolvedImageURL
 }
