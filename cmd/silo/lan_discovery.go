@@ -21,9 +21,12 @@ func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serverid
 }) {
 	port, err := landiscovery.PortFromAddr(listenAddr)
 	if err != nil {
-		if errors.Is(err, landiscovery.ErrLoopbackOnly) {
+		switch {
+		case errors.Is(err, landiscovery.ErrLoopbackOnly):
 			slog.InfoContext(ctx, "LAN discovery off: the API listener accepts loopback connections only", "addr", listenAddr.String())
-		} else {
+		case errors.Is(err, landiscovery.ErrSingleAddress):
+			slog.InfoContext(ctx, "LAN discovery off: the API listener is bound to one address; bind to all addresses to advertise", "addr", listenAddr.String())
+		default:
 			slog.WarnContext(ctx, "LAN discovery off", "error", err)
 		}
 		return
@@ -37,11 +40,7 @@ func advertiseOnLAN(ctx context.Context, listenAddr net.Addr, identity *serverid
 	if err != nil || strings.TrimSpace(name) == "" {
 		name = branding.DefaultServerName
 	}
-	var bindIP net.IP
-	if tcp, ok := listenAddr.(*net.TCPAddr); ok {
-		bindIP = tcp.IP
-	}
-	err = landiscovery.Advertise(ctx, landiscovery.Config{Name: name, ServerID: serverID, Port: port, BindIP: bindIP})
+	err = landiscovery.Advertise(ctx, landiscovery.Config{Name: name, ServerID: serverID, Port: port})
 	if err != nil && ctx.Err() == nil {
 		slog.WarnContext(ctx, "LAN discovery stopped", "error", err)
 	}

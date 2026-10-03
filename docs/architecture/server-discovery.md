@@ -15,7 +15,7 @@ service once its API listener is bound (`internal/landiscovery`):
 | Field | Value |
 |---|---|
 | Service type | `_silo._tcp` in `local.` |
-| Instance name | `branding.server_name` (default `Silo`), trimmed to 63 bytes |
+| Instance name | `branding.server_name` (default `Silo`), trimmed to 58 bytes so a conflict suffix fits the 63-byte label |
 | Host | `silo-<first 8 alphanumerics of the server ID>.local` |
 | Port | the port the API process listens on; it speaks plain HTTP |
 | TXT `v` | `1`; changes only if an existing key changes meaning |
@@ -52,10 +52,11 @@ unicast queries (`dig -p 5353`).
 
 `server.lan_discovery` (default `true`, restart required) turns the
 advertisement off. It is also skipped, with one log line, when the API
-listener is bound to loopback only, and any failure to start (no multicast
+listener is bound to loopback or to any single address: the responder
+answers queries on every multicast interface and cannot be confined to the
+one holding that address. Any failure to start (no multicast
 interface, port 5353 unavailable) is logged once without affecting the
-server. A listener bound to one address advertises only that address, on the
-interface that holds it. The advertisement reaches only the networks the process itself is
+server. The advertisement reaches only the networks the process itself is
 attached to, and it carries the port the process listens on, not a port a
 container runtime publishes it under.
 

@@ -36,8 +36,9 @@ const (
 	TXTVersion     = "1"
 )
 
-// maxInstanceNameBytes is the DNS label limit an instance name must fit in.
-const maxInstanceNameBytes = 63
+// maxInstanceNameBytes keeps an instance name within the 63-byte DNS label
+// limit after the responder appends a conflict suffix such as " (2)".
+const maxInstanceNameBytes = 63 - len(" (99)")
 
 // defaultInstanceName matches branding's default server name.
 const defaultInstanceName = "Silo"
@@ -52,37 +53,42 @@ type Config struct {
 	ServerID string
 	// Port is the TCP port the API listener accepts plain HTTP on.
 	Port int
-	// BindIP is the address the API listener is bound to. When it names one
-	// address rather than all of them, only that address is advertised, on
-	// the interface that holds it.
-	BindIP net.IP
 }
 
 // ErrLoopbackOnly reports that the API listener is bound to a loopback
 // address, so nothing on the LAN could connect to an advertised port.
 var ErrLoopbackOnly = errors.New("lan discovery: API listener is bound to loopback")
 
+// ErrSingleAddress reports that the API listener is bound to one address.
+// The responder answers queries on every multicast interface and cannot be
+// confined to the one holding that address, so advertising would offer the
+// server on networks it does not serve.
+var ErrSingleAddress = errors.New("lan discovery: API listener is bound to a single address")
+
 // PortFromAddr returns the port to advertise for the bound API listener
-// address, or ErrLoopbackOnly when the listener only accepts local
-// connections.
+// address. Only a listener on every address is advertised: it returns
+// ErrLoopbackOnly or ErrSingleAddress otherwise.
 func PortFromAddr(addr net.Addr) (int, error) {
 	tcp, ok := addr.(*net.TCPAddr)
 	if !ok || tcp.Port == 0 {
 		return 0, fmt.Errorf("lan discovery: unsupported listener address %v", addr)
 	}
-	if tcp.IP != nil && tcp.IP.IsLoopback() {
+	switch {
+	case tcp.IP == nil || tcp.IP.IsUnspecified():
+		return tcp.Port, nil
+	case tcp.IP.IsLoopback():
 		return 0, ErrLoopbackOnly
+	default:
+		return 0, ErrSingleAddress
 	}
-	return tcp.Port, nil
 }
 
 var quietLibraryLog sync.Once
 
-// Advertise announces cfg on every multicast-capable interface (or only the
-// one holding cfg.BindIP) and answers queries for it until ctx is canceled,
-// then sends goodbye packets and returns ctx.Err(). It returns earlier only
-// when the responder cannot start, for example when no interface supports
-// multicast.
+// Advertise announces cfg on every multicast-capable interface and answers
+// queries for it until ctx is canceled, then sends goodbye packets and
+// returns ctx.Err(). It returns earlier only when the responder cannot start,
+// for example when no interface supports multicast.
 func Advertise(ctx context.Context, cfg Config) (err error) {
 	quietLibraryLog.Do(func() {
 		// The library logs to stdout by default; Silo logs through slog.
@@ -100,7 +106,7 @@ func Advertise(ctx context.Context, cfg Config) (err error) {
 	if err != nil {
 		return err
 	}
-	if len(dnssd.MulticastInterfaces(srvCfg.Ifaces...)) == 0 {
+	if len(dnssd.MulticastInterfaces()) == 0 {
 		return errors.New("lan discovery: no multicast-capable network interface")
 	}
 	service, err := dnssd.NewService(srvCfg)
@@ -132,7 +138,7 @@ func serviceConfig(cfg Config) (dnssd.Config, error) {
 	if cfg.Port <= 0 || cfg.Port > 65535 {
 		return dnssd.Config{}, fmt.Errorf("lan discovery: invalid port %d", cfg.Port)
 	}
-	srvCfg := dnssd.Config{
+	return dnssd.Config{
 		Name: instanceName(cfg.Name),
 		Type: ServiceType,
 		Host: hostLabel(id),
@@ -141,36 +147,7 @@ func serviceConfig(cfg Config) (dnssd.Config, error) {
 			TXTKeyVersion:  TXTVersion,
 			TXTKeyServerID: id,
 		},
-	}
-	if cfg.BindIP != nil && !cfg.BindIP.IsUnspecified() {
-		iface, err := interfaceHolding(cfg.BindIP)
-		if err != nil {
-			return dnssd.Config{}, err
-		}
-		srvCfg.IPs = []net.IP{cfg.BindIP}
-		srvCfg.Ifaces = []string{iface}
-	}
-	return srvCfg, nil
-}
-
-// interfaceHolding returns the name of the interface that has ip assigned.
-func interfaceHolding(ip net.IP) (string, error) {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return "", fmt.Errorf("lan discovery: list interfaces: %w", err)
-	}
-	for _, iface := range ifaces {
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			if prefix, ok := addr.(*net.IPNet); ok && prefix.IP.Equal(ip) {
-				return iface.Name, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("lan discovery: no interface holds the listener address %s", ip)
+	}, nil
 }
 
 // instanceName trims name to a DNS label, falling back to defaultInstanceName.
