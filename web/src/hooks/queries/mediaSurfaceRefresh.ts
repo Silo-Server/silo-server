@@ -202,7 +202,8 @@ function listedChildIds(data: unknown): string[] {
 // relatedItemIds is itemId plus the items whose cached state derives from it,
 // as far as the cache shows: its parents (the series named by its detail, and
 // the season or series whose cached list holds it, and theirs) and its
-// children (the episodes or seasons its own cached lists hold, and theirs).
+// children (the episodes or seasons its own cached lists hold, the cached
+// details that name it as their series, and theirs).
 // Realtime events and watched marks name only the item itself, so narrowing
 // to that one ID would leave an open season grid, series watched totals or a
 // marked season's episodes stale.
@@ -228,8 +229,10 @@ export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<st
     for (const child of listedChildIds(query.state.data)) link(owner, child);
     if (isItemDetailQueryKey(query.queryKey, owner)) {
       const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
-      // A detail names its series; it isn't the series' listed child.
-      if (seriesId && seriesId !== owner) add(parentsOf, owner, seriesId);
+      // A detail names its series, and derives its series title, backdrop
+      // and credits from it. A season page opened directly has no cached
+      // season list, so this edge is how a series change reaches it.
+      if (seriesId) link(seriesId, owner);
     }
   }
 

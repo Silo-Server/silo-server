@@ -464,6 +464,24 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(relatedItemIds(queryClient, "episode-1")).toEqual(new Set(["episode-1", "series-1"]));
   });
 
+  it("refreshes a directly opened season when its series changes", async () => {
+    const queryClient = new QueryClient();
+    // A season page opened by URL caches its detail and episodes, but not the
+    // series' season list.
+    const seasonDetailKey = catalogKeys.itemDetail("season-1");
+    const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
+    const otherDetailKey = catalogKeys.itemDetail("season-9");
+    queryClient.setQueryData(seasonDetailKey, { content_id: "season-1", series_id: "series-1" });
+    queryClient.setQueryData(seasonEpisodesKey, { episodes: [{ content_id: "episode-1" }] });
+    queryClient.setQueryData(otherDetailKey, { content_id: "season-9", series_id: "series-9" });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "series-1" });
+
+    expect(queryClient.getQueryState(seasonDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(seasonEpisodesKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+  });
+
   it("refreshes a marked season's cached episode details", async () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(catalogKeys.itemEpisodes("season-1"), {
