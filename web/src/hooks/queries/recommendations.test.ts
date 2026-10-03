@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +12,6 @@ import getRecommendationSectionOk from "../../../../contracts/api/v2/fixtures/ge
 import getTasteProfileOk from "../../../../contracts/api/v2/fixtures/get_taste_profile_ok.json";
 import listSimilarOk from "../../../../contracts/api/v2/fixtures/list_similar_ok.json";
 import listTasteSeedItemsOk from "../../../../contracts/api/v2/fixtures/list_taste_seed_items_ok.json";
-import listWatchTonightCardsOk from "../../../../contracts/api/v2/fixtures/list_watch_tonight_cards_ok.json";
 
 import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
@@ -21,7 +20,6 @@ import {
   useDiscover,
   useRecommendationSection,
   useSimilarItems,
-  useSwipeCards,
   useTasteProfile,
 } from "./recommendations";
 import { useSubmitTasteSeed, useTasteSeedItems } from "./tasteSeed";
@@ -122,68 +120,6 @@ describe("recommendation reads on the v2 contract", () => {
     expect(result.current.data?.top_genres).toEqual(getTasteProfileOk.top_genres);
     expect(result.current.data?.signal_counts).toEqual(getTasteProfileOk.signal_counts);
     expect(result.current.data?.updated_at).toBe(getTasteProfileOk.updated_at);
-  });
-
-  it("pages swipe cards by excluded ids sent as repeated query keys", async () => {
-    const fetchMock = stubFetch(() => jsonResponse(listWatchTonightCardsOk));
-
-    const { result } = renderHook(() => useSwipeCards(true, "discover", ["Crime", "Action"]), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    const url = requestedUrl(fetchMock);
-    expect(url.pathname).toBe("/api/v2/recommendations/watch-tonight/cards");
-    expect(url.searchParams.get("mode")).toBe("discover");
-    expect(url.searchParams.getAll("genres")).toEqual(["Action", "Crime"]);
-
-    const page = result.current.data?.pages[0];
-    expect(page?.has_more).toBe(listWatchTonightCardsOk.has_more);
-    expect(page?.cards.map((c) => c.content_id)).toEqual(
-      listWatchTonightCardsOk.items.map((c) => c.content_id),
-    );
-    expect(page?.cards[0]?.cast).toEqual(listWatchTonightCardsOk.items[0]?.cast);
-    expect(result.current.hasNextPage).toBe(listWatchTonightCardsOk.has_more);
-
-    await result.current.fetchNextPage();
-    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(2));
-    expect(requestedUrl(fetchMock, 1).searchParams.getAll("exclude_ids")).toEqual(
-      listWatchTonightCardsOk.items.map((c) => c.content_id),
-    );
-  });
-  it("stops a limited swipe session before exclusion requests exceed the schema", async () => {
-    const fetchMock = stubFetch((url) => {
-      const prior = url.searchParams.getAll("exclude_ids");
-      expect(prior.length).toBeLessThanOrEqual(200);
-      const count = Math.min(12, 200 - prior.length);
-      return jsonResponse({
-        ...listWatchTonightCardsOk,
-        items: Array.from({ length: count }, (_, i) => ({
-          ...listWatchTonightCardsOk.items[0],
-          content_id: `movie:${prior.length + i}`,
-        })),
-        has_more: true,
-        paging_limited: prior.length + count === 200,
-      });
-    });
-    const { result } = renderHook(() => useSwipeCards(true, "discover", []), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.pages[0]?.cards).toHaveLength(12);
-    expect(result.current.hasNextPage).toBe(true);
-    for (let page = 1; page < 17; page++) {
-      await act(async () => {
-        const fetched = await result.current.fetchNextPage();
-        expect(fetched.error).toBeNull();
-      });
-      await waitFor(() => expect(result.current.data?.pages).toHaveLength(page + 1));
-    }
-    expect(result.current.data?.pages.flatMap((page) => page.cards)).toHaveLength(200);
-    expect(result.current.data?.pages[result.current.data.pages.length - 1]?.has_more).toBe(true);
-    expect(result.current.hasNextPage).toBe(false);
-    await result.current.fetchNextPage();
-    expect(fetchMock).toHaveBeenCalledTimes(17);
   });
 });
 

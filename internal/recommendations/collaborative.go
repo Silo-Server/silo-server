@@ -148,10 +148,10 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 		resultIDs[i] = item.MediaItemID
 	}
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, resultIDs)
-	results = applyMMR(results, embMap, e.mmrLambda(LambdaSimilarUsers), limit)
+	results = applyMMR(results, embMap, e.mmrLambda(), limit)
 
 	// Apply genre cap to "Similar Users Liked" for cross-genre diversity.
-	genres, _ := e.repo.GetItemGenres(ctx, resultIDs)
+	genres, _ := e.repo.GetItemAllGenres(ctx, resultIDs)
 	results = applyGenreCap(results, genres, GenreCapPercent)
 
 	if len(results) > limit {

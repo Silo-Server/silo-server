@@ -131,7 +131,7 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		}
 
 		embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-		reranked := applyMMR(candidates, embMap, e.mmrLambda(LambdaGenreRow), clusterLimit)
+		reranked := applyMMR(candidates, embMap, e.mmrLambda(), clusterLimit)
 
 		// Apply recency boost.
 		addedDates, _ := e.repo.GetItemAddedDates(ctx, candidateIDs)
@@ -183,7 +183,7 @@ func (e *Engine) buildAggregatedRow(ctx context.Context, userID int, profileID s
 	}
 
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	reranked := applyMMR(candidates, embMap, e.mmrLambda(LambdaForYou), limit)
+	reranked := applyMMR(candidates, embMap, e.mmrLambda(), limit)
 
 	// Apply genre cap on the main For You row.
 	reranked = applyGenreCap(reranked, genreMap, GenreCapPercent)
@@ -425,7 +425,7 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		candidateIDs[i] = item.MediaItemID
 	}
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	result := applyMMR(blended, embMap, e.mmrLambda(LambdaBecauseWatched), limit)
+	result := applyMMR(blended, embMap, e.mmrLambda(), limit)
 
 	for i := range result {
 		if result[i].Reason == "" {

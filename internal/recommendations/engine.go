@@ -99,14 +99,20 @@ func (e *Engine) signalReader() *SignalReader {
 	return NewSignalReader(e.repo, e.storeProvider)
 }
 
-func (e *Engine) mmrLambda(defaultLambda float64) float64 {
+// defaultMMRLambda is the relevance/diversity trade-off used when the
+// configured DiversityLambda is outside [0, 1].
+const defaultMMRLambda = 0.7
+
+// mmrLambda returns the configured MMR lambda, or defaultMMRLambda when it is
+// not a valid weight.
+func (e *Engine) mmrLambda() float64 {
 	if e == nil {
-		return defaultLambda
+		return defaultMMRLambda
 	}
 	if e.cfg.DiversityLambda >= 0 && e.cfg.DiversityLambda <= 1 {
 		return e.cfg.DiversityLambda
 	}
-	return defaultLambda
+	return defaultMMRLambda
 }
 
 func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID string) catalog.AccessFilter {
