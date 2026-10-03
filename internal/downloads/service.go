@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkurl"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
@@ -126,6 +128,9 @@ type Service struct {
 	subtitleSource   SubtitleSource
 	artworkSource    ManifestSource
 	httpClient       *http.Client
+	artworkStore     blobstore.Store
+	artworkSigner    *artworkurl.Signer
+	artworkRepair    ArtworkRepairer
 	subtitleCache    *playback.SubtitleCache
 
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
@@ -165,6 +170,22 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 	s.manifest.MarkerPopulation = s.markerPopulation
 	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
+}
+
+// ArtworkRepairer queues regeneration of cached artwork missing from the store.
+type ArtworkRepairer interface {
+	EnqueueArtworkRepair(ctx context.Context, keys []string, priority int) (int, error)
+}
+
+// SetArtworkStore lets artwork for offline downloads be read from local
+// artwork storage. That storage resolves images to signed routes on this
+// server, which the service reads from the store instead of over HTTP. A
+// missing revisioned image is queued on repair, as the signed route does; a
+// nil repair skips that.
+func (s *Service) SetArtworkStore(store blobstore.Store, signer *artworkurl.Signer, repair ArtworkRepairer) {
+	s.artworkStore = store
+	s.artworkSigner = signer
+	s.artworkRepair = repair
 }
 
 func (s *Service) SetMarkerPopulation(population MarkerPopulationService) {

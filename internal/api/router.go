@@ -2092,6 +2092,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+			if deps.Blobs.Assets != nil {
+				downloadSvc.SetArtworkStore(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair)
+			}
 		}
 		if streamHandler != nil {
 			downloadSvc.SetSubtitleCache(streamHandler.SubtitleCache)
