@@ -3098,7 +3098,20 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	case "30d":
 		interval = "30 days"
 	}
+	// Trending ranks breadth first: how many profiles watched a title, then
+	// how often.
+	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, interval, "wa.viewers DESC, wa.plays DESC")
+	return f.queryWatchActivity(ctx, "trending", query, args)
+}
 
+// watchActivityQuery ranks titles by watch history inside interval. Watch
+// history records an episode play against the episode, which has no
+// media_items row, so plays are rolled up to their series first: every episode
+// of a show counts toward the show. The library and access predicates apply to
+// the resolved title before GROUP BY, so plays from other libraries never
+// enter the aggregate. orderBy ranks the per-title aggregate wa(viewers,
+// plays); content ID breaks ties so the order is stable.
+func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, interval, orderBy string) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
@@ -3123,14 +3136,28 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s JOIN user_watch_history uwh ON uwh.media_item_id = mi.content_id %s GROUP BY mi.content_id ORDER BY COUNT(DISTINCT uwh.profile_id) DESC, COUNT(*) DESC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
+		`WITH wa AS (
+			SELECT mi.content_id,
+			       COUNT(DISTINCT uwh.profile_id) AS viewers,
+			       COUNT(*) AS plays
+			FROM user_watch_history uwh
+			LEFT JOIN episodes ep ON ep.content_id = uwh.media_item_id
+			JOIN %s ON mi.content_id = COALESCE(ep.series_id, uwh.media_item_id)
+			%s
+			GROUP BY mi.content_id
+		)
+		SELECT %s FROM media_items mi JOIN wa ON wa.content_id = mi.content_id
+		ORDER BY %s, mi.content_id LIMIT $%d`,
+		fromClause, whereClause, itemColumns("mi"), orderBy, argIdx,
 	)
 	args = append(args, limit)
+	return query, args
+}
 
+func (f *Fetcher) queryWatchActivity(ctx context.Context, rail, query string, args []any) ([]*models.MediaItem, int, error) {
 	rows, err := f.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("fetching trending: %w", err)
+		return nil, 0, fmt.Errorf("fetching %s: %w", rail, err)
 	}
 	defer rows.Close()
 	items, err := scanMediaItems(rows)
@@ -3278,46 +3305,9 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 	if p.Window == "month" {
 		interval = "30 days"
 	}
-
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
-	conditions = append(conditions, libConditions...)
-	args = append(args, libArgs...)
-	argIdx = newArgIdx
-	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
-
-	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
-
-	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
-	args = append(args, interval)
-	argIdx++
-
-	limit := s.ItemLimit
-	if limit <= 0 {
-		limit = 20
-	}
-
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
-
-	query := fmt.Sprintf(
-		`SELECT %s FROM %s JOIN user_watch_history uwh ON uwh.media_item_id = mi.content_id %s GROUP BY mi.content_id ORDER BY COUNT(*) DESC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
-	)
-	args = append(args, limit)
-
-	rows, err := f.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fetching most watched: %w", err)
-	}
-	defer rows.Close()
-	items, err := scanMediaItems(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, len(items), nil
+	// Most Watched ranks raw volume: total plays, then how many profiles.
+	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, interval, "wa.plays DESC, wa.viewers DESC")
+	return f.queryWatchActivity(ctx, "most watched", query, args)
 }
 
 // buildLibraryScope returns the FROM clause and membership predicates that
