@@ -35,7 +35,8 @@ type PopulationStore interface {
 	Complete(context.Context, FetchClaim, FetchCompletion) error
 	Cooldown(context.Context, string, string, time.Time) error
 	Cached(context.Context, int, string) (map[string]Result, error)
-	Candidates(context.Context, map[string]string, *SyncCursor, int) ([]int, *SyncCursor, error)
+	CooldownEnd(context.Context, map[string]string) (time.Time, error)
+	Candidates(context.Context, map[string]string) ([]int, error)
 }
 
 type DBPopulationStore struct{ pool *pgxpool.Pool }
@@ -140,19 +141,69 @@ func (s *DBPopulationStore) Cooldown(ctx context.Context, provider, revision str
 	return nil
 }
 
-// SyncCursor marks the last candidate of a sync page.
-type SyncCursor struct {
-	fetchedAt time.Time
-	fileID    int
+// CooldownEnd reports when the first of providers leaves its cooldown. It
+// returns the zero time when at least one provider can be asked now.
+func (s *DBPopulationStore) CooldownEnd(ctx context.Context, providers map[string]string) (time.Time, error) {
+	providerIDs, revisions := providerArrays(providers)
+	var end *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT CASE WHEN count(c.provider)=cardinality($1::text[]) THEN min(c.retry_at) END
+		FROM unnest($1::text[],$2::text[]) requested(provider,revision)
+		LEFT JOIN marker_provider_cooldowns c ON c.provider=requested.provider AND c.provider_revision=requested.revision AND c.retry_at>now()`,
+		providerIDs, revisions).Scan(&end)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("load marker provider cooldowns: %w", err)
+	}
+	if end == nil {
+		return time.Time{}, nil
+	}
+	return *end, nil
 }
 
-// Candidates lists due files with the least recently fetched first; files never
-// fetched sort as if fetched at the Unix epoch. A provider quota usually ends a
-// sync run early, so this order lets the next run continue where the last one
-// stopped instead of refreshing the same low file IDs every day. Metadata
-// changes make a file eligible for identity checking; Claim still suppresses
-// the request when those changes did not alter its IDs.
-func (s *DBPopulationStore) Candidates(ctx context.Context, providers map[string]string, after *SyncCursor, limit int) ([]int, *SyncCursor, error) {
+// Candidates lists every due file once, the least recently fetched first;
+// files never fetched sort as if fetched at the Unix epoch. A provider quota
+// usually ends a sync run early, so this order lets the next run continue
+// where the last one stopped instead of refreshing the same files every day.
+// Sync walks this one snapshot: the sort key moves as providers enter and
+// leave cooldown, so paging it with a cursor could skip files, and each page
+// would sort the whole library again. Claim re-checks each file before a
+// request. A metadata change made after the file's last identity check makes
+// it a candidate; Claim still suppresses the request when its IDs are unchanged.
+func (s *DBPopulationStore) Candidates(ctx context.Context, providers map[string]string) ([]int, error) {
+	providerIDs, revisions := providerArrays(providers)
+	rows, err := s.pool.Query(ctx, `SELECT f.id FROM media_files f
+		JOIN media_folders library ON library.id=f.media_folder_id
+		LEFT JOIN episodes episode ON episode.content_id=f.episode_id
+		LEFT JOIN media_items item ON item.content_id=COALESCE(episode.series_id,f.content_id)
+		LEFT JOIN marker_fetch_state checked ON checked.media_file_id=f.id AND checked.provider=$3
+		CROSS JOIN LATERAL (
+			SELECT MIN(CASE WHEN state.fetched_at IS NULL OR state.outcome='on_demand' THEN 'epoch'::timestamptz ELSE state.fetched_at END) AS fetched_at
+			FROM unnest($1::text[],$2::text[]) requested(provider,revision)
+			LEFT JOIN marker_fetch_state state ON state.media_file_id=f.id AND state.provider=requested.provider
+			WHERE NOT EXISTS (SELECT 1 FROM marker_provider_cooldowns c WHERE c.provider=requested.provider AND c.provider_revision=requested.revision AND c.retry_at>now())
+			AND (state.lease_until IS NULL OR state.lease_until<=now())
+			AND (state.media_file_id IS NULL OR state.retry_at<=now() OR state.outcome='on_demand' OR state.provider_revision<>requested.revision
+				OR item.updated_at>GREATEST(state.fetched_at,checked.fetched_at) OR episode.updated_at>GREATEST(state.fetched_at,checked.fetched_at))
+		) due
+		WHERE library.enabled AND lower(btrim(library.type)) IN ('movie','movies','tv','series','show','tvshows','mixed')
+		AND f.missing_since IS NULL AND f.extra_id IS NULL AND COALESCE(f.duration,0)>0
+		AND COALESCE(f.multi_episode_start,0)=0 AND COALESCE(f.multi_episode_end,0)=0
+		AND COALESCE(f.presentation_part_total,1)<=1
+		AND (episode.content_id IS NOT NULL OR item.type='movie')
+		AND (COALESCE(item.tmdb_id,'')<>'' OR COALESCE(item.imdb_id,'')<>'' OR COALESCE(item.tvdb_id,'')<>'')
+		AND due.fetched_at IS NOT NULL
+		ORDER BY due.fetched_at,f.id`, providerIDs, revisions, populationLease)
+	if err != nil {
+		return nil, fmt.Errorf("list marker sync candidates: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("list marker sync candidates: %w", err)
+	}
+	return ids, nil
+}
+
+// providerArrays splits providers into parallel ID and revision arrays.
+func providerArrays(providers map[string]string) ([]string, []string) {
 	providerIDs := make([]string, 0, len(providers))
 	for id := range providers {
 		providerIDs = append(providerIDs, id)
@@ -162,44 +213,5 @@ func (s *DBPopulationStore) Candidates(ctx context.Context, providers map[string
 	for _, id := range providerIDs {
 		revisions = append(revisions, providers[id])
 	}
-	if after == nil {
-		after = &SyncCursor{fetchedAt: time.Unix(0, 0)}
-	}
-	rows, err := s.pool.Query(ctx, `SELECT f.id,due.fetched_at FROM media_files f
-		JOIN media_folders library ON library.id=f.media_folder_id
-		LEFT JOIN episodes episode ON episode.content_id=f.episode_id
-		LEFT JOIN media_items item ON item.content_id=COALESCE(episode.series_id,f.content_id)
-		CROSS JOIN LATERAL (
-			SELECT MIN(CASE WHEN state.fetched_at IS NULL OR state.outcome='on_demand' THEN 'epoch'::timestamptz ELSE state.fetched_at END) AS fetched_at
-			FROM unnest($4::text[],$5::text[]) requested(provider,revision)
-			LEFT JOIN marker_fetch_state state ON state.media_file_id=f.id AND state.provider=requested.provider
-			WHERE NOT EXISTS (SELECT 1 FROM marker_provider_cooldowns c WHERE c.provider=requested.provider AND c.provider_revision=requested.revision AND c.retry_at>now())
-			AND (state.lease_until IS NULL OR state.lease_until<=now())
-			AND (state.media_file_id IS NULL OR state.retry_at<=now() OR state.outcome='on_demand' OR state.provider_revision<>requested.revision
-				OR item.updated_at>state.fetched_at OR episode.updated_at>state.fetched_at)
-		) due
-		WHERE library.enabled AND lower(btrim(library.type)) IN ('movie','movies','tv','series','show','tvshows','mixed')
-		AND f.missing_since IS NULL AND f.extra_id IS NULL AND COALESCE(f.duration,0)>0
-		AND COALESCE(f.multi_episode_start,0)=0 AND COALESCE(f.multi_episode_end,0)=0
-		AND COALESCE(f.presentation_part_total,1)<=1
-		AND (episode.content_id IS NOT NULL OR item.type='movie')
-		AND (COALESCE(item.tmdb_id,'')<>'' OR COALESCE(item.imdb_id,'')<>'' OR COALESCE(item.tvdb_id,'')<>'')
-		AND due.fetched_at IS NOT NULL AND (due.fetched_at,f.id)>($1,$2)
-		ORDER BY due.fetched_at,f.id LIMIT $3`, after.fetchedAt, after.fileID, limit, providerIDs, revisions)
-	if err != nil {
-		return nil, nil, fmt.Errorf("list marker sync candidates: %w", err)
-	}
-	defer rows.Close()
-	var ids []int
-	var last SyncCursor
-	for rows.Next() {
-		if err := rows.Scan(&last.fileID, &last.fetchedAt); err != nil {
-			return nil, nil, err
-		}
-		ids = append(ids, last.fileID)
-	}
-	if err := rows.Err(); err != nil || len(ids) == 0 {
-		return nil, nil, err
-	}
-	return ids, &last, nil
+	return providerIDs, revisions
 }

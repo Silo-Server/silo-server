@@ -21,14 +21,29 @@ const (
 	markerFetchError    = "error"
 	markerFetchLimited  = "limited"
 	markerFetchOnDemand = "on_demand"
+	markerFetchPending  = "pending"
 
 	// TheIntroDB asks clients to keep found markers for a month and retry
-	// missing ones after two weeks, so a daily quota can fill a library.
-	markerPositiveTTL  = 30 * 24 * time.Hour
-	markerMissTTL      = 14 * 24 * time.Hour
-	markerMemoryTTL    = 15 * time.Minute
-	markerFetchTimeout = 45 * time.Second
-	markerMemoryLimit  = 512
+	// missing ones after two weeks, so a daily quota can fill a library. These
+	// durations apply to every provider. Releases from the last month are
+	// still gaining crowd-sourced markers and keep shorter retries.
+	markerPositiveTTL       = 30 * 24 * time.Hour
+	markerMissTTL           = 14 * 24 * time.Hour
+	markerRecentWindow      = 30 * 24 * time.Hour
+	markerRecentPositiveTTL = 7 * 24 * time.Hour
+	markerRecentMissTTL     = 24 * time.Hour
+	markerMemoryTTL         = 15 * time.Minute
+	markerFetchTimeout      = 45 * time.Second
+	markerMemoryLimit       = 512
+
+	// A sync run waits out a short cooldown on every provider, such as a
+	// rate limit, and ends at a longer one, such as a daily quota.
+	syncCooldownWait = time.Minute
+
+	// populationLease is the fetch-state row that leases a whole file. Its
+	// fetched_at records the last pass that confirmed the file's lookup
+	// identity against every provider.
+	populationLease = "@population"
 )
 
 type PopulationSettings interface {
@@ -165,8 +180,15 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	if err != nil || !claimed {
 		return file, false, err
 	}
+	verified := false
 	defer func() {
-		_ = s.complete(ctx, fileClaim, FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()})
+		// Only a verified pass stamps fetched_at, which hides older metadata
+		// edits from sync. Any other pass leaves the stamp and the lease free.
+		release := FetchCompletion{Outcome: markerFetchPending}
+		if verified {
+			release = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()}
+		}
+		_ = s.complete(ctx, fileClaim, release)
 	}()
 	if s.opts.LoadFile != nil {
 		loaded, err := s.opts.LoadFile(ctx, file.ID)
@@ -256,13 +278,12 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		}
 		result.ProviderID = providerID
 		results = append(results, providerResult{entry: entry, result: result, refreshed: true})
-		ttl := markerPositiveTTL
-		outcome := markerFetchHit
-		if len(result.Markers) == 0 {
-			ttl = markerMissTTL
-			outcome = markerFetchMiss
+		found := len(result.Markers) > 0
+		outcome := markerFetchMiss
+		if found {
+			outcome = markerFetchHit
 		}
-		completion := FetchCompletion{Outcome: outcome, RetryAt: time.Now().Add(ttl), Result: &result}
+		completion := FetchCompletion{Outcome: outcome, RetryAt: time.Now().Add(markerTTL(found, ids.Released)), Result: &result}
 		if storage == OnlineStorageOnDemand {
 			s.remember(key, result)
 			completion = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()}
@@ -310,6 +331,9 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 	if err != nil {
 		failures = append(failures, err)
 	}
+	// Every provider either answered or has a cached result for this exact
+	// identity, so the file's current metadata has been checked.
+	verified = err == nil && len(results) == len(entries)
 	for _, fetch := range pending {
 		completion := fetch.completion
 		if err != nil {
@@ -381,7 +405,7 @@ func (s *PopulationService) selectResults(results []providerResult) Result {
 func (s *PopulationService) claimFile(ctx context.Context, file *models.MediaFile, wait bool) (FetchClaim, bool, error) {
 	delay := 50 * time.Millisecond
 	for {
-		claim, claimed, err := s.opts.Store.Claim(ctx, file.ID, "@population", models.MarkerFileIdentity(file), "", true)
+		claim, claimed, err := s.opts.Store.Claim(ctx, file.ID, populationLease, models.MarkerFileIdentity(file), "", true)
 		if err != nil || claimed || !wait {
 			return claim, claimed, err
 		}
@@ -457,6 +481,21 @@ func providerRevision(provider Provider) string {
 	return ""
 }
 
+// markerTTL is how long a stored response stays fresh.
+func markerTTL(found bool, released time.Time) time.Duration {
+	recent := !released.IsZero() && time.Since(released) < markerRecentWindow
+	switch {
+	case found && recent:
+		return markerRecentPositiveTTL
+	case found:
+		return markerPositiveTTL
+	case recent:
+		return markerRecentMissTTL
+	default:
+		return markerMissTTL
+	}
+}
+
 func fetchRetry(failures int) time.Duration {
 	if failures > 6 {
 		failures = 6
@@ -509,6 +548,30 @@ type SyncSummary struct {
 	Skipped    bool `json:"skipped,omitempty"`
 }
 
+// waitForProviders reports whether a sync run should continue after a rate
+// limit. It waits out a short cooldown that covers every provider.
+func (s *PopulationService) waitForProviders(ctx context.Context, providers map[string]string) (bool, error) {
+	end, err := s.opts.Store.CooldownEnd(ctx, providers)
+	if err != nil {
+		return false, err
+	}
+	if end.IsZero() {
+		return true, nil
+	}
+	delay := time.Until(end)
+	if delay > syncCooldownWait {
+		return false, nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-timer.C:
+		return true, nil
+	}
+}
+
 func (s *PopulationService) Sync(ctx context.Context, progress func(float64, string)) (SyncSummary, error) {
 	summary := SyncSummary{}
 	enabled, err := s.enabled(ctx)
@@ -543,39 +606,39 @@ func (s *PopulationService) Sync(ctx context.Context, progress func(float64, str
 		}
 		return summary, nil
 	}
-	var cursor *SyncCursor
-	for {
+	ids, err := s.opts.Store.Candidates(ctx, providers)
+	if err != nil {
+		return summary, err
+	}
+	for i, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
-		ids, next, err := s.opts.Store.Candidates(ctx, providers, cursor, 100)
+		summary.Considered++
+		file, err := s.opts.LoadFile(ctx, id)
 		if err != nil {
-			return summary, err
+			summary.Failed++
+			continue
 		}
-		if len(ids) == 0 {
-			break
+		_, changed, err := s.populate(ctx, file, false, false)
+		if changed {
+			summary.Updated++
 		}
-		cursor = next
-		for _, id := range ids {
-			if err := ctx.Err(); err != nil {
-				return summary, err
-			}
-			summary.Considered++
-			file, err := s.opts.LoadFile(ctx, id)
-			if err != nil {
-				summary.Failed++
-				continue
-			}
-			_, changed, err := s.populate(ctx, file, false, false)
-			if err != nil {
-				summary.Failed++
-			}
-			if changed {
-				summary.Updated++
-			}
+		if progress != nil {
+			progress(float64(i+1)*100/float64(len(ids)), fmt.Sprintf("Checked %d files; updated %d", summary.Considered, summary.Updated))
+		}
+		if err == nil {
+			continue
+		}
+		summary.Failed++
+		if _, limited := RetryAfter(err); !limited {
+			continue
+		}
+		if wait, err := s.waitForProviders(ctx, providers); err != nil || !wait {
 			if progress != nil {
-				progress(0, fmt.Sprintf("Checked %d files; updated %d", summary.Considered, summary.Updated))
+				progress(100, fmt.Sprintf("Online marker providers are rate limited; updated %d files", summary.Updated))
 			}
+			return summary, err
 		}
 	}
 	if progress != nil {
