@@ -69,8 +69,7 @@ func (e *ImageCacheCleanupExecutor) Execute(
 		deleted.DeletedS3Objects += n
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			// After the deadline every remaining delete fails at once; stop
-			// instead of logging and skipping each of them. The S3 client's
-			// per-object fallback logs such failures and still returns nil.
+			// instead of logging and skipping each of them.
 			return index, deleted, ctxErr
 		}
 		if err != nil {

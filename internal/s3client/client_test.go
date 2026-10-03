@@ -247,14 +247,109 @@ func TestDeleteObjectsCountsOnlyMissingObjectBatchErrors(t *testing.T) {
 		w.Header().Set("Content-Type", "application/xml")
 		_, _ = io.WriteString(w, `<DeleteResult>
 			<Error><Key>missing.webp</Key><Code>NoSuchKey</Code></Error>
-			<Error><Key>denied.webp</Key><Code>AccessDenied</Code></Error>
+			<Error><Key>denied.webp</Key><Code>AccessDenied</Code><Message>signed https://x/?X-Amz-Signature=SECRETSIG</Message></Error>
 		</DeleteResult>`)
 	}))
 	t.Cleanup(server.Close)
 	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
 	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"missing.webp", "existing.webp", "denied.webp"})
-	if err != nil || deleted != 2 {
-		t.Fatalf("DeleteObjects() = %d, %v; want 2, nil", deleted, err)
+	if err == nil || deleted != 2 {
+		t.Fatalf("DeleteObjects() = %d, %v; want 2 and an error", deleted, err)
+	}
+	if !strings.Contains(err.Error(), "denied.webp") {
+		t.Fatal("DeleteObjects() error did not name denied.webp")
+	}
+	if !strings.Contains(err.Error(), "AccessDenied") {
+		t.Fatal("DeleteObjects() error did not carry the AccessDenied error code")
+	}
+	if strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatal("DeleteObjects() error echoed the backend message")
+	}
+}
+
+func TestDeletePrefixReturnsErrorWhenBatchDeleteFails(t *testing.T) {
+	var mu sync.Mutex
+	var batchCalls, objectCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2":
+			_, _ = io.WriteString(w, `<ListBucketResult><Name>silo</Name><IsTruncated>false</IsTruncated>
+				<Contents><Key>local/ebooks/1/a.webp</Key></Contents>
+				<Contents><Key>local/ebooks/1/b.webp</Key></Contents>
+			</ListBucketResult>`)
+		case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+			mu.Lock()
+			batchCalls++
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code><Message>signed ?X-Amz-Signature=SECRETSIG</Message></Error>")
+		case r.Method == http.MethodDelete:
+			mu.Lock()
+			objectCalls++
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	deleted, err := client.DeletePrefix(t.Context(), client.Bucket(), "local/ebooks/1/")
+	if err == nil || deleted != 0 {
+		t.Fatalf("DeletePrefix() = %d, %v; want 0 and an error", deleted, err)
+	}
+	if !strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "SECRETSIG") {
+		t.Fatal("DeletePrefix() error must carry the code without the backend message")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if batchCalls != 1 || objectCalls != 0 {
+		t.Fatalf("batch requests=%d, per-key requests=%d; want 1 and 0", batchCalls, objectCalls)
+	}
+}
+
+func TestDeleteObjectsFallbackReturnsErrorForFailedKeys(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Query().Has("delete"):
+			w.WriteHeader(http.StatusNotImplemented)
+			_, _ = io.WriteString(w, "<Error><Code>NotImplemented</Code></Error>")
+		case r.Method == http.MethodDelete && strings.HasSuffix(r.URL.Path, "/denied.webp"):
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	deleted, err := client.DeleteObjects(t.Context(), client.Bucket(), []string{"ok.webp", "denied.webp"})
+	if err == nil || deleted != 1 {
+		t.Fatalf("DeleteObjects() = %d, %v; want 1 and an error", deleted, err)
+	}
+}
+
+func TestDeleteObjectsReturnsContextError(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", PathStyle: true, AccessKey: "test", SecretKey: "test"})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	deleted, err := client.deleteObjects(ctx, client.Bucket(), []string{"a.webp", "b.webp"})
+	if !errors.Is(err, context.Canceled) || deleted != 0 {
+		t.Fatalf("deleteObjects() = %d, %v; want 0, context.Canceled", deleted, err)
+	}
+	if calls != 0 {
+		t.Fatalf("requests=%d; want 0", calls)
 	}
 }
 
@@ -667,5 +762,20 @@ func TestArtworkDeliveryScopeExcludesCredentials(t *testing.T) {
 	client.publicEndpoint = "https://other-images.example"
 	if got := client.ArtworkDeliveryScope(); got == scope {
 		t.Fatal("delivery endpoint change did not change scope")
+	}
+}
+
+func TestSafeErrorCodeAllowsOnlyIdentifierCodes(t *testing.T) {
+	for code, want := range map[string]string{
+		"AccessDenied":                      "AccessDenied",
+		"Slow_Down-1.x":                     "Slow_Down-1.x",
+		"":                                  unrecognizedErrorCode,
+		"https://x/?X-Amz-Signature=SECRET": unrecognizedErrorCode,
+		"Access Denied token":               unrecognizedErrorCode,
+		strings.Repeat("A", 65):             unrecognizedErrorCode,
+	} {
+		if got := safeErrorCode(code); got != want {
+			t.Errorf("safeErrorCode(%q) = %q, want %q", code, got, want)
+		}
 	}
 }
