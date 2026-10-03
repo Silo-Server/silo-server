@@ -156,6 +156,9 @@ func kmeansCluster(items []clusterItem, k int) []int {
 	return assignments
 }
 
+// kmeansSeed derives the k-means seed from k and the item IDs only. Weights
+// decay with time, so seeding from them reshuffled the clusters on every
+// rebuild even when the profile's titles had not changed.
 func kmeansSeed(items []clusterItem, k int) int64 {
 	seed := int64(1469598103934665603)
 	seed = seed*1099511628211 + int64(k)
@@ -164,7 +167,8 @@ func kmeansSeed(items []clusterItem, k int) int64 {
 			seed ^= int64(b)
 			seed *= 1099511628211
 		}
-		seed ^= int64(math.Float64bits(item.weight))
+		// Separate IDs, so "ab","c" and "a","bc" seed differently.
+		seed ^= 0xff
 		seed *= 1099511628211
 	}
 	if seed == 0 {

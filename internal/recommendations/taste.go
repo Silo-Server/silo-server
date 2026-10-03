@@ -143,34 +143,42 @@ func maxContentRatingFromSets(ratedSet, completedSet, favSet map[string]struct{}
 // watch progress, and rewatches. Applies time decay and builds clustered
 // sub-profiles.
 func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID string) error {
+	_, err := e.refreshTasteProfile(ctx, userID, profileID)
+	return err
+}
+
+// refreshTasteProfile is RefreshTasteProfile, also reporting whether it wrote
+// a profile. It writes nothing when the profile has no signals or none of its
+// signaled titles has an embedding.
+func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID string) (bool, error) {
 	store, err := e.storeProvider.ForUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("get user store for user %d: %w", userID, err)
+		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
 	}
 
 	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list ratings: %w", err)
+		return false, fmt.Errorf("list ratings: %w", err)
 	}
 
 	favorites, err := store.ListFavorites(ctx, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list favorites: %w", err)
+		return false, fmt.Errorf("list favorites: %w", err)
 	}
 
 	watchlist, err := store.ListWatchlist(ctx, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list watchlist: %w", err)
+		return false, fmt.Errorf("list watchlist: %w", err)
 	}
 
 	watchProgress, err := e.signalReader().WatchProgressForUser(ctx, userID, profileID)
 	if err != nil {
-		return fmt.Errorf("get watch progress: %w", err)
+		return false, fmt.Errorf("get watch progress: %w", err)
 	}
 
 	rewatchCounts, err := e.signalReader().RewatchCounts(ctx, userID, profileID)
 	if err != nil {
-		return fmt.Errorf("get rewatch counts: %w", err)
+		return false, fmt.Errorf("get rewatch counts: %w", err)
 	}
 
 	now := time.Now()
@@ -203,7 +211,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	refs, err := e.repo.ResolveCanonicalContentRefs(ctx, rawIDs)
 	if err != nil {
-		return fmt.Errorf("resolve canonical content refs: %w", err)
+		return false, fmt.Errorf("resolve canonical content refs: %w", err)
 	}
 
 	signalCounts := make(map[string]int)
@@ -301,7 +309,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 	}
 
 	if len(signals) == 0 {
-		return nil
+		return false, nil
 	}
 
 	allIDs := make([]string, 0, len(signals))
@@ -328,7 +336,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
 	if err != nil {
-		return fmt.Errorf("get batch embeddings: %w", err)
+		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
 
 	vecs := make([][]float32, 0, len(signals))
@@ -367,7 +375,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	profile := weightedAverage(vecs, embWeights)
 	if profile == nil {
-		return nil
+		return false, nil
 	}
 
 	maxContentRating := ""
@@ -380,7 +388,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 	}
 
 	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating); err != nil {
-		return fmt.Errorf("upsert taste profile: %w", err)
+		return false, fmt.Errorf("upsert taste profile: %w", err)
 	}
 
 	if len(positiveItems) > 0 {
@@ -390,11 +398,11 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 			clusters[i].ProfileID = profileID
 		}
 		if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
-			return fmt.Errorf("upsert taste clusters: %w", err)
+			return false, fmt.Errorf("upsert taste clusters: %w", err)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // GetTasteProfileSummary returns a human-readable summary of the user's taste

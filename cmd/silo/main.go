@@ -2601,6 +2601,7 @@ func main() {
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
 		} else {
+			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB))
 			deps.RecWorker = recWorker
 		}
 	}

@@ -838,6 +838,29 @@ func (r *Repo) UpsertRecommendationCache(ctx context.Context, userID int, profil
 	return nil
 }
 
+// extendGlobalRecommendationCacheQuery addresses global rows the way
+// UpsertRecommendationCache writes them: user_id NULL, the global profile ID,
+// and no source item.
+const extendGlobalRecommendationCacheQuery = `
+		UPDATE recommendation_cache
+		SET    expires_at = GREATEST(expires_at, $4::timestamptz)
+		WHERE  user_id IS NULL
+		  AND  profile_id     = $1
+		  AND  source_item_id = ''
+		  AND  (rec_type = $2 OR ($3 AND starts_with(rec_type, $2)))
+		  AND  expires_at     > NOW()`
+
+// ExtendGlobalRecommendationCache keeps the unexpired global row recType, or
+// every global row whose type starts with recType when prefix is set, until at
+// least expiresAt. It returns the number of rows it extended.
+func (r *Repo) ExtendGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, expiresAt string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, extendGlobalRecommendationCacheQuery, GlobalCacheProfileID, recType, prefix, expiresAt)
+	if err != nil {
+		return 0, fmt.Errorf("extend global recommendation cache %s: %w", recType, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // GetRecommendationCache retrieves cached recommendation results that have not
 // yet expired. Returns nil, nil on cache miss or expiry.
 func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error) {
@@ -1640,23 +1663,50 @@ func (r *Repo) GetItemAddedDates(ctx context.Context, itemIDs []string) (map[str
 	return result, rows.Err()
 }
 
-// GetAllUsersWithTasteProfiles returns all user/profile pairs that have taste profiles.
-func (r *Repo) GetAllUsersWithTasteProfiles(ctx context.Context) ([]StaleProfile, error) {
-	rows, err := r.pool.Query(ctx, `SELECT user_id, profile_id FROM user_taste_profiles`)
-	if err != nil {
-		return nil, fmt.Errorf("get all users with taste profiles: %w", err)
-	}
-	defer rows.Close()
+// listCacheRefreshCandidatesQuery orders profiles by the age of their main
+// row, those without one first. A run that exhausts its time budget leaves the
+// newest rows for last, so the next run starts with the profiles it missed.
+const listCacheRefreshCandidatesQuery = `
+		SELECT tp.user_id, tp.profile_id
+		FROM   user_taste_profiles tp
+		LEFT   JOIN recommendation_cache rc
+		       ON  rc.user_id        = tp.user_id
+		       AND rc.profile_id     = tp.profile_id
+		       AND rc.rec_type       = $1
+		       AND rc.source_item_id = ''
+		ORDER  BY rc.created_at ASC NULLS FIRST, tp.user_id, tp.profile_id`
 
-	var profiles []StaleProfile
-	for rows.Next() {
-		var p StaleProfile
-		if err := rows.Scan(&p.UserID, &p.ProfileID); err != nil {
-			return nil, fmt.Errorf("scan user with taste profile: %w", err)
-		}
-		profiles = append(profiles, p)
+// ListCacheRefreshCandidates returns every profile that has a taste profile,
+// least recently cached first.
+func (r *Repo) ListCacheRefreshCandidates(ctx context.Context) ([]StaleProfile, error) {
+	rows, err := r.pool.Query(ctx, listCacheRefreshCandidatesQuery, RecTypeForYouMain)
+	if err != nil {
+		return nil, fmt.Errorf("list cache refresh candidates: %w", err)
 	}
-	return profiles, rows.Err()
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StaleProfile, error) {
+		var p StaleProfile
+		err := row.Scan(&p.UserID, &p.ProfileID)
+		return p, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list cache refresh candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+// HasGlobalRecommendationCache reports whether any unexpired global row is
+// cached.
+func (r *Repo) HasGlobalRecommendationCache(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM recommendation_cache
+			WHERE  user_id IS NULL AND profile_id = $1 AND expires_at > NOW()
+		)`, GlobalCacheProfileID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check global recommendation cache: %w", err)
+	}
+	return exists, nil
 }
 
 // GetWatchedItemIDs returns content IDs of media items the user has watched

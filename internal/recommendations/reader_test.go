@@ -49,3 +49,24 @@ func TestGetBecauseYouWatchedWithSourceReturnsAnchorThatHasCache(t *testing.T) {
 		t.Fatalf("items = %+v, want only %q", items, rec)
 	}
 }
+
+func TestClusterRowTitleComesFromTheCachedRow(t *testing.T) {
+	// The taste job renumbered the clusters: index 0 is now Horror, but the
+	// cached row for index 0 still holds the Comedy build.
+	horror := TasteCluster{ClusterIdx: 0, Label: "Horror"}
+	cached := []ScoredItem{{MediaItemID: "m1", Reason: clusterTitle("Comedy")}, {MediaItemID: "m2", Reason: clusterTitle("Comedy")}}
+	if row := clusterRow(horror, cached); row.Label != "Because you enjoy Comedy" || row.ClusterIndex != 0 || len(row.Items) != 2 {
+		t.Fatalf("row = %+v, want the cached Comedy title", row)
+	}
+
+	// Rows whose items carry no cluster title use the cluster label.
+	for _, reason := range []string{"", "cluster_match", clusterTitlePrefix} {
+		row := clusterRow(horror, []ScoredItem{{MediaItemID: "m1", Reason: reason}})
+		if row.Label != "Because you enjoy Horror" {
+			t.Fatalf("reason %q: title = %q", reason, row.Label)
+		}
+	}
+	if row := clusterRow(TasteCluster{}, nil); row.Label != "Because you enjoy For You" {
+		t.Fatalf("unlabelled cluster title = %q", row.Label)
+	}
+}

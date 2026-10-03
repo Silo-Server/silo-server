@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -56,7 +57,7 @@ func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit
 
 	// Build personalized rows from taste clusters.
 	liveFilter := catalog.AccessFilter{UserID: userID, ProfileID: profileID}
-	personalRows, err := e.buildClusterRows(ctx, userID, profileID, limit, watchedIDs, liveFilter)
+	personalRows, _, err := e.buildClusterRows(ctx, userID, profileID, limit, watchedIDs, liveFilter)
 	if err != nil {
 		return nil, fmt.Errorf("build cluster rows: %w", err)
 	}
@@ -82,14 +83,30 @@ func combinePersonalRows(aggregated *ForYouRow, clusterRows []ForYouRow) []ForYo
 	return rows
 }
 
-// buildClusterRows generates per-cluster recommendation rows.
-func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) ([]ForYouRow, error) {
+// clusterTitlePrefix starts every cluster row title and the Reason of every
+// item in a cluster row.
+const clusterTitlePrefix = "Because you enjoy "
+
+// unlabeledClusterLabel stands in for a cluster with no label.
+const unlabeledClusterLabel = "For You"
+
+// clusterTitle is the title of the cluster row with the given label.
+func clusterTitle(label string) string {
+	if label == "" {
+		label = unlabeledClusterLabel
+	}
+	return clusterTitlePrefix + label
+}
+
+// buildClusterRows generates per-cluster recommendation rows. A cluster whose
+// candidate query fails is logged and skipped; failed counts them.
+func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
 	clusters, err := e.repo.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("get taste clusters: %w", err)
+		return nil, 0, fmt.Errorf("get taste clusters: %w", err)
 	}
 	if len(clusters) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	// Calculate total weight across all clusters for proportional allocation.
@@ -98,7 +115,6 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		totalWeight += c.TotalWeight
 	}
 
-	var rows []ForYouRow
 	for _, c := range clusters {
 		if c.Embedding == nil || len(c.Embedding) == 0 {
 			continue
@@ -118,6 +134,9 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		// consume the candidate headroom before MMR.
 		candidates, _, err := e.repo.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
 		if err != nil {
+			failed++
+			slog.WarnContext(ctx, "cluster recommendation candidates failed", "component", "recommendations",
+				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
 			continue
 		}
 		if len(candidates) == 0 {
@@ -137,25 +156,22 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		addedDates, _ := e.repo.GetItemAddedDates(ctx, candidateIDs)
 		reranked = applyRecencyBoost(reranked, addedDates, time.Now())
 
-		label := c.Label
-		if label == "" {
-			label = "For You"
-		}
-
-		reason := "Because you enjoy " + label
+		// Every item carries the row title, so a reader can title the cached
+		// row from the build that produced it (see clusterRow).
+		title := clusterTitle(c.Label)
 		for i := range reranked {
-			reranked[i].Reason = reason
+			reranked[i].Reason = title
 		}
 
 		rows = append(rows, ForYouRow{
 			Type:         "cluster",
-			Label:        reason,
+			Label:        title,
 			ClusterIndex: c.ClusterIdx,
 			Items:        reranked,
 		})
 	}
 
-	return rows, nil
+	return rows, failed, nil
 }
 
 // buildAggregatedRow builds a single "For You" row from the aggregated taste profile.
