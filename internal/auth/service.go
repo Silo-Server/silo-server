@@ -377,6 +377,9 @@ type IdentitySession struct {
 	IdentityID int64
 	DeviceName string
 	IP         string
+	// Network: the identity is a network provider's, refused while the
+	// account's primary provider refuses the account (primaryAuthority).
+	Network bool
 }
 
 // OpenIdentitySession opens the login session of an account that signed in
@@ -384,7 +387,8 @@ type IdentitySession struct {
 // token pair. The account is locked and read again, so one disabled since
 // the provider answered is refused and account changes serialize with the
 // session's creation; the identity and its enabled installation are locked
-// too.
+// too. A network identity's primary-provider refusal is read again under the
+// account lock, which a re-check that refuses the account also holds.
 func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c IdentitySession) (*TokenPair, error) {
 	if db == nil {
 		var pair *TokenPair
@@ -405,8 +409,18 @@ func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c 
 	if !user.Enabled {
 		return nil, ErrUserDisabled
 	}
-	if err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID); err != nil {
+	installationID, err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID)
+	if err != nil {
 		return nil, err
+	}
+	if c.Network {
+		authority, err := primaryAuthorityOf(ctx, db, user.ID, installationID)
+		if err != nil {
+			return nil, err
+		}
+		if authority.refused {
+			return nil, ErrNotPermitted
+		}
 	}
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
@@ -433,41 +447,42 @@ func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c 
 	return pair, nil
 }
 
-// lockOAuthIdentity checks the identity and enabled installation after
-// the account is locked. Lock the installation before the identity so an
-// uninstall, which deletes identities by cascade, cannot deadlock with us.
-func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, identityID int64) error {
+// lockOAuthIdentity checks the identity and enabled installation after the
+// account is locked, and answers the installation. Lock the installation
+// before the identity so an uninstall, which deletes identities by cascade,
+// cannot deadlock with us.
+func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, identityID int64) (int, error) {
 	var installationID int
 	err := db.QueryRow(ctx, `SELECT plugin_installation_id FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2`, identityID, userID).Scan(&installationID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("read oauth identity: %w", err)
+		return 0, fmt.Errorf("read oauth identity: %w", err)
 	}
 	var enabled bool
 	err = db.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1 FOR SHARE`, installationID).Scan(&enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("lock oauth installation: %w", err)
+		return 0, fmt.Errorf("lock oauth installation: %w", err)
 	}
 	if !enabled {
-		return ErrProviderUnavailable
+		return 0, ErrProviderUnavailable
 	}
 	var lockedIdentityID int64
 	err = db.QueryRow(ctx, `SELECT id FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2 AND plugin_installation_id = $3 FOR UPDATE`,
 		identityID, userID, installationID).Scan(&lockedIdentityID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("lock oauth identity: %w", err)
+		return 0, fmt.Errorf("lock oauth identity: %w", err)
 	}
-	return nil
+	return installationID, nil
 }
 
 // LinkOAuthIdentity finishes a linking flow: the identity the plugin

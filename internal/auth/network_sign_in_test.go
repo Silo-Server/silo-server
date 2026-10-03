@@ -24,9 +24,16 @@ type peerPlugin struct {
 	err   error
 	// deadline is the context deadline of the latest call; zero without one.
 	deadline time.Time
+	// entered, when set, receives each call, which then waits for release.
+	entered chan struct{}
+	release chan struct{}
 }
 
 func (p *peerPlugin) AuthenticatePeer(ctx context.Context, req *pluginv1.AuthenticatePeerRequest) (*pluginv1.AuthenticateResponse, error) {
+	if p.entered != nil {
+		p.entered <- struct{}{}
+		<-p.release
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.asked = append(p.asked, req.GetPeerAddress())
@@ -191,6 +198,38 @@ func TestNetworkPreviewBoundsThePluginCall(t *testing.T) {
 	plugin.mu.Unlock()
 	if deadline.IsZero() || deadline.After(start.Add(networkPreviewTimeout+time.Second)) {
 		t.Fatalf("discovery call deadline = %v, want within %v of %v", deadline, networkPreviewTimeout, start)
+	}
+}
+
+// Concurrent misses for one peer share one plugin call.
+func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
+	const callers = 8
+	plugin := &peerPlugin{
+		peers: map[string]*pluginv1.AuthenticateResponse{
+			"100.64.0.7": {ExternalSubject: "controlplane.tailscale.com|42", DisplayName: "Alice Example"},
+		},
+		entered: make(chan struct{}, callers),
+		release: make(chan struct{}),
+	}
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+	ctx := overlayContext(t.Context(), 5, "100.64.0.7")
+	previews := make(chan *NetworkIdentityPreview, callers)
+	lookup := func() { previews <- svc.networkPreview(ctx, provider) }
+	go lookup()
+	<-plugin.entered
+	for range callers - 1 {
+		go lookup()
+	}
+	close(plugin.release)
+	for range callers {
+		if preview := <-previews; preview == nil || preview.DisplayName != "Alice Example" {
+			t.Fatalf("preview = %+v", preview)
+		}
+	}
+	if plugin.askedCount() != 1 {
+		t.Fatalf("plugin asked %d times, want 1", plugin.askedCount())
 	}
 }
 

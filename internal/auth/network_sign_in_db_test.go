@@ -277,6 +277,10 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 	if err := signIn(); !errors.Is(err, ErrNotPermitted) {
 		t.Fatalf("network sign-in after the primary provider's refusal = %v, want ErrNotPermitted", err)
 	}
+	// A refusal committed after account resolution still stops the session.
+	if _, err := overlay.OpenIdentitySession(ctx, nil, IdentitySession{UserID: env.user.ID, IdentityID: networkIdentity.ID, Network: true}); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("network session opened after the primary provider's refusal = %v, want ErrNotPermitted", err)
+	}
 	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusActive)
 	if err := signIn(); err != nil {
 		t.Fatalf("network sign-in once the primary provider vouches again = %v", err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -154,7 +155,7 @@ func (s *Service) NetworkSignIn(ctx context.Context, in NetworkSignInInput) (*To
 		return nil, err
 	}
 	return s.OpenIdentitySession(ctx, nil, IdentitySession{
-		UserID: user.ID, IdentityID: identityID, DeviceName: in.DeviceName, IP: in.IP,
+		UserID: user.ID, IdentityID: identityID, DeviceName: in.DeviceName, IP: in.IP, Network: true,
 	})
 }
 
@@ -247,10 +248,12 @@ type networkPreviewEntry struct {
 	expires time.Time
 }
 
-// networkPreviews caches the plugin's answers for discovery.
+// networkPreviews caches the plugin's answers for discovery. lookups runs
+// one plugin call per key at a time: concurrent misses share its answer.
 type networkPreviews struct {
 	mu      sync.Mutex
 	entries map[networkPreviewKey]networkPreviewEntry
+	lookups singleflight.Group
 }
 
 // networkPreview answers who the plugin says the request's peer is, or nil
@@ -264,13 +267,28 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 		return nil
 	}
 	key := networkPreviewKey{provider: provider, peer: peer}
-	now := time.Now()
-	s.previews.mu.Lock()
-	entry, ok := s.previews.entries[key]
-	s.previews.mu.Unlock()
-	if ok && now.Before(entry.expires) {
-		return entry.preview
+	if preview, ok := s.cachedNetworkPreview(key); ok {
+		return preview
 	}
+	// The shared call outlives a caller that goes away; networkPreviewTimeout
+	// bounds it.
+	shared := context.WithoutCancel(ctx)
+	answer, _, _ := s.previews.lookups.Do(fmt.Sprintf("%p|%s", provider, peer), func() (any, error) {
+		return s.lookupNetworkPreview(shared, key), nil
+	})
+	preview, _ := answer.(*NetworkIdentityPreview)
+	return preview
+}
+
+// lookupNetworkPreview asks the plugin about key's peer and caches a
+// refusal or an identity. A caller that missed the cache while the previous
+// lookup was finishing finds its answer here instead of asking again.
+func (s *Service) lookupNetworkPreview(ctx context.Context, key networkPreviewKey) *NetworkIdentityPreview {
+	if preview, ok := s.cachedNetworkPreview(key); ok {
+		return preview
+	}
+	provider, peer := key.provider, key.peer
+	now := time.Now()
 	response, err := provider.peerResponse(ctx, peer, networkPreviewTimeout)
 	if err != nil {
 		return nil
@@ -282,9 +300,9 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 		return nil
 	}
 	s.previews.mu.Lock()
-	for key, entry := range s.previews.entries {
+	for cached, entry := range s.previews.entries {
 		if !now.Before(entry.expires) {
-			delete(s.previews.entries, key)
+			delete(s.previews.entries, cached)
 		}
 	}
 	if s.previews.entries == nil || len(s.previews.entries) >= networkPreviewLimit {
@@ -293,4 +311,15 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 	s.previews.entries[key] = networkPreviewEntry{preview: preview, expires: now.Add(networkPreviewTTL)}
 	s.previews.mu.Unlock()
 	return preview
+}
+
+// cachedNetworkPreview is the unexpired cached answer for key, if any.
+func (s *Service) cachedNetworkPreview(key networkPreviewKey) (*NetworkIdentityPreview, bool) {
+	s.previews.mu.Lock()
+	defer s.previews.mu.Unlock()
+	entry, ok := s.previews.entries[key]
+	if !ok || !time.Now().Before(entry.expires) {
+		return nil, false
+	}
+	return entry.preview, true
 }
