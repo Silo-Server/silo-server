@@ -183,6 +183,16 @@ func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
 	if err != nil {
 		return fmt.Errorf("lan discovery: %w", err)
 	}
+	// Probe before opening the responder: dnssd's Respond returns a failed
+	// registration without closing the responder's sockets, and the library
+	// offers no Close, so a name that cannot be claimed must fail here, where
+	// ProbeService closes its own connection. Respond probes the claimed name
+	// again; only a cancellation during that second probe can still leave a
+	// responder's sockets open, at most once per interface change or shutdown.
+	service, err = dnssd.ProbeService(ctx, service)
+	if err != nil {
+		return fmt.Errorf("lan discovery: probe: %w", err)
+	}
 	responder, err := dnssd.NewResponder()
 	if err != nil {
 		return fmt.Errorf("lan discovery: %w", err)
@@ -191,12 +201,12 @@ func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
 		return fmt.Errorf("lan discovery: %w", err)
 	}
 	slog.InfoContext(ctx, "advertising Silo on the local network",
-		"service", ServiceType, "name", srvCfg.Name, "host", srvCfg.Host+".local", "port", srvCfg.Port)
+		"service", ServiceType, "name", service.Name, "host", service.Host+".local", "port", service.Port)
 	return responder.Respond(ctx)
 }
 
-// interfaceKey describes the multicast-capable interfaces and their addresses,
-// or "" when there is none.
+// interfaceKey describes the multicast-capable interfaces, their indexes and
+// their addresses, or "" when there is none.
 func interfaceKey() string {
 	var parts []string
 	for _, iface := range dnssd.MulticastInterfaces() {
@@ -206,7 +216,9 @@ func interfaceKey() string {
 			names = append(names, addr.String())
 		}
 		sort.Strings(names)
-		parts = append(parts, iface.Name+"="+strings.Join(names, ","))
+		// The index changes when an interface is removed and recreated under
+		// the same name, which the responder must also rejoin.
+		parts = append(parts, fmt.Sprintf("%d:%s=%s", iface.Index, iface.Name, strings.Join(names, ",")))
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ";")
