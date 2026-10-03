@@ -98,7 +98,8 @@ describe("TMDB collection edit form", () => {
       source_url: "tmdb://collection/10",
       source_config: franchise,
     });
-    expect(screen.getByText(/can't be changed here/)).toBeInTheDocument();
+    // A franchise opens in its own editor, not as a Trending preset.
+    expect(screen.getByLabelText("TMDB Collection ID")).toHaveValue(10);
     expect(screen.queryByText("Preset")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Star Wars" } });
@@ -106,7 +107,23 @@ describe("TMDB collection edit form", () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(patches).toHaveLength(1);
-    expect(patches[0]).toMatchObject({ title: "Star Wars", source_config: franchise });
+    expect(patches[0]).toMatchObject({
+      title: "Star Wars",
+      source_url: "tmdb://collection/10",
+      source_config: franchise,
+    });
+  });
+
+  it("keeps a discover collection's source when other fields are saved", async () => {
+    const discover = { mode: "tmdb_discover", media_type: "movie", with_genres: "28" };
+    const onClose = renderEditor({ source_url: "tmdb://discover/movie", source_config: discover });
+    expect(screen.getByText(/can't be changed here/)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Action" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Collection" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(patches[0]).toMatchObject({ title: "Action", source_config: discover });
     expect(patches[0]?.source_url).toBeUndefined();
   });
 
