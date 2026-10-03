@@ -1250,8 +1250,7 @@ func main() {
 		shutdownWork = append(shutdownWork, done)
 	}
 	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
-	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
-		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
+	redisBootstrapAvailable := normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil
 
 	deps := api.Dependencies{
 		Config:                       cfg,
