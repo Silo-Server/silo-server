@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -10,6 +11,27 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestQueryCursorRejectsChangedEpisodeDateOrder(t *testing.T) {
+	for _, field := range []string{"release_date", "last_air_date"} {
+		for _, order := range []string{"asc", "desc"} {
+			t.Run(field+"/"+order, func(t *testing.T) {
+				plan, err := NewQueryBuilder("mi").WithMediaScope("episode").BuildSortPlan(QuerySort{Field: field, Order: order})
+				if err != nil {
+					t.Fatal(err)
+				}
+				previous := &QueryCursor{Keys: []QueryCursorValue{{Kind: cursorKindDate}, {Kind: cursorKindText}, {Kind: cursorKindText}}}
+				if _, _, err := cursorSeekSQL(plan.terms, previous, 1); !errors.Is(err, ErrCatalogCursorChanged) {
+					t.Fatalf("old cursor error = %v, want ErrCatalogCursorChanged", err)
+				}
+				previous.Keys = append(previous.Keys, QueryCursorValue{Kind: cursorKindText}, QueryCursorValue{Kind: cursorKindText})
+				if _, _, err := cursorSeekSQL(plan.terms, previous, 1); !errors.Is(err, ErrCatalogCursorChanged) {
+					t.Fatalf("wrong key type error = %v, want ErrCatalogCursorChanged", err)
+				}
+			})
+		}
+	}
+}
 
 func TestQueryCursorSortTerms(t *testing.T) {
 	for field := range querySortDefs {

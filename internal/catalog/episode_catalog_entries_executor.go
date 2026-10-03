@@ -152,7 +152,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	args = append(args, plan.userArgs...)
 	argIdx += len(plan.userArgs)
 
-	fromClause := episodeCatalogUserStateFromClause(plan)
+	fromClause := episodeCatalogUserStateFromClause(plan) + episodeCatalogEntrySortJoin(plan.sortField)
 	orderBy, ok := episodeCatalogUserStateOrderBy(plan)
 	if !ok {
 		return nil, 0, false, false, nil
@@ -327,10 +327,11 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 
 	pageSQL := fmt.Sprintf(
 		`SELECT ece.episode_id, ece.added_at
-		FROM episode_catalog_entries ece
+		FROM episode_catalog_entries ece%s
 		%s
 		%s
 		LIMIT $%d%s`,
+		episodeCatalogEntrySortJoin(def.Sort.Field),
 		whereClause,
 		orderBy,
 		limitArgIdx,
@@ -1040,6 +1041,13 @@ func buildEpisodeCatalogBitrateClause(rule QueryRule, argIdx int) (string, []any
 	}
 }
 
+func episodeCatalogEntrySortJoin(field string) string {
+	if field == querySortReleaseDate || field == querySortLastAirDate {
+		return " JOIN episodes sort_episode ON sort_episode.content_id = ece.episode_id"
+	}
+	return ""
+}
+
 func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	sortConfig = NormalizeQuerySort(sortConfig)
 	dir := "DESC"
@@ -1053,7 +1061,7 @@ func episodeCatalogEntryOrderBy(sortConfig QuerySort) (string, bool) {
 	case "added_at":
 		return fmt.Sprintf("ORDER BY ece.added_at %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "release_date", "last_air_date":
-		return fmt.Sprintf("ORDER BY ece.episode_air_date %s NULLS LAST, ece.sort_key ASC, ece.episode_id ASC", dir), true
+		return fmt.Sprintf("ORDER BY ece.episode_air_date %s NULLS LAST, ece.series_id ASC, sort_episode.season_number %s, sort_episode.episode_number %s, ece.episode_id ASC", dir, dir, dir), true
 	case "year":
 		return fmt.Sprintf("ORDER BY ece.year %s, ece.sort_key ASC, ece.episode_id ASC", dir), true
 	case "content_rating":
