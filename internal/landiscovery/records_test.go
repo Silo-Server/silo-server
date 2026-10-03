@@ -136,6 +136,12 @@ func TestConflicts(t *testing.T) {
 	if inst, host := testService.conflicts(own, local); inst || host {
 		t.Fatal("our own records are not a conflict")
 	}
+	// Our goodbye for an address this machine no longer has, looped back.
+	gone := responseMsg()
+	gone.Answer = testService.addresses([]net.IP{net.ParseIP("192.168.1.99")}, 0)
+	if _, host := testService.conflicts(roundTrip(t, gone), local); host {
+		t.Fatal("a goodbye is not a claim")
+	}
 	hostClaim := responseMsg()
 	hostClaim.Answer = testService.addresses([]net.IP{net.ParseIP("192.168.1.99")}, hostTTL)
 	if _, host := testService.conflicts(roundTrip(t, hostClaim), local); !host {

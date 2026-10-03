@@ -227,6 +227,9 @@ func (s service) conflicts(msg *dns.Msg, isLocal func(net.IP) bool) (instance, h
 	instanceName, hostName := strings.ToLower(s.instanceName()), strings.ToLower(s.hostName())
 	for _, section := range [][]dns.RR{msg.Answer, msg.Ns, msg.Extra} {
 		for _, rr := range section {
+			if rr.Header().Ttl == 0 {
+				continue // a goodbye withdraws a record; it claims nothing
+			}
 			switch strings.ToLower(rr.Header().Name) {
 			case instanceName:
 				if srv, ok := rr.(*dns.SRV); ok && (!strings.EqualFold(srv.Target, s.hostName()) || int(srv.Port) != s.port) {
