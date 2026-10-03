@@ -231,3 +231,32 @@ func TestGeminiRetryRespectsContext(t *testing.T) {
 		}
 	})
 }
+
+func TestGeminiSendsAPIKeyOutsideTheURL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var requests []*http.Request
+		c := geminiTestClient(func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r)
+			return nil, errors.New("connection refused")
+		})
+		_, err := c.Embed(context.Background(), []string{"synthetic item"})
+		if err == nil {
+			t.Fatal("Embed succeeded through a failing transport")
+		}
+		// Transport errors quote the request URL, so the key must not be in it.
+		if strings.Contains(err.Error(), "test-key") {
+			t.Fatalf("error exposes the API key: %v", err)
+		}
+		if len(requests) == 0 {
+			t.Fatal("no request reached the transport")
+		}
+		for _, r := range requests {
+			if r.URL.Query().Has("key") {
+				t.Fatalf("request URL carries the key: %s", r.URL)
+			}
+			if got := r.Header.Get("x-goog-api-key"); got != "test-key" {
+				t.Fatalf("x-goog-api-key = %q, want the configured key", got)
+			}
+		}
+	})
+}

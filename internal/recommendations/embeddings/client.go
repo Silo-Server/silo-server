@@ -206,7 +206,9 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("marshal gemini embedding request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1beta/%s:batchEmbedContents?key=%s", c.cfg.BaseURL, modelRef, c.cfg.APIKey)
+	// The key travels in a header: a URL query parameter would surface in
+	// transport errors, which quote the request URL.
+	url := fmt.Sprintf("%s/v1beta/%s:batchEmbedContents", c.cfg.BaseURL, modelRef)
 
 	maxAttempts := 6
 	var resp *http.Response
@@ -216,6 +218,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			return nil, fmt.Errorf("create request: %w", reqErr)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-goog-api-key", c.cfg.APIKey)
 
 		resp, err = c.httpClient.Do(httpReq)
 		if err != nil {
