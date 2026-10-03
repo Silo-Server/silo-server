@@ -122820,7 +122820,8 @@
                 "favorites",
                 "watchlist",
                 "history",
-                "person"
+                "person",
+                "similar"
               ],
               "examples": [
                 "query"
@@ -122887,6 +122888,19 @@
                 "1"
               ],
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "For source=similar: the title the others are like, ranked by the genres, director, writer and lead actors they share",
+            "explode": false,
+            "in": "query",
+            "name": "item_id",
+            "schema": {
+              "description": "For source=similar: the title the others are like, ranked by the genres, director, writer and lead actors they share",
+              "examples": [
+                "movie-tmdb-299534"
+              ],
               "type": "string"
             }
           },

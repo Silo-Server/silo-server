@@ -14,6 +14,7 @@ const (
 	CatalogSourceWatchlist         CatalogSource = "watchlist"
 	CatalogSourceHistory           CatalogSource = "history"
 	CatalogSourcePerson            CatalogSource = "person"
+	CatalogSourceSimilar           CatalogSource = "similar"
 )
 
 // CatalogRequest is the normalized request shape shared by catalog parsing and resolution.
@@ -24,6 +25,7 @@ type CatalogRequest struct {
 	LibraryID      int
 	CollectionID   string
 	PersonID       int64
+	ItemID         string
 	NamePrefix     string
 	SearchQuery    string
 	Query          QueryDefinition

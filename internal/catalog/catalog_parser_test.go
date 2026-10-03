@@ -85,3 +85,16 @@ func TestParseCatalogRequest_AllowsCollectionOverlayParams(t *testing.T) {
 		t.Fatalf("groups = %+v, want two overlay groups", req.Query.Groups)
 	}
 }
+
+func TestParseCatalogRequest_SimilarSource(t *testing.T) {
+	req, err := ParseCatalogRequest(url.Values{"source": {"similar"}, "item_id": {" movie-tmdb-299534 "}})
+	if err != nil {
+		t.Fatalf("ParseCatalogRequest returned error: %v", err)
+	}
+	if req.Source != CatalogSourceSimilar || req.ItemID != "movie-tmdb-299534" || !req.UseSourceOrder {
+		t.Fatalf("got source %q item %q source order %v", req.Source, req.ItemID, req.UseSourceOrder)
+	}
+	if _, err := ParseCatalogRequest(url.Values{"source": {"similar"}}); err == nil {
+		t.Fatal("a similar source with no item_id parsed")
+	}
+}

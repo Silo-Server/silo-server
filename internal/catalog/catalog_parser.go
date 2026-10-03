@@ -103,6 +103,19 @@ func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
 		req.SearchQuery = overlay.searchQuery
 		req.Query = overlay.query
 		req.UseSourceOrder = !overlay.hasExplicitSort
+	case CatalogSourceSimilar:
+		req.ItemID = strings.TrimSpace(values.Get("item_id"))
+		if req.ItemID == "" {
+			return CatalogRequest{}, fmt.Errorf("item_id is required")
+		}
+		overlay, err := parseCatalogOverlay(values)
+		if err != nil {
+			return CatalogRequest{}, err
+		}
+		req.NamePrefix = overlay.namePrefix
+		req.SearchQuery = overlay.searchQuery
+		req.Query = overlay.query
+		req.UseSourceOrder = !overlay.hasExplicitSort
 	case CatalogSourceSection:
 		scope := strings.ToLower(strings.TrimSpace(values.Get("scope")))
 		if scope == "" {

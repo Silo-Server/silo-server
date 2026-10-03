@@ -270,6 +270,15 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 			return nil, err
 		}
 		return r.resolvePersonSource(ctx, req, access)
+	case CatalogSourceSimilar:
+		if err := validateCatalogSimilarRequest(req); err != nil {
+			return nil, err
+		}
+		contentIDs, err := r.itemRepo.SimilarContentIDs(ctx, req.ItemID)
+		if err != nil {
+			return nil, err
+		}
+		return r.resolveExactOrderedItems(ctx, contentIDs, req, access)
 	default:
 		return nil, fmt.Errorf("%w: unsupported catalog source %q", ErrInvalidCatalogRequest, req.Source)
 	}
@@ -1586,6 +1595,13 @@ func validateCatalogPersonRequest(req CatalogRequest) error {
 	}
 	if req.PersonID <= 0 {
 		return fmt.Errorf("%w: person_id is required", ErrInvalidCatalogRequest)
+	}
+	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogQueryRuleFields, catalogQuerySortFields(), false)
+}
+
+func validateCatalogSimilarRequest(req CatalogRequest) error {
+	if strings.TrimSpace(req.ItemID) == "" {
+		return fmt.Errorf("%w: item_id is required", ErrInvalidCatalogRequest)
 	}
 	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogQueryRuleFields, catalogQuerySortFields(), false)
 }

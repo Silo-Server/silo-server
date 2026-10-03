@@ -28,12 +28,13 @@ import (
 // CatalogBrowseInput is the listCatalogItems query: the source to page and
 // the overlay filters v1 accepts on it.
 type CatalogBrowseInput struct {
-	Source        string   `query:"source" enum:"query,section,library_collection,user_collection,favorites,watchlist,history,person" doc:"What to page; default query (the whole catalog)" example:"query"`
+	Source        string   `query:"source" enum:"query,section,library_collection,user_collection,favorites,watchlist,history,person,similar" doc:"What to page; default query (the whole catalog)" example:"query"`
 	Scope         string   `query:"scope" enum:"home,library" doc:"For source=section: which page the section is on; default library"`
 	SectionID     string   `query:"section_id" doc:"For source=section"`
 	LibraryID     ID       `query:"library_id" doc:"Restrict to one library; required for library sections" example:"1"`
 	CollectionID  string   `query:"collection_id" doc:"For source=library_collection or user_collection"`
 	PersonID      ID       `query:"person_id" doc:"For source=person"`
+	ItemID        string   `query:"item_id" doc:"For source=similar: the title the others are like, ranked by the genres, director, writer and lead actors they share" example:"movie-tmdb-299534"`
 	Q             string   `query:"q" doc:"Search text" example:"heat"`
 	NamePrefix    string   `query:"name_prefix" doc:"Alphabetical jump: only titles whose sort title (or title, when none is set) starts here"`
 	Match         string   `query:"match" enum:"all,any" doc:"How the filters combine; default all"`
@@ -741,6 +742,7 @@ func (in *CatalogBrowseInput) catalogValues() (url.Values, *Problem) {
 	set("library_id", string(in.LibraryID))
 	set("collection_id", in.CollectionID)
 	set("person_id", string(in.PersonID))
+	set("item_id", in.ItemID)
 	set("q", in.Q)
 	set("name_prefix", in.NamePrefix)
 	set("match", in.Match)
