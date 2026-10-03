@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -491,7 +492,10 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 	}
 	vector, err := p.cachedQueryVector(ctx, req.Query)
 	if err != nil {
-		return searchReq, "semantic query embedding failed: " + err.Error()
+		// The reason reaches every searching user, so it never carries the
+		// provider error: that can quote endpoint URLs and response bodies.
+		slog.WarnContext(ctx, "catalog search: semantic query embedding failed", "component", "catalog", "err", err)
+		return searchReq, "semantic query embedding failed"
 	}
 	if len(vector) == 0 {
 		return searchReq, "semantic query embedding returned no vector"
