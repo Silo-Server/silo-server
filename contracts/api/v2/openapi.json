@@ -26771,6 +26771,13 @@
           "overview": {
             "type": "string"
           },
+          "ratings": {
+            "description": "The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogRating"
+            },
+            "type": "array"
+          },
           "runtime": {
             "description": "Minutes",
             "format": "int64",

@@ -21262,6 +21262,8 @@ export interface components {
       imdb_id?: string;
       overlay_summary?: components["schemas"]["CatalogItemOverlay"];
       overview?: string;
+      /** @description The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating. */
+      ratings?: components["schemas"]["CatalogRating"][];
       /**
        * Format: int64
        * @description Minutes

@@ -417,6 +417,11 @@ func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []C
 			item.Sources[source.Source] = source.Score
 		}
 	}
+	return builtRatingsOf(item, sel)
+}
+
+// builtRatingsOf renders item's ratings, keeping only the sources sel shows.
+func builtRatingsOf(item ratingsources.Item, sel ratingsources.Selection) []CatalogRating {
 	built := ratingsources.Build(item, sel)
 	out := make([]CatalogRating, 0, len(built))
 	for _, r := range built {
@@ -505,6 +510,7 @@ type Episode struct {
 	ImdbID         string              `json:"imdb_id,omitempty"`
 	TmdbID         string              `json:"tmdb_id,omitempty"`
 	TvdbID         string              `json:"tvdb_id,omitempty"`
+	Ratings        []CatalogRating     `json:"ratings,omitempty" doc:"The episode's IMDb and TMDB ratings, in the shape a title page's ratings use. Absent when the episode has no rating."`
 	StillURL       string              `json:"still_url,omitempty" doc:"Presigned, short-lived"`
 	StillThumbhash string              `json:"still_thumbhash,omitempty"`
 	UserData       *WatchRollup        `json:"user_data,omitempty"`
@@ -1180,7 +1186,7 @@ func (reg *Registry) listCatalogItemEpisodes(ctx context.Context, in *CatalogIte
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes))}}, nil
+	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes, reg.ratingSelection(ctx)))}}, nil
 }
 
 func (reg *Registry) listSeriesSeasons(ctx context.Context, in *CatalogSeasonsInput) (*SeasonCollectionOutput, error) {
@@ -1232,7 +1238,7 @@ func (reg *Registry) listSeasonEpisodes(ctx context.Context, in *CatalogSeasonIn
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes))}}, nil
+	return &EpisodeCollectionOutput{Body: EpisodeCollection{Collection: NewCollection(episodesOf(episodes, reg.ratingSelection(ctx)))}}, nil
 }
 
 // --- renderers ---
@@ -1365,11 +1371,12 @@ func datePtr(s string) *string {
 	return &s
 }
 
-func episodesOf(views []handlers.EpisodeView) []Episode {
+func episodesOf(views []handlers.EpisodeView, sel ratingsources.Selection) []Episode {
 	out := make([]Episode, 0, len(views))
 	for _, e := range views {
 		ep := Episode{ContentID: e.ContentID, SeasonNumber: e.SeasonNumber, EpisodeNumber: e.EpisodeNumber, Title: e.Title, Overview: e.Overview,
 			AirDate: datePtr(e.AirDate), Runtime: e.Runtime, ImdbID: e.ImdbID, TmdbID: e.TmdbID, TvdbID: e.TvdbID, StillURL: e.StillURL, StillThumbhash: e.StillThumbhash,
+			Ratings:  builtRatingsOf(ratingsources.Item{IMDB: e.RatingIMDB, TMDB: e.RatingTMDB}, sel),
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,

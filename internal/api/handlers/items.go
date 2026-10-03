@@ -442,6 +442,10 @@ type episodeResponse struct {
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
 	Files          []episodeFileResponse   `json:"files,omitempty"`
 	OverlaySummary *models.OverlaySummary  `json:"overlay_summary,omitempty"`
+	// RatingIMDB and RatingTMDB feed the v2 episode's ratings; /api/v1 is
+	// frozen, so they stay off its wire.
+	RatingIMDB *float64 `json:"-"`
+	RatingTMDB *float64 `json:"-"`
 }
 
 type episodeImageFallback struct {
@@ -1237,6 +1241,8 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 		ImdbID:         ep.ImdbID,
 		TmdbID:         ep.TmdbID,
 		TvdbID:         ep.TvdbID,
+		RatingIMDB:     ep.RatingIMDB,
+		RatingTMDB:     ep.RatingTMDB,
 		StillThumbhash: stillThumbhash,
 	}
 
