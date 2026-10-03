@@ -15,7 +15,7 @@ service once its API listener is bound (`internal/landiscovery`):
 | Field | Value |
 |---|---|
 | Service type | `_silo._tcp` in `local.` |
-| Instance name | `branding.server_name` (default `Silo`), trimmed to 58 bytes so a conflict suffix fits the 63-byte label |
+| Instance name | `branding.server_name` (default `Silo`), trimmed to 56 bytes so a conflict suffix fits the 63-byte label |
 | Host | `silo-<first 8 alphanumerics of the server ID>.local` |
 | Port | the port the API process listens on; it speaks plain HTTP |
 | TXT `v` | `1`; changes only if an existing key changes meaning |

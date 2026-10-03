@@ -40,7 +40,7 @@ const (
 
 // maxInstanceNameBytes keeps an instance name within the 63-byte DNS label
 // limit after the responder appends a conflict suffix such as " (2)".
-const maxInstanceNameBytes = 63 - len(" (99)")
+const maxInstanceNameBytes = 63 - len(" (9999)")
 
 // defaultInstanceName matches branding's default server name.
 const defaultInstanceName = "Silo"
