@@ -1290,27 +1290,29 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with the same source
-exclusions as `profiles_active_24h` above, so marking something watched counts
-as a play. Episodes are rolled up to their series, so a season binge reads as
-one show and a title's `media_item_id` is a series content id for TV.
+`plays` on both lists counts `user_watch_history` rows with source `playback`
+or `legacy` (the default for rows written without a source). Marking something
+watched is not a play: `manual` rows from Silo clients and `jellycompat` rows
+from Jellyfin clients are all marks, and marking a series writes one row per
+episode, so both are excluded. Jellyfin-client playback records progress but no
+history row, so it does not count toward `plays` either. Episodes are rolled up
+to their series, so a season binge reads as one show and a title's
+`media_item_id` is a series content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
 (`admin_playback_history.watched_seconds`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry that was only ever marked watched has no sessions and reports
-`0`. Because `watched_seconds` records a session's final absolute position, a
-resumed session would claim the already-watched stretch again, so each
+minute. An entry with no finalized session in the window reports `0`. Because
+`watched_seconds` records a session's final absolute position, a resumed session would claim the already-watched stretch again, so each
 session's contribution is capped at its wall-clock length; the figure is an
 estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
-row; a profile that has only ever marked things watched falls back to its
-profile id. Ties are broken on a stable key (`media_item_id`, or
-`user_id`/`profile_id`) so equal rows keep their order between refreshes. No
+row; a profile with no such row falls back to its profile id. Ties are broken on
+a stable key (`media_item_id`, or `user_id`/`profile_id`) so equal rows keep their order between refreshes. No
 poster URLs are returned — the bar-list widgets do not need them, and it keeps
 the query cheap.
 

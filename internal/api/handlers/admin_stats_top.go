@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -26,14 +27,22 @@ const (
 	adminTopActivityMaxLimit     = 25
 )
 
-// adminTopActivityWatchSourceFilter keeps only history that originated on this
-// server, so the leaderboards describe what people actually played here.
-// `manual` (marked-watched) stays in as an on-server action, and `jellycompat`
-// is real playback through the Jellyfin surface. This is an allowlist rather
-// than a denylist of known providers because plugin watch providers store
-// their own arbitrary keys in `source` — a denylist would silently count any
-// newly installed provider's imported backlog as local plays.
-const adminTopActivityWatchSourceFilter = `COALESCE(h.source, 'legacy') IN ('legacy', 'manual', 'playback', 'jellycompat')`
+// adminTopActivityWatchSourceFilter keeps only history written by playback on
+// this server, so the leaderboards count what people actually played here.
+// Marking something watched is not a play: `manual` rows (Silo clients) and
+// `jellycompat` rows (Jellyfin clients) are all marks, and marking a series
+// writes one row per episode. Jellyfin playback records progress but no
+// history row. This is an allowlist rather than a denylist of known providers
+// because plugin watch providers store their own arbitrary keys in `source` —
+// a denylist would silently count any newly installed provider's imported
+// backlog as local plays.
+const adminTopActivityWatchSourceFilter = `COALESCE(h.source, 'legacy') IN ('legacy', 'playback')`
+
+// adminTopActivityQuerier is the part of a pool or transaction the
+// leaderboard queries use.
+type adminTopActivityQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
 
 // AdminTopTitle is one row of the most-watched-titles list. Episodes are rolled
 // up to their series, so media_item_id is a series content id for TV.
@@ -43,8 +52,8 @@ type AdminTopTitle struct {
 	MediaType   string `json:"media_type"`
 	Plays       int64  `json:"plays"`
 	// TotalSeconds is watched time summed from finalized playback sessions, not
-	// the runtime of the titles played. A title that was only ever marked
-	// watched has no sessions and reports 0.
+	// the runtime of the titles played. A title with no finalized session in
+	// the window reports 0.
 	TotalSeconds int64 `json:"total_seconds"`
 }
 
@@ -186,8 +195,8 @@ func (h *AdminHandler) HandleGetTopActivity(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, activity)
 }
 
-func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit int) (*AdminTopActivity, error) {
-	if pool == nil {
+func queryAdminTopActivity(ctx context.Context, db adminTopActivityQuerier, days, limit int) (*AdminTopActivity, error) {
+	if db == nil {
 		return nil, fmt.Errorf("database not configured")
 	}
 
@@ -201,12 +210,12 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 	// Episodes roll up to their series: a season binge should read as one show,
 	// not twelve one-play entries.
 	//
-	// Plays come from user_watch_history (marked-watched counts as a play),
-	// while total_seconds is watched time summed from finalized playback
-	// sessions — user_watch_history.duration_seconds is the media's full
-	// runtime, so summing it would report three hours for a movie someone
-	// abandoned after a minute. A title that was only ever marked watched has
-	// no session rows and reports 0 seconds. Sessions are windowed on ended_at
+	// Plays come from user_watch_history playback rows (marks are excluded,
+	// see adminTopActivityWatchSourceFilter), while total_seconds is watched
+	// time summed from finalized playback sessions —
+	// user_watch_history.duration_seconds is the media's full runtime, so
+	// summing it would report three hours for a movie someone abandoned after
+	// a minute. Sessions are windowed on ended_at
 	// — the same stop instant watched_at records — so a session that started
 	// before the cutoff but stopped inside the window counts toward both plays
 	// and watch time rather than only the former.
@@ -219,7 +228,7 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 	//
 	// The ranking is computed and limited first so the title lookup and the
 	// watched-seconds aggregate only run over the rows that survive.
-	titleRows, err := pool.Query(ctx, `
+	titleRows, err := db.Query(ctx, `
 		WITH ranked AS (
 			SELECT COALESCE(ep.series_id, h.media_item_id) AS item_id,
 			       bool_or(ep.content_id IS NOT NULL) AS is_series,
@@ -277,15 +286,15 @@ func queryAdminTopActivity(ctx context.Context, pool *pgxpool.Pool, days, limit 
 
 	// Profile display names live in the per-user stores, not in
 	// user_watch_history, so they are read back from the most recent admin
-	// playback-history row for that profile. A profile that has only ever been
-	// marked-watched has no such row and falls back to its id.
+	// playback-history row for that profile. A profile with no such row falls
+	// back to its id.
 	//
 	// The ranking groups on (user_id, profile_id) alone: a profile that was
 	// renamed mid-window would otherwise split into two rows. The name lookup
 	// and the watched-seconds aggregate run after the limit, once per surviving
 	// profile rather than once per history row. As above, total_seconds is
 	// watched time from finalized playback sessions.
-	profileRows, err := pool.Query(ctx, `
+	profileRows, err := db.Query(ctx, `
 		WITH ranked AS (
 			SELECT h.user_id,
 			       h.profile_id,
