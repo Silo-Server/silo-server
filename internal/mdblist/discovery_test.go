@@ -161,6 +161,32 @@ func TestTransportErrorRedactsAPIKeyInWrappedError(t *testing.T) {
 	}
 }
 
+// keyChangingTransport replaces the client's key while the request is in
+// flight, as a settings reload can, then fails with an error that quotes the
+// key the request sent outside any URL.
+type keyChangingTransport struct {
+	client *Client
+	newKey string
+}
+
+func (t keyChangingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.client.SetAPIKey(t.newKey)
+	return nil, fmt.Errorf("proxy rejected apikey %s", req.URL.Query().Get("apikey"))
+}
+
+func TestTransportErrorRedactsTheKeySentAfterASettingsReload(t *testing.T) {
+	sentKey := "super-secret-mdblist-key-12345"
+	for name, newKey := range map[string]string{"replaced": "another-mdblist-key-67890", "cleared": ""} {
+		t.Run(name, func(t *testing.T) {
+			c := NewClient(sentKey, nil)
+			c.http = &http.Client{Transport: keyChangingTransport{client: c, newKey: newKey}}
+
+			_, err := c.Search(context.Background(), "test")
+			assertErrorOmitsAPIKey(t, err, sentKey)
+		})
+	}
+}
+
 func TestTransportErrorKeepsTimeoutClassification(t *testing.T) {
 	secretKey := "super-secret-mdblist-key-12345"
 	c := NewClient(secretKey, &http.Client{Transport: timeoutTransport{}})

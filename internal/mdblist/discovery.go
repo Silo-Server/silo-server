@@ -112,14 +112,17 @@ func (c *Client) fetchLists(ctx context.Context, path string, q url.Values) ([]L
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
+	// Redact the key this request sent: the setting can be replaced or
+	// cleared while it's in flight, and the error quotes the key it sent.
+	sentKey := q.Get("apikey")
 	u := c.baseURL + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf("creating mdblist request: %w", sanitizeAPIKeyError(err, c.currentAPIKey()))
+		return nil, fmt.Errorf("creating mdblist request: %w", sanitizeAPIKeyError(err, sentKey))
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("calling mdblist: %w", sanitizeAPIKeyError(err, c.currentAPIKey()))
+		return nil, fmt.Errorf("calling mdblist: %w", sanitizeAPIKeyError(err, sentKey))
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
