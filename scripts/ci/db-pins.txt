@@ -179,3 +179,6 @@
 ./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
 ./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
 ./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB
+
+# Admin top-activity leaderboards count playback, not marked-watched rows.
+./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks
