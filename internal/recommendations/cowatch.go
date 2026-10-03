@@ -162,30 +162,3 @@ func blendScores(embeddingItems []ScoredItem, cowatchItems map[string]float64, e
 
 	return result
 }
-
-// jaccardSimilarity computes the Jaccard index between two string slices,
-// defined as |intersection| / |union|. Returns 0 if both slices are empty.
-func jaccardSimilarity(setA, setB []string) float64 {
-	if len(setA) == 0 && len(setB) == 0 {
-		return 0
-	}
-
-	members := make(map[string]struct{}, len(setA))
-	for _, v := range setA {
-		members[v] = struct{}{}
-	}
-
-	intersection := 0
-	for _, v := range setB {
-		if _, ok := members[v]; ok {
-			intersection++
-		}
-	}
-
-	union := len(members) + len(setB) - intersection
-	if union == 0 {
-		return 0
-	}
-
-	return float64(intersection) / float64(union)
-}

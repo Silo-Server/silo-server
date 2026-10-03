@@ -64,7 +64,6 @@ type Recommender interface {
 	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int) ([]ScoredItem, error)
 	RefreshTasteProfile(ctx context.Context, userID int, profileID string) error
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*TasteProfileSummary, error)
-	EmbedItem(ctx context.Context, itemID string) error
 	EmbedAll(ctx context.Context) (embedded int, err error)
 }
 
@@ -113,15 +112,6 @@ const (
 	ColdStartFullPersonalized = 15
 	ColdStartMixed            = 5
 	ColdStartMinimal          = 1
-)
-
-// MMR lambda values by recommendation type.
-const (
-	LambdaForYou         = 0.7
-	LambdaGenreRow       = 0.8
-	LambdaBecauseWatched = 0.7
-	LambdaSimilarUsers   = 0.6
-	LambdaSimilarItems   = 0.8
 )
 
 // GenreCapPercent is the maximum fraction of a recommendation row any single genre can occupy.

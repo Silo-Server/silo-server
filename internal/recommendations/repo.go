@@ -1566,34 +1566,6 @@ func (r *Repo) GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[st
 	return result, rows.Err()
 }
 
-// GetItemGenres returns the full genre array for each item ID.
-func (r *Repo) GetItemGenres(ctx context.Context, itemIDs []string) (map[string][]string, error) {
-	if len(itemIDs) == 0 {
-		return nil, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, genres
-		FROM   media_items
-		WHERE  content_id = ANY($1)
-		  AND  array_length(genres, 1) > 0`,
-		itemIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get item genres: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]string)
-	for rows.Next() {
-		var id string
-		var genres []string
-		if err := rows.Scan(&id, &genres); err != nil {
-			return nil, fmt.Errorf("scan item genre: %w", err)
-		}
-		result[id] = genres
-	}
-	return result, rows.Err()
-}
-
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given
 // access filter. The returned map is keyed by media_items.content_id.
 func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
@@ -1779,19 +1751,6 @@ func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profil
 	return ids, nil
 }
 
-// ExcludeWatchedItems removes watched items from a scored recommendation list.
-func (r *Repo) ExcludeWatchedItems(ctx context.Context, userID int, profileID string, items []ScoredItem) ([]ScoredItem, error) {
-	if len(items) == 0 {
-		return items, nil
-	}
-
-	watchedSet, err := r.GetWatchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
-	}
-	return excludeScoredItems(items, watchedSet), nil
-}
-
 func scoredItemIDSet(ids []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -1862,17 +1821,6 @@ func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) 
 		set[itemID] = struct{}{}
 	}
 	return set, nil
-}
-
-// CleanOldCacheTypes removes V1 cache entries that are no longer used.
-func (r *Repo) CleanOldCacheTypes(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2 AND rec_type IN ('for_you', 'taste_match')`,
-		userID, profileID)
-	if err != nil {
-		return fmt.Errorf("clean old cache types: %w", err)
-	}
-	return nil
 }
 
 // GetItemAllGenres returns the full genre array for each item ID.

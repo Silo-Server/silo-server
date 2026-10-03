@@ -322,7 +322,7 @@ func (w *Worker) doCowatch() {
 	slog.Info("starting co-watch matrix computation")
 
 	repo := NewRepo(w.engine.pool)
-	watchers, err := repo.GetItemWatchers(ctx, 5, 500)
+	watchers, err := repo.GetItemWatchers(ctx, DefaultMinWatchers, DefaultMaxWatchesPerUser)
 	if err != nil {
 		slog.Error("co-watch: failed to get item watchers", "error", err)
 		return
@@ -333,7 +333,7 @@ func (w *Worker) doCowatch() {
 		return
 	}
 
-	pairs := computeCowatchMatrix(watchers, 5, 3, 50)
+	pairs := computeCowatchMatrix(watchers, DefaultMinWatchers, DefaultMinShared, DefaultTopN)
 	if len(pairs) == 0 {
 		slog.Info("co-watch: no pairs met threshold")
 		return
@@ -379,11 +379,6 @@ func (w *Worker) doRecommendations() {
 
 	var cached int
 	for _, p := range profiles {
-		// Clean old V1 cache type.
-		if err := repo.CleanOldCacheTypes(ctx, p.UserID, p.ProfileID); err != nil {
-			slog.Warn("failed to cache recommendations", "error", err)
-		}
-
 		cached += w.cacheUserRows(ctx, repo, p.UserID, p.ProfileID, expires)
 	}
 	slog.Info("recommendation cache refresh completed", "cached_entries", cached)

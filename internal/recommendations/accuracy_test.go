@@ -263,12 +263,12 @@ func TestCompatiblePeerContentRatingsComparesAgeCeilings(t *testing.T) {
 
 func TestMMRLambdaUsesConfiguredGlobalOverride(t *testing.T) {
 	engine := &Engine{cfg: config.RecommendationsConfig{DiversityLambda: 0.25}}
-	if got := engine.mmrLambda(0.8); got != 0.25 {
+	if got := engine.mmrLambda(); got != 0.25 {
 		t.Fatalf("mmrLambda = %f, want configured override", got)
 	}
 
 	engine.cfg.DiversityLambda = 1.2
-	if got := engine.mmrLambda(0.8); got != 0.8 {
+	if got := engine.mmrLambda(); got != defaultMMRLambda {
 		t.Fatalf("mmrLambda = %f, want fallback default for invalid override", got)
 	}
 }

@@ -91,7 +91,7 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 		candidateIDs[i] = item.MediaItemID
 	}
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	result := applyMMR(blended, embMap, e.mmrLambda(LambdaSimilarItems), limit)
+	result := applyMMR(blended, embMap, e.mmrLambda(), limit)
 
 	// 8. Connection reasons.
 	e.assignReasons(ctx, itemID, sourceMeta, result)
@@ -230,36 +230,6 @@ func (e *Engine) assignReasons(ctx context.Context, sourceItemID string, sourceM
 		items[i].Reason = reason
 		items[i].ReasonDetail = detail
 	}
-}
-
-// EmbedItem generates and stores an embedding for a single media item.
-func (e *Engine) EmbedItem(ctx context.Context, itemID string) error {
-	if err := e.ensureEmbeddingLockConfig(ctx); err != nil {
-		return fmt.Errorf("embed item %s: %w", itemID, err)
-	}
-
-	items, err := e.itemRepo.GetByIDs(ctx, []string{itemID})
-	if err != nil || len(items) == 0 {
-		return fmt.Errorf("get item %s: %w", itemID, err)
-	}
-
-	// Hydrate cast/crew from item_people for richer embedding text.
-	e.hydrateItemPeople(ctx, items)
-
-	text := embeddings.BuildEmbeddingText(items[0])
-	vectors, err := e.embClient.Embed(ctx, []string{text})
-	if err != nil {
-		return fmt.Errorf("embed item %s: %w", itemID, err)
-	}
-	if len(vectors) == 0 {
-		return fmt.Errorf("no embedding returned for item %s", itemID)
-	}
-
-	if err := e.ensureEmbeddingLock(ctx, vectors[0]); err != nil {
-		return fmt.Errorf("embed item %s: %w", itemID, err)
-	}
-
-	return e.repo.UpsertEmbedding(ctx, itemID, vectors[0], e.cfg.EmbeddingModel, text)
 }
 
 // EmbedAll embeds items that are missing embeddings or have stale canonical
