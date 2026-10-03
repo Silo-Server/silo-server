@@ -220,12 +220,20 @@ func submissionErrorText(err error) string {
 		}
 		return m[1] + m[2] + logredact.Placeholder
 	})
+	return maskKeyValueSecrets(msg)
+}
+
+// maskKeyValueSecrets masks the values of secret-named key=value pairs. The
+// value of a pair whose key is not secret is scanned again, as it can hold an
+// assignment of its own: gRPC renders a status as "desc = api_key=...", where
+// the outer pair's value is the inner one.
+func maskKeyValueSecrets(msg string) string {
 	return keyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
 		m := keyValueInText.FindStringSubmatch(pair)
 		// Header-style names ("x-api-key") use hyphens where SecretKey's
 		// markers use underscores.
 		if !logredact.SecretKey(strings.ReplaceAll(m[1], "-", "_")) {
-			return pair
+			return m[1] + m[2] + maskKeyValueSecrets(m[3])
 		}
 		// "Authorization: Bearer [REDACTED]": the scheme word is not the
 		// secret, and the pass above already masked what follows it.

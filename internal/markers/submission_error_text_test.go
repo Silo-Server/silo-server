@@ -5,6 +5,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // The values these tests mask are obvious placeholders, not credential-shaped
@@ -51,6 +54,10 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		{"upstream said: Authorization: Bearer FAKE_FIXTURE_7 was expired", "FAKE_FIXTURE_7", "Bearer [REDACTED] was expired"},
 		{"token expired, please retry", "", "token expired, please retry"},
 		{"session_token=FAKE_FIXTURE_8; retry=3", "FAKE_FIXTURE_8", "retry=3"},
+		// A secret assignment inside a non-secret pair's value: gRPC's
+		// "desc = " runs straight into a description that starts with one.
+		{"rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_9 rejected", "FAKE_FIXTURE_9", "desc = api_key=[REDACTED] rejected"},
+		{"reason=token=FAKE_FIXTURE_10", "FAKE_FIXTURE_10", "reason=token=[REDACTED]"},
 		// Short or unpadded credentials after a scheme word are still masked.
 		{"Authorization: Basic " + strings.ToUpper(tok[:4]) + tok[4:], strings.ToUpper(tok[:4]) + tok[4:], "Basic [REDACTED]"},
 		{"Authorization: Bearer " + tok[:6] + "-" + tok[6:], tok[:6] + "-" + tok[6:], "Bearer [REDACTED]"},
@@ -74,5 +81,18 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		if !strings.Contains(got, tc.keep) {
 			t.Fatalf("case %q dropped the useful part", tc.keep)
 		}
+	}
+}
+
+// A plugin's gRPC status whose description starts with a secret assignment
+// renders as "desc = api_key=...", which must still be masked.
+func TestSubmissionErrorTextMasksSecretAtTheStartOfAGRPCDescription(t *testing.T) {
+	err := status.Error(codes.Unauthenticated, "api_key=FAKE_FIXTURE_SECRET rejected")
+	got := submissionErrorText(err)
+	if strings.Contains(got, "FAKE_FIXTURE_SECRET") {
+		t.Fatal("submissionErrorText kept the api_key value")
+	}
+	if !strings.Contains(got, "Unauthenticated") || !strings.Contains(got, "rejected") {
+		t.Fatalf("submissionErrorText dropped the useful part: %s", got)
 	}
 }
