@@ -1218,7 +1218,7 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 	case SectionReturningShows:
 		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionProfileActivityFeed:
-		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
+		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionWatchlist, SectionFavorites:
 		return f.fetchPersonalListSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	default:
@@ -3140,20 +3140,24 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	return items, len(items), nil
 }
 
-func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+// fetchProfileActivityFeed lists recent watches by the caller's other profiles
+// (household mode) or by one pinned profile. Both modes read only the caller's
+// account, so a pinned profile from another account lists nothing.
+func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.ProfileActivityFeedParams
 	if len(s.Config) > 0 {
 		_ = json.Unmarshal(s.Config, &p)
 	}
 	target := p.ProfileID
 
-	// Household mode (target == "") leaks all history when caller is unauthenticated.
-	if target == "" && profileID == "" {
+	// Without an account there's no household to read, and household mode
+	// (target == "") without a profile would list the whole account.
+	if userID <= 0 || (target == "" && profileID == "") {
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	var args []any
-	argIdx := 1
+	args := []any{userID}
+	argIdx := 2
 
 	// CTE deduplicates per media_item_id and keeps the most-recent watched_at,
 	// so each item appears once and is ordered by latest-watch DESC.
@@ -3192,7 +3196,7 @@ func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSectio
 		`WITH most_recent AS (
 			SELECT media_item_id, MAX(watched_at) AS latest
 			FROM user_watch_history
-			WHERE %s AND watched_at > NOW() - %s
+			WHERE user_id = $1 AND %s AND watched_at > NOW() - %s
 			GROUP BY media_item_id
 		)
 		SELECT %s
