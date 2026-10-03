@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -31,8 +33,9 @@ func TestHandlerSnapshotsValuesTheCallerOwns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// encoding/json sorts map keys, so the encoding is stable.
-	want := `{"counts":{"movies":1},"error":{},"ids":[1,2],"static":{"movies":1},"status":200}`
+	// encoding/json sorts map keys, so the encoding is stable. An error keeps
+	// its message rather than encoding as {}.
+	want := `{"counts":{"movies":1},"error":"boom","ids":[1,2],"static":{"movies":1},"status":200}`
 	if string(got) != want {
 		t.Fatalf("attrs = %s, want %s", got, want)
 	}
@@ -55,5 +58,49 @@ func TestHandlerKeepsAValueItCannotEncode(t *testing.T) {
 	}
 	if entry.Attrs["status"] != int64(200) {
 		t.Fatalf("attrs[status] = %#v, want 200", entry.Attrs["status"])
+	}
+}
+
+func TestAttrValueError(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"plain", errors.New("s3 PutObject failed: AccessDenied"), "s3 PutObject failed: AccessDenied"},
+		{"wrapped", fmt.Errorf("upload chapter-images/1/0/original.webp: %w", errors.New("AccessDenied")), "upload chapter-images/1/0/original.webp: AccessDenied"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := attrValue(slog.AnyValue(tc.err))
+			if got != tc.want {
+				t.Fatalf("attrValue(%v) = %#v, want %q", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAttrValueErrorMasksURLCredentials(t *testing.T) {
+	presigned := "https://bucket.s3.example.test/chapter-images/1/0/original.webp?X-Amz-Credential=AKIDEXAMPLE&X-Amz-Signature=deadbeef"
+	err := fmt.Errorf("upload chapter image: PUT %s: AccessDenied", presigned)
+	got, ok := attrValue(slog.AnyValue(err)).(string)
+	if !ok {
+		t.Fatalf("attrValue(error) = %#v, want a string", got)
+	}
+	for _, secret := range []string{"X-Amz-Credential", "AKIDEXAMPLE", "X-Amz-Signature", "deadbeef"} {
+		if strings.Contains(got, secret) {
+			t.Fatalf("attrValue kept %q: %s", secret, got)
+		}
+	}
+	if !strings.Contains(got, "https://bucket.s3.example.test/chapter-images/1/0/original.webp") || !strings.Contains(got, "AccessDenied") {
+		t.Fatalf("attrValue dropped the useful part of the error: %s", got)
+	}
+}
+
+func TestAttrValueErrorMasksQueryAfterQuoteInURL(t *testing.T) {
+	err := fmt.Errorf(`upload: PUT "https://bucket.s3.example.test/it's<1>.webp?X-Amz-Signature=deadbeef": AccessDenied`)
+	got, _ := attrValue(slog.AnyValue(err)).(string)
+	if strings.Contains(got, "X-Amz-Signature") || strings.Contains(got, "deadbeef") {
+		t.Fatalf("attrValue kept the signature: %s", got)
 	}
 }
