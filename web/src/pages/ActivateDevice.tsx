@@ -94,13 +94,14 @@ function ActivateDeviceRequest() {
   const loginHref = `/login?redirect=${encodeURIComponent(redirectTarget)}`;
 
   // keepOnError leaves the last known details on screen when a refresh
-  // fails, for the reloads after a decision and while watching.
+  // fails, for the reloads after a decision and while watching. Returns the
+  // details it loaded, or null.
   const loadDetails = useCallback(
-    async (keepOnError = false) => {
+    async (keepOnError = false): Promise<DeviceLoginDetails | null> => {
       if ((!token && !code) || (needsAccount && lookupAccount === null)) {
         setDetails(null);
         setLoadError(null);
-        return;
+        return null;
       }
       try {
         const result = await v2("GET /api/v2/auth/device", {
@@ -108,9 +109,10 @@ function ActivateDeviceRequest() {
         });
         setDetails(result);
         setLoadError(null);
+        return result;
       } catch (error) {
         if (keepOnError) {
-          return;
+          return null;
         }
         setDetails(null);
         const status = error instanceof V2ProblemError ? error.status : 0;
@@ -125,6 +127,7 @@ function ActivateDeviceRequest() {
                 ? "impersonating"
                 : "failed",
         );
+        return null;
       }
     },
     [code, token, needsAccount, lookupAccount],
@@ -167,9 +170,12 @@ function ActivateDeviceRequest() {
   async function handleDecision(action: "approve" | "deny") {
     setActing(true);
     setActionError(null);
+    const failure =
+      action === "approve" ? "Couldn't sign in the TV. Try again." : "Couldn't decline. Try again.";
     // Every Quick Connect lookup spends the account's code budget, so a
     // decision on one is followed by a reload only when the request moved on.
     let reload = !isQuickConnect;
+    let refused = false;
     try {
       const body = token ? { token } : { code };
       if (action === "approve") {
@@ -184,7 +190,8 @@ function ActivateDeviceRequest() {
         }
       }
     } catch (error) {
-      // A conflict or gone means the request moved on; the reload shows why.
+      // A conflict or gone usually means the request moved on; the reload
+      // shows why.
       const moved = error instanceof V2ProblemError && [404, 409, 410].includes(error.status);
       reload ||= moved;
       if (error instanceof V2ProblemError && error.status === 429) {
@@ -197,16 +204,19 @@ function ActivateDeviceRequest() {
         // Only the account's own login session decides for a TV, never an
         // admin viewing as someone; trying again cannot help.
         setActionError(impersonationText);
-      } else if (!moved) {
-        setActionError(
-          action === "approve"
-            ? "Couldn't sign in the TV. Try again."
-            : "Couldn't decline. Try again.",
-        );
+      } else if (moved) {
+        // If the request is still pending after the reload, the server
+        // refused the decision itself.
+        refused = true;
+      } else {
+        setActionError(failure);
       }
     } finally {
       if (reload) {
-        await loadDetails(true);
+        const current = await loadDetails(true);
+        if (refused && (current === null || current.status === "pending")) {
+          setActionError(failure);
+        }
       }
       setActing(false);
       setFocusResult(true);
@@ -262,6 +272,13 @@ function ActivateDeviceRequest() {
       : null;
   const serverHost = window.location.host;
   const deviceName = details?.device_name || "this device";
+  // This page approves a TV sign-in or a Quick Connect code. A remote-playback
+  // request comes from a Silo app sending playback to the TV, and that app
+  // approves it for its own profile.
+  const remotePlayback =
+    details !== null &&
+    !isQuickConnect &&
+    (details.client_purpose !== "device_login" || details.temporary);
   const shownCode = displayDeviceCode(details?.user_code || code);
   const screen = isQuickConnect ? "app" : "TV";
   const requestedAgo = formatRelativeTime(details?.requested_at);
@@ -275,7 +292,9 @@ function ActivateDeviceRequest() {
   let resultMessage = "";
   switch (details?.status) {
     case "approved":
-      if (isQuickConnect) {
+      if (remotePlayback) {
+        resultMessage = "This request was approved in the Silo app.";
+      } else if (isQuickConnect) {
         resultMessage = approvedProfile
           ? `Done. ${deviceName} is signing in as ${approvedProfile}.`
           : "This device was approved and is finishing sign-in.";
@@ -286,14 +305,16 @@ function ActivateDeviceRequest() {
       }
       break;
     case "consumed":
-      if (isQuickConnect) {
+      if (remotePlayback) {
+        resultMessage = "This request was approved in the Silo app.";
+      } else if (isQuickConnect) {
         resultMessage = "That device is signed in.";
       } else {
         resultMessage = approvedHere ? "Your TV is signed in." : "That TV is already signed in.";
       }
       break;
     case "denied":
-      resultMessage = "This sign-in was declined.";
+      resultMessage = remotePlayback ? "This request was declined." : "This sign-in was declined.";
       break;
     case "canceled":
       resultMessage = "This TV stopped waiting. Start again on the TV.";
@@ -377,7 +398,9 @@ function ActivateDeviceRequest() {
           ) : details ? (
             <div className="space-y-5">
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Sign in {deviceName}?</h2>
+                <h2 className="text-lg font-semibold">
+                  {remotePlayback ? `Play on ${deviceName}?` : `Sign in ${deviceName}?`}
+                </h2>
                 {deviceLine ? <p className="text-muted-foreground text-sm">{deviceLine}</p> : null}
               </div>
 
@@ -404,7 +427,35 @@ function ActivateDeviceRequest() {
               ) : null}
 
               {details.status === "pending" ? (
-                !user ? (
+                remotePlayback ? (
+                  <div className="space-y-4">
+                    <p className="text-sm">
+                      This request comes from the Silo app that sent playback to this TV. Approve it
+                      in that app.
+                    </p>
+                    <p className="text-muted-foreground text-sm">
+                      The TV plays with the profile chosen in the app instead of signing in, so this
+                      page can&apos;t approve it.
+                    </p>
+                    {user && !isImpersonating ? (
+                      <>
+                        {actionError ? (
+                          <p className="text-destructive text-sm" role="alert">
+                            {actionError}
+                          </p>
+                        ) : null}
+                        <Button
+                          variant="outline"
+                          className="w-full"
+                          disabled={acting}
+                          onClick={() => void handleDecision("deny")}
+                        >
+                          Not now
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                ) : !user ? (
                   <div className="space-y-3">
                     <p className="text-sm">Sign in to {serverName} to approve this TV.</p>
                     {appLink ? (

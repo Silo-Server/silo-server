@@ -483,3 +483,65 @@ it("reloads a Quick Connect request that moved on before it was declined", async
   await screen.findByText("This code expired. Start Quick Connect again in the app.");
   expect(lookupCount).toBe(2);
 });
+it("reports an approval the server refuses while the request stays pending", async () => {
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") return Promise.resolve(pending);
+    return Promise.reject(
+      v2Problem(409, "conflict", "Device login purpose does not match this approval route"),
+    );
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign in the TV. Try again.");
+  expect(screen.getByRole("button", { name: "Sign in TV" }).hasAttribute("disabled")).toBe(false);
+});
+
+it("shows no error when a refused approval's request has moved on", async () => {
+  lookups = [pending, { ...pending, status: "canceled" }];
+  vi.mocked(v2).mockImplementation(((op: string) => {
+    if (op === "GET /api/v2/auth/device") {
+      return Promise.resolve(lookups.length > 1 ? lookups.shift() : lookups[0]);
+    }
+    return Promise.reject(v2Problem(409, "conflict", "Device login request was canceled"));
+  }) as never);
+  mount("/activate?code=48217730");
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in TV" }));
+  await screen.findByText("This TV stopped waiting. Start again on the TV.");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+const remotePlayback = { ...pending, client_purpose: "remote_playback", temporary: true };
+
+it("sends a remote-playback request back to the app and can decline it", async () => {
+  lookups = [remotePlayback, { ...remotePlayback, status: "denied" }];
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(
+    screen.getByText(/This request comes from the Silo app that sent playback to this TV/),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
+  expect(screen.queryByText(/Anyone using this TV can pick from your profiles/)).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  await screen.findByText("This request was declined.");
+  expect(decisions).toEqual([{ op: "POST /api/v2/auth/device/deny", body: { code: "48217730" } }]);
+});
+
+it("doesn't ask a signed-out approver to sign in for a remote-playback request", async () => {
+  auth.user = null;
+  lookups = [remotePlayback];
+  mount("/activate?code=48217730");
+  await screen.findByText("Play on Living room TV?");
+  expect(screen.queryByRole("link", { name: "Sign in to approve" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+});
+
+it.each(["approved", "consumed"])(
+  "says a remote-playback request the app %s was approved there, not that a TV signed in",
+  async (status) => {
+    lookups = [{ ...remotePlayback, status }];
+    mount("/activate?code=48217730");
+    await screen.findByText("This request was approved in the Silo app.");
+    expect(screen.queryByText(/signed in|finishing sign-in/)).toBeNull();
+  },
+);
