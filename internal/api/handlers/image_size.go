@@ -86,9 +86,19 @@ func sizedCardBackdropPath(path string, size imagesize.Size) string {
 	return sizedCardPath(path, imageTypeForBackdropPath(path), size)
 }
 
-// sizedLogoPath is a title's wordmark at the request's size; unsized, the
-// stored original, since a logo has no card thumbnail.
+// sizedLogoPath is a listing card's wordmark at the request's size. Unsized it
+// is the medium rung, the logo item detail and catalog item cards serve, so a
+// card's logo is the file the title's page shows.
 func sizedLogoPath(path string, size imagesize.Size) string {
+	if size == imagesize.Unset {
+		size = imagesize.Medium
+	}
+	return sizedImagePath(path, artworkkey.ImageLogo, size, path)
+}
+
+// sizedFeaturedLogoPath is a section card's wordmark at the request's size.
+// Unsized it stays the stored original, which sections have always served.
+func sizedFeaturedLogoPath(path string, size imagesize.Size) string {
 	return sizedImagePath(path, artworkkey.ImageLogo, size, path)
 }
 

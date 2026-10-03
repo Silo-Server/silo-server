@@ -868,9 +868,9 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 		}
 		resp.PosterURL = h.presignURL(ctx, sizedPosterPath(mi.PosterPath, size), posterHint)
 		resp.BackdropURL = h.presignURL(ctx, sizedCardBackdropPath(mi.BackdropPath, size), cardHint)
-		resp.LogoURL = h.presignURL(ctx, sizedLogoPath(mi.LogoPath, size), cardHint)
 		byID[mi.ContentID] = &resp
 	}
+	logoPaths := localizedLogoPaths(ctx, h.detailSvc, accessibleItems, filter)
 
 	// Resolve any remaining IDs as episodes.
 	if h.episodeRepo != nil {
@@ -893,6 +893,7 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 				for _, mi := range parentItems {
 					parentByID[mi.ContentID] = mi
 				}
+				parentLogoPaths := localizedLogoPaths(ctx, h.detailSvc, parentItems, filter)
 
 				for _, ep := range episodes {
 					// Verify the parent series is accessible.
@@ -921,10 +922,19 @@ func resolveItemsByIDs(h *PersonalDataHandler, ctx context.Context, viewer Perso
 						resp.Year = parent.Year
 						resp.Genres = parent.Genres
 						resp.ContentRating = parent.ContentRating
+						if path := parentLogoPaths[parent.ContentID]; path != "" {
+							logoPaths[ep.ContentID] = path
+						}
 					}
 					byID[ep.ContentID] = &resp
 				}
 			}
+		}
+	}
+
+	for contentID, url := range signListingLogos(ctx, h.detailSvc, logoPaths, size) {
+		if item, ok := byID[contentID]; ok {
+			item.LogoURL = url
 		}
 	}
 

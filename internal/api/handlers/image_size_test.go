@@ -34,6 +34,9 @@ func TestUnsetImageSizeKeepsExistingPaths(t *testing.T) {
 		if got, want := sizedBackdropPath(path, imagesize.Unset), featuredBackdropPath(path); got != want {
 			t.Errorf("sizedBackdropPath(%q, Unset) = %q, want %q", path, got, want)
 		}
+		if got := sizedFeaturedLogoPath(path, imagesize.Unset); got != path {
+			t.Errorf("sizedFeaturedLogoPath(%q, Unset) = %q, want the stored path", path, got)
+		}
 		for _, sectionType := range []sections.SectionType{sections.SectionContinueWatching, sections.SectionNextUp, sections.SectionRecentlyAdded} {
 			got := sizedSectionBackdropPath(sectionType, path, imagesize.Unset)
 			want := sectionBackdropPath(sectionType, path)
@@ -183,4 +186,30 @@ func TestRejectInvalidImageSize(t *testing.T) {
 			t.Fatalf("error body = %s, want an invalid_image_size code", rec.Body.String())
 		}
 	})
+}
+
+// A listing card's logo is the file item detail serves: unsized is the medium
+// rung, the same key an explicit medium names, never the full original.
+func TestSizedLogoPathMatchesItemDetail(t *testing.T) {
+	const logo = "tmdb/movies/550/logo/original.png"
+	tests := []struct {
+		size imagesize.Size
+		want string
+	}{
+		{imagesize.Unset, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Small, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Medium, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Large, "tmdb/movies/550/logo/w1280.png"},
+		{imagesize.Original, logo},
+	}
+	for _, tt := range tests {
+		if got := sizedLogoPath(logo, tt.size); got != tt.want {
+			t.Errorf("sizedLogoPath(%q, %q) = %q, want %q", logo, tt.size, got, tt.want)
+		}
+	}
+	for _, path := range []string{"https://image.tmdb.org/t/p/original/xyz.png", "plugin://tmdb/movies/550/logo/original.png", ""} {
+		if got := sizedLogoPath(path, imagesize.Unset); got != path {
+			t.Errorf("sizedLogoPath(%q, Unset) = %q, want it unchanged", path, got)
+		}
+	}
 }
