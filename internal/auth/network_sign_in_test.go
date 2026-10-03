@@ -184,24 +184,33 @@ func TestDiscoverProvidersOffersNetworkProviderToOverlayPeers(t *testing.T) {
 	}
 }
 
-// Discovery bounds its plugin call well below the client's default, so a
-// hung plugin cannot stall the provider list; sign-in keeps the default.
+// Discovery bounds its lookup well below the client's default, loading the
+// plugin client included, so a hung plugin or a stalled installation read
+// cannot stall the provider list; sign-in keeps the default.
 func TestNetworkPreviewBoundsThePluginCall(t *testing.T) {
 	plugin := &peerPlugin{}
+	var loadDeadline time.Time
 	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
-		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+		nil, nil, func(ctx context.Context) (pluginAuthClient, error) {
+			loadDeadline, _ = ctx.Deadline()
+			return plugin, nil
+		})
 	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
 	start := time.Now()
 	svc.networkPreview(overlayContext(t.Context(), 5, "100.64.0.7"), provider)
 	plugin.mu.Lock()
 	deadline := plugin.deadline
 	plugin.mu.Unlock()
-	if deadline.IsZero() || deadline.After(start.Add(networkPreviewTimeout+time.Second)) {
-		t.Fatalf("discovery call deadline = %v, want within %v of %v", deadline, networkPreviewTimeout, start)
+	for name, got := range map[string]time.Time{"plugin load": loadDeadline, "plugin call": deadline} {
+		if got.IsZero() || got.After(start.Add(networkPreviewTimeout+time.Second)) {
+			t.Fatalf("discovery %s deadline = %v, want within %v of %v", name, got, networkPreviewTimeout, start)
+		}
 	}
 }
 
-// Concurrent misses for one peer share one plugin call.
+// Concurrent misses for one peer share one plugin call. Every caller misses
+// the cache while the first call is still in the plugin, so none can pass by
+// finding its answer cached.
 func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
 	const callers = 8
 	plugin := &peerPlugin{
@@ -214,13 +223,19 @@ func TestNetworkPreviewSharesConcurrentLookups(t *testing.T) {
 	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
 		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
 	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+	joined := make(chan struct{}, callers)
+	svc.previews.joining = func() { joined <- struct{}{} }
 	ctx := overlayContext(t.Context(), 5, "100.64.0.7")
 	previews := make(chan *NetworkIdentityPreview, callers)
 	lookup := func() { previews <- svc.networkPreview(ctx, provider) }
 	go lookup()
+	<-joined
 	<-plugin.entered
 	for range callers - 1 {
 		go lookup()
+	}
+	for range callers - 1 {
+		<-joined
 	}
 	close(plugin.release)
 	for range callers {

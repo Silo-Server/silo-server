@@ -281,7 +281,17 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 	if _, err := overlay.OpenIdentitySession(ctx, nil, IdentitySession{UserID: env.user.ID, IdentityID: networkIdentity.ID, Network: true}); !errors.Is(err, ErrNotPermitted) {
 		t.Fatalf("network session opened after the primary provider's refusal = %v, want ErrNotPermitted", err)
 	}
-	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusActive)
+	// So does a refusal whose revocation rolled back: it waits in
+	// pending_refusal while last_check_status keeps the previous answer.
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = $3 WHERE id = $1`,
+		env.identityID, CheckStatusActive, CheckStatusNotFound)
+	if err := signIn(); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("network sign-in during the primary provider's pending refusal = %v, want ErrNotPermitted", err)
+	}
+	if _, err := overlay.OpenIdentitySession(ctx, nil, IdentitySession{UserID: env.user.ID, IdentityID: networkIdentity.ID, Network: true}); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("network session opened during the primary provider's pending refusal = %v, want ErrNotPermitted", err)
+	}
+	exec(`UPDATE plugin_auth_identities SET pending_refusal = '' WHERE id = $1`, env.identityID)
 	if err := signIn(); err != nil {
 		t.Fatalf("network sign-in once the primary provider vouches again = %v", err)
 	}

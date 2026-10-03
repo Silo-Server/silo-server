@@ -68,9 +68,8 @@ func requestPeer(ctx context.Context, installationID int) (netip.Addr, error) {
 	return path.Peer, nil
 }
 
-// peerResponse asks the plugin who peer is. A positive callTimeout bounds
-// the call itself (not loading the plugin) below the client's default.
-func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr, callTimeout time.Duration) (*pluginv1.AuthenticateResponse, error) {
+// peerResponse asks the plugin who peer is.
+func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr) (*pluginv1.AuthenticateResponse, error) {
 	client, err := p.client(ctx)
 	if err != nil {
 		return nil, pluginCallError(ctx, p.config.InstallationID, "load", err)
@@ -79,13 +78,7 @@ func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr, call
 	if !ok {
 		return nil, ErrProviderUnavailable
 	}
-	callCtx := ctx
-	if callTimeout > 0 {
-		var cancel context.CancelFunc
-		callCtx, cancel = context.WithTimeout(ctx, callTimeout)
-		defer cancel()
-	}
-	response, err := network.AuthenticatePeer(callCtx, &pluginv1.AuthenticatePeerRequest{PeerAddress: peer.String()})
+	response, err := network.AuthenticatePeer(ctx, &pluginv1.AuthenticatePeerRequest{PeerAddress: peer.String()})
 	if err != nil {
 		return nil, pluginCallError(ctx, p.config.InstallationID, "authenticate_peer", err)
 	}
@@ -96,7 +89,7 @@ func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr, call
 // sign-in when linkingUserID is 0, otherwise a link to that signed-in
 // account. It also answers the identity, for the login session it opens.
 func (p *PluginProvider) authenticatePeer(ctx context.Context, peer netip.Addr, linkingUserID int) (*models.User, int64, error) {
-	response, err := p.peerResponse(ctx, peer, 0)
+	response, err := p.peerResponse(ctx, peer)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -194,7 +187,9 @@ type primaryAuthority struct {
 	// apply their own role and sign the account out at every change.
 	defers bool
 	// refused: defers, and the primary provider's latest answer refused the
-	// account, so the network identity cannot sign it back in.
+	// account, so the network identity cannot sign it back in. A refusal
+	// whose revocation rolled back counts: it is kept as pending_refusal
+	// while last_check_status still holds the previous answer.
 	refused bool
 }
 
@@ -204,13 +199,13 @@ func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installation
 	isNetwork := plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")
 	var network, primary, refused bool
 	err := db.QueryRow(ctx, `WITH primary_identities AS (
-			SELECT i.last_check_status FROM plugin_auth_identities i
+			SELECT i.last_check_status, i.pending_refusal FROM plugin_auth_identities i
 			JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
 			JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
 			WHERE i.user_id = $1 AND i.plugin_installation_id <> $2 AND NOT `+isNetwork+`)
 		SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $2 AND `+isNetwork+`),
 			EXISTS (SELECT 1 FROM primary_identities),
-			EXISTS (SELECT 1 FROM primary_identities WHERE last_check_status = ANY($3))`,
+			EXISTS (SELECT 1 FROM primary_identities WHERE last_check_status = ANY($3) OR pending_refusal = ANY($3))`,
 		userID, installationID, []string{CheckStatusNotFound, CheckStatusDisabled, CheckStatusNotPermitted}).Scan(&network, &primary, &refused)
 	if err != nil {
 		return primaryAuthority{}, fmt.Errorf("checking for a primary sign-in identity: %w", err)
@@ -223,9 +218,9 @@ func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installation
 // one peer. Sign-in and linking always ask again.
 const networkPreviewTTL = 30 * time.Second
 
-// networkPreviewTimeout bounds discovery's call to the plugin: the provider
-// list waits on it, so a plugin that hangs costs the login page at most this
-// long and leaves the network provider out.
+// networkPreviewTimeout bounds discovery's lookup, loading the plugin client
+// included: the provider list waits on it, so a plugin that hangs costs the
+// login page at most this long and leaves the network provider out.
 const networkPreviewTimeout = 2 * time.Second
 
 // networkPreviewLimit caps the cached answers; discovery is unauthenticated,
@@ -254,6 +249,9 @@ type networkPreviews struct {
 	mu      sync.Mutex
 	entries map[networkPreviewKey]networkPreviewEntry
 	lookups singleflight.Group
+	// joining, when set (tests), runs for each cache miss just before it
+	// joins or starts the shared lookup.
+	joining func()
 }
 
 // networkPreview answers who the plugin says the request's peer is, or nil
@@ -270,11 +268,15 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 	if preview, ok := s.cachedNetworkPreview(key); ok {
 		return preview
 	}
-	// The shared call outlives a caller that goes away; networkPreviewTimeout
-	// bounds it.
-	shared := context.WithoutCancel(ctx)
+	if s.previews.joining != nil {
+		s.previews.joining()
+	}
 	answer, _, _ := s.previews.lookups.Do(fmt.Sprintf("%p|%s", provider, peer), func() (any, error) {
-		return s.lookupNetworkPreview(shared, key), nil
+		// The shared lookup outlives a caller that goes away, but not
+		// networkPreviewTimeout.
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), networkPreviewTimeout)
+		defer cancel()
+		return s.lookupNetworkPreview(lookupCtx, key), nil
 	})
 	preview, _ := answer.(*NetworkIdentityPreview)
 	return preview
@@ -289,7 +291,7 @@ func (s *Service) lookupNetworkPreview(ctx context.Context, key networkPreviewKe
 	}
 	provider, peer := key.provider, key.peer
 	now := time.Now()
-	response, err := provider.peerResponse(ctx, peer, networkPreviewTimeout)
+	response, err := provider.peerResponse(ctx, peer)
 	if err != nil {
 		return nil
 	}
