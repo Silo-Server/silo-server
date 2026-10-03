@@ -189,6 +189,49 @@ describe("buildWatchPageProps", () => {
     });
   });
 
+  it("carries the resolved embedded-subtitle preference into the player and the initial pick", () => {
+    const props = buildWatchPageProps({
+      request: makeRequest(),
+      item: makeWatchDetail({
+        effective_prefer_embedded_subtitles: true,
+        effective_subtitle_mode: "always",
+        effective_subtitle_language: "en",
+        versions: [
+          {
+            file_id: 7,
+            resolution: "1080p",
+            codec_video: "h264",
+            codec_audio: "aac",
+            hdr: false,
+            container: "mkv",
+            file_size: 1,
+            duration: 120,
+            bitrate: 8000,
+            subtitle_tracks: [
+              { index: 0, language: "eng", codec: "subrip" },
+              { index: 1, language: "eng", codec: "srt", external: true },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(props).toMatchObject({ preferEmbeddedSubtitles: true });
+    // The start request and the player read the same flag, so a refused start
+    // cannot leave them disagreeing about which track was picked. Ordinals in
+    // the start map are the combined ones: the sidecar is 0, the embedded track 1.
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 7: 1 });
+  });
+
+  it("leaves the embedded-subtitle preference off when the server omits it", () => {
+    const props = buildWatchPageProps({
+      request: makeRequest(),
+      item: makeWatchDetail(),
+    });
+
+    expect(props).toMatchObject({ preferEmbeddedSubtitles: false });
+  });
+
   it("falls back to effective version hints when there is no item-specific resume", () => {
     const props = buildWatchPageProps({
       request: makeRequest(),

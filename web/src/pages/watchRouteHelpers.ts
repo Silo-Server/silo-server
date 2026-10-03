@@ -183,6 +183,7 @@ function buildInitialSubtitleTrackIndexes({
   preferredSubtitleTrackSignature,
   profileLanguage,
   showForcedSubtitles,
+  preferEmbeddedSubtitles,
 }: {
   item: WatchDetail;
   audioTrackIndex?: number;
@@ -191,6 +192,7 @@ function buildInitialSubtitleTrackIndexes({
   preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null;
   profileLanguage: string | null;
   showForcedSubtitles: boolean;
+  preferEmbeddedSubtitles: boolean;
 }): {
   start: Record<number, number>;
   bitmap: Record<number, number>;
@@ -237,6 +239,7 @@ function buildInitialSubtitleTrackIndexes({
       audioLanguage: resolveVersionAudioLanguage(version, selectedAudioTrackIndex),
       profileLanguage,
       showForcedSubtitles,
+      preferEmbeddedSubtitles,
     });
     if (selectedSubtitleTrackIndex === null) {
       continue;
@@ -283,6 +286,9 @@ export function buildWatchPageProps({
     "auto") as SubtitleMode;
   const showForcedSubtitles =
     item.effective_show_forced_subtitles ?? currentProfile?.show_forced_subtitles ?? true;
+  // Servers before the key existed omit it; the contract default is off, which
+  // keeps every client's external-first ranking.
+  const preferEmbeddedSubtitles = item.effective_prefer_embedded_subtitles ?? false;
   const profileLanguage = currentProfile?.language || null;
 
   const subtitles: PlayerSubtitleInfo[] = item.subtitles.map((subtitle, index) => ({
@@ -347,6 +353,7 @@ export function buildWatchPageProps({
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
     profileLanguage,
     showForcedSubtitles,
+    preferEmbeddedSubtitles,
   });
 
   const intro: PlayerTimeRange | null = item.intro ?? null;
@@ -407,6 +414,7 @@ export function buildWatchPageProps({
     preferredSubtitleTrackSignature: effectivePreferredSubtitleTrackSignature,
     subtitleMode,
     showForcedSubtitles,
+    preferEmbeddedSubtitles,
     profileLanguage,
     intro,
     introSkipMode,

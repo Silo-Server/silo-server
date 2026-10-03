@@ -22,10 +22,28 @@ const SOURCE_PRIORITY: Record<string, number> = {
  * tier, text tracks beat bitmap (PGS) tracks — bitmap is heavier to render
  * and can't be styled — while a bitmap track still wins when it's the only
  * match for the language.
+ *
+ * `preferEmbeddedSubtitles` reverses the source tiers for a profile that chose
+ * `playback.prefer_embedded_subtitles`: an external file is cut for one release
+ * and can play out of sync, while the track inside the file cannot. The middle
+ * tier (downloaded subtitles) keeps its place, and the reversal sits inside the
+ * source tier only, so language rank is unaffected.
+ *
+ * It also makes a full track outrank a signs-only one, which the source tier is
+ * otherwise blind to: turning the preference on must not make a forced embedded
+ * track the default while the file still offers a full external one.
+ * FULL_DIALOGUE_WEIGHT exceeds every value the tiers below it can produce
+ * together, which keeps the comparison lexicographic.
  */
-function trackPriority(track: PlayerSubtitleInfo): number {
-  const source = SOURCE_PRIORITY[track.source ?? "embedded"] ?? 2;
-  return source * 2 + (isBitmapCodec(track.codec) ? 1 : 0);
+const FULL_DIALOGUE_WEIGHT = 6;
+const SOURCE_TIER_CEILING = 2;
+
+function trackPriority(track: PlayerSubtitleInfo, preferEmbedded: boolean): number {
+  const tier = SOURCE_PRIORITY[track.source ?? "embedded"] ?? SOURCE_TIER_CEILING;
+  const source = preferEmbedded ? SOURCE_TIER_CEILING - tier : tier;
+  const belowSource = source * SOURCE_TIER_CEILING + (isBitmapCodec(track.codec) ? 1 : 0);
+  if (!preferEmbedded) return belowSource;
+  return (track.forced ? 1 : 0) * FULL_DIALOGUE_WEIGHT + belowSource;
 }
 
 function normalize(value: string | undefined | null): string {
@@ -106,10 +124,15 @@ export function sortSubtitlesBySource(tracks: PlayerSubtitleInfo[]): PlayerSubti
 /**
  * Find the best subtitle track index for a given language: exact tag, then
  * bare language, then another variant of the same language. Within a language
- * rank, prefer external > downloaded > embedded, then text over bitmap.
+ * rank, prefer external > downloaded > embedded (embedded first when the
+ * profile prefers embedded subtitles), then text over bitmap.
  * Returns the track's backend index (track.index) or -1 if no match.
  */
-export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], language: string): number {
+export function findPreferredSubtitleIndex(
+  tracks: PlayerSubtitleInfo[],
+  language: string,
+  preferEmbedded = false,
+): number {
   let bestIdx = -1;
   let bestLanguageRank = 3;
   let bestPriority = Infinity;
@@ -118,7 +141,7 @@ export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], languag
     if (!track) continue;
     const languageRank = languageMatchRank(track.language, language);
     if (languageRank < 0) continue;
-    const priority = trackPriority(track);
+    const priority = trackPriority(track, preferEmbedded);
     if (
       languageRank < bestLanguageRank ||
       (languageRank === bestLanguageRank && priority < bestPriority)
@@ -136,6 +159,7 @@ function findPreferredSubtitleIndexWithSignature(
   tracks: PlayerSubtitleInfo[],
   language: string,
   signature: PlayerSubtitleTrackSignature | null,
+  preferEmbedded: boolean,
 ): number {
   let bestTrack: PlayerSubtitleInfo | null = null;
   let bestScore = -1;
@@ -146,7 +170,7 @@ function findPreferredSubtitleIndexWithSignature(
     if (!track) continue;
     const languageRank = languageMatchRank(track.language, language);
     if (languageRank < 0) continue;
-    const priority = trackPriority(track);
+    const priority = trackPriority(track, preferEmbedded);
     const score = scoreSignatureFallback(track, signature);
     if (
       bestTrack === null ||
@@ -172,16 +196,20 @@ export interface SubtitleAutoSelectOptions {
   audioLanguage: string | null;
   profileLanguage: string | null;
   showForcedSubtitles: boolean;
+  /** The profile's `playback.prefer_embedded_subtitles` choice. */
+  preferEmbeddedSubtitles?: boolean;
 }
 
 function findForcedSubtitleIndex(
   tracks: PlayerSubtitleInfo[],
   language: string | null | undefined,
+  preferEmbedded: boolean,
 ): number | null {
   if (!language) return null;
   const match = findPreferredSubtitleIndex(
     tracks.filter((track) => track.forced),
     language,
+    preferEmbedded,
   );
   return match >= 0 ? match : null;
 }
@@ -199,6 +227,7 @@ export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): n
     audioLanguage,
     profileLanguage,
     showForcedSubtitles,
+    preferEmbeddedSubtitles = false,
   } = options;
   const signature = preferredTrackSignature ?? null;
 
@@ -216,26 +245,42 @@ export function resolveSubtitleAutoSelect(options: SubtitleAutoSelectOptions): n
 
   switch (mode) {
     case "off":
-      return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
+      return showForcedSubtitles
+        ? findForcedSubtitleIndex(tracks, effectiveAudioLang, preferEmbeddedSubtitles)
+        : null;
 
     case "always": {
       const exactMatch = findExactSubtitleSignatureMatch(tracks, signature);
       if (exactMatch !== null) return exactMatch;
       if (!preferredLanguage) return null;
-      const match = findPreferredSubtitleIndexWithSignature(tracks, preferredLanguage, signature);
+      const match = findPreferredSubtitleIndexWithSignature(
+        tracks,
+        preferredLanguage,
+        signature,
+        preferEmbeddedSubtitles,
+      );
       return match >= 0 ? match : null;
     }
 
     case "auto": {
       if (preferredLanguage === "") return null;
       if (effectiveProfileLang && sameLanguageCode(effectiveAudioLang, effectiveProfileLang)) {
-        return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
+        return showForcedSubtitles
+          ? findForcedSubtitleIndex(tracks, effectiveAudioLang, preferEmbeddedSubtitles)
+          : null;
       }
       const lang = preferredSubtitleLang ?? effectiveProfileLang;
       if (!lang) {
-        return showForcedSubtitles ? findForcedSubtitleIndex(tracks, effectiveAudioLang) : null;
+        return showForcedSubtitles
+          ? findForcedSubtitleIndex(tracks, effectiveAudioLang, preferEmbeddedSubtitles)
+          : null;
       }
-      const match = findPreferredSubtitleIndexWithSignature(tracks, lang, signature);
+      const match = findPreferredSubtitleIndexWithSignature(
+        tracks,
+        lang,
+        signature,
+        preferEmbeddedSubtitles,
+      );
       return match >= 0 ? match : null;
     }
 

@@ -33,31 +33,32 @@ type WatchDetailOutput struct {
 // WatchDetail is the playable detail of one item: its file versions, playback
 // variants, subtitles, markers, and the acting profile's progress.
 type WatchDetail struct {
-	ContentID                       string                  `json:"content_id" example:"movie:heat-1995"`
-	Type                            string                  `json:"type" doc:"movie, episode, audiobook, ebook" example:"movie"`
-	Title                           string                  `json:"title" example:"Heat"`
-	Year                            int                     `json:"year,omitempty" example:"1995"`
-	Overview                        string                  `json:"overview,omitempty"`
-	Versions                        []WatchFileVersion      `json:"versions" doc:"Every playable file of the item; empty, never null"`
-	PlaybackVariants                []WatchPlaybackVariant  `json:"playback_variants,omitempty" doc:"Logical watch choices, each spanning one or more ordered parts"`
-	Subtitles                       []WatchSubtitle         `json:"subtitles" doc:"Empty, never null"`
-	Intro                           *WatchMarker            `json:"intro,omitempty"`
-	Credits                         *WatchMarker            `json:"credits,omitempty"`
-	Recap                           *WatchMarker            `json:"recap,omitempty"`
-	Preview                         *WatchMarker            `json:"preview,omitempty"`
-	UserData                        *WatchUserData          `json:"user_data,omitempty" doc:"The acting profile's progress; absent without a profile or progress"`
-	SeriesID                        string                  `json:"series_id,omitempty" doc:"Owning series of an episode"`
-	SeriesTitle                     string                  `json:"series_title,omitempty"`
-	SeasonNumber                    int                     `json:"season_number,omitempty"`
-	EpisodeNumber                   int                     `json:"episode_number,omitempty"`
-	EffectiveSubtitleLanguage       *string                 `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the profile's preferences resolve to"`
-	EffectiveSubtitleMode           *string                 `json:"effective_subtitle_mode,omitempty"`
-	EffectiveShowForcedSubtitles    *bool                   `json:"effective_show_forced_subtitles,omitempty"`
-	EffectiveSubtitleTrackSignature *WatchSubtitleSignature `json:"effective_subtitle_track_signature,omitempty" doc:"The subtitle track the profile last chose on this item"`
-	EffectiveVersionResolution      *string                 `json:"effective_version_resolution,omitempty" doc:"The version resolution the profile last played"`
-	EffectiveVersionHDR             *bool                   `json:"effective_version_hdr,omitempty"`
-	EffectiveVersionCodecVideo      *string                 `json:"effective_version_codec_video,omitempty"`
-	EffectiveVersionEditionKey      *string                 `json:"effective_version_edition_key,omitempty"`
+	ContentID                        string                  `json:"content_id" example:"movie:heat-1995"`
+	Type                             string                  `json:"type" doc:"movie, episode, audiobook, ebook" example:"movie"`
+	Title                            string                  `json:"title" example:"Heat"`
+	Year                             int                     `json:"year,omitempty" example:"1995"`
+	Overview                         string                  `json:"overview,omitempty"`
+	Versions                         []WatchFileVersion      `json:"versions" doc:"Every playable file of the item; empty, never null"`
+	PlaybackVariants                 []WatchPlaybackVariant  `json:"playback_variants,omitempty" doc:"Logical watch choices, each spanning one or more ordered parts"`
+	Subtitles                        []WatchSubtitle         `json:"subtitles" doc:"Empty, never null"`
+	Intro                            *WatchMarker            `json:"intro,omitempty"`
+	Credits                          *WatchMarker            `json:"credits,omitempty"`
+	Recap                            *WatchMarker            `json:"recap,omitempty"`
+	Preview                          *WatchMarker            `json:"preview,omitempty"`
+	UserData                         *WatchUserData          `json:"user_data,omitempty" doc:"The acting profile's progress; absent without a profile or progress"`
+	SeriesID                         string                  `json:"series_id,omitempty" doc:"Owning series of an episode"`
+	SeriesTitle                      string                  `json:"series_title,omitempty"`
+	SeasonNumber                     int                     `json:"season_number,omitempty"`
+	EpisodeNumber                    int                     `json:"episode_number,omitempty"`
+	EffectiveSubtitleLanguage        *string                 `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the profile's preferences resolve to"`
+	EffectiveSubtitleMode            *string                 `json:"effective_subtitle_mode,omitempty"`
+	EffectiveShowForcedSubtitles     *bool                   `json:"effective_show_forced_subtitles,omitempty"`
+	EffectivePreferEmbeddedSubtitles *bool                   `json:"effective_prefer_embedded_subtitles,omitempty" doc:"Whether the profile's preferences prefer an embedded subtitle over an external sidecar in the same language"`
+	EffectiveSubtitleTrackSignature  *WatchSubtitleSignature `json:"effective_subtitle_track_signature,omitempty" doc:"The subtitle track the profile last chose on this item"`
+	EffectiveVersionResolution       *string                 `json:"effective_version_resolution,omitempty" doc:"The version resolution the profile last played"`
+	EffectiveVersionHDR              *bool                   `json:"effective_version_hdr,omitempty"`
+	EffectiveVersionCodecVideo       *string                 `json:"effective_version_codec_video,omitempty"`
+	EffectiveVersionEditionKey       *string                 `json:"effective_version_edition_key,omitempty"`
 }
 
 // WatchFileVersion is one playable file of the item.
@@ -379,6 +380,9 @@ func watchDetailOf(d *catalogpkg.WatchDetail) WatchDetail {
 	}
 	if d.HasEffectiveShowForcedSubtitles {
 		out.EffectiveShowForcedSubtitles = ptr(d.EffectiveShowForcedSubtitles)
+	}
+	if d.HasEffectivePreferEmbeddedSubtitles {
+		out.EffectivePreferEmbeddedSubtitles = ptr(d.EffectivePreferEmbeddedSubtitles)
 	}
 	if sig := d.EffectiveSubtitleTrackSignature; sig != nil {
 		out.EffectiveSubtitleTrackSignature = watchSignatureOf(*sig)

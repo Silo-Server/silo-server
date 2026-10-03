@@ -34,3 +34,13 @@ their own playback grants until they start or expire.
 
 These are Jellyfin compatibility behaviors. Native Silo client API contracts are
 unchanged.
+
+`playback.prefer_embedded_subtitles` moves the source comparison in the default
+subtitle selection. Jellyfin ranks an external sidecar above an embedded track
+regardless of language, which is Jellyfin 12.1's own order; with the preference
+on, the comparison inverts and moves below the language and default keys, so
+the embedded track wins only when the viewer's language and the track class
+already match. The preference is off by default, so a Jellyfin client sees
+Jellyfin's order until the profile asks for the embedded track. A Jellyfin
+client has no way to express this preference; the server reads it from the Silo
+profile.

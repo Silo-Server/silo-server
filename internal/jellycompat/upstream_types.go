@@ -127,6 +127,10 @@ type upstreamItemDetail struct {
 	SubtitleMode        string `json:"-"`
 	SubtitleModeSet     bool   `json:"-"`
 	ShowForcedSubtitles bool   `json:"-"`
+	// PreferEmbeddedSubtitles is the viewer's playback.prefer_embedded_subtitles
+	// choice: rank an embedded container track above an external sidecar when
+	// language and track class otherwise match.
+	PreferEmbeddedSubtitles bool `json:"-"`
 	// SubtitleTrackSignature is the track the viewer last picked for this
 	// series, or nil.
 	SubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"-"`

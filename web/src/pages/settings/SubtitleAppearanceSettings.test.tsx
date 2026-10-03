@@ -89,7 +89,7 @@ describe("SubtitleAppearanceSettings", () => {
 
   afterEach(cleanup);
 
-  it("reads the behavior triple from the contract in one batch", () => {
+  it("reads the behavior keys from the contract in one batch", () => {
     render(<SubtitleAppearanceSettings />);
 
     const [options] = mocks.useEffectiveSettings.mock.calls[0] ?? [];
@@ -97,7 +97,21 @@ describe("SubtitleAppearanceSettings", () => {
       SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
       SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
       SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+      SETTING_KEYS.PLAYBACK_PREFER_EMBEDDED_SUBTITLES,
     ]);
+  });
+
+  it("writes the embedded-subtitle preference at profile scope", () => {
+    render(<SubtitleAppearanceSettings />);
+
+    // Contract default is false, so the first click stores an explicit true.
+    fireEvent.click(screen.getByLabelText("Prefer embedded subtitles"));
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      key: SETTING_KEYS.PLAYBACK_PREFER_EMBEDDED_SUBTITLES,
+      value: true,
+      identity: { scope: "profile" },
+    });
   });
 
   it("writes forced subtitles at profile scope as a typed boolean", () => {

@@ -192,6 +192,8 @@ interface VideoPlayerProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
+  /** `playback.prefer_embedded_subtitles`: rank an embedded track above an external sidecar. */
+  preferEmbeddedSubtitles?: boolean;
   profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
   /**
@@ -358,6 +360,7 @@ export function VideoPlayer({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
+  preferEmbeddedSubtitles,
   profileLanguage,
   intro,
   introSkipMode = "ask",
@@ -2777,6 +2780,7 @@ export function VideoPlayer({
       audioLanguage: audioLang,
       profileLanguage: profileLanguage ?? null,
       showForcedSubtitles: showForcedSubtitles ?? true,
+      preferEmbeddedSubtitles: preferEmbeddedSubtitles ?? false,
     });
 
     if (match !== null) {
@@ -2793,6 +2797,7 @@ export function VideoPlayer({
     effectiveSubtitleTracks,
     subtitleMode,
     showForcedSubtitles,
+    preferEmbeddedSubtitles,
     profileLanguage,
     audioTracks,
     activeAudioIndex,

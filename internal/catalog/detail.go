@@ -300,13 +300,15 @@ type ItemDetail struct {
 
 	// Effective subtitle defaults for episode playback derived from
 	// profile, library, and series-level preferences.
-	EffectiveSubtitleLanguage       string                            `json:"-"`
-	HasEffectiveSubtitleLang        bool                              `json:"-"`
-	EffectiveSubtitleMode           string                            `json:"-"`
-	HasEffectiveSubtitleMode        bool                              `json:"-"`
-	EffectiveShowForcedSubtitles    bool                              `json:"-"`
-	HasEffectiveShowForcedSubtitles bool                              `json:"-"`
-	EffectiveSubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
+	EffectiveSubtitleLanguage           string                            `json:"-"`
+	HasEffectiveSubtitleLang            bool                              `json:"-"`
+	EffectiveSubtitleMode               string                            `json:"-"`
+	HasEffectiveSubtitleMode            bool                              `json:"-"`
+	EffectiveShowForcedSubtitles        bool                              `json:"-"`
+	HasEffectiveShowForcedSubtitles     bool                              `json:"-"`
+	EffectivePreferEmbeddedSubtitles    bool                              `json:"-"`
+	HasEffectivePreferEmbeddedSubtitles bool                              `json:"-"`
+	EffectiveSubtitleTrackSignature     *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
 
 	// Effective version defaults for episode playback derived from
 	// series-level sticky preferences.
@@ -633,43 +635,46 @@ type SeasonUserData struct {
 
 // WatchDetail is the playback-oriented payload for /watch/{id}.
 type WatchDetail struct {
-	ContentID                       string                            `json:"content_id"`
-	Type                            string                            `json:"type"`
-	Title                           string                            `json:"title"`
-	Year                            int                               `json:"year,omitempty"`
-	Overview                        string                            `json:"overview,omitempty"`
-	EffectiveSubtitleLanguage       string                            `json:"-"`
-	HasEffectiveSubtitleLang        bool                              `json:"-"`
-	EffectiveSubtitleMode           string                            `json:"-"`
-	HasEffectiveSubtitleMode        bool                              `json:"-"`
-	EffectiveShowForcedSubtitles    bool                              `json:"-"`
-	HasEffectiveShowForcedSubtitles bool                              `json:"-"`
-	Versions                        []FileVersion                     `json:"versions"`
-	PlaybackVariants                []PlaybackVariant                 `json:"playback_variants,omitempty"`
-	Subtitles                       []SubtitleInfo                    `json:"subtitles"`
-	Intro                           *Marker                           `json:"intro,omitempty"`
-	Credits                         *Marker                           `json:"credits,omitempty"`
-	Recap                           *Marker                           `json:"recap,omitempty"`
-	Preview                         *Marker                           `json:"preview,omitempty"`
-	UserData                        *SeasonUserData                   `json:"user_data,omitempty"`
-	SeriesID                        string                            `json:"series_id,omitempty"`
-	SeriesTitle                     string                            `json:"series_title,omitempty"`
-	SeasonNumber                    int                               `json:"season_number,omitempty"`
-	EpisodeNumber                   int                               `json:"episode_number,omitempty"`
-	EffectiveSubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
-	EffectiveVersionResolution      *string                           `json:"effective_version_resolution,omitempty"`
-	EffectiveVersionHDR             *bool                             `json:"effective_version_hdr,omitempty"`
-	EffectiveVersionCodecVideo      *string                           `json:"effective_version_codec_video,omitempty"`
-	EffectiveVersionEditionKey      *string                           `json:"effective_version_edition_key,omitempty"`
+	ContentID                           string                            `json:"content_id"`
+	Type                                string                            `json:"type"`
+	Title                               string                            `json:"title"`
+	Year                                int                               `json:"year,omitempty"`
+	Overview                            string                            `json:"overview,omitempty"`
+	EffectiveSubtitleLanguage           string                            `json:"-"`
+	HasEffectiveSubtitleLang            bool                              `json:"-"`
+	EffectiveSubtitleMode               string                            `json:"-"`
+	HasEffectiveSubtitleMode            bool                              `json:"-"`
+	EffectiveShowForcedSubtitles        bool                              `json:"-"`
+	HasEffectiveShowForcedSubtitles     bool                              `json:"-"`
+	EffectivePreferEmbeddedSubtitles    bool                              `json:"-"`
+	HasEffectivePreferEmbeddedSubtitles bool                              `json:"-"`
+	Versions                            []FileVersion                     `json:"versions"`
+	PlaybackVariants                    []PlaybackVariant                 `json:"playback_variants,omitempty"`
+	Subtitles                           []SubtitleInfo                    `json:"subtitles"`
+	Intro                               *Marker                           `json:"intro,omitempty"`
+	Credits                             *Marker                           `json:"credits,omitempty"`
+	Recap                               *Marker                           `json:"recap,omitempty"`
+	Preview                             *Marker                           `json:"preview,omitempty"`
+	UserData                            *SeasonUserData                   `json:"user_data,omitempty"`
+	SeriesID                            string                            `json:"series_id,omitempty"`
+	SeriesTitle                         string                            `json:"series_title,omitempty"`
+	SeasonNumber                        int                               `json:"season_number,omitempty"`
+	EpisodeNumber                       int                               `json:"episode_number,omitempty"`
+	EffectiveSubtitleTrackSignature     *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
+	EffectiveVersionResolution          *string                           `json:"effective_version_resolution,omitempty"`
+	EffectiveVersionHDR                 *bool                             `json:"effective_version_hdr,omitempty"`
+	EffectiveVersionCodecVideo          *string                           `json:"effective_version_codec_video,omitempty"`
+	EffectiveVersionEditionKey          *string                           `json:"effective_version_edition_key,omitempty"`
 }
 
 func (d ItemDetail) MarshalJSON() ([]byte, error) {
 	type itemDetailAlias ItemDetail
 	payload := struct {
 		itemDetailAlias
-		EffectiveSubtitleLanguage    *string `json:"effective_subtitle_language,omitempty"`
-		EffectiveSubtitleMode        *string `json:"effective_subtitle_mode,omitempty"`
-		EffectiveShowForcedSubtitles *bool   `json:"effective_show_forced_subtitles,omitempty"`
+		EffectiveSubtitleLanguage        *string `json:"effective_subtitle_language,omitempty"`
+		EffectiveSubtitleMode            *string `json:"effective_subtitle_mode,omitempty"`
+		EffectiveShowForcedSubtitles     *bool   `json:"effective_show_forced_subtitles,omitempty"`
+		EffectivePreferEmbeddedSubtitles *bool   `json:"effective_prefer_embedded_subtitles,omitempty"`
 	}{
 		itemDetailAlias: itemDetailAlias(d),
 	}
@@ -682,6 +687,9 @@ func (d ItemDetail) MarshalJSON() ([]byte, error) {
 	if d.HasEffectiveShowForcedSubtitles {
 		payload.EffectiveShowForcedSubtitles = &d.EffectiveShowForcedSubtitles
 	}
+	if d.HasEffectivePreferEmbeddedSubtitles {
+		payload.EffectivePreferEmbeddedSubtitles = &d.EffectivePreferEmbeddedSubtitles
+	}
 	return json.Marshal(payload)
 }
 
@@ -689,9 +697,10 @@ func (d WatchDetail) MarshalJSON() ([]byte, error) {
 	type watchDetailAlias WatchDetail
 	payload := struct {
 		watchDetailAlias
-		EffectiveSubtitleLanguage    *string `json:"effective_subtitle_language,omitempty"`
-		EffectiveSubtitleMode        *string `json:"effective_subtitle_mode,omitempty"`
-		EffectiveShowForcedSubtitles *bool   `json:"effective_show_forced_subtitles,omitempty"`
+		EffectiveSubtitleLanguage        *string `json:"effective_subtitle_language,omitempty"`
+		EffectiveSubtitleMode            *string `json:"effective_subtitle_mode,omitempty"`
+		EffectiveShowForcedSubtitles     *bool   `json:"effective_show_forced_subtitles,omitempty"`
+		EffectivePreferEmbeddedSubtitles *bool   `json:"effective_prefer_embedded_subtitles,omitempty"`
 	}{
 		watchDetailAlias: watchDetailAlias(d),
 	}
@@ -704,17 +713,22 @@ func (d WatchDetail) MarshalJSON() ([]byte, error) {
 	if d.HasEffectiveShowForcedSubtitles {
 		payload.EffectiveShowForcedSubtitles = &d.EffectiveShowForcedSubtitles
 	}
+	if d.HasEffectivePreferEmbeddedSubtitles {
+		payload.EffectivePreferEmbeddedSubtitles = &d.EffectivePreferEmbeddedSubtitles
+	}
 	return json.Marshal(payload)
 }
 
 type subtitleDefaults struct {
-	Language       string
-	HasLanguage    bool
-	Mode           string
-	HasMode        bool
-	ShowForced     bool
-	HasShowForced  bool
-	TrackSignature *userstore.SubtitleTrackSignature
+	Language          string
+	HasLanguage       bool
+	Mode              string
+	HasMode           bool
+	ShowForced        bool
+	HasShowForced     bool
+	PreferEmbedded    bool
+	HasPreferEmbedded bool
+	TrackSignature    *userstore.SubtitleTrackSignature
 }
 
 func (d subtitleDefaults) applyToItemDetail(detail *ItemDetail) {
@@ -724,6 +738,8 @@ func (d subtitleDefaults) applyToItemDetail(detail *ItemDetail) {
 	detail.HasEffectiveSubtitleMode = d.HasMode
 	detail.EffectiveShowForcedSubtitles = d.ShowForced
 	detail.HasEffectiveShowForcedSubtitles = d.HasShowForced
+	detail.EffectivePreferEmbeddedSubtitles = d.PreferEmbedded
+	detail.HasEffectivePreferEmbeddedSubtitles = d.HasPreferEmbedded
 	detail.EffectiveSubtitleTrackSignature = d.TrackSignature
 }
 
@@ -734,6 +750,8 @@ func (d subtitleDefaults) applyToWatchDetail(detail *WatchDetail) {
 	detail.HasEffectiveSubtitleMode = d.HasMode
 	detail.EffectiveShowForcedSubtitles = d.ShowForced
 	detail.HasEffectiveShowForcedSubtitles = d.HasShowForced
+	detail.EffectivePreferEmbeddedSubtitles = d.PreferEmbedded
+	detail.HasEffectivePreferEmbeddedSubtitles = d.HasPreferEmbedded
 	detail.EffectiveSubtitleTrackSignature = d.TrackSignature
 }
 
@@ -3405,6 +3423,7 @@ func (s *DetailService) effectiveSubtitleDefaults(
 		settingskeys.PlaybackSubtitleLanguage,
 		settingskeys.PlaybackSubtitleMode,
 		settingskeys.PlaybackShowForcedSubtitles,
+		settingskeys.PlaybackPreferEmbeddedSubtitles,
 	}, nil)
 	if err == nil {
 		for _, eff := range resolved {
@@ -3430,6 +3449,12 @@ func (s *DetailService) effectiveSubtitleDefaults(
 				if json.Unmarshal(eff.Value, &forced) == nil && stored {
 					defaults.ShowForced = forced
 					defaults.HasShowForced = true
+				}
+			case settingskeys.PlaybackPreferEmbeddedSubtitles:
+				var preferEmbedded bool
+				if json.Unmarshal(eff.Value, &preferEmbedded) == nil && stored {
+					defaults.PreferEmbedded = preferEmbedded
+					defaults.HasPreferEmbedded = true
 				}
 			}
 		}

@@ -346,49 +346,50 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
-	SortTitle                       string                               `json:"sort_title,omitempty"`
-	OriginalTitle                   string                               `json:"original_title,omitempty"`
-	Tagline                         string                               `json:"tagline,omitempty"`
-	PendingTranslationLanguage      string                               `json:"pending_translation_language,omitempty" doc:"A translation of the overview is queued for this language"`
-	ImdbID                          string                               `json:"imdb_id,omitempty"`
-	TmdbID                          string                               `json:"tmdb_id,omitempty"`
-	TvdbID                          string                               `json:"tvdb_id,omitempty"`
-	Cast                            []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
-	Crew                            []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
-	Countries                       []string                             `json:"countries,omitempty"`
-	LockedFields                    []int                                `json:"locked_fields,omitempty" doc:"Metadata fields an editor pinned"`
-	FirstAirDate                    *string                              `json:"first_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	AirTime                         *string                              `json:"air_time,omitempty"`
-	AirTimezone                     *string                              `json:"air_timezone,omitempty"`
-	SeasonCount                     *int                                 `json:"season_count,omitempty"`
-	EpisodeCount                    *int                                 `json:"episode_count,omitempty"`
-	AirDate                         *string                              `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
-	IsSpecials                      bool                                 `json:"is_specials,omitempty"`
-	UserData                        *WatchRollup                         `json:"user_data,omitempty"`
-	UserRating                      *int                                 `json:"user_rating,omitempty"`
-	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
-	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
-	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
-	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
-	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
-	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
-	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
-	Intro                           *catalogpkg.Marker                   `json:"intro,omitempty"`
-	Credits                         *catalogpkg.Marker                   `json:"credits,omitempty"`
-	Recap                           *catalogpkg.Marker                   `json:"recap,omitempty"`
-	Preview                         *catalogpkg.Marker                   `json:"preview,omitempty"`
-	EffectiveSubtitleLanguage       *string                              `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the viewer's preferences resolve to for this item"`
-	EffectiveSubtitleMode           *string                              `json:"effective_subtitle_mode,omitempty" doc:"The subtitle mode the viewer's preferences resolve to for this item"`
-	EffectiveShowForcedSubtitles    *bool                                `json:"effective_show_forced_subtitles,omitempty" doc:"Whether forced subtitles show for this item under the viewer's preferences"`
-	EffectiveSubtitleTrackSignature *WatchSubtitleSignature              `json:"effective_subtitle_track_signature,omitempty"`
-	EffectiveVersionResolution      *string                              `json:"effective_version_resolution,omitempty"`
-	EffectiveVersionHDR             *bool                                `json:"effective_version_hdr,omitempty"`
-	EffectiveVersionCodecVideo      *string                              `json:"effective_version_codec_video,omitempty"`
-	EffectiveVersionEditionKey      *string                              `json:"effective_version_edition_key,omitempty"`
-	Audiobook                       *catalogpkg.AudiobookDetailExtension `json:"audiobook,omitempty"`
-	Ebook                           *catalogpkg.EbookDetailExtension     `json:"ebook,omitempty"`
-	Manga                           *catalogpkg.MangaDetailExtension     `json:"manga,omitempty"`
+	SortTitle                        string                               `json:"sort_title,omitempty"`
+	OriginalTitle                    string                               `json:"original_title,omitempty"`
+	Tagline                          string                               `json:"tagline,omitempty"`
+	PendingTranslationLanguage       string                               `json:"pending_translation_language,omitempty" doc:"A translation of the overview is queued for this language"`
+	ImdbID                           string                               `json:"imdb_id,omitempty"`
+	TmdbID                           string                               `json:"tmdb_id,omitempty"`
+	TvdbID                           string                               `json:"tvdb_id,omitempty"`
+	Cast                             []catalogpkg.CastCredit              `json:"cast" doc:"Empty, never null"`
+	Crew                             []catalogpkg.CrewCredit              `json:"crew" doc:"Empty, never null"`
+	Countries                        []string                             `json:"countries,omitempty"`
+	LockedFields                     []int                                `json:"locked_fields,omitempty" doc:"Metadata fields an editor pinned"`
+	FirstAirDate                     *string                              `json:"first_air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	AirTime                          *string                              `json:"air_time,omitempty"`
+	AirTimezone                      *string                              `json:"air_timezone,omitempty"`
+	SeasonCount                      *int                                 `json:"season_count,omitempty"`
+	EpisodeCount                     *int                                 `json:"episode_count,omitempty"`
+	AirDate                          *string                              `json:"air_date,omitempty" doc:"Calendar date, YYYY-MM-DD"`
+	IsSpecials                       bool                                 `json:"is_specials,omitempty"`
+	UserData                         *WatchRollup                         `json:"user_data,omitempty"`
+	UserRating                       *int                                 `json:"user_rating,omitempty"`
+	Versions                         []FileVersion                        `json:"versions" doc:"Empty, never null"`
+	PlaybackVariants                 []PlaybackVariant                    `json:"playback_variants,omitempty"`
+	Videos                           []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
+	RatingSources                    []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
+	Ratings                          []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
+	Extras                           []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
+	FolderPaths                      []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
+	Subtitles                        []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
+	Intro                            *catalogpkg.Marker                   `json:"intro,omitempty"`
+	Credits                          *catalogpkg.Marker                   `json:"credits,omitempty"`
+	Recap                            *catalogpkg.Marker                   `json:"recap,omitempty"`
+	Preview                          *catalogpkg.Marker                   `json:"preview,omitempty"`
+	EffectiveSubtitleLanguage        *string                              `json:"effective_subtitle_language,omitempty" doc:"The subtitle language the viewer's preferences resolve to for this item"`
+	EffectiveSubtitleMode            *string                              `json:"effective_subtitle_mode,omitempty" doc:"The subtitle mode the viewer's preferences resolve to for this item"`
+	EffectiveShowForcedSubtitles     *bool                                `json:"effective_show_forced_subtitles,omitempty" doc:"Whether forced subtitles show for this item under the viewer's preferences"`
+	EffectivePreferEmbeddedSubtitles *bool                                `json:"effective_prefer_embedded_subtitles,omitempty" doc:"Whether the viewer's preferences prefer an embedded subtitle over an external sidecar for this item"`
+	EffectiveSubtitleTrackSignature  *WatchSubtitleSignature              `json:"effective_subtitle_track_signature,omitempty"`
+	EffectiveVersionResolution       *string                              `json:"effective_version_resolution,omitempty"`
+	EffectiveVersionHDR              *bool                                `json:"effective_version_hdr,omitempty"`
+	EffectiveVersionCodecVideo       *string                              `json:"effective_version_codec_video,omitempty"`
+	EffectiveVersionEditionKey       *string                              `json:"effective_version_edition_key,omitempty"`
+	Audiobook                        *catalogpkg.AudiobookDetailExtension `json:"audiobook,omitempty"`
+	Ebook                            *catalogpkg.EbookDetailExtension     `json:"ebook,omitempty"`
+	Manga                            *catalogpkg.MangaDetailExtension     `json:"manga,omitempty"`
 }
 
 // CatalogRatingSource is one source's rating of an item.
@@ -1351,6 +1352,9 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	}
 	if d.HasEffectiveShowForcedSubtitles {
 		out.EffectiveShowForcedSubtitles = &d.EffectiveShowForcedSubtitles
+	}
+	if d.HasEffectivePreferEmbeddedSubtitles {
+		out.EffectivePreferEmbeddedSubtitles = &d.EffectivePreferEmbeddedSubtitles
 	}
 	return out
 }

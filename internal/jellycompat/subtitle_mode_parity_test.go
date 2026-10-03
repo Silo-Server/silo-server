@@ -67,7 +67,7 @@ func TestCompatDefaultSubtitleStreamIndexMatchesJellyfin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := compatDefaultSubtitleStreamIndex(tc.candidates, tc.preferred, tc.mode, tc.audio)
+			got := compatDefaultSubtitleStreamIndex(tc.candidates, tc.preferred, tc.mode, tc.audio, false)
 			if tc.want < 0 {
 				if got != nil {
 					t.Fatalf("got %d, want none", *got)

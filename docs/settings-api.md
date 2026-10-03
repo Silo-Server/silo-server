@@ -1046,3 +1046,34 @@ Native adoption is tracked in [Apple #267](https://github.com/Silo-Server/silo-a
 and [Android #300](https://github.com/Silo-Server/silo-android/issues/300).
 Jellyfin clients keep their own seek controls; this does not extend the
 Jellyfin protocol.
+
+## Subtitle source preference
+
+Revision 17 adds `playback.prefer_embedded_subtitles`, a boolean that defaults
+to `false`. It is allowed at `profile` and `profile_device` scope and resolves
+device-scope first, like `playback.subtitle_appearance`; an unset value
+resolves to the contract default.
+
+Every client ranks an external sidecar above an embedded container track when
+both match the chosen language, which is what Jellyfin's 12.1
+`MediaStreamSelector` does. An external file was cut for one release of the
+title and can play out of sync, while the embedded track cannot drift from the
+picture. This preference is the viewer's opt-in to the embedded track instead.
+
+The preference re-ranks only the source tier of auto-selection:
+
+- Language match still comes first, so an embedded French track does not beat
+  an external English one.
+- A full-dialogue track still beats a signs-only (forced) track, so turning the
+  preference on cannot make a forced embedded track the default while the file
+  still offers a full external one.
+- Text still beats bitmap within the same source tier.
+- An explicit track choice and the remembered per-series track signature still
+  win over the preference.
+
+Read the value from `GET /api/v2/settings/values/effective`, or from
+`effective_prefer_embedded_subtitles` on item and watch detail, which the
+server resolves through the same ladder. The server applies it on the one
+surface where it picks the track itself, Jellyfin compatibility; native clients
+apply it in their own auto-selection, because the native playback contract
+publishes the inventory and leaves the choice to the client.

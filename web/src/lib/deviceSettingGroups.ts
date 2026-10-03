@@ -48,6 +48,7 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
   "playback.subtitle_language": "subtitles",
   "playback.subtitle_mode": "subtitles",
   "playback.show_forced_subtitles": "subtitles",
+  "playback.prefer_embedded_subtitles": "subtitles",
   "playback.subtitle_appearance": "subtitles",
   "playback.preferred_quality": "picture",
   "playback.max_bitrate_kbps": "picture",

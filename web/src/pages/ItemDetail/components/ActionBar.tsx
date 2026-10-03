@@ -242,6 +242,7 @@ export interface ActionBarProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
+  preferEmbeddedSubtitles?: boolean;
   profileLanguage?: string | null;
 }
 
@@ -301,6 +302,7 @@ export default function ActionBar({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
+  preferEmbeddedSubtitles,
   profileLanguage,
 }: ActionBarProps) {
   const navigate = useNavigate();
@@ -1070,6 +1072,7 @@ export default function ActionBar({
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={subtitleMode}
               showForcedSubtitles={showForcedSubtitles}
+              preferEmbeddedSubtitles={preferEmbeddedSubtitles}
               profileLanguage={profileLanguage}
               activeAudioTrackIndex={
                 audioSelectionMode === "explicit" ? explicitAudioTrackIndex : null

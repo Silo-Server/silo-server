@@ -282,6 +282,8 @@ export interface WatchPageProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
+  /** `playback.prefer_embedded_subtitles`: rank an embedded track above an external sidecar. */
+  preferEmbeddedSubtitles?: boolean;
   profileLanguage?: string | null;
   intro: PlayerTimeRange | null;
   /** null while the connected server's answer is still unknown; see VideoPlayer. */

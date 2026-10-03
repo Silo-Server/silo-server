@@ -418,6 +418,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
               showForcedSubtitles={item.effective_show_forced_subtitles}
+              preferEmbeddedSubtitles={item.effective_prefer_embedded_subtitles}
               profileLanguage={currentProfile?.language}
             />
           }

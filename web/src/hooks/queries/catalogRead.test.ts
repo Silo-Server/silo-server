@@ -83,6 +83,7 @@ describe("catalog item reads on the v2 contract", () => {
       effective_subtitle_language: "eng",
       effective_subtitle_mode: "off",
       effective_show_forced_subtitles: false,
+      effective_prefer_embedded_subtitles: true,
       effective_subtitle_track_signature: signature,
       subtitles: [{ index: 3, language: "eng", forced: false }],
     });
@@ -92,6 +93,7 @@ describe("catalog item reads on the v2 contract", () => {
     expect(detail.effective_subtitle_language).toBe("eng");
     expect(detail.effective_subtitle_mode).toBe("off");
     expect(detail.effective_show_forced_subtitles).toBe(false);
+    expect(detail.effective_prefer_embedded_subtitles).toBe(true);
     expect(detail.effective_subtitle_track_signature).toEqual(signature);
     expect(detail.subtitles[0]).toMatchObject({ codec: "", title: "", forced: false });
   });

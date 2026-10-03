@@ -18630,6 +18630,8 @@ export interface components {
       /** Format: double */
       duration_seconds?: number;
       ebook?: components["schemas"]["EbookDetailExtension"];
+      /** @description Whether the viewer's preferences prefer an embedded subtitle over an external sidecar for this item */
+      effective_prefer_embedded_subtitles?: boolean;
       /** @description Whether forced subtitles show for this item under the viewer's preferences */
       effective_show_forced_subtitles?: boolean;
       /** @description The subtitle language the viewer's preferences resolve to for this item */
@@ -28454,6 +28456,8 @@ export interface components {
       /** @example movie:heat-1995 */
       content_id: string;
       credits?: components["schemas"]["WatchMarker"];
+      /** @description Whether the profile's preferences prefer an embedded subtitle over an external sidecar in the same language */
+      effective_prefer_embedded_subtitles?: boolean;
       effective_show_forced_subtitles?: boolean;
       /** @description The subtitle language the profile's preferences resolve to */
       effective_subtitle_language?: string;

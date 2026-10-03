@@ -19981,6 +19981,10 @@
           "ebook": {
             "$ref": "#/components/schemas/EbookDetailExtension"
           },
+          "effective_prefer_embedded_subtitles": {
+            "description": "Whether the viewer's preferences prefer an embedded subtitle over an external sidecar for this item",
+            "type": "boolean"
+          },
           "effective_show_forced_subtitles": {
             "description": "Whether forced subtitles show for this item under the viewer's preferences",
             "type": "boolean"
@@ -44140,6 +44144,10 @@
           },
           "credits": {
             "$ref": "#/components/schemas/WatchMarker"
+          },
+          "effective_prefer_embedded_subtitles": {
+            "description": "Whether the profile's preferences prefer an embedded subtitle over an external sidecar in the same language",
+            "type": "boolean"
           },
           "effective_show_forced_subtitles": {
             "type": "boolean"

@@ -44,6 +44,7 @@ const BEHAVIOR_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
   SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
   SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+  SETTING_KEYS.PLAYBACK_PREFER_EMBEDDED_SUBTITLES,
 ];
 
 interface ColorPaletteProps {
@@ -194,6 +195,9 @@ export default function SubtitleAppearanceSettings() {
     (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as string | undefined) ?? "auto";
   const showForcedSubtitles =
     (behavior?.[SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES]?.value as boolean | undefined) ?? true;
+  const preferEmbeddedSubtitles =
+    (behavior?.[SETTING_KEYS.PLAYBACK_PREFER_EMBEDDED_SUBTITLES]?.value as boolean | undefined) ??
+    false;
 
   const [draftState, setDraftState] = useState<{
     key: string;
@@ -340,6 +344,23 @@ export default function SubtitleAppearanceSettings() {
               disabled={behaviorPending}
               onCheckedChange={(checked) =>
                 saveBehavior(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, checked)
+              }
+            />
+          )}
+        </SettingRow>
+
+        <SettingRow
+          label="Prefer embedded subtitles"
+          description="Start on the subtitle track stored in the video file when it matches your language, instead of an external subtitle file in the same language. External files are cut for one release and can play out of sync."
+        >
+          {({ id, descriptionId }) => (
+            <Switch
+              id={id}
+              aria-describedby={descriptionId}
+              checked={preferEmbeddedSubtitles}
+              disabled={behaviorPending}
+              onCheckedChange={(checked) =>
+                saveBehavior(SETTING_KEYS.PLAYBACK_PREFER_EMBEDDED_SUBTITLES, checked)
               }
             />
           )}

@@ -160,6 +160,7 @@ describe("resolveSubtitleAutoSelect", () => {
     audioLanguage?: string | null;
     profileLanguage?: string | null;
     showForcedSubtitles?: boolean;
+    preferEmbeddedSubtitles?: boolean;
   }) {
     return {
       mode: overrides.mode,
@@ -168,6 +169,7 @@ describe("resolveSubtitleAutoSelect", () => {
       audioLanguage: overrides.audioLanguage ?? null,
       profileLanguage: overrides.profileLanguage ?? null,
       showForcedSubtitles: overrides.showForcedSubtitles ?? true,
+      preferEmbeddedSubtitles: overrides.preferEmbeddedSubtitles ?? false,
     };
   }
 
@@ -551,5 +553,87 @@ describe("bitmap (PGS) codec deprioritization", () => {
         showForcedSubtitles: true,
       }),
     ).toBe(1);
+  });
+});
+
+describe("preferEmbeddedSubtitles", () => {
+  const both = [
+    makeSub({ index: 0, source: "external", language: "en", codec: "srt" }),
+    makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
+  ];
+
+  it("leaves the external sidecar first while the preference is off", () => {
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "always",
+        tracks: both,
+        preferredLanguage: "en",
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("starts on the embedded track when the preference is on", () => {
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "always",
+        tracks: both,
+        preferredLanguage: "en",
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+        preferEmbeddedSubtitles: true,
+      }),
+    ).toBe(1);
+  });
+
+  it("does not let the preference outrank the preferred language", () => {
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "always",
+        tracks: [
+          makeSub({ index: 0, source: "external", language: "en", codec: "srt" }),
+          makeSub({ index: 1, source: "embedded", language: "fr", codec: "subrip" }),
+        ],
+        preferredLanguage: "en",
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+        preferEmbeddedSubtitles: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("does not let the preference outrank a full-dialogue track over a forced one", () => {
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "always",
+        tracks: [
+          makeSub({ index: 0, source: "external", language: "en", codec: "srt" }),
+          makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip", forced: true }),
+        ],
+        preferredLanguage: "en",
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+        preferEmbeddedSubtitles: true,
+      }),
+    ).toBe(0);
+  });
+
+  it("still selects an embedded bitmap track that is the only language match", () => {
+    expect(
+      resolveSubtitleAutoSelect({
+        mode: "always",
+        tracks: [makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs" })],
+        preferredLanguage: "en",
+        audioLanguage: "en",
+        profileLanguage: "en",
+        showForcedSubtitles: true,
+        preferEmbeddedSubtitles: true,
+      }),
+    ).toBe(0);
   });
 });

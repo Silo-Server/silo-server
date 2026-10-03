@@ -324,6 +324,7 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     effective_subtitle_language: item.effective_subtitle_language,
     effective_subtitle_mode: item.effective_subtitle_mode,
     effective_show_forced_subtitles: item.effective_show_forced_subtitles,
+    effective_prefer_embedded_subtitles: item.effective_prefer_embedded_subtitles,
     effective_subtitle_track_signature: item.effective_subtitle_track_signature,
     effective_version_resolution: item.effective_version_resolution,
     effective_version_hdr: item.effective_version_hdr,

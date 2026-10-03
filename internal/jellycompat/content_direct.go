@@ -1493,6 +1493,9 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 	detail.SubtitleModeSet = d.HasEffectiveSubtitleMode
 	// playback.show_forced_subtitles defaults to true.
 	detail.ShowForcedSubtitles = !d.HasEffectiveShowForcedSubtitles || d.EffectiveShowForcedSubtitles
+	// playback.prefer_embedded_subtitles defaults to false, the external-first
+	// ranking Jellyfin itself uses.
+	detail.PreferEmbeddedSubtitles = d.HasEffectivePreferEmbeddedSubtitles && d.EffectivePreferEmbeddedSubtitles
 	detail.SubtitleTrackSignature = d.EffectiveSubtitleTrackSignature
 	return detail
 }

@@ -140,23 +140,39 @@ func compatWithoutForcedSubtitles(candidates []compatSubtitleCandidate) []compat
 // MediaStreamSelector.GetDefaultSubtitleStreamIndex. preferred is the user's
 // subtitle language preference (empty matches any language, as upstream);
 // audioLanguage is the language of the audio the client starts with.
-func compatDefaultSubtitleStreamIndex(candidates []compatSubtitleCandidate, preferred []string, mode, audioLanguage string) *int {
+func compatDefaultSubtitleStreamIndex(candidates []compatSubtitleCandidate, preferred []string, mode, audioLanguage string, preferEmbedded bool) *int {
 	if mode == compatSubtitleNone {
 		return nil
 	}
 	matches := func(language string) bool { return compatMatchesPreferredLanguage(language, preferred) }
+	isEmbedded := func(c compatSubtitleCandidate) bool { return c.Source == playback.SubtitleSourceEmbeddedV3 }
 	// Sort: external > default > preferred full > preferred forced >
 	// undefined forced > forced. The sort is stable, as LINQ's OrderBy is.
+	//
+	// With playback.prefer_embedded_subtitles the source comparison inverts and
+	// moves below the language and default keys: the viewer asked for the
+	// embedded track *when everything else matches*, so an embedded French track
+	// must not beat an external English one, and a full track must
+	// still beat a signs-only one. It is deliberately not the leading key.
+	keys := make([]func(compatSubtitleCandidate) bool, 0, 7)
+	if !preferEmbedded {
+		keys = append(keys, func(c compatSubtitleCandidate) bool { return c.External })
+	}
+	keys = append(keys,
+		func(c compatSubtitleCandidate) bool { return c.Default },
+		func(c compatSubtitleCandidate) bool { return !c.Forced && matches(c.Language) },
+	)
+	if preferEmbedded {
+		keys = append(keys, isEmbedded)
+	}
+	keys = append(keys,
+		func(c compatSubtitleCandidate) bool { return c.Forced && matches(c.Language) },
+		func(c compatSubtitleCandidate) bool { return c.Forced && compatLanguageUndefined(c.Language) },
+		func(c compatSubtitleCandidate) bool { return c.Forced },
+	)
 	sorted := slices.Clone(candidates)
 	slices.SortStableFunc(sorted, func(a, b compatSubtitleCandidate) int {
-		for _, key := range []func(compatSubtitleCandidate) bool{
-			func(c compatSubtitleCandidate) bool { return c.External },
-			func(c compatSubtitleCandidate) bool { return c.Default },
-			func(c compatSubtitleCandidate) bool { return !c.Forced && matches(c.Language) },
-			func(c compatSubtitleCandidate) bool { return c.Forced && matches(c.Language) },
-			func(c compatSubtitleCandidate) bool { return c.Forced && compatLanguageUndefined(c.Language) },
-			func(c compatSubtitleCandidate) bool { return c.Forced },
-		} {
+		for _, key := range keys {
 			if ka, kb := key(a), key(b); ka != kb {
 				if ka {
 					return -1
@@ -204,6 +220,15 @@ func compatDefaultSubtitleStreamIndex(candidates []compatSubtitleCandidate, pref
 
 	switch mode {
 	case compatSubtitleDefault:
+		if preferEmbedded {
+			// The Jellyfin rule selects the first external, default or forced
+			// candidate; an embedded track that is none of those would be
+			// skipped even though it now sorts first. Take the best embedded
+			// track when one exists and fall back to the Jellyfin rule.
+			if index := first(isEmbedded); index != nil {
+				return index
+			}
+		}
 		return first(func(c compatSubtitleCandidate) bool { return c.External || c.Default || c.Forced })
 	case compatSubtitleSmart:
 		// Subtitles only when the audio is not in a preferred subtitle
@@ -288,7 +313,7 @@ func compatDetailSubtitleStreamIndex(detail *upstreamItemDetail, version catalog
 	if !detail.ShowForcedSubtitles {
 		candidates = compatWithoutForcedSubtitles(candidates)
 	}
-	return compatDefaultSubtitleStreamIndex(candidates, preferred, mode, compatAudioTrack(version, audioIndex).Language)
+	return compatDefaultSubtitleStreamIndex(candidates, preferred, mode, compatAudioTrack(version, audioIndex).Language, detail.PreferEmbeddedSubtitles)
 }
 
 // compatSignatureSubtitleIndex returns the first candidate matching every

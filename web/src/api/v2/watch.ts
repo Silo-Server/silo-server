@@ -130,6 +130,7 @@ export function watchDetailFromV2(detail: WatchDetailV2): WatchDetail {
     effective_subtitle_language: detail.effective_subtitle_language,
     effective_subtitle_mode: detail.effective_subtitle_mode,
     effective_show_forced_subtitles: detail.effective_show_forced_subtitles,
+    effective_prefer_embedded_subtitles: detail.effective_prefer_embedded_subtitles,
     effective_subtitle_track_signature: detail.effective_subtitle_track_signature,
     effective_version_resolution: detail.effective_version_resolution,
     effective_version_hdr: detail.effective_version_hdr,

@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 16;
+export const SETTINGS_REVISION = 17;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -218,6 +218,8 @@ export const SETTING_KEYS = {
   PLAYBACK_MAX_BITRATE_KBPS: "playback.max_bitrate_kbps",
   /** Next up prompt */
   PLAYBACK_NEXT_UP_PROMPT_SECONDS: "playback.next_up_prompt_seconds",
+  /** Prefer embedded subtitles */
+  PLAYBACK_PREFER_EMBEDDED_SUBTITLES: "playback.prefer_embedded_subtitles",
   /** Preferred quality */
   PLAYBACK_PREFERRED_QUALITY: "playback.preferred_quality",
   /** Show forced subtitles */
@@ -686,6 +688,23 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     unit: "seconds",
     minimum: 0,
     maximum: 120,
+  },
+  "playback.prefer_embedded_subtitles": {
+    key: "playback.prefer_embedded_subtitles",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [17, 17],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Prefer embedded subtitles",
+    description:
+      "Start on the subtitle track stored inside the video file when it matches the chosen language, rather than an external subtitle file in the same language. An external file is cut for whichever release it was made for and can play out of sync; the embedded track cannot drift from the picture.",
+    category: "playback",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
   },
   "playback.preferred_quality": {
     key: "playback.preferred_quality",

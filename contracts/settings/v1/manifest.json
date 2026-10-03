@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 16,
+  "revision": 17,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -435,6 +435,21 @@
       "description": "Show subtitles for foreign-language dialogue even when subtitles are off.",
       "recommended_control": "switch",
       "notes": "Default is true because that is what the server resolves today: user_profiles.show_forced_subtitles is NOT NULL DEFAULT true (migration 029) and profile creation sets it true. A false default here would silently turn forced subtitles off for every profile that never touched the toggle. The Has* companion booleans on LibraryPlaybackPreference and SubtitlePreference encode set-vs-unset at the library and series scopes, so migration writes rows there only where Has* is true. The profile column has no companion and cannot distinguish an explicit true from the column default, so migration writes a profile row only where the value is false — the value that differs from the default."
+    },
+    {
+      "key": "playback.prefer_embedded_subtitles",
+      "introduced_in": 17,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "playback",
+      "label": "Prefer embedded subtitles",
+      "description": "Start on the subtitle track stored inside the video file when it matches the chosen language, rather than an external subtitle file in the same language. An external file is cut for whichever release it was made for and can play out of sync; the embedded track cannot drift from the picture.",
+      "recommended_control": "switch",
+      "notes": "Off by default. Every client ranks an external sidecar above an embedded track today — the web SOURCE_PRIORITY table, the Jellyfin 12.1 port in jellycompat, and the inventory order the Android and Apple resolvers walk — so a true default would silently move existing viewers to a different track. The setting re-ranks only the source tier of auto-selection: language match, forced, hearing-impaired and text-over-bitmap precedence are unchanged, an explicit pick still wins, and the remembered per-series track signature is untouched. Scopes and resolution order match playback.subtitle_appearance. The Jellyfin surface cannot carry this preference, so jellycompat resolves it from the Silo profile server-side."
     },
     {
       "key": "playback.subtitle_appearance",

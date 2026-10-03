@@ -1224,6 +1224,7 @@ export interface ItemDetail {
   effective_subtitle_language?: string;
   effective_subtitle_mode?: string;
   effective_show_forced_subtitles?: boolean;
+  effective_prefer_embedded_subtitles?: boolean;
   effective_subtitle_track_signature?: SubtitleTrackSignature;
   effective_version_resolution?: string;
   effective_version_hdr?: boolean;
@@ -1255,6 +1256,7 @@ export interface WatchDetail {
   effective_subtitle_language?: string;
   effective_subtitle_mode?: string;
   effective_show_forced_subtitles?: boolean;
+  effective_prefer_embedded_subtitles?: boolean;
   effective_subtitle_track_signature?: SubtitleTrackSignature;
   effective_version_resolution?: string;
   effective_version_hdr?: boolean;

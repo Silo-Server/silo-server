@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 16,
+  "manifest_revision": 17,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -1087,6 +1087,25 @@
         {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false}
       ],
       "expected": [{"key": "ui.title_art", "value": true, "source": "profile"}]
+    },
+    {
+      "name": "prefer_embedded_subtitles_device_over_profile",
+      "description": "The device's own choice wins over the profile's.",
+      "keys": ["playback.prefer_embedded_subtitles"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [
+        {"key": "playback.prefer_embedded_subtitles", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "playback.prefer_embedded_subtitles", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false}
+      ],
+      "expected": [{"key": "playback.prefer_embedded_subtitles", "value": false, "source": "profile_device"}]
+    },
+    {
+      "name": "prefer_embedded_subtitles_defaults_off",
+      "description": "Nothing stored at any scope resolves to the contract default, which keeps every client's existing external-first ranking.",
+      "keys": ["playback.prefer_embedded_subtitles"],
+      "context": {"profile_id": "p2", "device_id": "tablet"},
+      "stored": [],
+      "expected": [{"key": "playback.prefer_embedded_subtitles", "value": false, "source": "default"}]
     }
   ]
 }
