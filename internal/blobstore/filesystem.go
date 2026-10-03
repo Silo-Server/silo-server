@@ -380,29 +380,53 @@ func (f *Filesystem) DeletePrefix(ctx context.Context, prefix string) (int, erro
 		return 0, err
 	}
 	n := 0
-	err = fs.WalkDir(root.FS(), prefix, func(p string, d fs.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if e = ctx.Err(); e != nil {
-			return e
-		}
-		if d.Type().IsRegular() {
-			n++
-		}
-		return nil
-	})
+	info, err := root.Lstat(prefix)
 	if os.IsNotExist(err) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	if err = root.RemoveAll(prefix); err != nil {
-		return 0, err
+	if err = deleteTree(ctx, root, prefix, info.IsDir(), info.Mode().IsRegular(), &n); err != nil {
+		return n, err
 	}
 	prune(root, path.Dir(prefix))
 	return n, nil
+}
+
+// deleteTree removes p and everything below it, post-order, so only the
+// entries of the directories on the current path are held in memory. Each
+// directory is removed as soon as its children are gone. It checks ctx before
+// every entry and before every directory removal, stopping with ctx.Err() and
+// leaving the rest for a later call.
+func deleteTree(ctx context.Context, root *os.Root, p string, isDir, regular bool, n *int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if isDir {
+		entries, err := fs.ReadDir(root.FS(), p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		for _, e := range entries {
+			if err = deleteTree(ctx, root, path.Join(p, e.Name()), e.IsDir(), e.Type().IsRegular(), n); err != nil {
+				return err
+			}
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+	}
+	if err := root.Remove(p); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if regular {
+		*n++
+	}
+	return nil
 }
 func (f *Filesystem) List(ctx context.Context, prefix, cursor string, limit int) ([]ObjectInfo, string, error) {
 	if prefix != "" {
