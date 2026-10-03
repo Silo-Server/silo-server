@@ -41,6 +41,7 @@ import {
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
 import MediaCarousel from "@/components/MediaCarousel";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
@@ -58,6 +59,7 @@ import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import {
   buildUserCollectionCatalogHref,
   buildUserCollectionEditorPath,
+  isCollectionReadOnly,
 } from "./userCollectionsShared";
 
 type ImportedCollectionType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
@@ -75,6 +77,7 @@ function CollectionList() {
   const { data, isLoading } = useCollections();
   const { data: groupsData } = useCollectionGroups();
   const { data: capabilities } = useCollectionCapabilities();
+  const { profile } = useCurrentProfile();
   const collections = useMemo(() => data ?? [], [data]);
   const groups = useMemo(() => groupsData ?? [], [groupsData]);
   const [confirmDeleteCollection, setConfirmDeleteCollection] =
@@ -260,6 +263,7 @@ function CollectionList() {
                       .then(setConfirmDeleteCollection)
                       .catch((error) => toast.error(error.message));
                   }}
+                  readOnly={isCollectionReadOnly(collection, profile?.id)}
                 />
               );
             }}
@@ -410,6 +414,7 @@ function SortableCollectionCard({
   onSync,
   onEdit,
   onDelete,
+  readOnly,
 }: {
   collection: Collection;
   syncable: boolean;
@@ -418,6 +423,9 @@ function SortableCollectionCard({
   onSync: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  // Only the profile that created a collection can change it, so another
+  // profile's shared collection gets no Sync, Edit or Delete buttons.
+  readOnly: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useGroupedCollectionCard(collection.id, !canReorder);
@@ -431,7 +439,7 @@ function SortableCollectionCard({
     <Card
       ref={setNodeRef}
       style={style}
-      className="surface-panel hover:border-primary group relative rounded-[1.6rem] border-0 transition-all hover:-translate-y-1"
+      className="surface-panel hover:border-primary group relative h-full rounded-[1.6rem] border-0 transition-all hover:-translate-y-1"
     >
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <div className="flex min-w-0 items-center gap-2">
@@ -458,47 +466,49 @@ function SortableCollectionCard({
             <CollectionBadges collection={collection} />
           </div>
         </div>
-        <div className="relative z-10 flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-          {syncable ? (
+        {readOnly ? null : (
+          <div className="relative z-10 flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
+            {syncable ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="Sync collection"
+                disabled={isSyncing}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSync();
+                }}
+              >
+                <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="icon"
               className="h-9 w-9"
-              aria-label="Sync collection"
-              disabled={isSyncing}
+              aria-label="Edit collection"
               onClick={(event) => {
                 event.stopPropagation();
-                onSync();
+                onEdit();
               }}
             >
-              <RefreshCw className={`h-3 w-3 ${isSyncing ? "animate-spin" : ""}`} />
+              <Pencil className="h-3 w-3" />
             </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            aria-label="Edit collection"
-            onClick={(event) => {
-              event.stopPropagation();
-              onEdit();
-            }}
-          >
-            <Pencil className="h-3 w-3" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            aria-label="Delete collection"
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete();
-            }}
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
-        </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label="Delete collection"
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete();
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
       </CardHeader>
     </Card>
   );
