@@ -1,5 +1,7 @@
+import { Link } from "react-router";
 import type { LibraryTabCollection, LibraryTabGroup, LibraryTabUngrouped } from "@/api/types";
 import { useLibraryCollections } from "@/hooks/queries/libraryCollections";
+import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
@@ -12,6 +14,7 @@ interface LibraryCollectionsProps {
 
 export default function LibraryCollections({ libraryId }: LibraryCollectionsProps) {
   const { data, isLoading } = useLibraryCollections(libraryId);
+  const actingAdmin = useIsActingAdmin();
   const { cardPresentation } = useUICustomization();
   const gridClasses = cardGridClasses(cardPresentation.poster_size);
 
@@ -40,9 +43,18 @@ export default function LibraryCollections({ libraryId }: LibraryCollectionsProp
         <Card className="surface-panel overflow-hidden rounded-[2rem] border-0 shadow-none">
           <CardContent className="py-10 text-center">
             <p className="text-lg font-semibold">No collections yet</p>
-            <p className="text-muted-foreground mt-2 text-sm">
-              Create library collections from the admin area to feature curated shelves here.
-            </p>
+            {actingAdmin ? (
+              <Link
+                to={`/admin/collections?libraryId=${libraryId}`}
+                className="text-primary mt-2 inline-block text-sm font-medium hover:underline"
+              >
+                Create collections for this library
+              </Link>
+            ) : (
+              <p className="text-muted-foreground mt-2 text-sm">
+                Collections for this library will show up here.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
