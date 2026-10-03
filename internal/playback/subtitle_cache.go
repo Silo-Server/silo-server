@@ -372,6 +372,19 @@ func (c *SubtitleCache) LookupText(inputPath string, trackIndex int, format stri
 	return data, err == nil
 }
 
+// LookupWebVTT returns the complete WebVTT rendition native playback cached
+// for a text track (ServeExtract stores SubRip and forced-VTT extracts under
+// the vtt key), so another reader can reuse it instead of demuxing the source.
+func (c *SubtitleCache) LookupWebVTT(inputPath string, trackIndex int) ([]byte, bool) {
+	f, _, ok := c.lookup(inputPath, trackIndex, SubtitleFormatVTTV3)
+	if !ok {
+		return nil, false
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(f)
+	return data, err == nil
+}
+
 // ExtractText reuses a complete cached text track or extracts it once for this
 // request. The fill captures source identity before extraction, so a replaced
 // source cannot publish an old extract under the new file's cache key.
@@ -387,6 +400,23 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 		return data, nil
 	}
 	fill := c.beginFill(inputPath, trackIndex, format)
+	if fill == nil && c.waitForTextFill(ctx, inputPath, TextSubtitleTrack{Ordinal: trackIndex, Format: format}) {
+		// Another request is extracting this track: share its result rather
+		// than demuxing the source a second time. If that fill failed, try
+		// again as the filler.
+		if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+			return data, nil
+		}
+		fill = c.beginFill(inputPath, trackIndex, format)
+	}
+	if fill != nil {
+		// A previous filler may have committed between the lookup above and
+		// this reservation; reuse its entry rather than extracting again.
+		if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+			fill.Discard()
+			return data, nil
+		}
+	}
 	data, err := extract(ctx)
 	if err != nil {
 		if fill != nil {
