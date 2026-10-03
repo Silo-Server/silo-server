@@ -3,10 +3,12 @@ package jellycompat
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,11 +125,11 @@ func TestStaticPlaybackSelectsCompliantVersionUnderServerCap(t *testing.T) {
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 
 	firstID := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
-	if _, _, err := h.createStaticPlaySession(t.Context(), session, item, firstID, ""); !errors.Is(err, errServerBitrateDirectUnavailable) {
+	if _, _, err := h.createStaticPlaySession(t.Context(), session, item, firstID, "", ""); !errors.Is(err, errServerBitrateDirectUnavailable) {
 		t.Fatalf("explicit over-limit source: err=%v", err)
 	}
 
-	playSession, source, err := h.createStaticPlaySession(t.Context(), session, item, "", "")
+	playSession, source, err := h.createStaticPlaySession(t.Context(), session, item, "", "", "")
 	if err != nil || source == nil || source.FileID != 43 {
 		t.Fatalf("unqualified static source=%+v err=%v", source, err)
 	}
@@ -292,6 +294,325 @@ func TestHandleVideoStream_StaticDirectPlayReusesSessionAcrossRequests(t *testin
 
 	if mgr.startCalls != 1 {
 		t.Fatalf("StartSession ran %d times across 3 Static requests with the same PlaySessionId; want 1 (sessions must be reused, not leaked)", mgr.startCalls)
+	}
+}
+
+// BenchmarkStaticPlaybackReservationReuse includes the in-memory lookup scan
+// at several active-store sizes; it does not measure client startup latency.
+func BenchmarkStaticPlaybackReservationReuse(b *testing.B) {
+	for _, size := range []int{1, 100, 1000} {
+		b.Run(fmt.Sprintf("sessions_%d", size), func(b *testing.B) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			for i := range size {
+				store.Put(PlaybackSession{ID: fmt.Sprint(i), CompatToken: "example-token", StaticPlaybackKey: fmt.Sprint(i)})
+			}
+			input := PlaybackSession{ID: "unused", CompatToken: "example-token", StaticPlaybackKey: "0"}
+			b.ReportAllocs()
+			for b.Loop() {
+				got, err := store.GetOrCreateStatic(context.Background(), input)
+				if err != nil || got.ID != "0" {
+					b.Fatal("existing reservation was not reused")
+				}
+			}
+		})
+	}
+}
+
+func TestCreateStaticPlaySessionConcurrentRequestsShareReservation(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	caller := &Session{Token: "static-test-token", ProfileID: "profile"}
+	const requests = 16
+	start := make(chan struct{})
+	type result struct {
+		session *PlaybackSession
+		err     error
+	}
+	results := make(chan result, requests)
+	for range requests {
+		go func() {
+			<-start
+			session, _, err := handler.createStaticPlaySession(context.Background(), caller, routeID, "", "client-play", "device")
+			results <- result{session, err}
+		}()
+	}
+	close(start)
+	var sessionID string
+	for range requests {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("reserve static playback: %v", got.err)
+		}
+		if sessionID == "" {
+			sessionID = got.session.ID
+		}
+		if got.session.ID != sessionID {
+			t.Fatalf("simultaneous requests created different sessions")
+		}
+	}
+	if got := len(handler.playbackStore.(*PlaybackSessionStore).sessions); got != 1 {
+		t.Fatalf("stored %d sessions for one static play, want 1", got)
+	}
+	if err := handler.playbackStore.Update(sessionID, func(session *PlaybackSession) error {
+		session.UpstreamSessionID = "active-upstream"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := handler.createStaticPlaySession(context.Background(), caller, routeID, "", "client-play", "device")
+	if err != nil || got.UpstreamSessionID != "active-upstream" {
+		t.Fatalf("reservation overwrote the active upstream attachment: %v", err)
+	}
+}
+
+func TestStaticPlaybackReservationPreservesSelectedSourceBeforeAttachment(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	detail := handler.content.(*stubContentService).detail
+	second := detail.Versions[0]
+	second.FileID = 43
+	detail.Versions = append(detail.Versions, second)
+	sourceID := handler.codec.EncodeIntID(EncodedIDMediaSource, int64(second.FileID))
+	caller := &Session{Token: "token-1", ProfileID: "profile-1"}
+	reserved, _, err := handler.createStaticPlaySession(context.Background(), caller, routeID, sourceID, "client-play", "device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reserved.UpstreamSessionID != "" {
+		t.Fatal("test must resolve the reservation before native attachment")
+	}
+	for _, sourceParam := range []string{"", routeID} {
+		r := httptest.NewRequest("GET", "/Videos/stream?Static=true&DeviceId=device&PlaySessionId=client-play", nil)
+		got, source, err := handler.resolvePlaybackRoute(r, caller, routeID, sourceParam)
+		if err != nil || got == nil || source == nil || got.ID != reserved.ID || source.FileID != second.FileID {
+			t.Fatalf("pre-attachment request lost the selected edition: %v", err)
+		}
+	}
+	if got := len(handler.playbackStore.(*PlaybackSessionStore).sessions); got != 1 {
+		t.Fatalf("reserved %d sessions, want one selected-edition reservation", got)
+	}
+}
+
+// legacyStaticPair mirrors two rows left by the old parallel Static=true
+// creation race. That path never stored a device, so neither row has one.
+func legacyStaticPair(token string, now time.Time) (PlaybackSession, PlaybackSession) {
+	first := PlaybackSession{
+		ID: token + "-first", CompatToken: token, UserID: "profile-user",
+		ClientPlaySessionID: "client-play", ItemID: "item", RouteItemID: "route",
+		UpstreamSessionID: "native-first", UpstreamPlayMethod: "direct",
+		CreatedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Hour),
+		MediaSources: []PlaybackMediaSource{{ID: "source", FileID: 42}},
+	}
+	second := first
+	second.ID, second.UpstreamSessionID = token+"-second", "native-second"
+	second.CreatedAt = first.CreatedAt.Add(4 * time.Millisecond)
+	return first, second
+}
+
+// Without a stored device, two rows sharing a key and client play ID may be
+// separate installations. Neither is picked, ended or hidden from its own stop.
+func TestLegacyStaticDuplicatesStayAmbiguous(t *testing.T) {
+	now := time.Now()
+	first, second := legacyStaticPair("token", now)
+	store := NewPlaybackSessionStore(time.Hour, func() time.Time { return now })
+	store.Put(first)
+	store.Put(second)
+	if _, err := store.ResolveClientPlaySessionID("token", "client-play"); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("ambiguous legacy alias resolved: %v", err)
+	}
+	if _, ok := store.FindByClientPlaySessionID("token", "client-play"); ok {
+		t.Fatal("ambiguous legacy alias was bound")
+	}
+	for _, old := range []PlaybackSession{first, second} {
+		got, ok := store.Get(old.ID)
+		if !ok || got.Terminal {
+			t.Fatalf("legacy row %s was ended", old.ID)
+		}
+		if _, ok := store.GetFinalizable(old.ID, "token"); !ok {
+			t.Fatalf("legacy row %s can no longer accept its final stop report", old.ID)
+		}
+	}
+}
+
+func TestDevicePlaybackAliasRequiresExactUniqueIdentity(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	first, second := legacyStaticPair("token", time.Now())
+	first.ClientDeviceID, second.ClientDeviceID = "first-device", "second-device"
+	store.Put(first)
+	store.Put(second)
+	if _, err := store.ResolveDeviceClientPlaySessionID("token", "client-play", "", "route", "source", false); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatal("absent device guessed a playback")
+	}
+	if _, err := store.ResolveDeviceClientPlaySessionID("other-token", "client-play", "first-device", "route", "source", false); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatal("foreign token matched")
+	}
+	if _, err := store.ResolveDeviceClientPlaySessionID("token", "client-play", "first-device", "route", "other-source", false); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatal("different source matched")
+	}
+	if got, err := store.ResolveDeviceClientPlaySessionID("token", "client-play", "second-device", "route", "source", false); err != nil || got.ID != second.ID {
+		t.Fatal("exact device did not resolve")
+	}
+	second.ClientDeviceID = first.ClientDeviceID
+	store.Put(second)
+	if _, err := store.ResolveDeviceClientPlaySessionID("token", "client-play", "first-device", "route", "source", false); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatal("ambiguous device guessed a playback")
+	}
+}
+
+func TestStaticPlaybackKeySeparatesPlaybackIdentities(t *testing.T) {
+	baseline := staticPlaybackKey(&Session{Token: "token", ProfileID: "profile"}, "device", "play", "item", "source")
+	variants := []struct{ token, profile, device, play, item, source string }{
+		{"other-token", "profile", "device", "play", "item", "source"},
+		{"token", "other-profile", "device", "play", "item", "source"},
+		{"token", "profile", "other-device", "play", "item", "source"},
+		{"token", "profile", "device", "other-play", "item", "source"},
+		{"token", "profile", "device", "play", "other-item", "source"},
+		{"token", "profile", "device", "play", "item", "other-source"},
+	}
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	for i, variant := range variants {
+		key := staticPlaybackKey(&Session{Token: variant.token, ProfileID: variant.profile}, variant.device, variant.play, variant.item, variant.source)
+		if key == baseline {
+			t.Fatalf("identity field %d did not affect the reservation key", i)
+		}
+		candidate := PlaybackSession{ID: fmt.Sprintf("distinct-%d", i), CompatToken: variant.token, StaticPlaybackKey: key}
+		got, err := store.GetOrCreateStatic(context.Background(), candidate)
+		if err != nil || got.ID != candidate.ID {
+			t.Fatalf("distinct playback %d was merged: %v", i, err)
+		}
+	}
+	if left, right := staticPlaybackKey(&Session{Token: "ab"}, "c", "", "", ""), staticPlaybackKey(&Session{Token: "a"}, "bc", "", "", ""); left == right {
+		t.Fatal("reservation keys lost field boundaries")
+	}
+}
+
+func TestPlaybackSessionStoreStaticReservationSkipsTerminalAndExpired(t *testing.T) {
+	now := time.Now()
+	store := NewPlaybackSessionStore(time.Minute, func() time.Time { return now })
+	first := PlaybackSession{ID: "first", CompatToken: "token", StaticPlaybackKey: "scope"}
+	if _, err := store.GetOrCreateStatic(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.HideFromRouting(first.ID, first.CompatToken); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.ID = "second"
+	got, err := store.GetOrCreateStatic(context.Background(), second)
+	if err != nil || got.ID != second.ID {
+		t.Fatalf("terminal reservation was reused: %v", err)
+	}
+	now = now.Add(2 * time.Minute)
+	third := first
+	third.ID = "third"
+	got, err = store.GetOrCreateStatic(context.Background(), third)
+	if err != nil || got.ID != third.ID {
+		t.Fatalf("expired reservation was reused: %v", err)
+	}
+}
+
+func TestHandleVideoStreamStaticKeepsDistinctClientPlays(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	for _, playID := range []string{"play-a", "play-b", "play-a", "play-b"} {
+		if response := serveStaticStream(handler, routeID, "Static=true&PlaySessionId="+playID); response.Code != 200 {
+			t.Fatalf("static play failed: %d", response.Code)
+		}
+	}
+	if got := handler.sessionMgr.(*testCompatSessionManager).startCalls; got != 2 {
+		t.Fatalf("started %d upstream sessions for two distinct plays, want 2", got)
+	}
+	if got := len(handler.playbackStore.(*PlaybackSessionStore).sessions); got != 2 {
+		t.Fatalf("stored %d sessions, want 2", got)
+	}
+}
+
+func TestHandleVideoStreamStaticKeepsDistinctDevicesWithoutClientPlayID(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	for _, deviceID := range []string{"device-a", "device-b", "device-a", "device-b"} {
+		if response := serveStaticStream(handler, routeID, "static=true&DeviceId="+deviceID); response.Code != 200 {
+			t.Fatalf("static play failed: %d", response.Code)
+		}
+	}
+	if got := handler.sessionMgr.(*testCompatSessionManager).startCalls; got != 2 {
+		t.Fatalf("started %d upstream sessions for two devices, want 2", got)
+	}
+}
+
+// Two devices stream one item without a PlaySessionId. A request that names
+// its device reaches its own play; one that does not cannot be told apart.
+func TestHandleVideoStreamStaticIDLessDevicesStayScoped(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	for _, deviceID := range []string{"device-a", "device-b"} {
+		if response := serveStaticStream(handler, routeID, "static=true&DeviceId="+deviceID); response.Code != 200 {
+			t.Fatalf("static play failed: %d", response.Code)
+		}
+	}
+	if response := serveStaticStream(handler, routeID, "static=true"); response.Code != 404 {
+		t.Fatalf("ambiguous ID-less request status = %d, want 404", response.Code)
+	}
+	mgr := handler.sessionMgr.(*testCompatSessionManager)
+	for _, tc := range []struct {
+		header string
+		want   int
+	}{
+		{"", 0},
+		{`MediaBrowser DeviceId="device-b"`, 1},
+	} {
+		before := mgr.progressCalls
+		req := httptest.NewRequest("POST", "/Sessions/Playing/Progress", strings.NewReader(`{"ItemId":"`+routeID+`","PositionTicks":600000000}`))
+		if tc.header != "" {
+			req.Header.Set("X-Emby-Authorization", tc.header)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+		rec := httptest.NewRecorder()
+		handler.HandleSessionPlayingProgress(rec, req)
+		if got := mgr.progressCalls - before; got != tc.want {
+			t.Fatalf("device %q reached %d plays, want %d", tc.header, got, tc.want)
+		}
+	}
+}
+
+func TestUnidentifiedPlaybackSkipsOtherDevices(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	base := PlaybackSession{
+		CompatToken: "token", RouteItemID: "route", ExpiresAt: time.Now().Add(time.Hour),
+		MediaSources: []PlaybackMediaSource{{ID: "source", FileID: 42}},
+	}
+	for _, device := range []string{"device-a", "device-b"} {
+		s := base
+		s.ID, s.ClientDeviceID, s.UpstreamSessionID = "play-"+device, device, "native-"+device
+		store.Put(s)
+	}
+	for device, want := range map[string]string{"device-a": "play-device-a", "device-b": "play-device-b", "device-c": ""} {
+		got, err := store.FindUnidentifiedPlayback("token", "route", "", device)
+		if err != nil || (got == nil) != (want == "") || (got != nil && got.ID != want) {
+			t.Fatalf("device %s resolved %v, %v; want %q", device, got, err, want)
+		}
+	}
+	if _, err := store.FindUnidentifiedPlayback("token", "route", "", ""); !errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+		t.Fatalf("request without a device guessed a play: %v", err)
+	}
+	unscoped := base
+	unscoped.ID, unscoped.UpstreamSessionID = "play-unscoped", "native-unscoped"
+	store.Put(unscoped)
+	if _, err := store.FindUnidentifiedPlayback("token", "route", "", "device-a"); !errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+		t.Fatalf("a play with no recorded device was excluded: %v", err)
+	}
+}
+
+type failingStaticReservationStore struct{ CompatPlaybackStore }
+
+func (s failingStaticReservationStore) GetOrCreateStatic(context.Context, PlaybackSession) (*PlaybackSession, error) {
+	return nil, errors.New("reservation unavailable")
+}
+
+func TestHandleVideoStreamStaticReservationFailureDoesNotStartPlayback(t *testing.T) {
+	handler, routeID, _ := newStaticDirectPlayHandler(t)
+	handler.playbackStore = failingStaticReservationStore{handler.playbackStore}
+	response := serveStaticStream(handler, routeID, "Static=true&PlaySessionId=play")
+	if response.Code != 503 {
+		t.Fatalf("response = %d, want retryable 503", response.Code)
+	}
+	if handler.sessionMgr.(*testCompatSessionManager).startCalls != 0 {
+		t.Fatal("persistence failure started an uncoordinated playback session")
 	}
 }
 

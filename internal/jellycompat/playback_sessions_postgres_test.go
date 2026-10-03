@@ -240,7 +240,7 @@ func TestNegotiatedPlaybackScopeIsPostgresSafeAndUnambiguous(t *testing.T) {
 	}
 }
 
-func newCompatTestPool(t *testing.T) *pgxpool.Pool {
+func newCompatTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -260,6 +260,323 @@ func newCompatTestPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("test database has not applied jellycompat playback sessions migration")
 	}
 	return pool
+}
+
+func TestStaticPlaybackReservationLockKey(t *testing.T) {
+	const want int64 = -530545320499500074
+	if got := staticPlaybackReservationLockKey("example-token", "example-key"); got != want {
+		t.Fatalf("reservation lock key = %d, want deployed framing %d", got, want)
+	}
+	seen := make(map[int64]bool)
+	for _, scope := range [][2]string{{"a", "b"}, {"ab", ""}, {"", "ab"}, {"a\x00", "b"}, {"a", "\x00b"}} {
+		key := staticPlaybackReservationLockKey(scope[0], scope[1])
+		if seen[key] {
+			t.Fatal("distinct test scopes shared a lock key")
+		}
+		seen[key] = true
+	}
+}
+
+func TestDurableStaticAttachmentRejectsStaleWriter(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("static-attachment-test-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	first.Put(PlaybackSession{ID: id, CompatToken: "example-token"})
+	if _, ok := second.Get(id); !ok {
+		t.Fatal("second API instance did not cache the unbound reservation")
+	}
+	attach := func(upstream string) func(*PlaybackSession) error {
+		return func(session *PlaybackSession) error {
+			if session.UpstreamSessionID != "" {
+				return errUpstreamReplaced
+			}
+			session.UpstreamSessionID = upstream
+			return nil
+		}
+	}
+	if err := first.Update(id, attach("winner")); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Update(id, attach("loser")); !errors.Is(err, errUpstreamReplaced) {
+		t.Fatalf("stale attachment = %v, want rejected compare-and-set", err)
+	}
+	if second.hasPendingUpdates(id) {
+		t.Fatal("losing attachment was queued to retry later")
+	}
+	for _, store := range []*DurableCompatPlaybackStore{first, second, NewDurableCompatPlaybackStore(pool, time.Hour, nil)} {
+		got, ok := store.Get(id)
+		if !ok || got.UpstreamSessionID != "winner" {
+			t.Fatal("cache or durable row did not retain the winning attachment")
+		}
+	}
+}
+
+func TestDurableStaticAttachmentPreservesUncommittedPendingUpdate(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	id := fmt.Sprintf("static-pending-attachment-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+	first := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	second := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	first.Put(PlaybackSession{ID: id, CompatToken: "example-token"})
+	if _, ok := second.Get(id); !ok {
+		t.Fatal("second API instance did not cache the reservation")
+	}
+	second.appendPendingUpdate(id, "example-token", func(session *PlaybackSession) error {
+		session.InitialSeekSeconds = 37
+		return nil
+	})
+	if err := first.Update(id, func(session *PlaybackSession) error {
+		session.UpstreamSessionID = "winner"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := second.Update(id, func(session *PlaybackSession) error {
+		if session.UpstreamSessionID != "" {
+			return errUpstreamReplaced
+		}
+		session.UpstreamSessionID = "loser"
+		return nil
+	})
+	if !errors.Is(err, errUpstreamReplaced) {
+		t.Fatalf("attachment = %v, want rejected compare-and-set", err)
+	}
+	if len(second.pendingUpdatesSnapshot(id)) != 1 {
+		t.Fatal("rollback discarded the unrelated pending update or queued the losing attachment")
+	}
+	if err := second.Update(id, func(*PlaybackSession) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := NewDurableCompatPlaybackStore(pool, time.Hour, nil).Get(id)
+	if !ok || got.UpstreamSessionID != "winner" || got.InitialSeekSeconds != 37 || second.hasPendingUpdates(id) {
+		t.Fatal("pending update was not committed without replacing the winning attachment")
+	}
+}
+
+// BenchmarkDurableStaticReservationReuse measures the reservation transaction,
+// not native playback startup or media delivery. Run only on a test database.
+func BenchmarkDurableStaticReservationReuse(b *testing.B) {
+	pool := newCompatTestPool(b)
+	ctx := context.Background()
+	id := fmt.Sprintf("static-benchmark-%d", time.Now().UnixNano())
+	b.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE id = $1`, id) })
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	input := PlaybackSession{ID: id, CompatToken: id, StaticPlaybackKey: "example-key"}
+	if _, err := store.GetOrCreateStatic(ctx, input); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := store.GetOrCreateStatic(ctx, input); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestDurableCompatPlaybackStoreStaticReservationAcrossInstances(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	token := fmt.Sprintf("static-reservation-test-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token = $1`, token); err != nil {
+			t.Errorf("clean static reservation fixtures: %v", err)
+		}
+	})
+	const requests = 12
+	type result struct {
+		session *PlaybackSession
+		err     error
+	}
+	results := make(chan result, requests)
+	start := make(chan struct{})
+	for i := range requests {
+		go func() {
+			store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+			<-start
+			session, err := store.GetOrCreateStatic(ctx, PlaybackSession{
+				ID: fmt.Sprintf("%s-%d", token, i), CompatToken: token, StaticPlaybackKey: "same-play",
+			})
+			results <- result{session, err}
+		}()
+	}
+	close(start)
+	var firstID string
+	for range requests {
+		got := <-results
+		if got.err != nil {
+			t.Errorf("reserve across instances: %v", got.err)
+			continue
+		}
+		if firstID == "" {
+			firstID = got.session.ID
+		}
+		if got.session.ID != firstID {
+			t.Error("different API instances reserved different sessions for one play")
+		}
+	}
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM jellycompat_playback_sessions WHERE compat_token = $1`, token).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("durable rows = %d, want 1", count)
+	}
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	if err := store.Update(firstID, func(session *PlaybackSession) error {
+		session.UpstreamSessionID = "attached-upstream"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	candidate := PlaybackSession{ID: token + "-retry", CompatToken: token, StaticPlaybackKey: "same-play"}
+	got, err := NewDurableCompatPlaybackStore(pool, time.Hour, nil).GetOrCreateStatic(ctx, candidate)
+	if err != nil || got.ID != firstID || got.UpstreamSessionID != "attached-upstream" {
+		t.Fatalf("retry did not preserve the live session: %v", err)
+	}
+	if err := store.Update(firstID, func(session *PlaybackSession) error {
+		session.Terminal = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetOrCreateStatic(ctx, candidate)
+	if err != nil || got.ID != candidate.ID {
+		t.Fatalf("terminal session was reused: %v", err)
+	}
+}
+
+func TestDurableLegacyStaticDuplicatesReturnStorageFailure(t *testing.T) {
+	pool := newCompatTestPool(t)
+	pool.Close()
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	first, second := legacyStaticPair("offline-legacy", time.Now())
+	store.mem.Put(first)
+	store.mem.Put(second)
+	if _, err := store.ResolveClientPlaySessionID(first.CompatToken, first.ClientPlaySessionID); err == nil {
+		t.Fatal("storage failure was not returned")
+	}
+	if _, ok := store.mem.Get(second.ID); !ok {
+		t.Fatal("failed lookup changed the local routing map")
+	}
+}
+
+func TestDurableLegacyStaticDuplicatesStayAmbiguousAcrossInstances(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	token := fmt.Sprintf("legacy-static-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
+	})
+	first, second := legacyStaticPair(token, time.Now())
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	seed.Put(first)
+	seed.Put(second)
+	const requests = 8
+	results := make(chan error, requests)
+	for range requests {
+		go func() {
+			store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+			_, err := store.ResolveClientPlaySessionID(token, "client-play")
+			if !errors.Is(err, ErrSessionNotFound) {
+				err = fmt.Errorf("ambiguous legacy alias resolved: %w", err)
+			} else {
+				err = nil
+			}
+			results <- err
+		}()
+	}
+	for range requests {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	var active int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM jellycompat_playback_sessions WHERE compat_token=$1 AND COALESCE((data->>'Terminal')::boolean,false)=false`, token).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 2 {
+		t.Fatalf("active legacy rows = %d, want both left untouched", active)
+	}
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, old := range []PlaybackSession{first, second} {
+		if _, ok := fresh.GetFinalizable(old.ID, token); !ok {
+			t.Fatalf("legacy row %s can no longer accept its final stop report", old.ID)
+		}
+	}
+}
+
+func TestDurableLegacyStaticDuplicatesDoNotBlockDeviceRecovery(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	token := fmt.Sprintf("device-recovery-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
+	})
+	first, second := legacyStaticPair(token, time.Now())
+	first.MediaSources = append(first.MediaSources, PlaybackMediaSource{ID: "other", FileID: 43})
+	second.MediaSources = append(second.MediaSources, PlaybackMediaSource{ID: "other", FileID: 43})
+	current := first
+	current.ID, current.ClientDeviceID, current.StaticPlaybackKey = token+"-current", "current-device", "reservation"
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, session := range []PlaybackSession{first, second, current} {
+		seed.Put(session)
+	}
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	got, err := fresh.ResolveDeviceClientPlaySessionID(token, "client-play", "current-device", "route", "source", false)
+	if err != nil || got == nil || got.ID != current.ID {
+		t.Fatalf("device recovery failed: %v", err)
+	}
+	var active int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM jellycompat_playback_sessions WHERE compat_token=$1 AND COALESCE((data->>'Terminal')::boolean,false)=false`, token).Scan(&active); err != nil {
+		t.Fatal(err)
+	}
+	if active != 3 {
+		t.Fatal("unproven historical records were modified")
+	}
+}
+
+func TestDurableUnidentifiedPlaybackSkipsOtherDevices(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	token := fmt.Sprintf("unidentified-device-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE compat_token=$1`, token)
+	})
+	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	for _, device := range []string{"device-a", "device-b"} {
+		seed.Put(PlaybackSession{
+			ID: token + "-" + device, CompatToken: token, ClientDeviceID: device, RouteItemID: "route",
+			UpstreamSessionID: "native-" + device, ExpiresAt: time.Now().Add(time.Hour),
+			MediaSources: []PlaybackMediaSource{{ID: "source", FileID: 42}},
+		})
+	}
+	fresh := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	got, err := fresh.FindUnidentifiedPlayback(token, "route", "", "device-b")
+	if err != nil || got == nil || got.ID != token+"-device-b" {
+		t.Fatalf("device lookup = %v, %v", got, err)
+	}
+	if _, err := fresh.FindUnidentifiedPlayback(token, "route", "", ""); !errors.Is(err, errUnidentifiedPlaybackAmbiguous) {
+		t.Fatalf("request without a device guessed a play: %v", err)
+	}
+}
+
+func TestDurableCompatPlaybackStoreStaticReservationFailureLeavesNoLocalRow(t *testing.T) {
+	pool := newCompatTestPool(t)
+	pool.Close()
+	store := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	_, err := store.GetOrCreateStatic(context.Background(), PlaybackSession{
+		ID: "failed-static", CompatToken: "token", StaticPlaybackKey: "play",
+	})
+	if err == nil {
+		t.Fatal("closed database unexpectedly accepted a reservation")
+	}
+	if _, ok := store.mem.Get("failed-static"); ok {
+		t.Fatal("persistence failure left an uncoordinated local session")
+	}
 }
 
 func TestNegotiatedSessionAdvisoryLockCoordinatesAcrossRollingUpgrade(t *testing.T) {

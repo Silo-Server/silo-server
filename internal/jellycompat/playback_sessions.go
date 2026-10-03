@@ -46,6 +46,10 @@ type PlaybackSession struct {
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
 	ClientPlaySessionID string
+	// StaticPlaybackKey identifies one caller/device/play/item/source tuple.
+	// It is a hash, not a credential or a client-visible session identifier.
+	StaticPlaybackKey   string
+	SelectedMediaFileID int
 	UserID              string
 	InitialSeekSeconds  float64
 	MediaSources        []PlaybackMediaSource
@@ -164,6 +168,9 @@ type CompatPlaybackStore interface {
 	// PutNegotiated stores a PlaybackInfo negotiation and atomically replaces
 	// older, still-unstarted negotiations for the same client device and item.
 	PutNegotiated(session PlaybackSession)
+	// GetOrCreateStatic atomically reserves one live session for a static play.
+	// Persistence failure must not create an uncoordinated local session.
+	GetOrCreateStatic(ctx context.Context, session PlaybackSession) (*PlaybackSession, error)
 	// Get returns a session when it exists and is not expired.
 	Get(id string) (*PlaybackSession, bool)
 	// Delete removes a session.
@@ -195,7 +202,8 @@ type CompatPlaybackStore interface {
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
 	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
 	// active session owned by the caller. Pending negotiations are not playback.
-	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error)
+	// A nonempty deviceID skips sessions recorded for a different device.
+	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID, deviceID string) (*PlaybackSession, error)
 	// FindByClientPlaySessionID resolves the client-generated PlaySessionId
 	// alias recorded for plays that skipped PlaybackInfo. The alias must
 	// identify exactly one live session; ambiguity returns not-found.
@@ -263,6 +271,27 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 // publishing a stale pause.
 func (s *PlaybackSessionStore) PutNegotiated(session PlaybackSession) {
 	s.putNegotiatedNormalized(session)
+}
+
+func (s *PlaybackSessionStore) GetOrCreateStatic(ctx context.Context, session PlaybackSession) (*PlaybackSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if session.CompatToken == "" || session.StaticPlaybackKey == "" {
+		return nil, ErrSessionNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, existing := range s.sessions {
+		if existing.CompatToken == session.CompatToken && existing.StaticPlaybackKey == session.StaticPlaybackKey &&
+			!existing.Terminal && existing.ExpiresAt.After(s.now()) {
+			return &existing, nil
+		}
+	}
+	stored := s.normalizeSession(session)
+	s.sessions[stored.ID] = stored
+	return &stored, nil
 }
 
 // putNormalized stores or replaces a compat playback session and returns the
@@ -630,6 +659,13 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 	mediaSourceID string,
 	includeTerminal bool,
 ) (*PlaybackSession, bool) {
+	return s.findDeviceClientPlaySessionID(compatToken, clientPlaySessionID, "", routeItemID, mediaSourceID, includeTerminal)
+}
+
+func (s *PlaybackSessionStore) findDeviceClientPlaySessionID(
+	compatToken, clientPlaySessionID, deviceID, routeItemID, mediaSourceID string,
+	includeTerminal bool,
+) (*PlaybackSession, bool) {
 	if clientPlaySessionID == "" {
 		return nil, false
 	}
@@ -645,10 +681,13 @@ func (s *PlaybackSessionStore) findByClientPlaySessionID(
 		if session.CompatToken != compatToken {
 			continue
 		}
+		if deviceID != "" && session.ClientDeviceID != deviceID {
+			continue
+		}
 		if routeItemID != "" && !mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
 			continue
 		}
-		if mediaSourceID != "" && findMediaSource(&session, mediaSourceID) == nil {
+		if mediaSourceID != "" && !reservationServesMediaSource(&session, findMediaSource(&session, mediaSourceID)) {
 			continue
 		}
 		if session.ClientPlaySessionID == clientPlaySessionID {
@@ -725,17 +764,25 @@ func streamGrantMatches(session *PlaybackSession, routeItemID, mediaSourceID, cl
 		!mediaSourceIDsEqual(session.RouteItemID, routeItemID) {
 		return false
 	}
-	for _, source := range session.MediaSources {
-		if mediaSourceIDsEqual(source.ID, mediaSourceID) {
-			return true
-		}
+	return reservationServesMediaSource(session, findMediaSource(session, mediaSourceID))
+}
+
+// reservationServesMediaSource reports whether a play can account for a report
+// or stream naming source. Every static reservation for an item offers all of
+// its editions, so source membership alone matches each reservation a client
+// made; a reservation that recorded its edition only serves that edition.
+// Negotiated plays keep every offered source, since a client may switch
+// editions within one PlaybackInfo play.
+func reservationServesMediaSource(session *PlaybackSession, source *PlaybackMediaSource) bool {
+	if session == nil || source == nil {
+		return false
 	}
-	return false
+	return session.StaticPlaybackKey == "" || session.SelectedMediaFileID <= 0 || source.FileID == session.SelectedMediaFileID
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
 func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
-	return s.findByRoute(compatToken, routeID, false, false)
+	return s.findByRoute(compatToken, routeID, false, true)
 }
 
 // FindFinalizableByRoute includes terminal sessions retained for a stopped
@@ -780,6 +827,9 @@ func (s *PlaybackSessionStore) findByRoute(
 		}
 		for _, source := range session.MediaSources {
 			if mediaSourceIDsEqual(source.ID, routeID) {
+				if !reservationServesMediaSource(&session, &source) {
+					break
+				}
 				if requireUnique && matchedSession != nil {
 					return nil, nil, false
 				}
@@ -800,11 +850,19 @@ func (s *PlaybackSessionStore) findByRoute(
 
 var errUnidentifiedPlaybackAmbiguous = errors.New("ambiguous unidentified playback")
 
+// unidentifiedPlaybackDeviceMatches excludes only a session proven to belong
+// to another device.
+func unidentifiedPlaybackDeviceMatches(sessionDeviceID, requestDeviceID string) bool {
+	return requestDeviceID == "" || sessionDeviceID == "" || sessionDeviceID == requestDeviceID
+}
+
 // FindUnidentifiedPlayback supports direct players that omit PlaySessionId.
 // Require a unique started session and validate both identifiers before binding
 // a report; map iteration must never select another simultaneous play.
 // A nil session with no error means no started match; ambiguity is an error.
-func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error) {
+// A session with no recorded device still counts for every device, so one that
+// cannot be told apart keeps the lookup ambiguous rather than guessed.
+func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID, deviceID string) (*PlaybackSession, error) {
 	if compatToken == "" || (routeItemID == "" && mediaSourceID == "") {
 		return nil, nil
 	}
@@ -814,7 +872,8 @@ func (s *PlaybackSessionStore) FindUnidentifiedPlayback(compatToken, routeItemID
 	report := sessionReportRequest{ItemID: routeItemID, MediaSourceID: mediaSourceID}
 	now := s.now()
 	for _, candidate := range s.sessions {
-		if candidate.CompatToken != compatToken || candidate.Terminal || candidate.UpstreamSessionID == "" || !candidate.ExpiresAt.After(now) || !reportMatchesPlaySession(&candidate, report) {
+		if candidate.CompatToken != compatToken || candidate.Terminal || candidate.UpstreamSessionID == "" || !candidate.ExpiresAt.After(now) || !reportMatchesPlaySession(&candidate, report) ||
+			!unidentifiedPlaybackDeviceMatches(candidate.ClientDeviceID, deviceID) {
 			continue
 		}
 		if match != nil {

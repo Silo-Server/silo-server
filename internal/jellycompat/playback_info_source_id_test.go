@@ -303,7 +303,7 @@ func TestCreateStaticPlaySessionSelectsRouteMediaSource(t *testing.T) {
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	routeID := h.codec.EncodeIntID(EncodedIDMediaSource, 43)
 
-	playSession, source, err := h.createStaticPlaySession(t.Context(), session, routeID, "", "")
+	playSession, source, err := h.createStaticPlaySession(t.Context(), session, routeID, "", "", "")
 	if err != nil || source == nil || source.FileID != 43 {
 		t.Fatalf("static source = %+v, err = %v; want file 43", source, err)
 	}
@@ -373,7 +373,7 @@ func TestMediaSourceRouteMissingVersionIsNotFound(t *testing.T) {
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	removed := h.codec.EncodeIntID(EncodedIDMediaSource, 99)
 
-	if _, _, err := h.createStaticPlaySession(t.Context(), session, removed, "", ""); !errors.Is(err, ErrSessionNotFound) {
+	if _, _, err := h.createStaticPlaySession(t.Context(), session, removed, "", "", ""); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("static session err = %v, want ErrSessionNotFound", err)
 	}
 	if rec := serveStaticStream(h, removed, "Static=true"); rec.Code != http.StatusNotFound {
@@ -423,5 +423,63 @@ func TestHandleMediaSegmentsMediaSourceLookupErrors(t *testing.T) {
 	codec.SetMediaSourceOwnerLookup(failingMediaSourceOwners{})
 	if rec := serve(sourceID); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("lookup failure: status = %d, want 500, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+// One static play can reach the same edition through the item route (with a
+// MediaSourceId) and through the media-source route. Both requests carry the
+// same reservation key, so the second must reuse the first reservation rather
+// than fail its route check.
+func TestStaticPlayAcrossItemAndSourceRoutesReusesTheReservation(t *testing.T) {
+	for _, order := range [][2]string{{"item", "source"}, {"source", "item"}} {
+		t.Run(order[0]+" then "+order[1], func(t *testing.T) {
+			h, itemID, _ := newStaticDirectPlayHandler(t)
+			detail := h.content.(*stubContentService).detail
+			second := detail.Versions[0]
+			second.FileID = 43
+			second.FilePath = filepath.Join(t.TempDir(), "second.mkv")
+			if err := os.WriteFile(second.FilePath, []byte("second version bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			detail.Versions = append(detail.Versions, second)
+			h.fileResolver = mediaSourceFiles{
+				42: {ID: 42, FilePath: detail.Versions[0].FilePath},
+				43: {ID: 43, FilePath: second.FilePath},
+			}
+			h.codec.SetMediaSourceOwnerLookup(mediaSourceOwners{42: "movie-1", 43: "movie-1"})
+			sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, 43)
+			for _, form := range order {
+				routeID, query := itemID, "&MediaSourceId="+sourceID
+				if form == "source" {
+					routeID, query = sourceID, ""
+				}
+				req := httptest.NewRequest(http.MethodGet, "/Videos/"+routeID+"/stream?Static=true&PlaySessionId=client-play-1&DeviceId=device-1"+query, nil)
+				req.Header.Set("Range", "bytes=0-5")
+				routeCtx := chi.NewRouteContext()
+				routeCtx.URLParams.Add("id", routeID)
+				ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+				ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+				rec := httptest.NewRecorder()
+				h.HandleVideoStream(rec, req.WithContext(ctx))
+				if rec.Code != http.StatusPartialContent || rec.Body.String() != "second" {
+					t.Fatalf("%s route: status = %d, body = %q; want 206 and the second edition", form, rec.Code, rec.Body.String())
+				}
+			}
+
+			// The other edition's source route is a different reservation and
+			// must serve that edition, not reuse this one.
+			otherID := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
+			req := httptest.NewRequest(http.MethodGet, "/Videos/"+otherID+"/stream?Static=true&PlaySessionId=client-play-1&DeviceId=device-1", nil)
+			req.Header.Set("Range", "bytes=0-3")
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("id", otherID)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+			rec := httptest.NewRecorder()
+			h.HandleVideoStream(rec, req.WithContext(ctx))
+			if rec.Code != http.StatusPartialContent || rec.Body.String() != "fake" {
+				t.Fatalf("other edition route: status = %d, body = %q; want 206 and the first edition", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

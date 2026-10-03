@@ -34,7 +34,7 @@ func TestVideoStreamTokenAuthRouteIdentity(t *testing.T) {
 			source := h.codec.EncodeIntID(EncodedIDMediaSource, 42)
 			ids := map[string]string{"item": item, "source": source, "foreign": h.codec.EncodeStringID(EncodedIDItem, "movie-2"), "unknown": "unknown"}
 			if tc.seeded {
-				session, _, err := h.createStaticPlaySession(t.Context(), &Session{Token: "token-1", StreamAppUserID: 1}, item, source, "")
+				session, _, err := h.createStaticPlaySession(t.Context(), &Session{Token: "token-1", StreamAppUserID: 1}, item, source, "", "")
 				if err != nil {
 					t.Fatal(err)
 				}

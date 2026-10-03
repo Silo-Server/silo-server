@@ -329,7 +329,7 @@ func TestWebOSDurableLookupRejectsUnpersistedLocalPlay(t *testing.T) {
 	sibling.UpstreamSessionID = "upstream-2"
 	store.mem.Put(sibling)
 	store.markUnpersisted(sibling.ID)
-	got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+	got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source, "")
 	if err == nil || got != nil {
 		t.Fatalf("unpersisted sibling ignored: got=%+v err=%v", got, err)
 	}
@@ -342,7 +342,7 @@ func TestWebOSDurableLookupRejectsUnpersistedLocalPlay(t *testing.T) {
 		t.Fatal("repaired session is not durable")
 	}
 	store.Delete(sibling.ID)
-	got, err = store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+	got, err = store.FindUnidentifiedPlayback(active.CompatToken, item, source, "")
 	if err != nil || got == nil || got.ID != active.ID {
 		t.Fatalf("lookup after repair=%+v err=%v", got, err)
 	}
@@ -395,7 +395,7 @@ func TestWebOSDurableLookupRetriesConcurrentUpdates(t *testing.T) {
 					}
 				}
 			}
-			got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source)
+			got, err := store.FindUnidentifiedPlayback(active.CompatToken, item, source, "")
 			if changes < 3 {
 				if err != nil || got == nil || got.ID != active.ID || calls != changes+1 {
 					t.Fatalf("lookup=%+v err=%v attempts=%d", got, err, calls)
