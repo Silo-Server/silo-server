@@ -2404,8 +2404,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			// dropping it from session tracking for the rest of playback.
 			if revived := h.reviveUpstreamForReport(r.Context(), session, playSession, req.MediaSourceID); revived != nil {
 				playSession = revived
-				progressUpdated = h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused) == nil
+				// The revive sent a fresh start from the new session's state;
+				// compare this report against that state, not the reaped one.
 				previousSession = nil
+				if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil && current != nil {
+					copy := *current
+					previousSession = &copy
+				}
+				progressUpdated = h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused) == nil
 			}
 		}
 	}
@@ -2424,17 +2430,10 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 		}
 	}
-	if progressUpdated && !stop && previousSession != nil && previousSession.IsPaused != req.IsPaused {
-		updatedSession := *previousSession
-		updatedSession.Position = positionSeconds
-		updatedSession.IsPaused = req.IsPaused
-		action := compatScrobbleStart
-		if req.IsPaused {
-			action = compatScrobblePause
-		}
-		h.dispatchCompatScrobbleAt(
-			r.Context(), action, playSession, &updatedSession,
-			findMediaSource(playSession, req.MediaSourceID), &positionSeconds,
+	if progressUpdated && !stop && previousSession != nil {
+		h.scrobbleCompatReport(
+			r.Context(), playSession, previousSession,
+			findMediaSource(playSession, req.MediaSourceID), positionSeconds, req.IsPaused,
 		)
 	}
 	// Only the Stopped report and the report that marks the item watched change
@@ -2609,7 +2608,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
 					}
 					_ = h.syncUpstreamAudioSelection(playSession, source)
-					h.dispatchCompatScrobble(ctx, compatScrobbleStart, playSession, reconstructed, &source)
+					h.sendCompatResumeStart(ctx, playSession, reconstructed, &source)
 					return playSession, nil
 				}
 			}
@@ -2734,7 +2733,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, ErrSessionNotFound
 	}
 	h.syncSessionsNow(ctx, "compat_start")
-	h.dispatchCompatScrobble(ctx, compatScrobbleStart, updated, session, &source)
+	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
 }
 
