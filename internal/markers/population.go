@@ -36,6 +36,10 @@ const (
 	markerFetchTimeout      = 45 * time.Second
 	markerMemoryLimit       = 512
 
+	// Files can arrive a few days before their listed date, through time
+	// zones or early releases; titles dated further ahead are not recent.
+	markerUpcomingWindow = 7 * 24 * time.Hour
+
 	// A sync run waits out a short cooldown on every provider, such as a
 	// rate limit, and ends at a longer one, such as a daily quota.
 	syncCooldownWait = time.Minute
@@ -483,7 +487,8 @@ func providerRevision(provider Provider) string {
 
 // markerTTL is how long a stored response stays fresh.
 func markerTTL(found bool, released time.Time) time.Duration {
-	recent := !released.IsZero() && time.Since(released) < markerRecentWindow
+	age := time.Since(released)
+	recent := !released.IsZero() && age > -markerUpcomingWindow && age < markerRecentWindow
 	switch {
 	case found && recent:
 		return markerRecentPositiveTTL
@@ -572,6 +577,15 @@ func (s *PopulationService) waitForProviders(ctx context.Context, providers map[
 	}
 }
 
+func (s *PopulationService) syncFile(ctx context.Context, id int) (bool, error) {
+	file, err := s.opts.LoadFile(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	_, changed, err := s.populate(ctx, file, false, false)
+	return changed, err
+}
+
 func (s *PopulationService) Sync(ctx context.Context, progress func(float64, string)) (SyncSummary, error) {
 	summary := SyncSummary{}
 	enabled, err := s.enabled(ctx)
@@ -606,6 +620,16 @@ func (s *PopulationService) Sync(ctx context.Context, progress func(float64, str
 		}
 		return summary, nil
 	}
+	limited := func(err error) (SyncSummary, error) {
+		if progress != nil {
+			progress(100, fmt.Sprintf("Online marker providers are rate limited; updated %d files", summary.Updated))
+		}
+		return summary, err
+	}
+	// A cooldown left by a lookup elsewhere hides every file from Candidates.
+	if wait, err := s.waitForProviders(ctx, providers); err != nil || !wait {
+		return limited(err)
+	}
 	ids, err := s.opts.Store.Candidates(ctx, providers)
 	if err != nil {
 		return summary, err
@@ -615,30 +639,21 @@ func (s *PopulationService) Sync(ctx context.Context, progress func(float64, str
 			return summary, err
 		}
 		summary.Considered++
-		file, err := s.opts.LoadFile(ctx, id)
-		if err != nil {
-			summary.Failed++
-			continue
-		}
-		_, changed, err := s.populate(ctx, file, false, false)
+		changed, err := s.syncFile(ctx, id)
 		if changed {
 			summary.Updated++
+		}
+		if err != nil {
+			summary.Failed++
 		}
 		if progress != nil {
 			progress(float64(i+1)*100/float64(len(ids)), fmt.Sprintf("Checked %d files; updated %d", summary.Considered, summary.Updated))
 		}
-		if err == nil {
-			continue
-		}
-		summary.Failed++
-		if _, limited := RetryAfter(err); !limited {
+		if _, rateLimited := RetryAfter(err); !rateLimited {
 			continue
 		}
 		if wait, err := s.waitForProviders(ctx, providers); err != nil || !wait {
-			if progress != nil {
-				progress(100, fmt.Sprintf("Online marker providers are rate limited; updated %d files", summary.Updated))
-			}
-			return summary, err
+			return limited(err)
 		}
 	}
 	if progress != nil {

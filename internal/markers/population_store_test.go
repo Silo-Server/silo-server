@@ -359,6 +359,15 @@ func TestPopulationSyncWaitsOutShortRateLimit(t *testing.T) {
 	if _, got := q.run(t, 1); !slices.Equal(got, []int{q.fileIDs[0], q.fileIDs[2]}) {
 		t.Fatalf("sync fetched %v, want every file but the rate-limited one", got)
 	}
+	// A cooldown left by another lookup must not end the next run before it starts.
+	q.nextDay(t)
+	if err := NewPopulationStore(q.fixture.pool).Cooldown(t.Context(), q.fixture.provider, "rev1", time.Now().Add(200*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	_, got := q.run(t, len(q.fileIDs))
+	if slices.Sort(got); !slices.Equal(got, q.fileIDs) {
+		t.Fatalf("sync after an existing cooldown fetched %v, want %v", got, q.fileIDs)
+	}
 }
 
 // A metadata refresh that leaves a file's IDs unchanged must not keep the file

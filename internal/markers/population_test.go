@@ -204,6 +204,8 @@ func TestPopulationStoredFreshnessFollowsReleaseDate(t *testing.T) {
 		{"recent hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -2 * day, markerRecentPositiveTTL},
 		{"old miss", nil, -365 * day, markerMissTTL},
 		{"old hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -365 * day, markerPositiveTTL},
+		{"upcoming miss", nil, 2 * day, markerRecentMissTTL},
+		{"far future miss", nil, 90 * day, markerMissTTL},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{Markers: tc.markers}, nil }}
