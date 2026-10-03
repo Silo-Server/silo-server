@@ -163,12 +163,13 @@ func (r *responder) read6() {
 	}
 }
 
-// handle processes one packet from mDNS port 5353 on the receiving
-// interface's own link; anything else is dropped, so the responder cannot be
-// used to reflect traffic. Queries are answered only when they arrive by
-// multicast, and answers go only to the link's multicast group. A unicast
-// response is accepted only while probing, as a defense of a name we asked
-// about with the unicast-response bit (RFC 6762 §5.4).
+// handle processes one packet from mDNS port 5353; anything else is
+// dropped. Queries are answered only when they arrive by multicast, which is
+// link-local whatever its source subnet (RFC 6762 §11), and answers go only
+// to the link's multicast group, never to the sender, so the responder cannot
+// be used to reflect traffic. A unicast response is accepted only while
+// probing and only from an address on the receiving interface's networks, in
+// case a responder defends a name by unicast anyway (§5.4).
 func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6, multicast bool) {
 	defer func() {
 		if p := recover(); p != nil {
@@ -205,9 +206,11 @@ func (r *responder) handle(packet []byte, ifIndex int, src *net.UDPAddr, viaIPv6
 	if err != nil {
 		return
 	}
-	from, ok := netip.AddrFromSlice(src.IP)
-	if !ok || !onLink(from, addrs) {
-		return
+	if !multicast {
+		from, ok := netip.AddrFromSlice(src.IP)
+		if !ok || !onLink(from, addrs) {
+			return
+		}
 	}
 	if probeRelevant {
 		// Responses defend a name; queries with authority records are

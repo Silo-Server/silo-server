@@ -49,14 +49,15 @@ general mDNS library, and it is deliberately narrow:
 
 - It shares UDP 5353 with the operating system's mDNS daemon (avahi,
   mDNSResponder) and never claims the machine's own `<hostname>.local`.
-- It answers only multicast queries sent from port 5353 by an address on the
-  receiving interface's own link (RFC 6762 §11), and answers by multicast on
-  that link. Legacy unicast queries (`dig -p 5353 @host`) and anything from
-  off the link get no reply, so the listener cannot reflect or amplify
-  traffic toward another address. Apple's `NWBrowser` and Android's
-  `NsdManager` send multicast queries from port 5353. The one unicast packet
-  it accepts is an on-link response while it probes, the defense its
-  unicast-response probes ask for.
+- It answers only multicast queries sent from port 5353, which are local to
+  the link whatever their source subnet (RFC 6762 §11), and answers by
+  multicast on that link, never to the sender. Legacy unicast queries
+  (`dig -p 5353 @host`) get no reply, so the listener cannot reflect or
+  amplify traffic toward another address. Apple's `NWBrowser` and Android's
+  `NsdManager` send multicast queries from port 5353. Its probes ask for
+  multicast replies, since a unicast reply would reach only the first socket
+  bound to the shared port; the one unicast packet it accepts is a response
+  from the interface's own networks while it probes.
 - It probes its names before announcing, announces twice, and sends goodbyes
   (TTL 0) on every interface when it stops. Two processes probing one name at
   once settle it with the RFC 6762 §8.2 tiebreak. A response that later claims

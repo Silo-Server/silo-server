@@ -312,20 +312,22 @@ func rdata(rr dns.RR) []byte {
 }
 
 // probe is the query that claims the instance and host names before they are
-// announced (RFC 6762 §8.1).
+// announced (RFC 6762 §8.1). It asks for multicast replies, not unicast ones:
+// the responder shares port 5353 with the operating system's daemon, and a
+// unicast defense would reach only the first socket bound (§15.1).
 func (s service) probe(ips []net.IP) *dns.Msg {
 	m := new(dns.Msg)
 	m.Question = []dns.Question{
-		{Name: s.instanceName(), Qtype: dns.TypeANY, Qclass: dns.ClassINET | cacheFlush},
-		{Name: s.hostName(), Qtype: dns.TypeANY, Qclass: dns.ClassINET | cacheFlush},
+		{Name: s.instanceName(), Qtype: dns.TypeANY, Qclass: dns.ClassINET},
+		{Name: s.hostName(), Qtype: dns.TypeANY, Qclass: dns.ClassINET},
 	}
 	m.Ns = append([]dns.RR{s.srv(serviceTTL), s.txt(serviceTTL)}, s.addresses(ips, hostTTL)...)
 	return m
 }
 
 // onLink reports whether src is an address on one of the receiving
-// interface's networks. mDNS answers only its own link (RFC 6762 §11); a
-// unicast query from anywhere else must not get a reply.
+// interface's networks. A unicast packet carries no proof it came from the
+// link (RFC 6762 §11), so a unicast response is trusted only from there.
 func onLink(src netip.Addr, ifaceAddrs []net.Addr) bool {
 	src = src.Unmap()
 	if src.Is6() && src.IsLinkLocalUnicast() {
