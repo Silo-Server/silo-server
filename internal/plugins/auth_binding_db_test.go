@@ -120,3 +120,33 @@ func TestUpsertAuthBindingAllowsNetworkProviderBesidePrimary(t *testing.T) {
 		t.Fatalf("second primary enable beside a network provider = %v, want ErrAuthProviderAlreadyEnabled", err)
 	}
 }
+
+// TestUpsertAuthBindingRefusesSecondKindFromOneInstallation: identities and
+// account rechecks are keyed by installation, so one installation enables at
+// most one auth binding, even when its capabilities are of different kinds.
+func TestUpsertAuthBindingRefusesSecondKindFromOneInstallation(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := context.Background()
+	var others int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM plugin_auth_bindings WHERE enabled`).Scan(&others); err != nil {
+		t.Fatal(err)
+	}
+	if others > 0 {
+		t.Skipf("%d enabled auth bindings already in the database", others)
+	}
+	configs := NewRuntimeConfigStore(pool, instanceStateTestCipher(t))
+	id := seedResidentQueryInstallation(t, pool, true)
+	if _, err := pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'oidc', '{"auth_modes": ["oauth2"]}'), ($1, 'auth_provider.v1', 'network', '{"auth_modes": ["network"]}')`, id); err != nil {
+		t.Fatalf("seed capabilities: %v", err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: id, CapabilityID: "oidc", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: id, CapabilityID: "network", Enabled: true}); !errors.Is(err, ErrAuthProviderAlreadyEnabled) {
+		t.Fatalf("network enable beside the same installation's primary binding = %v, want ErrAuthProviderAlreadyEnabled", err)
+	}
+	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: id, CapabilityID: "oidc", Enabled: true, DisplayOrder: 2}); err != nil {
+		t.Fatalf("re-saving the enabled binding = %v, want nil", err)
+	}
+}

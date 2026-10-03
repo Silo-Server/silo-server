@@ -189,9 +189,11 @@ routed to their provider there.
 - At most one primary auth binding (OIDC, LDAP) is enabled at a time, plus at
   most one network identity binding ([Network identity](#network-identity));
   enabling a second of the same kind is refused with
-  `provider_already_enabled` (checked under an advisory lock). A binding's
-  kind is read from its capability's stored `auth_modes`, so it cannot drift
-  from what the plugin declares. The built-in local provider always exists.
+  `provider_already_enabled` (checked under an advisory lock), and so is a
+  second binding from the same installation, because identities and account
+  rechecks are keyed by installation. A binding's kind is read from its
+  capability's stored `auth_modes`, so it cannot drift from what the plugin
+  declares. The built-in local provider always exists.
 - The provider registry is rebuilt from the bindings on this node after a
   plugin lifecycle change or a binding write, and on every other node when the
   admin channel announces `plugins_changed` or `auth_providers_changed`. A

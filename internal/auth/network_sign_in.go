@@ -95,7 +95,10 @@ func (p *PluginProvider) authenticatePeer(ctx context.Context, peer netip.Addr, 
 	}
 	// A network identity never matches an account by email: whoever uses
 	// the device is its owner, which says nothing about who owns the address.
-	response.EmailVerified = nil
+	// A nil response is left for resolve to refuse.
+	if response != nil {
+		response.EmailVerified = nil
+	}
 	return p.resolve(ctx, response, linkingUserID, true)
 }
 

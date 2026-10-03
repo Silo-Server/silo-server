@@ -292,6 +292,19 @@ func TestNetworkSignInWithoutPeerServiceIsUnavailable(t *testing.T) {
 	}
 }
 
+// A plugin that answers AuthenticatePeer with neither a response nor an
+// error vouches for nobody; sign-in refuses it instead of panicking.
+func TestNetworkSignInRefusesEmptyPeerAnswer(t *testing.T) {
+	plugin := &peerPlugin{peers: map[string]*pluginv1.AuthenticateResponse{"100.64.0.7": nil}}
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+	svc.SetPluginProviderSource(networkProviderSource(5, provider))
+	if _, err := svc.NetworkSignIn(overlayContext(t.Context(), 5, "100.64.0.7"), NetworkSignInInput{InstallationID: 5}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
 // A network provider never takes a password: a login naming it, or one
 // routed without a provider, never reaches it.
 func TestPasswordLoginNeverReachesNetworkProvider(t *testing.T) {
