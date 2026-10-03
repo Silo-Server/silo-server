@@ -124,6 +124,7 @@ type Claims struct {
 	VideoBitstreamFilter       string  `json:"vbsf,omitempty"`
 	VideoSampleEntry           string  `json:"vse,omitempty"`
 	CopyVideoMPEGTS            bool    `json:"cvts,omitempty"`
+	KeyframePlaylist           bool    `json:"kfp,omitempty"`
 	OutputSubdir               string  `json:"osd,omitempty"`
 	SeekSeconds                float64 `json:"seek,omitempty"`
 	StreamOriginSeconds        float64 `json:"origin,omitempty"`

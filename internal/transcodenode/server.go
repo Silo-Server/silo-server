@@ -64,6 +64,7 @@ type TranscodeStartRequest struct {
 	VideoBitstreamFilter       string                 `json:"video_bitstream_filter,omitempty"`
 	VideoSampleEntry           string                 `json:"video_sample_entry,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
+	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
 	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
@@ -115,11 +116,20 @@ type TranscodeStartResponse struct {
 	// decoder failed to start. Older nodes omit it, so callers OR it with the
 	// requested value.
 	SoftwareVideoDecode bool `json:"software_video_decode,omitempty"`
+	// KeyframePlaylist attests that the executor understood a requested
+	// keyframe playlist. Older nodes omit it and are rejected before they
+	// serve FFmpeg's growing playlist under a recipe that records the planned
+	// one.
+	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
 var ErrCopyFMP4RecipeAttestationMismatch = errors.New("transcode node copy-fmp4 recipe attestation mismatch")
 var ErrThrottleAttestationMismatch = errors.New("transcode node throttle attestation mismatch")
+
+// ErrKeyframePlaylistAttestationMismatch reports an executor that ignored a
+// requested keyframe playlist.
+var ErrKeyframePlaylistAttestationMismatch = errors.New("transcode node keyframe playlist attestation mismatch")
 
 func validateAudioRecipeRequest(req TranscodeStartRequest) error {
 	if req.SourceAudioChannels == 0 && req.AudioRecipeVersion == "" {
@@ -169,6 +179,16 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 	if req.CopyFMP4RecipeVersion != "" && response.CopyFMP4RecipeVersion != req.CopyFMP4RecipeVersion {
 		return fmt.Errorf("%w: got %q, want %q",
 			ErrCopyFMP4RecipeAttestationMismatch, response.CopyFMP4RecipeVersion, req.CopyFMP4RecipeVersion)
+	}
+	return nil
+}
+
+// ValidateKeyframePlaylistAttestation rejects an executor that silently
+// ignored a requested keyframe playlist. Requests without one stay compatible
+// with older nodes, which omit the field.
+func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.KeyframePlaylist && !response.KeyframePlaylist {
+		return ErrKeyframePlaylistAttestationMismatch
 	}
 	return nil
 }
@@ -1586,6 +1606,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		VideoBitstreamFilter:       req.VideoBitstreamFilter,
 		VideoSampleEntry:           req.VideoSampleEntry,
 		CopyVideoMPEGTS:            req.CopyVideoMPEGTS,
+		KeyframePlaylist:           req.KeyframePlaylist,
 		SeekSeconds:                req.SeekSeconds,
 		StreamOriginSeconds:        req.StreamOriginSeconds,
 		CopySeekAnchorResolved:     req.CopySeekAnchorResolved,
@@ -1762,6 +1783,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
+		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 	})
 }
 
