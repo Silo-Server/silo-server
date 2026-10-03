@@ -40,3 +40,36 @@ func TestQueryExecutorGroupQueryPreservesAccessFilters(t *testing.T) {
 		t.Fatalf("ceiling arg = %#v, want the PG ceiling bound as age 8", args[3])
 	}
 }
+
+// A viewer's allowlist that shares no library with the query admits nothing.
+// The intersection is empty then, and an empty library list would otherwise
+// mean every library: jellycompat BoxSets, collection items and custom rows
+// pass a query's own library_ids straight to the executor.
+func TestQueryExecutorMatchesNothingOutsideTheViewersLibraries(t *testing.T) {
+	disjoint := AccessFilter{AllowedLibraryIDs: []int{1}}
+	noLibraries := AccessFilter{AllowedLibraryIDs: []int{}, DisabledLibraryIDs: []int{3}}
+	for _, tc := range []struct {
+		name   string
+		def    QueryDefinition
+		access AccessFilter
+		empty  bool
+	}{
+		{name: "libraries outside the allowlist", def: QueryDefinition{LibraryIDs: []int{2}}, access: disjoint, empty: true},
+		{name: "episode libraries outside the allowlist", def: QueryDefinition{MediaScope: "episode", LibraryIDs: []int{2}}, access: disjoint, empty: true},
+		{name: "empty allowlist beside a disabled library", def: QueryDefinition{}, access: noLibraries, empty: true},
+		{name: "empty episode allowlist beside a disabled library", def: QueryDefinition{MediaScope: "episode"}, access: noLibraries, empty: true},
+		{name: "overlapping libraries", def: QueryDefinition{LibraryIDs: []int{1, 2}}, access: disjoint},
+		{name: "overlapping episode libraries", def: QueryDefinition{MediaScope: "episode", LibraryIDs: []int{1, 2}}, access: disjoint},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executor := &QueryExecutor{Scope: tc.def.MediaScope}
+			sql, _, err := executor.buildPreviewPageSQL(tc.def, tc.access, 20, 0, false)
+			if err != nil {
+				t.Fatalf("build preview SQL: %v", err)
+			}
+			if got := strings.Contains(sql, "1 = 0"); got != tc.empty {
+				t.Fatalf("matches nothing = %v, want %v:\n%s", got, tc.empty, sql)
+			}
+		})
+	}
+}

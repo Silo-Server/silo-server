@@ -324,7 +324,11 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		// cached entry; the pointed-to *MediaItem must not be mutated in place
 		// (see cloneMediaItems). The per-user overlay still runs fresh in
 		// buildSectionsResponse.
-		key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+		var key string
+		key, err = f.resolvedListKey(ctx, resolved, libraryID, libraryIDs, filter)
+		if err != nil {
+			return SectionWithItems{}, err
+		}
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
 			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		})
@@ -1248,6 +1252,24 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return nil, 0, fmt.Errorf("loading library collection: %w", err)
 	}
 
+	// Library collection rails are shared across profiles (see
+	// isCacheableSectionType), so only the creator's user-agnostic default
+	// sort applies here — a viewer's personal override is honored on the
+	// collection's own browse page.
+	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
+	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess.AllowedLibraryIDs)
+	if err != nil {
+		// The stored query no longer parses or validates, e.g. a legacy
+		// per-profile rule. Like jellycompat, list nothing rather than fail
+		// every request that shows the row; the collection's page reports it.
+		slog.DebugContext(ctx, "library collection query is unusable", "component", "sections",
+			"collection_id", collection.ID, "error", err)
+		return []*models.MediaItem{}, 0, nil
+	}
+	if membership.Live {
+		return catalog.PreviewLiveLibraryCollection(ctx, f.pool, membership, queryAccess, s.ItemLimit)
+	}
+
 	collectionItems, err := f.CollectionRepo.ListItems(ctx, cfg.LibraryCollectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing collection items: %w", err)
@@ -1256,18 +1278,12 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	// Library collection rails are shared across profiles (see
-	// isCacheableSectionType), so only the creator's user-agnostic default
-	// applies here — a viewer's personal override is honored on the collection's
-	// own browse page.
-	defaultSort, hasDefaultSort := catalog.ParseCollectionDefaultSort(collection.SortConfig, false)
-	if hasDefaultSort {
+	if membership.Sort.Field != "" {
 		contentIDs := make([]string, 0, len(collectionItems))
 		for _, item := range collectionItems {
 			contentIDs = append(contentIDs, item.MediaItemID)
 		}
-		queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
-		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, defaultSort, queryAccess, s.ItemLimit, "")
+		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, queryAccess, s.ItemLimit, "")
 		if err != nil {
 			return nil, 0, err
 		}

@@ -136,6 +136,10 @@
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
 
+# Server collection rows: a cached row costs one revision read, which shows an
+# edit on the next read, and lists what the collection's page lists.
+./internal/sections TestLibraryCollectionRailsMatchTheCollectionPageDB
+
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
 
