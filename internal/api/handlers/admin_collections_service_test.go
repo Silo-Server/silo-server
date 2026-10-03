@@ -25,6 +25,32 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", Visibility: "public"})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("create: expected visibility field error, got %v", err)
+	}
+	_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{Visibility: new("public")})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "visibility" {
+		t.Fatalf("update: expected visibility field error, got %v", err)
+	}
+	for _, v := range []string{"", "visible", "hidden"} {
+		if err := validateCollectionVisibility(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	if got, err := normalizeCollectionVisibilityUpdate(nil); err != nil || got != nil {
+		t.Fatalf("nil update: got %v, %v", got, err)
+	}
+	for in, want := range map[string]string{"": adminCollectionVisible, adminCollectionHidden: adminCollectionHidden, adminCollectionVisible: adminCollectionVisible} {
+		got, err := normalizeCollectionVisibilityUpdate(new(in))
+		if err != nil || got == nil || *got != want {
+			t.Fatalf("%q: got %v, %v, want %q", in, got, err, want)
+		}
+	}
+}
+
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

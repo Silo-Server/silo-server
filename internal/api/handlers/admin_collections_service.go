@@ -18,6 +18,7 @@ const (
 	adminCollectionBackdrop = "backdrop"
 	adminCollectionTrakt    = "trakt"
 	adminCollectionVisible  = "visible"
+	adminCollectionHidden   = "hidden"
 )
 
 type AdminCollection = libraryCollectionResponse
@@ -111,6 +112,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	var none AdminCollection
 	if req.CollectionType == adminCollectionTrakt || isTraktCollectionSourceConfig(req.SourceConfig) {
 		return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
+	}
+	if err := validateCollectionVisibility(req.Visibility); err != nil {
+		return none, err
 	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
@@ -207,6 +211,11 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	visibility, err := normalizeCollectionVisibilityUpdate(req.Visibility)
+	if err != nil {
+		return none, err
+	}
+	req.Visibility = visibility
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
@@ -299,6 +308,33 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
+}
+
+// normalizeCollectionVisibilityUpdate validates an update's visibility. Nil
+// means "not provided" and stays nil; an explicit empty value means the
+// default, so it becomes visible rather than reaching the CHECK constraint.
+func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
+	if visibility == nil {
+		return nil, nil
+	}
+	if err := validateCollectionVisibility(*visibility); err != nil {
+		return nil, err
+	}
+	if *visibility == "" {
+		v := adminCollectionVisible
+		return &v, nil
+	}
+	return visibility, nil
+}
+
+// validateCollectionVisibility rejects values the library_collections
+// visibility CHECK constraint would refuse. An empty value means the default.
+func validateCollectionVisibility(visibility string) error {
+	switch visibility {
+	case "", adminCollectionVisible, adminCollectionHidden:
+		return nil
+	}
+	return fieldError("visibility", "visibility must be visible or hidden")
 }
 
 func adminCollectionLookupAPIError(err error) error {
