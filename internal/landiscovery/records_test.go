@@ -211,3 +211,26 @@ func TestOnLink(t *testing.T) {
 		}
 	}
 }
+
+func TestInterfaceKeepsItsMembershipAcrossAFlap(t *testing.T) {
+	// No sockets: every join fails, as it does in the kernel for an
+	// interface that went down and up with its membership kept.
+	r := &responder{served: map[int]net.Interface{}, members: map[int]bool{5: true}, addrs: map[int][]net.IP{}}
+	up := net.Interface{Index: 5, Name: "eth0", Flags: net.FlagUp | net.FlagMulticast}
+	down := up
+	down.Flags = net.FlagMulticast
+
+	if fresh := r.serve([]net.Interface{down}); len(fresh) != 0 || len(r.served) != 0 {
+		t.Fatal("a down interface is not served")
+	}
+	if fresh := r.serve([]net.Interface{up}); len(fresh) != 1 {
+		t.Fatal("an interface back up with its membership kept is served again, as new")
+	}
+	if fresh := r.serve([]net.Interface{up}); len(fresh) != 0 {
+		t.Fatal("an interface already served is not new")
+	}
+	r.serve(nil)
+	if r.members[5] {
+		t.Fatal("a destroyed interface drops its membership")
+	}
+}

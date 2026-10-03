@@ -45,13 +45,17 @@ type responder struct {
 
 	sendMu sync.Mutex // SetMulticastInterface and WriteTo go together
 
-	mu       sync.Mutex
-	svc      service
-	active   bool                  // answering queries for svc
-	served   map[int]net.Interface // interfaces whose groups are joined
-	probing  service               // the names a running probe claims
-	probes   chan *dns.Msg         // messages about them while probing
-	conflict chan struct{}         // another responder took an active name
+	mu     sync.Mutex
+	svc    service
+	active bool                  // answering queries for svc
+	served map[int]net.Interface // eligible interfaces being served
+	// members holds every interface index whose groups a socket joined. It
+	// outlives `served`: an interface that goes down and comes back keeps
+	// its membership in the kernel, so joining again fails.
+	members  map[int]bool
+	probing  service       // the names a running probe claims
+	probes   chan *dns.Msg // messages about them while probing
+	conflict chan struct{} // another responder took an active name
 	// lastSent rate-limits each record per link and family (RFC 6762 §6).
 	lastSent map[sentKey]time.Time
 	// addrs and allAddrs track interface addresses, so a change is
@@ -74,6 +78,7 @@ type sentKey struct {
 func openResponder() (*responder, error) {
 	r := &responder{
 		served:   map[int]net.Interface{},
+		members:  map[int]bool{},
 		conflict: make(chan struct{}, 1),
 		lastSent: map[sentKey]time.Time{},
 		addrs:    map[int][]net.IP{},
@@ -330,18 +335,35 @@ func eligible(iface net.Interface) bool {
 }
 
 // joinInterfaces joins the mDNS groups on every eligible interface and
-// returns the ones that were not joined before, which need an announcement.
-// A join on an interface already joined fails harmlessly, so an interface
-// that was removed and recreated, even under the same index, is caught too.
-// One interface listing per call; no per-interface address dumps.
+// returns the ones newly served, which need a probe and an announcement. A
+// join on an interface already joined fails harmlessly, so an interface that
+// was removed and recreated, even under the same index, is caught too; one
+// that only went down and up keeps its membership and is served again from
+// `members`. One interface listing per call; no per-interface address dumps.
 func (r *responder) joinInterfaces() []net.Interface {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
+	fresh := r.serve(ifaces)
+	// Record the addresses a newly served interface is announced with, so
+	// a later change is noticed.
+	for _, iface := range fresh {
+		r.addressChange(iface)
+	}
+	return fresh
+}
+
+// serve joins and records the eligible interfaces among ifaces and returns
+// the newly served ones.
+func (r *responder) serve(ifaces []net.Interface) []net.Interface {
 	current := map[int]net.Interface{}
+	listed := map[int]bool{}
 	var fresh []net.Interface
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	for _, iface := range ifaces {
+		listed[iface.Index] = true
 		if !eligible(iface) {
 			continue
 		}
@@ -352,26 +374,29 @@ func (r *responder) joinInterfaces() []net.Interface {
 		if r.v6 != nil && r.v6.JoinGroup(&iface, group6) == nil {
 			joined = true
 		}
-		r.mu.Lock()
-		_, known := r.served[iface.Index]
-		r.mu.Unlock()
-		if joined || known {
-			current[iface.Index] = iface
-		}
 		if joined {
+			r.members[iface.Index] = true
+		}
+		_, served := r.served[iface.Index]
+		if !r.members[iface.Index] {
+			continue
+		}
+		current[iface.Index] = iface
+		if joined || !served {
 			fresh = append(fresh, iface)
 		}
 	}
-	r.mu.Lock()
+	// A destroyed interface takes its memberships with it.
+	for index := range r.members {
+		if !listed[index] {
+			delete(r.members, index)
+		}
+	}
 	r.served = current
 	for index := range r.addrs {
 		if _, ok := current[index]; !ok {
 			delete(r.addrs, index)
 		}
-	}
-	r.mu.Unlock()
-	for _, iface := range fresh {
-		r.addressChange(iface)
 	}
 	return fresh
 }
