@@ -25,26 +25,64 @@ const (
 	SectionKindGenre         = "genre"
 )
 
-// ProfileRefreshRequester queues a profile-scoped refresh without blocking the caller.
-type ProfileRefreshRequester interface {
-	RequestProfileRefresh(ctx context.Context, userID int, profileID string)
+// ReadRefreshRequester queues a refresh for a profile whose cached rows a read
+// found missing, without blocking the caller. *Worker limits these to one per
+// profile per interval, because a row that came out empty looks the same to a
+// read as a row that was never built.
+type ReadRefreshRequester interface {
+	RequestReadRefresh(ctx context.Context, userID int, profileID string)
 }
 
 // Reader assembles recommendation rows from cache-backed data sources.
 type Reader struct {
 	repo        *Repo
 	ratingsRepo *catalog.RatingsRepo
-	refresh     ProfileRefreshRequester
+	refresh     ReadRefreshRequester
 	signals     *SignalReader
 }
 
 // NewReader creates a cache-backed recommendations reader.
-func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ProfileRefreshRequester, storeProvider userstore.UserStoreProvider) *Reader {
+func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ReadRefreshRequester, storeProvider userstore.UserStoreProvider) *Reader {
 	return &Reader{
 		repo:        repo,
 		ratingsRepo: ratingsRepo,
 		refresh:     refresh,
 		signals:     NewSignalReader(repo, storeProvider),
+	}
+}
+
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the reader. Signal checks then read the store.
+func (r *Reader) WithUserStoreOutsidePostgres(outside bool) *Reader {
+	if r != nil && r.signals != nil {
+		r.signals.storeOutsidePostgres = outside
+	}
+	return r
+}
+
+// requestRefresh asks for the profile's cached rows to be rebuilt.
+func (r *Reader) requestRefresh(ctx context.Context, userID int, profileID string) {
+	if r.refresh != nil {
+		r.refresh.RequestReadRefresh(ctx, userID, profileID)
+	}
+}
+
+// requestRefreshIfSignals asks for a refresh of a profile that has no taste
+// profile yet, when it has signals to build one from. Its first refresh
+// request lives in one server's memory and can be lost; this lets a later
+// read recover it. A profile with nothing to build from asks for nothing.
+func (r *Reader) requestRefreshIfSignals(ctx context.Context, userID int, profileID string) {
+	if r.refresh == nil {
+		return
+	}
+	has, err := r.signalReader().HasSignals(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "checking a profile's recommendation signals failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		return
+	}
+	if has {
+		r.refresh.RequestReadRefresh(ctx, userID, profileID)
 	}
 }
 
@@ -58,7 +96,7 @@ func (r *Reader) signalReader() *SignalReader {
 // GetForYouMain returns the first row the recommendations page should display.
 func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +110,7 @@ func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string
 // GetForYouRows returns the remaining recommendations-page rows after the main row.
 func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -92,9 +130,7 @@ func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID
 		return nil, err
 	}
 	if len(items) == 0 {
-		if r.refresh != nil {
-			r.refresh.RequestProfileRefresh(ctx, userID, profileID)
-		}
+		r.requestRefresh(ctx, userID, profileID)
 		return []ScoredItem{}, nil
 	}
 
@@ -159,8 +195,10 @@ func (r *Reader) GetBecauseYouWatchedWithSource(ctx context.Context, userID int,
 		return rows[0].Items, sourceID, nil
 	}
 
-	if r.refresh != nil {
-		r.refresh.RequestProfileRefresh(ctx, userID, profileID)
+	// Rows are built only for completed titles, so a profile with none has
+	// nothing a refresh could add.
+	if len(sourceIDs) > 0 {
+		r.requestRefresh(ctx, userID, profileID)
 	}
 	return []ScoredItem{}, "", nil
 }
@@ -200,9 +238,7 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 			return nil, err
 		}
 		if len(items) == 0 {
-			if r.refresh != nil {
-				r.refresh.RequestProfileRefresh(ctx, userID, profileID)
-			}
+			r.requestRefresh(ctx, userID, profileID)
 			continue
 		}
 
@@ -250,11 +286,11 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 	return &rows[0], nil
 }
 
-func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, bool, error) {
+func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	level := 0
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if meta != nil {
 		positiveSignals := 0
@@ -270,18 +306,18 @@ func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID st
 
 	globalRows, err := r.getGlobalRows(ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	clusterRows, missingClusters, err := r.getClusterRows(ctx, userID, profileID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	personalRows := make([]ForYouRow, 0, 1+len(clusterRows))
 	mainItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "")
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	missingPersonalized := level > 0 && (len(mainItems) == 0 || missingClusters)
 	if len(mainItems) > 0 {
@@ -299,14 +335,17 @@ func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID st
 	rows := mergePersonalizedAndColdStart(personalRows, globalRows, level)
 	rows, err = r.filterRows(ctx, userID, profileID, rows, filter)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
-	if missingPersonalized && r.refresh != nil {
-		r.refresh.RequestProfileRefresh(ctx, userID, profileID)
+	switch {
+	case missingPersonalized:
+		r.requestRefresh(ctx, userID, profileID)
+	case meta == nil:
+		r.requestRefreshIfSignals(ctx, userID, profileID)
 	}
 
-	return rows, missingPersonalized, nil
+	return rows, nil
 }
 
 func (r *Reader) getGlobalRows(ctx context.Context) ([]ForYouRow, error) {
@@ -432,7 +471,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	limit = normalizeRecommendationLimit(limit)
 
 	// 1. For-you rows (personalized + cold-start blended, already filtered).
-	forYouRows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	forYouRows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}

@@ -49,9 +49,9 @@ type RecommendationsHandler struct {
 	WatchTonightFetcher watchTonightSectionFetcher
 	CastFetcher         cardsCastFetcher
 	EbookProgress       EbookReaderProgressLister
-	// RecWorker enqueues asynchronous taste-profile refreshes after writes
-	// (taste seeding). Optional — when nil, refresh is simply skipped.
-	RecWorker ProfileRefreshRequester
+	// RecWorker is told when taste seeding adds favorites. Optional: when
+	// nil, nothing is rebuilt until the next scheduled job.
+	RecWorker SignalsChangedNotifier
 	nowFn     func() time.Time
 }
 

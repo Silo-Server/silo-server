@@ -452,11 +452,7 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 		}
 	}
 	if added > 0 {
-		var staler ProfileStaler
-		if h.recsRepo != nil {
-			staler = h.recsRepo
-		}
-		triggerProfileRefresh(ctx, staler, h.RecWorker, userID, profileID)
+		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
 	}
 	return added, nil
 }

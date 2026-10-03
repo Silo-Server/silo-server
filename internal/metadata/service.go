@@ -454,6 +454,7 @@ type MetadataService struct {
 	groupOverrideRepo       metadataGroupOverrideRepo
 	observedLocationRepo    metadataObservedLocationRepo
 	dbPool                  *pgxpool.Pool
+	recsStaler              RecommendationStaler
 
 	dedupLocks      keyedDedupLocks
 	onDemandRefresh keyedRefreshSet
@@ -7428,7 +7429,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 			return "", fmt.Errorf("loading source status for provider conflict recovery: %w", statusErr)
 		}
 		if isProvisionalOwnershipStatus(sourceStatus) && isConfirmedOwnershipStatus(existing.Status) {
-			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, sourceContentID, existing.ContentID, false)
+			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, s.recsStaler, sourceContentID, existing.ContentID, false)
 			if err != nil {
 				return "", err
 			}
@@ -7562,12 +7563,13 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 	if err != nil {
 		return err
 	}
-	if _, err := reattribute.Run(ctx, tx, reattribute.Options{
+	report, err := reattribute.Run(ctx, tx, reattribute.Options{
 		FromContentID: fromContentID,
 		ToContentID:   toContentID,
 		WholeItem:     true,
 		EpisodePairs:  episodePairs,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("reattributing user state %s -> %s: %w", fromContentID, toContentID, err)
 	}
 
@@ -7587,6 +7589,7 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
+	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(report, toContentID, episodePairs)...)
 	return nil
 }
 
