@@ -552,7 +552,9 @@ the SDK's `NetworkIdentityAuth`.
   keeping the account's API keys and the sessions the primary provider vouches
   for. While the primary provider's latest answer refuses the account, network
   sign-in is `not_permitted`, so the overlay cannot undo the primary
-  provider's deprovisioning. Otherwise the two providers would each apply their
+  provider's deprovisioning. A refresh of a network session re-checks only
+  the network identity, so the scheduled pass re-checks the primary identity
+  of an account with live network sessions. Otherwise the two providers would each apply their
   own role and sign the account out at every change.
 - **No email matching.** The host drops `email_verified` from a network
   provider's answer, so a network identity never links to an account by email

@@ -743,7 +743,10 @@ const scheduledRecheckBatch = 100
 // through the identity that is not refreshing. An identity whose provider
 // last answered unsupported is skipped when its account has local password
 // sign-in turned on: asking again could only repeat an answer that bounds
-// nothing for it (staleProviderAuth).
+// nothing for it (staleProviderAuth). An identity at an enabled primary
+// provider is also due while its account has a live login session opened
+// through a network identity: those sessions defer to it (primaryAuthorityOf),
+// but their refresh re-checks only the network identity.
 //
 // At an installation that is no longer an enabled sign-in provider nobody
 // can be asked, so the pass only bounds the API keys and Audiobookshelf
@@ -751,7 +754,7 @@ const scheduledRecheckBatch = 100
 // absolute age ($3, auth.refresh_token_expiry in seconds), as for an
 // unsupported answer (staleProviderAuth). Login sessions already stop
 // sliding at refresh.
-const idleIdentityCondition = `
+var idleIdentityCondition = `
 	(i.last_checked_at IS NULL OR i.last_check_status = ''
 		OR i.last_checked_at <= NOW() - make_interval(secs => $1)
 		OR (i.last_check_status = 'unavailable' AND i.last_checked_at <= NOW() - make_interval(secs => $2)))
@@ -766,7 +769,15 @@ const idleIdentityCondition = `
 			AND (a.expires_at IS NULL OR a.expires_at > NOW()))
 		OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.identity_id = i.id AND s.revoked_at IS NULL AND s.expires_at > NOW()
 			AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
-				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled)))`
+				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled))
+		OR EXISTS (SELECT 1 FROM auth_sessions s JOIN plugin_auth_identities n ON n.id = s.identity_id
+			WHERE s.user_id = i.user_id AND n.user_id = i.user_id AND n.plugin_installation_id <> i.plugin_installation_id
+				AND s.revoked_at IS NULL AND s.expires_at > NOW()
+				AND EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = n.plugin_installation_id
+					AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `)
+				AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
+					WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled
+						AND NOT ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `)))`
 
 // IdleRecheckDue reports whether the scheduled pass has an identity to
 // re-check (RecheckIdleIdentities).

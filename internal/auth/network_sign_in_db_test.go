@@ -162,6 +162,33 @@ func TestLinkNetworkIdentityDB(t *testing.T) {
 	}
 }
 
+// enableNetworkProvider enables the env's primary binding and adds an
+// enabled network identity provider installation beside it.
+func (e *recheckEnv) enableNetworkProvider(t *testing.T, label string) int {
+	t.Helper()
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, e.installationID)
+	var network int
+	if err := e.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/network-sign-in-test', true, 'manual', 'plugin') RETURNING id`,
+		label+"-"+e.suffix).Scan(&network); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, network)
+	})
+	exec(`INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}')`, network)
+	exec(`INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'tailscale', true)`, network)
+	return network
+}
+
 // TestNetworkIdentityDefersToPrimaryProviderDB: an account that also signs in
 // through the primary provider takes its role from that provider alone, and
 // a refusal from the network provider ends only the sessions the network
@@ -175,19 +202,7 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	exec(`UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
-	var network int
-	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
-		VALUES ($1, '0', '/nonexistent/network-sign-in-test', true, 'manual', 'plugin') RETURNING id`,
-		"network-sign-in-"+env.suffix).Scan(&network); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, network)
-	})
-	exec(`INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
-		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}')`, network)
-	exec(`INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'tailscale', true)`, network)
+	network := env.enableNetworkProvider(t, "network-sign-in")
 
 	tailnetAdmin := ExternalIdentity{Subject: "controlplane.tailscale.com|" + env.suffix, Username: env.name("tv-owner"),
 		ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN}
@@ -297,6 +312,37 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 	}
 	if user, err := NewUserRepository(env.pool).GetByID(ctx, env.user.ID); err != nil || user.Role != models.RoleUser {
 		t.Fatalf("after a network sign-in = %+v, %v; want the primary provider's role", user, err)
+	}
+}
+
+// TestScheduledRecheckCoversNetworkSessionsDB: an account whose only
+// credential is a network session still has its primary identity re-checked
+// by the scheduled pass, so the primary provider's removal ends the session.
+func TestScheduledRecheckCoversNetworkSessionsDB(t *testing.T) {
+	env := newRecheckEnv(t, "network-only-sessions", "")
+	ctx := t.Context()
+	network := env.enableNetworkProvider(t, "network-only-sessions")
+	_, networkIdentityID, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Network: true, LinkingUserID: env.user.ID,
+		Identity: ExternalIdentity{Subject: "controlplane.tailscale.com|" + env.suffix, Username: env.name("tv-owner")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_identities SET last_checked_at = NOW(), last_check_status = $2 WHERE id = $1`,
+		networkIdentityID, CheckStatusActive); err != nil {
+		t.Fatal(err)
+	}
+	networkSession, _ := env.sessionWithChain(t, &networkIdentityID, time.Now())
+	env.makeDue(t)
+
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
+	if _, err := env.recheck.RecheckIdleIdentities(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if status := env.identityState(t).LastCheckStatus; status != CheckStatusNotFound {
+		t.Fatalf("primary identity status = %q, want %q: the scheduled pass skipped it", status, CheckStatusNotFound)
+	}
+	if env.sessionRow(t, networkSession).RevokedAt == nil {
+		t.Fatal("the network session survived the primary provider's refusal")
 	}
 }
 
