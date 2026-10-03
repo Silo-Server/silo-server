@@ -83,11 +83,12 @@ Client flow:
 
 1. Probe `http://silo/api/v2/system/identity`, and `silo-1` and `silo-2` (the
    names a second and third node with the default name receive), with a
-   short timeout. Accept the answer only when the bare name resolved to an
-   overlay address (`100.64.0.0/10`, or Tailscale's `fd7a:115c:a1e0::/48`),
-   and follow at most one redirect, only to an `https` URL whose host is the
-   probed name plus a domain. A bare name resolved through the local
-   network's DNS instead could send the client anywhere.
+   short timeout. Follow at most one redirect, only to an `https` URL whose
+   host is the probed name plus a domain, and accept the answer only when
+   every connection the probe made ran over the overlay: both its local and
+   remote addresses are overlay addresses (`100.64.0.0/10`, or Tailscale's
+   `fd7a:115c:a1e0::/48`). A remote overlay address alone is not enough, since
+   a local network can resolve the bare name to one and route it to itself.
 2. On success, the final origin is the server's overlay address: save that,
    never the bare-name URL. The redirect only answers reads, so a client that
    keeps `http://silo/` as its base URL fails at the first `POST` (sign-in
