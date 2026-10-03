@@ -1,6 +1,6 @@
 import type { PlayerSubtitleInfo, PlayerSubtitleTrackSignature, SubtitleMode } from "../types";
 import { canonicalLanguageTag, normalizeLanguageCode } from "@/lib/languageTags";
-import { isBitmapCodec } from "./subtitleCodecs";
+import { isBitmapCodec, isPGSCodec } from "./subtitleCodecs";
 
 const ORIGINAL_LANGUAGE_SENTINEL = "original";
 // playback.audio_language stores the original-language choice as this
@@ -12,20 +12,47 @@ function isOriginalLanguagePreference(normalized: string): boolean {
 }
 
 const SOURCE_PRIORITY: Record<string, number> = {
-  external: 0,
-  downloaded: 1,
-  embedded: 2,
+  embedded: 0,
+  external: 1,
+  downloaded: 2,
 };
 
+function sourcePriority(track: PlayerSubtitleInfo): number {
+  return SOURCE_PRIORITY[track.source ?? "embedded"] ?? 0;
+}
+
 /**
- * Auto-select priority within the same language rank: lower is better. Within the same source
- * tier, text tracks beat bitmap (PGS) tracks — bitmap is heavier to render
- * and can't be styled — while a bitmap track still wins when it's the only
- * match for the language.
+ * Whether the track can only be shown by burning it into a transcode. Uses the
+ * server's delivery class when the track carries one, and otherwise mirrors
+ * it: text tracks and embedded PGS reach the player as sidecars, while every
+ * other bitmap track (external or downloaded files, embedded DVD/DVB) does not.
+ */
+function isBurnInOnly(track: PlayerSubtitleInfo): boolean {
+  if (track.burn_in_only !== undefined) return track.burn_in_only;
+  if (!isBitmapCodec(track.codec)) return false;
+  return !((track.source ?? "embedded") === "embedded" && isPGSCodec(track.codec));
+}
+
+/**
+ * Auto-select priority within the same language rank: lower is better. Each
+ * tier only breaks ties in the one before it:
+ * 1. a track the player renders itself beats one that forces a burn-in;
+ * 2. full dialogue beats forced, and plain beats SDH, so a file's own forced
+ *    or SDH track never displaces the full track the viewer asked for;
+ * 3. embedded beats external beats downloaded;
+ * 4. text beats bitmap (PGS), which is heavier to render and can't be styled.
+ * A bitmap track still wins when it's the only match for the language.
  */
 function trackPriority(track: PlayerSubtitleInfo): number {
-  const source = SOURCE_PRIORITY[track.source ?? "embedded"] ?? 2;
-  return source * 2 + (isBitmapCodec(track.codec) ? 1 : 0);
+  // Source (0-2) times 2 plus bitmap (0-1) stays below 8, so each flag
+  // weight outranks every lower tier combined.
+  return (
+    (isBurnInOnly(track) ? 32 : 0) +
+    (track.forced ? 16 : 0) +
+    (track.hearing_impaired ? 8 : 0) +
+    sourcePriority(track) * 2 +
+    (isBitmapCodec(track.codec) ? 1 : 0)
+  );
 }
 
 function normalize(value: string | undefined | null): string {
@@ -94,19 +121,15 @@ function scoreSignatureFallback(
   return score;
 }
 
-/** Sort subtitle tracks: external first, then downloaded, then embedded. */
+/** Sort subtitle tracks: embedded first, then external, then downloaded. */
 export function sortSubtitlesBySource(tracks: PlayerSubtitleInfo[]): PlayerSubtitleInfo[] {
-  return [...tracks].sort((a, b) => {
-    const pa = SOURCE_PRIORITY[a.source ?? "embedded"] ?? 2;
-    const pb = SOURCE_PRIORITY[b.source ?? "embedded"] ?? 2;
-    return pa - pb;
-  });
+  return [...tracks].sort((a, b) => sourcePriority(a) - sourcePriority(b));
 }
 
 /**
  * Find the best subtitle track index for a given language: exact tag, then
  * bare language, then another variant of the same language. Within a language
- * rank, prefer external > downloaded > embedded, then text over bitmap.
+ * rank, order candidates by trackPriority.
  * Returns the track's backend index (track.index) or -1 if no match.
  */
 export function findPreferredSubtitleIndex(tracks: PlayerSubtitleInfo[], language: string): number {
