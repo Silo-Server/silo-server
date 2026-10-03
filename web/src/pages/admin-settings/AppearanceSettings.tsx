@@ -236,7 +236,7 @@ export default function AppearanceSettings() {
                   <>Restart the server to finish enabling image uploads.</>
                 ) : (
                   <>
-                    Image uploads need a public S3 bucket, set in{" "}
+                    Image uploads need artwork storage (local disk or S3), set in{" "}
                     <span className="text-foreground font-medium">Storage &amp; Database</span>{" "}
                     settings.
                   </>

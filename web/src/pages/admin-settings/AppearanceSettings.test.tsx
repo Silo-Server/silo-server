@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useSettingsFormMock = vi.fn();
+const brandingState = { storageAvailable: true };
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -15,7 +16,7 @@ vi.mock("@/hooks/useRestartKeys", () => ({
 
 vi.mock("@/hooks/useBranding", () => ({
   useBranding: () => ({
-    storageAvailable: true,
+    storageAvailable: brandingState.storageAvailable,
     wordmarkUrl: null,
     markUrl: null,
     faviconUrl: null,
@@ -98,6 +99,7 @@ let form: ReturnType<typeof makeForm>;
 describe("AppearanceSettings", () => {
   beforeEach(() => {
     localStorage.clear();
+    brandingState.storageAvailable = true;
     form = makeForm();
     useSettingsFormMock.mockReset();
     useSettingsFormMock.mockImplementation(() => form);
@@ -109,6 +111,16 @@ describe("AppearanceSettings", () => {
     for (const heading of ["Logos and icons", "Colors", "Card overlays"]) {
       expect(screen.getByRole("group", { name: heading })).toBeInTheDocument();
     }
+  });
+
+  it("points unavailable uploads at artwork storage, not an S3 bucket", () => {
+    brandingState.storageAvailable = false;
+    render(<AppearanceSettings />);
+
+    expect(
+      screen.getByText(/Image uploads need artwork storage \(local disk or S3\)/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/public S3 bucket/)).not.toBeInTheDocument();
   });
 
   it("renders the tab title and nothing else in the header", () => {
