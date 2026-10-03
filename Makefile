@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint lint-changed test test-go test-db-pins test-web embed-stub clean jellyfin-web verify-local-paths verify-case-collisions install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all playback-fixtures verify-playback-fixtures route-inventory verify-route-inventory lint-router-recovery verify-migration-ledger verify-scenario-catalogs offline-routes verify-offline-routes apiv2-openapi verify-apiv2-openapi verify-apiv2-contract apiv2-fixtures verify-apiv2-fixtures apiv2-fixtures-sync verify-apiv2-fixtures-siblings apiv2-web-types verify-apiv2-web-types
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -379,6 +379,12 @@ verify-offline-routes:
 # Check committed content for local machine path leaks.
 verify-local-paths:
 	scripts/check-local-path-leaks.sh
+
+# Fail on tracked paths that name the same file on a case-insensitive file
+# system (macOS, Windows), including JS/TS modules that differ only in case
+# once the extension an import omits is removed.
+verify-case-collisions:
+	go run ./scripts/ci/casecollisions
 
 # Create a timestamped Goose SQL migration. Usage: make migrate-create NAME=add_thing
 migrate-create:
