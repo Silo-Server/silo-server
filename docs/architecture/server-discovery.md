@@ -100,6 +100,9 @@ Client flow:
    `media-box`: admins rename nodes, so the default names are only the common
    case.
 
+Probe again when the device's network changes: an overlay often connects
+after the setup screen is already open.
+
 A provider that cannot open port 80 still serves every listener; the redirect
 is a convenience, not part of connection setup.
 
