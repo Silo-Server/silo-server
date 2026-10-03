@@ -408,7 +408,10 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
-	} else if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+	}
+	if access.AllowedLibraryIDs != nil && len(libraryIDs) == 0 {
+		// The allowlist shares no library with the query. An empty library
+		// list would otherwise scope nothing and match every library.
 		conditions = append(conditions, "1 = 0")
 	}
 	if access.AllowedContentIDs != nil {
