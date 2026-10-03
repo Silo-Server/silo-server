@@ -1112,6 +1112,30 @@ describe("SignInSettings password sign-in", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Turn on a sign-in provider first");
   });
 
+  it("does not count a network sign-in as the provider that is on", async () => {
+    const user = userEvent.setup();
+    state.installations = [
+      ldapInstallation(),
+      tailscaleInstallation({
+        auth_bindings: [
+          {
+            capability_id: "tailscale",
+            enabled: true,
+            display_order: 1,
+            auto_provision: true,
+            default_login: false,
+            created_at: STAMP,
+            updated_at: STAMP,
+          },
+        ],
+      }),
+    ];
+    mount();
+    await user.click(screen.getByRole("switch", { name: "Allow password sign-in" }));
+    expect(state.setValue).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Turn on a sign-in provider first");
+  });
+
   it("stages turning password sign-in off when a break-glass admin exists", async () => {
     const user = userEvent.setup();
     mount();

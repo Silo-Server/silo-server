@@ -12,9 +12,10 @@ import {
 import {
   adminSignInErrorText,
   authBindingOf,
-  authCapabilityOf,
   authProviderLabel,
   networkSignInInstallations,
+  savedAutoProvision,
+  signInBindingWrite,
 } from "@/lib/externalSignInAdmin";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 
@@ -63,24 +64,16 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
   const feedbackRef = useRef<HTMLParagraphElement>(null);
   const enabledId = useId();
   const autoProvisionId = useId();
-  const capability = authCapabilityOf(installation)!;
-  const binding = authBindingOf(installation);
   const label = authProviderLabel(installation);
-  const enabled = binding?.enabled === true;
-  const autoProvision = binding?.auto_provision ?? true;
+  const enabled = authBindingOf(installation)?.enabled === true;
+  const autoProvision = savedAutoProvision(installation);
   const pending = bindingWrites > 0;
 
   function write(change: { enabled?: boolean; auto_provision?: boolean }, success: string) {
     updateBinding.mutate(
       {
         installationId: installation.id,
-        body: {
-          capability_id: capability.id,
-          enabled: change.enabled ?? enabled,
-          display_order: binding?.display_order ?? 1,
-          auto_provision: change.auto_provision ?? autoProvision,
-          default_login: false,
-        },
+        body: signInBindingWrite(installation, { ...change, default_login: false }),
       },
       {
         onSuccess: () => setFeedback({ tone: "ok", text: success }),

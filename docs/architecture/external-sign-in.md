@@ -521,8 +521,9 @@ the SDK's `NetworkIdentityAuth`.
   `network_sign_in_path` and the owner's name for a "Continue as" label.
   Answers about a peer (identity or refusal) are cached for 30 seconds per
   provider instance and peer; a binding or plugin configuration change builds
-  a new instance, so a changed rule applies at once. A plugin that cannot
-  answer is not cached. Sign-in
+  a new instance, so a changed rule applies at once. Discovery waits at most
+  2 seconds for the plugin; a plugin that cannot answer in time is left out
+  and not cached. Sign-in
   and linking always ask again. A network provider is never the default
   provider, never counts toward `password_login`, and never receives a
   password: login and Jellyfin routing skip it, a login that names it fails

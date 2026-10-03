@@ -27,6 +27,8 @@ import {
   primarySignInInstallations,
   authProviderLabel,
   authProviderName,
+  savedAutoProvision,
+  signInBindingWrite,
 } from "@/lib/externalSignInAdmin";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 import { cn } from "@/lib/utils";
@@ -292,20 +294,12 @@ function useBindingSwitch({
   const updateBinding = useUpdateSignInBinding();
   const bindingWrites = useIsMutating({ mutationKey: signInBindingMutationKey });
   const [confirmOff, setConfirmOff] = useState(false);
-  const capability = authCapabilityOf(installation)!;
-  const binding = authBindingOf(installation);
 
   function write(enabled: boolean, success: string) {
     updateBinding.mutate(
       {
         installationId: installation.id,
-        body: {
-          capability_id: capability.id,
-          enabled,
-          display_order: binding?.display_order ?? 1,
-          auto_provision: binding?.auto_provision ?? true,
-          default_login: binding?.default_login ?? false,
-        },
+        body: signInBindingWrite(installation, { enabled }),
       },
       {
         onSuccess: () => report({ tone: "ok", text: success }),
@@ -491,7 +485,7 @@ function ProviderPanel({
       key="auto-provision"
       label="Create accounts on first sign-in"
       htmlFor={autoProvisionId}
-      dirty={autoProvision !== (binding?.auto_provision ?? true)}
+      dirty={autoProvision !== savedAutoProvision(installation)}
       description="People the provider lets in get a Silo account the first time they sign in. Off: only people whose Silo account is already connected can sign in."
       descriptionId={autoProvisionDescription}
     >

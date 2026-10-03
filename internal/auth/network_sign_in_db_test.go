@@ -7,6 +7,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -16,12 +17,18 @@ import (
 // env's installation.
 func networkSignInService(t *testing.T, env *externalSignInEnv, plugin *peerPlugin, autoProvision bool) *Service {
 	t.Helper()
-	users := NewUserRepository(env.pool)
-	sessions := NewSessionRepository(env.pool)
+	return networkSignInServiceAt(env.pool, env.resolver, env.installationID, plugin, autoProvision)
+}
+
+// networkSignInServiceAt wires a Service to a network identity plugin at
+// installationID.
+func networkSignInServiceAt(pool *pgxpool.Pool, resolver *AccountResolver, installationID int, plugin *peerPlugin, autoProvision bool) *Service {
+	users := NewUserRepository(pool)
+	sessions := NewSessionRepository(pool)
 	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
-	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "tailscale", AutoProvision: autoProvision},
-		sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
-	svc.SetPluginProviderSource(networkProviderSource(env.installationID, provider))
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: installationID, CapabilityID: "tailscale", AutoProvision: autoProvision},
+		sessions, resolver, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	svc.SetPluginProviderSource(networkProviderSource(installationID, provider))
 	return svc
 }
 
@@ -186,7 +193,7 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 		ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN}
 	resolve := func(linking int) *models.User {
 		t.Helper()
-		user, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Identity: tailnetAdmin, LinkingUserID: linking})
+		user, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Network: true, Identity: tailnetAdmin, LinkingUserID: linking})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -259,8 +266,11 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 
 	// While the primary provider refuses the account, the overlay cannot sign
 	// it back in; once it vouches again, it can.
+	overlay := networkSignInServiceAt(env.pool, env.resolver, network, &peerPlugin{peers: map[string]*pluginv1.AuthenticateResponse{
+		"100.64.0.7": {ExternalSubject: tailnetAdmin.Subject, Username: tailnetAdmin.Username, ManagedRole: tailnetAdmin.ManagedRole},
+	}}, false)
 	signIn := func() error {
-		_, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Identity: tailnetAdmin})
+		_, err := overlay.NetworkSignIn(overlayContext(ctx, network, "100.64.0.7"), NetworkSignInInput{InstallationID: network})
 		return err
 	}
 	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusNotFound)
@@ -270,6 +280,9 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusActive)
 	if err := signIn(); err != nil {
 		t.Fatalf("network sign-in once the primary provider vouches again = %v", err)
+	}
+	if user, err := NewUserRepository(env.pool).GetByID(ctx, env.user.ID); err != nil || user.Role != models.RoleUser {
+		t.Fatalf("after a network sign-in = %+v, %v; want the primary provider's role", user, err)
 	}
 }
 

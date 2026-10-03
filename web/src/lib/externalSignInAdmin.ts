@@ -2,6 +2,7 @@
 // Sign-in settings page and an account's Sign-in tab. The refusals are listed
 // in docs/auth-api.md#external-sign-in.
 import type { PluginAuthBinding, PluginCapability, PluginInstallation } from "@/api/types";
+import type { SignInBindingWrite } from "@/hooks/queries/admin/externalSignIn";
 import { StaleApiRequestContextError } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 
@@ -88,11 +89,39 @@ export function authBindingOf(installation: PluginInstallation): PluginAuthBindi
   return installation.auth_bindings?.find((entry) => entry.capability_id === capability?.id);
 }
 
-/** The installation whose binding is on: a server has at most one. */
+/** Whether the installation creates accounts for people it signs in; on until saved off. */
+export function savedAutoProvision(installation: PluginInstallation): boolean {
+  return authBindingOf(installation)?.auto_provision ?? true;
+}
+
+/**
+ * The binding write for an installation: its saved binding (or a fresh
+ * install's defaults) with change applied.
+ */
+export function signInBindingWrite(
+  installation: PluginInstallation,
+  change: Partial<Omit<SignInBindingWrite, "capability_id">> = {},
+): SignInBindingWrite {
+  const binding = authBindingOf(installation);
+  return {
+    capability_id: authCapabilityOf(installation)!.id,
+    enabled: binding?.enabled ?? false,
+    display_order: binding?.display_order ?? 1,
+    auto_provision: savedAutoProvision(installation),
+    default_login: binding?.default_login ?? false,
+    ...change,
+  };
+}
+
+/**
+ * The OIDC or LDAP installation whose binding is on: a server has at most
+ * one. A network sign-in beside it is not counted: it signs in only people
+ * on its network.
+ */
 export function activeSignInInstallation(
   installations: readonly PluginInstallation[] | undefined,
 ): PluginInstallation | undefined {
-  return authPluginInstallations(installations).find(
+  return primarySignInInstallations(installations).find(
     (installation) => authBindingOf(installation)?.enabled === true,
   );
 }

@@ -67,8 +67,9 @@ func requestPeer(ctx context.Context, installationID int) (netip.Addr, error) {
 	return path.Peer, nil
 }
 
-// peerResponse asks the plugin who peer is.
-func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr) (*pluginv1.AuthenticateResponse, error) {
+// peerResponse asks the plugin who peer is. A positive callTimeout bounds
+// the call itself (not loading the plugin) below the client's default.
+func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr, callTimeout time.Duration) (*pluginv1.AuthenticateResponse, error) {
 	client, err := p.client(ctx)
 	if err != nil {
 		return nil, pluginCallError(ctx, p.config.InstallationID, "load", err)
@@ -77,7 +78,13 @@ func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr) (*pl
 	if !ok {
 		return nil, ErrProviderUnavailable
 	}
-	response, err := network.AuthenticatePeer(ctx, &pluginv1.AuthenticatePeerRequest{PeerAddress: peer.String()})
+	callCtx := ctx
+	if callTimeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, callTimeout)
+		defer cancel()
+	}
+	response, err := network.AuthenticatePeer(callCtx, &pluginv1.AuthenticatePeerRequest{PeerAddress: peer.String()})
 	if err != nil {
 		return nil, pluginCallError(ctx, p.config.InstallationID, "authenticate_peer", err)
 	}
@@ -88,14 +95,14 @@ func (p *PluginProvider) peerResponse(ctx context.Context, peer netip.Addr) (*pl
 // sign-in when linkingUserID is 0, otherwise a link to that signed-in
 // account. It also answers the identity, for the login session it opens.
 func (p *PluginProvider) authenticatePeer(ctx context.Context, peer netip.Addr, linkingUserID int) (*models.User, int64, error) {
-	response, err := p.peerResponse(ctx, peer)
+	response, err := p.peerResponse(ctx, peer, 0)
 	if err != nil {
 		return nil, 0, err
 	}
 	// A network identity never matches an account by email: whoever uses
 	// the device is its owner, which says nothing about who owns the address.
 	response.EmailVerified = nil
-	return p.resolve(ctx, response, linkingUserID)
+	return p.resolve(ctx, response, linkingUserID, true)
 }
 
 // findNetworkInstallation returns the PluginProvider registered for the
@@ -215,6 +222,11 @@ func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installation
 // one peer. Sign-in and linking always ask again.
 const networkPreviewTTL = 30 * time.Second
 
+// networkPreviewTimeout bounds discovery's call to the plugin: the provider
+// list waits on it, so a plugin that hangs costs the login page at most this
+// long and leaves the network provider out.
+const networkPreviewTimeout = 2 * time.Second
+
 // networkPreviewLimit caps the cached answers; discovery is unauthenticated,
 // though only overlay peers reach it.
 const networkPreviewLimit = 4096
@@ -222,7 +234,8 @@ const networkPreviewLimit = 4096
 // networkPreviewKey keys a cached answer by the provider instance, not its
 // installation: the registry builds new instances whenever bindings or the
 // plugin's configuration change, so a changed access rule is never answered
-// from the cache.
+// from the cache. Expired answers, a replaced instance's included, are
+// dropped at the next miss.
 type networkPreviewKey struct {
 	provider *PluginProvider
 	peer     netip.Addr
@@ -243,7 +256,8 @@ type networkPreviews struct {
 // networkPreview answers who the plugin says the request's peer is, or nil
 // when the request has no peer from this provider, the plugin refuses the
 // peer, or it cannot answer. Refusals and identities are cached briefly per
-// peer; a failure to answer is not.
+// peer; a failure to answer, or no answer within networkPreviewTimeout, is
+// not.
 func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) *NetworkIdentityPreview {
 	peer, err := requestPeer(ctx, provider.InstallationID())
 	if err != nil {
@@ -257,7 +271,7 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 	if ok && now.Before(entry.expires) {
 		return entry.preview
 	}
-	response, err := provider.peerResponse(ctx, peer)
+	response, err := provider.peerResponse(ctx, peer, networkPreviewTimeout)
 	if err != nil {
 		return nil
 	}
@@ -268,6 +282,11 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 		return nil
 	}
 	s.previews.mu.Lock()
+	for key, entry := range s.previews.entries {
+		if !now.Before(entry.expires) {
+			delete(s.previews.entries, key)
+		}
+	}
 	if s.previews.entries == nil || len(s.previews.entries) >= networkPreviewLimit {
 		s.previews.entries = make(map[networkPreviewKey]networkPreviewEntry)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"sync"
 	"testing"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"google.golang.org/grpc/codes"
@@ -21,12 +22,15 @@ type peerPlugin struct {
 	peers map[string]*pluginv1.AuthenticateResponse
 	asked []string
 	err   error
+	// deadline is the context deadline of the latest call; zero without one.
+	deadline time.Time
 }
 
-func (p *peerPlugin) AuthenticatePeer(_ context.Context, req *pluginv1.AuthenticatePeerRequest) (*pluginv1.AuthenticateResponse, error) {
+func (p *peerPlugin) AuthenticatePeer(ctx context.Context, req *pluginv1.AuthenticatePeerRequest) (*pluginv1.AuthenticateResponse, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.asked = append(p.asked, req.GetPeerAddress())
+	p.deadline, _ = ctx.Deadline()
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -170,6 +174,53 @@ func TestDiscoverProvidersOffersNetworkProviderToOverlayPeers(t *testing.T) {
 	}
 	if plugin.askedCount() != asked+2 {
 		t.Fatalf("plugin asked %d times, want %d: an unavailable answer must not be cached", plugin.askedCount(), asked+2)
+	}
+}
+
+// Discovery bounds its plugin call well below the client's default, so a
+// hung plugin cannot stall the provider list; sign-in keeps the default.
+func TestNetworkPreviewBoundsThePluginCall(t *testing.T) {
+	plugin := &peerPlugin{}
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+		nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+	start := time.Now()
+	svc.networkPreview(overlayContext(t.Context(), 5, "100.64.0.7"), provider)
+	plugin.mu.Lock()
+	deadline := plugin.deadline
+	plugin.mu.Unlock()
+	if deadline.IsZero() || deadline.After(start.Add(networkPreviewTimeout+time.Second)) {
+		t.Fatalf("discovery call deadline = %v, want within %v of %v", deadline, networkPreviewTimeout, start)
+	}
+}
+
+// A cache miss drops expired answers, including those of a provider instance
+// a registry rebuild replaced.
+func TestNetworkPreviewDropsExpiredAnswers(t *testing.T) {
+	plugin := &peerPlugin{}
+	newProvider := func() *PluginProvider {
+		return NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: 5, CapabilityID: "tailscale"},
+			nil, nil, func(context.Context) (pluginAuthClient, error) { return plugin, nil })
+	}
+	replaced, current := newProvider(), newProvider()
+	svc := NewService(nil, nil, nil, nil, nil, nil, nil)
+	stale := networkPreviewKey{provider: replaced, peer: netip.MustParseAddr("100.64.0.7")}
+	fresh := networkPreviewKey{provider: replaced, peer: netip.MustParseAddr("100.64.0.8")}
+	svc.previews.entries = map[networkPreviewKey]networkPreviewEntry{
+		stale: {expires: time.Now().Add(-time.Second)},
+		fresh: {expires: time.Now().Add(time.Minute)},
+	}
+	svc.networkPreview(overlayContext(t.Context(), 5, "100.64.0.9"), current)
+	svc.previews.mu.Lock()
+	defer svc.previews.mu.Unlock()
+	if _, ok := svc.previews.entries[stale]; ok {
+		t.Fatal("an expired answer survived a cache miss")
+	}
+	if _, ok := svc.previews.entries[fresh]; !ok {
+		t.Fatal("a live answer was dropped")
+	}
+	if len(svc.previews.entries) != 2 {
+		t.Fatalf("cache = %v, want the live answer and the new one", svc.previews.entries)
 	}
 }
 
