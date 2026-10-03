@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -166,6 +168,82 @@ func (s *ContributionService) ContributeFile(ctx context.Context, file *models.M
 	return outcomes, nil
 }
 
+// urlInText matches a URL token of any scheme (postgres://, HTTPS://) inside
+// free text. It takes the whole non-space run, so trailing punctuation lands
+// in the query or path that SanitizeURL then trims, and anything unparseable
+// fails closed.
+var urlInText = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
+
+// authSchemeInText matches the word after an HTTP auth scheme word. That word
+// is always masked unless it is one of authSchemeProse, a fixed list of words
+// that cannot be credentials, so "basic authentication required" keeps its
+// noun while any token, however short or plain, fails closed. A quoted value
+// is masked whole, spaces and all; an unterminated quote masks to the end.
+var authSchemeInText = regexp.MustCompile(`(?i)\b(bearer|basic)(\s+)(?:"([^"]*)"?|'([^']*)'?|([^\s"',;]+))`)
+
+var authSchemeProse = func() map[string]bool {
+	words := map[string]bool{}
+	for _, w := range strings.Fields("auth authentication authorization credential credentials header realm scheme token") {
+		words[w] = true
+	}
+	return words
+}()
+
+// keyValueInText matches a key followed by ":" or "=" and its value, as in
+// "api_key=abc" or `"x-api-key": "abc"`. Whether the key names a secret is
+// left to logredact.SecretKey, so new markers there apply here too.
+var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`)
+
+// submissionErrorText is a provider error's message safe to log and store.
+// URL errors are sanitized structurally; in other error text (gRPC status
+// text from a plugin, say) a quoted URL loses its query, fragment and
+// userinfo, and auth-scheme or key=value secrets are masked. It is best
+// effort over free text, not a guarantee: a bare secret with no key and no
+// auth scheme ("invalid token sk-abc") is left as is, since masking every
+// word after "token" would also eat ordinary diagnostics. Also unmasked: a
+// scheme-relative URL ("//user:pass@host"), and the tail of a quoted query
+// value containing a space, which \S+ splits off the URL.
+func submissionErrorText(err error) string {
+	msg := logredact.SanitizeURLError(err).Error()
+	msg = urlInText.ReplaceAllStringFunc(msg, logredact.SanitizeURL)
+	msg = authSchemeInText.ReplaceAllStringFunc(msg, func(match string) string {
+		m := authSchemeInText.FindStringSubmatch(match)
+		if quote := match[len(m[1])+len(m[2])]; quote == '"' || quote == '\'' {
+			// Quoted: the whole value is the credential, with no prose exemption.
+			if m[3] == logredact.Placeholder || m[4] == logredact.Placeholder {
+				return match
+			}
+			return m[1] + m[2] + string(quote) + logredact.Placeholder + string(quote)
+		}
+		if m[5] == logredact.Placeholder || authSchemeProse[strings.ToLower(m[5])] {
+			return match
+		}
+		return m[1] + m[2] + logredact.Placeholder
+	})
+	return maskKeyValueSecrets(msg)
+}
+
+// maskKeyValueSecrets masks the values of secret-named key=value pairs. The
+// value of a pair whose key is not secret is scanned again, as it can hold an
+// assignment of its own: gRPC renders a status as "desc = api_key=...", where
+// the outer pair's value is the inner one.
+func maskKeyValueSecrets(msg string) string {
+	return keyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
+		m := keyValueInText.FindStringSubmatch(pair)
+		// Header-style names ("x-api-key") use hyphens where SecretKey's
+		// markers use underscores.
+		if !logredact.SecretKey(strings.ReplaceAll(m[1], "-", "_")) {
+			return m[1] + m[2] + maskKeyValueSecrets(m[3])
+		}
+		// "Authorization: Bearer [REDACTED]": the scheme word is not the
+		// secret, and the pass above already masked what follows it.
+		if strings.EqualFold(m[3], "bearer") || strings.EqualFold(m[3], "basic") {
+			return pair
+		}
+		return m[1] + m[2] + logredact.Placeholder
+	})
+}
+
 func (s *ContributionService) contributeSegment(
 	ctx context.Context,
 	sub Submitter,
@@ -237,7 +315,8 @@ func (s *ContributionService) contributeSegment(
 	}
 	claim, claimed, err := s.store.Claim(ctx, row, contributionClaimLease)
 	if err != nil {
-		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: err.Error()}, true
+		// Reason reaches the task error; a store error can quote a DSN.
+		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusError, Reason: submissionErrorText(err)}, true
 	}
 	if !claimed {
 		return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusSkipped, Reason: "already submitted for this item"}, true
@@ -262,7 +341,10 @@ func (s *ContributionService) contributeSegment(
 	result, err := sub.SubmitMarker(submitCtx, req)
 	cancel()
 	if err != nil {
-		msg := err.Error()
+		// Sanitized once here: the message is stored on the contribution
+		// row, returned as the outcome's Reason (which the task can surface
+		// as its own error) and logged below.
+		msg := submissionErrorText(err)
 		row.Error = &msg
 		var conflict *SubmissionConflictError
 		var invalid *SubmissionInvalidError
@@ -281,6 +363,9 @@ func (s *ContributionService) contributeSegment(
 			}
 		default:
 			row.Status = OutcomeStatusError
+		}
+		if row.Status != OutcomeStatusConflict {
+			s.logger.WarnContext(ctx, "marker submission failed", "file_id", row.MediaFileID, "provider", providerID, "segment", seg.kind, "error", msg)
 		}
 		s.recordContribution(ctx, row)
 		if row.Status == OutcomeStatusConflict || row.Status == OutcomeStatusInvalid {
