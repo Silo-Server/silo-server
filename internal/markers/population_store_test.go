@@ -397,6 +397,21 @@ func TestPopulationSyncClearsUnchangedMetadataEdits(t *testing.T) {
 	if ids := allCandidates(t, store, providers, q.fileIDs); len(ids) != 0 {
 		t.Fatalf("candidates after the identity check=%v, want none", ids)
 	}
+	// An edit that lands while a pass is checking the file stays due.
+	edit := func() error {
+		_, err := q.fixture.pool.Exec(t.Context(), `UPDATE media_items SET updated_at=now()
+			WHERE content_id=(SELECT content_id FROM media_files WHERE id=$1)`, q.fileIDs[0])
+		return err
+	}
+	if err := edit(); err != nil {
+		t.Fatal(err)
+	}
+	q.write = edit
+	q.run(t, len(q.fileIDs))
+	// Each file's own check saw the edit made while it ran, the last file's included.
+	if ids := allCandidates(t, store, providers, q.fileIDs); !slices.Equal(ids, q.fileIDs) {
+		t.Fatalf("candidates after edits during the identity check=%v, want %v", ids, q.fileIDs)
+	}
 }
 
 // requestRecorder exposes the last request to a populationProvider fetch.

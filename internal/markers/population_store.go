@@ -18,6 +18,8 @@ type FetchClaim struct {
 	Identity string
 	Token    string
 	Failures int
+	// ClaimedAt is the database time of the claim.
+	ClaimedAt time.Time
 }
 
 type FetchCompletion struct {
@@ -25,6 +27,9 @@ type FetchCompletion struct {
 	RetryAt time.Time
 	Error   string
 	Result  *Result
+	// FetchedAt, when set, is recorded instead of the completion time, so a
+	// metadata edit made while a pass ran still counts as newer than it.
+	FetchedAt time.Time
 }
 
 // PopulationStore coordinates provider requests across API replicas and caches
@@ -76,7 +81,7 @@ func (s *DBPopulationStore) Claim(ctx context.Context, fileID int, provider, ide
 		WHERE (marker_fetch_state.lease_until IS NULL OR marker_fetch_state.lease_until<=now())
 		AND (marker_fetch_state.identity_key<>EXCLUDED.identity_key OR marker_fetch_state.provider_revision<>EXCLUDED.provider_revision OR marker_fetch_state.retry_at<=now()
 			OR marker_fetch_state.outcome='on_demand' OR ($4 AND marker_fetch_state.outcome IN ('hit','miss')))
-		RETURNING lease_token::text,failures`, fileID, provider, identity, force, revision).Scan(&claim.Token, &claim.Failures)
+		RETURNING lease_token::text,failures,now()`, fileID, provider, identity, force, revision).Scan(&claim.Token, &claim.Failures, &claim.ClaimedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return FetchClaim{}, false, nil
 	}
@@ -95,13 +100,17 @@ func (s *DBPopulationStore) Complete(ctx context.Context, claim FetchClaim, resu
 			return fmt.Errorf("encode cached marker result: %w", err)
 		}
 	}
+	var fetchedAt *time.Time
+	if !result.FetchedAt.IsZero() {
+		fetchedAt = &result.FetchedAt
+	}
 	_, err := s.pool.Exec(ctx, `UPDATE marker_fetch_state SET
 		outcome=$5,retry_at=$6,last_error=NULLIF($7,''),lease_token=NULL,lease_until=NULL,
-		fetched_at=CASE WHEN $5 IN ('hit','miss','on_demand') THEN now() ELSE fetched_at END,
+		fetched_at=CASE WHEN $5 IN ('hit','miss','on_demand') THEN COALESCE($9::timestamptz,now()) ELSE fetched_at END,
 		result=CASE WHEN $5 IN ('hit','miss') THEN $8::jsonb WHEN $5='on_demand' THEN NULL ELSE result END,
 		failures=CASE WHEN $5='error' THEN failures+1 ELSE 0 END
 		WHERE media_file_id=$1 AND provider=$2 AND identity_key=$3 AND lease_token=$4::uuid`,
-		claim.FileID, claim.Provider, claim.Identity, claim.Token, result.Outcome, result.RetryAt, result.Error, payload)
+		claim.FileID, claim.Provider, claim.Identity, claim.Token, result.Outcome, result.RetryAt, result.Error, payload, fetchedAt)
 	if err != nil {
 		return fmt.Errorf("complete marker fetch: %w", err)
 	}

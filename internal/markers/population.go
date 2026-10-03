@@ -190,7 +190,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		// edits from sync. Any other pass leaves the stamp and the lease free.
 		release := FetchCompletion{Outcome: markerFetchPending}
 		if verified {
-			release = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()}
+			release = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now(), FetchedAt: fileClaim.ClaimedAt}
 		}
 		_ = s.complete(ctx, fileClaim, release)
 	}()
@@ -287,7 +287,7 @@ func (s *PopulationService) populate(ctx context.Context, file *models.MediaFile
 		if found {
 			outcome = markerFetchHit
 		}
-		completion := FetchCompletion{Outcome: outcome, RetryAt: time.Now().Add(markerTTL(found, ids.Released)), Result: &result}
+		completion := FetchCompletion{Outcome: outcome, RetryAt: time.Now().Add(markerTTL(found, ids.Released)), Result: &result, FetchedAt: fileClaim.ClaimedAt}
 		if storage == OnlineStorageOnDemand {
 			s.remember(key, result)
 			completion = FetchCompletion{Outcome: markerFetchOnDemand, RetryAt: time.Now()}
