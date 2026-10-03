@@ -332,6 +332,16 @@ Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
 
+## Play target season
+
+A v2 item detail whose `play_content_id` names an episode also carries
+`play_season_number`, that episode's season (`0` for specials). A client that
+opens a series or season on its play target can request that season's episode
+list without fetching the episode first. The season comes from the same query
+that chose the target. The field is absent when there is no play target or the
+target is not an episode; a client that finds it absent fetches the episode as
+before. Cards do not carry it, and the frozen v1 detail does not expose it.
+
 ## Collection membership titles
 
 `GET /api/v2/collections/{id}/items` and

@@ -2748,6 +2748,15 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 	return resp
 }
 
+// setListingLogos fills in the logo of each card on a v2 collection page,
+// signed in one batch. items are the cards' media items in any order.
+func (h *LibraryCollectionHandler) setListingLogos(ctx context.Context, cards []itemListResponse, items []*models.MediaItem, access catalog.AccessFilter) {
+	urls := signListingLogos(ctx, h.detailSvc, localizedLogoPaths(ctx, h.detailSvc, items, access), access.ImageSize)
+	for i := range cards {
+		cards[i].LogoURL = urls[cards[i].ContentID]
+	}
+}
+
 func (h *LibraryCollectionHandler) presignURL(r *http.Request, path string, variant string) string {
 	return h.presignURLCtx(r.Context(), path, variant)
 }

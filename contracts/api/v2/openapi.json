@@ -20610,6 +20610,11 @@
             "description": "The item to play when the card is a series or season; absent when the item plays itself",
             "type": "string"
           },
+          "play_season_number": {
+            "description": "The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "playback_variants": {
             "items": {
               "$ref": "#/components/schemas/PlaybackVariant"
