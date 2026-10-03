@@ -271,6 +271,18 @@ func TestAdminCollectionSyncRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
+// A smart collection follows its rules and has no list to fetch, so a sync
+// request for one is the same caller mistake and must not answer 500.
+func TestAdminCollectionSyncRejectsSmartCollection(t *testing.T) {
+	f := newFakeAdminCollections()
+	f.syncErr = catalogsvc.ErrLibraryCollectionSyncUnsupported
+	h := adminCollectionsTestHandler(t, f)
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/admin/collections/c1/sync", "", bearer(adminToken)), TypeValidationFailed)
+	if strings.Contains(p.Detail, catalogsvc.ErrLibraryCollectionSyncUnsupported.Error()) {
+		t.Fatalf("leaked service diagnostic: %s", p.Detail)
+	}
+}
+
 // The per-entry reason explains a skipped or failed template; v1 returns it and
 // v2 must reach the wire with it too.
 func TestAdminCollectionTemplateApplyKeepsEntryReason(t *testing.T) {

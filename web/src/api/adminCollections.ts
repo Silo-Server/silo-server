@@ -176,15 +176,20 @@ export async function fetchAdminItemOrderSnapshot(id: string) {
   return { ...body, etag: requiredETag(etag) };
 }
 /** Read before opening the confirmation, with at most four requests in flight. */
+export type AdminCollectionDeleteSnapshot = {
+  id: string;
+  etag: string;
+  collection: LibraryCollection;
+};
 export async function prepareAdminCollectionDeletes(ids: string[]) {
-  const snapshots: { id: string; etag: string }[] = [];
+  const snapshots: AdminCollectionDeleteSnapshot[] = [];
   const unique = [...new Set(ids)];
   for (let offset = 0; offset < unique.length; offset += 4) {
     snapshots.push(
       ...(await Promise.all(
         unique
           .slice(offset, offset + 4)
-          .map(async (id) => ({ id, etag: (await fetchAdminCollectionSnapshot(id)).etag })),
+          .map(async (id) => ({ id, ...(await fetchAdminCollectionSnapshot(id)) })),
       )),
     );
   }

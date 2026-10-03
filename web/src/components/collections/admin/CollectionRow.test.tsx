@@ -37,10 +37,10 @@ const collection = {
   item_count: 2,
 } as LibraryCollection;
 
-function renderRow() {
+function renderRow(row: LibraryCollection = collection) {
   return render(
     <CollectionRow
-      collection={collection}
+      collection={row}
       parentGroupID="group-one"
       parentCollectionIDs={["collection-one", "collection-two", "collection-three"]}
       onEdit={vi.fn()}
@@ -81,5 +81,20 @@ describe("CollectionRow selection", () => {
     );
     expect(selection.selectOnly).not.toHaveBeenCalled();
     expect(selection.toggleOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("CollectionRow sync action", () => {
+  it.each(["mdblist", "tmdb", "trakt"] as const)("offers Sync on a %s collection", (type) => {
+    renderRow({ ...collection, collection_type: type });
+
+    expect(screen.getByRole("button", { name: "Sync collection" })).toBeInTheDocument();
+  });
+
+  // The server refuses to sync anything without a list source.
+  it.each(["manual", "smart"] as const)("offers no Sync on a %s collection", (type) => {
+    renderRow({ ...collection, collection_type: type });
+
+    expect(screen.queryByRole("button", { name: "Sync collection" })).not.toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ import {
   prepareAdminCollectionDeletes,
   adminMutationMessage,
 } from "@/api/adminCollections";
+import type { AdminCollectionDeleteSnapshot } from "@/api/adminCollections";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -55,6 +56,7 @@ import {
 import { CollectionTemplateGallery } from "@/components/CollectionTemplateGallery";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
+import { isListBackedCollectionType } from "@/lib/collectionTypes";
 import { buildAdminCollectionEditorPath, collectionsInAdminScope } from "./adminCollectionsShared";
 
 export default function AdminCollections() {
@@ -149,7 +151,7 @@ export default function AdminCollections() {
     return () => window.removeEventListener("keydown", clearSelection);
   }, [confirmDeleteAll, confirmDeleteCollection, confirmDeleteSelected]);
 
-  const [deleteSnapshots, setDeleteSnapshots] = useState<{ id: string; etag: string }[]>([]);
+  const [deleteSnapshots, setDeleteSnapshots] = useState<AdminCollectionDeleteSnapshot[]>([]);
   const [preparingDelete, setPreparingDelete] = useState(false);
   async function prepareDelete(collection: LibraryCollection) {
     try {
@@ -208,12 +210,31 @@ export default function AdminCollections() {
     boardCollectionCount === 0 &&
     !hasRegularBoardGroups;
   const selectedLibrary = libraries.find((library) => library.id === selectedLibraryId) ?? null;
+  // Deleting removes the collection itself, so a shared one leaves every library at once.
+  const deleteLibraryCount = confirmDeleteCollection
+    ? collectionLibraryIDs(confirmDeleteCollection).length
+    : 0;
+  const deleteScopeNotice =
+    deleteLibraryCount > 1
+      ? ` It will be removed from all ${deleteLibraryCount} libraries it belongs to.`
+      : "";
   const collectionDeletionNotice =
     "Silo will keep collections that are still used by home or library sections. This action cannot be undone.";
+  const sharedDeletionNotice =
+    "Shared collections will also be removed from their other libraries.";
   const deleteAllDescription = selectedLibrary
-    ? `Delete all ${deleteSnapshots.length} collections shown for ${selectedLibrary.name}? Shared collections will also be removed from their other libraries. ${collectionDeletionNotice}`
+    ? `Delete all ${deleteSnapshots.length} collections shown for ${selectedLibrary.name}? ${sharedDeletionNotice} ${collectionDeletionNotice}`
     : `Delete all ${deleteSnapshots.length} server collections? ${collectionDeletionNotice}`;
-  const deleteSelectedDescription = `Delete ${deleteSnapshots.length} selected collection${deleteSnapshots.length === 1 ? "" : "s"}? ${collectionDeletionNotice}`;
+  // Read library membership from the snapshots the delete will use, not the
+  // board, which can be stale.
+  const selectedIncludesShared = deleteSnapshots.some(
+    (snapshot) => collectionLibraryIDs(snapshot.collection).length > 1,
+  );
+  const sharedSelectionNotice = selectedLibrary
+    ? sharedDeletionNotice
+    : "Collections in more than one library will be removed from all of them.";
+  const deleteSelectedScopeNotice = selectedIncludesShared ? ` ${sharedSelectionNotice}` : "";
+  const deleteSelectedDescription = `Delete ${deleteSnapshots.length} selected collection${deleteSnapshots.length === 1 ? "" : "s"}?${deleteSelectedScopeNotice} ${collectionDeletionNotice}`;
   const deleteProgressLabel = `Deleting ${deleteCollections.progress?.completed ?? 0} of ${deleteCollections.progress?.total ?? collectionsInScope.length} collections`;
 
   function handleDeleteSelected() {
@@ -239,7 +260,7 @@ export default function AdminCollections() {
           if (!open) setConfirmDeleteCollection(null);
         }}
         title="Delete collection"
-        description={`Delete collection "${confirmDeleteCollection?.title}"? This action cannot be undone.`}
+        description={`Delete collection "${confirmDeleteCollection?.title}"?${deleteScopeNotice} This action cannot be undone.`}
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={() => {
@@ -759,7 +780,7 @@ function AllLibraryCollectionRow({
   onDelete: () => void;
   onSync: () => void;
 }) {
-  const syncable = collection.collection_type !== "manual";
+  const syncable = isListBackedCollectionType(collection.collection_type);
   const collectionLibraries = collectionLibraryIDs(collection)
     .map((id) => libraries.find((library) => library.id === id)?.name ?? `Library ${id}`)
     .join(", ");

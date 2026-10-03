@@ -363,28 +363,6 @@ export function buildTMDBPresetSourceInput({
   };
 }
 
-function buildTraktListSourceInput({ listUrl, limit }: { listUrl: string; limit: string }): {
-  source_url: string;
-  source_config: Record<string, unknown>;
-} {
-  const trimmedListUrl = listUrl.trim();
-  const parsedLimit = parseOptionalPositiveInteger(limit);
-  const source_config: Record<string, unknown> = {
-    mode: "trakt_list",
-    provider: "trakt",
-    url: trimmedListUrl,
-    list_url: trimmedListUrl,
-  };
-  if (parsedLimit !== undefined) {
-    source_config.limit = parsedLimit;
-  }
-
-  return {
-    source_url: trimmedListUrl,
-    source_config,
-  };
-}
-
 export function LibraryPicker({
   libraries,
   value,
@@ -420,11 +398,13 @@ export function CollectionLibraryPicker({
   value,
   onChange,
   eligibility,
+  disabled,
 }: {
   libraries: Array<{ id: number; name: string; type?: string }>;
   value: number[];
   onChange: (libraryIds: number[]) => void;
   eligibility?: LibraryEligibility;
+  disabled?: boolean;
 }) {
   return (
     <LibraryMultiSelect
@@ -435,6 +415,7 @@ export function CollectionLibraryPicker({
       hideAllOption
       emptyLabel="Choose libraries"
       ineligibleReason={eligibility?.hint}
+      disabled={disabled}
     />
   );
 }
@@ -543,6 +524,7 @@ export function CollectionForm({
       onChange={setDraft}
       defaultAdvanced
       allowLibrarySelection={false}
+      lockCollectionType={Boolean(collection)}
       onSubmit={() => {
         const body = {
           ...toAdminCollectionRequest(draft),
@@ -1478,6 +1460,7 @@ export function MDBListImportForm({
             id="mdblist-limit"
             type="number"
             min={1}
+            max={COLLECTION_MAX_ITEMS}
             step={1}
             inputMode="numeric"
             value={limit}
@@ -1485,7 +1468,7 @@ export function MDBListImportForm({
             placeholder="Leave blank for all items"
           />
           <p className="text-muted-foreground text-xs">
-            Store only the first N items from the remote list.
+            Store only the first N items from the remote list, up to {COLLECTION_MAX_ITEMS}.
           </p>
         </div>
 
@@ -1582,13 +1565,9 @@ export function CollectionEditForm({
     tmdbSourceKindOf(collection),
   );
   const [tmdbListUrl, setTmdbListUrl] = useState(() => parseTMDBListSourceURL(collection));
-  const traktDefaults = parseTraktPresetSourceConfig(collection);
-  const [traktSourceKind, setTraktSourceKind] = useState<TraktSourceKind>(traktDefaults.sourceKind);
-  const [traktListUrl, setTraktListUrl] = useState(traktDefaults.listUrl);
-  const [traktPreset, setTraktPreset] = useState<TraktPreset>(traktDefaults.preset);
-  const [traktMediaType, setTraktMediaType] = useState<TraktMediaType>(traktDefaults.mediaType);
-  const [traktProfileId, setTraktProfileId] = useState(traktDefaults.profileId);
-  const [traktLimit, setTraktLimit] = useState(traktDefaults.limit);
+  // Trakt is a legacy source: the server refuses any change to it, so the
+  // editor only shows it.
+  const traktSource = parseTraktPresetSourceConfig(collection);
 
   const isMDBListCollection = collection.collection_type === "mdblist";
   const isTMDBCollection = collection.collection_type === "tmdb";
@@ -1598,12 +1577,6 @@ export function CollectionEditForm({
   const missingSourceURL = isMDBListCollection && sourceUrl.trim().length === 0;
   const parsedTmdbLimit = parseOptionalPositiveInteger(tmdbLimit);
   const hasInvalidTmdbLimit = tmdbLimit.trim().length > 0 && parsedTmdbLimit === undefined;
-  const parsedTraktLimit = parseOptionalPositiveInteger(traktLimit);
-  const hasInvalidTraktLimit = traktLimit.trim().length > 0 && parsedTraktLimit === undefined;
-  const isTraktListMode = isTraktCollection && traktSourceKind === "list";
-  const traktNeedsProfile = !isTraktListMode && traktPreset === "recommended";
-  const missingTraktProfile = isTraktCollection && traktNeedsProfile && traktProfileId === "";
-  const missingTraktListURL = isTraktListMode && traktListUrl.trim().length === 0;
   const allowedTMDBMediaTypes = getTMDBAllowedMediaTypes(tmdbPreset);
   const normalizedTMDBMediaType = normalizeTMDBPresetMediaType(tmdbPreset, tmdbMediaType);
   const invalidTMDBListURL =
@@ -1614,22 +1587,13 @@ export function CollectionEditForm({
       : libraryEligibilityForMediaKind(
           tmdbSourceKind === "list" ? "mixed" : normalizedTMDBMediaType,
         )
-    : isTraktCollection
-      ? libraryEligibilityForMediaKind(isTraktListMode ? "mixed" : traktMediaType)
-      : undefined;
+    : undefined;
 
   useEffect(() => {
     if (tmdbMediaType !== normalizedTMDBMediaType) {
       setTmdbMediaType(normalizedTMDBMediaType);
     }
   }, [normalizedTMDBMediaType, tmdbMediaType]);
-
-  useEffect(() => {
-    const firstProfileID = profiles[0]?.id;
-    if (isTraktCollection && traktNeedsProfile && traktProfileId === "" && firstProfileID) {
-      setTraktProfileId(firstProfileID);
-    }
-  }, [isTraktCollection, profiles, traktNeedsProfile, traktProfileId]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1657,28 +1621,6 @@ export function CollectionEditForm({
       });
       sourceUrlValue = tmdbSource.source_url;
       sourceConfig = tmdbSource.source_config;
-    } else if (isTraktCollection) {
-      if (isTraktListMode) {
-        const traktListSource = buildTraktListSourceInput({
-          listUrl: traktListUrl,
-          limit: traktLimit,
-        });
-        sourceUrlValue = traktListSource.source_url;
-        sourceConfig = traktListSource.source_config;
-      } else {
-        sourceUrlValue =
-          traktPreset === "recommended"
-            ? `trakt://${traktPreset}/${traktMediaType}/${traktProfileId}`
-            : `trakt://${traktPreset}/${traktMediaType}`;
-        sourceConfig = {
-          mode: "trakt_preset",
-          provider: "trakt",
-          preset: traktPreset,
-          media_type: traktMediaType,
-          ...(traktPreset === "recommended" ? { profile_id: traktProfileId } : {}),
-          ...(parsedTraktLimit ? { limit: parsedTraktLimit } : {}),
-        };
-      }
     }
 
     const body: CreateLibraryCollectionRequest = {
@@ -1755,6 +1697,7 @@ export function CollectionEditForm({
               value={libraryIds}
               onChange={setLibraryIds}
               eligibility={editEligibility}
+              disabled={isTraktCollection}
             />
           </div>
           <div className="space-y-2">
@@ -1845,6 +1788,7 @@ export function CollectionEditForm({
                 id="collection-source-limit"
                 type="number"
                 min={1}
+                max={COLLECTION_MAX_ITEMS}
                 step={1}
                 inputMode="numeric"
                 value={sourceLimit}
@@ -1861,7 +1805,11 @@ export function CollectionEditForm({
           inputId="collection-edit-default-sort"
         />
 
-        <SyncScheduleField value={editSyncSchedule} onChange={setEditSyncSchedule} />
+        <SyncScheduleField
+          value={editSyncSchedule}
+          onChange={setEditSyncSchedule}
+          disabled={isTraktCollection && !collection.sync_schedule?.trim()}
+        />
 
         {isTMDBCollection && tmdbSourceKind === "other" ? (
           <p className="text-muted-foreground border-border rounded-lg border px-4 py-3 text-sm">
@@ -1992,12 +1940,13 @@ export function CollectionEditForm({
 
         {isTraktCollection ? (
           <div className="space-y-4">
+            <p className="text-muted-foreground border-border rounded-lg border px-4 py-3 text-sm">
+              Silo no longer supports Trakt sources. This collection keeps its source and libraries,
+              and a stopped sync schedule can&apos;t be restarted.
+            </p>
             <div className="space-y-2">
               <Label>Source</Label>
-              <Select
-                value={traktSourceKind}
-                onValueChange={(v) => setTraktSourceKind(v as TraktSourceKind)}
-              >
+              <Select value={traktSource.sourceKind} disabled>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -2010,103 +1959,69 @@ export function CollectionEditForm({
               </Select>
             </div>
 
-            {isTraktListMode ? (
-              <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              {traktSource.sourceKind === "list" ? (
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="collection-trakt-list-url">Trakt list URL</Label>
-                  <Input
-                    id="collection-trakt-list-url"
-                    value={traktListUrl}
-                    onChange={(event) => setTraktListUrl(event.target.value)}
-                    placeholder="https://trakt.tv/users/jjjonesjr33/lists/saw-cinematic-universe-in-timeline-order"
-                    required
-                  />
-                  <p className="text-muted-foreground text-xs">
-                    Paste a public Trakt list URL. Movies and shows in the list are matched against
-                    the selected libraries in list order.
-                  </p>
+                  <Input id="collection-trakt-list-url" value={traktSource.listUrl} disabled />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="collection-trakt-limit">Max Items</Label>
-                  <Input
-                    id="collection-trakt-limit"
-                    type="number"
-                    min={1}
-                    max={COLLECTION_MAX_ITEMS}
-                    step={1}
-                    inputMode="numeric"
-                    value={traktLimit}
-                    onChange={(event) => setTraktLimit(event.target.value)}
-                    placeholder="Defaults to 20"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Preset</Label>
-                  <Select
-                    value={traktPreset}
-                    onValueChange={(v) => setTraktPreset(v as TraktPreset)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="trending">Trending</SelectItem>
-                      <SelectItem value="popular">Popular</SelectItem>
-                      <SelectItem value="recommended">Recommended</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Media Type</Label>
-                  <Select
-                    value={traktMediaType}
-                    onValueChange={(v) => setTraktMediaType(v as TraktMediaType)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="movie">Movies</SelectItem>
-                      <SelectItem value="tv">TV Shows</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {traktNeedsProfile ? (
+              ) : (
+                <>
                   <div className="space-y-2">
-                    <Label>Profile</Label>
-                    <Select value={traktProfileId} onValueChange={setTraktProfileId}>
+                    <Label>Preset</Label>
+                    <Select value={traktSource.preset} disabled>
                       <SelectTrigger>
-                        <SelectValue placeholder="Choose a profile" />
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {profiles.map((profile) => (
-                          <SelectItem key={profile.id} value={profile.id}>
-                            {profile.name}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="trending">Trending</SelectItem>
+                        <SelectItem value="popular">Popular</SelectItem>
+                        <SelectItem value="recommended">Recommended</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                ) : null}
-                <div className="space-y-2">
-                  <Label htmlFor="collection-trakt-limit">Max Items</Label>
-                  <Input
-                    id="collection-trakt-limit"
-                    type="number"
-                    min={1}
-                    max={COLLECTION_MAX_ITEMS}
-                    step={1}
-                    inputMode="numeric"
-                    value={traktLimit}
-                    onChange={(event) => setTraktLimit(event.target.value)}
-                    placeholder="Defaults to 20"
-                  />
-                </div>
+                  <div className="space-y-2">
+                    <Label>Media Type</Label>
+                    <Select value={traktSource.mediaType} disabled>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="movie">Movies</SelectItem>
+                        <SelectItem value="tv">TV Shows</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {traktSource.preset === "recommended" ? (
+                    <div className="space-y-2">
+                      <Label>Profile</Label>
+                      <Select value={traktSource.profileId} disabled>
+                        <SelectTrigger>
+                          <SelectValue placeholder="No profile" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {profiles.map((profile) => (
+                            <SelectItem key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
+                </>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="collection-trakt-limit">Max Items</Label>
+                <Input
+                  id="collection-trakt-limit"
+                  type="number"
+                  value={traktSource.limit}
+                  placeholder="Defaults to 20"
+                  disabled
+                />
               </div>
-            )}
+            </div>
           </div>
         ) : null}
 
@@ -2146,10 +2061,7 @@ export function CollectionEditForm({
             hasInvalidSourceLimit ||
             missingSourceURL ||
             hasInvalidTmdbLimit ||
-            invalidTMDBListURL ||
-            hasInvalidTraktLimit ||
-            missingTraktListURL ||
-            missingTraktProfile
+            invalidTMDBListURL
           }
         >
           {updateMutation.isPending ? "Saving..." : "Save Collection"}

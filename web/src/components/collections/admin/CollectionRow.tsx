@@ -4,6 +4,7 @@ import { GripVertical, Pencil, RefreshCw, Trash2 } from "lucide-react";
 import type { LibraryCollection } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { isListBackedCollectionType } from "@/lib/collectionTypes";
 import { cn } from "@/lib/utils";
 import { useSelection, type SelectionKind } from "./GroupsBoard";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
@@ -46,7 +47,7 @@ export function CollectionRow({
   const { isSelected, selectOnly, toggleOne, selectRange } = useSelection();
   const selected = isSelected(collection.id);
   const kind: SelectionKind = isInUserCollectionsGroup ? "user_collection" : "collection";
-  const syncable = collection.collection_type !== "manual";
+  const syncable = isListBackedCollectionType(collection.collection_type);
 
   function onRowClick(e: React.MouseEvent<HTMLDivElement>) {
     // Ignore clicks on interactive children (Edit link, drag handle button)
