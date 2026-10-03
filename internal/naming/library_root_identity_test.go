@@ -250,3 +250,27 @@ func TestBareSeasonFolderIsSeasonStructureEvidence(t *testing.T) {
 		t.Errorf("group confidence %q, want high", group.Confidence)
 	}
 }
+
+func TestBareSeasonFolderInsideNumberedSeasonKeepsShow(t *testing.T) {
+	shows := []string{"/media/tv/Example Show (2013) {tvdb-123456}", "/media/tv/Other Show (2015) {tvdb-654321}"}
+	paths := []string{
+		shows[0] + "/Season 2/Season/Example Show - S02E01.mkv",
+		shows[1] + "/Season 2/Season/Other Show - S02E01.mkv",
+	}
+	_, assignments := InferRootAssignments(paths, "series", 1, nil, "/media/tv")
+	keys := map[string]bool{}
+	for i, p := range paths {
+		assignment := assignments[p]
+		if assignment.RootPath != shows[i] {
+			t.Errorf("%s: root %q, want %q", p, assignment.RootPath, shows[i])
+		}
+		group := InferGroupIdentity(p, "series", assignment)
+		if group.TvdbID == "" || keys[group.ContentGroupKey] {
+			t.Errorf("%s: identity %+v", p, group)
+		}
+		keys[group.ContentGroupKey] = true
+	}
+	if number, ok := firstSeasonNumber([]string{"Example Show", "Season 2", "Season"}, true, true); !ok || number != 2 {
+		t.Errorf("season number %d ok=%v, want 2 from the numbered ancestor", number, ok)
+	}
+}

@@ -274,8 +274,9 @@ func detectSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...
 // false when the match is a bare season folder such as "Season": that folder
 // counts as season structure but carries no season number. A bare folder only
 // counts as the file's immediate parent, the same place deriveSeriesRoot
-// accepts it.
+// accepts it, and a numbered season folder above it takes precedence.
 func scanSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...bool) (found bool, number int, numbered bool) {
+	bare := false
 	for i := len(parts) - 1; i >= 0; i-- {
 		parent := ""
 		if i > 0 {
@@ -286,10 +287,10 @@ func scanSeasonStructure(parts []string, allowNumeric bool, configuredRoot ...bo
 			return true, number, true
 		}
 		if i == len(parts)-1 && numericSeason && i > 0 && isBareSeasonDirectory(parts[i]) {
-			return true, 0, false
+			bare = true
 		}
 	}
-	return false, 0, false
+	return bare, 0, false
 }
 
 func firstSeasonNumber(parts []string, allowNumeric bool, configuredRoot ...bool) (int, bool) {
@@ -329,6 +330,7 @@ func collapseWhitespace(value string) string {
 
 func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool, libraryRoot string) (*SeriesRoot, bool) {
 	parentDir := path.Dir(filePath)
+	bareSeason := ""
 	for current := parentDir; current != "." && current != "/" && current != ""; current = path.Dir(current) {
 		if libraryRoot != "" && filepath.Clean(current) == libraryRoot {
 			break
@@ -338,9 +340,11 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 		_, isSeason := seasonDirectoryNumber(segment, path.Base(path.Dir(current)), allowNumeric)
 		// A bare "Season" folder only marks the season level when it holds the
 		// file directly. Higher up it is more likely a category folder or a
-		// show that happens to be named Season.
+		// show that happens to be named Season. Keep walking in case it sits
+		// inside a numbered season folder, which then decides the show root.
 		if !isSeason && allowNumeric && current == parentDir && isBareSeasonDirectory(segment) {
-			isSeason = true
+			bareSeason = current
+			continue
 		}
 		if isSeason {
 			rootPath := path.Dir(current)
@@ -352,6 +356,16 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool,
 				FolderName: path.Base(rootPath),
 			}, true
 		}
+	}
+
+	if bareSeason != "" {
+		if rootPath := path.Dir(bareSeason); rootPath != "." && rootPath != "/" && rootPath != "" {
+			return &SeriesRoot{
+				RootPath:   rootPath,
+				FolderName: path.Base(rootPath),
+			}, true
+		}
+		return nil, false
 	}
 
 	if hasEpisodePattern || forceParent {
