@@ -1,6 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { QueryDefinition } from "@/api/types";
+
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
+vi.mock("@/hooks/queries/catalog", () => ({
+  useCatalogMetadataFilters: () => ({ data: undefined, isLoading: false }),
+}));
 
 vi.mock("@/hooks/queries/collectionPreviews", async () => {
   const actual = await vi.importActual<typeof import("@/hooks/queries/collectionPreviews")>(
@@ -25,6 +36,7 @@ vi.mock("@/hooks/queries/collectionPreviews", async () => {
 import CollectionBuilder, {
   buildCollectionBuilderPreviewRequest,
   createCollectionBuilderValue,
+  SmartCollectionLimitField,
 } from "./CollectionBuilder";
 import {
   COLLECTION_FIELD_OPTIONS,
@@ -140,5 +152,106 @@ describe("CollectionBuilder", () => {
     expect(getCollectionSortOptions(true).map((sort) => sort.value)).toEqual(
       expect.arrayContaining(["progress", "date_viewed", "plays"]),
     );
+  });
+});
+
+describe("CollectionBuilder rules Guided can't show", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("opens them in Advanced and keeps Guided switched off", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <CollectionBuilder
+          mode="admin"
+          value={createCollectionBuilderValue({
+            query_definition: {
+              match: "all",
+              groups: [
+                {
+                  match: "any",
+                  rules: [
+                    { field: "genre", op: "is", value: "Comedy" },
+                    { field: "genre", op: "is", value: "Drama" },
+                  ],
+                },
+              ],
+            },
+          })}
+          onChange={() => {}}
+          onSubmit={() => {}}
+          allowLibrarySelection={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByText("Rule Groups")).toBeInTheDocument();
+    expect(screen.queryByText("Genres")).toBeNull();
+    expect(screen.getByRole("button", { name: "Switch to Guided" })).toBeDisabled();
+    expect(screen.getByText("These rules use options the Guided view can't show.")).toBeVisible();
+  });
+});
+
+describe("SmartCollectionLimitField", () => {
+  afterEach(cleanup);
+
+  function renderLimit(limit?: number) {
+    const onQueryChange = vi.fn<(query: QueryDefinition) => void>();
+    render(
+      <SmartCollectionLimitField
+        query={{ ...createCollectionBuilderValue().query_definition, limit }}
+        onQueryChange={onQueryChange}
+      />,
+    );
+    return { input: screen.getByLabelText("Max items"), onQueryChange };
+  }
+
+  it("shows a blank field and says blank means no limit", () => {
+    const { input } = renderLimit();
+
+    expect(input).toHaveValue(null);
+    expect(screen.getByText("Leave blank for no limit.")).toBeVisible();
+  });
+
+  it("keeps a limit above 500", () => {
+    const { input, onQueryChange } = renderLimit();
+
+    fireEvent.change(input, { target: { value: "2000" } });
+    fireEvent.blur(input);
+
+    expect(onQueryChange).toHaveBeenCalledWith(expect.objectContaining({ limit: 2000 }));
+  });
+
+  it("removes the limit when the field is cleared", () => {
+    const { input, onQueryChange } = renderLimit(250);
+    expect(input).toHaveValue(250);
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+
+    expect(onQueryChange).toHaveBeenCalledTimes(1);
+    expect(onQueryChange.mock.calls[0]?.[0].limit).toBeUndefined();
+  });
+  it.each(["0", "-5"])("keeps the limit when %s is entered", (value) => {
+    const { input, onQueryChange } = renderLimit(250);
+
+    fireEvent.change(input, { target: { value } });
+    fireEvent.blur(input);
+
+    expect(onQueryChange).not.toHaveBeenCalled();
+    expect(input).toHaveValue(250);
   });
 });
