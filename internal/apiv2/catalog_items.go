@@ -346,7 +346,7 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
-	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"On a series, the season of play_content_id"`
+	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise"`
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`

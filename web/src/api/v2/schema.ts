@@ -18940,7 +18940,7 @@ export interface components {
       play_content_id?: string;
       /**
        * Format: int64
-       * @description On a series, the season of play_content_id
+       * @description The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise
        */
       play_season_number?: number;
       playback_variants?: components["schemas"]["PlaybackVariant"][];

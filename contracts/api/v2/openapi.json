@@ -20611,7 +20611,7 @@
             "type": "string"
           },
           "play_season_number": {
-            "description": "On a series, the season of play_content_id",
+            "description": "The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise",
             "format": "int64",
             "type": "integer"
           },
