@@ -222,7 +222,9 @@ func (w *PersonRefreshWorker) processBatch() bool {
 			return false
 		}
 		w.runManual(done)
-		if w.stopped() {
+		if w.stopped() || w.paused() {
+			// The rest of the batch comes back when its claims' lease runs
+			// out.
 			return false
 		}
 		if _, ran := done[id]; ran || w.isQueued(id) {
@@ -331,7 +333,12 @@ func (w *PersonRefreshWorker) runManual(done map[int64]struct{}) {
 		requestedAt := w.queued[id]
 		w.mu.Unlock()
 
-		_ = w.refresh(id, requestedAt)
+		// A page's lookup that a provider rate limited pauses the
+		// background lookups too; a success doesn't reset their backoff.
+		var limited rateLimitedLookup
+		if err := w.refresh(id, requestedAt); errors.As(err, &limited) {
+			w.rateLimited(err)
+		}
 		done[id] = struct{}{}
 
 		w.mu.Lock()

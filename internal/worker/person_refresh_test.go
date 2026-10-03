@@ -240,6 +240,35 @@ func TestPersonRefreshWorkerStoppedDuringOnDemandClaimsNothing(t *testing.T) {
 	}
 }
 
+// A provider rate limiting a page's lookup pauses background lookups: before
+// a batch is claimed, and between the items of one already claimed.
+func TestPersonRefreshWorkerPausesOnOnDemandRateLimit(t *testing.T) {
+	service := &fakePersonRefresher{
+		batches: [][]int64{{1, 2, 3}},
+		errs:    map[int64]error{99: rateLimitErr{retryAfter: 30 * time.Minute}},
+	}
+	w := newTestPersonRefreshWorker(service)
+	w.Enqueue(99, nil)
+	if w.processBatch() || service.claims != 0 || !w.paused() {
+		t.Fatalf("claims %d, paused %v after a rate-limited page lookup; want no claim and a pause", service.claims, w.paused())
+	}
+
+	service = &fakePersonRefresher{
+		batches: [][]int64{{1, 2, 3}},
+		errs:    map[int64]error{99: rateLimitErr{}},
+	}
+	w = newTestPersonRefreshWorker(service)
+	service.onRefresh = func(id int64) {
+		if id == 1 {
+			w.Enqueue(99, nil)
+		}
+	}
+	w.processBatch()
+	if want := []int64{1, 99}; !slices.Equal(service.refreshed, want) {
+		t.Fatalf("refreshed %v, want %v: the batch should stop at the page's rate limit", service.refreshed, want)
+	}
+}
+
 // A stopped worker finishes the lookup in progress and starts no more.
 func TestPersonRefreshWorkerStopsMidBatch(t *testing.T) {
 	service := &fakePersonRefresher{batches: [][]int64{{1, 2, 3}, {4, 5, 6}}}
