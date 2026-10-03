@@ -27,6 +27,13 @@ type PlaybackSession struct {
 	// request for the same play before it starts either response; the newer
 	// negotiation replaces an older, still-unstarted one from the same device.
 	ClientDeviceID string
+	// ClientName and ClientVersion come from the MediaBrowser header of the
+	// PlaybackInfo request. Players that open the stream URL directly (a
+	// <video> element authenticated by api_key, or a client that sends no
+	// credentials) don't send that header, so the native session falls back
+	// to these; see withNegotiatedClientInfo.
+	ClientName    string
+	ClientVersion string
 	// ClientIP is the resolved address that negotiated this play. Static
 	// streams from clients that send no credentials (Jellyfin for Android TV,
 	// Findroid) are granted only to the same address; see FindStreamGrant.

@@ -2379,6 +2379,8 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		ID:                 playSessionID,
 		CompatToken:        session.Token,
 		ClientDeviceID:     clientDeviceID,
+		ClientName:         stripCompatNUL(firstMediaBrowserAuthorizationValue(r, "Client")),
+		ClientVersion:      stripCompatNUL(firstMediaBrowserAuthorizationValue(r, "Version")),
 		ClientIP:           clientip.FromContext(r.Context()),
 		ClientPeer:         requestPeerHost(r),
 		ItemID:             detail.ContentID,
