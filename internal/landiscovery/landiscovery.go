@@ -150,7 +150,9 @@ func advertise(ctx context.Context, opts Options) error {
 
 	// RFC 6762 §8.3: announce at least twice, a second apart.
 	repeat := time.After(time.Second)
-	// reclaim withdraws the current names and claims svc afresh.
+	// reclaim withdraws the current names and claims next afresh. Callers
+	// pass the unsuffixed name, so a later conflict probes "Name", "Name (2)"
+	// … again rather than stacking suffixes past the label limit.
 	reclaim := func(next service) error {
 		r.goodbye(r.deactivate())
 		// A conflict reported for the names being withdrawn is settled by
@@ -181,7 +183,9 @@ func advertise(ctx context.Context, opts Options) error {
 		case <-r.conflicts():
 			// Another responder answers for one of our names: probe again,
 			// renaming if it keeps them (RFC 6762 §9).
-			if err := reclaim(svc); err != nil {
+			next := svc
+			next.instance = name
+			if err := reclaim(next); err != nil {
 				return err
 			}
 			slog.InfoContext(ctx, "LAN discovery resolved a name conflict", "name", svc.instance, "host", svc.hostName())
@@ -206,7 +210,9 @@ func advertise(ctx context.Context, opts Options) error {
 					return err
 				}
 				if result.instanceTaken || result.hostTaken || result.lostTiebreak {
-					if err := reclaim(svc); err != nil {
+					next := svc
+					next.instance = name
+					if err := reclaim(next); err != nil {
 						return err
 					}
 					continue
@@ -214,8 +220,8 @@ func advertise(ctx context.Context, opts Options) error {
 				r.announce(svc, fresh)
 			}
 			// Changed addresses are announced so caches drop the old ones
-			// (RFC 6762 §8.4); the cache-flush bit replaces them.
-			r.announce(svc, r.changedAddresses())
+			// (RFC 6762 §8.4).
+			r.announceAddressChanges(svc, r.changedAddresses())
 		}
 	}
 }

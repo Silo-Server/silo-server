@@ -187,6 +187,11 @@ func TestRateLimitIsPerRecordAndFamily(t *testing.T) {
 	if got := r.allow(2, false, []dns.RR{srv}); len(got) != 1 {
 		t.Fatal("another interface is limited separately")
 	}
+	// Every address of an interface is one record set and goes out whole.
+	two := testService.addresses([]net.IP{net.ParseIP("192.168.1.20"), net.ParseIP("10.0.0.20")}, hostTTL)
+	if got := r.allow(3, false, two); len(got) != 2 {
+		t.Fatalf("an A record set was cut to %v", got)
+	}
 }
 
 func TestOnLink(t *testing.T) {

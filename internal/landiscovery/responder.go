@@ -54,9 +54,9 @@ type responder struct {
 	conflict chan struct{}         // another responder took an active name
 	// lastSent rate-limits each record per link and family (RFC 6762 §6).
 	lastSent map[sentKey]time.Time
-	// addrKeys and allAddrs track interface addresses, so a change is
+	// addrs and allAddrs track interface addresses, so a change is
 	// announced (RFC 6762 §8.4) without listing every interface each tick.
-	addrKeys map[int]string
+	addrs    map[int][]net.IP
 	allAddrs string
 
 	wg sync.WaitGroup
@@ -76,7 +76,7 @@ func openResponder() (*responder, error) {
 		served:   map[int]net.Interface{},
 		conflict: make(chan struct{}, 1),
 		lastSent: map[sentKey]time.Time{},
-		addrKeys: map[int]string{},
+		addrs:    map[int][]net.IP{},
 	}
 	lc := net.ListenConfig{Control: shareMDNSPort}
 	pc4, err4 := lc.ListenPacket(context.Background(), "udp4", fmt.Sprintf("0.0.0.0:%d", mdnsPort))
@@ -253,14 +253,20 @@ func (r *responder) allow(ifIndex int, viaIPv6 bool, answers []dns.RR) []dns.RR 
 			}
 		}
 	}
+	// Decide per record set before recording anything, so every address of
+	// a set goes out together.
 	var out []dns.RR
+	sent := map[sentKey]bool{}
 	for _, rr := range answers {
 		key := sentKey{ifIndex, viaIPv6, strings.ToLower(rr.Header().Name), rr.Header().Rrtype}
 		if now.Sub(r.lastSent[key]) < time.Second {
 			continue
 		}
-		r.lastSent[key] = now
+		sent[key] = true
 		out = append(out, rr)
+	}
+	for key := range sent {
+		r.lastSent[key] = now
 	}
 	return out
 }
@@ -358,27 +364,34 @@ func (r *responder) joinInterfaces() []net.Interface {
 	}
 	r.mu.Lock()
 	r.served = current
-	for index := range r.addrKeys {
+	for index := range r.addrs {
 		if _, ok := current[index]; !ok {
-			delete(r.addrKeys, index)
+			delete(r.addrs, index)
 		}
 	}
 	r.mu.Unlock()
 	for _, iface := range fresh {
-		r.addressesChanged(iface)
+		r.addressChange(iface)
 	}
 	return fresh
+}
+
+// addressChange is a served interface whose addresses changed, with the
+// addresses it no longer has.
+type addressChange struct {
+	iface   net.Interface
+	removed []net.IP
 }
 
 // changedAddresses returns the served interfaces whose addresses changed
 // since they were last announced. One address listing tells whether
 // anything changed; only then is each interface looked at.
-func (r *responder) changedAddresses() []net.Interface {
+func (r *responder) changedAddresses() []addressChange {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return nil
 	}
-	all := addressKey(addrs)
+	all := addressKey(ipsOf(addrs))
 	r.mu.Lock()
 	unchanged := all == r.allAddrs
 	r.allAddrs = all
@@ -386,34 +399,67 @@ func (r *responder) changedAddresses() []net.Interface {
 	if unchanged {
 		return nil
 	}
-	var changed []net.Interface
+	var changes []addressChange
 	for _, iface := range r.servedInterfaces() {
-		if r.addressesChanged(iface) {
-			changed = append(changed, iface)
+		if change, ok := r.addressChange(iface); ok {
+			changes = append(changes, change)
 		}
 	}
-	return changed
+	return changes
 }
 
-// addressesChanged records an interface's current addresses and reports
-// whether they differ from the last record.
-func (r *responder) addressesChanged(iface net.Interface) bool {
+// addressChange records an interface's current addresses and reports how
+// they differ from the last record; ok is false for no change or a first
+// record.
+func (r *responder) addressChange(iface net.Interface) (addressChange, bool) {
 	addrs, err := iface.Addrs()
 	if err != nil {
-		return false
+		return addressChange{}, false
 	}
-	key := addressKey(addrs)
+	now := ipsOf(addrs)
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	old, known := r.addrKeys[iface.Index]
-	r.addrKeys[iface.Index] = key
-	return known && old != key
+	old, known := r.addrs[iface.Index]
+	r.addrs[iface.Index] = now
+	r.mu.Unlock()
+	if !known || addressKey(old) == addressKey(now) {
+		return addressChange{}, false
+	}
+	var removed []net.IP
+	for _, ip := range old {
+		if !containsIP(now, ip) {
+			removed = append(removed, ip)
+		}
+	}
+	return addressChange{iface: iface, removed: removed}, true
 }
 
-func addressKey(addrs []net.Addr) string {
-	parts := make([]string, 0, len(addrs))
-	for _, a := range addrs {
-		parts = append(parts, a.String())
+// announceAddressChanges announces the current records on each changed
+// interface and withdraws removed addresses with goodbyes. The cache-flush
+// bit replaces a changed address set, but not one whose family vanished.
+func (r *responder) announceAddressChanges(svc service, changes []addressChange) {
+	for _, c := range changes {
+		r.announce(svc, []net.Interface{c.iface})
+		if gone := svc.addresses(c.removed, 0); len(gone) > 0 {
+			m := responseMsg()
+			m.Answer = gone
+			r.send(c.iface, m, true, true)
+		}
+	}
+}
+
+func containsIP(ips []net.IP, ip net.IP) bool {
+	for _, x := range ips {
+		if x.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func addressKey(ips []net.IP) string {
+	parts := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		parts = append(parts, ip.String())
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ",")
@@ -424,6 +470,8 @@ func addressKey(addrs []net.Addr) string {
 // the instance name, and with a new host label if the host name is taken.
 // Losing a simultaneous-probe tiebreak waits a second and probes again
 // (RFC 6762 §8.2); the winner's announcement then shows as a conflict.
+// Only a name that probed clean is returned; after maxRenames attempts the
+// claim fails and Advertise retries later.
 func (r *responder) claim(ctx context.Context, svc service) (service, error) {
 	base, suffix := svc.instance, 1
 	for try := 0; try < maxRenames; try++ {
@@ -448,8 +496,7 @@ func (r *responder) claim(ctx context.Context, svc service) (service, error) {
 			svc.host = newHostLabel(svc.serverID)
 		}
 	}
-	slog.WarnContext(ctx, "LAN discovery could not claim a unique name; announcing anyway", "name", svc.instance)
-	return svc, nil
+	return svc, fmt.Errorf("lan discovery: no free instance name after %d attempts", maxRenames)
 }
 
 type probeResult struct {
