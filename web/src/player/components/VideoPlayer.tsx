@@ -12,6 +12,7 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { NextEpisodeOverlay } from "./NextEpisodeOverlay";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
+import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
@@ -178,6 +179,19 @@ interface VideoPlayerProps {
   /** `failure_recovery` replan after the client could not play the plan. */
   onPlanFailure?: (failure: FailureV3, currentPosition: number) => void;
   /**
+   * The stream already played and then lost its connection to the server. The
+   * session reconnects and resumes at `positionSeconds`, playing again only
+   * when `resume` is set.
+   */
+  onConnectionLost?: (positionSeconds: number, resume: boolean) => void;
+  /** Starts another reconnect after the session gave up. */
+  onRetryConnection?: () => void;
+  /** The session's mid-stream connection state. */
+  connectionStatus?: PlaybackConnectionStatus;
+  /** Why reconnecting gave up, while `connectionStatus` is `lost`. */
+  connectionErrorTitle?: string | null;
+  connectionError?: string | null;
+  /**
    * Replan for a plan the server invalidated over the realtime
    * `plan_invalidated` command. Resolving false rejects the command, which is
    * what tells the server to stop the session instead.
@@ -241,6 +255,8 @@ interface VideoPlayerProps {
 }
 
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
+// MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
+const MEDIA_ERR_NETWORK = 2;
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 // How often a rejected autoplay is retried, and how many times. A transport
 // swap tears the previous source down with `load()`, and the media element load
@@ -352,6 +368,11 @@ export function VideoPlayer({
   onQualitySelect,
   onSubtitleTrackChange,
   onPlanFailure,
+  onConnectionLost,
+  onRetryConnection,
+  connectionStatus = "connected",
+  connectionErrorTitle = null,
+  connectionError = null,
   onPlanInvalidated,
   onReanchorSeek,
   preferredSubtitleLanguage,
@@ -408,6 +429,12 @@ export function VideoPlayer({
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
+  // Whether the current transport has shown a frame. A network error after
+  // that is a lost connection, not a route that cannot play. Reset whenever
+  // the transport is rebuilt (see the hls.js lifecycle effect).
+  const streamPlayedRef = useRef(false);
+  const connectionStatusRef = useRef(connectionStatus);
+  connectionStatusRef.current = connectionStatus;
   const transportFailedForPlanRevisionRef = useRef<number | null>(null);
   const timelineOffsetRef = useRef(0);
   const subtitleFetchAnchorRef = useRef(initialPosition);
@@ -612,7 +639,12 @@ export function VideoPlayer({
   const reportCurrentPlanFailure = useCallback(
     (failure: FailureV3): boolean => {
       if (!onPlanFailure) return false;
-      const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+      // While the session reconnects, a dying transport says nothing about
+      // its route; the reconnect replaces it anyway.
+      if (connectionStatusRef.current !== "connected") return true;
+      // The revision is part of the key: a reconnect can hand back the same
+      // route under the same attempt key, and its transport can fail as well.
+      const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
       if (reportedPlanFailureKeyRef.current === failureKey) return true;
       reportedPlanFailureKeyRef.current = failureKey;
       transportFailedForPlanRevisionRef.current = planRevision;
@@ -626,6 +658,42 @@ export function VideoPlayer({
   useEffect(() => {
     transportFailedForPlanRevisionRef.current = null;
   }, [planRevision]);
+
+  /**
+   * Hands a network failure to the session's reconnect when the stream has
+   * already played. Returns false before the first frame, where the failure
+   * keeps going through route recovery: a stream that never started may be
+   * one this route cannot deliver.
+   */
+  const reportConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
+    if (connectionStatusRef.current === "connected") {
+      // A seek still in flight is where the viewer wants to be.
+      const positionSeconds =
+        pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
+      onConnectionLost(positionSeconds, !video.paused);
+    }
+    return true;
+  }, [onConnectionLost]);
+  // The transport effect reads it through a ref so a new callback identity
+  // never tears the transport down.
+  const reportConnectionLostRef = useRef(reportConnectionLost);
+  reportConnectionLostRef.current = reportConnectionLost;
+
+  // While the session reconnects, nothing plays: the element is paused (so
+  // progress reports say so), and hls.js stops hammering the server. The
+  // transport is rebuilt from the plan the reconnect adopts.
+  useEffect(() => {
+    if (connectionStatus === "connected") return;
+    hlsRef.current?.stopLoad();
+    videoRef.current?.pause();
+    if (bufferingTimerRef.current) {
+      clearTimeout(bufferingTimerRef.current);
+      bufferingTimerRef.current = null;
+    }
+    setBuffering(false);
+  }, [connectionStatus]);
 
   const failHlsStartup = useCallback(() => {
     console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
@@ -985,7 +1053,7 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
 
-    const failureKey = `${sessionId}:${plan.plan_attempt_key}`;
+    const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
@@ -1836,6 +1904,10 @@ export function VideoPlayer({
 
   // -- hls.js lifecycle --
   useEffect(() => {
+    // "Played" belongs to one transport. A replacement that has not shown a
+    // frame yet may be a route this browser cannot reach, so its network
+    // failures go through startup recovery rather than the reconnect.
+    streamPlayedRef.current = false;
     const video = videoRef.current;
     if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
 
@@ -2014,6 +2086,12 @@ export function VideoPlayer({
                 error: data.error?.message,
               });
 
+              // hls.js has already retried the request; a fatal network error
+              // on a stream that played means the server went away.
+              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && reportConnectionLostRef.current()) {
+                return;
+              }
+
               const now = Date.now();
               if (now - lastRecoveryRef.current < 3000) return;
               lastRecoveryRef.current = now;
@@ -2146,7 +2224,8 @@ export function VideoPlayer({
     if (!video) return;
 
     const onPlay = () => {
-      if (connectionReplacedRef.current) {
+      // Nothing can play until the reconnect hands over a new transport.
+      if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") {
         video.pause();
         return;
       }
@@ -2165,6 +2244,7 @@ export function VideoPlayer({
     };
     const markPlaybackStarted = () => {
       hlsStartupGuardRef.current?.markPlaybackStarted();
+      streamPlayedRef.current = true;
       setAwaitingFirstFrame(false);
     };
     // `timeupdate` and `seeked` prove a frame is on screen only once the
@@ -2292,6 +2372,7 @@ export function VideoPlayer({
     };
     const onError = () => {
       if (video.error) {
+        if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
           setError(`Playback error: ${message}`);
@@ -2349,6 +2430,7 @@ export function VideoPlayer({
     // room snapshot churn doesn't re-subscribe every listener.
   }, [
     pendingSeekTime,
+    reportConnectionLost,
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
     roomReadinessPending,
@@ -2667,6 +2749,23 @@ export function VideoPlayer({
   );
   const subtitleLoadState = isASSActive ? assSubtitleState : textSubtitleState;
 
+  // -- Reconnect subtitle handover --
+  // The session a lost connection left behind. When a reconnect has to start
+  // a new session, the first render of that session still holds the old
+  // selection; the handover below replaces it with the granted one, and until
+  // then nothing may send the stale track to the server.
+  const reconnectFromSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (connectionStatus !== "connected") {
+      reconnectFromSessionRef.current ??= sessionId;
+      return;
+    }
+    // The session survived the reconnect: nothing to hand over.
+    if (reconnectFromSessionRef.current === sessionId) reconnectFromSessionRef.current = null;
+  }, [connectionStatus, sessionId]);
+  const subtitleHandoverPending =
+    reconnectFromSessionRef.current !== null && reconnectFromSessionRef.current !== sessionId;
+
   // -- Authoritative subtitle track selection --
   // Some tracks (bitmap PGS/DVD/DVB) cannot be delivered as a sidecar and are
   // published `burn_in_only`: the server composites them into the video. The
@@ -2685,6 +2784,10 @@ export function VideoPlayer({
       requestedSubtitleTrackChangeRef.current = null;
       return;
     }
+    // The selection is the lost session's until the handover applies the one
+    // the reconnect's start was granted; asking for it now would re-request a
+    // track the server may just have refused.
+    if (subtitleHandoverPending) return;
     const desiredServerIndex = pendingServerSubtitleSelection(
       plan.subtitle.mode,
       plan.selected_tracks.subtitle?.index ?? null,
@@ -2717,6 +2820,7 @@ export function VideoPlayer({
     plan.plan_id,
     plan.selected_tracks.subtitle?.index,
     plan.subtitle.mode,
+    subtitleHandoverPending,
   ]);
 
   // A refused replan leaves the previous stream playing, so the selection has
@@ -2742,7 +2846,22 @@ export function VideoPlayer({
   // A refusal pin belongs only to the session that rejected the automatic
   // selection. Clear it before the auto-selection effect evaluates a new
   // session so the viewer's persisted subtitle mode applies to the next title.
+  //
+  // A new session that a reconnect started is the same viewing, not the next
+  // title: it carries the viewer's subtitle state (including "off") in its
+  // start request, so the player adopts what the server granted and pins it
+  // rather than auto-selecting from the profile again. A track the server had
+  // to drop (a refused burn-in) comes back as no subtitle.
+  const grantedSubtitleIndexRef = useRef<number | null>(null);
+  grantedSubtitleIndexRef.current = plan.selected_tracks.subtitle?.index ?? null;
   useEffect(() => {
+    const reconnectFrom = reconnectFromSessionRef.current;
+    if (reconnectFrom !== null && reconnectFrom !== sessionId) {
+      reconnectFromSessionRef.current = null;
+      subtitleSelectionWasManualRef.current = true;
+      setActiveSubtitleIndex(grantedSubtitleIndexRef.current);
+      return;
+    }
     subtitleSelectionWasManualRef.current = false;
   }, [sessionId]);
 
@@ -3777,8 +3896,56 @@ export function VideoPlayer({
         />
       ) : null}
 
+      {/* Mid-stream connection loss: retrying, or given up */}
+      {!isDetached && connectionStatus !== "connected" && (
+        <div
+          role={connectionStatus === "reconnecting" ? "status" : "alert"}
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/80 px-6"
+        >
+          <div className="flex max-w-md flex-col items-center gap-4 text-center">
+            {connectionStatus === "reconnecting" && (
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            )}
+            <div className="space-y-1">
+              <p className="text-base font-semibold text-white">
+                {connectionStatus === "reconnecting"
+                  ? "Reconnecting…"
+                  : (connectionErrorTitle ?? "Connection lost")}
+              </p>
+              <p className="text-sm text-white/60">
+                {connectionStatus === "reconnecting"
+                  ? "The connection to the server was lost. Playback will continue where you left off."
+                  : (connectionError ?? "Silo couldn't reconnect to the server.")}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {connectionStatus === "lost" && onRetryConnection && (
+                <button
+                  onClick={onRetryConnection}
+                  disabled={isLeaving}
+                  type="button"
+                  className="rounded bg-white px-4 py-2 text-sm font-medium text-black hover:bg-white/90"
+                >
+                  Try again
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  void handleExit();
+                }}
+                disabled={isLeaving}
+                type="button"
+                className="rounded bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/20"
+              >
+                Go Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error state */}
-      {!isDetached && error && (
+      {!isDetached && error && connectionStatus === "connected" && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center">
             <div className="mb-4 text-sm text-white/60">{error}</div>

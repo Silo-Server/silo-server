@@ -1,4 +1,4 @@
-import type { AccessGroup, AdminUser } from "@/api/types";
+import type { AccessGroup, AdminPolicyDefaults, AdminUser } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
@@ -9,11 +9,13 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminUsers from "./AdminUsers";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: mocks.policyDefaults }),
   useViewerIsOwner: (id?: number) => mocks.users.some((u) => u.id === id && u.is_owner),
   useAdminUserCapabilities: () => ({ data: { available: mocks.available, default_profile: true } }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
@@ -38,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   accessGroupsLoaded: false,
   accessGroupsFailed: false,
   refetchAccessGroups: vi.fn(),
+  /** The server's built-in policy defaults; undefined while they load. */
+  policyDefaults: undefined as AdminPolicyDefaults | undefined,
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -504,6 +508,7 @@ describe("AdminUsers user dialog policy hints", () => {
     mocks.available = true;
     mocks.accessGroups = [];
     mocks.accessGroupsLoaded = false;
+    mocks.policyDefaults = POLICY_DEFAULTS;
     mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
     vi.stubGlobal(
       "ResizeObserver",
@@ -581,6 +586,41 @@ describe("AdminUsers user dialog policy hints", () => {
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
   });
 
+  it("does not show an override as the default while the server defaults load", async () => {
+    mocks.policyDefaults = undefined;
+    mocks.users = [{ ...adminUser, download_transcode_allowed: true }, ownerViewer];
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit taylor");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    // A field without an override shows the account's resolved value.
+    expect(within(dialog).getByRole("combobox", { name: "Downloads" })).toHaveTextContent(
+      "Server default: Allowed",
+    );
+
+    // This one is overridden, so its resolved value is not what clearing the
+    // override falls back to: the hint waits for the defaults.
+    await user.click(within(dialog).getByRole("combobox", { name: "Download Transcodes" }));
+    expect(await screen.findByRole("option", { name: "Server default" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Server default: / })).toBeNull();
+  });
+
+  it("previews server-prepared downloads from the server's admin and no-group defaults", async () => {
+    mocks.users = [ownerViewer];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    const transcodes = () => within(dialog).getByRole("combobox", { name: "Download Transcodes" });
+
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Server default: Not allowed");
+
+    await chooseRole(user, dialog, "Admin");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Admin default: Allowed");
+  });
+
   async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {
     await user.click(screen.getByRole("button", { name: button }));
     const dialog = await screen.findByRole("dialog");
@@ -644,6 +684,38 @@ describe("AdminUsers user dialog policy hints", () => {
     const dialog = await openAccess(user, "Edit root");
     expect(within(dialog).getByRole("combobox", { name: "Group" })).toBeDisabled();
     expect(within(dialog).getByText("Admin accounts can't join groups.")).toBeInTheDocument();
+  });
+
+  it("keeps an admin other than the owner from changing its own access and limits", async () => {
+    // The viewer (id 1) is an admin, not the Owner.
+    mocks.users = [{ ...adminUser, id: 1, username: "me", role: "admin", max_streams: 2 }];
+    mocks.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit me");
+
+    expect(
+      within(dialog).getByText("Only the server owner can change an admin's access and limits."),
+    ).toBeInTheDocument();
+    for (const control of within(dialog).getAllByRole("switch")) {
+      expect(control).toBeDisabled();
+    }
+    // Radix Select ignores a disabled fieldset and opens on pointerdown, so
+    // each menu must carry its own disabled state.
+    for (const menu of within(dialog).getAllByRole("combobox")) {
+      expect(menu).toHaveAttribute("data-disabled");
+    }
+    // Max Profiles is not access policy and stays editable.
+    expect(within(dialog).getByLabelText("Max Profiles")).toBeEnabled();
+
+    await user.click(within(dialog).getByRole("tab", { name: "Account" }));
+    await user.clear(within(dialog).getByLabelText("Email"));
+    await user.type(within(dialog).getByLabelText("Email"), "me@example.test");
+    await user.click(within(dialog).getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
+    const body = mocks.update.mock.calls[0]![0].body;
+    expect(body.email).toBe("me@example.test");
+    expect(body).not.toHaveProperty("max_streams");
   });
 
   it("previews the default group for an admin demoted from the list", async () => {

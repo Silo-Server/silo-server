@@ -346,6 +346,8 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  // Outside users(): saving an account does not change the server defaults.
+  policyDefaults: () => ["admin", "policyDefaults"] as const,
   accessGroups: () => ["admin", "accessGroups"] as const,
   accessGroup: (id: number) => ["admin", "accessGroups", id] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
@@ -388,6 +390,7 @@ export const adminKeys = {
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
+  downloadPreparations: () => ["admin", "downloadPreparations"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,

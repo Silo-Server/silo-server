@@ -116,6 +116,7 @@ make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
+make verify-case-collisions
 ```
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
@@ -138,7 +139,7 @@ Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 stale artifact or fixture tree.
 
 `make test-go` has no database, so every DB-backed test in it skips. The
-`Go DB pins` CI job covers the query-budget pins listed in
+`Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
 and runs `make test-db-pins`, which fails when a listed test is missing,
 skipped or failing. A test that pins a statement count or query plan belongs in

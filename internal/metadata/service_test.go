@@ -1777,6 +1777,45 @@ func TestCreateOrFindSkeleton_WithFolderIDs(t *testing.T) {
 	}
 }
 
+func TestCreateOrFindSkeleton_UntaggedVersionRespectsTaggedSibling(t *testing.T) {
+	const root = "/media/movies/Dune (2021)"
+	for _, tc := range []struct {
+		name        string
+		siblingPath string
+		wantFlagged bool
+	}{
+		{name: "tagged sibling", siblingPath: root + "/Dune (2021) [imdbid-tt1160419] [Bluray-1080p].mkv"},
+		{name: "untagged sibling", siblingPath: root + "/Dune (2021) [Bluray-1080p].mkv", wantFlagged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			h.service.folderRepo = &fakeMetadataFolderRepo{
+				folders: map[int]*models.MediaFolder{
+					10: {ID: 10, Type: "movies", Enabled: true},
+				},
+			}
+			sibling := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: tc.siblingPath, ObservedRootPath: root}
+			file := &models.MediaFile{
+				ID:               2,
+				MediaFolderID:    10,
+				FilePath:         root + "/Dune (2021) [Bluray-2160p].mkv",
+				ObservedRootPath: root,
+			}
+			h.fileRepo.setGroupFiles(10, 1, "dune", sibling, file)
+
+			if _, err := h.service.createOrFindSkeleton(ctx, file, 10); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			_, flagged := h.skippedRootRepo.skipped["10:"+root]
+			if flagged != tc.wantFlagged {
+				t.Fatalf("root flagged = %v, want %v", flagged, tc.wantFlagged)
+			}
+		})
+	}
+}
+
 func TestCreateOrFindSkeleton_IDTaggedMovieFolderBeatsDivergentReleaseFilename(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()

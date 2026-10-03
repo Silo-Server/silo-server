@@ -2,6 +2,7 @@
 // Sign-in settings page and an account's Sign-in tab. The refusals are listed
 // in docs/auth-api.md#external-sign-in.
 import type { PluginAuthBinding, PluginCapability, PluginInstallation } from "@/api/types";
+import type { SignInBindingWrite } from "@/hooks/queries/admin/externalSignIn";
 import { StaleApiRequestContextError } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 
@@ -10,7 +11,7 @@ export const BREAK_GLASS_REQUIRED_TEXT =
 
 const PROBLEM_TEXT: Record<string, string> = {
   provider_already_enabled:
-    "Another sign-in provider is already on. A server has one sign-in provider at a time: turn the other one off first.",
+    "Another sign-in provider is already on. A server has one sign-in provider at a time, plus one network sign-in such as Tailscale: turn the other one off first.",
   break_glass_required: BREAK_GLASS_REQUIRED_TEXT,
   identity_linked_elsewhere:
     "That provider account is already connected to another Silo account. Unlink it there first.",
@@ -57,17 +58,70 @@ export function authPluginInstallations(
   return (installations ?? []).filter((installation) => authCapabilityOf(installation));
 }
 
+/**
+ * Whether an installation signs people in from its network (such as the
+ * Tailscale plugin) rather than as the server's one OIDC or LDAP provider.
+ * One network sign-in can be on beside that provider.
+ */
+export function isNetworkSignIn(installation: PluginInstallation): boolean {
+  return authCapabilityOf(installation)?.sign_in_mode === "network";
+}
+
+/** Installed OIDC and LDAP sign-in plugins: the one-at-a-time provider slot. */
+export function primarySignInInstallations(
+  installations: readonly PluginInstallation[] | undefined,
+): PluginInstallation[] {
+  return authPluginInstallations(installations).filter(
+    (installation) => !isNetworkSignIn(installation),
+  );
+}
+
+/** Installed network sign-in plugins (such as Tailscale). */
+export function networkSignInInstallations(
+  installations: readonly PluginInstallation[] | undefined,
+): PluginInstallation[] {
+  return authPluginInstallations(installations).filter(isNetworkSignIn);
+}
+
 /** The binding row of an installation's sign-in capability; none on a fresh install. */
 export function authBindingOf(installation: PluginInstallation): PluginAuthBinding | undefined {
   const capability = authCapabilityOf(installation);
   return installation.auth_bindings?.find((entry) => entry.capability_id === capability?.id);
 }
 
-/** The installation whose binding is on: a server has at most one. */
+/** Whether the installation creates accounts for people it signs in; on until saved off. */
+export function savedAutoProvision(installation: PluginInstallation): boolean {
+  return authBindingOf(installation)?.auto_provision ?? true;
+}
+
+/**
+ * The binding write for an installation: its saved binding (or a fresh
+ * install's defaults) with change applied.
+ */
+export function signInBindingWrite(
+  installation: PluginInstallation,
+  change: Partial<Omit<SignInBindingWrite, "capability_id">> = {},
+): SignInBindingWrite {
+  const binding = authBindingOf(installation);
+  return {
+    capability_id: authCapabilityOf(installation)!.id,
+    enabled: binding?.enabled ?? false,
+    display_order: binding?.display_order ?? 1,
+    auto_provision: savedAutoProvision(installation),
+    default_login: binding?.default_login ?? false,
+    ...change,
+  };
+}
+
+/**
+ * The OIDC or LDAP installation whose binding is on: a server has at most
+ * one. A network sign-in beside it is not counted: it signs in only people
+ * on its network.
+ */
 export function activeSignInInstallation(
   installations: readonly PluginInstallation[] | undefined,
 ): PluginInstallation | undefined {
-  return authPluginInstallations(installations).find(
+  return primarySignInInstallations(installations).find(
     (installation) => authBindingOf(installation)?.enabled === true,
   );
 }

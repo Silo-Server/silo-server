@@ -89,6 +89,37 @@ jobs:
           fi
       - name: Verify no local paths leaked into committed docs
         run: make verify-local-paths
+      # Linux checks out two paths that differ only in case without
+      # complaint; macOS and Windows builds then fail. Like the selection
+      # tools, the checker comes from this workflow's commit on main, so a
+      # branch cannot skip it by deleting or editing its own copy, and a
+      # branch cut before the checker existed is checked too. A change to the
+      # checker gates later runs once it merges; its tests run in Go test.
+      # After the PR checkout, which would otherwise clean it away.
+      - name: Check out the case-collision checker from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /scripts/ci/casecollisions/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # The checker uses only the standard library, so it needs a toolchain
+      # but no module cache.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Equivalent to make verify-case-collisions with main's checker. It
+      # lists the files tracked in the PR checkout; .ci-tools is untracked.
+      - name: Verify no tracked paths collide ignoring case
+        run: |
+          go build -o "$RUNNER_TEMP/casecollisions" ./.ci-tools/scripts/ci/casecollisions
+          "$RUNNER_TEMP/casecollisions"
 
   # Contract assertions run once in the full suite; artifact generation and
   # semantic comparison retain their separate gate. PG17 race tests and
@@ -414,16 +445,17 @@ jobs:
       # policy, the OAuth flow store across nodes (a completion code opens its
       # session only when redeemed), the provider re-check (and
       # the provider chain a device approval inherits), the one-provider
-      # binding rule, compatibility sign-in routing, the Owner rules on admin
+      # binding rule (and the network provider beside it), network identity
+      # sign-in and linking, compatibility sign-in routing, the Owner rules on admin
       # identity link and unlink, and the admin guards that keep a break-glass
       # account while local sign-in is off. The break-glass guards run first:
       # they skip on a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
           go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
-          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
+          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
           go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
-          go test -race -count=1 -run '^TestUpsertAuthBindingAllowsOneEnabledProvider$' ./internal/plugins/
+          go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
 
   web:
     name: Web

@@ -61,7 +61,10 @@ type ResolveInput struct {
 	InstallationID int
 	// AutoProvision is the binding's account-creation switch.
 	AutoProvision bool
-	Identity      ExternalIdentity
+	// Network: the installation is a network provider, whose identity
+	// defers to the account's primary provider (primaryAuthority).
+	Network  bool
+	Identity ExternalIdentity
 	// LinkingUserID is the signed-in account a linking flow links to; 0 for
 	// an ordinary sign-in.
 	LinkingUserID int
@@ -236,9 +239,24 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 }
 
 // finish applies the managed role and records the account the sign-in
-// resolved to.
+// resolved to. A network identity (in.Network) of an account that also has a
+// primary provider identity (primaryAuthority) leaves the role to that
+// provider, and cannot sign in while that provider refuses the account.
 func (r *AccountResolver) finish(ctx context.Context, tx pgx.Tx, in ResolveInput, user *models.User, out *resolution) error {
-	synced, event, err := syncManagedRole(ctx, tx, user, in.Identity.ManagedRole)
+	managed := in.Identity.ManagedRole
+	if in.Network {
+		authority, err := primaryAuthorityOf(ctx, tx, user.ID, in.InstallationID)
+		if err != nil {
+			return err
+		}
+		if authority.refused {
+			return ErrNotPermitted
+		}
+		if authority.defers {
+			managed = pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_UNSPECIFIED
+		}
+	}
+	synced, event, err := syncManagedRole(ctx, tx, user, managed)
 	if err != nil {
 		return err
 	}

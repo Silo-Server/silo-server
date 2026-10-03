@@ -27,6 +27,9 @@ type ServerConfig struct {
 	LogFormat string `yaml:"log_format"`
 	LogQuiet  string `yaml:"log_quiet"`
 	PublicURL string `yaml:"public_url"`
+	// LANDiscovery advertises the API server on the local network with
+	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
+	LANDiscovery bool `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.

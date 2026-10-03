@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { Activity, ChevronRight, Loader, ScanLine } from "lucide-react";
+import { Activity, AlertTriangle, ChevronRight, Clock, Loader, ScanLine } from "lucide-react";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useTasksIncludingHidden } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminDownloadPreparations } from "@/hooks/queries/admin/downloadPreparations";
+import type { AdminDownloadPreparation } from "@/api/v2/adminDownloadPreparations";
 import {
   useRealtimeEvents,
   type RealtimeConnectionState,
@@ -18,11 +20,22 @@ import {
 } from "@/pages/adminActivityPresentation";
 import { cn } from "@/lib/utils";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
+import {
+  formatPreparationKind,
+  formatRemaining,
+  preparationCompactTitle,
+  preparationPercent,
+  preparationRemainingSeconds,
+  preparationRunningLabel,
+  preparationWorker,
+} from "@/pages/adminDownloadPreparationPresentation";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
 const MAX_BADGE_COUNT = 99;
 const ACTIVE_SCAN_SNAPSHOT_LIMIT = 500;
+const MAX_ACTIVITY_PREPARATION_ROWS = 3;
+export const PREPARATIONS_ACTIVITY_HREF = "/admin/activity?view=preparations";
 
 interface ServerActivityProps {
   /** Hide the trigger button entirely when there is no activity */
@@ -38,6 +51,9 @@ function useServerActivityData() {
   const { data: tasks = [] } = useTasksIncludingHidden();
   const { data: scans } = useActiveScans();
   const { data: libraries = [] } = useAdminLibraries();
+  // Undefined when the server has no preparation queue (the read answers 503);
+  // the section is hidden rather than showing an error.
+  const { data: preparations } = useAdminDownloadPreparations();
   const { connectionState } = useRealtimeEvents();
 
   const activeScans = useMemo(
@@ -56,7 +72,18 @@ function useServerActivityData() {
     return counts;
   }, [sessions]);
 
-  const totalActive = sessions.length + runningTasks.length + activeScans.length;
+  const runningPreparations = useMemo(
+    () => (preparations?.items ?? []).filter((p) => p.state === "running"),
+    [preparations],
+  );
+  const preparationCounts = preparations?.counts;
+  // Queued jobs count as activity, as queued scans already do.
+  const activePreparations = preparationCounts
+    ? preparationCounts.running + preparationCounts.queued + preparationCounts.retrying
+    : 0;
+
+  const totalActive =
+    sessions.length + runningTasks.length + activeScans.length + activePreparations;
 
   const libraryName = (id: number) => libraries.find((l) => l.id === id)?.name ?? `Library #${id}`;
 
@@ -69,6 +96,9 @@ function useServerActivityData() {
     libraryName,
     connectionState,
     scansLoaded: scans !== undefined,
+    preparationCounts,
+    runningPreparations,
+    activePreparations,
   };
 }
 
@@ -115,6 +145,9 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
     libraryName,
     connectionState,
     scansLoaded,
+    preparationCounts,
+    runningPreparations,
+    activePreparations,
   } = useServerActivityData();
   const showConnectionProblem = useDelayedConnectionProblem(connectionState);
   const visibleActiveScans = activeScans.slice(0, MAX_ACTIVITY_SCAN_ROWS);
@@ -177,7 +210,9 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
           </div>
 
           <div className="max-h-[400px] overflow-y-auto">
-            {totalActive === 0 && scansLoaded ? (
+            {/* Recent preparation failures are not activity, but hiding them
+                behind the empty state would leave them nowhere to be seen. */}
+            {totalActive === 0 && scansLoaded && !preparationCounts?.failed_recent ? (
               <div className="text-muted-foreground px-4 py-8 text-center text-sm">
                 No active server activity
               </div>
@@ -228,7 +263,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                   countIsLowerBound={activeScansMayBeTruncated}
                   href="/admin/libraries"
                   onNavigate={() => setOpen(false)}
-                  last
+                  last={!preparationCounts}
                 >
                   {activeScans.length > 0 ? (
                     <div className="space-y-1.5">
@@ -251,6 +286,24 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                     <EmptyRow>No active scans</EmptyRow>
                   )}
                 </ActivitySection>
+
+                {preparationCounts && (
+                  <ActivitySection
+                    title="Preparing downloads"
+                    count={activePreparations}
+                    href={PREPARATIONS_ACTIVITY_HREF}
+                    onNavigate={() => setOpen(false)}
+                    last
+                  >
+                    <PreparationsSummary
+                      running={runningPreparations}
+                      queued={preparationCounts.queued}
+                      retrying={preparationCounts.retrying}
+                      failed={preparationCounts.failed_recent}
+                      onNavigate={() => setOpen(false)}
+                    />
+                  </ActivitySection>
+                )}
               </>
             )}
           </div>
@@ -364,6 +417,116 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function PreparationsSummary({
+  running,
+  queued,
+  retrying,
+  failed,
+  onNavigate,
+}: {
+  running: AdminDownloadPreparation[];
+  queued: number;
+  retrying: number;
+  failed: number;
+  onNavigate: () => void;
+}) {
+  const visible = running.slice(0, MAX_ACTIVITY_PREPARATION_ROWS);
+  // Running jobs past the visible rows join the waiting line, so the counts
+  // still add up to the section badge.
+  const hiddenRunning = running.length - visible.length;
+  const waiting = [
+    hiddenRunning > 0 ? `${hiddenRunning} more running` : "",
+    queued > 0 ? `${queued.toLocaleString()} queued` : "",
+    retrying > 0 ? `${retrying.toLocaleString()} waiting to retry` : "",
+  ].filter(Boolean);
+
+  if (visible.length === 0 && waiting.length === 0 && failed === 0) {
+    return <EmptyRow>No downloads being prepared</EmptyRow>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {visible.map((prep) => (
+        <PreparationRow key={prep.id} prep={prep} onNavigate={onNavigate} />
+      ))}
+      {waiting.length > 0 && (
+        <div
+          className={cn(
+            "text-muted-foreground flex items-center gap-1.5 text-[11px]",
+            visible.length > 0 &&
+              "border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5",
+          )}
+        >
+          <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {waiting.join(" · ")}
+        </div>
+      )}
+      {failed > 0 && (
+        <div className="text-destructive flex items-center gap-1.5 text-[11px] font-medium">
+          <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {failed.toLocaleString()} failed in the last 24 hours
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreparationRow({
+  prep,
+  onNavigate,
+}: {
+  prep: AdminDownloadPreparation;
+  onNavigate: () => void;
+}) {
+  const percent = preparationPercent(prep);
+  const worker = preparationWorker(prep);
+  const detail = [
+    formatPreparationKind(prep),
+    worker?.name,
+    formatRemaining(preparationRemainingSeconds(prep)),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <Link
+          to={PREPARATIONS_ACTIVITY_HREF}
+          onClick={onNavigate}
+          className="hover:text-primary truncate text-[12px] font-medium transition-colors"
+        >
+          {preparationCompactTitle(prep)}
+        </Link>
+        {percent != null ? (
+          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+            {Math.floor(percent)}%
+          </span>
+        ) : (
+          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+            <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
+            {preparationRunningLabel(prep)}
+          </span>
+        )}
+      </div>
+      {percent != null && (
+        <div
+          className="bg-muted h-1.5 overflow-hidden rounded-full"
+          role="progressbar"
+          aria-label={`${preparationCompactTitle(prep)} progress`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.floor(percent)}
+        >
+          <div
+            className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      )}
+      <div className="text-muted-foreground truncate text-[10px]">{detail}</div>
     </div>
   );
 }

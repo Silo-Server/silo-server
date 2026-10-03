@@ -464,7 +464,9 @@ Local URLs are root-relative, which is enough for clients of the API listener
 and for the Jellyfin and Audiobookshelf compatibility listeners, which mount
 the same signed artwork route so their cover redirects resolve on their own
 port. Consumers outside the server, such as Discord embeds, anchor them to
-`server.public_url` and send no image when it is unset.
+`server.public_url` and send no image when it is unset. Offline download
+artwork is served by the server itself, so it reads a signed local URL's key
+from the assets store instead of requesting the route over HTTP.
 
 Local storage publishes an object by writing to a temporary file, syncing it,
 renaming it into place, and syncing the containing directory, so a crash after

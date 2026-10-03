@@ -224,6 +224,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
 	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
 	cfg.Server.PublicURL = stringOr(m, "server.public_url", "")
+	lanDiscovery, err := boolOr(m, ServerLANDiscoverySettingKey, true)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Server.LANDiscovery = lanDiscovery
 
 	// TMDB collection presets (independent of metadata providers)
 	cfg.TMDBAPIKey = stringOr(m, "tmdb.api_key", "")

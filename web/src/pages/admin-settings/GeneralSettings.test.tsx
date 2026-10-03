@@ -66,6 +66,7 @@ describe("GeneralSettings", () => {
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
       "server.public_url",
+      "server.lan_discovery",
       "branding.server_name",
       "branding.login_subtitle",
       "signup.enabled",
@@ -86,6 +87,16 @@ describe("GeneralSettings", () => {
     expect(screen.getByRole("link", { name: /Manage invite codes/i })).toHaveAttribute(
       "href",
       "/admin/users?tab=invite-codes",
+    );
+  });
+
+  it("shows the local network discovery toggle in its saved state", () => {
+    useSettingsFormMock.mockReturnValue(makeForm({ "server.lan_discovery": "true" }));
+    renderPage();
+
+    expect(screen.getByRole("switch", { name: /Show on the local network/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
     );
   });
 

@@ -35,6 +35,40 @@ const OAUTH_LINK_FAILURE_TEXT: Record<string, string> = {
 };
 const OAUTH_LINK_FAILURE_FALLBACK = "Connecting the sign-in provider failed. Try again.";
 
+/**
+ * Who a network provider (such as Tailscale) says owns this device, for a
+ * "Continue as" label; empty when it named nobody.
+ */
+export function networkIdentityName(provider: {
+  network_identity?: { display_name: string; username: string };
+}): string {
+  return provider.network_identity?.display_name || provider.network_identity?.username || "";
+}
+
+/**
+ * Readable text for a refused network identity sign-in or link (a provider
+ * such as Tailscale that knows who owns the device); null for a problem the
+ * caller words itself.
+ */
+export function networkSignInRefusalText(problemType: string, providerName: string): string | null {
+  switch (problemType) {
+    case "network_identity_required":
+      return `Open this server at its ${providerName} address to sign in this way.`;
+    case "not_permitted":
+      return `${providerName} doesn't allow this device to sign in to this server.`;
+    case "email_in_use":
+      return `An account with your email already exists. Sign in with your password, then connect ${providerName} under Settings → Sign-in.`;
+    case "permission_denied":
+      return oauthFailureText("account_disabled");
+    case "account_required":
+    case "identity_linked_elsewhere":
+    case "provider_unavailable":
+      return oauthFailureText(problemType);
+    default:
+      return null;
+  }
+}
+
 /** Readable text for a linking flow's failure reason (error=oauth_link_failed). */
 export function oauthLinkFailureText(reason: string | null | undefined): string {
   if (reason && OAUTH_LINK_FAILURE_TEXT[reason]) return OAUTH_LINK_FAILURE_TEXT[reason];

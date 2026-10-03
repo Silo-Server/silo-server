@@ -1068,6 +1068,45 @@
       "body_file": "admin_discord_test.json"
     },
     {
+      "name": "admin_download_preparation_capabilities",
+      "operation_id": "getAdminDownloadPreparationCapabilities",
+      "scenario": "Administrator discovery names the realtime channel and how long failed preparations stay listed.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/preparations/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody",
+      "body_file": "admin_download_preparation_capabilities.json"
+    },
+    {
+      "name": "admin_download_preparations",
+      "operation_id": "listAdminDownloadPreparations",
+      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, and a recent failure, with totals across every listed job.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/downloads/preparations?limit=10",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationsOutputBody",
+      "body_file": "admin_download_preparations.json"
+    },
+    {
       "name": "admin_episode_intro_redetect",
       "operation_id": "redetectAdminEpisodeIntro",
       "scenario": "Intro re-detection preserves the same local execution service and eligibility checks.",
@@ -3390,6 +3429,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CollectionAdminUnmatchedFile",
       "body_file": "admin_unmatched_files.json"
+    },
+    {
+      "name": "admin_user_policy_defaults",
+      "operation_id": "getAdminUserPolicyDefaults",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/policy-defaults",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminUserPolicyDefaults",
+      "body_file": "admin_user_policy_defaults.json"
     },
     {
       "name": "apple_push_registration_capability",
@@ -8120,6 +8180,28 @@
       "body_file": "link_account_identity_with_credentials_ok.json"
     },
     {
+      "name": "link_account_identity_with_network_ok",
+      "operation_id": "linkAccountIdentityWithNetwork",
+      "scenario": "The account re-enters its password and links the Tailscale identity of the device it is using.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/account/identities/link-network",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        },
+        "body": "{\"installation_id\":\"5\",\"password\":\"right password\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json",
+        "Location": "/api/v2/account/identities"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AccountIdentity",
+      "body_file": "link_account_identity_with_network_ok.json"
+    },
+    {
       "name": "list_account_identities_ok",
       "operation_id": "listAccountIdentities",
       "scenario": "The account's Sign-in section lists the provider identity it is linked to.",
@@ -12751,6 +12833,42 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/TokenPair",
       "body_file": "setup_server_ok.json"
+    },
+    {
+      "name": "sign_in_with_network_identity_off_overlay",
+      "operation_id": "signInWithNetworkIdentity",
+      "scenario": "A request that did not come through the provider's network has no device owner to sign in.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/network/7/sign-in",
+        "body": "{}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "sign_in_with_network_identity_off_overlay.json"
+    },
+    {
+      "name": "sign_in_with_network_identity_ok",
+      "operation_id": "signInWithNetworkIdentity",
+      "scenario": "A TV on the server's Tailscale network signs its owner in with no password: the body is an empty JSON object.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/network/5/sign-in",
+        "body": "{}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/TokenPair",
+      "body_file": "sign_in_with_network_identity_ok.json"
     },
     {
       "name": "signup_duplicate",

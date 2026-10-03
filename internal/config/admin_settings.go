@@ -158,6 +158,12 @@ func PreviewImageWidth(value string) int {
 // seasons are analyzed at once and how many ffmpeg processes read audio.
 const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 
+// ServerLANDiscoverySettingKey advertises the API server on the local network
+// (DNS-SD service _silo._tcp, internal/landiscovery) so clients can find it
+// without an address. The responder starts with the API listener, so a change
+// takes effect on restart.
+const ServerLANDiscoverySettingKey = "server.lan_discovery"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -251,6 +257,7 @@ var adminSettingDefaults = map[string]string{
 	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
 	"theme.catalog_url":         DefaultThemeCatalogURL,
 
+	ServerLANDiscoverySettingKey:              "true",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
@@ -565,7 +572,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey:
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
 		return normalizeAdminBool(key, value)
 
 	case AuthProviderRecheckIntervalSettingKey:

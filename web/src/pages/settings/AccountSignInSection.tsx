@@ -24,6 +24,7 @@ import {
   LinkStartError,
   useAccountIdentities,
   useLinkAccountIdentityWithCredentials,
+  useLinkAccountIdentityWithNetwork,
   useStartAccountIdentityLink,
   useUnlinkAccountIdentity,
   type AccountIdentity,
@@ -31,7 +32,12 @@ import {
 import { useAuth, type AuthProviderOption } from "@/hooks/useAuth";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
-import { leaveForProvider, oauthFailureText, oauthLinkFailureText } from "@/lib/externalSignIn";
+import {
+  leaveForProvider,
+  networkIdentityName,
+  oauthFailureText,
+  oauthLinkFailureText,
+} from "@/lib/externalSignIn";
 
 // Where a web linking flow comes back to, with linked=1 or
 // error=oauth_link_failed&reason=<reason>.
@@ -54,6 +60,8 @@ function connectErrorText(error: unknown, provider: AuthProviderOption): string 
   }
   const location = problem.problem.errors?.[0]?.location;
   switch (problem.problemType) {
+    case "network_identity_required":
+      return `Open this server at its ${provider.display_name} address to connect ${provider.display_name}.`;
     case "validation_failed":
       if (location === "body.directory_password") {
         return `${provider.display_name} didn't accept that username and password.`;
@@ -85,6 +93,20 @@ function connectErrorText(error: unknown, provider: AuthProviderOption): string 
         : `${provider.display_name} isn't available right now.`;
   }
   return problem.message;
+}
+
+/** What connecting asks for, by how the provider signs in. */
+function connectIntro(provider: AuthProviderOption): string {
+  const name = provider.display_name;
+  if (provider.mode === "network") {
+    const owner = networkIdentityName(provider);
+    const account = owner ? `${owner}'s ${name} account` : `the ${name} account`;
+    return `Confirm your Silo password to connect ${account} on this device.`;
+  }
+  if (provider.mode === "credentials") {
+    return `Confirm your Silo password, then enter your ${name} username and password.`;
+  }
+  return `Confirm your Silo password, then sign in at ${name}.`;
 }
 
 /** Reads the result a web linking flow came back with, once. */
@@ -126,7 +148,9 @@ export function AccountSignInSection() {
   }, [searchParams, setSearchParams]);
 
   const externalProviders = providers.filter(
-    (entry) => entry.installation_id && (entry.mode === "oauth" || entry.mode === "credentials"),
+    (entry) =>
+      entry.installation_id &&
+      (entry.mode === "oauth" || entry.mode === "credentials" || entry.mode === "network"),
   );
   const linked = identities.data?.items ?? [];
   const linkedInstallations = new Set(linked.map((identity) => identity.installation_id));
@@ -287,6 +311,7 @@ function ConnectForm({
 }) {
   const startLink = useStartAccountIdentityLink();
   const linkCredentials = useLinkAccountIdentityWithCredentials();
+  const linkNetwork = useLinkAccountIdentityWithNetwork();
   const [password, setPassword] = useState("");
   const [directoryUsername, setDirectoryUsername] = useState("");
   const [directoryPassword, setDirectoryPassword] = useState("");
@@ -294,7 +319,10 @@ function ConnectForm({
   const [leaving, setLeaving] = useState(false);
   const installationId = provider.installation_id ?? "";
   const directory = provider.mode === "credentials";
-  const busy = startLink.isPending || linkCredentials.isPending || leaving;
+  // A network provider (such as Tailscale) names the owner of this device;
+  // only the Silo password is asked for.
+  const network = provider.mode === "network";
+  const busy = startLink.isPending || linkCredentials.isPending || linkNetwork.isPending || leaving;
   const idPrefix = `connect-${installationId}`;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -302,6 +330,12 @@ function ConnectForm({
     setError(null);
     const session = captureSessionIdentity();
     try {
+      if (network) {
+        await linkNetwork.mutateAsync({ installation_id: installationId, password });
+        if (!isSessionIdentityCurrent(session)) return;
+        onLinked();
+        return;
+      }
       if (directory) {
         await linkCredentials.mutateAsync({
           installation_id: installationId,
@@ -339,10 +373,8 @@ function ConnectForm({
       <div className="space-y-1 text-sm">
         <p className="font-medium">Connect {provider.display_name}</p>
         <p className="text-muted-foreground">
-          {directory
-            ? `Confirm your Silo password, then enter your ${provider.display_name} username and password.`
-            : `Confirm your Silo password, then sign in at ${provider.display_name}.`}{" "}
-          Afterwards you sign in with {provider.display_name} instead of your Silo password.
+          {connectIntro(provider)} Afterwards you sign in with {provider.display_name} instead of
+          your Silo password.
         </p>
       </div>
       <div className="space-y-2">
@@ -389,7 +421,11 @@ function ConnectForm({
       ) : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={busy}>
-          {busy ? "Connecting…" : directory ? "Connect" : `Continue to ${provider.display_name}`}
+          {busy
+            ? "Connecting…"
+            : directory || network
+              ? "Connect"
+              : `Continue to ${provider.display_name}`}
         </Button>
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
           Cancel

@@ -19,6 +19,7 @@ import { activeSignInInstallation, BREAK_GLASS_REQUIRED_TEXT } from "@/lib/exter
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField, SettingFieldStatus } from "./SettingField";
+import { NetworkSignInSection } from "./NetworkSignInSection";
 import { SignInProviderSlot } from "./SignInProviderSlot";
 import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
 
@@ -178,6 +179,8 @@ export default function SignInSettings() {
             />
           </div>
         </FieldGroup>
+
+        <NetworkSignInSection installations={installations.data} />
 
         <FieldGroup label="Silo passwords" dirty={form.isDirty(LOCAL_LOGIN_KEY)}>
           <SettingField

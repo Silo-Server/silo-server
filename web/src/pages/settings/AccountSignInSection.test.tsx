@@ -40,6 +40,14 @@ const LDAP = {
   display_name: "Directory",
   default: false,
 };
+const TAILSCALE = {
+  id: "plugin:7:tailscale",
+  installation_id: "7",
+  mode: "network",
+  display_name: "Tailscale",
+  default: false,
+  network_identity: { display_name: "Alice Example", username: "alice@example.test" },
+};
 const IDENTITY = {
   id: "4",
   installation_id: "5",
@@ -100,6 +108,9 @@ beforeEach(() => {
         return Promise.resolve({ authorize_url: "https://id.example.test/authorize?state=s" });
       case "POST /api/v2/account/identities/link-credentials":
         identities = [{ ...IDENTITY, id: "9", installation_id: "6", provider_name: "Directory" }];
+        return Promise.resolve(identities[0]);
+      case "POST /api/v2/account/identities/link-network":
+        identities = [{ ...IDENTITY, id: "10", installation_id: "7", provider_name: "Tailscale" }];
         return Promise.resolve(identities[0]);
       case "DELETE /api/v2/account/identities/{id}":
         identities = [];
@@ -291,6 +302,40 @@ it.each([
 ])("explains a refused directory connect (%#)", async (failure, text) => {
   failures["POST /api/v2/account/identities/link-credentials"] = failure;
   await submitDirectoryConnect();
+  expect((await screen.findByRole("alert")).textContent).toBe(text);
+});
+
+async function submitNetworkConnect() {
+  auth.providers = [LOCAL, TAILSCALE];
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Connect Tailscale" }));
+  expect(
+    screen.getByText(/Confirm your Silo password to connect Alice Example's Tailscale account/),
+  ).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Silo password"), { target: { value: "local pw" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+}
+
+it("connects the network identity of this device with the Silo password only", async () => {
+  await submitNetworkConnect();
+  await screen.findByText("Connected Tailscale. Sign in with it from now on.");
+  expect(opCalls("POST /api/v2/account/identities/link-network")[0]?.options).toEqual({
+    body: { installation_id: "7", password: "local pw" },
+    profileContext: undefined,
+    retryAuthentication: false,
+  });
+  expect(leave).not.toHaveBeenCalled();
+});
+
+it.each([
+  [
+    problem("network_identity_required", 403),
+    "Open this server at its Tailscale address to connect Tailscale.",
+  ],
+  [problem("validation_failed", 422, "body.password"), "That isn't your current Silo password."],
+])("explains a refused network connect (%#)", async (failure, text) => {
+  failures["POST /api/v2/account/identities/link-network"] = failure;
+  await submitNetworkConnect();
   expect((await screen.findByRole("alert")).textContent).toBe(text);
 });
 

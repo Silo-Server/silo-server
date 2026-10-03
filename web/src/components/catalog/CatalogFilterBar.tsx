@@ -206,7 +206,7 @@ export default function CatalogFilterBar({
         <SlidersHorizontal className="h-4 w-4" />
         Filters
         {activeFilterCount > 0 && (
-          <Badge variant="default" className="ml-1 px-1.5 py-0 text-[10px]">
+          <Badge variant="default" className="ml-1 px-1.5 py-0 text-[0.625rem]">
             {activeFilterCount}
           </Badge>
         )}

@@ -250,7 +250,7 @@ describe("ActionBar primary action", () => {
       "h-11",
       "rounded-full",
       "px-8",
-      "text-[15px]",
+      "text-[0.9375rem]",
       "font-bold",
       "cursor-pointer",
       "hover:bg-primary",

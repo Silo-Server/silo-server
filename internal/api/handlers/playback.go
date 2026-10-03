@@ -2184,8 +2184,8 @@ func (h *PlaybackHandler) maybeStartThrottler(ctx context.Context, session *play
 // still accept one that direct-plays or remuxes without forbidden video
 // encoding.
 // Within each class it prefers SDR, then resolution, then bitrate.
-func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.MediaFile) (*models.MediaFile, error) {
-	candidates, err := h.findAlternateFiles(ctx, source)
+func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.MediaFile, filter catalog.AccessFilter) (*models.MediaFile, error) {
+	candidates, err := h.findAlternateFiles(ctx, source, filter)
 	if err != nil || len(candidates) == 0 {
 		return nil, err
 	}
@@ -2196,7 +2196,13 @@ func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.
 // fallback order. Callers that plan candidates must keep trying after a
 // terminal: a lower-resolution candidate can still fail while a later 4K
 // candidate direct-plays or remuxes without forbidden video encoding.
-func (h *PlaybackHandler) findAlternateFiles(ctx context.Context, source *models.MediaFile) ([]*models.MediaFile, error) {
+//
+// Only versions the viewer may play are returned: the per-file checks
+// loadAuthorizedFile applies to a requested file (library access and the
+// maximum playback quality), and present on disk. The sibling query itself is
+// unfiltered, and the requested file's authorization says nothing about which
+// library a sibling version lives in or how high its resolution is.
+func (h *PlaybackHandler) findAlternateFiles(ctx context.Context, source *models.MediaFile, filter catalog.AccessFilter) ([]*models.MediaFile, error) {
 	if h.FileVersionFetcher == nil {
 		return nil, fmt.Errorf("file version fetcher not configured")
 	}
@@ -2214,7 +2220,10 @@ func (h *PlaybackHandler) findAlternateFiles(ctx context.Context, source *models
 
 	candidates := make([]*models.MediaFile, 0, len(files))
 	for _, f := range files {
-		if f.ID == source.ID {
+		if f == nil || f.ID == source.ID {
+			continue
+		}
+		if f.MissingSince != nil || !catalog.FileAllowedByAccess(f, filter) {
 			continue
 		}
 		if source.EditionKey != "" && f.EditionKey != source.EditionKey {

@@ -305,3 +305,34 @@ func TestDirectResolverHoldsOnlyRevisionedDefaultLifetimeURLs(t *testing.T) {
 		t.Fatalf("batch resolve did not hold the revisioned URL: %s", got)
 	}
 }
+
+func TestSignedKeyAcceptsOnlyItsOwnValidURLs(t *testing.T) {
+	now := time.Date(2026, 1, 2, 3, 0, 0, 0, time.UTC)
+	signer := NewSigner("secret", time.Hour)
+	key := "uploads/a b#c?d%25.webp"
+	signed, exp := signer.Sign(key, now)
+	if got, ok := signer.SignedKey(signed, now); !ok || got != key {
+		t.Fatalf("SignedKey(%s) = %q, %v", signed, got, ok)
+	}
+
+	other, _ := NewSigner("other", time.Hour).Sign(key, now)
+	artifact, _ := NewJobArtifactSigner("secret", time.Hour).Sign("job-1", now)
+	for name, rawURL := range map[string]string{
+		"expired":        signed,
+		"other secret":   other,
+		"other domain":   artifact,
+		"tampered key":   strings.Replace(signed, "uploads/", "uploadz/", 1),
+		"absolute":       "https://cdn.example" + signed,
+		"invalid key":    strings.Replace(signed, "uploads/", "../", 1),
+		"not a URL":      "%zz",
+		"missing expiry": strings.Split(signed, "?")[0],
+	} {
+		at := now
+		if name == "expired" {
+			at = exp
+		}
+		if got, ok := signer.SignedKey(rawURL, at); ok {
+			t.Errorf("%s: SignedKey(%s) = %q, want rejection", name, rawURL, got)
+		}
+	}
+}

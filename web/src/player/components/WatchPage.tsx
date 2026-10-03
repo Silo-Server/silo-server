@@ -666,6 +666,11 @@ function WatchPagePlayer({
       onQualitySelect={session.changeQuality}
       onSubtitleTrackChange={session.changeSubtitleTrack}
       onPlanFailure={session.recoverFromFailure}
+      onConnectionLost={session.recoverConnection}
+      onRetryConnection={session.retryConnection}
+      connectionStatus={session.connectionStatus}
+      connectionErrorTitle={session.connectionErrorTitle}
+      connectionError={session.connectionError}
       onPlanInvalidated={session.invalidatePlan}
       onReanchorSeek={session.reanchorSeek}
       onApplySubtitleTrack={session.applySubtitleTrack}
