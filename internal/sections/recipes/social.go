@@ -53,7 +53,7 @@ func (trendingRecipe) Definition() RecipeDefinition {
 // other profile"). Currently the fetcher honors only the section ItemLimit;
 // persisting RecentCount in the section config is forward-compatible.
 type ProfileActivityFeedParams struct {
-	ProfileID   string `json:"profile_id"` // empty = all-other-profiles
+	ProfileID   string `json:"profile_id"` // empty = the caller's other profiles
 	RecentCount int    `json:"recent_count,omitempty"`
 }
 
@@ -77,7 +77,7 @@ func (profileActivityRecipe) Definition() RecipeDefinition {
 		Type:     "profile_activity_feed",
 		Category: CategorySocial,
 		Presets: []GalleryPreset{
-			{Key: "pa_household", DisplayName: "What Others Just Watched", Icon: "👪", DescriptionShort: "Recent watches across all other profiles.", DefaultParams: json.RawMessage(`{"profile_id":""}`)},
+			{Key: "pa_household", DisplayName: "What Others Just Watched", Icon: "👪", DescriptionShort: "Recent watches by the other profiles on your account.", DefaultParams: json.RawMessage(`{"profile_id":""}`)},
 		},
 	}
 }
