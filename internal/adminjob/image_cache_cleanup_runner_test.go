@@ -311,3 +311,163 @@ func TestJobOutcomeIsRecordedAfterItsContextEnds(t *testing.T) {
 		t.Fatalf("outcome %v %+v, want completed", err, terminal)
 	}
 }
+
+// Canceling a cleanup that yielded stops it at its next claim. The job ends
+// canceled with the progress and deletion totals the earlier claim recorded.
+func TestImageCacheCleanupCancelledBetweenSlicesKeepsTotals(t *testing.T) {
+	r := lifecycleRepo(t)
+	prefixes := cleanupPrefixes(8)
+	job := queueImageCacheCleanupJob(t, r, prefixes)
+	store := &cleanupStore{deleteFn: func(ctx context.Context, call int, _ string) (int, error) {
+		if call == 3 {
+			return stallUntilDone(ctx)
+		}
+		return 1, nil
+	}}
+	runner := imageCacheCleanupRunner(r, store, 2*time.Second)
+
+	runner.runNext()
+	if _, err := r.RequestCancellation(t.Context(), job.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	runner.runNext()
+
+	canceled, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 3 || canceled.ProgressTotal != 8 {
+		t.Fatalf("after cancellation: status=%s progress=%d/%d, want canceled 3/8", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+	}
+	if !strings.Contains(canceled.Message, "remain in storage") {
+		t.Fatalf("cancellation message %q does not say undeleted images remain", canceled.Message)
+	}
+	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 3 || got.DeletedS3Objects != 3 {
+		t.Fatalf("canceled result %+v, want the 3 prefixes deleted before cancellation", got)
+	}
+	if calls := store.attempted(); len(calls) != 4 {
+		t.Fatalf("attempted %v, want no deletes after cancellation", calls)
+	}
+	if again, err := r.RequestCancellation(t.Context(), job.ID); err != nil || again.Status != StatusCancelled {
+		t.Fatalf("repeat cancellation: %v %+v", err, again)
+	}
+}
+
+// A cancellation requested while a slice is running stops the slice before the
+// next prefix. The job ends canceled with the totals of the prefixes deleted so
+// far, whether the request arrives through the database flag or the in-process
+// cancel registry.
+func TestImageCacheCleanupCanceledMidSliceStopsAndKeepsTotals(t *testing.T) {
+	for _, via := range []string{"flag", "registry"} {
+		t.Run(via, func(t *testing.T) {
+			r := lifecycleRepo(t)
+			prefixes := cleanupPrefixes(8)
+			job := queueImageCacheCleanupJob(t, r, prefixes)
+			var runner *Runner
+			store := &cleanupStore{deleteFn: func(ctx context.Context, call int, _ string) (int, error) {
+				if call == 3 {
+					if _, err := r.RequestCancellation(context.Background(), job.ID); err != nil {
+						t.Errorf("request cancellation: %v", err)
+					}
+					if via == "registry" && !runner.cancelRegistry.Cancel(job.ID) {
+						t.Error("cleanup is not registered for cancellation")
+					}
+					return stallUntilDone(ctx)
+				}
+				return 1, nil
+			}}
+			runner = imageCacheCleanupRunner(r, store, time.Minute)
+			if via == "flag" {
+				runner.heartbeatInterval = 50 * time.Millisecond
+			}
+
+			started := time.Now()
+			runner.runNext()
+			if elapsed := time.Since(started); elapsed > 30*time.Second {
+				t.Fatalf("cancellation took %s; the slice ran to its deadline", elapsed)
+			}
+
+			canceled, err := r.GetByID(t.Context(), job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 3 || canceled.ProgressTotal != 8 {
+				t.Fatalf("status=%s progress=%d/%d, want canceled 3/8", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+			}
+			if !strings.Contains(canceled.Message, "canceled") || strings.Contains(canceled.Message, "completed") {
+				t.Fatalf("message %q should report the cancellation", canceled.Message)
+			}
+			if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 3 || got.DeletedS3Objects != 3 {
+				t.Fatalf("canceled result %+v, want the 3 prefixes deleted before cancellation", got)
+			}
+			if calls := store.attempted(); len(calls) != 4 {
+				t.Fatalf("attempted %v, want no deletes after cancellation", calls)
+			}
+		})
+	}
+}
+
+// A cancellation that arrives after the last prefix still ends canceled, but
+// keeps the deletion totals rather than the empty result Complete would write.
+func TestImageCacheCleanupCanceledAfterLastPrefixKeepsTotals(t *testing.T) {
+	r := lifecycleRepo(t)
+	prefixes := cleanupPrefixes(2)
+	job := queueImageCacheCleanupJob(t, r, prefixes)
+	store := &cleanupStore{deleteFn: func(_ context.Context, call int, _ string) (int, error) {
+		if call == 1 {
+			if _, err := r.RequestCancellation(context.Background(), job.ID); err != nil {
+				t.Errorf("request cancellation: %v", err)
+			}
+		}
+		return 1, nil
+	}}
+	runner := imageCacheCleanupRunner(r, store, time.Minute)
+
+	runner.runNext()
+
+	canceled, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canceled.Status != StatusCancelled || strings.Contains(canceled.Message, "completed") {
+		t.Fatalf("status=%s message=%q, want a canceled job reported as canceled", canceled.Status, canceled.Message)
+	}
+	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 2 {
+		t.Fatalf("canceled result %+v, want both prefixes counted", got)
+	}
+}
+
+// A cancellation that lands between the runner's last check and Complete is
+// resolved atomically by Complete: the job ends canceled with the cleanup's
+// cancel message and keeps its totals instead of a cleared result.
+func TestImageCacheCleanupCompleteRacingCancelKeepsTotals(t *testing.T) {
+	r := lifecycleRepo(t)
+	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(2))
+	claimed, err := r.ClaimNextQueued(t.Context(), JobTypeImageCacheCleanup)
+	if err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("claim: %v %+v", err, claimed)
+	}
+	if _, err := r.RequestCancellation(t.Context(), job.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	if err := r.Complete(t.Context(), job.ID, CompleteJobInput{
+		ResultPayload:   ImageCacheCleanupResult{LibraryID: 1, DeletedPrefixes: 2, DeletedS3Objects: 5},
+		Message:         "Cached image cleanup completed",
+		CanceledMessage: "Image cache cleanup canceled after 2/2 prefixes",
+		ProgressCurrent: 2,
+		ProgressTotal:   2,
+		ExpiresAt:       time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, err := r.GetByID(t.Context(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusCancelled || got.Message != "Image cache cleanup canceled after 2/2 prefixes" {
+		t.Fatalf("status=%s message=%q, want canceled with the cleanup cancel message", got.Status, got.Message)
+	}
+	if result := imageCacheCleanupResultOf(t, got); result.DeletedPrefixes != 2 || result.DeletedS3Objects != 5 {
+		t.Fatalf("result %+v, want totals kept", result)
+	}
+}
