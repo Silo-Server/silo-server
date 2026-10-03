@@ -304,8 +304,11 @@ export function useReorderCollections() {
       await queryClient.cancelQueries({ queryKey: collectionKeys.list() });
       const snapshot = queryClient.getQueryData<CollectionsListResponse>(collectionKeys.list());
       if (snapshot) {
+        // Collections outside orderedIds, such as ones another profile
+        // created, keep their places.
+        const ordered = new Set(orderedIds);
         const inScope = (c: Collection) =>
-          groupId === undefined ? true : (c.group_id ?? null) === groupId;
+          ordered.has(c.id) && (groupId === undefined ? true : (c.group_id ?? null) === groupId);
         // Clone before stamping sort_order so the snapshot retained for
         // rollback (ctx.snapshot) keeps its original values when onError
         // restores the cache.

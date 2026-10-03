@@ -167,7 +167,8 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 }
 
 // ReorderPersonalCollections replaces the order of one group's collections.
-// orderedIDs must name every collection in scope exactly once.
+// orderedIDs must name every collection profileID created in the group
+// exactly once.
 func (h *CollectionHandler) ReorderPersonalCollections(ctx context.Context, userID int, profileID string, groupID *string, orderedIDs []string) error {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -181,7 +182,7 @@ func (h *CollectionHandler) ReorderPersonalCollections(ctx context.Context, user
 			return err
 		}
 		if errors.Is(err, collectionutil.ErrOrderedIDsMismatch) {
-			return fieldError("ordered_ids", "ordered_ids must include every visible collection in the group exactly once")
+			return fieldError("ordered_ids", "ordered_ids must include every collection this profile created in the group exactly once")
 		}
 		if strings.Contains(err.Error(), "ordered_ids contains duplicates") {
 			return fieldError("ordered_ids", "ordered_ids contains duplicates")

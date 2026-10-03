@@ -93,6 +93,10 @@ func (h *CollectionHandler) PersonalCollectionOrderEditor(ctx context.Context, u
 		return out, err
 	}
 	for _, c := range view.Collections {
+		// A profile orders only the collections it created.
+		if c.CreatorProfileID != profileID {
+			continue
+		}
 		same := c.GroupID == nil && groupID == nil
 		if c.GroupID != nil && groupID != nil {
 			same = *c.GroupID == *groupID

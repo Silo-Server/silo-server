@@ -103,7 +103,7 @@ type PersonalCollectionCreateInput struct {
 // CollectionOrder is the reorderCollections body.
 type CollectionOrder struct {
 	GroupID    *ID  `json:"group_id,omitempty" nullable:"true" doc:"The group whose collections are ordered; omitted or null orders the ungrouped section" example:"g1"`
-	OrderedIDs []ID `json:"ordered_ids" doc:"Every visible collection in the scope, exactly once, in the new order" example:"[\"01J9Z8C3W4R5T6Y7U8I9O0P1Q4\"]"`
+	OrderedIDs []ID `json:"ordered_ids" doc:"The collections the acting profile created in the scope, each once, in order. A write rejects a collection another profile created, even one shared with this profile" example:"[\"01J9Z8C3W4R5T6Y7U8I9O0P1Q4\"]"`
 }
 
 // CollectionOrderInput is the reorderCollections request.
@@ -398,7 +398,7 @@ func registerPersonalCollections(reg *Registry) {
 		"The collection features this server supports.")), reg.getCollectionCapabilities)
 
 	order := humaOp(http.MethodPut, Prefix+"/collections/order", opReorderCollections, "collections",
-		"Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.")
+		"Replace the order of the acting profile's own collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.")
 	order.DefaultStatus = http.StatusOK
 	Register(reg, write(order), reg.reorderCollections)
 
