@@ -30,7 +30,7 @@ import {
 // The badge takes the top-right corner and truncates before it reaches the
 // Library chip on the left.
 const BADGE_CLASS = "ml-auto max-w-full shrink-0";
-const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[12px] font-medium";
+const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
 type DiscoverProps = {
   variant: "discover";
@@ -179,14 +179,14 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
           {progress ? <p className={DETAIL_CLASS}>{progress}</p> : null}
           {request.last_error ? (
             <p
-              className="text-destructive mt-1 line-clamp-2 text-[12px] leading-snug font-medium"
+              className="text-destructive mt-1 line-clamp-2 text-[0.75rem] leading-snug font-medium"
               title={request.last_error}
             >
               {request.last_error}
             </p>
           ) : request.outcome_reason ? (
             <p
-              className="text-muted-foreground mt-1 line-clamp-2 text-[12px] leading-snug"
+              className="text-muted-foreground mt-1 line-clamp-2 text-[0.75rem] leading-snug"
               title={request.outcome_reason}
             >
               {request.outcome_reason}
@@ -332,7 +332,7 @@ export function RequestAction({
       }}
       className={cn(
         MEDIA_CARD_CENTER_ACTION_CLASS,
-        "h-9 gap-1.5 px-3.5 text-[12px] font-semibold whitespace-nowrap hover:scale-105",
+        "h-9 gap-1.5 px-3.5 text-[0.75rem] font-semibold whitespace-nowrap hover:scale-105",
         // Keep the pending state in view after the pointer leaves the card.
         pending && "pointer-events-auto opacity-100",
       )}
@@ -399,7 +399,7 @@ function LibraryChip({ contentID, title }: { contentID: string; title: string })
     <ViewTransitionLink
       to={`/item/${encodeURIComponent(contentID)}`}
       aria-label={`Open ${title} in library`}
-      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
+      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
     >
       <Library className="size-3 shrink-0" strokeWidth={2.4} aria-hidden />
       Library

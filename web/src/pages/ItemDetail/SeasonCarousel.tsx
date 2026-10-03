@@ -93,7 +93,7 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
 
               {/* Info — always the same height */}
               <ViewTransitionLink to={`/item/${season.content_id}`} className="block px-0.5 pt-2.5">
-                <div className="truncate text-[13px] font-semibold">
+                <div className="truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>
                 <div className="text-muted-foreground text-xs">

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import CardOverlays from "./CardOverlays";
 import { formatLanguageWhenLoaded } from "@/lib/languageNamesLoader";
@@ -20,6 +23,31 @@ import {
 } from "@/lib/overlays";
 
 const posterLength = (pixels: number) => `${Number(((pixels / 185) * 100).toFixed(6))}cqi`;
+const textScaled = (length: string) => `calc(${length} * var(--ui-root-text-ratio, 1))`;
+
+// app.css owns the root font sizes; jsdom does not apply it, so read the source.
+const appCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../app.css"), "utf8");
+
+/** Root font size, as a multiple of the 16px browser default, for an in-app text scale. */
+function rootTextRatio(scale: "default" | "large" | "x-large"): number {
+  const selector = scale === "default" ? "html" : `html\\[data-text-scale="${scale}"\\]`;
+  const match = appCss.match(
+    new RegExp(`^\\s*${selector}\\s*\\{[^}]*?font-size:\\s*([\\d.]+)%;`, "m"),
+  );
+  if (!match) throw new Error(`no root font size for ${scale}`);
+  return Number(match[1]) / 100;
+}
+
+/**
+ * Resolves a badge's inline font size the way a browser would on a card with
+ * the 185px reference width (1cqi = 1.85px), given the root text ratio.
+ */
+function resolveBadgeFontSize(value: string, ratio: number): number {
+  const match = value.match(/^calc\(([\d.]+)(cqi|px) \* var\(--ui-root-text-ratio, 1\)\)$/);
+  if (!match) throw new Error(`unexpected badge font size: ${value}`);
+  const base = Number(match[1]) * (match[2] === "cqi" ? 185 / 100 : 1);
+  return base * ratio;
+}
 
 function prefsWithOnly(id: OverlayId, preset: PresetId = "classic"): CardOverlayPrefs {
   const prefs = buildDefaultPrefs();
@@ -151,7 +179,7 @@ describe("CardOverlays", () => {
     expect(posterLayer?.className).toContain("@container/card-overlays");
     expect(posterTop?.style.left).toBe(posterLength(8));
     expect(posterTop?.style.top).toBe(posterLength(8));
-    expect(posterBadge?.style.fontSize).toBe(posterLength(10));
+    expect(posterBadge?.style.fontSize).toBe(textScaled(posterLength(10)));
     expect(posterBadge?.style.paddingInline).toBe(posterLength(10));
     expect(posterBadge?.style.paddingBlock).toBe(posterLength(4));
     expect(posterBadge?.style.borderWidth).toBe(posterLength(1));
@@ -171,11 +199,39 @@ describe("CardOverlays", () => {
 
     expect(wideTop?.style.left).toBe("8px");
     expect(wideTop?.style.top).toBe("8px");
-    expect(wideBadge?.style.fontSize).toBe("10px");
+    expect(wideBadge?.style.fontSize).toBe(textScaled("10px"));
     expect(wideBadge?.style.paddingInline).toBe("10px");
     expect(wideBadge?.style.paddingBlock).toBe("4px");
     expect(wideIcon?.style.height).toBe("12px");
     expect(wideIcon?.getAttribute("height")).toBe("12");
+  });
+
+  it("grows badge text with the in-app Large text size and keeps the default size", () => {
+    // The root text ratio is the root font size over 16px; browsers without
+    // CSS trigonometry use the in-app scale factor instead.
+    expect(appCss).toMatch(
+      /@supports[^{]*\{\s*html\s*\{\s*--ui-root-text-ratio: tan\(atan2\(1rem, 16px\)\);/,
+    );
+    expect(appCss).toMatch(/--ui-root-text-ratio: var\(--ui-text-scale-factor\);/);
+    const ratio = { default: rootTextRatio("default"), large: rootTextRatio("large") };
+    expect(ratio).toEqual({ default: 1, large: 1.125 });
+
+    const poster = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("audio", "classic")} />,
+    ).container.querySelector<HTMLElement>("span.inline-flex");
+    const wide = render(
+      <CardOverlays
+        data={SAMPLE_MOVIE_DATA}
+        prefs={prefsWithOnly("audio", "classic")}
+        variant="wide"
+      />,
+    ).container.querySelector<HTMLElement>("span.inline-flex");
+
+    for (const badge of [poster, wide]) {
+      const fontSize = badge?.style.fontSize ?? "";
+      expect(resolveBadgeFontSize(fontSize, ratio.default)).toBeCloseTo(10, 4);
+      expect(resolveBadgeFontSize(fontSize, ratio.large)).toBeCloseTo(11.25, 4);
+    }
   });
 
   it.each(PRESET_IDS)("keeps the %s preset proportional with fixed geometry fallbacks", (id) => {
@@ -192,7 +248,7 @@ describe("CardOverlays", () => {
     expect(stack?.style.gap).toBe(posterLength(preset.stackGap));
     expect(badge?.className).toContain(preset.badgeClass);
     expect(badge?.style.columnGap).toBe(posterLength(preset.iconGap));
-    expect(badge?.style.fontSize).toBe(posterLength(preset.fontSize));
+    expect(badge?.style.fontSize).toBe(textScaled(posterLength(preset.fontSize)));
     expect(badge?.style.paddingInline).toBe(posterLength(preset.paddingInline));
     expect(badge?.style.paddingBlock).toBe(posterLength(preset.paddingBlock));
     expect(badge?.style.borderRadius).toBe(

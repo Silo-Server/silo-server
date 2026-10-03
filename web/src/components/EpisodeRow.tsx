@@ -109,7 +109,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
       {rating != null && (
         <div className="flex shrink-0 items-center gap-1">
           <Star className="text-primary size-3 fill-current" />
-          <span className="text-primary text-[13px] font-semibold">{rating.toFixed(1)}</span>
+          <span className="text-primary text-[0.8125rem] font-semibold">{rating.toFixed(1)}</span>
         </div>
       )}
     </ViewTransitionLink>
