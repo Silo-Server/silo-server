@@ -155,6 +155,13 @@ func respondWhileUnchanged(ctx context.Context, srvCfg dnssd.Config, key string,
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- respond(runCtx, srvCfg) }()
+	// Drop a tick that fired while the previous responder shut down, so the
+	// first interface check is a full interval away and an interface change
+	// cannot cancel this responder while it registers (see respond).
+	select {
+	case <-ticks:
+	default:
+	}
 	for {
 		select {
 		case err := <-done:
@@ -187,8 +194,9 @@ func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
 	// registration without closing the responder's sockets, and the library
 	// offers no Close, so a name that cannot be claimed must fail here, where
 	// ProbeService closes its own connection. Respond probes the claimed name
-	// again; only a cancellation during that second probe can still leave a
-	// responder's sockets open, at most once per interface change or shutdown.
+	// again; a cancellation during that second probe would still leave the
+	// responder's sockets open, but interface changes are only acted on a full
+	// check interval after a responder starts, so only shutdown can do that.
 	service, err = dnssd.ProbeService(ctx, service)
 	if err != nil {
 		return fmt.Errorf("lan discovery: probe: %w", err)
