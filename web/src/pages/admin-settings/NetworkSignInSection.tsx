@@ -139,9 +139,8 @@ function NetworkSignInRow({ installation }: { installation: PluginInstallation }
           Anyone whose device can reach this server over {label} can sign in, including people you
           share the server with; tagged devices can&apos;t. To limit it, set the plugin&apos;s
           &ldquo;Who can sign in&rdquo; to people granted{" "}
-          <code className="font-mono">siloserver.org/cap/silo</code>. An existing account with the
-          person&apos;s email is never taken over: its owner connects {label} from their own Sign-in
-          settings.
+          <code className="font-mono">siloserver.org/cap/silo</code>. {label} sign-in never matches
+          an existing account by email: its owner connects {label} from their own Sign-in settings.
         </p>
         <p>
           Roles come from grants in your tailnet policy: a{" "}

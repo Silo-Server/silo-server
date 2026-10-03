@@ -8,6 +8,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -240,5 +241,55 @@ func TestNetworkIdentityDefersToPrimaryProviderDB(t *testing.T) {
 	}
 	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err != nil {
 		t.Fatalf("the network refusal deleted the account's API key: %v", err)
+	}
+
+	// A network provider that cannot re-check removes nothing either, even
+	// past the absolute age: the primary provider bounds the credentials.
+	t.Cleanup(saveSettings(t, env.pool, config.AuthRefreshTokenExpirySettingKey))
+	exec(`DELETE FROM server_settings WHERE key = $1`, config.AuthRefreshTokenExpirySettingKey)
+	exec(`UPDATE plugin_auth_identities SET last_authenticated_at = NOW() - INTERVAL '31 days' WHERE id = $1`, networkIdentity.ID)
+	env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED, "")
+	ageNetworkIdentity()
+	if counts, err := env.recheck.RecheckIdleIdentities(ctx); err != nil || counts[CheckStatusUnsupported] != 1 {
+		t.Fatalf("scheduled pass = %v, %v; want the network identity answered unsupported", counts, err)
+	}
+	if _, err := NewAPIKeyRepository(env.pool).GetByKey(ctx, key.Key); err != nil {
+		t.Fatalf("a network provider that cannot re-check deleted the account's API key: %v", err)
+	}
+
+	// While the primary provider refuses the account, the overlay cannot sign
+	// it back in; once it vouches again, it can.
+	signIn := func() error {
+		_, _, err := env.resolver.Resolve(ctx, ResolveInput{InstallationID: network, Identity: tailnetAdmin})
+		return err
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusNotFound)
+	if err := signIn(); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("network sign-in after the primary provider's refusal = %v, want ErrNotPermitted", err)
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, env.identityID, CheckStatusActive)
+	if err := signIn(); err != nil {
+		t.Fatalf("network sign-in once the primary provider vouches again = %v", err)
+	}
+}
+
+// TestNetworkSignInNeverMatchesByEmailDB: with email auto-match on, a
+// network identity whose provider claims a verified email still does not
+// link to the account holding that email.
+func TestNetworkSignInNeverMatchesByEmailDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	env.setSetting(t, config.AuthEmailAutoMatchSettingKey, "true")
+	owner := env.localAccount(t, "owner", models.RoleUser)
+	verified := peerIdentity(env, "owner")
+	yes := true
+	verified.EmailVerified = &yes
+	plugin := &peerPlugin{peers: map[string]*pluginv1.AuthenticateResponse{"100.64.0.7": verified}}
+	svc := networkSignInService(t, env, plugin, true)
+	if _, err := svc.NetworkSignIn(overlayContext(ctx, env.installationID, "100.64.0.7"), NetworkSignInInput{InstallationID: env.installationID}); !errors.Is(err, ErrEmailInUse) {
+		t.Fatalf("verified email of a local account = %v, want ErrEmailInUse", err)
+	}
+	if env.activeSessions(t, owner.ID) != 0 {
+		t.Fatal("a network sign-in matched the local account by email")
 	}
 }

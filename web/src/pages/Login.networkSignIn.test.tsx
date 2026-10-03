@@ -126,6 +126,14 @@ it("falls back to the provider name when the owner is unnamed", () => {
   expect(screen.getByRole("button", { name: "Continue with Tailscale" })).toBeTruthy();
 });
 
+it("shows no password form when the network provider is the only way in", () => {
+  auth.providers = [TAILSCALE];
+  renderLogin();
+  expect(screen.getByRole("button", { name: /Continue as Alice Example/ })).toBeTruthy();
+  expect(screen.queryByLabelText("Password")).toBeNull();
+  expect(screen.queryByText("or")).toBeNull();
+});
+
 it("does not leave for the only OAuth provider while a network sign-in is offered", async () => {
   auth.providers = [OIDC, TAILSCALE];
   renderLogin();

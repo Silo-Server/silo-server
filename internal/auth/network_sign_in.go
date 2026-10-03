@@ -92,6 +92,9 @@ func (p *PluginProvider) authenticatePeer(ctx context.Context, peer netip.Addr, 
 	if err != nil {
 		return nil, 0, err
 	}
+	// A network identity never matches an account by email: whoever uses
+	// the device is its owner, which says nothing about who owns the address.
+	response.EmailVerified = nil
 	return p.resolve(ctx, response, linkingUserID)
 }
 
@@ -172,26 +175,40 @@ func (s *Service) LinkNetworkIdentity(ctx context.Context, in NetworkLinkInput) 
 	return identityByID(ctx, provider.resolver.pool, identityID)
 }
 
-// networkDefersToPrimary reports whether installationID is a network
-// provider and the account also has an identity at an enabled primary
-// (non-network) sign-in provider. That provider is then the account's
-// authority: the network identity neither sets the account's role nor, when
-// its provider refuses it, ends more than the sessions opened through it.
-// Otherwise the two would each apply their own role and sign the account out
-// at every change.
-func networkDefersToPrimary(ctx context.Context, db rowQuerier, userID, installationID int) (bool, error) {
+// primaryAuthority is what decides for an account that has identities at
+// both a network provider and an enabled primary (non-network) sign-in
+// provider: the primary provider is the account's authority.
+type primaryAuthority struct {
+	// defers: the installation is a network provider and the account has an
+	// identity at an enabled primary provider. The network identity then
+	// neither sets the account's role nor, when its provider refuses it, ends
+	// more than the sessions opened through it. Otherwise the two would each
+	// apply their own role and sign the account out at every change.
+	defers bool
+	// refused: defers, and the primary provider's latest answer refused the
+	// account, so the network identity cannot sign it back in.
+	refused bool
+}
+
+// primaryAuthorityOf answers primaryAuthority for a network identity of
+// userID at installationID; the zero value for any other installation.
+func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installationID int) (primaryAuthority, error) {
 	isNetwork := plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")
-	var defers bool
-	err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $2 AND `+isNetwork+`)
-		AND EXISTS (SELECT 1 FROM plugin_auth_identities i
+	var network, primary, refused bool
+	err := db.QueryRow(ctx, `WITH primary_identities AS (
+			SELECT i.last_check_status FROM plugin_auth_identities i
 			JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
 			JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
-			WHERE i.user_id = $1 AND i.plugin_installation_id <> $2 AND NOT `+isNetwork+`)`,
-		userID, installationID).Scan(&defers)
+			WHERE i.user_id = $1 AND i.plugin_installation_id <> $2 AND NOT `+isNetwork+`)
+		SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $2 AND `+isNetwork+`),
+			EXISTS (SELECT 1 FROM primary_identities),
+			EXISTS (SELECT 1 FROM primary_identities WHERE last_check_status = ANY($3))`,
+		userID, installationID, []string{CheckStatusNotFound, CheckStatusDisabled, CheckStatusNotPermitted}).Scan(&network, &primary, &refused)
 	if err != nil {
-		return false, fmt.Errorf("checking for a primary sign-in identity: %w", err)
+		return primaryAuthority{}, fmt.Errorf("checking for a primary sign-in identity: %w", err)
 	}
-	return defers, nil
+	defers := network && primary
+	return primaryAuthority{defers: defers, refused: defers && refused}, nil
 }
 
 // networkPreviewTTL bounds how long discovery reuses a plugin's answer about

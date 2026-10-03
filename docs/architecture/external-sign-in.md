@@ -541,12 +541,19 @@ the SDK's `NetworkIdentityAuth`.
 - **The primary provider comes first.** One network binding may be on beside
   the one OIDC or LDAP binding, and an account can hold an identity at each.
   When it does, the primary provider is the account's authority
-  (`networkDefersToPrimary`): the network identity's `managed_role` is
-  ignored at sign-in, linking and re-check, and a refusal from the network
-  provider ends only the sessions opened through the network identity
-  (as for a break-glass account), keeping the account's API keys and the
-  sessions the primary provider vouches for. Otherwise the two providers
-  would each apply their own role and sign the account out at every change.
+  (`primaryAuthorityOf`). The network identity's `managed_role` is ignored at
+  sign-in, linking and re-check. A refusal from the network provider ends only
+  the sessions opened through the network identity (as for a break-glass
+  account), and a network provider that cannot re-check removes nothing,
+  keeping the account's API keys and the sessions the primary provider vouches
+  for. While the primary provider's latest answer refuses the account, network
+  sign-in is `not_permitted`, so the overlay cannot undo the primary
+  provider's deprovisioning. Otherwise the two providers would each apply their
+  own role and sign the account out at every change.
+- **No email matching.** The host drops `email_verified` from a network
+  provider's answer, so a network identity never links to an account by email
+  auto-match: whoever uses a device is its owner, which proves nothing about
+  an email address.
 - **Trust.** Anyone who controls a device signed in to the overlay as a
   person can sign in to Silo as that person, with that person's role, within
   what the overlay's policy allows them, and can link that person's identity

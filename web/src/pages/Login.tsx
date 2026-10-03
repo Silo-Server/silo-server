@@ -203,11 +203,13 @@ export default function Login() {
     credentialProviders[0]?.id ||
     "";
 
-  // With local password sign-in off and no directory, only the OAuth
-  // provider can sign anyone in, so the password form is hidden. It stays
-  // when the provider list could not be read (no provider at all).
+  // With local password sign-in off and no directory, only the OAuth or
+  // network provider can sign anyone in, so the password form is hidden. It
+  // stays when the provider list could not be read (no provider at all).
   const passwordFormShown =
-    localBypass || credentialProviders.length > 0 || oauthProviders.length === 0;
+    localBypass ||
+    credentialProviders.length > 0 ||
+    (oauthProviders.length === 0 && networkProviders.length === 0);
   const startHref = (installationId: string) =>
     oauthStartHref(installationId, { next: redirectTarget, selectAccount: switchingAccount });
   // The only way in is one OAuth provider: go there directly, unless the

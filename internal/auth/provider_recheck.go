@@ -628,21 +628,21 @@ func absoluteSessionAge(ctx context.Context, db dbQuerier) (time.Duration, error
 // or for a network identity that defers to the account's primary provider),
 // and of the API keys and Audiobookshelf sessions of an account whose
 // provider cannot re-check it and has not vouched for it within the absolute
-// age (staleAuth).
+// age (staleAuth). A deferring network identity changes nothing else: the
+// primary provider sets the role and bounds the account's credentials.
 func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *LinkedIdentity, checkStatus string, account *pluginv1.AuthenticateResponse, staleAuth bool, out *recheckOutcome) error {
+	authority, err := primaryAuthorityOf(ctx, tx, identity.UserID, identity.InstallationID)
+	if err != nil {
+		return err
+	}
 	switch {
 	case checkStatus == CheckStatusActive:
+		if authority.defers {
+			return nil
+		}
 		user, err := lockUser(ctx, tx, identity.UserID)
 		if err != nil {
 			return err
-		}
-		defers, err := networkDefersToPrimary(ctx, tx, identity.UserID, identity.InstallationID)
-		if err != nil {
-			return err
-		}
-		if defers {
-			// The primary provider sets this account's role.
-			return nil
 		}
 		synced, event, err := syncManagedRole(ctx, tx, user, account.GetManagedRole())
 		if err != nil {
@@ -658,11 +658,7 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 		if err != nil {
 			return err
 		}
-		defers, err := networkDefersToPrimary(ctx, tx, identity.UserID, identity.InstallationID)
-		if err != nil {
-			return err
-		}
-		if user.BreakGlass || defers {
+		if user.BreakGlass || authority.defers {
 			// A break-glass account keeps its local sessions and API keys
 			// independent of the provider (linkIdentityTx does not attach
 			// them), and an account whose primary provider still vouches for
@@ -680,7 +676,7 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,
-				"break_glass", user.BreakGlass, "primary_identity", defers}})
+				"break_glass", user.BreakGlass, "primary_identity", authority.defers}})
 			return nil
 		}
 		if err := RevokeSignInsInTransaction(ctx, tx, identity.UserID); err != nil {
@@ -695,7 +691,7 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 		out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 			auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus}})
 	case checkStatus == CheckStatusUnsupported:
-		if !staleAuth {
+		if !staleAuth || authority.defers {
 			return nil
 		}
 		// Login sessions already stop sliding (verdictAbsoluteAge); API keys

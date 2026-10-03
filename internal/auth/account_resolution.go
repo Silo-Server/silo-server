@@ -235,19 +235,21 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 	return nil
 }
 
-// finish applies the managed role, unless a network identity defers to the
-// account's primary provider (networkDefersToPrimary), and records the
-// account the sign-in resolved to.
+// finish applies the managed role and records the account the sign-in
+// resolved to. A network identity of an account that also has a primary
+// provider identity (primaryAuthority) leaves the role to that provider, and
+// cannot sign in while that provider refuses the account.
 func (r *AccountResolver) finish(ctx context.Context, tx pgx.Tx, in ResolveInput, user *models.User, out *resolution) error {
+	authority, err := primaryAuthorityOf(ctx, tx, user.ID, in.InstallationID)
+	if err != nil {
+		return err
+	}
+	if authority.refused {
+		return ErrNotPermitted
+	}
 	managed := in.Identity.ManagedRole
-	if managed != pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_UNSPECIFIED {
-		defers, err := networkDefersToPrimary(ctx, tx, user.ID, in.InstallationID)
-		if err != nil {
-			return err
-		}
-		if defers {
-			managed = pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_UNSPECIFIED
-		}
+	if authority.defers {
+		managed = pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_UNSPECIFIED
 	}
 	synced, event, err := syncManagedRole(ctx, tx, user, managed)
 	if err != nil {
