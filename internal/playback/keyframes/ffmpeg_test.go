@@ -124,7 +124,23 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 // have.
 func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 	ffmpeg, _ := requireFFmpeg(t)
-	path := makeTestMKV(t, ffmpeg)
+	// Regular 2s keyframes on a timeline that starts at 0.28s land exactly
+	// on every target, which float error in the planner must not skip.
+	regular := filepath.Join(t.TempDir(), "regular.mkv")
+	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+		"-t", "10", "-c:v", "libx264", "-preset", "ultrafast",
+		"-g", "50", "-sc_threshold", "0", "-bf", "0",
+		"-c:a", "aac", "-output_ts_offset", "0.28", regular).CombinedOutput(); err != nil {
+		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
+	}
+	for name, path := range map[string]string{"irregular": makeTestMKV(t, ffmpeg), "regular with an offset": regular} {
+		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, path) })
+	}
+}
+
+func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	dir := t.TempDir()
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
 		"-i", path, "-map", "0:v:0", "-map", "0:a:0",
