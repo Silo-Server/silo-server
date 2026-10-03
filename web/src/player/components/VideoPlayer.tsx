@@ -43,6 +43,7 @@ import type {
 import { resolvePendingSeekTime } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { HlsStartupGuard } from "../utils/hlsStartupGuard";
+import { NativeHlsStallWatchdog } from "../utils/nativeHlsStallWatchdog";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
@@ -443,6 +444,10 @@ export function VideoPlayer({
   // element has not reached yet — including a reanchor still being replanned —
   // is the position playback is heading to, so the next skip starts there.
   const pendingSeekTimeRef = useRef<number | null>(null);
+  // True while a stalled native HLS stream reloads to resume playback. The
+  // reload pauses the element, so `video.paused` doesn't say whether the
+  // viewer is playing then.
+  const stallRecoveryPendingRef = useRef(false);
   useEffect(() => {
     pendingSeekTimeRef.current = pendingSeekTime;
   }, [pendingSeekTime]);
@@ -1846,6 +1851,8 @@ export function VideoPlayer({
     let autoplayAttempts = 0;
     let autoplayRetryTimer: ReturnType<typeof setTimeout> | null = null;
     let nativeHLSMetadataHandler: (() => void) | null = null;
+    let stallWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+    let stallRecoveryHandler: (() => void) | null = null;
 
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
@@ -1941,6 +1948,67 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
+    const clearStallRecovery = () => {
+      if (!stallRecoveryHandler) return;
+      video.removeEventListener("loadedmetadata", stallRecoveryHandler);
+      stallRecoveryHandler = null;
+      // Drops the pause() interceptor below, back to the prototype's.
+      delete (video as { pause?: unknown }).pause;
+      stallRecoveryPendingRef.current = false;
+    };
+
+    // Safari's native HLS can stop fetching segments mid-stream while still
+    // reporting that it plays (#1466). Reloading the same source and seeking
+    // back to the frozen position resumes it.
+    const recoverNativeStall = (position: number) => {
+      if (destroyed) return;
+      console.warn("[player] native HLS stopped advancing; reloading the stream", { position });
+      // Hold the seek bar at the frozen position while the reload resets it.
+      rememberPendingSeek(toMediaTime(position, timelineOffsetRef.current));
+      clearStallRecovery();
+      // A pause asked for during the reload (the controls, a room or remote
+      // command, a subtitle translation) must stick. The reload has already
+      // paused the element, so those pause() calls change nothing and fire no
+      // event; note them here instead of resuming over them.
+      let pauseRequested = false;
+      const pause = HTMLMediaElement.prototype.pause;
+      video.pause = () => {
+        pauseRequested = true;
+        pause.call(video);
+      };
+      stallRecoveryPendingRef.current = true;
+      stallRecoveryHandler = () => {
+        clearStallRecovery();
+        if (destroyed) return;
+        video.currentTime = position;
+        if (pauseRequested) {
+          setPlaying(false);
+          return;
+        }
+        video.play().catch(() => {
+          if (!destroyed) setPlaying(false);
+        });
+      };
+      video.addEventListener("loadedmetadata", stallRecoveryHandler, { once: true });
+      video.load();
+    };
+
+    const startNativeStallWatchdog = () => {
+      if (stallWatchdogTimer !== null) clearInterval(stallWatchdogTimer);
+      const watchdog = new NativeHlsStallWatchdog({
+        media: video,
+        atEnd: () => {
+          const end = backendDurationRef.current;
+          return end > 0 && toMediaTime(video.currentTime, timelineOffsetRef.current) >= end - 1;
+        },
+        onStall: recoverNativeStall,
+        onGiveUp: () => {
+          console.error("[player] native HLS kept stopping; leaving the stream as it is");
+        },
+      });
+      stallWatchdogTimer = setInterval(() => watchdog.check(), 1_000);
+    };
+
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
@@ -1948,6 +2016,7 @@ export function VideoPlayer({
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
+      startNativeStallWatchdog();
     };
 
     async function init() {
@@ -2114,6 +2183,8 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (stallWatchdogTimer !== null) clearInterval(stallWatchdogTimer);
+      clearStallRecovery();
       if (hls) {
         hls.destroy();
         hlsRef.current = null;
@@ -2136,6 +2207,7 @@ export function VideoPlayer({
     planRevision,
     plannedBitrateKbps,
     plannedDynamicRange,
+    rememberPendingSeek,
     reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);
@@ -2806,7 +2878,10 @@ export function VideoPlayer({
       if (watchTogether.replacementReason) return;
       const video = videoRef.current;
       if (!video) return;
-      const shouldPlay = action === "toggle" ? video.paused : action === "play";
+      // During a stall reload the element is paused but the viewer is still
+      // playing, so a toggle pauses.
+      const paused = video.paused && !stallRecoveryPendingRef.current;
+      const shouldPlay = action === "toggle" ? paused : action === "play";
       if (
         watchTogetherRoomId &&
         !watchTogether.closedReason &&
