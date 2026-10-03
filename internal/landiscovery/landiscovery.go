@@ -127,7 +127,7 @@ func Advertise(ctx context.Context, cfg Config) error {
 			if isNew("no interface") {
 				slog.WarnContext(ctx, "LAN discovery waiting: no multicast-capable network interface")
 			}
-		} else if err := respondWhileUnchanged(ctx, srvCfg, key, ticker.C); err != nil {
+		} else if err := respondWhileUnchanged(ctx, srvCfg, key, ticker); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -150,23 +150,25 @@ func Advertise(ctx context.Context, cfg Config) error {
 // respondWhileUnchanged runs one responder until ctx ends, the responder
 // fails, or the multicast interfaces stop matching key. It returns nil only
 // for an interface change, after the responder has sent its goodbyes.
-func respondWhileUnchanged(ctx context.Context, srvCfg dnssd.Config, key string, ticks <-chan time.Time) error {
+func respondWhileUnchanged(ctx context.Context, srvCfg dnssd.Config, key string, ticker *time.Ticker) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- respond(runCtx, srvCfg) }()
-	// Drop a tick that fired while the previous responder shut down, so the
-	// first interface check is a full interval away and an interface change
-	// cannot cancel this responder while it registers (see respond).
+	// Start the interval over and drop a tick that fired while the previous
+	// responder shut down, so the first interface check is a full interval
+	// after this responder starts and is unlikely to cancel it while it
+	// registers (see respond).
+	ticker.Reset(interfaceCheckInterval)
 	select {
-	case <-ticks:
+	case <-ticker.C:
 	default:
 	}
 	for {
 		select {
 		case err := <-done:
 			return err
-		case <-ticks:
+		case <-ticker.C:
 			if interfaceKey() != key {
 				cancel()
 				<-done
@@ -194,9 +196,11 @@ func respond(ctx context.Context, srvCfg dnssd.Config) (err error) {
 	// registration without closing the responder's sockets, and the library
 	// offers no Close, so a name that cannot be claimed must fail here, where
 	// ProbeService closes its own connection. Respond probes the claimed name
-	// again; a cancellation during that second probe would still leave the
-	// responder's sockets open, but interface changes are only acted on a full
-	// check interval after a responder starts, so only shutdown can do that.
+	// again, and a cancellation during that second probe still leaves the
+	// responder's sockets open. Interface checks start a full interval after a
+	// responder starts, so in practice only shutdown or a registration slowed
+	// past that interval by new conflicts can hit it; the complete fix is in
+	// dnssd (close the connection whenever Respond returns).
 	service, err = dnssd.ProbeService(ctx, service)
 	if err != nil {
 		return fmt.Errorf("lan discovery: probe: %w", err)
