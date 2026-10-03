@@ -30,13 +30,15 @@ func TestSyncTMDBListFallsBackToSourceURLAndRedactsFetchErrors(t *testing.T) {
 	}}
 	svc := NewService(nil, nil, nil, nil, slog.New(slog.DiscardHandler))
 	svc.TMDBLists = fetcher
+	svc.ScopeResolver = &fakeScopeResolver{}
+	svc.accessible = &fakeAccessibleIDs{}
 	collection := &userstore.Collection{
 		ID:           "c",
 		SourceURL:    "https://www.themoviedb.org/list/310",
 		SourceConfig: `{"mode":"tmdb_list"}`,
 	}
 
-	_, _, err := svc.RunSync(t.Context(), nil, collection)
+	_, _, err := svc.RunSync(t.Context(), 1, nil, collection)
 	if fetcher.gotID != 310 {
 		t.Fatalf("fetched list = %d, want 310 from source_url", fetcher.gotID)
 	}
@@ -52,9 +54,11 @@ func TestSyncTMDBListRejectsNonListURL(t *testing.T) {
 	fetcher := &recordingTMDBListFetcher{}
 	svc := NewService(nil, nil, nil, nil, slog.New(slog.DiscardHandler))
 	svc.TMDBLists = fetcher
+	svc.ScopeResolver = &fakeScopeResolver{}
+	svc.accessible = &fakeAccessibleIDs{}
 	collection := &userstore.Collection{ID: "c", SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/movie/550"}`}
 
-	if _, _, err := svc.RunSync(t.Context(), nil, collection); err == nil {
+	if _, _, err := svc.RunSync(t.Context(), 1, nil, collection); err == nil {
 		t.Fatal("RunSync succeeded for a non-list URL")
 	}
 	if fetcher.gotID != 0 {

@@ -2761,6 +2761,18 @@ func main() {
 		if deps.UserStoreProvider != nil {
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
+			// A sync keeps only the titles the collection's creator profile
+			// can see, judged the way that profile's requests are. It is set
+			// before the task manager starts, so no scheduled sync runs
+			// without it.
+			syncUsers := auth.NewUserRepository(deps.DB)
+			syncTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+			if policySystem != nil {
+				userSync.ScopeResolver = policy.NewViewerResolver(syncUsers, deps.UserStoreProvider, syncTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system, as for the notification scopes.
+				userSync.ScopeResolver = access.NewResolver(syncUsers, deps.UserStoreProvider, syncTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			}
 			// Trakt fetchers are wired in router.go (they need settingsRepo);
 			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
