@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -56,8 +57,9 @@ const (
 	transcodeStartFailedReasonV3 = "transcode_start_failed"
 	// transportStartupReadyV3 is the "outcome" of a transport startup whose
 	// first manifest became ready.
-	transportStartupReadyV3 = "ready"
-	seekRestorationPlayerV3 = "player_position"
+	transportStartupReadyV3    = "ready"
+	seekRestorationPlayerV3    = "player_position"
+	outputRouteChangedReasonV3 = "output_route_changed"
 	// Failed capability fetches are memoized briefly so an unreachable node
 	// costs one timeout per window instead of one per planning request.
 	v3NodeCapabilityErrorTTL = 15 * time.Second
@@ -4628,6 +4630,16 @@ func (h *PlaybackHandler) replanPlaybackApplicationV3(r *http.Request, sessionID
 	if record.CurrentPlanID != req.FailedPlanID {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "stale_playback_plan", "The failed plan is no longer current")
 	}
+	// Older Android clients can report a Spatializer callback as an output-route
+	// change even though the sink and every planning capability stayed the same.
+	// Replanning remounts Media3, which can fire the callback again and create a
+	// direct/remux/transcode loop. Keep the active route mounted when only the
+	// opaque route token or Spatializer runtime state changed.
+	if req.EffectiveOperation() == playback.ReplanOperationFailureRecoveryV3 &&
+		req.Failure.Classification == outputRouteChangedReasonV3 &&
+		sameLegacyOutputRouteReplanV3(record, req) {
+		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusConflict, "output_route_unchanged", "Output route capabilities did not change")
+	}
 	response, updated, transport, replanErr := h.executeReplanV3(r, record, req)
 	if replanErr != nil {
 		if transport != nil {
@@ -4727,6 +4739,100 @@ func rollbackFailedReplanV3(transport *preparedTransportV3, rollbackSession func
 	return nil, nil
 }
 
+func sameLegacyOutputRouteReplanV3(record *playback.AttemptRecordV3, next playback.ReplanRequestV3) bool {
+	if record == nil {
+		return false
+	}
+	current := record.NormalizedRequest
+	if nextQuality := strings.TrimSpace(next.QualityPreference); nextQuality != "" {
+		normalized, _ := playback.NormalizeQualityV3(nextQuality)
+		if normalized != current.QualityPreference {
+			return false
+		}
+	}
+	if next.Metered != current.Metered ||
+		!reflect.DeepEqual(next.BandwidthEstimateKbps, current.BandwidthEstimateKbps) ||
+		!reflect.DeepEqual(next.BandwidthCapKbps, current.BandwidthCapKbps) ||
+		!sameClientFeatureSetV3(next.ClientFeatures, current.ClientFeatures) {
+		return false
+	}
+	// Legacy failure replans may omit unchanged track identities. Only an
+	// explicitly supplied identity can prove that this callback carries a
+	// material track change; track-change operations use their own path.
+	if next.SelectedTracks.Audio != nil &&
+		!sameTrackIdentityV3(next.SelectedTracks.Audio, record.CurrentPlan.SelectedTracks.Audio) {
+		return false
+	}
+	if next.SelectedTracks.Subtitle != nil &&
+		!sameTrackIdentityV3(next.SelectedTracks.Subtitle, record.CurrentPlan.SelectedTracks.Subtitle) {
+		return false
+	}
+	currentCapabilities := current.Capabilities
+	nextCapabilities := next.Capabilities
+	currentCapabilities.AudioPassthrough = withoutSpatializerV3(currentCapabilities.AudioPassthrough)
+	nextCapabilities.AudioPassthrough = withoutSpatializerV3(nextCapabilities.AudioPassthrough)
+	if !equivalentPersistedValueV3(currentCapabilities, nextCapabilities) {
+		return false
+	}
+	currentContext := current.ClientPlaybackContext
+	nextContext := next.ClientPlaybackContext
+	currentContext.Output.OutputContextID = ""
+	nextContext.Output.OutputContextID = ""
+	currentContext.Output.AudioPassthrough = withoutSpatializerV3(currentContext.Output.AudioPassthrough)
+	nextContext.Output.AudioPassthrough = withoutSpatializerV3(nextContext.Output.AudioPassthrough)
+	return equivalentPersistedValueV3(currentContext, nextContext)
+}
+
+// persistedFormV3 returns value as the Postgres plan store reloads it: the
+// store keeps the normalized request as JSON, so an empty list tagged
+// omitempty comes back as nil. Comparing both sides in this form keeps a
+// stored request equal to an identical incoming one.
+func persistedFormV3[T any](value T) (T, bool) {
+	var reloaded T
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return reloaded, false
+	}
+	if err := json.Unmarshal(encoded, &reloaded); err != nil {
+		return reloaded, false
+	}
+	return reloaded, true
+}
+
+func equivalentPersistedValueV3[T any](a, b T) bool {
+	persistedA, okA := persistedFormV3(a)
+	persistedB, okB := persistedFormV3(b)
+	return okA && okB && reflect.DeepEqual(persistedA, persistedB)
+}
+
+// sameClientFeatureSetV3 compares feature membership the way HasFeatureV3
+// reads it: trimmed and case-insensitive, ignoring order and duplicates.
+// PinAttemptStickyFeaturesV3 moves sticky features to the end of the replan's
+// list, so the stored start order cannot be compared directly.
+func sameClientFeatureSetV3(a, b []string) bool {
+	return slices.Equal(clientFeatureSetV3(a), clientFeatureSetV3(b))
+}
+
+func clientFeatureSetV3(features []string) []string {
+	set := make([]string, 0, len(features))
+	for _, feature := range features {
+		if normalized := strings.ToLower(strings.TrimSpace(feature)); normalized != "" {
+			set = append(set, normalized)
+		}
+	}
+	slices.Sort(set)
+	return slices.Compact(set)
+}
+
+func withoutSpatializerV3(value *playback.AudioPassthroughV3) *playback.AudioPassthroughV3 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.SpatializerEnabled = false
+	return &copy
+}
+
 // raceCopySafetyV3 resolves an unknown H.264 copy-safety verdict behind a plan
 // that stream-copies video. It is called after the durable commit on both the
 // start and replan paths, so the scan only ever chases a route a client was
@@ -4820,7 +4926,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
 			case "subtitle_track_changed":
 				intentChange = subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
-			case "output_route_changed":
+			case outputRouteChangedReasonV3:
 				intentChange = req.ClientPlaybackContext.Output.OutputContextID != start.ClientPlaybackContext.Output.OutputContextID
 			}
 		}
