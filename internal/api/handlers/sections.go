@@ -106,6 +106,9 @@ type createSectionRequest struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
+	// ValidateRecipe runs the section type's own config check. Only /api/v2
+	// sets it; the frozen /api/v1 routes keep accepting what they always did.
+	ValidateRecipe bool `json:"-"`
 }
 
 type updateSectionRequest struct {
@@ -116,6 +119,8 @@ type updateSectionRequest struct {
 	ItemLimit   *int            `json:"item_limit"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Enabled     *bool           `json:"enabled"`
+	// ValidateRecipe: see createSectionRequest.
+	ValidateRecipe bool `json:"-"`
 }
 
 type reorderSectionsRequest struct {
@@ -200,6 +205,20 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		if _, err := sections.ParseQueryDefinition(config); err != nil {
 			return err.Error(), false
 		}
+	}
+	return "", true
+}
+
+// validateRecipeConfig runs the section type's own recipe check, which bulk
+// create and profile saves also run; validateSectionConfig only checks the
+// keys every section type shares.
+func validateRecipeConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+	rec, ok := recipes.Get(string(sectionType))
+	if !ok {
+		return "", true
+	}
+	if err := rec.Validate(config); err != nil {
+		return err.Error(), false
 	}
 	return "", true
 }

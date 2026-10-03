@@ -21,8 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import CollectionRulesEditor from "@/components/collections/CollectionRulesEditor";
-import FilterEasyMode from "@/components/FilterEasyMode/FilterEasyMode";
-import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import RecipeParamFields from "@/components/RecipeGallery/RecipeParamFields";
 import {
@@ -297,7 +295,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
   );
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [recipeParams, setRecipeParams] = useState<Record<string, unknown>>({});
-  const [filterMode, setFilterMode] = useState<"easy" | "advanced">("easy");
   const { collections: allCollections, isLoading: collectionsLoading } = useAllUserCollections();
   const collections = useMemo(
     () =>
@@ -351,16 +348,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
       setSelectedCollectionId("");
       setRecipeParams({});
     }
-  }, [props.open, props.section]);
-
-  useEffect(() => {
-    if (!props.open) return;
-    const cfg = props.section
-      ? queryDefinitionFromSectionConfig(props.section.config)
-      : queryDefinitionFromSectionConfig();
-    const easyCompatible =
-      cfg.groups.length <= 1 && (cfg.match === "all" || cfg.groups.length === 0);
-    setFilterMode(easyCompatible ? "easy" : "advanced");
   }, [props.open, props.section]);
 
   useEffect(() => {
@@ -553,92 +540,17 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
             </div>
           ) : null}
 
+          {/* Rows resolve per viewer, so the server accepts personalized rules and sorts. */}
           {showLegacyFilter ? (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Media Scope</Label>
-                  <Select
-                    value={queryDefinition.media_scope ?? "all"}
-                    onValueChange={(value) =>
-                      setQueryDefinition({
-                        ...queryDefinition,
-                        media_scope:
-                          value === "all"
-                            ? undefined
-                            : (value as "movie" | "series" | "episode" | "audiobook" | "ebook"),
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Media</SelectItem>
-                      <SelectItem value="movie">Movies</SelectItem>
-                      <SelectItem value="series">Series</SelectItem>
-                      <SelectItem value="episode">Episodes</SelectItem>
-                      <SelectItem value="audiobook">Audiobooks</SelectItem>
-                      <SelectItem value="ebook">Ebooks</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Libraries</Label>
-                  <LibraryMultiSelect
-                    libraries={props.libraries}
-                    value={queryDefinition.library_ids}
-                    onChange={(libraryIds) =>
-                      setQueryDefinition({ ...queryDefinition, library_ids: libraryIds })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Filter Rules</Label>
-                <div className="mb-3 flex items-center gap-1 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setFilterMode("easy")}
-                    className={`rounded px-2 py-0.5 ${filterMode === "easy" ? "bg-indigo-500 text-white" : "bg-white/5"}`}
-                    aria-pressed={filterMode === "easy"}
-                  >
-                    Easy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterMode("advanced")}
-                    className={`rounded px-2 py-0.5 ${filterMode === "advanced" ? "bg-indigo-500 text-white" : "bg-white/5"}`}
-                    aria-pressed={filterMode === "advanced"}
-                  >
-                    Advanced
-                  </button>
-                </div>
-                {filterMode === "easy" ? (
-                  <FilterEasyMode
-                    initialConfig={{
-                      match: queryDefinition.match,
-                      groups: queryDefinition.groups,
-                    }}
-                    onChange={(filter) =>
-                      setQueryDefinition({
-                        ...queryDefinition,
-                        match: filter.match,
-                        groups: filter.groups,
-                      })
-                    }
-                  />
-                ) : (
-                  <CollectionRulesEditor
-                    value={queryDefinition}
-                    onChange={setQueryDefinition}
-                    libraries={props.libraries}
-                    showMediaScopeSelector
-                    allowLibrarySelection
-                  />
-                )}
-              </div>
-            </div>
+            <CollectionRulesEditor
+              value={queryDefinition}
+              onChange={setQueryDefinition}
+              libraries={props.libraries}
+              showMediaScopeSelector
+              allowLibrarySelection
+              allowPersonalizedFilters
+              allowPersonalizedSorts
+            />
           ) : null}
 
           {showRecipeParams && recipeDef ? (

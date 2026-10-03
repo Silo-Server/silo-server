@@ -53,6 +53,7 @@ export default function RecipeConfigDrawer({
   const [enabled, setEnabled] = useState(true);
   const [applyAll, setApplyAll] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const libraryCollectionID =
     typeof params.library_collection_id === "string" ? params.library_collection_id : "";
   const userCollectionID =
@@ -69,7 +70,7 @@ export default function RecipeConfigDrawer({
     (!Array.isArray(params.item_ids) || params.item_ids.length === 0);
 
   const handleAdd = () => {
-    if (collectionMissing || curatedListEmpty) {
+    if (submitting || collectionMissing || curatedListEmpty) {
       return;
     }
     const payload = {
@@ -85,9 +86,12 @@ export default function RecipeConfigDrawer({
       setBulkOpen(true);
       return;
     }
-    void Promise.resolve(onAdd(payload)).catch(() => {
-      // The owner reports the failure and keeps the drawer mounted for retry.
-    });
+    setSubmitting(true);
+    void Promise.resolve(onAdd(payload))
+      .catch(() => {
+        // The owner reports the failure and keeps the drawer mounted for retry.
+      })
+      .finally(() => setSubmitting(false));
   };
 
   return (
@@ -188,7 +192,7 @@ export default function RecipeConfigDrawer({
         <button
           type="button"
           onClick={handleAdd}
-          disabled={collectionMissing || curatedListEmpty}
+          disabled={submitting || collectionMissing || curatedListEmpty}
           className="rounded bg-indigo-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add section

@@ -62,6 +62,25 @@ describe("RecipeConfigDrawer", () => {
     );
   });
 
+  it("disables Add section until the create settles", async () => {
+    let finish!: () => void;
+    const onAdd = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={onAdd} />);
+    const add = screen.getByRole("button", { name: /add section/i });
+
+    await userEvent.dblClick(add);
+    expect(onAdd).toHaveBeenCalledTimes(1);
+    expect(add).toBeDisabled();
+
+    finish();
+    await waitFor(() => expect(add).toBeEnabled());
+  });
+
   it("filters a Recently Added row to the chosen libraries", async () => {
     const onAdd = vi.fn();
     render(
