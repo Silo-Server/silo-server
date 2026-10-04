@@ -2494,9 +2494,13 @@ func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilter
 	filters.RequireBackdrop = req.RequireBackdrop
 	applyCatalogBrowseOverlayRules(&filters, req.Query)
 
-	if len(allowedLibraryIDs) == 1 {
+	// The language predicates limit files by LibraryIDs only, so with them a
+	// single allowed library goes there too; LibraryID alone would let them
+	// match a file in a library the viewer cannot access.
+	languages := len(filters.AudioLanguages) > 0 || len(filters.SubtitleLanguages) > 0
+	if len(allowedLibraryIDs) == 1 && !languages {
 		filters.LibraryID = allowedLibraryIDs[0]
-	} else if len(allowedLibraryIDs) > 1 {
+	} else if len(allowedLibraryIDs) > 0 {
 		filters.LibraryIDs = allowedLibraryIDs
 	} else if access.AllowedLibraryIDs != nil && len(req.Query.LibraryIDs) == 0 {
 		filters.LibraryIDs = []int{}

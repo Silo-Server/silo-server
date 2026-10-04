@@ -785,11 +785,17 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 		t.Fatalf("episode fixture must resolve before any overlay: result=%+v err=%v", base, err)
 	}
 	parentID = h.codec.EncodeStringID(EncodedIDUserCollection, smart.ID)
-	for _, query := range []string{"", "&IncludeItemTypes=Episode", "&SortBy=SortName"} {
+	for _, query := range []string{"", "&IncludeItemTypes=Episode", "&SortBy=SortName", "&SortBy=ParentIndexNumber,IndexNumber"} {
 		t.Run("smart episodes"+query, func(t *testing.T) {
 			result := performItemsRequest(t, h, "/Items?ParentId="+parentID+query, session)
 			if len(result.Items) != 1 || result.Items[0].Type != "Episode" || result.TotalRecordCount != 1 {
 				t.Fatalf("smart episode collection lost its members: %+v", result)
+			}
+			// Clients label and link episodes by these fields.
+			episode := result.Items[0]
+			if episode.SeriesID == "" || episode.SeriesName == "" || episode.IndexNumber == nil || *episode.IndexNumber != 1 ||
+				episode.ParentIndexNumber == nil || *episode.ParentIndexNumber != 1 {
+				t.Fatalf("episode lost its series and index context: %+v", episode)
 			}
 		})
 	}
@@ -1378,6 +1384,138 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 			children := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID, tc.session)
 			if listing.Items[0].ChildCount != tc.want || children.TotalRecordCount != tc.want || len(children.Items) != tc.want {
 				t.Fatalf("ChildCount=%d children=%d of %d, want %d", listing.Items[0].ChildCount, len(children.Items), children.TotalRecordCount, tc.want)
+			}
+		})
+	}
+}
+
+// TestPersonalBoxSetLanguageFiltersStayInVisibleLibrariesDB pins that a
+// language filter on a personal BoxSet matches only files in libraries the
+// viewer can access, also when the viewer can access a single library: a
+// French version in a hidden library must not make the movie match.
+func TestPersonalBoxSetLanguageFiltersStayInVisibleLibrariesDB(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	var userID, visibleLib, hiddenLib int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-lang-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	for i, target := range []*int{&visibleLib, &hiddenLib} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+			fmt.Sprintf("boxset-lang-%s-%d", suffix, i)).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	movie := "boxset-lang-movie-" + suffix
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, movie)
+	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($1, $3)`, movie, visibleLib, hiddenLib)
+	exec(`INSERT INTO media_files (content_id, media_folder_id, file_path, audio_language_codes, subtitle_language_codes) VALUES ($1, $2, $1 || '-en.mkv', '{en}', '{en}'), ($1, $3, $1 || '-fr.mkv', '{fr}', '{fr}')`, movie, visibleLib, hiddenLib)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE content_id = $1`, movie)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, movie)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{visibleLib, hiddenLib})
+	})
+
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: session.ProfileID, Name: "Test profile"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: session.ProfileID, Name: "Stored", CollectionType: "manual",
+		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddCollectionItem(ctx, stored.ID, movie, 0); err != nil {
+		t.Fatal(err)
+	}
+	smart, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: session.ProfileID, Name: "Smart", CollectionType: "smart",
+		QueryDefinition:   fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d,%d]}`, visibleLib, hiddenLib),
+		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: visibleLib, Name: "Movies", Type: "movies"}}, nil)
+	h.userCollections = usercollections.NewStore(pool)
+	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
+		WithUserStoreProvider(provider)
+	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+		return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{visibleLib}}
+	}
+	for _, collectionID := range []string{stored.ID, smart.ID} {
+		parentID := h.codec.EncodeStringID(EncodedIDUserCollection, collectionID)
+		for _, tc := range []struct {
+			query string
+			want  int
+		}{
+			{"&AudioLanguages=en", 1},
+			{"&AudioLanguages=fr", 0},
+			{"&SubtitleLanguages=en", 1},
+			{"&SubtitleLanguages=fr", 0},
+		} {
+			for _, sortQuery := range []string{"", "&SortBy=SortName"} {
+				t.Run(collectionID+tc.query+sortQuery, func(t *testing.T) {
+					result := performItemsRequest(t, h, "/Items?ParentId="+parentID+tc.query+sortQuery, session)
+					if len(result.Items) != tc.want || result.TotalRecordCount != tc.want {
+						t.Fatalf("got %d items of %d, want %d", len(result.Items), result.TotalRecordCount, tc.want)
+					}
+				})
+			}
+		}
+	}
+}
+
+// A request naming a personal BoxSet by Ids still returns it when the client
+// adds filters or a sort, as it does for a library BoxSet.
+func TestHandleItems_PersonalBoxSetIdsWithFilters(t *testing.T) {
+	const collectionID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
+	h := newUserCollectionsTestHandler(&fakeCollectionSource{},
+		&fakeUserCollectionSource{rows: []fakeUserCollection{ownedUserCollection(collectionID, "Mine")}},
+		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+	routeID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
+	for _, extra := range []string{"&IncludeItemTypes=BoxSet", "&SortBy=SortName"} {
+		t.Run(extra, func(t *testing.T) {
+			result := performItemsRequest(t, h, "/Items?Ids="+routeID+extra)
+			if len(result.Items) != 1 || result.Items[0].ID != routeID || result.Items[0].Type != "BoxSet" {
+				t.Fatalf("personal BoxSet missing from Ids response: %+v", result.Items)
+			}
+		})
+	}
+}
+
+// Episode-order sort keys map to no sort, so a personal BoxSet lists its
+// members in its own order instead of rejecting the request.
+func TestHandleItems_PersonalBoxSetEpisodeOrderSort(t *testing.T) {
+	const collectionID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
+	resolver := &fakePersonalCollectionResolver{result: &catalog.CatalogResult{}}
+	h := newUserCollectionsTestHandler(&fakeCollectionSource{},
+		&fakeUserCollectionSource{rows: []fakeUserCollection{ownedUserCollection(collectionID, "Mine")}},
+		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+	h.collectionResolver = resolver
+	parentID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, collectionID)
+	for _, sortBy := range []string{"IndexNumber", "ParentIndexNumber,IndexNumber", "AiredEpisodeOrder"} {
+		t.Run(sortBy, func(t *testing.T) {
+			performItemsRequest(t, h, "/Items?ParentId="+parentID+"&SortBy="+sortBy)
+			if !resolver.gotReq.UseSourceOrder || resolver.gotReq.Query.Sort != (catalog.QuerySort{}) {
+				t.Fatalf("episode-order sort did not keep the collection order: %+v", resolver.gotReq)
 			}
 		})
 	}

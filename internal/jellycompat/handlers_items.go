@@ -2822,11 +2822,12 @@ func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	if len(query.specificCollectionIDs) == 0 && !idsRequestCollectionsView(r) && (query.hasIntersectingFilters() || query.hasItemTypeFilter || query.isFavorite || query.isPlayed != nil || query.isResumable || query.searchTerm != "" || query.sortExplicit) {
+	hasCollectionIDs := len(query.specificCollectionIDs) > 0 || len(query.specificPersonalCollectionIDs) > 0
+	if !hasCollectionIDs && !idsRequestCollectionsView(r) && (query.hasIntersectingFilters() || query.hasItemTypeFilter || query.isFavorite || query.isPlayed != nil || query.isResumable || query.searchTerm != "" || query.sortExplicit) {
 		h.handleBrowseItems(w, r, session, query)
 		return
 	}
-	if len(query.specificCollectionIDs) > 0 || idsRequestCollectionsView(r) {
+	if hasCollectionIDs || idsRequestCollectionsView(r) {
 		ids, err := h.filteredSpecificMediaIDs(r.Context(), session, query)
 		if err != nil {
 			writeCompatUpstreamError(w, err)

@@ -1363,7 +1363,10 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 	}
 	def := catalog.QueryDefinition{}
 	randomize := false
-	if query.sortExplicit {
+	// Episode-order keys (IndexNumber, AiredEpisodeOrder) map to no sort: the
+	// natural order, which for a collection is its own listed order.
+	sourceOrder := !query.sortExplicit || query.sort == ""
+	if !sourceOrder {
 		sortField := query.sort
 		switch sortField {
 		case "sort_title":
@@ -1455,7 +1458,7 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 		Query:           def,
 		Limit:           query.limit,
 		Offset:          query.startIndex,
-		UseSourceOrder:  !query.sortExplicit || randomize,
+		UseSourceOrder:  sourceOrder || randomize,
 		RequireBackdrop: query.requireBackdrop,
 		Randomize:       randomize,
 	}, access)
@@ -1468,8 +1471,28 @@ func (h *ItemsHandler) handlePersonalBoxSetChildren(w http.ResponseWriter, r *ht
 		return
 	}
 	listItems := h.compatListItemsFromModels(r.Context(), access, result.Items)
+	// Episodes of an episode-scoped smart collection carry their season and
+	// series context, as on the library collection and Play all paths.
+	var episodeIDs []string
+	for _, item := range result.Items {
+		if item != nil && item.Type == compatEpisodeType {
+			episodeIDs = append(episodeIDs, item.ContentID)
+		}
+	}
+	var episodeTargets map[string]compatEpisodeTarget
+	if len(episodeIDs) > 0 {
+		if episodeTargets, err = h.fetchCompatEpisodeTargetsByContentIDsWithDurations(r.Context(), session, episodeIDs, nil); err != nil {
+			writeCompatUpstreamError(w, err)
+			return
+		}
+		for i := range listItems {
+			if target, ok := episodeTargets[listItems[i].ContentID]; ok {
+				listItems[i] = target.Item
+			}
+		}
+	}
 	routeID := h.codec.EncodeStringID(EncodedIDUserCollection, collection.ID)
-	h.writeCollectionItemsPage(w, r, session, query, routeID, listItems, nil, result.Total)
+	h.writeCollectionItemsPage(w, r, session, query, routeID, listItems, episodeTargets, result.Total)
 }
 
 // writeCollectionItemsPage hydrates user state for one page of collection
