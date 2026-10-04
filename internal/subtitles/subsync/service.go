@@ -63,6 +63,7 @@ type (
 		MarkRunning(ctx context.Context, id int64) error
 		Progress(ctx context.Context, id int64, phase string, progress float64) error
 		Finish(ctx context.Context, id int64, o Outcome) error
+		FinishUnchanged(ctx context.Context, job *Job, o Outcome) error
 		Apply(ctx context.Context, job *Job, timing subtitles.Timing, o Outcome) (int64, error)
 	}
 )
@@ -389,9 +390,15 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		return
 	}
 	if outcome.Status != string(StatusSynced) {
-		log.InfoContext(ctx, "subtitle sync finished")
-		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
+		err := s.jobs.FinishUnchanged(finishCtx, job, outcome)
+		switch {
+		case errors.Is(err, ErrSubtitleChanged):
+			fail(err, "finish")
+		case err == nil:
+			log.InfoContext(ctx, "subtitle sync finished")
 			r.finished(finishCtx, outcome, r.timingNow(finishCtx))
+		case !errors.Is(err, jobrunner.ErrJobTerminal):
+			log.WarnContext(ctx, "subtitle sync outcome not recorded", "error", err)
 		}
 		return
 	}

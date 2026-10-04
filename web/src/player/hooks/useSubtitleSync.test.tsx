@@ -627,6 +627,31 @@ describe("useSubtitleSync", () => {
     });
   });
 
+  it("asks the server about known subtitles when the inventory has none left", async () => {
+    let listed = [stored({ key: SIDECAR, source: "external", sync: job("running") })];
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({ subtitles: listed }),
+    });
+    const { result, rerender } = renderHook(
+      ({ keys }: { keys: string[] }) =>
+        useSubtitleSync({
+          playerConfig: config,
+          mediaFileId: 42,
+          sessionId: "session-1",
+          syncKeys: keys,
+        }),
+      { initialProps: { keys: [SIDECAR] } },
+    );
+    await flush();
+    expect(result.current.entries[SIDECAR]).toBeDefined();
+    listed = [];
+    rerender({ keys: [] });
+    await flush();
+    expect(calls(LIST)).toHaveLength(2);
+    expect(result.current.entries[SIDECAR]).toBeUndefined();
+  });
+
   it("reads all subtitles again for an update about one it has not loaded", async () => {
     serve({
       [STATUS]: () => ({ state: "available" }),

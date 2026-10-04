@@ -84,6 +84,9 @@ func (f *fakeJobs) Progress(_ context.Context, _ int64, phase string, progress f
 	f.progress = append(f.progress, fmt.Sprintf("%s %.2f", phase, progress))
 	return nil
 }
+func (f *fakeJobs) FinishUnchanged(ctx context.Context, job *Job, o Outcome) error {
+	return f.Finish(ctx, job.ID, o)
+}
 func (f *fakeJobs) Finish(_ context.Context, id int64, o Outcome) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

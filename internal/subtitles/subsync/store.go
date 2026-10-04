@@ -349,6 +349,37 @@ type Outcome struct {
 	Failure string
 }
 
+// FinishUnchanged records a verdict that leaves the subject as it is
+// (already synced, no match) only while the subject still carries the job's
+// base revision, checked under a row lock in the same transaction: the
+// verdict is about that revision. Otherwise nothing is recorded and the
+// result is ErrSubtitleChanged; a job already finished is
+// jobrunner.ErrJobTerminal.
+func (s *Store) FinishUnchanged(ctx context.Context, job *Job, o Outcome) error {
+	query, subjectID := `SELECT revision FROM downloaded_subtitles WHERE id = $1 AND media_file_id = $2 FOR SHARE`, int64(job.SubtitleID)
+	if job.ExternalTimingID != 0 {
+		query, subjectID = `SELECT revision FROM external_subtitle_timings WHERE id = $1 AND media_file_id = $2 FOR SHARE`, job.ExternalTimingID
+	}
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var revision int64
+		err := tx.QueryRow(ctx, query, subjectID, job.MediaFileID).Scan(&revision)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revision != job.BaseRevision) {
+			return ErrSubtitleChanged
+		}
+		if err != nil {
+			return fmt.Errorf("read subtitle revision: %w", err)
+		}
+		tag, err := tx.Exec(ctx, finishJobSQL, append([]any{job.ID}, outcomeArgs(o)...)...)
+		if err != nil {
+			return fmt.Errorf("finish subtitle sync job: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return jobrunner.ErrJobTerminal
+		}
+		return nil
+	})
+}
+
 // Finish records an outcome that leaves the subtitle as it is.
 func (s *Store) Finish(ctx context.Context, id int64, o Outcome) error {
 	tag, err := s.pool.Exec(ctx, finishJobSQL, append([]any{id}, outcomeArgs(o)...)...)

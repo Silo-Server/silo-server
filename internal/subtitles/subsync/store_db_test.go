@@ -138,6 +138,39 @@ func TestExternalTimingAndJobsPostgres(t *testing.T) {
 		t.Fatalf("racing first write: %v", err)
 	}
 
+	// A verdict that leaves the timing as it is records only while the
+	// subject still has the revision the job read.
+	verdict, _, err := store.CreateExternal(ctx, created2, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetExternalTiming(ctx, fileID, other, "/media/movie.fr.srt", subtitles.FormatSRT, subtitles.Timing{Scale: 1, OffsetMS: 500}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishUnchanged(ctx, verdict, Outcome{Status: string(StatusAlreadySynced)}); !errors.Is(err, ErrSubtitleChanged) {
+		t.Fatalf("verdict on a retimed sidecar: %v", err)
+	}
+	if active, err := store.LatestExternal(ctx, created2.ID); err != nil || active.ID != verdict.ID || active.Status != JobPending {
+		t.Fatalf("job after a refused verdict: %+v %v", active, err)
+	}
+	if err := store.Finish(ctx, verdict.ID, Outcome{Status: JobFailed}); err != nil {
+		t.Fatal(err)
+	}
+	retimed, err := repo.ExternalTiming(ctx, fileID, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := store.CreateExternal(ctx, retimed, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinishUnchanged(ctx, current, Outcome{Status: string(StatusAlreadySynced)}); err != nil {
+		t.Fatalf("verdict: %v", err)
+	}
+	if err := store.FinishUnchanged(ctx, current, Outcome{Status: string(StatusAlreadySynced)}); !errors.Is(err, jobrunner.ErrJobTerminal) {
+		t.Fatalf("second verdict: %v", err)
+	}
+
 	// Replacing the media file removes the corrections and their jobs.
 	if _, err := pool.Exec(ctx, `UPDATE media_files SET file_hash = 'bbbbbbbbbbbbbbbb' WHERE id = $1`, fileID); err != nil {
 		t.Fatal(err)

@@ -267,10 +267,13 @@ export function useSubtitleSync({
     };
   }, [playerConfig]);
 
-  // Load the file's syncable subtitles whenever the inventory gains or loses one.
+  // Load the file's syncable subtitles whenever the inventory gains or loses
+  // one. An inventory without any still reads the list while subtitles are
+  // known, so the server says which of them are gone.
   const syncKeysKey = useMemo(() => [...syncKeys].sort().join(","), [syncKeys]);
   useEffect(() => {
-    if (!playerConfig || !mediaFileId || syncKeysKey === "") return;
+    if (!playerConfig || !mediaFileId) return;
+    if (syncKeysKey === "" && Object.keys(entriesRef.current).length === 0) return;
     const current = capture();
     const controller = new AbortController();
     const sentAt = observationRef.current;
