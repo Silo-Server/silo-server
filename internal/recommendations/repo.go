@@ -91,7 +91,17 @@ var recentCompletedItemIDsQuery = fmt.Sprintf(`
 	LIMIT  $3
 `, watchedActivityCTE)
 
-var tasteSeedCandidateQuery = fmt.Sprintf(`
+// tasteSeedCandidateQuery builds the taste-seed picker query. accessConditions
+// are the viewer's access predicates; limit and offset bind at limitArg and
+// limitArg+1.
+func tasteSeedCandidateQuery(accessConditions []string, limitArg int) string {
+	conditions := append([]string{
+		recommendationItemEligibilityWhereClause("mi"),
+		"mi.type IN ('movie', 'series', 'audiobook', 'ebook')",
+		"mi.poster_path IS NOT NULL",
+		"mi.poster_path <> ''",
+	}, accessConditions...)
+	return fmt.Sprintf(`
 			WITH %s,
 			watched_counts AS (
 				SELECT item_id, COUNT(DISTINCT watcher_id) AS watch_count
@@ -103,9 +113,6 @@ var tasteSeedCandidateQuery = fmt.Sprintf(`
 			FROM   media_items mi
 			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
 			WHERE  %s
-			  AND  mi.type IN ('movie', 'series', 'audiobook', 'ebook')
-			  AND  mi.poster_path IS NOT NULL
-			  AND  mi.poster_path <> ''
 			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
 			          CASE
 			            WHEN mi.rating_imdb IS NOT NULL THEN 2
@@ -116,7 +123,8 @@ var tasteSeedCandidateQuery = fmt.Sprintf(`
 			          CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST,
 			          mi.year DESC NULLS LAST,
 			          mi.content_id ASC
-			LIMIT  $1 OFFSET $2`, watchedActivityCTE, recommendationItemEligibilityWhereClause("mi"))
+			LIMIT  $%d OFFSET $%d`, watchedActivityCTE, strings.Join(conditions, " AND "), limitArg, limitArg+1)
+}
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
@@ -278,20 +286,36 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 // excluding the specified item IDs. When mediaType is non-empty, results are
 // restricted to that media_items.type so cross-media-type results never appear
 // (e.g. an audiobook in a "Similar to this movie" rail) once audiobook
-// embeddings exist alongside movie/series ones.
-func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int) ([]ScoredItem, error) {
-	var items []ScoredItem
-	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+// embeddings exist alongside movie/series ones. filter's library and maturity
+// limits apply in the query, as in findTasteProfileCandidates, so a restricted
+// viewer gets limit items it can see; a zero filter applies none.
+func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return []ScoredItem{}, nil
+	}
+	if excludeIDs == nil {
+		excludeIDs = []string{}
+	}
+	conditions := []string{
+		"e.media_item_id != ALL($2)",
+		"($4 = '' OR mi.type = $4)",
+	}
+	args := []any{pgvector.NewVector(embedding), excludeIDs, limit, mediaType}
+	argIdx := len(args) + 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	query := fmt.Sprintf(`
 			SELECT e.media_item_id,
 			       1 - (e.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS similarity
 			FROM   media_item_embeddings e
 			JOIN   media_items mi ON mi.content_id = e.media_item_id
-			WHERE  e.media_item_id != ALL($2)
-			  AND  ($4 = '' OR mi.type = $4)
+			WHERE  %s
 			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
-			LIMIT  $3
-		`, pgvector.NewVector(embedding), excludeIDs, limit, mediaType)
+			LIMIT  $3`, strings.Join(conditions, " AND "))
+
+	var items []ScoredItem
+	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -1204,6 +1228,37 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// purgeProfileStatements delete a profile's ratings and recommendation state.
+// None of these tables has a foreign key to the profile, which may live
+// outside Postgres.
+var purgeProfileStatements = []string{
+	`DELETE FROM user_ratings WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`,
+}
+
+// PurgeProfile deletes a deleted profile's ratings, taste profile, taste
+// clusters and cached rows in one transaction. The Postgres user store does
+// this as it deletes the profile; with a user store outside Postgres the
+// profile handler calls this after the delete.
+func (r *Repo) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin recommendation purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, stmt := range purgeProfileStatements {
+		if _, err := tx.Exec(ctx, stmt, userID, profileID); err != nil {
+			return fmt.Errorf("purge recommendation data for user %d profile %s: %w", userID, profileID, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit recommendation purge: %w", err)
+	}
+	return nil
+}
+
 // --- Staleness Operations ---
 
 // MarkProfileStale sets stale_at = NOW() on a user's taste profile. It always
@@ -1219,6 +1274,20 @@ func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID strin
 		return fmt.Errorf("mark profile stale: %w", err)
 	}
 	return nil
+}
+
+// MarkAccountsStale marks stale the taste profile of every profile on the
+// accounts, in one statement, and returns how many it marked. Access changes
+// that reach whole accounts call it.
+func (r *Repo) MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error) {
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE user_taste_profiles SET stale_at = NOW() WHERE user_id = ANY($1)`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("mark accounts stale: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // MarkProfilesStaleForItems marks stale every taste profile whose progress,
@@ -1645,14 +1714,26 @@ func (r *Repo) GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]S
 	return items, rows.Err()
 }
 
-// GetTasteSeedCandidates returns movie/series/audiobook content IDs ordered for the
-// taste-seeding picker: server engagement first (most-watched in the last
-// 180 days), then rating reliability and rating score, then recency. This keeps
-// fresh servers from front-loading single-vote TMDB 10.0 obscurities while
-// established servers prioritize what users actually watch. Episodes are resolved
-// to their parent series. Items without a poster are excluded.
-func (r *Repo) GetTasteSeedCandidates(ctx context.Context, limit, offset int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, tasteSeedCandidateQuery, limit, offset)
+// GetTasteSeedCandidates returns movie, series, audiobook and ebook content IDs
+// ordered for the taste-seeding picker: server engagement first (most-watched
+// in the last 180 days), then rating reliability and rating score, then
+// recency. This keeps fresh servers from front-loading single-vote TMDB 10.0
+// obscurities while established servers prioritize what users actually watch.
+// Episodes are resolved to their parent series. Items without a poster are
+// excluded, and so are those filter does not admit, so a restricted profile
+// gets full pages of titles it can pick.
+func (r *Repo) GetTasteSeedCandidates(ctx context.Context, filter catalog.AccessFilter, limit, offset int) ([]string, error) {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return []string{}, nil
+	}
+	var conditions []string
+	var args []any
+	argIdx := 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	args = append(args, limit, offset)
+
+	rows, err := r.pool.Query(ctx, tasteSeedCandidateQuery(conditions, argIdx), args...)
 	if err != nil {
 		return nil, fmt.Errorf("get taste seed candidates: %w", err)
 	}

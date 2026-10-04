@@ -61,6 +61,8 @@ type SettingsHandler struct {
 	serverSettings ServerSettingReader
 	deviceSeen     *cache.TTLCache[struct{}]
 	EventsHub      *evt.Hub
+	// RecWorker is told when a profile's hidden libraries change. Optional.
+	RecWorker SignalsChangedNotifier
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
@@ -701,6 +703,7 @@ func (h *SettingsHandler) syncLegacyUserSetting(
 		for _, changedKey := range profile.keys {
 			publishUserSettingsEvent(ctx, h.EventsHub, userID, profile.profileID,
 				changedKey, string(settingscontract.ScopeProfile))
+			notifyScopeSettingChanged(ctx, h.RecWorker, userID, profile.profileID, changedKey)
 		}
 	}
 	return nil

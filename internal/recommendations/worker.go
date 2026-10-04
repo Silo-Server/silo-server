@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
@@ -56,6 +57,12 @@ type profileStaleMarker interface {
 	MarkProfileStale(ctx context.Context, userID int, profileID string) error
 }
 
+// accountsStaleMarker marks stale every taste profile on some accounts.
+// *Repo implements it.
+type accountsStaleMarker interface {
+	MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error)
+}
+
 // Worker runs scheduled recommendation jobs.
 type Worker struct {
 	engine                *Engine
@@ -63,6 +70,7 @@ type Worker struct {
 	locker                jobLocker
 	history               JobHistory
 	staleMarker           profileStaleMarker
+	accountsMarker        accountsStaleMarker
 	mu                    sync.Mutex
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
@@ -95,6 +103,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		cron:                  cron.New(),
 		locker:                pgJobLocker{pool: engine.pool},
 		staleMarker:           engine.repo,
+		accountsMarker:        engine.repo,
 		running:               make(map[JobName]bool),
 		profileRefreshCh:      make(chan profileRefreshRequest, 256),
 		profileRefreshPending: make(map[string]struct{}),
@@ -292,6 +301,24 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 	}
 	w.markProfileStale(ctx, userID, profileID)
 	w.RequestProfileRefresh(ctx, userID, profileID)
+}
+
+// NotifyAccountsScopeChanged records that the access scope of every profile
+// on the accounts changed: an account's libraries or access group, or its
+// access group's libraries. Their cached rows were built under the old scope,
+// so their taste profiles are marked stale in one statement and the stale
+// sweep rebuilds them. Nothing is refreshed here: one access group can hold
+// many accounts.
+func (w *Worker) NotifyAccountsScopeChanged(ctx context.Context, userIDs []int) {
+	if w == nil || w.accountsMarker == nil || len(userIDs) == 0 {
+		return
+	}
+	marked, err := w.accountsMarker.MarkAccountsStale(ctx, userIDs)
+	if err != nil {
+		slog.WarnContext(ctx, "marking accounts' taste profiles stale after an access change failed", "component", "recommendations", "accounts", len(userIDs), "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "access change: taste profiles marked stale", "component", "recommendations", "accounts", len(userIDs), "profiles", marked)
 }
 
 // RequestReadRefresh queues a refresh for a profile whose cached rows a read
@@ -710,6 +737,20 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		res.cached++
 	}
 
+	// Rows are built under the scope the profile's reads are filtered by. A
+	// read only removes titles, so rows built under a wider scope would come
+	// back thin; a profile whose scope cannot be resolved keeps its cached
+	// rows, and one that no longer exists gets none.
+	accessFilter, err := w.engine.profileAccessFilter(ctx, userID, profileID)
+	if errors.Is(err, access.ErrProfileNotFound) {
+		slog.InfoContext(ctx, "profile no longer exists; recommendation rows not built", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+		return res
+	}
+	if err != nil {
+		fail("access_scope", err)
+		return res
+	}
+
 	// Watched and favorited titles (taste-seed picks are favorites) never
 	// enter any row's candidates. Rows built without the set would carry
 	// them, so a profile whose set cannot be read keeps its cached rows.
@@ -719,7 +760,6 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		return res
 	}
 	excludeIDs := scoredItemIDsFromSet(excluded)
-	accessFilter := w.engine.profileAccessFilter(ctx, userID, profileID)
 
 	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
@@ -742,10 +782,16 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
 	}
 
-	items, err := w.engine.similarUsersLiked(ctx, userID, profileID, CacheCandidateLimit, excluded)
+	// An empty Similar Users row is cached too: it records that the row was
+	// built and came out empty (below the account floors), so reads do not
+	// keep asking for a rebuild that cannot fill it.
+	items, err := w.engine.similarUsersLiked(ctx, userID, profileID, CacheCandidateLimit, excluded, accessFilter)
 	if err != nil {
 		fail("similar_users", err)
-	} else if len(items) > 0 {
+	} else {
+		if items == nil {
+			items = []ScoredItem{}
+		}
 		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
@@ -755,7 +801,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		return res
 	}
 	for _, sourceItemID := range recentCompleted {
-		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded)
+		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
 		if err != nil {
 			fail("because_you_watched", err, "source_item_id", sourceItemID)
 			continue

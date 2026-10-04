@@ -1061,10 +1061,16 @@ func newChiRouter(deps Dependencies) chi.Router {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
 		profileHandler.EventsHub = deps.EventsHub
+		if deps.RecWorker != nil {
+			profileHandler.RecWorker = deps.RecWorker
+		}
 		if deps.DB != nil {
 			// Drops live in Postgres whichever store holds the profile.
 			profileHandler.DroppedSeriesPurger = catalog.NewDroppedSeriesRepo(deps.DB)
 			profileHandler.WatchlistTitlesPurger = watchlistTitles
+			// So do ratings and recommendation state; the Postgres store
+			// already deleted them with the profile.
+			profileHandler.RecommendationsPurger = recommendations.NewRepo(deps.DB)
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
@@ -1123,6 +1129,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		settingsHandler.EventsHub = deps.EventsHub
+		// A profile's hidden libraries are part of the scope its
+		// recommendations are built under.
+		if deps.RecWorker != nil {
+			settingsHandler.RecWorker = deps.RecWorker
+		}
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
 		}
@@ -1133,6 +1144,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
+			if deps.RecWorker != nil {
+				settingValuesHandler.RecWorker = deps.RecWorker
+			}
 			// Household management: a primary profile acting for another
 			// profile on its own account. Without both of these the widening
 			// is unavailable rather than unguarded.
@@ -1543,9 +1557,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.OnServerSettingUpdated != nil {
 			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
 		}
+		if deps.RecWorker != nil {
+			adminHandler.RecWorker = deps.RecWorker
+		}
 	}
 	if accessGroupStore != nil {
 		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
+		if deps.RecWorker != nil {
+			accessGroupHandler.RecWorker = deps.RecWorker
+		}
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)

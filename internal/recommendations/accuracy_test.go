@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"math"
 	"slices"
 	"testing"
 
@@ -199,17 +200,20 @@ func TestApplyGenreCapDoesNotCollapseConcentratedRows(t *testing.T) {
 }
 
 func TestCollaborativeSupportAggregatesAcrossPeers(t *testing.T) {
-	candidates := map[string]collaborativeCandidate{}
+	candidates := collaborativeCandidates([]peerLikes{
+		{userID: 1, similarity: 1, weights: map[string]float64{"shared": 0.4, "single": 0.6}},
+		{userID: 2, similarity: 1, weights: map[string]float64{"shared": 0.3, "single-other": 0.6}},
+	})
 
-	addCollaborativeSupport(candidates, "shared", 0.4)
-	addCollaborativeSupport(candidates, "shared", 0.3)
-	addCollaborativeSupport(candidates, "single", 0.6)
-
-	if candidates["shared"].score <= candidates["single"].score {
-		t.Fatalf("shared score = %f, single score = %f; expected aggregated shared support to win", candidates["shared"].score, candidates["single"].score)
+	shared, ok := candidates["shared"]
+	if !ok {
+		t.Fatalf("candidates = %#v, want the title two accounts liked", candidates)
 	}
-	if candidates["shared"].support != 2 {
-		t.Fatalf("shared support = %d, want 2", candidates["shared"].support)
+	if math.Abs(shared.score-0.7) > 1e-9 {
+		t.Fatalf("shared score = %f, want the peers' scores summed", shared.score)
+	}
+	if len(shared.accounts) != 2 {
+		t.Fatalf("shared accounts = %d, want 2", len(shared.accounts))
 	}
 }
 

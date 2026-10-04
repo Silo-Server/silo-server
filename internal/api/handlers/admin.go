@@ -176,6 +176,9 @@ type AdminHandler struct {
 	WatchlistTitlesSweeper interface {
 		SweepOrphanTitles(ctx context.Context) error
 	}
+	// RecWorker is told when an account update changes its profiles' access
+	// scope, so their recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -1073,6 +1076,9 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 	}
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
+	}
+	if accountScopeChanged(updateInput) {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, id)
 	}
 
 	user, err := h.userRepo.GetByID(r.Context(), id)

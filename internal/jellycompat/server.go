@@ -130,6 +130,9 @@ type Dependencies struct {
 	JWTSecret              string
 	Recommender            recommendations.Recommender
 	RecWorker              *recommendations.Worker
+	// RecommendationReader serves /Movies/Recommendations from the cached
+	// rows the native API reads; nil answers an empty list.
+	RecommendationReader RecommendationRowReader
 
 	// CollectionPosters picks each viewer's BoxSet poster; without it BoxSets
 	// show only uploaded and template posters.

@@ -21,6 +21,14 @@ type embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
 
+// ScopeResolver resolves a viewer's effective access scope: the account's
+// and its access group's libraries, the profile's restrictions and hidden
+// libraries, and its maturity limits. *access.Resolver and
+// *policy.ViewerResolver implement it.
+type ScopeResolver interface {
+	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
+}
+
 // Engine implements the Recommender interface.
 type Engine struct {
 	repo          *Repo
@@ -33,6 +41,18 @@ type Engine struct {
 	cfg           config.RecommendationsConfig
 	pool          *pgxpool.Pool
 	unrated       access.UnratedContentPolicy
+	scopes        ScopeResolver
+}
+
+// WithScopeResolver installs the resolver the API resolves request scopes
+// with, and returns the engine. Cached rows are then built under the scope a
+// read filters them by. Without it the build falls back to the profile's own
+// restrictions, missing access groups and hidden libraries.
+func (e *Engine) WithScopeResolver(resolver ScopeResolver) *Engine {
+	if e != nil {
+		e.scopes = resolver
+	}
+	return e
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -128,19 +148,47 @@ func (e *Engine) mmrLambda() float64 {
 	return defaultMMRLambda
 }
 
-func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID string) catalog.AccessFilter {
+// profileAccessFilter returns the access filter a profile's cached rows are
+// built under. With a ScopeResolver it is the filter the API derives from the
+// profile's resolved scope (handlers.accessFilterFromScope), PIN verification
+// skipped. An error means the scope is unknown and nothing may be cached for
+// the profile; access.ErrProfileNotFound means the profile no longer exists.
+func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID string) (catalog.AccessFilter, error) {
 	filter := catalog.AccessFilter{UserID: userID, ProfileID: profileID}
-	if e == nil || e.storeProvider == nil || profileID == "" {
-		return filter
+	if e == nil || profileID == "" {
+		return filter, nil
+	}
+	if e.scopes != nil {
+		scope, err := e.scopes.Resolve(ctx, access.ResolveInput{
+			UserID:              userID,
+			ProfileID:           profileID,
+			SkipPINVerification: true,
+		})
+		if err != nil {
+			return catalog.AccessFilter{}, fmt.Errorf("resolve access scope for user %d profile %s: %w", userID, profileID, err)
+		}
+		filter.AllowedLibraryIDs = scope.AllowedLibraryIDs
+		filter.DisabledLibraryIDs = scope.DisabledLibraryIDs
+		filter.MaturityLimits = scope.MaturityLimits
+		return filter, nil
+	}
+	if e.storeProvider == nil {
+		return filter, nil
 	}
 
 	store, err := e.storeProvider.ForUser(ctx, userID)
-	if err != nil || store == nil {
-		return filter
+	if err != nil {
+		return catalog.AccessFilter{}, fmt.Errorf("open user store for user %d: %w", userID, err)
+	}
+	if store == nil {
+		return catalog.AccessFilter{}, fmt.Errorf("open user store for user %d: no store", userID)
 	}
 	profile, err := store.GetProfile(ctx, profileID)
-	if err != nil || profile == nil {
-		return filter
+	if err != nil {
+		return catalog.AccessFilter{}, fmt.Errorf("load profile %s: %w", profileID, err)
+	}
+	if profile == nil {
+		return catalog.AccessFilter{}, access.ErrProfileNotFound
 	}
 
 	filter.MaxContentRating = profile.MaxContentRating
@@ -153,9 +201,9 @@ func (e *Engine) profileAccessFilter(ctx context.Context, userID int, profileID 
 		filter.AllowUnratedContent = e.unrated.AllowUnratedContent(ctx)
 	}
 	if profile.LibraryRestrictionsEnabled {
-		filter.AllowedLibraryIDs = append([]int(nil), profile.AllowedLibraryIDs...)
+		filter.AllowedLibraryIDs = append([]int{}, profile.AllowedLibraryIDs...)
 	}
-	return filter
+	return filter, nil
 }
 
 // storeProfiles lists the IDs of an account's profiles from the user store.

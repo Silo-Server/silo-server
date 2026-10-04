@@ -21,8 +21,14 @@ import (
 
 type recommendationsEngine interface {
 	SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error)
-	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]recommendations.ScoredItem, error)
+	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
+}
+
+// accessibleItemIDFilter keeps the item IDs an access filter admits.
+// *recommendations.Repo implements it.
+type accessibleItemIDFilter interface {
+	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 }
 
 type recommendationsReader interface {
@@ -42,6 +48,7 @@ type RecommendationsHandler struct {
 	ratingsRepo         *catalog.RatingsRepo
 	recsRepo            *recommendations.Repo
 	signals             *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
+	accessibleIDs       accessibleItemIDFilter
 	enabled             bool
 	Fetcher             discoverFetcher
 	DetailSvc           discoverPresigner
@@ -79,6 +86,7 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 	}
 	if recsRepo != nil {
 		h.signals = recommendations.NewSignalReader(recsRepo, storeProvider)
+		h.accessibleIDs = recsRepo
 	}
 	return h
 }
@@ -123,7 +131,11 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 		limit = 50
 	}
 
-	items, err := h.SimilarItems(r.Context(), itemID, limit)
+	filter := requestAccessFilter(r)
+	items, err := h.SimilarItems(r.Context(), itemID, limit, filter)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, filter)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -175,7 +187,11 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 	}
 
 	limit, _ := parsePagination(r)
-	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit)
+	filter := requestAccessFilter(r)
+	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, filter)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -217,6 +233,9 @@ func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Re
 	}
 
 	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, requestAccessFilter(r))
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -241,6 +260,9 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 	}
 
 	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, requestAccessFilter(r))
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return

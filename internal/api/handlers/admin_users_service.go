@@ -275,6 +275,9 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 	if revoked && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
 	}
+	if accountScopeChanged(input) {
+		notifyAccountsScopeChanged(ctx, h.RecWorker, id)
+	}
 	return snapshot.Revision, nil
 }
 func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision, groupRevision int64) error {

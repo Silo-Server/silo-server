@@ -49,6 +49,12 @@ type ProfileHandler struct {
 	WatchlistTitlesPurger interface {
 		PurgeProfile(ctx context.Context, userID int, profileID string) error
 	}
+	// RecommendationsPurger removes a deleted profile's ratings, taste
+	// profile and cached recommendations, which live in Postgres whichever
+	// store holds the profile.
+	RecommendationsPurger interface {
+		PurgeProfile(ctx context.Context, userID int, profileID string) error
+	}
 	// WatchlistRequestWithdrawer cancels the unsent requests a deleted
 	// profile's watchlist made, as removing each title would.
 	WatchlistRequestWithdrawer interface {
@@ -58,6 +64,9 @@ type ProfileHandler struct {
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
+	// RecWorker is told when an update changes a profile's access scope, so
+	// its recommendations are rebuilt under the new one. Optional.
+	RecWorker SignalsChangedNotifier
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -650,6 +659,9 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 	}
+	if profileScopeChanged(currentProfile, req) {
+		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
+	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
 			slog.WarnContext(ctx, "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
@@ -789,6 +801,13 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		defer cancel()
 		if purgeErr := h.WatchlistTitlesPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
 			slog.WarnContext(ctx, "profile watchlist-title purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+		}
+	}
+	if h.RecommendationsPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.RecommendationsPurger.PurgeProfile(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.WarnContext(ctx, "profile recommendation purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 	return nil

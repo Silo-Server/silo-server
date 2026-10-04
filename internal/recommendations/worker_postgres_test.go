@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -342,7 +343,16 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 	const prefix = "tcache-exclude-"
 	cleanupRecoMediaItems(t, pool, prefix)
 	userID, profile := newTasteTestAccount(t, pool, prefix)
-	peerID, peer := newTasteTestAccount(t, pool, prefix+"peer-")
+	// Similar Users needs three peer accounts, and two of them behind a title.
+	type account struct {
+		userID  int
+		profile string
+	}
+	var peers []account
+	for i := range minSimilarUsersPeerAccounts {
+		peerID, peer := newTasteTestAccount(t, pool, fmt.Sprintf("%speer-%d-", prefix, i))
+		peers = append(peers, account{peerID, peer})
+	}
 	repo := NewRepo(pool)
 
 	const axis = 2100
@@ -367,7 +377,8 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW())`, []any{userID, profile, watched}},
 		{`INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, $3), ($1, $2, $4)`, []any{userID, profile, seedPick, episode}},
 		{`INSERT INTO user_watchlist(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, []any{userID, profile, watchlist}},
-		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peerID, peer, seedPick, plain[0]}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peers[0].userID, peers[0].profile, seedPick, plain[0]}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peers[1].userID, peers[1].profile, seedPick, plain[0]}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
 			t.Fatalf("seed %q: %v", stmt.query, err)
@@ -375,10 +386,7 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 	}
 	taste := axisVector(axis, nil)
 	now := time.Now()
-	for _, p := range []struct {
-		userID  int
-		profile string
-	}{{userID, profile}, {peerID, peer}} {
+	for _, p := range append([]account{{userID, profile}}, peers...) {
 		if err := repo.UpsertTasteProfile(ctx, p.userID, p.profile, taste, map[string]int{"favorited": 2, "watch_high": 1}, "", now); err != nil {
 			t.Fatal(err)
 		}

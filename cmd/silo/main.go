@@ -2592,6 +2592,17 @@ func main() {
 			cfg.Recommendations,
 		).WithUnratedContentPolicy(unratedContent).
 			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+		if userStoreProvider != nil {
+			// Cached rows are built under the scope the API resolves for the
+			// profile's own requests, so reads do not filter them down.
+			recUserRepo := auth.NewUserRepository(deps.DB)
+			if policySystem != nil {
+				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent))
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent))
+			}
+		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
 
@@ -3540,6 +3551,16 @@ func main() {
 			}
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
+
+			// /Movies/Recommendations reads the cached rows the native API
+			// reads. Reads queue profile refreshes only while recommendations
+			// are enabled.
+			var compatRecRefresh recommendations.ReadRefreshRequester
+			if recWorker != nil {
+				compatRecRefresh = recWorker
+			}
+			compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
+				WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)
