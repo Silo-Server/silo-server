@@ -433,6 +433,28 @@ func TestDiagnosticsAdminDeleteEmitsAuditEvent(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsAdminRoutesRejectNonActingAdmin(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	handler := NewDiagnosticsHandler(service)
+	router := chi.NewRouter()
+	router.Use(apimw.RequireActingAdmin(nil))
+	RegisterAdminDiagnosticsRoutes(router, handler)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, adminDiagnosticsRequest(http.MethodGet, "/diagnostics/reports", &auth.Claims{
+		UserID:    8,
+		Role:      "user",
+		TokenType: auth.TokenTypeAccess,
+	}))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if service.listCalls != 0 {
+		t.Fatalf("list calls = %d, want 0", service.listCalls)
+	}
+}
+
 func TestDiagnosticsUploadsEnablementRequiresStorageProbe(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{}}
 	handler := &AdminHandler{SettingsRepo: settings}
