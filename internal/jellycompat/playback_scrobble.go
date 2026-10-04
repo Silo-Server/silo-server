@@ -153,9 +153,16 @@ func (l *compatScrobbleLocks) lock(key string) (unlock func()) {
 	if turn != nil {
 		<-turn
 	}
+	released := false
 	return func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
+		// A second release would drop or hand on a lock someone else now
+		// owns, so fail loudly as sync.Mutex does.
+		if released {
+			panic("jellycompat: scrobble lock released twice")
+		}
+		released = true
 		if len(entry.waiters) == 0 {
 			delete(l.locks, key)
 			return

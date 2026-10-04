@@ -666,6 +666,26 @@ func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
 	}
 }
 
+// Releasing the same scrobble lock twice panics instead of dropping the entry
+// a later caller now owns, which would let a third caller in beside it.
+func TestCompatScrobbleLocksPanicOnDoubleRelease(t *testing.T) {
+	var locks compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	unlock()
+	relock := locks.lock("upstream")
+	defer relock()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("second release of a scrobble lock did not panic")
+		}
+		if n := locks.holdersFor("upstream"); n != 1 {
+			t.Fatalf("lock entry has %d holders after a rejected double release, want the new owner", n)
+		}
+	}()
+	unlock()
+}
+
 func scrobbleAt(action string, seconds float64) compatScrobbleCall {
 	return compatScrobbleCall{action: action, event: watchsync.ScrobbleEvent{PositionSeconds: seconds}}
 }
