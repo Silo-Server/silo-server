@@ -69,7 +69,7 @@ func registerSubtitleUploads(reg *Registry) {
 	upload.ServiceBacked = true
 	upload.DemoRestricted = true
 	upload.RetrySafety = RetrySafetyNonRetryable
-	upload.Description = "Store a user subtitle file. Requires the subtitle_upload permission (implicit for an acting admin); without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
+	upload.Description = "Store a user subtitle file. Requires the subtitle_upload permission. An enabled admin holds it implicitly while using the primary profile or declaring no profile; any other profile needs it assigned. Without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
 	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
 		form := in.RawBody.Data()
 		if form == nil {

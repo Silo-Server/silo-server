@@ -10582,7 +10582,7 @@ export interface paths {
     put?: never;
     /**
      * Submit a bounded subtitle multipart form.
-     * @description Store a user subtitle file. Requires the subtitle_upload permission (implicit for an acting admin); without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit.
+     * @description Store a user subtitle file. Requires the subtitle_upload permission. An enabled admin holds it implicitly while using the primary profile or declaring no profile; any other profile needs it assigned. Without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit.
      */
     post: operations["uploadSubtitle"];
     delete?: never;
