@@ -468,3 +468,42 @@ func TestImageCacheCleanupCompleteRacingCancelKeepsTotals(t *testing.T) {
 		t.Fatalf("result %+v, want totals kept", result)
 	}
 }
+
+// CancelWithResult writes the canceled status and final totals together, and
+// only for the claim that still owns the running job. CancelState reports the
+// two fields the cancellation watcher polls.
+func TestImageCacheCleanupCancelWithResultIsOneFencedWrite(t *testing.T) {
+	r := lifecycleRepo(t)
+	job := queueImageCacheCleanupJob(t, r, cleanupPrefixes(4))
+	claimed, err := r.ClaimNextQueued(t.Context(), JobTypeImageCacheCleanup)
+	if err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatalf("claim: %v %+v", err, claimed)
+	}
+	if requested, generation, err := r.CancelState(t.Context(), job.ID); err != nil || requested || generation != claimed.ClaimGeneration {
+		t.Fatalf("cancel state before request: %v %v %d", err, requested, generation)
+	}
+	if _, err := r.RequestCancellation(t.Context(), job.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+	if requested, _, err := r.CancelState(t.Context(), job.ID); err != nil || !requested {
+		t.Fatalf("cancel state after request: %v %v", err, requested)
+	}
+
+	stale := r.withClaim(&models.AdminJob{ClaimGeneration: claimed.ClaimGeneration + 1})
+	if _, err := stale.CancelWithResult(t.Context(), job.ID, 2, 4, "stale", ImageCacheCleanupResult{DeletedPrefixes: 9}, time.Now().Add(time.Hour)); err == nil {
+		t.Fatal("a stale claim canceled the job")
+	}
+
+	owner := r.withClaim(claimed)
+	canceled, err := owner.CancelWithResult(t.Context(), job.ID, 2, 4, "Image cache cleanup canceled after 2/4 prefixes",
+		ImageCacheCleanupResult{LibraryID: 1, DeletedPrefixes: 2, DeletedS3Objects: 7}, time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("cancel with result: %v", err)
+	}
+	if canceled.Status != StatusCancelled || canceled.ProgressCurrent != 2 || canceled.ProgressTotal != 4 {
+		t.Fatalf("status=%s progress=%d/%d, want canceled 2/4", canceled.Status, canceled.ProgressCurrent, canceled.ProgressTotal)
+	}
+	if got := imageCacheCleanupResultOf(t, canceled); got.DeletedPrefixes != 2 || got.DeletedS3Objects != 7 {
+		t.Fatalf("result %+v, want the final totals", got)
+	}
+}

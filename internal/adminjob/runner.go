@@ -659,15 +659,15 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				current, err := r.repo.GetByID(ctx, job.ID)
+				cancelRequested, claimGeneration, err := r.repo.CancelState(ctx, job.ID)
 				if err != nil {
 					continue
 				}
-				if current.ClaimGeneration != job.ClaimGeneration {
+				if claimGeneration != job.ClaimGeneration {
 					stop(errImageCacheCleanupClaimLost)
 					return
 				}
-				if current.CancelRequested {
+				if cancelRequested {
 					stop(errImageCacheCleanupCancelRequested)
 					return
 				}
@@ -702,7 +702,7 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 	if err == nil && cause == nil {
 		// Complete would record a cancellation that arrived after the last
 		// prefix as canceled with an empty result; keep the totals instead.
-		if current, getErr := r.repo.GetByID(finishCtx, job.ID); getErr == nil && current.CancelRequested {
+		if cancelRequested, _, getErr := r.repo.CancelState(finishCtx, job.ID); getErr == nil && cancelRequested {
 			cause = errImageCacheCleanupCancelRequested
 		}
 	}
@@ -711,10 +711,23 @@ func (r *Runner) executeImageCacheCleanup(job *models.AdminJob) {
 		slog.Warn("admin jobs: image cache cleanup claim lost; leaving the job to its new owner", "job_id", job.ID)
 	case errors.Is(cause, errImageCacheCleanupCancelRequested):
 		message := fmt.Sprintf("Image cache cleanup canceled after %d/%d prefixes; cached images not yet deleted remain in storage", next, total)
-		if err := r.repo.UpdateProgressResult(finishCtx, job.ID, next, total, message, result); err != nil {
-			slog.Warn("admin jobs: failed to record image cache cleanup totals before cancellation", "job_id", job.ID, "error", err)
+		// One claim-fenced write records the totals and the canceled status
+		// together. If it fails the job stays running; stale recovery then
+		// reclaims it and the claim-time cancel ends it with the last
+		// checkpointed totals.
+		canceled, err := r.repo.CancelWithResult(finishCtx, job.ID, next, total, message, result, time.Now().UTC().Add(r.retention))
+		if err != nil {
+			slog.Warn("admin jobs: failed to record image cache cleanup cancellation", "job_id", job.ID, "error", err)
+			return
 		}
-		r.cancelJob(job.ID, next, total, message)
+		if r.observation != nil {
+			r.observation.Finish(canceled.Status)
+		}
+		if r.realtimeHub != nil {
+			if err := r.realtimeHub.PublishJob(finishCtx, notifications.TypeJobCancelled, canceled); err != nil {
+				slog.Warn("admin jobs: failed to publish job cancellation", "job_id", job.ID, "error", err)
+			}
+		}
 	case err == nil:
 		if err := r.repo.Complete(finishCtx, job.ID, CompleteJobInput{
 			ResultPayload:   result,

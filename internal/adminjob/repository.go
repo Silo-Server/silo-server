@@ -654,6 +654,42 @@ func (r *Repository) Cancel(ctx context.Context, id, message string, expiresAt t
 	return nil, ErrJobNotFound
 }
 
+// CancelWithResult ends a running job as canceled and records its final
+// progress and result in the same claim-fenced update, so a canceled job can
+// never be left without the totals it reached.
+func (r *Repository) CancelWithResult(ctx context.Context, id string, current, total int, message string, result any, expiresAt time.Time) (*models.AdminJob, error) {
+	payload, err := marshalPayload(result)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling admin job result payload: %w", err)
+	}
+	return scanAdminJob(r.pool.QueryRow(ctx, `
+		UPDATE admin_jobs
+		SET status = $2,
+			message = $3,
+			error_message = '',
+			progress_current = $4,
+			progress_total = $5,
+			result_payload = $6,
+			completed_at = NOW(),
+			heartbeat_at = NOW(),
+			expires_at = GREATEST($7, NOW() + INTERVAL '24 hours'),
+			updated_at = NOW()
+		WHERE id = $1
+		  AND status = $8
+		  AND ($9::bigint IS NULL OR claim_generation = $9)
+		RETURNING `+adminJobColumns,
+		id, StatusCancelled, message, current, total, payload, expiresAt, StatusRunning, r.claim,
+	))
+}
+
+// CancelState reads only whether cancellation was requested and the current
+// claim generation, for watchers that poll a long-running job.
+func (r *Repository) CancelState(ctx context.Context, id string) (cancelRequested bool, claimGeneration int64, err error) {
+	err = r.pool.QueryRow(ctx, `SELECT cancel_requested, claim_generation FROM admin_jobs WHERE id = $1`, id).
+		Scan(&cancelRequested, &claimGeneration)
+	return cancelRequested, claimGeneration, err
+}
+
 func (r *Repository) CancelQueued(ctx context.Context, id, message string, expiresAt time.Time) (*models.AdminJob, error) {
 	if message == "" {
 		message = "Admin job cancelled"
