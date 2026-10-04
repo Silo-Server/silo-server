@@ -210,7 +210,7 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 		if len(candidates) == 0 {
 			continue
 		}
-		candidates = b.withQualityPrior(ctx, candidates, 0)
+		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, 0))
 		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
 		// MMR's ranking is greedy, so its first slots[i] items are the
 		// anchor's picks; the rest stand in when another anchor runs out.

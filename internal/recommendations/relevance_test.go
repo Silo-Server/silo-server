@@ -689,7 +689,14 @@ func TestRelevancePersonaReport(t *testing.T) {
 			lengths = append(lengths, len(row.Items))
 		}
 		t.Logf("    clusters %s; anchor slots of 20 %v, served nearest each %v; cluster rows' served 20 repeating the main row %v, cached lengths after removal %v",
-			strings.Join(clusters, ", "), want, got, overlaps, lengths)
+			strings.Join(clusters, "; "), want, got, overlaps, lengths)
+		week := map[string]struct{}{}
+		for d := range 7 {
+			for _, item := range r.page(t, relevanceNow.AddDate(0, 0, d))[0].Items {
+				week[item.MediaItemID] = struct{}{}
+			}
+		}
+		t.Logf("    page %q; main row titles served over 7 days %d", rowLabels(r.page(t, relevanceNow)), len(week))
 	}
 }
 
@@ -939,5 +946,168 @@ func TestRelevanceQualityPriorLiftsRatingsAtLittleCost(t *testing.T) {
 	b := rowBuilder{store: &toyStore{catalog: &toyCatalog{byID: map[string]*toyItem{}}}}
 	if got := b.withQualityPrior(t.Context(), small, qualityMinSmallPool); !slices.Equal(got, small) {
 		t.Fatalf("a pool under %d candidates changed", qualityMinSmallPool)
+	}
+}
+
+// reader serves the persona's rows as the cache holds them, the cluster rows
+// less the main row's served window, on day.
+func (r personaRows) reader(day time.Time) *Reader {
+	personal := map[string][]ScoredItem{RecTypeForYouMain + "|": r.main}
+	for _, row := range withoutMainRowItems(slices.Clone(r.clusters), r.main) {
+		personal[RecTypeForYouClusterPrefix+itoa(row.ClusterIndex)+"|"] = row.Items
+	}
+	return &Reader{
+		repo: &fakeReaderRepo{
+			meta:     &TasteProfileMeta{SignalCounts: map[string]int{signalCountPositiveTitles: len(r.persona.history)}},
+			clusters: r.store.clusters,
+			personal: personal,
+		},
+		signals: NewSignalReader(&fakeSignalRepo{}, nil),
+		now:     func() time.Time { return day },
+	}
+}
+
+// page reads the persona's For You page on day, ServedRowSize items a row.
+func (r personaRows) page(t *testing.T, day time.Time) []ForYouRow {
+	t.Helper()
+	rows, err := r.reader(day).GetForYouPage(t.Context(), 1, "p", ServedRowSize, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("%s: page: %v", r.persona.name, err)
+	}
+	return rows
+}
+
+// labelFit is the share of items carrying at least one genre label names.
+func (r personaRows) labelFit(items []ScoredItem, label string) float64 {
+	named := strings.Split(label, clusterLabelSeparator)
+	if len(items) == 0 {
+		return 0
+	}
+	n := 0
+	for _, item := range items {
+		if slices.ContainsFunc(named, func(g string) bool { return slices.Contains(r.catalog.byID[item.MediaItemID].genres, g) }) {
+			n++
+		}
+	}
+	return float64(n) / float64(len(items))
+}
+
+// Cluster rows say what they hold: at least 60% of a row's served titles
+// carry a genre its title names, and no title names more than two genres
+// unless it was extended to tell two rows apart.
+func TestRelevanceClusterTitlesDescribeTheirRows(t *testing.T) {
+	for key, r := range buildAllPersonaRows(t) {
+		for _, row := range r.page(t, relevanceNow) {
+			if row.personalKey == RecTypeForYouMain || row.Type != "cluster" || row.Subject == "" {
+				continue
+			}
+			if n := len(strings.Split(row.Subject, clusterLabelSeparator)); n > labelMaxGenres+1 {
+				t.Fatalf("%s: %q names %d genres", key, row.Label, n)
+			}
+			if fit := r.labelFit(row.Items, row.Subject); fit < 0.6 {
+				t.Fatalf("%s: %.0f%% of %q's served titles carry a genre it names, want at least 60%%", key, 100*fit, row.Label)
+			}
+		}
+	}
+}
+
+// No persona's page shows two rows under one title; the kid's two Family
+// clusters are told apart or one is hidden.
+func TestRelevancePagesNeverRepeatATitle(t *testing.T) {
+	for key, r := range buildAllPersonaRows(t) {
+		labels := rowLabels(r.page(t, relevanceNow))
+		for i, label := range labels {
+			if slices.Contains(labels[:i], label) {
+				t.Fatalf("%s: page %v repeats %q", key, labels, label)
+			}
+		}
+	}
+}
+
+// The personal rows keep their best-matched head and refresh their tail
+// daily: the same all day, the first ten fixed, at least two of the served
+// 20 new each day, and more titles over a week than an unrotated row.
+func TestRelevanceRotationKeepsTheHeadAndRefreshesTheTail(t *testing.T) {
+	for _, key := range []string{"A", "E", "F"} {
+		r := buildAllPersonaRows(t)[key]
+		mainOn := func(day time.Time) []string { return scoredIDs(r.page(t, day)[0].Items) }
+		today := mainOn(relevanceNow)
+		if !slices.Equal(today, mainOn(relevanceNow.Add(6*time.Hour))) {
+			t.Fatalf("%s: the main row changed within the day", key)
+		}
+		week := map[string]struct{}{}
+		for d := range 7 {
+			day := mainOn(relevanceNow.AddDate(0, 0, d))
+			if !slices.Equal(day[:rotationMaxPinned], scoredIDs(served(r.main)[:rotationMaxPinned])) {
+				t.Fatalf("%s: day %d moved the head", key, d)
+			}
+			if d > 0 {
+				if n := ServedRowSize - len(intersect(day, mainOn(relevanceNow.AddDate(0, 0, d-1)))); n < 2 {
+					t.Fatalf("%s: day %d changed %d served titles, want at least 2", key, d, n)
+				}
+			}
+			for _, id := range day {
+				week[id] = struct{}{}
+			}
+		}
+		if len(week) < 25 {
+			t.Fatalf("%s: %d distinct titles served in a week, want at least 25", key, len(week))
+		}
+	}
+}
+
+func intersect(a, b []string) []string {
+	var out []string
+	for _, id := range a {
+		if slices.Contains(b, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// A few new titles in the catalog reach the served rows without displacing
+// the best-matched head; a freshly imported catalog, every title new, gets
+// exactly the rows it would get with none.
+func TestRelevanceFreshnessAddsNewTitlesWithoutDisplacingTheHead(t *testing.T) {
+	newCatalog := func(isNew func(i int) bool) (*toyCatalog, map[string]bool) {
+		c := newToyCatalog()
+		ids := map[string]bool{}
+		for i := range c.items {
+			if isNew(i) {
+				c.items[i].addedAt = relevanceNow.Add(-time.Duration(1+i%5) * 24 * time.Hour)
+				ids[c.items[i].id] = true
+			}
+		}
+		return c, ids
+	}
+	old := newToyCatalog()
+	// One title in 60 is new, about a week's additions to a large library.
+	fresh, newIDs := newCatalog(func(i int) bool { return i%60 == 7 })
+	imported, _ := newCatalog(func(int) bool { return true })
+	countNew := func(items []ScoredItem) int {
+		n := 0
+		for _, item := range items {
+			if newIDs[item.MediaItemID] {
+				n++
+			}
+		}
+		return n
+	}
+	gained := 0
+	for _, key := range []string{"A", "B", "C", "D", "E", "F"} {
+		before := buildPersonaRows(t, old, relevancePersonas(old)[key])
+		after := buildPersonaRows(t, fresh, relevancePersonas(fresh)[key])
+		gained += countNew(served(after.main)) - countNew(served(before.main))
+		if kept := len(intersect(scoredIDs(served(before.main)[:rotationMaxPinned]), scoredIDs(served(after.main)))); kept < rotationMaxPinned-1 {
+			t.Fatalf("%s: %d of the head's %d titles still served, want at least %d", key, kept, rotationMaxPinned, rotationMaxPinned-1)
+		}
+		bulk := buildPersonaRows(t, imported, relevancePersonas(imported)[key])
+		if !slices.Equal(scoredIDs(bulk.main), scoredIDs(before.main)) {
+			t.Fatalf("%s: a freshly imported catalog changes the main row", key)
+		}
+	}
+	if gained < 2 {
+		t.Fatalf("new titles in the served main rows rose by %d across personas, want at least 2", gained)
 	}
 }

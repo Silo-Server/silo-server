@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -70,8 +71,13 @@ func TestClusterRowTitleComesFromTheCachedRow(t *testing.T) {
 			t.Fatalf("reason %q: title = %q", reason, row.Label)
 		}
 	}
-	if row := clusterRow(TasteCluster{}, nil); row.Label != "Because you enjoy For You" {
-		t.Fatalf("unlabelled cluster title = %q", row.Label)
+	// An unlabeled cluster is not "Because you enjoy" anything, and its title
+	// round-trips through the cache like a labeled one.
+	if row := clusterRow(TasteCluster{}, nil); row.Label != unlabeledClusterTitle {
+		t.Fatalf("unlabeled cluster title = %q", row.Label)
+	}
+	if row := clusterRow(horror, []ScoredItem{{MediaItemID: "m1", Reason: clusterTitle("")}}); row.Label != unlabeledClusterTitle || row.Subject != "" {
+		t.Fatalf("cached unlabeled title = %q (subject %q), want %q", row.Label, row.Subject, unlabeledClusterTitle)
 	}
 }
 
@@ -305,7 +311,7 @@ func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 				},
 			}
 			r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-			rows, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{})
+			rows, err := r.getForYouPageRows(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -347,7 +353,7 @@ func TestForYouPageAsksForMissingRowsOnlyWithPositiveSignals(t *testing.T) {
 			}
 			refresher := &countingReadRefresher{}
 			r := &Reader{repo: repo, refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
-			if _, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{}); err != nil {
+			if _, err := r.getForYouPageRows(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{}); err != nil {
 				t.Fatal(err)
 			}
 			if refresher.calls != tc.wantRefresh {
@@ -402,5 +408,170 @@ func TestFilterRowsDropsWatchedAndFavoritedTitles(t *testing.T) {
 	}
 	if want := []string{"movie-watchlist", "movie-plain"}; !slices.Equal(got, want) {
 		t.Fatalf("items = %v, want %v", got, want)
+	}
+}
+
+// fakeItemRatings serves a profile's star ratings by item from memory.
+type fakeItemRatings map[string]int
+
+func (f fakeItemRatings) ListForItems(_ context.Context, _ int, _ string, itemIDs []string) (map[string]int, error) {
+	out := map[string]int{}
+	for _, id := range itemIDs {
+		if rating, ok := f[id]; ok {
+			out[id] = rating
+		}
+	}
+	return out, nil
+}
+
+// Anchors come from the latest ten completions, newest first, passing over
+// those rated two stars or lower; a 3-star title still anchors.
+func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
+	recent := []string{"one-star", "liked", "three-stars", "two-stars", "next"}
+	for i := len(recent); i < 12; i++ {
+		recent = append(recent, fmt.Sprintf("older-%d", i))
+	}
+	allLow := fakeItemRatings{}
+	for _, id := range recent[:anchorCandidateLimit] {
+		allLow[id] = 1
+	}
+	signals := NewSignalReader(&fakeSignalRepo{fallbackRecentCompleted: recent}, nil)
+	for _, tc := range []struct {
+		name    string
+		ratings itemRatingReader
+		want    []string
+	}{
+		{"no ratings reader", nil, recent[:3]},
+		{"disliked passed over", fakeItemRatings{"one-star": 1, "two-stars": 2, "three-stars": 3, "liked": 5}, []string{"liked", "three-stars", "next"}},
+		// Only the latest ten are looked at, so older liked titles do not
+		// anchor a profile whose recent watching it disliked.
+		{"latest ten all disliked", allLow, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := anchorItemIDs(t.Context(), signals, tc.ratings, 7, "p1", becauseYouWatchedAnchors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("anchors = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A title the profile rated one star never heads a Because You Watched row,
+// on Discover, in a home section or in Watch Tonight, even while the row
+// built for it is still cached; the next completion heads the row instead.
+func TestBecauseYouWatchedNeverOpensOnADislikedTitle(t *testing.T) {
+	repo := &fakeReaderRepo{personal: map[string][]ScoredItem{
+		RecTypeBecauseWatched + "|disliked": {{MediaItemID: "like-disliked", Score: 1}},
+		RecTypeBecauseWatched + "|liked":    {{MediaItemID: "like-liked", Score: 1}},
+		RecTypeBecauseWatched + "|older":    {{MediaItemID: "like-older", Score: 1}},
+	}}
+	refresher := &countingReadRefresher{}
+	r := &Reader{
+		repo:        repo,
+		ratingsRepo: fakeItemRatings{"disliked": 1},
+		refresh:     refresher,
+		signals:     NewSignalReader(&fakeSignalRepo{fallbackRecentCompleted: []string{"disliked", "liked", "older"}}, nil),
+	}
+	ctx := t.Context()
+
+	rows, err := r.GetBecauseYouWatchedRows(ctx, 7, "p1", 3, 20, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var anchors []string
+	for _, row := range rows {
+		anchors = append(anchors, row.AnchorItemID)
+	}
+	if want := []string{"liked", "older"}; !slices.Equal(anchors, want) {
+		t.Fatalf("row anchors = %v, want %v", anchors, want)
+	}
+
+	_, source, err := r.SectionBecauseYouWatched(ctx, 7, "p1", "", nil, catalog.AccessFilter{})
+	if err != nil || source != "liked" {
+		t.Fatalf("section anchor = %q, %v; want liked", source, err)
+	}
+
+	tonight, err := r.GetWatchTonight(ctx, 7, "p1", 20, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range tonight.Items {
+		if item.MediaItemID == "like-disliked" {
+			t.Fatalf("Watch Tonight %v holds the disliked anchor's neighbor", tonight.Items)
+		}
+	}
+	if refresher.calls != 0 {
+		t.Fatalf("refreshes = %d, want none: the remaining anchors have rows", refresher.calls)
+	}
+
+	// Without ratings the disliked title anchors as before.
+	r.ratingsRepo = nil
+	if _, source, _ := r.SectionBecauseYouWatched(ctx, 7, "p1", "", nil, catalog.AccessFilter{}); source != "disliked" {
+		t.Fatalf("anchor without ratings = %q, want disliked", source)
+	}
+}
+
+// Two cluster rows never share a title. A lighter row that mostly repeats a
+// heavier one's served items is hidden, without asking for a rebuild; one
+// with other items is named with its next dominant genre. A row whose
+// cluster was renumbered since it was cached keeps its title.
+func TestClusterRowsWithOneTitleAreToldApartOrHidden(t *testing.T) {
+	titled := func(label string, items []ScoredItem) []ScoredItem {
+		for i := range items {
+			items[i].Reason = clusterTitle(label)
+		}
+		return items
+	}
+	heavy := titled("Family", scoredRun("f", 20))
+	// 15 of 20 shared: a Jaccard index of 15/25.
+	repeat := titled("Family", append(scoredRun("f", 15), scoredRun("r", 5)...))
+	other := titled("Family", scoredRun("o", 20))
+	stale := titled("Horror", scoredRun("h", 20))
+	repo := &fakeReaderRepo{
+		meta: &TasteProfileMeta{SignalCounts: map[string]int{signalCountPositiveTitles: ColdStartFullPersonalized}},
+		clusters: []TasteCluster{
+			{ClusterIdx: 0, Label: "Family", DominantGenres: []string{"Family", "Animation"}, TotalWeight: 2},
+			{ClusterIdx: 1, Label: "Family", DominantGenres: []string{"Family", "Animation"}, TotalWeight: 3},
+			{ClusterIdx: 2, Label: "Family", DominantGenres: []string{"Family", "Comedy", "Fantasy"}, TotalWeight: 1},
+			// The table now labels index 3 "Drama", but its cached row is
+			// the Horror build, so it cannot be renamed from the table.
+			{ClusterIdx: 3, Label: "Drama", DominantGenres: []string{"Drama", "Crime"}, TotalWeight: 0.5},
+			{ClusterIdx: 4, Label: "Horror", DominantGenres: []string{"Horror", "Thriller"}, TotalWeight: 0.8},
+		},
+		personal: map[string][]ScoredItem{
+			RecTypeForYouMain + "|":                scoredRun("main", 20),
+			RecTypeForYouClusterPrefix + "0" + "|": repeat,
+			RecTypeForYouClusterPrefix + "1" + "|": heavy,
+			RecTypeForYouClusterPrefix + "2" + "|": other,
+			RecTypeForYouClusterPrefix + "3" + "|": stale,
+			RecTypeForYouClusterPrefix + "4" + "|": titled("Horror", scoredRun("h2", 20)),
+		},
+	}
+	refresher := &countingReadRefresher{}
+	r := &Reader{repo: repo, refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+
+	rows, err := r.GetForYouPage(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{ForYouLabel, "Because you enjoy Family", "Because you enjoy Family, Comedy", "Because you enjoy Horror", "Because you enjoy Horror"}
+	if got := rowLabels(rows); !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
+	}
+	if rows[1].ClusterIndex != 1 {
+		t.Fatalf("kept Family row is cluster %d, want the heavier 1", rows[1].ClusterIndex)
+	}
+	renamed := rows[2]
+	if renamed.Subject != "Family, Comedy" || renamed.Items[0].Reason != renamed.Label {
+		t.Fatalf("renamed row subject %q, item reason %q", renamed.Subject, renamed.Items[0].Reason)
+	}
+	if other[0].Reason != clusterTitle("Family") {
+		t.Fatal("renaming changed the cached items")
+	}
+	if refresher.calls != 0 {
+		t.Fatalf("refreshes = %d, want none: a hidden row was built", refresher.calls)
 	}
 }

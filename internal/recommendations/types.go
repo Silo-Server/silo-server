@@ -27,6 +27,10 @@ type ForYouRow struct {
 	Subject string `json:"-"`
 	// AnchorItemID is the title a Because You Watched row was built from.
 	AnchorItemID string `json:"-"`
+	// personalKey is the cache key of a personal taste row, the main row
+	// (RecTypeForYouMain) or a cluster row, and empty on every other row.
+	// Reads rotate these rows daily (see rotateTail).
+	personalKey string
 }
 
 // ForYouResponse is the grouped response of the For You rows endpoint.
@@ -97,6 +101,11 @@ const (
 	WeightRatedLow  = -0.5 // 1-2 star ratings
 )
 
+// DislikedRatingMax is the highest star rating that marks a title the profile
+// disliked: reads leave such titles out of every row, and they never anchor a
+// Because You Watched row.
+const DislikedRatingMax = 2
+
 // RecType constants for recommendation cache.
 const (
 	RecTypeForYouMain          = "for_you_main"
@@ -126,10 +135,13 @@ const (
 )
 
 // RecencyBoostDays is the number of days a new item gets a relevance boost.
-const RecencyBoostDays = 7
+const RecencyBoostDays = 14
 
-// RecencyBoostMultiplier is the max multiplier for newly added items.
-const RecencyBoostMultiplier = 1.2
+// RecencyBoostMultiplier is the max multiplier for newly added items. The
+// boost applies before selection, where a candidate pool's scores spread by
+// about a tenth, so a small multiplier already lifts a new title several
+// places.
+const RecencyBoostMultiplier = 1.05
 
 // CacheCandidateLimit is the default number of candidates cached per row so
 // read paths have headroom for watched, low-rated, access, and dedup filters.

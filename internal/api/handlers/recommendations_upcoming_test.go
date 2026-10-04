@@ -83,7 +83,7 @@ func TestMergePremieresIntoDiscoverRow_PromotesAndRanksCandidates(t *testing.T) 
 		},
 		{
 			Type:  "genre_sampler",
-			Label: "Popular in Drama",
+			Label: "Top Drama",
 			Items: []recommendations.ScoredItem{
 				{MediaItemID: "movie-c"},
 			},
@@ -151,7 +151,7 @@ func TestBlendUpcomingIntoDiscoverRows_LeavesRowsUnchangedWithoutForYou(t *testi
 
 	rows := []discoverRowModel{{
 		Type:  "genre_sampler",
-		Label: "Popular in Drama",
+		Label: "Top Drama",
 		Items: []recommendations.ScoredItem{{MediaItemID: "movie-1"}},
 	}}
 
@@ -166,7 +166,7 @@ func TestBlendUpcomingIntoDiscoverRows_LeavesRowsUnchangedWithoutForYou(t *testi
 	if err != nil {
 		t.Fatalf("blendUpcomingIntoDiscoverRows error = %v", err)
 	}
-	if len(blended) != 1 || blended[0].Label != "Popular in Drama" {
+	if len(blended) != 1 || blended[0].Label != "Top Drama" {
 		t.Fatalf("blended rows = %+v, want unchanged rows", blended)
 	}
 }

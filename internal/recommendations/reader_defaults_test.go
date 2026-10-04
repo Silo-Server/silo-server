@@ -165,7 +165,8 @@ func TestDefaultRowSectionsMatchDiscover(t *testing.T) {
 }
 
 // Discover dedupes a row only against the items earlier rows show: an item
-// past an earlier row's limit still appears in a later row.
+// past an earlier row's limit still appears in a later row. A limit of 10
+// leaves the main row unrotated, so it shows main-00 to main-09.
 func TestDiscoverDedupesOnlyAgainstShownItems(t *testing.T) {
 	main := numbered("main-", 25)
 	repo := &fakeReaderRepo{
@@ -176,7 +177,7 @@ func TestDiscoverDedupesOnlyAgainstShownItems(t *testing.T) {
 	}
 	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
 
-	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
+	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", rotationMaxPinned, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

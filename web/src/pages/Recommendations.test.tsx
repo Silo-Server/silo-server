@@ -72,6 +72,17 @@ describe("Recommendations", () => {
     mockUseDiscover.mockReturnValue({ data: undefined, isLoading: true, isError: false });
   });
 
+  it("shows the taste genres without a signal count", () => {
+    mockUseDiscover.mockReturnValue({ data: { rows: [] }, isLoading: false, isError: false });
+
+    const markup = renderPage();
+
+    // The count summed raw signal rows, so a series binger read "300+ signals".
+    expect(markup).toContain("Your Taste Profile");
+    expect(markup).toContain("Drama");
+    expect(markup).not.toMatch(/\d+ signals?/);
+  });
+
   it("renders a neutral empty state when discover returns no rows", () => {
     mockUseDiscover.mockReturnValue({
       data: { rows: [] },
@@ -146,7 +157,7 @@ describe("Recommendations", () => {
           },
           {
             type: "genre_sampler",
-            label: "Popular in Action",
+            label: "Top Action",
             section_kind: "genre",
             section_key: "Sci Fi & Action",
             items: [
@@ -169,7 +180,7 @@ describe("Recommendations", () => {
     const markup = renderPage();
 
     expect(markup).toContain("For You");
-    expect(markup).toContain("Popular in Action");
+    expect(markup).toContain("Top Action");
     expect(markup).toContain("Movie A");
     expect(markup).toContain("Movie B");
     expect(markup).toContain('data-title="Custom row" data-href=""');

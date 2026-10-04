@@ -39,11 +39,11 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 	mergeScored(byID, forYouItems, 0.80, 1.00)
 
 	// 2. Because-you-watched — mid band (0.55–0.75).
-	recentCompleted, err := r.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
+	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
 	if err != nil {
 		return WatchTonightResult{}, err
 	}
-	for _, sourceID := range recentCompleted {
+	for _, sourceID := range anchors {
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
 		if err != nil {
 			return WatchTonightResult{}, err

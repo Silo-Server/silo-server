@@ -68,8 +68,10 @@ func TestPublicReadsServeUpToFiftyAndSectionReadsTheWholePool(t *testing.T) {
 		}
 	}
 
+	// The section row is rotated like a default-size page, but keeps every
+	// cached item.
 	main, err := r.SectionForYouMain(ctx, 7, "p1", catalog.AccessFilter{})
-	if err != nil || main == nil || !slices.Equal(scoredIDs(main.Items), scoredIDs(pool)) {
+	if err != nil || main == nil || !slices.Equal(slices.Sorted(slices.Values(scoredIDs(main.Items))), scoredIDs(pool)) {
 		t.Fatalf("SectionForYouMain = %v, %v; want the whole cached pool", main, err)
 	}
 	similar, err := r.SectionSimilarUsersLiked(ctx, 7, "p1", catalog.AccessFilter{})

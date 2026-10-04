@@ -3,6 +3,7 @@ package recommendations
 import (
 	"math"
 	"math/rand"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -331,6 +332,15 @@ func buildTasteClusters(items []clusterItem) []TasteCluster {
 	}
 	sort.Ints(clusterIndices)
 
+	// The profile's own genre mix is the baseline a cluster's label is
+	// measured against.
+	profileGenres := make(map[string]int)
+	for _, item := range valid {
+		for _, g := range distinctGenres(item.genres) {
+			profileGenres[g]++
+		}
+	}
+
 	clusters := make([]TasteCluster, 0, len(clusterIndices))
 	for _, ci := range clusterIndices {
 		memberIndices := clusterMap[ci]
@@ -339,9 +349,11 @@ func buildTasteClusters(items []clusterItem) []TasteCluster {
 		vecs := make([][]float32, len(memberIndices))
 		weights := make([]float64, len(memberIndices))
 		genreCounts := make(map[string]int)
+		members := make([]clusterItem, len(memberIndices))
 		totalWeight := 0.0
 
 		for j, idx := range memberIndices {
+			members[j] = valid[idx]
 			vecs[j] = valid[idx].embedding
 			weights[j] = valid[idx].weight
 			totalWeight += valid[idx].weight
@@ -356,8 +368,7 @@ func buildTasteClusters(items []clusterItem) []TasteCluster {
 		// Determine dominant genres (top 3 by frequency).
 		dominantGenres := topNGenres(genreCounts, 3)
 
-		// Build a human-readable label from the dominant genres.
-		label := buildClusterLabel(dominantGenres)
+		label := clusterLabel(members, profileGenres, len(valid))
 
 		clusters = append(clusters, TasteCluster{
 			ClusterIdx:     ci,
@@ -404,13 +415,108 @@ func topNGenres(counts map[string]int, n int) []string {
 	return result
 }
 
-// buildClusterLabel creates a display label by joining genre names with " & ".
-// Returns "Mixed" if no genres are available.
-func buildClusterLabel(genres []string) string {
-	if len(genres) == 0 {
-		return "Mixed"
+// A cluster's label names what sets it apart from the profile's other
+// interests, not merely what is common: Drama runs through most taste
+// clusters, so the most frequent genres would name nearly every cluster the
+// same. The thresholds were tuned on synthetic profiles.
+const (
+	// labelMinShare is the fewest of a cluster's members, as a share, that
+	// must carry a distinctive genre.
+	labelMinShare = 0.40
+	// labelMinLift is how many times more often the cluster's members must
+	// carry a distinctive genre than the profile's titles do.
+	labelMinLift = 1.5
+	// labelMaxGenres is the most genres a label names.
+	labelMaxGenres = 2
+	// clusterLabelSeparator joins a label's genres. It is not " & ", which
+	// TMDB genres such as "Sci-Fi & Fantasy" already contain.
+	clusterLabelSeparator = ", "
+)
+
+// clusterLabel labels the cluster of members against a profile whose
+// profileTitles titles carry each genre profileGenres times. It names the
+// cluster's distinctive genres, those at least labelMinShare of the members
+// carry and carry at least labelMinLift times as often as the profile's
+// titles do, the most distinctive first, and always the cluster's most common
+// genre, which its row's titles mostly carry, in at most labelMaxGenres
+// genres. A cluster with no distinctive genre, such as a profile's only
+// cluster, is labeled by its most common genre alone, and one whose members
+// carry no genres gets "".
+func clusterLabel(members []clusterItem, profileGenres map[string]int, profileTitles int) string {
+	counts := make(map[string]int)
+	weights := make(map[string]float64)
+	for _, m := range members {
+		for _, g := range distinctGenres(m.genres) {
+			counts[g]++
+			weights[g] += m.weight
+		}
 	}
-	return strings.Join(genres, " & ")
+	if len(counts) == 0 {
+		return ""
+	}
+	// The most common genre; a tie goes to the genre of the heavier titles,
+	// which pull the cluster's centroid, and its row, toward them.
+	moreCommon := func(g, than string) bool {
+		switch {
+		case counts[g] != counts[than]:
+			return counts[g] > counts[than]
+		case weights[g] != weights[than]:
+			return weights[g] > weights[than]
+		default:
+			return g < than
+		}
+	}
+	common := ""
+	for g := range counts {
+		if common == "" || moreCommon(g, common) {
+			common = g
+		}
+	}
+
+	type candidate struct {
+		genre       string
+		share, lift float64
+	}
+	var distinctive []candidate
+	for g, n := range counts {
+		share := float64(n) / float64(len(members))
+		base := float64(profileGenres[g]) / float64(max(profileTitles, 1))
+		if share < labelMinShare || base <= 0 {
+			continue
+		}
+		if lift := share / base; lift >= labelMinLift {
+			distinctive = append(distinctive, candidate{g, share, lift})
+		}
+	}
+	sort.Slice(distinctive, func(i, j int) bool {
+		a, b := distinctive[i], distinctive[j]
+		if a.lift != b.lift {
+			return a.lift > b.lift
+		}
+		if a.share != b.share {
+			return a.share > b.share
+		}
+		return a.genre < b.genre
+	})
+
+	// The most common genre and the most distinctive others, in order of
+	// distinction; the most common genre goes last when it is not
+	// distinctive.
+	genres := make([]string, 0, labelMaxGenres)
+	others := 0
+	for _, c := range distinctive {
+		switch {
+		case c.genre == common:
+			genres = append(genres, c.genre)
+		case others < labelMaxGenres-1:
+			genres = append(genres, c.genre)
+			others++
+		}
+	}
+	if !slices.Contains(genres, common) {
+		genres = append(genres, common)
+	}
+	return strings.Join(genres, clusterLabelSeparator)
 }
 
 // --- Vector math helpers ---

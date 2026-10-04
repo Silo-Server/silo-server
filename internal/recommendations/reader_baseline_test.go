@@ -9,14 +9,13 @@ import (
 )
 
 // A cluster row's subject is its genre label without the title wording. An
-// unlabeled cluster, one whose history had no genres, and any other title
-// have none.
+// unlabeled cluster and any other title have none.
 func TestClusterSubject(t *testing.T) {
 	for _, tc := range []struct{ title, want string }{
-		{clusterTitle("Science Fiction & Thriller"), "Science Fiction & Thriller"},
+		{clusterTitle("Sci-Fi & Fantasy, Thriller"), "Sci-Fi & Fantasy, Thriller"},
 		{clusterTitle("Crime"), "Crime"},
 		{clusterTitle(""), ""},
-		{clusterTitle(buildClusterLabel(nil)), ""},
+		{unlabeledClusterTitle, ""},
 		{clusterTitlePrefix, ""},
 		{"For You", ""},
 		{"Popular on This Server", ""},
@@ -50,7 +49,7 @@ func TestForYouPageClusterRowsCarryTheirSubject(t *testing.T) {
 	for _, row := range rows {
 		subjects[row.Label] = row.Subject
 	}
-	want := map[string]string{"For You": "", "Because you enjoy Comedy": "Comedy", "Because you enjoy For You": ""}
+	want := map[string]string{"For You": "", "Because you enjoy Comedy": "Comedy", unlabeledClusterTitle: ""}
 	for label, subject := range want {
 		got, ok := subjects[label]
 		if !ok || got != subject {
