@@ -20,7 +20,22 @@ const source: AutoscanSource = {
   last_error: null,
   webhook_configured: false,
 };
-const descriptor: AutoscanScanSourceDescriptor = { delivery_modes: ["poll"], connection: "none" };
+const descriptor: AutoscanScanSourceDescriptor = {
+  delivery_modes: ["poll"],
+  connection: "none",
+  config_form: {
+    fields: [
+      {
+        key: "root",
+        label: "Root",
+        control: "TEXT",
+        required: true,
+        secret: false,
+        multiline: false,
+      },
+    ],
+  },
+};
 function mount() {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: 3 }, queries: { retry: false } },
@@ -59,6 +74,9 @@ it("actual row label edit saves full state through PUT", async () => {
   );
   vi.stubGlobal("fetch", fetchMock);
   mount();
+  expect(screen.getByRole("button", { name: "Save configuration" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Root"), { target: { value: "/synthetic/library" } });
+  expect(screen.getByRole("button", { name: "Save configuration" })).toBeEnabled();
   const input = screen.getByPlaceholderText("Custom label (optional)");
   fireEvent.change(input, { target: { value: "New" } });
   fireEvent.blur(input);

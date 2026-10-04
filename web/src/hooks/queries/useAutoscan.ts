@@ -604,17 +604,17 @@ export function captureAutoscanWebhookIntent(
   return { id, profileContext };
 }
 type WebhookCallbacks = {
-  onSuccess?: (source: AutoscanSource | null) => void;
+  onSuccess?: (source: AutoscanSource) => void;
   onError?: (error: Error) => void;
 };
 function useAutoscanWebhookLifecycle(
-  action: "create" | "rotate" | "delete",
+  action: "create" | "rotate",
   profileContext: ProfileRequestContextSnapshot | null,
 ) {
   const queryClient = useQueryClient();
   const mutation = useMutation({
     retry: false,
-    mutationFn: async (intent: AutoscanWebhookIntent): Promise<AutoscanSource | null> => {
+    mutationFn: async (intent: AutoscanWebhookIntent): Promise<AutoscanSource> => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
       const options = {
@@ -622,24 +622,19 @@ function useAutoscanWebhookLifecycle(
         profileContext: intent.profileContext,
         retryAuthentication: false,
       };
-      let source: AutoscanSource | null = null;
-      if (action === "delete")
-        await v2("DELETE /api/v2/admin/autoscan/sources/{id}/webhook", options);
-      else {
-        const result =
-          action === "create"
-            ? await v2("POST /api/v2/admin/autoscan/sources/{id}/webhook", options)
-            : await v2("POST /api/v2/admin/autoscan/sources/{id}/webhook/rotate", options);
-        source = {
-          ...result,
-          poll_interval_seconds: result.poll_interval_seconds ?? null,
-          last_run_at: result.last_run_at ?? null,
-          last_error: result.last_error ?? null,
-        };
-      }
+      const result =
+        action === "create"
+          ? await v2("POST /api/v2/admin/autoscan/sources/{id}/webhook", options)
+          : await v2("POST /api/v2/admin/autoscan/sources/{id}/webhook/rotate", options);
+      const source = {
+        ...result,
+        poll_interval_seconds: result.poll_interval_seconds ?? null,
+        last_run_at: result.last_run_at ?? null,
+        last_error: result.last_error ?? null,
+      };
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
-      return source ? observedAutoscanSource(source, nextAutoscanSourceObservation()) : null;
+      return observedAutoscanSource(source, nextAutoscanSourceObservation());
     },
     onSuccess: (_result, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
@@ -647,9 +642,7 @@ function useAutoscanWebhookLifecycle(
       toast.success(
         action === "create"
           ? "Webhook endpoint created or already configured"
-          : action === "rotate"
-            ? "Webhook endpoint rotated. Refresh and copy the current URL to your provider."
-            : "Webhook endpoint removed",
+          : "Webhook endpoint rotated. Refresh and copy the current URL to your provider.",
       );
     },
     onError: (_error, intent) => {
@@ -689,9 +682,6 @@ export function useCreateAutoscanWebhook(profileContext = captureProfileRequestC
 }
 export function useRotateAutoscanWebhook(profileContext = captureProfileRequestContext()) {
   return useAutoscanWebhookLifecycle("rotate", profileContext);
-}
-export function useDeleteAutoscanWebhook(profileContext = captureProfileRequestContext()) {
-  return useAutoscanWebhookLifecycle("delete", profileContext);
 }
 
 /**

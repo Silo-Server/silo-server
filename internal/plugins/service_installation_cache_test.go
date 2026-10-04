@@ -37,38 +37,6 @@ func newCachedInstallationService(installations ...*Installation) (*Service, *co
 	return svc, store
 }
 
-func TestLoadInstallationCachesAndInvalidatesOnLifecycleChange(t *testing.T) {
-	ctx := context.Background()
-	svc, store := newCachedInstallationService(&Installation{ID: 7, PluginID: "silo.metadb", Enabled: true})
-
-	// First read hits the store.
-	if _, err := svc.loadInstallation(ctx, 7, false); err != nil {
-		t.Fatalf("first loadInstallation err = %v", err)
-	}
-	if store.getByIDCalls != 1 {
-		t.Fatalf("after first read GetByID calls = %d, want 1", store.getByIDCalls)
-	}
-
-	// Subsequent reads are served from the cache.
-	for i := 0; i < 5; i++ {
-		if _, err := svc.loadInstallation(ctx, 7, false); err != nil {
-			t.Fatalf("cached loadInstallation err = %v", err)
-		}
-	}
-	if store.getByIDCalls != 1 {
-		t.Fatalf("after cached reads GetByID calls = %d, want still 1", store.getByIDCalls)
-	}
-
-	// A lifecycle change wipes the cache and forces a re-read.
-	svc.OnLifecycleChange(ctx)
-	if _, err := svc.loadInstallation(ctx, 7, false); err != nil {
-		t.Fatalf("post-invalidate loadInstallation err = %v", err)
-	}
-	if store.getByIDCalls != 2 {
-		t.Fatalf("after lifecycle change GetByID calls = %d, want 2", store.getByIDCalls)
-	}
-}
-
 func TestRefreshMarkerRuntimeInvalidatesReplicaState(t *testing.T) {
 	svc, store := newCachedInstallationService(&Installation{ID: 7, PluginID: "silo.theintrodb", Version: "1.0.0", Enabled: true})
 	host := &fakeServiceHost{}

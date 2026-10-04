@@ -8,10 +8,10 @@ import {
 } from "@/hooks/queries/admin/externalSignIn";
 import {
   adminSignInErrorText,
-  authBindingOf,
-  authCapabilityOf,
-  authPluginInstallations,
+  primarySignInInstallations,
   authProviderName,
+  savedAutoProvision,
+  signInBindingWrite,
 } from "@/lib/externalSignInAdmin";
 
 import {
@@ -38,10 +38,6 @@ function entryDraftOf(draft: InstallationDraft, entry: SignInConfigEntry): Confi
 
 export type SignInDraftSaveResult = { ok: true } | { ok: false; text: string };
 
-function savedAutoProvision(installation: PluginInstallation): boolean {
-  return authBindingOf(installation)?.auto_provision ?? true;
-}
-
 function isEmpty(draft: InstallationDraft): boolean {
   return Object.keys(draft.config).length === 0 && draft.autoProvision === undefined;
 }
@@ -57,7 +53,7 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
   const saveConfig = useSaveSignInPluginConfig();
   const updateBinding = useUpdateSignInBinding();
 
-  const candidates = useMemo(() => authPluginInstallations(installations), [installations]);
+  const candidates = useMemo(() => primarySignInInstallations(installations), [installations]);
   const layouts = useMemo(
     () =>
       new Map(candidates.map((installation) => [installation.id, signInSetupLayout(installation)])),
@@ -227,17 +223,9 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
             });
           }
           if (draft.autoProvision !== undefined) {
-            const capability = authCapabilityOf(installation)!;
-            const binding = authBindingOf(installation);
             await updateBinding.mutateAsync({
               installationId: installation.id,
-              body: {
-                capability_id: capability.id,
-                enabled: binding?.enabled ?? false,
-                display_order: binding?.display_order ?? 1,
-                auto_provision: draft.autoProvision,
-                default_login: binding?.default_login ?? false,
-              },
+              body: signInBindingWrite(installation, { auto_provision: draft.autoProvision }),
             });
             update(installation.id, (current) =>
               current.autoProvision === draft.autoProvision

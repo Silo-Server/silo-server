@@ -3,14 +3,11 @@ package apiv2
 import (
 	"context"
 	"errors"
-	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 type fakeSourceWrites struct {
@@ -56,7 +53,7 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 			if method == "PUT" && (f.id != "source" || f.input.ConnectionID != nil) {
 				t.Fatal(f)
 			}
-			rec = do(t, h, method, path, `{"enabled":true,"path_rewrites":[],"plugin_id":"p","capability_id":"c","poll_interval_seconds":0}`, bearer(adminToken))
+			rec = do(t, h, method, path, strings.TrimSuffix(body, "}")+`,"poll_interval_seconds":0}`, bearer(adminToken))
 			if rec.Code != 422 || f.calls != 1 {
 				t.Fatal(rec.Code, f.calls)
 			}
@@ -73,17 +70,5 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 			deps.AdminAutoscanSourceWrites = nil
 			requireProblem(t, do(t, NewHandler(deps), method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
-	}
-}
-
-func TestAdminAutoscanSourceWriteNullableSchemas(t *testing.T) {
-	for _, typ := range []reflect.Type{reflect.TypeFor[AdminAutoscanSourceCreateBody](), reflect.TypeFor[AdminAutoscanSourceWriteBody]()} {
-		registry := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
-		schema := huma.SchemaFromType(registry, typ)
-		for _, field := range []string{"connection_id", "poll_interval_seconds"} {
-			if !schema.Properties[field].Nullable || slices.Contains(schema.Required, field) {
-				t.Fatalf("%s.%s must allow explicit null and omission", typ.Name(), field)
-			}
-		}
 	}
 }

@@ -243,19 +243,12 @@ describe("PlaybackSettings", () => {
     },
   );
 
-  it("renders without a profile record, reading every value from the contract", () => {
-    // The screen used to require the cached profile object and read its
-    // preference columns; it now resolves them, so it renders from the
-    // settings API alone.
+  it("reads its values in one batch rather than one request per control", () => {
     render(<PlaybackSettings />);
 
     expect(screen.getByText("Spoken language")).toBeTruthy();
     expect(screen.getByText("Auto-play next episode")).toBeTruthy();
     expect(screen.getByText("Next up episodes")).toBeTruthy();
-  });
-
-  it("reads its values in one batch rather than one request per control", () => {
-    render(<PlaybackSettings />);
 
     const batched = mocks.useEffectiveSettings.mock.calls.find(
       ([options]) => (options?.keys?.length ?? 0) > 2,
@@ -305,29 +298,9 @@ describe("PlaybackSettings", () => {
     expect(screen.getByRole("combobox", { name: "Skip intros" })).toBeDisabled();
   });
 
-  it("reads a stored value in preference to the contract default", () => {
-    // playback.auto_play_next defaults to true, so a stored false is the case
-    // that proves the screen trusts the resolved answer: the bug this guards is
-    // a default-on toggle that a client's own idea of the default flips back.
-    render(<PlaybackSettings />);
-    expect(screen.getByLabelText("Auto-play next episode").getAttribute("aria-checked")).toBe(
-      "true",
-    );
-
-    cleanup();
-    mocks.useEffectiveSettings.mockReturnValue({
-      data: resolved(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, false, "profile"),
-      isLoading: false,
-    });
-
-    render(<PlaybackSettings />);
-    expect(screen.getByLabelText("Auto-play next episode").getAttribute("aria-checked")).toBe(
-      "false",
-    );
-  });
-
   it("turning a default-on toggle off stores an explicit false", async () => {
     render(<PlaybackSettings />);
+    expect(screen.getByLabelText("Auto-play next episode")).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(screen.getByLabelText("Auto-play next episode"));
 
@@ -379,6 +352,10 @@ describe("PlaybackSettings", () => {
     });
 
     render(<PlaybackSettings />);
+    expect(screen.getByLabelText("Auto-play next episode")).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
     fireEvent.click(screen.getByLabelText("Auto-play next episode"));
 
     await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
@@ -410,16 +387,13 @@ describe("PlaybackSettings", () => {
 
   // Quality is the same two axes the device screen edits — a resolution cap
   // and a bandwidth cap — not a compound preset only this screen understands.
-  it("offers the resolution cap and the bandwidth cap as separate controls", () => {
+
+  it("saves the resolution cap as its own key", async () => {
     render(<PlaybackSettings />);
 
     expect(screen.getByText("Preferred quality")).toBeTruthy();
     expect(screen.getByText("Maximum bitrate")).toBeTruthy();
     expect(screen.queryByText("Video quality")).toBeNull();
-  });
-
-  it("saves the resolution cap as its own key", async () => {
-    render(<PlaybackSettings />);
 
     await userEvent.click(screen.getByRole("combobox", { name: "Preferred quality" }));
     await userEvent.click(await screen.findByRole("option", { name: "1080p" }));
@@ -501,6 +475,11 @@ describe("PlaybackSettings", () => {
       mocks.capabilities = capabilitiesAtRevision(9);
 
       render(<PlaybackSettings />);
+
+      expect(
+        screen.queryByRole("button", { name: "Use this browser's audiobook intervals" }),
+      ).toBeNull();
+      expect(mutateAsync).not.toHaveBeenCalled();
 
       for (const name of ["Video", "Audiobooks"]) {
         const back = group(name).getByRole("combobox", { name: "Rewind interval" });
@@ -605,17 +584,6 @@ describe("PlaybackSettings", () => {
 
       expect(screen.getByRole("alert")).toHaveTextContent(/Could not check whether this server/);
       expect(screen.queryByText(/does not store seek intervals per profile yet/)).toBeNull();
-    });
-
-    it("offers no import when this browser holds no legacy audiobook intervals", () => {
-      mocks.capabilities = capabilitiesAtRevision(9);
-
-      render(<PlaybackSettings />);
-
-      expect(
-        screen.queryByRole("button", { name: "Use this browser's audiobook intervals" }),
-      ).toBeNull();
-      expect(mutateAsync).not.toHaveBeenCalled();
     });
 
     it("imports only on a click, listing exactly what will be written", async () => {

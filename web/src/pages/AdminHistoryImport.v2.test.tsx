@@ -235,6 +235,8 @@ describe("admin history import editors", () => {
     const view = mount();
     fireEvent.click(await screen.findByText("Import all"));
     await screen.findByText("1 queued, 1 already active, 1 failed.");
+    expect(screen.getByText("Mapping 2: accepted")).toBeTruthy();
+    expect(screen.getByText("Mapping 3: active")).toBeTruthy();
     expect(screen.getByText("Mapping 4: failed — Unavailable source")).toBeTruthy();
     view.unmount();
     state.available = false;
@@ -303,33 +305,6 @@ describe("admin history import editors", () => {
           ([op]) => op === "DELETE /api/v2/admin/history-imports/sources/{id}/token",
         ),
     ).toHaveLength(1);
-  });
-  it("states what a Plex admin import leaves out, beside the imports and in the server editor", async () => {
-    const plex = { ...source, source_type: "plex" };
-    vi.mocked(v2).mockImplementation((op, options) =>
-      op === "GET /api/v2/admin/history-import-sources"
-        ? reply(options, { items: [plex], page: { has_more: false } })
-        : op === "GET /api/v2/admin/history-import-sources/{id}"
-          ? reply(options, plex)
-          : baseline(op, options),
-    );
-    mount();
-    const limits = "Plex admin imports only bring over finished plays";
-    const note = await screen.findByRole("note", { name: limits });
-    expect(within(note).getByText("Resume points for titles still in progress")).toBeTruthy();
-    expect(
-      within(note).getByText("Titles, seasons, or shows marked as watched without playing them"),
-    ).toBeTruthy();
-    expect(within(note).getByText("Watchlists")).toBeTruthy();
-    await screen.findByText("Import all");
-    fireEvent.click(screen.getByTitle("Edit server"));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("note", { name: limits })).toBeTruthy();
-  });
-  it("shows no Plex import limits for other source types", async () => {
-    mount();
-    await screen.findByText("Import all");
-    expect(screen.queryByRole("note")).toBeNull();
   });
   it("requires legacy source reconfiguration before imports", async () => {
     vi.mocked(v2).mockImplementation((op, options) =>

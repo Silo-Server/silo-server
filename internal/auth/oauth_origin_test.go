@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
-	"net/url"
 	"testing"
 )
 
@@ -22,14 +21,7 @@ func TestOAuthPublicOriginEquivalentIPs(t *testing.T) {
 		{"IPv4 mapped remains IPv6", "https://[::ffff:127.0.0.1]", "https://127.0.0.1", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			base, err := url.Parse(tc.public)
-			if err != nil {
-				t.Fatal(err)
-			}
 			req := httptest.NewRequest("GET", tc.request+"/api/v2/auth/oauth/42/native/start", nil)
-			if got := sameOrigin(req.URL.Scheme, req.Host, base); got != tc.want {
-				t.Fatalf("sameOrigin(%q, %q) = %v, want %v", tc.request, tc.public, got, tc.want)
-			}
 			h := NewOAuthHandler(OAuthHandlerDeps{HostBaseURL: tc.public})
 			if got := h.OnPublicOrigin(req); got != tc.want {
 				t.Fatalf("OnPublicOrigin(%q) = %v, want %v", tc.request, got, tc.want)

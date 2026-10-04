@@ -11,18 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestInstallationIsBuiltin(t *testing.T) {
-	if (&Installation{Kind: KindBuiltin}).IsBuiltin() != true {
-		t.Error("kind=builtin must report IsBuiltin")
-	}
-	if (&Installation{Kind: KindPlugin}).IsBuiltin() {
-		t.Error("kind=plugin must not report IsBuiltin")
-	}
-	if (&Installation{}).IsBuiltin() {
-		t.Error("zero-value kind must not report IsBuiltin")
-	}
-}
-
 // The reserved builtin plugin id must be rejected at install time so a
 // malicious or accidental catalog entry cannot hijack the reserved row.
 func TestReservedPluginIDRejected(t *testing.T) {

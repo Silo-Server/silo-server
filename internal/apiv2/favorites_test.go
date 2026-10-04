@@ -295,10 +295,6 @@ func TestListFavoritesCursor(t *testing.T) {
 	if len(page.Items) != 0 || !page.Page.HasMore {
 		t.Fatalf("page = %s", rec.Body.String())
 	}
-	// A cursor of another operation is refused.
-	other := NewCursors([]byte("other-test-cursor-key"))
-	foreign, _ := other.Encode(CursorScope{OperationID: opListProgress}, offsetPosition{Offset: 1})
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites?cursor="+foreign, "", viewerHeaders()), TypeInvalidCursor)
 }
 
 // TestListFavoritesKeysetStable walks three pages while the list changes

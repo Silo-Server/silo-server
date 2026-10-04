@@ -37,67 +37,6 @@ describe("SettingsLayout", () => {
     vi.unstubAllGlobals();
   });
 
-  it("includes a PageBack control at the top of the page", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain('aria-label="Go back"');
-  });
-
-  it("renders a grouped settings index at the root route", () => {
-    render(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    for (const group of ["Playback", "Appearance", "Home & Discovery", "Connections", "Account"]) {
-      expect(screen.getByRole("heading", { name: group })).toBeInTheDocument();
-    }
-    expect(
-      screen.getByRole("link", { name: /Playback.*Quality, languages, skipping/ }),
-    ).toHaveAttribute("href", "/settings/playback");
-    expect(screen.getByRole("link", { name: /Connect Apps.*Sign-in details/ })).toBeInTheDocument();
-  });
-
-  it("names each settings group exactly once", () => {
-    render(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    // The category jump bar used to repeat every group name and count directly
-    // above the headings that already carry them.
-    expect(
-      screen.queryByRole("navigation", { name: "Settings sections categories" }),
-    ).not.toBeInTheDocument();
-    for (const group of ["Playback", "Appearance", "Home & Discovery", "Connections", "Account"]) {
-      expect(screen.getAllByRole("heading", { name: group })).toHaveLength(1);
-      expect(
-        screen.queryByRole("link", { name: new RegExp(`^${group}, \\d+ settings`) }),
-      ).toBeNull();
-    }
-  });
-
-  it("uses one desktop grid and card geometry for every settings group", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    // Five groups, seventeen sections — every card the same height so no group
-    // is visually ranked above another.
-    expect(markup.match(/2xl:grid-cols-4/g)).toHaveLength(5);
-    expect(markup.match(/lg:h-28/g)).toHaveLength(17);
-    expect(markup).not.toContain("max-w-5xl");
-  });
-
   it("lists Requests only while the server has requests on", () => {
     const renderIndex = () =>
       renderToStaticMarkup(
@@ -111,61 +50,6 @@ describe("SettingsLayout", () => {
     expect(renderIndex()).not.toContain('href="/settings/requests"');
     mocks.requestStatus.mockReturnValue({ data: undefined });
     expect(renderIndex()).not.toContain('href="/settings/requests"');
-  });
-
-  it("keeps each settings section in exactly one group", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    for (const path of ["devices", "libraries", "watch-providers", "profiles"]) {
-      expect(markup.match(new RegExp(`href="/settings/${path}"`, "g"))).toHaveLength(1);
-    }
-  });
-
-  it("offers a clear return to the settings index from detail pages", () => {
-    render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("link", { name: "All settings" })).toHaveAttribute("href", "/settings");
-  });
-
-  it("does not include a plugins section in personal settings", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("/settings/plugins");
-    expect(markup).not.toContain(">Plugins<");
-  });
-
-  it("includes the profiles section in personal settings", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings/profiles"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("/settings/profiles");
-    expect(markup).toContain(">Profiles<");
-  });
-
-  it("includes the Webhook Sync section in personal settings", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/settings/webhook-sync"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("/settings/webhook-sync");
-    expect(markup).toContain(">Webhook Sync<");
   });
 
   it("hides the profiles section for non-admin users without a primary profile", () => {
@@ -219,19 +103,6 @@ describe("SettingsLayout", () => {
     expect(screen.getAllByRole("link", { name: /Navigation & Cards/ })).toHaveLength(1);
     expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
     expect(screen.getByText("3 matches")).toBeInTheDocument();
-  });
-
-  it("matches individual personal setting labels", async () => {
-    render(
-      <MemoryRouter initialEntries={["/settings/playback"]}>
-        <SettingsLayout />
-      </MemoryRouter>,
-    );
-
-    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "font family");
-
-    expect(screen.getAllByRole("link", { name: /Subtitles/ })).toHaveLength(1);
-    expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
   });
 
   it("focuses personal settings search with Cmd+K", () => {

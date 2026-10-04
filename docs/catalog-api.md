@@ -121,6 +121,20 @@ selection, and the Jellyfin compatibility surface: an item always plays from its
 full accessible version list. No client change is needed: the setting only
 changes what an existing `library_id` request returns.
 
+## Episode files
+
+Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
+accessible files with their quality facts. `unreadable` is present and `true`
+on a file the server could not read: ffprobe rejected it as empty, corrupt, or
+truncated, and no successful probe exists. Starting playback of that file
+falls back to another version of the episode the viewer may play; when there
+is none, it answers the terminal reason `source_unreadable` (see
+[Playback API](playback-api.md#start)). The field is cleared once the file is
+replaced and a scan or playback attempt probes it successfully. The web client
+marks an episode only when every one of its files is unreadable, since any
+readable version still plays. `/api/v1` episode listings do not carry the
+field.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,
@@ -307,6 +321,16 @@ while preserving metadata, viewer rollups, play targets and the `items` envelope
 Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
+
+## Play target season
+
+A v2 item detail whose `play_content_id` names an episode also carries
+`play_season_number`, that episode's season (`0` for specials). A client that
+opens a series or season on its play target can request that season's episode
+list without fetching the episode first. The season comes from the same query
+that chose the target. The field is absent when there is no play target or the
+target is not an episode; a client that finds it absent fetches the episode as
+before. Cards do not carry it, and the frozen v1 detail does not expose it.
 
 ## Collection membership titles
 

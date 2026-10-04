@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setAccessToken, setRefreshToken } from "@/api/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -21,6 +22,8 @@ function setup(body: unknown, status = 200) {
   };
 }
 it("does not refresh or replay provider update after401", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { fetchMock, wrapper } = setup({ message: "Expired" }, 401);
   const { result } = renderHook(useUpdateMarkerProvider, { wrapper });
   await act(async () => {
@@ -34,6 +37,8 @@ it("does not refresh or replay provider update after401", async () => {
   );
 });
 it("does not refresh or replay validation after401", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { fetchMock, wrapper } = setup({ message: "Expired" }, 401);
   const { result } = renderHook(useValidateMarkerProvider, { wrapper });
   await act(async () => {

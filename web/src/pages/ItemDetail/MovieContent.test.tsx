@@ -435,16 +435,6 @@ describe("MovieContent", () => {
     expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(true);
   });
 
-  it("does not read library capabilities for viewers", () => {
-    mocks.useAuth.mockReturnValue({ user: null });
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/movie-1"]}>
-        <MovieContent item={makeMovieItem()} />
-      </MemoryRouter>,
-    );
-    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(false);
-  });
-
   it("passes credits re-detection only for admins", () => {
     const redetect = vi.fn();
     mocks.useAuth.mockReturnValue({ user: { role: "admin" } });
@@ -476,6 +466,7 @@ describe("MovieContent", () => {
       </MemoryRouter>,
     );
     expect(mocks.capturedActionBarProps.value?.onRedetectMarkers).toBeUndefined();
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(false);
   });
 
   it.each([

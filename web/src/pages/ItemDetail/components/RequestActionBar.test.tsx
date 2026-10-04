@@ -82,17 +82,6 @@ describe("RequestActionBar watchlist toggle", () => {
     vi.clearAllMocks();
   });
 
-  it("offers Add to Watchlist and says the add also requests", () => {
-    renderBar(heat);
-    const button = screen.getByRole("button", { name: "Add to Watchlist" });
-    expect(button).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByText(NOTE)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Settings › Requests" })).toHaveAttribute(
-      "href",
-      "/settings/requests",
-    );
-  });
-
   it("drops the note when watchlist adds don't request or the title can't be requested", () => {
     mocks.featureStatus.mockReturnValue({
       data: {
@@ -115,15 +104,6 @@ describe("RequestActionBar watchlist toggle", () => {
       },
     });
     renderBar({ ...heat, request: { requestable: false, status: "pending" } });
-    expect(screen.queryByText(NOTE)).toBeNull();
-  });
-
-  it("shows On Watchlist, pressed, without the note", () => {
-    renderBar({ ...heat, in_watchlist: true });
-    expect(screen.getByRole("button", { name: "On Watchlist" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     expect(screen.queryByText(NOTE)).toBeNull();
   });
 
@@ -154,7 +134,15 @@ describe("RequestActionBar watchlist toggle", () => {
     queryClient.setQueryData(requestKeys.detail("movie", 949), heat);
     renderBar(heat, queryClient);
 
-    fireEvent.click(screen.getByRole("button", { name: "Add to Watchlist" }));
+    const button = screen.getByRole("button", { name: "Add to Watchlist" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Settings › Requests" })).toHaveAttribute(
+      "href",
+      "/settings/requests",
+    );
+
+    fireEvent.click(button);
 
     await waitFor(() =>
       expect(mocks.toastSuccess).toHaveBeenCalledWith("Added to your watchlist and requested", {
@@ -188,13 +176,32 @@ describe("RequestActionBar watchlist toggle", () => {
   });
 
   it("removes the title and reverts the page when the call fails", async () => {
-    mocks.deleteWatchlistTitle.mockRejectedValue(new Error("Network down"));
+    let rejectDelete!: (error: Error) => void;
+    mocks.deleteWatchlistTitle.mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rejectDelete = reject;
+      }),
+    );
     const queryClient = new QueryClient();
     const onList = { ...heat, in_watchlist: true };
     queryClient.setQueryData(requestKeys.detail("movie", 949), onList);
     renderBar(onList, queryClient);
 
+    expect(screen.getByRole("button", { name: "On Watchlist" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByText(NOTE)).toBeNull();
+
     fireEvent.click(screen.getByRole("button", { name: "On Watchlist" }));
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<RequestMediaDetail>(requestKeys.detail("movie", 949))
+          ?.in_watchlist,
+      ).toBe(false),
+    );
+    await waitFor(() => expect(mocks.deleteWatchlistTitle).toHaveBeenCalledWith("movie", 949));
+    rejectDelete(new Error("Network down"));
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Network down"));
     expect(mocks.deleteWatchlistTitle).toHaveBeenCalledWith("movie", 949);

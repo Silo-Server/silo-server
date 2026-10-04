@@ -189,13 +189,13 @@ func TestExecuteAppliesSyncAndCachesSpeech(t *testing.T) {
 		t.Fatalf("executed on %q", got)
 	}
 
-	// The same file's speech comes from the cache the second time.
-	job = f.run(t, TriggerManual)
-	if f.decodes != sampledWindows {
-		t.Fatalf("second sync decoded again: %d", f.decodes)
+	// The next speech request reuses the artifact written by execute.
+	windows, _, executedOn, err := f.svc.speech(t.Context(), f.svc.files.(fakeFiles).file, "en", false)
+	if err != nil || len(windows) != sampledWindows || executedOn != "cache" {
+		t.Fatalf("cached speech: windows=%d executed_on=%q err=%v", len(windows), executedOn, err)
 	}
-	if got := f.jobs.finished[job.ID].ExecutedOn; got != "cache" {
-		t.Fatalf("executed on %q", got)
+	if f.decodes != sampledWindows {
+		t.Fatalf("cached speech decoded again: %d", f.decodes)
 	}
 }
 
@@ -235,20 +235,11 @@ func TestExecuteReportsNoMatch(t *testing.T) {
 	}
 }
 
-func TestExecuteLosesToConcurrentEdit(t *testing.T) {
-	f := newFixture(t, subtitles.Timing{OffsetMS: 3000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	f.jobs.applyErr = ErrSubtitleChanged
-	job := f.run(t, TriggerManual)
-	if job.Status != JobFailed || f.notifier.calls != 0 {
-		t.Fatalf("status %s notifier %d", job.Status, f.notifier.calls)
-	}
-}
-
 func TestExecuteEndsJobWhenApplyFails(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{OffsetMS: 3000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
 	f.jobs.applyErr = errors.New("connection reset")
-	if job := f.run(t, TriggerManual); job.Status != JobFailed {
-		t.Fatalf("status %s, want failed so a new sync can start", job.Status)
+	if job := f.run(t, TriggerManual); job.Status != JobFailed || f.notifier.calls != 0 {
+		t.Fatalf("status %s, notifier calls %d; want failed without notifying players", job.Status, f.notifier.calls)
 	}
 }
 

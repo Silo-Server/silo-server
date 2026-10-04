@@ -234,9 +234,6 @@ type PluginPresentationView struct {
 }
 
 type PluginConfigSchemaView = plugins.ConfigSchemaView
-type pluginAdminFormJSON = plugins.AdminFormView
-type pluginAdminFormFieldJSON = plugins.AdminFormFieldView
-type pluginAdminFormSectionJSON = plugins.AdminFormSectionView
 
 type PluginCapabilityView struct {
 	Type          string                   `json:"type"`
@@ -1535,10 +1532,6 @@ func toUserPluginSettingsSummary(
 
 func configSchemasToJSON(schemas []*pluginv1.ConfigSchema) []PluginConfigSchemaView {
 	return plugins.ConfigSchemaViews(schemas)
-}
-
-func adminFormToJSON(form *pluginv1.AdminFormDescriptor) *pluginAdminFormJSON {
-	return plugins.AdminFormViewFromProto(form)
 }
 
 func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCapabilityView {

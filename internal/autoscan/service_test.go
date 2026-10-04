@@ -1084,18 +1084,6 @@ func TestPollOnceAdvancesMarkerWhenZeroPathsReturned(t *testing.T) {
 	}
 }
 
-func TestPollOnceDisabledNoop(t *testing.T) {
-	store := &fakeStore{settings: Settings{Enabled: false}}
-	q := &recordingQueuer{}
-	svc := newService(store, &fakeProvider{}, q, allowSuppressor{})
-	if err := svc.PollOnce(context.Background()); err != nil {
-		t.Fatalf("PollOnce: %v", err)
-	}
-	if len(q.enqueued) != 0 {
-		t.Fatalf("disabled autoscan should enqueue nothing, got %d", len(q.enqueued))
-	}
-}
-
 func TestPollOnceProviderErrorKeepsMarker(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},

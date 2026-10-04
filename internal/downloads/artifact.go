@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -92,6 +91,27 @@ type Artifact struct {
 	CreatedAt                  time.Time
 	CompletedAt                *time.Time
 	LastUsedAt                 time.Time
+	// Live state of the current attempt; a claim resets it.
+	StartedAt           *time.Time
+	WorkerKind          string // "", WorkerServer or WorkerNode
+	WorkerNodeID        *int
+	WorkerName          string
+	Progress            *ArtifactProgress
+	ProgressUnavailable bool
+}
+
+// Worker kinds recorded on an artifact attempt (download_artifacts.worker_kind).
+const (
+	WorkerServer = "server"
+	WorkerNode   = "node"
+)
+
+// ArtifactProgress is the last progress reading the lease owner persisted.
+type ArtifactProgress struct {
+	EncodedSeconds  float64
+	DurationSeconds float64
+	Speed           float64
+	UpdatedAt       time.Time
 }
 
 type paramsHashParams struct {
@@ -104,26 +124,6 @@ type paramsHashParams struct {
 	recipeVersion                                         string
 	preflightRequired                                     bool
 	sourceRevision                                        tonemap.SourceRevision
-}
-
-// paramsHash is the test-only legacy wrapper for an encode target without a
-// tone-map recipe.
-func paramsHash(format, container, codecVideo, codecAudio, resolution string, audioTrackIndex, targetBitrateKbps int, subtitleBurnIn bool) string {
-	return paramsHashWithToneMapRevision(paramsHashParams{
-		format: format, container: container, codecVideo: codecVideo, codecAudio: codecAudio, resolution: resolution,
-		audioTrackIndex: audioTrackIndex, targetBitrateKbps: targetBitrateKbps, subtitleBurnIn: subtitleBurnIn,
-		policy: tonemap.PolicyNone,
-	})
-}
-
-// paramsHashWithToneMap extends the legacy encode identity with the frozen
-// tone-map policy and recipe while preserving old hashes for ordinary encodes.
-func paramsHashWithToneMap(format, container, codecVideo, codecAudio, resolution string, audioTrackIndex, targetBitrateKbps int, subtitleBurnIn bool, policy tonemap.Policy, mode tonemap.Mode, sourceKind tonemap.SourceKind, recipeVersion string) string {
-	return paramsHashWithToneMapRevision(paramsHashParams{
-		format: format, container: container, codecVideo: codecVideo, codecAudio: codecAudio, resolution: resolution,
-		audioTrackIndex: audioTrackIndex, targetBitrateKbps: targetBitrateKbps, subtitleBurnIn: subtitleBurnIn,
-		policy: policy, mode: mode, sourceKind: sourceKind, recipeVersion: recipeVersion,
-	})
 }
 
 // paramsHashWithToneMapRevision binds prepared-output deduplication to the
@@ -146,19 +146,6 @@ func artifactUsesExecutionFingerprint(a *Artifact) bool {
 		return false
 	}
 	return a.ToneMapMode != "" || a.AudioRecipeVersion != "" || a.TrackRecipeVersion != ""
-}
-
-// effectiveArtifactDir resolves where prepared artifacts are written: the
-// configured download.artifact_dir when set, otherwise a dedicated directory
-// alongside the transcode dir. The result is always rooted at a real volume,
-// never "" (which would land in the process cwd).
-//
-// Artifacts live as a SIBLING of the transcode dir, never inside it:
-// CleanupOrphanedTranscodeDirs deletes every non-active subdirectory of the
-// transcode dir, so an artifact dir nested under it would be wiped on the next
-// transcode sweep.
-func effectiveArtifactDir(artifactDir, transcodeDir string) string {
-	return config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 }
 
 // artifactOutputPath derives a deterministic output path from

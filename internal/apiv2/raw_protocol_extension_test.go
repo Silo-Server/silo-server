@@ -229,11 +229,11 @@ func TestRawProtocolDeclarationsRejectInvalidHandshakes(t *testing.T) {
 					t.Fatal("invalid raw protocol accepted")
 				}
 			}()
-			NewHandler(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				raw := rawProtocolFixture(http.MethodPost, "html-callback", ClassPublic)
 				change(&raw)
 				RegisterRaw(reg, raw, http.NotFoundHandler())
-			}})
+			})
 		})
 	}
 }

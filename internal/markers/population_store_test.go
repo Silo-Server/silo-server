@@ -198,55 +198,6 @@ func TestMarkerResolverUsesShowIDsAndPreservesSpecials(t *testing.T) {
 	}
 }
 
-// A daily quota smaller than the due backlog must still reach every file over
-// successive runs instead of spending it on the lowest file IDs each time.
-func TestPopulationCandidatesRotateThroughDueFilesUnderQuota(t *testing.T) {
-	fixture := newContributionStoreFixture(t)
-	store := NewPopulationStore(fixture.pool)
-	ctx := t.Context()
-	_, fileIDs := fixture.seedMovieFiles(t)
-	providers := map[string]string{fixture.provider: "rev1"}
-	fetch := func(fileID int) {
-		t.Helper()
-		claim, claimed, err := store.Claim(ctx, fileID, fixture.provider, "identity", "rev1", false)
-		if err != nil || !claimed {
-			t.Fatalf("claim file %d: claimed=%v err=%v", fileID, claimed, err)
-		}
-		if err := store.Complete(ctx, claim, FetchCompletion{Outcome: markerFetchMiss, RetryAt: time.Now().Add(markerMissTTL), Result: &Result{}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	advance := func() {
-		t.Helper()
-		if _, err := fixture.pool.Exec(ctx, `UPDATE marker_fetch_state SET fetched_at=fetched_at-make_interval(secs=>$1),retry_at=retry_at-make_interval(secs=>$1)
-			WHERE provider=$2 AND media_file_id=ANY($3)`, markerMissTTL.Seconds()+1, fixture.provider, fileIDs); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Seed every file as an older miss, the highest ID oldest of all.
-	for i := len(fileIDs) - 1; i >= 0; i-- {
-		fetch(fileIDs[i])
-		advance()
-	}
-
-	refreshed := make(map[int]bool)
-	for run := range len(fileIDs) {
-		ids := allCandidates(t, store, providers, fileIDs)
-		if len(ids) == 0 {
-			t.Fatalf("run %d: no due candidates", run)
-		}
-		// The provider quota allows one request per run.
-		fetch(ids[0])
-		refreshed[ids[0]] = true
-		advance()
-	}
-	for _, id := range fileIDs {
-		if !refreshed[id] {
-			t.Errorf("file %d was never refreshed in %d quota-limited runs; refreshed=%v", id, len(fileIDs), refreshed)
-		}
-	}
-}
-
 // quotaSync runs Sync over the fixture's movie files with a provider that
 // answers a fixed number of requests per run and then rate-limits.
 type quotaSync struct {

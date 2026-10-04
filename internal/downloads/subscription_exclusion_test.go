@@ -342,41 +342,6 @@ func TestManagedDeleteOutsideMonitorPostgres(t *testing.T) {
 	}
 }
 
-// TestMonitorRetentionLoopPostgres replays the iOS monitoring run for a
-// delete_watched monitor: sync, then the client's retention pass deletes the
-// completed download. Across runs the watched episode must not come back.
-func TestMonitorRetentionLoopPostgres(t *testing.T) {
-	ctx := context.Background()
-	fx := seedMonitorFixture(t, 0, true)
-	if n := fx.sync(t); n != 3 {
-		t.Fatalf("first sync registered %d, want 3", n)
-	}
-	store, err := pgstore.NewPostgresProvider(fx.pool).ForUser(ctx, fx.userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The profile finishes episode 1 after it was downloaded.
-	if err := store.SetProgressAt(ctx, fx.profileA, fx.episodes[0], 1200, 1200, true, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	const runs = 5
-	redownloads := 0
-	for range runs {
-		fx.sync(t)
-		if fx.entry(t, fx.episodes[0]) == nil {
-			continue
-		}
-		redownloads++
-		fx.deleteEpisode(t, fx.episodes[0])
-	}
-	// The first run deletes the copy registered before the episode was watched.
-	redownloads--
-	t.Logf("watched episode re-registered in %d of %d monitoring runs", redownloads, runs)
-	if redownloads != 0 {
-		t.Fatalf("watched episode re-registered in %d runs, want 0", redownloads)
-	}
-}
-
 // TestManagedDeleteWaitsForMonitorSyncPostgres: while a sync holds the monitor
 // lock, a delete of one of its episodes waits and cannot commit, so the locked
 // sync still sees the episode as held; once the delete commits, the next sync

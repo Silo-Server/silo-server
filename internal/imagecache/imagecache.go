@@ -109,13 +109,6 @@ func (c *Cacher) SetArtworkRevisionTracker(tracker ArtworkRevisionTracker) {
 	}
 }
 
-func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Cacher{s3: s3, httpClient: client}
-}
-
 // CacheImage implements metadata.ImageCacher using the internal Cache method.
 func (c *Cacher) CacheImage(ctx context.Context, req metadata.CacheImageRequest) (*metadata.CacheImageResult, error) {
 	result, err := c.Cache(ctx, CacheRequest{

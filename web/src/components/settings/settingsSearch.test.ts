@@ -63,22 +63,6 @@ describe("settingsSearch", () => {
     ]);
   });
 
-  it("matches individual setting labels", () => {
-    expect(filterSettingsSearchGroups(groups, "quiet subsystems")).toEqual([
-      {
-        label: "Server",
-        items: [groups[0]!.items[0]],
-      },
-    ]);
-
-    expect(filterSettingsSearchGroups(groups, "pool max open")).toEqual([
-      {
-        label: "Server",
-        items: [groups[0]!.items[1]],
-      },
-    ]);
-  });
-
   it("matches section labels by returning the full section", () => {
     const filtered = filterSettingsSearchGroups(groups, "server");
 

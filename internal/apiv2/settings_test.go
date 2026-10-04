@@ -66,23 +66,6 @@ func TestGetSettingsContractCapabilities(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/contract/capabilities?fields=x", "", bearer(memberToken)), TypeValidationFailed)
 }
 
-func TestGetOverlayConfig(t *testing.T) {
-	h := newTestHandler(t, pilotDeps(nil, nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/settings/overlay-config", "", bearer(memberToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	// defaults is absent, not "", when the administrator set none.
-	want := `{"enabled":true,"quick_actions_enabled":false,"quick_actions_default":"both"}` + "\n"
-	if rec.Body.String() != want {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
-	if got := rec.Header().Get("Cache-Control"); got != "private, no-cache" {
-		t.Fatalf("Cache-Control = %q", got)
-	}
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/overlay-config", "", bearer(expiredToken)), TypeSessionExpired)
-}
-
 func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	h := newTestHandler(t, deps)

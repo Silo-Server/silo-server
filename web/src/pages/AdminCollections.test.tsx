@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { LibraryCollection } from "@/api/types";
 
 import {
-  buildAdminCollectionEditorPath,
   buildTMDBPresetSourceInput,
   collectionsInAdminScope,
   parseTMDBPresetSourceConfig,
@@ -83,16 +82,6 @@ describe("AdminCollections helpers", () => {
     expect(body.collection_type).toBe("manual");
     expect(body.query_definition).toBeUndefined();
     expect(body.sort_config).toBeUndefined();
-  });
-
-  it("builds a create route that preserves the current library selection", () => {
-    expect(buildAdminCollectionEditorPath("new", 7)).toBe("/admin/collections/new?libraryId=7");
-  });
-
-  it("builds an edit route for an existing collection", () => {
-    expect(buildAdminCollectionEditorPath("col-9", 4)).toBe(
-      "/admin/collections/col-9/edit?libraryId=4",
-    );
   });
 
   it("parses a generic tmdb preset source config", () => {

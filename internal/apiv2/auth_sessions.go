@@ -19,13 +19,24 @@ import (
 
 // AuthProvider is one way to sign in.
 type AuthProvider struct {
-	ID              string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
-	DisplayName     string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
-	Mode            string `json:"mode" doc:"How the provider authenticates: credentials (login) or oauth (the OAuth handshake)" example:"credentials"`
-	Default         bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
-	IconURL         string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
-	InstallationID  ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
-	NativeStartPath string `json:"native_start_path,omitempty" doc:"Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in" example:"/api/v2/auth/oauth/3/native/start"`
+	ID                string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
+	DisplayName       string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
+	Mode              string `json:"mode" doc:"How the provider authenticates: credentials (login), oauth (the OAuth handshake) or network (signInWithNetworkIdentity: the provider's network says who owns the device; listed only to a request that arrived through that network). Clients ignore modes they do not know" example:"credentials"`
+	Default           bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
+	IconURL           string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
+	InstallationID    ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
+	NativeStartPath   string `json:"native_start_path,omitempty" doc:"Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in" example:"/api/v2/auth/oauth/3/native/start"`
+	NetworkSignInPath string `json:"network_sign_in_path,omitempty" doc:"Path of signInWithNetworkIdentity below the server base, for a network provider; absent for other modes. An app appends it to its saved server base URL and POSTs {} to sign in, with no password and no browser" example:"/api/v2/auth/network/5/sign-in"`
+	// NetworkIdentity is who the network provider says owns the requesting
+	// device, for a "Continue as" label.
+	NetworkIdentity *AuthProviderNetworkIdentity `json:"network_identity,omitempty" doc:"Who the network provider says owns the device that sent this request, for a Continue as label; present only for a network provider. It authorizes nothing: signInWithNetworkIdentity asks the provider again"`
+}
+
+// AuthProviderNetworkIdentity is the owner of the requesting device as a
+// network provider names them.
+type AuthProviderNetworkIdentity struct {
+	DisplayName string `json:"display_name" doc:"Name at the provider; may be empty" example:"Alice Example"`
+	Username    string `json:"username" doc:"Login name at the provider; may be empty" example:"alice@example.test"`
 }
 
 // AuthProviderCollection is the listAuthProviders response: the bounded list
@@ -212,6 +223,12 @@ func (reg *Registry) listAuthProviders(ctx context.Context, _ *struct{}) (*AuthP
 			if p.Mode == auth.ProviderModeOAuth && reg.deps.OAuth != nil {
 				if reg.deps.OAuth.NativeSignInAvailable() {
 					item.NativeStartPath = auth.NativeStartPath(Prefix, p.InstallationID)
+				}
+			}
+			if p.Mode == auth.ProviderModeNetwork {
+				item.NetworkSignInPath = networkSignInPath(p.InstallationID)
+				if p.NetworkIdentity != nil {
+					item.NetworkIdentity = &AuthProviderNetworkIdentity{DisplayName: p.NetworkIdentity.DisplayName, Username: p.NetworkIdentity.Username}
 				}
 			}
 		}

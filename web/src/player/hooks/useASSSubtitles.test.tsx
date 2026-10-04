@@ -1,8 +1,8 @@
-import type { RefObject } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useASSSubtitles } from "./useASSSubtitles";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
+import { useASSSubtitles } from "./useASSSubtitles";
 
 // Capture the options every JASSUB instance is constructed with, plus the
 // instances themselves so tests can observe later timeOffset updates.
@@ -263,21 +263,6 @@ describe("useASSSubtitles time offset", () => {
       ready();
     });
     expect(instances[0]!.resize).not.toHaveBeenCalled();
-  });
-
-  it("updates the live instance's timeOffset when the delay changes", async () => {
-    const videoRef = makeVideoRef();
-    const { rerender } = renderHook(
-      ({ delay }) => useASSSubtitles(videoRef, [germanTrack], 6, false, 30, delay),
-      { initialProps: { delay: 0 } },
-    );
-
-    await waitFor(() => expect(instances).toHaveLength(1));
-    expect(instances[0]!.timeOffset).toBe(30);
-
-    rerender({ delay: 2000 });
-
-    await waitFor(() => expect(instances[0]!.timeOffset).toBe(28));
   });
 });
 

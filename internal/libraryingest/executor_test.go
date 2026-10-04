@@ -27,7 +27,7 @@ func newSkippedRootMemoryRepo(roots ...models.SkippedMediaRoot) *skippedRootMemo
 
 func TestThemeFileDoesNotCreateSkippedVideoRoot(t *testing.T) {
 	repo := newSkippedRootMemoryRepo()
-	e := &Executor{skippedRootRepo: repo}
+	e := &Executor{scanner: &finalizeRecordingScanner{}, skippedRootRepo: repo}
 	path := "/movies/Title (2020)/theme-music/opening.mp3"
 	if err := e.reconcileSkippedRoots(t.Context(), 1, "movies", scopeModeFile, path, []string{path}, nil); err != nil {
 		t.Fatal(err)
@@ -155,6 +155,11 @@ func (s *settleStubScanner) ScanFile(context.Context, string, *models.MediaFolde
 	return nil
 }
 
+func (s *settleStubScanner) ObserveFileRoot(_ context.Context, _ int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error) {
+	observation, ok := scanner.ObserveRoot(filePath, libraryType, libraryRoots...)
+	return observation, ok, nil
+}
+
 func (s *settleStubScanner) FinalizeVariantsByPathPrefix(context.Context, *models.MediaFolder, string) error {
 	return nil
 }
@@ -192,6 +197,11 @@ func (s *finalizeRecordingScanner) ScanSubtree(context.Context, *models.MediaFol
 
 func (s *finalizeRecordingScanner) ScanFile(context.Context, string, *models.MediaFolder) error {
 	return nil
+}
+
+func (s *finalizeRecordingScanner) ObserveFileRoot(_ context.Context, _ int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error) {
+	observation, ok := scanner.ObserveRoot(filePath, libraryType, libraryRoots...)
+	return observation, ok, nil
 }
 
 func (s *finalizeRecordingScanner) FinalizeVariantsByPathPrefix(context.Context, *models.MediaFolder, string) error {

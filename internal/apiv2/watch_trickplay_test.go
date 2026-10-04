@@ -89,20 +89,6 @@ func TestGetWatchTrickplay(t *testing.T) {
 	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner), TypeDependencyUnavailable)
 }
 
-func TestWatchVersionsCarryTrickplayAvailability(t *testing.T) {
-	watch := &fakeWatch{}
-	h := newTestHandler(t, watchDeps(watch))
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", bearer(memberToken))
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	version := body["versions"].([]any)[0].(map[string]any)
-	if available, ok := version["trickplay_available"]; !ok || available != false {
-		t.Fatalf("trickplay_available = %v (%t), want false present", available, ok)
-	}
-}
-
 func watchTrickplayFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{

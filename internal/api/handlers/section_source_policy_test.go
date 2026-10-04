@@ -143,30 +143,6 @@ func TestGenericAdminCollectionCannotCreateTraktSource(t *testing.T) {
 	}
 }
 
-func TestProfileTMDBTrendingSaveRequestsImmediateRefresh(t *testing.T) {
-	store := &sourcePolicyStore{}
-	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 1)}
-	h := &SectionHandler{
-		StoreProvider:     sourcePolicyProvider{store: store},
-		TrendingRefresher: refresher,
-	}
-	want := json.RawMessage(`{"source":"tmdb","window":"day"}`)
-	err := h.SaveProfileOverrides(t.Context(), SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{{
-		ID: "new", IsUserAdded: true, UserSectionType: "trending_discover", UserConfig: want,
-	}})
-	if err != nil {
-		t.Fatalf("SaveProfileOverrides: %v", err)
-	}
-	select {
-	case got := <-refresher.configs:
-		if string(got) != string(want) {
-			t.Fatalf("refresh config = %s, want %s", got, want)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("immediate refresh was not requested")
-	}
-}
-
 func TestProfileTMDBTrendingUnchangedSaveDoesNotRefreshAgain(t *testing.T) {
 	store := &sourcePolicyStore{}
 	refresher := sourcePolicyRefresher{configs: make(chan json.RawMessage, 2)}
@@ -183,7 +159,10 @@ func TestProfileTMDBTrendingUnchangedSaveDoesNotRefreshAgain(t *testing.T) {
 		t.Fatalf("first SaveProfileOverrides: %v", err)
 	}
 	select {
-	case <-refresher.configs:
+	case config := <-refresher.configs:
+		if string(config) != string(write.UserConfig) {
+			t.Fatalf("refresh config = %s, want %s", config, write.UserConfig)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("first save did not request an immediate refresh")
 	}

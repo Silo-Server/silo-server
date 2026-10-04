@@ -161,7 +161,7 @@ func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 		}
 	}
 	// ...but extras-shaped dirs are walked now (classified downstream).
-	for _, dir := range []string{"/m/Movie/Trailers", "/m/Movie/Extras", "/m/Movie/Behind The Scenes"} {
+	for _, dir := range []string{"/m/Movie/Trailers", "/m/Movie/Extras", "/m/Movie/Behind The Scenes", "/m/Movie/Featurettes", "/m/Movie/Season 1"} {
 		if shouldSkipMovieSupplementalDir(dir) {
 			t.Errorf("expected %q to be walked for extras classification", dir)
 		}

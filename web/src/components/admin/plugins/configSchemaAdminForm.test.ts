@@ -85,7 +85,7 @@ describe("adminFormForConfigSchema", () => {
         },
       ],
     };
-    expect(adminFormForConfigSchema(schema({ json_schema: "", admin_form: explicit }))).toBe(
+    expect(adminFormForConfigSchema(schema({ json_schema: "", admin_form: explicit }))).toEqual(
       explicit,
     );
   });

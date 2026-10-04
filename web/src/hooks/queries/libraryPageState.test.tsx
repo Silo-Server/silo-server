@@ -65,49 +65,6 @@ describe("useLibraryPageStatePreference", () => {
     };
   });
 
-  it("serializes whole-document saves and preserves queued library changes", async () => {
-    let resolveFirst: ((value: unknown) => void) | undefined;
-    mocks.mutateAsync
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveFirst = resolve;
-          }),
-      )
-      .mockResolvedValueOnce({});
-    const { result } = renderHook(() => useLibraryPageStatePreference());
-
-    act(() => {
-      void result.current.saveLibrarySearch(7, "tab=library&sort=year");
-      void result.current.saveLibrarySearch(9, "tab=collections");
-    });
-
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
-    expect(mocks.mutate).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveFirst?.({});
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(2));
-
-    expect(mocks.mutateAsync.mock.calls[0][0].value).toEqual({
-      version: 1,
-      libraries: {
-        "3": { search: "tab=collections" },
-        "7": { search: "tab=library&sort=year" },
-      },
-    });
-    expect(mocks.mutateAsync.mock.calls[1][0].value).toEqual({
-      version: 1,
-      libraries: {
-        "3": { search: "tab=collections" },
-        "7": { search: "tab=library&sort=year" },
-        "9": { search: "tab=collections" },
-      },
-    });
-  });
-
   it("allows the same desired state to retry after a failed write", async () => {
     mocks.mutateAsync
       .mockRejectedValueOnce(v2Problem(429, "rate_limited", "rate limited"))
@@ -657,6 +614,13 @@ describe("useLibraryPageStatePreference", () => {
 
     const first = firstHook.result.current.saveLibrarySearch(7, "tab=library&sort=year");
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(1));
+    expect(mocks.mutateAsync.mock.calls[0][0].value).toEqual({
+      version: 1,
+      libraries: {
+        "3": { search: "tab=collections" },
+        "7": { search: "tab=library&sort=year" },
+      },
+    });
     firstHook.unmount();
 
     const secondHook = renderHook(() => useLibraryPageStatePreference());

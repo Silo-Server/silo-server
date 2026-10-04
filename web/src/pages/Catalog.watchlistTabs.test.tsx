@@ -116,6 +116,8 @@ it("opens on the library tab and keeps the other tab in the URL", () => {
   expect(screen.getByTestId("item-grid")).toBeInTheDocument();
   expect(screen.getByTestId("catalog-filters")).toBeInTheDocument();
   expect(screen.queryByTestId("watchlist-titles-tab")).toBeNull();
+  expect(screen.getByRole("tab", { name: /Not in your library yet/ })).toHaveTextContent("2");
+  expect(screen.queryByTestId("watchlist-attention-dot")).toBeNull();
 
   selectTab(/Not in your library yet/);
 
@@ -146,6 +148,12 @@ it("labels each tab's content as its tab panel", () => {
 });
 
 it("restores the titles tab from the URL and passes whether adds request", () => {
+  mocks.watchlistTitles.mockReturnValue({
+    data: [title(1), title(2, "needs_review")],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  });
   mocks.featureStatus.mockReturnValue({
     data: {
       requests_enabled: true,
@@ -158,29 +166,11 @@ it("restores the titles tab from the URL and passes whether adds request", () =>
 
   const tab = screen.getByRole("tab", { name: /Not in your library yet/ });
   expect(tab).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByTestId("watchlist-attention-dot")).toBeInTheDocument();
+  expect(tab).toHaveAccessibleName(/some need attention/);
   expect(mocks.titlesTab).toHaveBeenLastCalledWith(
     expect.objectContaining({ watchlistRequests: false }),
   );
-});
-
-it("counts the titles and flags ones that need attention", () => {
-  renderCatalog("/catalog?source=watchlist");
-  const tab = screen.getByRole("tab", { name: /Not in your library yet/ });
-  expect(tab).toHaveTextContent("2");
-  // Narrow screens read the shorter label.
-  expect(tab.querySelector(".sm\\:hidden")?.textContent).toBe("Not in library");
-  expect(screen.queryByTestId("watchlist-attention-dot")).toBeNull();
-  cleanup();
-
-  mocks.watchlistTitles.mockReturnValue({
-    data: [title(1), title(2, "needs_review")],
-    isLoading: false,
-    isError: false,
-    refetch: vi.fn(),
-  });
-  renderCatalog("/catalog?source=watchlist");
-  expect(screen.getByTestId("watchlist-attention-dot")).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: /some need attention/ })).toBeInTheDocument();
 });
 
 it.each([

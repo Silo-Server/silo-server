@@ -1040,18 +1040,6 @@ func TestHandleDirectDownloadViaProxyStaysLocalWhenTargetIneligible(t *testing.T
 	}
 }
 
-func TestHandleDirectDownloadViaProxyMapsResolverError(t *testing.T) {
-	svc := &proxyDownloadService{fakeDownloadService: &fakeDownloadService{}, resolveErr: catalog.ErrItemNotFound}
-	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(nodepool.NewProxyPool(), nodepool.NewTranscodePool()), func() string { return "secret" })
-	rec := httptest.NewRecorder()
-	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
 // An unknown file_id reaches the handler as the catalog not-found sentinel the
 // download service now returns, on every direct-download variant.
 func TestHandleDirectDownloadUnknownFileIsNotFound(t *testing.T) {

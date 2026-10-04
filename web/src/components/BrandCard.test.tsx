@@ -31,6 +31,13 @@ describe("BrandCard", () => {
     expect(
       renderCard({ kind: "genre", card: card({ slug: "sci fi", display_name: "Sci-Fi" }) }),
     ).toHaveAttribute("href", "/requests/browse/genre/sci%20fi?media_type=movie");
+    expect(
+      renderCard({
+        kind: "genre",
+        card: card({ slug: "comedy", display_name: "Comedy" }),
+        defaultMediaTypeForGenre: "series",
+      }),
+    ).toHaveAttribute("href", "/requests/browse/genre/comedy?media_type=movie");
   });
 
   it("opens a genre on series when asked and supported", () => {

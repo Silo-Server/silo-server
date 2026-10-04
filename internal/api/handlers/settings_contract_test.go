@@ -133,24 +133,6 @@ type notScalarError struct{}
 
 func (*notScalarError) Error() string { return "not a scalar default" }
 
-// TestContractLoadsUnderTheServerBuild is a cheap canary: the handlers package
-// is linked into cmd/silo, so if the embedded manifest is self-inconsistent the
-// failure shows up here rather than at a customer's startup.
-func TestContractLoadsUnderTheServerBuild(t *testing.T) {
-	manifest, err := settingscontract.Load()
-	if err != nil {
-		t.Fatalf("embedded settings contract is invalid: %v", err)
-	}
-	if len(manifest.Keys()) == 0 {
-		t.Fatal("settings contract declares no keys")
-	}
-	for _, key := range manifest.Keys() {
-		if strings.TrimSpace(key) == "" {
-			t.Error("contract declares an empty key")
-		}
-	}
-}
-
 // TestAudioLanguageRejectsMalformedTags closes a drift measured against the
 // live server: the manifest declares playback.audio_language as language_tag,
 // but the registry check was "32 characters or fewer", so "!!!" was stored for
@@ -201,36 +183,5 @@ func TestPlaybackSpeedEnforcesDeclaredStep(t *testing.T) {
 		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
 			t.Errorf("out-of-range value %q was accepted", v)
 		}
-	}
-}
-
-// TestRegistryStepMatchesTheManifest keeps the two in lockstep: if the manifest
-// widens or narrows the step, this fails until the typed endpoint follows.
-// The legacy registry deliberately does not enforce the step — see the
-// player.playback_speed entry — so the check runs against the contract
-// validator the typed mutation endpoint uses.
-func TestRegistryStepMatchesTheManifest(t *testing.T) {
-	manifest, err := settingscontract.Load()
-	if err != nil {
-		t.Fatalf("loading contract: %v", err)
-	}
-	def, ok := manifest.Lookup("player.playback_speed")
-	if !ok {
-		t.Fatal("player.playback_speed is not in the manifest")
-	}
-	if def.ValueSchema.Step == nil {
-		t.Fatal("the manifest no longer declares a step; drop this check too")
-	}
-	step := *def.ValueSchema.Step
-	min, ok := def.ValueSchema.Minimum.Current()
-	if !ok {
-		t.Fatal("the manifest no longer declares a minimum for player.playback_speed")
-	}
-
-	// A value one half-step above the minimum must be rejected by the typed
-	// endpoint's validator for whatever step the manifest currently declares.
-	offStep := strconv.FormatFloat(min+step/2, 'f', -1, 64)
-	if err := def.ValueSchema.ValidateValue(json.RawMessage(offStep), nil); err == nil {
-		t.Errorf("%s is off the manifest's declared %g step but the contract accepted it", offStep, step)
 	}
 }

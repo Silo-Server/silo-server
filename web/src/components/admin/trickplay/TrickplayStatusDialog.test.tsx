@@ -47,9 +47,10 @@ function renderDialog(respond: (method: string, path: string) => Response) {
 }
 
 describe("TrickplayStatusDialog", () => {
-  it("lists each file's previews and why one failed", async () => {
-    renderDialog(() => jsonResponse(getItemOk));
-
+  it("queues the item's previews again", async () => {
+    const calls = renderDialog((method) =>
+      method === "POST" ? jsonResponse(regenerateAccepted, 202) : jsonResponse(getItemOk),
+    );
     expect(await screen.findByText("Heat (1995) Remux.mkv")).toBeTruthy();
     expect(screen.getByText("Ready")).toBeTruthy();
     expect(screen.getByText(/^720 previews · 300 px every 10 s · 2\.0 MB · made /)).toBeTruthy();
@@ -57,12 +58,7 @@ describe("TrickplayStatusDialog", () => {
     expect(screen.getByText("File 43")).toBeTruthy();
     expect(screen.getByText("Failed")).toBeTruthy();
     expect(screen.getByText("ffmpeg sampling failed (invalid_data)")).toBeTruthy();
-  });
 
-  it("queues the item's previews again", async () => {
-    const calls = renderDialog((method) =>
-      method === "POST" ? jsonResponse(regenerateAccepted, 202) : jsonResponse(getItemOk),
-    );
     const button = await screen.findByRole("button", { name: /Make Again/ });
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
 

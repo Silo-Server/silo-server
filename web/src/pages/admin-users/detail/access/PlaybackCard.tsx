@@ -36,7 +36,6 @@ import {
   rowSource,
   sameVideoTranscoding,
   videoTranscodingFromEffective,
-  videoTranscodingFromOverrides,
   videoTranscodingOverrides,
   type InheritContext,
   type PolicyRowKey,
@@ -117,7 +116,7 @@ function toDraft(user: AdminUser): PlaybackDraft {
   // A custom row shows what applies now, which also covers an overridden
   // count under an inherited switch.
   const video =
-    videoTranscodingFromOverrides(user.transcode_allowed, user.max_transcodes) === null
+    user.transcode_allowed === null && user.max_transcodes === null
       ? null
       : videoTranscodingFromEffective(
           user.effective_policy.transcode_allowed,
