@@ -1,7 +1,6 @@
 package recommendations
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -493,13 +492,7 @@ const summaryTopGenres = 5
 // heaviest cluster has genres to fill every place. A profile without clusters
 // has none.
 func clusterTopGenres(clusters []TasteCluster, n int) []string {
-	sorted := slices.Clone(clusters)
-	slices.SortStableFunc(sorted, func(a, b TasteCluster) int {
-		if c := cmp.Compare(b.TotalWeight, a.TotalWeight); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.ClusterIdx, b.ClusterIdx)
-	})
+	sorted := clustersHeaviestFirst(clusters)
 	genres := []string{}
 	for rank := 0; len(genres) < n; rank++ {
 		more := false

@@ -73,8 +73,7 @@ func collaborativeCandidates(peers []peerLikes) map[string]collaborativeCandidat
 // user to the requesting user. Items the target profile already rated, those
 // in its recommendation exclusion set, those filter does not admit and those
 // not of recommendableMediaTypes are filtered out before ranking. Applies MMR
-// re-ranking for diversity. Below
-// the account floors it returns an empty list.
+// re-ranking for diversity. Below the account floors it returns an empty list.
 func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {

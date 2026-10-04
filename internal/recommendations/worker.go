@@ -342,8 +342,8 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 // pending key, so the queue and the stale sweep on this server do not start a
 // duplicate; when a refresh is already queued or running here it returns at
 // once and leaves the work to that one, which runs again if it already
-// started. When maxRefreshesNow are already
-// running it queues the refresh instead.
+// started. When maxRefreshesNow are already running it queues the refresh
+// instead.
 func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
 		return false
@@ -900,9 +900,9 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	}
 	excludeIDs := scoredItemIDsFromSet(excluded)
 
-	rows := w.engine.rowBuilder()
+	builder := w.engine.rowBuilder()
 	var mainItems []ScoredItem
-	aggregatedRow, err := rows.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	aggregatedRow, err := builder.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		fail("main_row", err)
 	} else {
@@ -916,7 +916,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	// candidate query failed and returns no row for it, so its cached row
 	// stays. A row that rebuilds empty, or that the main row's titles empty,
 	// is cached empty: it replaces the old row, and reads know it was built.
-	clusterRows, failedClusters, err := rows.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	clusterRows, failedClusters, err := builder.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	res.failed += failedClusters
 	if err != nil {
 		fail("cluster_rows", err)

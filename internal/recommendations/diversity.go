@@ -115,7 +115,7 @@ const servedGenreShare = 0.5
 // item is removed. Items without genre data are never counted.
 func applyGenreCap(items []ScoredItem, genres map[string][]string) []ScoredItem {
 	window := min(len(items), ServedRowSize)
-	limit := int(servedGenreShare * ServedRowSize)
+	maxPerGenre := int(servedGenreShare * ServedRowSize)
 	counts := make(map[string]int)
 	out := make([]ScoredItem, 0, len(items))
 	var skipped []ScoredItem
@@ -123,7 +123,7 @@ func applyGenreCap(items []ScoredItem, genres map[string][]string) []ScoredItem 
 	for ; next < len(items) && len(out) < window; next++ {
 		item := items[next]
 		itemGenres := distinctGenres(genres[item.MediaItemID])
-		if slices.ContainsFunc(itemGenres, func(g string) bool { return counts[g] >= limit }) {
+		if slices.ContainsFunc(itemGenres, func(g string) bool { return counts[g] >= maxPerGenre }) {
 			skipped = append(skipped, item)
 			continue
 		}

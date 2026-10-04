@@ -2081,7 +2081,7 @@ func (r *Repo) tasteSeedCandidates(ctx context.Context, filter catalog.AccessFil
 // server nobody has watched anything on yet, genres rank by how many titles
 // they hold, then by name. Episodes are resolved to their parent series.
 func (r *Repo) GetTopGenres(ctx context.Context, limit int) ([]string, error) {
-	eligible := recommendationItemEligibilityWhereClause("mi") + " AND mi.type = ANY($1)"
+	eligible := strings.Join(recommendableItemConditions(), " AND ")
 	query := fmt.Sprintf(`
 		WITH %s,
 		catalog_genres AS (
