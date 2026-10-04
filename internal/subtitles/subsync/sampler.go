@@ -106,6 +106,9 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 	endpoint := nodepool.NodeEndpoint(node.URL, mediasample.RemotePath)
 	results := make([]mediasample.Result, 0, len(reqs))
 	for i, req := range reqs {
+		if err := ctx.Err(); err != nil {
+			return nil, nodeLabel(node), err
+		}
 		result, err := s.runRemote(ctx, endpoint, secret, req)
 		if err == nil {
 			results = append(results, result)
@@ -136,6 +139,9 @@ func (s *sampler) runRemote(ctx context.Context, endpoint, secret string, req me
 // runLocal runs reqs here, appending their results to those already done.
 func (s *sampler) runLocal(ctx context.Context, reqs []mediasample.Request, results []mediasample.Result, done func(int)) ([]mediasample.Result, error) {
 	for _, req := range reqs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		result, err := s.local(ctx, req)
 		if err != nil {
 			return nil, err

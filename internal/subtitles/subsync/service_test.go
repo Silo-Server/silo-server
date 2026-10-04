@@ -572,10 +572,10 @@ func TestExecuteDoesNotAnnounceProgressOfAJobThatEndedMeanwhile(t *testing.T) {
 	}
 	f.notifier.updates = nil
 	f.jobs.progressErr = jobrunner.ErrJobTerminal
-	f.jobs.applyErr = jobrunner.ErrJobTerminal
 	f.svc.execute(context.Background(), job)
-	if len(f.notifier.updates) != 0 {
-		t.Fatalf("announced %+v", f.notifier.updates)
+	// It stops at its first progress step: no audio decoded, nothing said.
+	if len(f.notifier.updates) != 0 || f.decodes != 0 || len(f.jobs.finished) != 0 || len(f.jobs.applied) != 0 {
+		t.Fatalf("announced %+v, decoded %d, finished %v, applied %v", f.notifier.updates, f.decodes, f.jobs.finished, f.jobs.applied)
 	}
 }
 

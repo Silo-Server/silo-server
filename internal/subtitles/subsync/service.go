@@ -268,14 +268,20 @@ type run struct {
 	s       *Service
 	job     Job
 	subject subject
+	// stop ends the run's work early once its job is known to have ended.
+	stop context.CancelCauseFunc
 }
 
 // report records a running job's phase and progress, on the job row and for
 // players of its file.
 func (r *run) report(ctx context.Context, phase string, progress float64) {
 	r.job.Status, r.job.Phase, r.job.Progress = JobRunning, phase, &progress
-	// A job reaped or deleted with a replaced file is no longer running.
+	// A job reaped or deleted with a replaced file is no longer running:
+	// stop working on it, and say nothing.
 	if err := r.s.jobs.Progress(context.WithoutCancel(ctx), r.job.ID, phase, progress); errors.Is(err, jobrunner.ErrJobTerminal) {
+		if r.stop != nil {
+			r.stop(err)
+		}
 		return
 	}
 	r.s.updated(ctx, r.subject.target, r.timingNow(ctx), r.job)
@@ -313,11 +319,17 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		return
 	}
 	started := s.now()
-	r := &run{s: s, job: *job}
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	r := &run{s: s, job: *job, stop: stop}
 	outcome, err := s.align(ctx, r)
 	log := slog.With("component", "subsync", "job_id", job.ID, "subtitle_id", job.SubtitleID,
 		"external_timing_id", job.ExternalTimingID, "media_file_id", job.MediaFileID, "trigger", job.Trigger,
 		"executed_on", outcome.ExecutedOn, "duration_ms", s.now().Sub(started).Milliseconds())
+	if errors.Is(context.Cause(ctx), jobrunner.ErrJobTerminal) {
+		log.InfoContext(ctx, "subtitle sync stopped: the job ended meanwhile")
+		return
+	}
 	finishCtx := context.WithoutCancel(ctx)
 	// stage says where a failure happened: aligning, or applying its result.
 	fail := func(err error, stage string) {
