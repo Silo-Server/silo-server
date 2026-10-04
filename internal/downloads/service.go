@@ -942,13 +942,17 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 	}
 	var inserted []*Download
 	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		adding := len(newIdx)
+		activating := len(newIdx)
 		for _, r := range prepared {
-			if replacementAddsActive(r.existing, items[r.i].file.ID, decisions[r.i]) {
-				adding++
+			d := decisions[r.i]
+			ready := s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget)
+			if replacementAddsActive(r.existing, ready) {
+				activating++
 			}
 		}
-		if err := s.limiter.Check(ctx, userID, adding); err != nil {
+		// A replacement updates its entry in place: it can become active but
+		// creates no download, so only new entries count toward the period.
+		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx)); err != nil {
 			return err
 		}
 		for _, r := range prepared {
@@ -1102,20 +1106,15 @@ func reusableManagedStatus(status string) bool {
 }
 
 // replacementAddsActive reports whether replacing existing with a prepared
-// entry for mediaFileID and decision adds an active download: existing is not
-// already active, and its file or target changes, so it is replaced rather
-// than reused.
-func replacementAddsActive(existing *Download, mediaFileID int, decision QualityDecision) bool {
+// entry adds an active download: existing is not already active, and the
+// target's prepared file is not ready, so the entry would start preparing. A
+// ready target, or one existing already holds, registers ready.
+func replacementAddsActive(existing *Download, targetReady bool) bool {
 	switch existing.Status {
 	case StatusQueued, StatusDownloading, StatusPreparing:
 		return false
 	}
-	return existing.MediaFileID != mediaFileID ||
-		existing.Format != decision.DeliveryFormat ||
-		existing.Quality != decision.RequestedQuality ||
-		existing.EffectiveQuality != decision.EffectiveQuality ||
-		existing.TargetBitrateKbps != decision.TargetBitrateKbps ||
-		!reusableManagedStatus(existing.Status)
+	return !targetReady
 }
 
 func sameManagedTarget(a, b *Download) bool {

@@ -88,6 +88,7 @@
 ./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
 ./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
+./internal/downloads TestPreparedReplacementQuotaAccountingDB
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

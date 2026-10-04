@@ -187,25 +187,20 @@ func TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres(t *testing.T) {
 }
 
 func TestReplacementAddsActive(t *testing.T) {
-	prepared := QualityDecision{RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode, TargetBitrateKbps: 5000, RequiresArtifact: true}
-	same := func(status string) *Download {
-		return &Download{Status: status, MediaFileID: 1, Format: FormatTranscode, Quality: Quality5Mbps, EffectiveQuality: Quality5Mbps, TargetBitrateKbps: 5000}
-	}
-	original := &Download{Status: StatusReady, MediaFileID: 1, Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal}
 	cases := []struct {
-		name     string
-		existing *Download
-		fileID   int
-		want     bool
+		name   string
+		status string
+		ready  bool
+		want   bool
 	}{
-		{"ready original becomes prepared", original, 1, true},
-		{"same prepared target is reused", same(StatusReady), 1, false},
-		{"another version of the episode", same(StatusReady), 2, true},
-		{"already active", same(StatusPreparing), 2, false},
-		{"failed entry is replaced", same(StatusFailed), 1, true},
+		{"ready entry, target still to prepare", StatusReady, false, true},
+		{"ready entry, target already prepared", StatusReady, true, false},
+		{"failed entry, target still to prepare", StatusFailed, false, true},
+		{"entry already active", StatusPreparing, false, false},
+		{"entry downloading", StatusDownloading, false, false},
 	}
 	for _, tc := range cases {
-		if got := replacementAddsActive(tc.existing, tc.fileID, prepared); got != tc.want {
+		if got := replacementAddsActive(&Download{Status: tc.status}, tc.ready); got != tc.want {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}
