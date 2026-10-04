@@ -369,11 +369,11 @@ type itemRatingReader interface {
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
 // its most recently completed titles of recommendableMediaTypes still in the
 // catalog, newest first, of the latest anchorCandidateLimit, leaving out
-// those it rated
-// DislikedRatingMax or lower. A row headed "Because You Watched" a title the
-// profile disliked contradicts its taste. With no ratings reader nothing is
-// left out. The worker, the Reader and Watch Tonight all choose anchors here,
-// since a read can only use an anchor whose row the worker cached.
+// those it rated DislikedRatingMax or lower. A row headed "Because You
+// Watched" a title the profile disliked contradicts its taste. With no
+// ratings reader nothing is left out. The worker, the Reader and Watch
+// Tonight all choose anchors here, since a read can only use an anchor whose
+// row the worker cached.
 func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
 	if n <= 0 {
 		return []string{}, nil

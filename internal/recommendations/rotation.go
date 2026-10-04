@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -60,15 +61,7 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 		order[i] = i
 		keys[i] = math.Log(rotationUniform(seedKey, day, items[pin+i].MediaItemID)) * float64(i+rotationRankOffset)
 	}
-	slices.SortStableFunc(order, func(a, b int) int {
-		switch {
-		case keys[a] > keys[b]:
-			return -1
-		case keys[a] < keys[b]:
-			return 1
-		}
-		return a - b
-	})
+	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(keys[b], keys[a]) })
 	drawn := make([]bool, end-pin)
 	for _, i := range order[:take] {
 		drawn[i] = true

@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"cmp"
 	"math"
 	"math/rand"
 	"slices"
@@ -379,11 +380,16 @@ func bestSeeding(items []clusterItem, k, restarts int) []int {
 // clustersHoldMinimum reports whether each of the k clusters of assignments
 // holds at least kmeansMinClusterSize items.
 func clustersHoldMinimum(assignments []int, k int) bool {
+	return !slices.ContainsFunc(clusterSizes(assignments, k), func(size int) bool { return size < kmeansMinClusterSize })
+}
+
+// clusterSizes counts the items assignments puts in each of k clusters.
+func clusterSizes(assignments []int, k int) []int {
 	sizes := make([]int, k)
 	for _, c := range assignments {
 		sizes[c]++
 	}
-	return !slices.ContainsFunc(sizes, func(size int) bool { return size < kmeansMinClusterSize })
+	return sizes
 }
 
 // cosineDistances returns the cosine distance, 1 - cosine similarity, between
@@ -407,10 +413,7 @@ func cosineDistances(items []clusterItem) [][]float64 {
 // than to the members of the nearest other cluster.
 func silhouette(distances [][]float64, assignments []int) float64 {
 	k := slices.Max(assignments) + 1
-	sizes := make([]int, k)
-	for _, c := range assignments {
-		sizes[c]++
-	}
+	sizes := clusterSizes(assignments, k)
 	total := 0.0
 	for i, own := range assignments {
 		if sizes[own] < 2 {
@@ -566,6 +569,19 @@ func topNGenres(counts map[string]int, n int) []string {
 		result[i] = pairs[i].genre
 	}
 	return result
+}
+
+// clustersHeaviestFirst returns a copy of clusters ordered by total weight,
+// heaviest first, ties by cluster index.
+func clustersHeaviestFirst(clusters []TasteCluster) []TasteCluster {
+	sorted := slices.Clone(clusters)
+	slices.SortStableFunc(sorted, func(a, b TasteCluster) int {
+		if c := cmp.Compare(b.TotalWeight, a.TotalWeight); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ClusterIdx, b.ClusterIdx)
+	})
+	return sorted
 }
 
 // A cluster's label names what sets it apart from the profile's other

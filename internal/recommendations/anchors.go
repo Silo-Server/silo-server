@@ -42,16 +42,9 @@ type mainRowAnchor struct {
 // buildTasteClusters already decides which titles are one interest, against
 // the profile's own spread.
 func mainRowAnchors(clusters []TasteCluster) []mainRowAnchor {
-	sorted := slices.Clone(clusters)
-	slices.SortStableFunc(sorted, func(a, b TasteCluster) int {
-		if c := cmp.Compare(b.TotalWeight, a.TotalWeight); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.ClusterIdx, b.ClusterIdx)
-	})
 	titles := 0
 	var anchors []mainRowAnchor
-	for _, c := range sorted {
+	for _, c := range clustersHeaviestFirst(clusters) {
 		titles += c.MemberCount
 		if len(c.Embedding) == 0 || c.TotalWeight <= 0 {
 			continue
