@@ -31,6 +31,7 @@ const (
 	RealtimeEventSubtitleTranslationDone  RealtimeEventName = "subtitle_translation_completed"
 	RealtimeEventSubtitleTranslationFail  RealtimeEventName = "subtitle_translation_failed"
 	RealtimeEventSubtitleTimingChanged    RealtimeEventName = "subtitle_timing_changed"
+	RealtimeEventSubtitleSyncUpdated      RealtimeEventName = "subtitle_sync_updated"
 )
 
 var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
@@ -42,6 +43,7 @@ var supportedRealtimeEventNameSet = map[RealtimeEventName]struct{}{
 	RealtimeEventSubtitleTranslationDone:  {},
 	RealtimeEventSubtitleTranslationFail:  {},
 	RealtimeEventSubtitleTimingChanged:    {},
+	RealtimeEventSubtitleSyncUpdated:      {},
 }
 
 // CommandName identifies a supported realtime command.
@@ -314,27 +316,80 @@ func NewSubtitleReadyEvent(
 	return NewEventEnvelope(sessionID, RealtimeEventSubtitleReady, payload)
 }
 
-// SubtitleTimingChangedPayload tells a player that a stored subtitle of its
-// file was retimed (automatic sync or a manual adjustment). A player showing
-// that track fetches it again; its stream URL already serves the new timing.
+// SubtitleTimingChangedPayload tells a player that a stored subtitle or a
+// sidecar of its file was retimed (sync or a manual adjustment). A player
+// showing that track fetches it again; its stream URL already serves the new
+// timing.
 type SubtitleTimingChangedPayload struct {
-	SessionID  string `json:"session_id"`
-	FileID     int    `json:"file_id"`
-	SubtitleID int    `json:"subtitle_id"`
+	SessionID string `json:"session_id"`
+	FileID    int    `json:"file_id"`
+	// SubtitleID is the stored subtitle's ID; absent for a sidecar.
+	SubtitleID int `json:"subtitle_id,omitempty"`
+	// SyncKey names the retimed subtitle, as the inventory's sync_key does.
+	SyncKey string `json:"sync_key"`
 	// Track identifies the retimed track in the session's inventory, as in
 	// SubtitleReadyPayload. Absent when the inventory could not be resolved.
 	Track *SubtitleInventoryItemV3 `json:"track,omitempty"`
 }
 
 // NewSubtitleTimingChangedEvent creates a validated subtitle-timing event.
-func NewSubtitleTimingChangedEvent(sessionID string, fileID, subtitleID int, track *SubtitleInventoryItemV3) (EventEnvelope, error) {
+func NewSubtitleTimingChangedEvent(sessionID string, fileID, subtitleID int, syncKey string, track *SubtitleInventoryItemV3) (EventEnvelope, error) {
 	payload, err := json.Marshal(SubtitleTimingChangedPayload{
-		SessionID: sessionID, FileID: fileID, SubtitleID: subtitleID, Track: track,
+		SessionID: sessionID, FileID: fileID, SubtitleID: subtitleID, SyncKey: syncKey, Track: track,
 	})
 	if err != nil {
 		return EventEnvelope{}, err
 	}
 	return NewEventEnvelope(sessionID, RealtimeEventSubtitleTimingChanged, payload)
+}
+
+// SubtitleSyncTiming is a subtitle's timing correction: original time t plays
+// at t * scale + offset_ms.
+type SubtitleSyncTiming struct {
+	OffsetMS int     `json:"offset_ms"`
+	Scale    float64 `json:"scale"`
+}
+
+// SubtitleSyncJob is a sync job's state, in the shape of the native API's
+// SubtitleSyncJobState.
+type SubtitleSyncJob struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Trigger string `json:"trigger"`
+	// Phase and Progress (0..1) describe a queued or running job.
+	Phase    string   `json:"phase,omitempty"`
+	Progress *float64 `json:"progress,omitempty"`
+	// Failure says why a failed job failed.
+	Failure    string              `json:"failure,omitempty"`
+	Confidence *float64            `json:"confidence"`
+	Result     *SubtitleSyncTiming `json:"result,omitempty"`
+	CreatedAt  string              `json:"created_at"`
+	FinishedAt *string             `json:"finished_at"`
+}
+
+// SubtitleSyncUpdatedPayload reports a subtitle sync job of the session's
+// file: queued, each step while it runs, and how it ended. A synced job has
+// already applied its result, and subtitle_timing_changed follows. SyncKey
+// matches the inventory track's sync_key.
+type SubtitleSyncUpdatedPayload struct {
+	SessionID string `json:"session_id"`
+	FileID    int    `json:"file_id"`
+	// SyncKey names the subtitle, as the inventory's sync_key does.
+	SyncKey string `json:"sync_key"`
+	// SubtitleID is the stored subtitle's ID; absent for a sidecar.
+	SubtitleID int `json:"subtitle_id,omitempty"`
+	// Timing is the subtitle's correction after this step.
+	Timing SubtitleSyncTiming `json:"timing"`
+	Job    SubtitleSyncJob    `json:"job"`
+}
+
+// NewSubtitleSyncUpdatedEvent creates a validated subtitle-sync event.
+func NewSubtitleSyncUpdatedEvent(payload SubtitleSyncUpdatedPayload) (EventEnvelope, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return EventEnvelope{}, err
+	}
+	return NewEventEnvelope(payload.SessionID, RealtimeEventSubtitleSyncUpdated, raw)
 }
 
 // NewSubtitleTranslationStartedEvent creates a validated translation-started event.

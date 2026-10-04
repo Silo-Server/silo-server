@@ -108,6 +108,11 @@ func (r *ArtifactRepository) EnsureQueued(ctx context.Context, a *Artifact) (*Ar
 		return nil, false, fmt.Errorf("ensuring artifact: %w", err)
 	}
 	row, err := r.GetByKey(ctx, a.MediaFileID, a.Format, a.ParamsHash)
+	if errors.Is(err, ErrNotFound) && tag.RowsAffected() == 0 {
+		// The conflicting row was deleted (an administrator canceled it)
+		// between the insert and the read; queue a fresh one.
+		return r.EnsureQueued(ctx, a)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -142,8 +147,10 @@ func (r *ArtifactRepository) GetByKey(ctx context.Context, mediaFileID int, form
 	return a, nil
 }
 
-// ClaimNext atomically claims one runnable job: a queued row whose backoff has
-// elapsed, or a running row whose lease has expired (lease stealing). FOR UPDATE
+// ClaimNext atomically claims one runnable job: a queued, unpaused row whose
+// backoff has elapsed, or a running row whose lease has expired (lease
+// stealing). A queued row can carry an unowned lease_expires_at after a pause
+// took it from a worker that may still be running; it waits that out. FOR UPDATE
 // SKIP LOCKED makes concurrent workers (and nodes) safe without double-encoding.
 // Returns ErrNoArtifactJob when nothing is claimable.
 func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease time.Duration) (*Artifact, error) {
@@ -166,9 +173,10 @@ func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease 
 		     progress_updated_at = NULL, progress_unavailable = false
 		 WHERE id = (
 		     SELECT id FROM download_artifacts
-		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND (next_retry_at IS NULL OR next_retry_at <= now()))
+		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND paused_at IS NULL
+		            AND (next_retry_at IS NULL OR next_retry_at <= now()) AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
 		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now())
-		     ORDER BY created_at
+		     ORDER BY created_at, id
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )

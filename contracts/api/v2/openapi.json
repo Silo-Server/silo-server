@@ -5145,6 +5145,13 @@
           "output": {
             "$ref": "#/components/schemas/AdminDownloadPreparationOutput"
           },
+          "paused_at": {
+            "description": "Present only when state is paused",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
           "progress": {
             "$ref": "#/components/schemas/AdminDownloadPreparationProgress",
             "description": "Latest reading of a running attempt, written about every 5 seconds; absent until the first one"
@@ -5184,11 +5191,12 @@
             "type": "string"
           },
           "state": {
-            "description": "running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). failed: attempts are exhausted; listed for 24 hours after failing.",
+            "description": "running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). paused: an administrator paused the job (paused_at); no worker claims it until it is resumed. failed: attempts are exhausted; listed for 24 hours after failing.",
             "enum": [
               "running",
               "queued",
               "retrying",
+              "paused",
               "failed"
             ],
             "type": "string"
@@ -5216,6 +5224,64 @@
         ],
         "type": "object"
       },
+      "AdminDownloadPreparationActionInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "description": "Preparation job ids (the id of a listed job). A repeated id is reported once.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationActionOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "description": "One result per distinct requested id, in request order",
+            "items": {
+              "$ref": "#/components/schemas/AdminDownloadPreparationActionResult"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
+      "AdminDownloadPreparationActionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "outcome": {
+            "description": "applied: the action took effect. unchanged: the job was already in the requested state. not_found: no such job is being prepared; it finished, was canceled, or never existed. not_applicable: the action does not apply to the job's state, such as pausing or resuming a failed job.",
+            "enum": [
+              "applied",
+              "unchanged",
+              "not_found",
+              "not_applicable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "outcome"
+        ],
+        "type": "object"
+      },
       "AdminDownloadPreparationAudioTrack": {
         "additionalProperties": false,
         "properties": {
@@ -5240,6 +5306,10 @@
             "type": "boolean"
           },
           "available": {
+            "type": "boolean"
+          },
+          "controls": {
+            "description": "Jobs can be paused, resumed and canceled",
             "type": "boolean"
           },
           "failed_window_seconds": {
@@ -5275,6 +5345,7 @@
           "realtime_channel",
           "failed_window_seconds",
           "live_progress",
+          "controls",
           "revision",
           "state",
           "allowed"
@@ -5286,6 +5357,11 @@
         "properties": {
           "failed_recent": {
             "description": "Jobs that failed in the last 24 hours",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "paused": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -5310,6 +5386,7 @@
           "running",
           "queued",
           "retrying",
+          "paused",
           "failed_recent"
         ],
         "type": "object"
@@ -5517,7 +5594,7 @@
             "$ref": "#/components/schemas/AdminDownloadPreparationCounts"
           },
           "items": {
-            "description": "Running jobs, then jobs waiting to retry, then the queue in claim order, then recent failures, newest first",
+            "description": "Running jobs, then jobs waiting to retry, then the queue in claim order, then paused jobs in claim order, then recent failures, newest first",
             "items": {
               "$ref": "#/components/schemas/AdminDownloadPreparation"
             },
@@ -24895,6 +24972,9 @@
           "bounded_subscription_sync": {
             "type": "boolean"
           },
+          "bulk_quality": {
+            "type": "boolean"
+          },
           "download_allowed": {
             "type": "boolean"
           },
@@ -24904,6 +24984,9 @@
           "file_delivery": {
             "type": "boolean"
           },
+          "monitor_quality": {
+            "type": "boolean"
+          },
           "monitoring_modes": {
             "items": {
               "type": "string"
@@ -24911,6 +24994,9 @@
             "type": "array"
           },
           "ordered_status": {
+            "type": "boolean"
+          },
+          "preparation_progress": {
             "type": "boolean"
           },
           "proxy_delivery": {
@@ -24979,6 +25065,9 @@
           "season_download",
           "series_monitoring",
           "monitoring_modes",
+          "bulk_quality",
+          "monitor_quality",
+          "preparation_progress",
           "revision",
           "state",
           "allowed"
@@ -25168,6 +25257,10 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "preparation": {
+            "$ref": "#/components/schemas/DownloadPreparation",
+            "description": "How far the server has got preparing the file. Present on listed preparing entries when the capability reports preparation_progress."
           },
           "quality": {
             "type": "string"
@@ -25485,6 +25578,44 @@
         ],
         "type": "object"
       },
+      "DownloadPreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "progress": {
+            "description": "Encoded fraction, once a running encode reports it.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "queue_position": {
+            "description": "1-based place among every queued preparation on this server; present only while queued.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remaining_seconds": {
+            "description": "Estimated seconds left at the encode's reported speed.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "description": "retrying: an attempt failed and the job waits out its backoff. paused: an administrator paused the job; it isn't claimed until resumed.",
+            "enum": [
+              "queued",
+              "running",
+              "retrying",
+              "paused"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
       "DownloadQualityOption": {
         "additionalProperties": false,
         "properties": {
@@ -25571,6 +25702,18 @@
           "mode": {
             "type": "string"
           },
+          "quality": {
+            "description": "Quality the monitor registers episodes in.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
+            ],
+            "type": "string"
+          },
           "season_numbers": {
             "items": {
               "format": "int64",
@@ -25600,6 +25743,7 @@
           "season_numbers",
           "delete_watched",
           "max_storage_bytes",
+          "quality",
           "active",
           "created_at",
           "updated_at",
@@ -25624,6 +25768,18 @@
               "future",
               "latest_season",
               "specific_seasons"
+            ],
+            "type": "string"
+          },
+          "quality": {
+            "description": "Quality to register episodes in. Defaults to original. A new monitor needs the monitor_quality capability for any other preset; an existing monitor keeps its quality.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
             ],
             "type": "string"
           },
@@ -25672,6 +25828,21 @@
             ]
           },
           "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality": {
+            "description": "Quality preset for episodes registered from now on; already-registered downloads keep theirs.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
+            ],
             "type": [
               "string",
               "null"
@@ -42537,6 +42708,9 @@
           "source": {
             "type": "string"
           },
+          "sync_key": {
+            "type": "string"
+          },
           "track_id": {
             "type": "string"
           },
@@ -42863,6 +43037,15 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "failure": {
+            "enum": [
+              "subtitle_changed",
+              "no_audio",
+              "unavailable",
+              "error"
+            ],
+            "type": "string"
+          },
           "finished_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -42880,6 +43063,20 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "queued",
+              "analyzing",
+              "matching"
+            ],
+            "type": "string"
+          },
+          "progress": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
           },
           "result": {
             "$ref": "#/components/schemas/SubtitleTiming"
@@ -42912,13 +43109,118 @@
           }
         },
         "required": [
-          "id",
           "subtitle_id",
+          "id",
           "status",
           "trigger",
           "confidence",
           "created_at",
           "finished_at"
+        ],
+        "type": "object"
+      },
+      "SubtitleSyncJobState": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "failure": {
+            "enum": [
+              "subtitle_changed",
+              "no_audio",
+              "unavailable",
+              "error"
+            ],
+            "type": "string"
+          },
+          "finished_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "queued",
+              "analyzing",
+              "matching"
+            ],
+            "type": "string"
+          },
+          "progress": {
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "result": {
+            "$ref": "#/components/schemas/SubtitleTiming"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "synced",
+              "already_synced",
+              "no_match",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "trigger",
+          "confidence",
+          "created_at",
+          "finished_at"
+        ],
+        "type": "object"
+      },
+      "SubtitleSyncListOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "subtitles": {
+            "items": {
+              "$ref": "#/components/schemas/SubtitleSyncState"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "subtitles"
         ],
         "type": "object"
       },
@@ -42946,6 +43248,86 @@
         ],
         "type": "object"
       },
+      "SubtitleSyncStartOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "subtitle": {
+            "$ref": "#/components/schemas/SubtitleSyncState"
+          }
+        },
+        "required": [
+          "subtitle"
+        ],
+        "type": "object"
+      },
+      "SubtitleSyncState": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "media_file_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "downloaded",
+              "external"
+            ],
+            "type": "string"
+          },
+          "stored_subtitle_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "sync": {
+            "$ref": "#/components/schemas/SubtitleSyncJobState"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/SubtitleTiming"
+          }
+        },
+        "required": [
+          "key",
+          "media_file_id",
+          "source",
+          "language",
+          "format",
+          "label",
+          "timing"
+        ],
+        "type": "object"
+      },
+      "SubtitleSyncStateOutputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "subtitle": {
+            "$ref": "#/components/schemas/SubtitleSyncState"
+          }
+        },
+        "required": [
+          "subtitle"
+        ],
+        "type": "object"
+      },
       "SubtitleSyncStatus": {
         "additionalProperties": false,
         "properties": {
@@ -42954,6 +43336,9 @@
             "type": "boolean"
           },
           "auto_sync": {
+            "type": "boolean"
+          },
+          "external": {
             "type": "boolean"
           },
           "revision": {
@@ -42973,6 +43358,7 @@
         },
         "required": [
           "auto_sync",
+          "external",
           "revision",
           "state",
           "allowed"
@@ -65721,6 +66107,190 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/downloads/preparations/cancel": {
+      "post": {
+        "operationId": "cancelAdminDownloadPreparations",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminDownloadPreparationActionInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationActionOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Cancel offline-download preparation jobs, including failed ones. A running encode stops, the job is removed, and every download still waiting on it fails with the message 'Canceled by an administrator'. A job that already finished preparing is not affected.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/downloads/preparations/capabilities": {
       "get": {
         "operationId": "getAdminDownloadPreparationCapabilities",
@@ -65918,6 +66488,374 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations/pause": {
+      "post": {
+        "operationId": "pauseAdminDownloadPreparations",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminDownloadPreparationActionInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationActionOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pause offline-download preparation jobs. A paused job keeps its place in the queue and no worker claims it until it is resumed. A running encode stops and restarts from the beginning when resumed; the stopped attempt does not count against the job. Waiting downloads stay preparing.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/downloads/preparations/resume": {
+      "post": {
+        "operationId": "resumeAdminDownloadPreparations",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminDownloadPreparationActionInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDownloadPreparationActionOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resume paused offline-download preparation jobs. Each job returns to the queue at its original position, or waits out a pending retry backoff.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -186603,7 +187541,14 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "400": {
             "content": {
@@ -186701,7 +187646,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read a stored subtitle's timing and latest sync job. Requires file access.",
+        "summary": "Read a stored subtitle's timing and latest sync job, and the validator for setStoredSubtitleTiming. Requires file access.",
         "tags": [
           "subtitles"
         ],
@@ -186709,7 +187654,7 @@
         "x-silo-service-backed": true
       },
       "post": {
-        "description": "Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access and downloading-account or effective administrator authority, because the resulting timing applies to everyone watching the file. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list.",
+        "description": "Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access only: the stored bytes never change, and the timing can always be reset. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list.",
         "operationId": "syncStoredSubtitle",
         "parameters": [
           {
@@ -186869,7 +187814,7 @@
     },
     "/api/v2/subtitles/stored/{id}/timing": {
       "put": {
-        "description": "Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getViewerSubtitleMetadata, file access, and downloading-account or effective administrator authority. The stored bytes never change.",
+        "description": "Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getStoredSubtitleSync, and file access. The stored bytes never change.",
         "operationId": "setStoredSubtitleTiming",
         "parameters": [
           {
@@ -187678,6 +188623,770 @@
           "subtitles"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/subtitles/{media_file_id}/sync": {
+      "get": {
+        "description": "Each entry's key is the subtitle's sync key, which the playback inventory publishes as sync_key on the matching track. Only SRT, WebVTT, ASS, and SSA subtitles are listed. A subtitle file next to the media that cannot be read is left out. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.",
+        "operationId": "listSubtitleSync",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "media_file_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubtitleSyncListOutputBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the timing and latest sync job of every subtitle of a media file that can be synced: stored subtitles, then subtitle files next to the media.",
+        "tags": [
+          "subtitles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/subtitles/{media_file_id}/sync/{key}": {
+      "get": {
+        "description": "Poll it while the job is pending or running, or follow the subtitle_sync_updated realtime event of a playback session. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.",
+        "operationId": "getSubtitleSync",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "media_file_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+              "pattern": "^(stored-[1-9][0-9]*|external-[0-9a-f]{64})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubtitleSyncStateOutputBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read one subtitle's timing and latest sync job, and the validator for setSubtitleTiming.",
+        "tags": [
+          "subtitles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "description": "Starts a sync job, or returns the subtitle's active one, and returns the subtitle with that job. A request repeated after the job finished starts another job, which reaches the same timing. A synced job stores a correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. A subtitle file next to the media is never modified: its correction belongs to its current bytes. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.",
+        "operationId": "startSubtitleSync",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "media_file_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+              "pattern": "^(stored-[1-9][0-9]*|external-[0-9a-f]{64})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubtitleSyncStartOutputBody"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Align one subtitle to its file's audio.",
+        "tags": [
+          "subtitles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "coalescing",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/subtitles/{media_file_id}/sync/{key}/timing": {
+      "put": {
+        "description": "Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getSubtitleSync. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.",
+        "operationId": "setSubtitleTiming",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "media_file_id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "The subtitle's sync key, from the playback inventory or listSubtitleSync",
+              "pattern": "^(stored-[1-9][0-9]*|external-[0-9a-f]{64})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubtitleTiming"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubtitleSyncStateOutputBody"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace one subtitle's timing correction.",
+        "tags": [
+          "subtitles"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

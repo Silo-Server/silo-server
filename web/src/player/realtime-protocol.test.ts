@@ -182,10 +182,13 @@ describe("realtime protocol", () => {
       hearing_impaired: false,
       delivery: "sidecar",
       url: "/stream/session-1/subtitles/3.vtt?file_id=42&downloaded_subtitle_id=7",
+      sync_key: "stored-7",
     };
+    const sidecar = "external-" + "f".repeat(64);
     for (const payload of [
-      { session_id: "session-1", file_id: 42, subtitle_id: 7 },
-      { session_id: "session-1", file_id: 42, subtitle_id: 7, track },
+      { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: 7 },
+      { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: 7, track },
+      { session_id: "session-1", file_id: 42, sync_key: sidecar },
     ]) {
       expect(
         parsePlaybackRealtimeMessage(
@@ -205,10 +208,30 @@ describe("realtime protocol", () => {
     }
   });
 
+  it("derives the sync key of a stored subtitle from an older server's timing event", () => {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({
+          type: "event",
+          session_id: "session-1",
+          name: "subtitle_timing_changed",
+          payload: { session_id: "session-1", file_id: 42, subtitle_id: 7 },
+        }),
+      ),
+    ).toEqual({
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_timing_changed",
+      payload: { session_id: "session-1", file_id: 42, subtitle_id: 7, sync_key: "stored-7" },
+    });
+  });
+
   it.each([
     { session_id: "session-1", file_id: 42 },
-    { session_id: "session-1", file_id: "42", subtitle_id: 7 },
-    { session_id: "session-1", file_id: 42, subtitle_id: 7, track: { combined_index: 3 } },
+    { session_id: "session-1", file_id: 42, sync_key: 7, subtitle_id: 7 },
+    { session_id: "session-1", file_id: "42", sync_key: "stored-7" },
+    { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: "7" },
+    { session_id: "session-1", file_id: 42, sync_key: "stored-7", track: { combined_index: 3 } },
   ])("rejects malformed subtitle timing changed payload %#", (payload) => {
     expect(
       parsePlaybackRealtimeMessage(
@@ -220,6 +243,42 @@ describe("realtime protocol", () => {
         }),
       ),
     ).toBeNull();
+  });
+
+  it("parses subtitle sync updated events", () => {
+    const payload = {
+      session_id: "session-1",
+      file_id: 42,
+      sync_key: "external-" + "f".repeat(64),
+      timing: { offset_ms: 0, scale: 1 },
+      job: {
+        id: "80",
+        status: "running",
+        trigger: "manual",
+        phase: "analyzing",
+        progress: 0.25,
+        confidence: null,
+        created_at: "2026-01-02T03:04:05.000Z",
+        finished_at: null,
+      },
+    };
+    const message = {
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_sync_updated",
+      payload,
+    };
+    expect(parsePlaybackRealtimeMessage(JSON.stringify(message))).toEqual(message);
+
+    for (const job of [
+      { ...payload.job, status: "exploded" },
+      { ...payload.job, progress: "25%" },
+      { ...payload.job, created_at: undefined },
+    ]) {
+      expect(
+        parsePlaybackRealtimeMessage(JSON.stringify({ ...message, payload: { ...payload, job } })),
+      ).toBeNull();
+    }
   });
 
   it("parses subtitle translation started/completed/failed events", () => {
