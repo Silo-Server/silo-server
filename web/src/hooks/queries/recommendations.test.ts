@@ -163,4 +163,35 @@ describe("taste seeding on the v2 contract", () => {
       item_ids: ["movie:heat-1995"],
     });
   });
+
+  // The server answers once the profile's refresh finished or after a few
+  // seconds; the recommendation reads are refetched again later so a slower
+  // refresh still shows up.
+  it("refetches the recommendation reads again after a submission", async () => {
+    stubFetch(() => jsonResponse(createTasteSeedOk));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const recInvalidations = () =>
+      invalidate.mock.calls.filter(([filters]) => filters?.queryKey?.[0] === "recommendations")
+        .length;
+    const { result } = renderHook(() => useSubmitTasteSeed(), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client }, children),
+    });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await result.current.mutateAsync(["movie:heat-1995"]);
+      expect(recInvalidations()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(recInvalidations()).toBe(2);
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(recInvalidations()).toBe(3);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(recInvalidations()).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

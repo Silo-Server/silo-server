@@ -6,14 +6,38 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// recordingTasteSeedRefresher records each refresh and how many favorites the
+// profile held when it was asked for.
+type recordingTasteSeedRefresher struct {
+	store interface {
+		ListFavorites(context.Context, string, int, int) ([]userstore.Favorite, error)
+	}
+	calls          int
+	favoritesAtRun []int
+	userID         int
+	profileID      string
+}
+
+func (r *recordingTasteSeedRefresher) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
+	r.calls++
+	r.userID, r.profileID = userID, profileID
+	if r.store != nil {
+		favorites, _ := r.store.ListFavorites(ctx, profileID, 100, 0)
+		r.favoritesAtRun = append(r.favoritesAtRun, len(favorites))
+	}
+	return true
+}
 
 // A taste-seed submission counts only the favorites it newly recorded: a
 // duplicate pick, an already-favorited item, and a retried submission all
-// report 0 added and queue no refresh.
+// report 0 added and refresh nothing. A submission that added picks refreshes
+// the profile once, after every pick is stored.
 func TestSubmitTasteSeedCountsOnlyNewFavorites(t *testing.T) {
 	store := newHouseholdTestStore(t)
-	refresher := &countingSignalsNotifier{}
+	refresher := &recordingTasteSeedRefresher{store: store}
 	h := &RecommendationsHandler{storeProvider: testUserStoreProvider{store: store}, RecWorker: refresher, Fetcher: stubDiscoverFetcher{items: []*models.MediaItem{{ContentID: "movie:heat-1995"}, {ContentID: "movie:already"}, {ContentID: "movie:collateral-2004"}}}}
 	ctx := context.Background()
 
@@ -27,6 +51,9 @@ func TestSubmitTasteSeedCountsOnlyNewFavorites(t *testing.T) {
 	}
 	if added != 2 || refresher.calls != 1 {
 		t.Fatalf("first submission: added=%d refreshes=%d, want 2 and 1", added, refresher.calls)
+	}
+	if refresher.userID != 7 || refresher.profileID != "p1" || refresher.favoritesAtRun[0] != 3 {
+		t.Fatalf("refreshed user %d profile %q holding %v favorites, want 7, p1 and all 3 stored first", refresher.userID, refresher.profileID, refresher.favoritesAtRun)
 	}
 
 	added, err = h.SubmitTasteSeed(ctx, 7, "p1", []string{"movie:heat-1995", "movie:collateral-2004"}, catalog.AccessFilter{})
@@ -60,7 +87,7 @@ func TestSubmitTasteSeedRejectsInvisiblePicksBeforeWriting(t *testing.T) {
 	for _, inaccessible := range []string{"movie:hidden-library", "movie:unknown", " "} {
 		t.Run(inaccessible, func(t *testing.T) {
 			store := newHouseholdTestStore(t)
-			refresher := &countingSignalsNotifier{}
+			refresher := &recordingTasteSeedRefresher{}
 			fetcher := &tasteSeedAccessFetcher{}
 			h := &RecommendationsHandler{storeProvider: testUserStoreProvider{store: store}, RecWorker: refresher, Fetcher: fetcher}
 			filter := catalog.AccessFilter{AllowedLibraryIDs: []int{7}}

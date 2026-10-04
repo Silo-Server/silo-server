@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CatalogCardItem } from "@/api/v2/catalog";
@@ -7,11 +7,12 @@ import type { CatalogCardItem } from "@/api/v2/catalog";
 const mocks = vi.hoisted(() => ({
   fetchNextPage: vi.fn(),
   useTasteSeedItems: vi.fn(),
+  submit: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/tasteSeed", () => ({
   useTasteSeedItems: () => mocks.useTasteSeedItems(),
-  useSubmitTasteSeed: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useSubmitTasteSeed: () => ({ isPending: false, mutateAsync: mocks.submit }),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -132,5 +133,66 @@ describe("TasteSeed paging", () => {
 
     expect(mocks.fetchNextPage).not.toHaveBeenCalled();
     expect(screen.getByRole("option", { name: "Select Title movie-1" })).toBeTruthy();
+  });
+});
+
+describe("TasteSeed destinations", () => {
+  beforeEach(() => {
+    mocks.submit.mockReset();
+    mocks.submit.mockResolvedValue({ added: 3 });
+    mocks.useTasteSeedItems.mockReset();
+    mocks.useTasteSeedItems.mockReturnValue(
+      pickerState({ pages: [{ items: [card("m1"), card("m2"), card("m3")] }], hasNextPage: false }),
+    );
+    vi.stubGlobal("IntersectionObserver", NoopObserver);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderAt(entry: string) {
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/taste-seed" element={<TasteSeed />} />
+          <Route path="/" element={<p>home page</p>} />
+          <Route path="/recommendations" element={<p>recommendations page</p>} />
+          <Route path="/settings/playback" element={<p>settings page</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  function pickAll() {
+    for (const id of ["m1", "m2", "m3"]) {
+      fireEvent.click(screen.getByRole("option", { name: `Select Title ${id}` }));
+    }
+  }
+
+  // A first-run submission opens the recommendations it just shaped.
+  it("opens the recommendations after a first-run submission", async () => {
+    renderAt("/taste-seed");
+    pickAll();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("recommendations page")).toBeTruthy();
+    expect(mocks.submit).toHaveBeenCalledWith(["m1", "m2", "m3"]);
+  });
+
+  it("returns to settings after a submission from settings", async () => {
+    renderAt("/taste-seed?from=settings");
+    pickAll();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("settings page")).toBeTruthy();
+  });
+
+  it("goes home when the first-run picker is skipped", async () => {
+    renderAt("/taste-seed");
+    fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+
+    expect(await screen.findByText("home page")).toBeTruthy();
+    expect(mocks.submit).not.toHaveBeenCalled();
   });
 });
