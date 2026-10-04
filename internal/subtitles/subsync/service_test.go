@@ -402,6 +402,25 @@ func TestSubtitlePlayedSyncsASidecarNeverSynced(t *testing.T) {
 	}
 }
 
+func TestSubtitlePlayedTriesAgainAfterAFailureToAsk(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
+	f.svc.runner = idleRunner(f.jobs)
+	_, sidecar := sidecarFixture(t, f)
+	read := f.svc.readFile
+	f.svc.readFile = func(string) ([]byte, error) { return nil, errors.New("mount not ready") }
+	target := subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path}
+	f.svc.SubtitlePlayed(context.Background(), target)
+	if len(f.jobs.jobs) != 0 {
+		t.Fatalf("jobs %+v", f.jobs.jobs)
+	}
+	// The next window of the same track asks again, and this time it can.
+	f.svc.readFile = read
+	f.svc.SubtitlePlayed(context.Background(), target)
+	if len(f.jobs.jobs) != 1 || f.jobs.jobs[0].Trigger != TriggerAuto {
+		t.Fatalf("jobs %+v", f.jobs.jobs)
+	}
+}
+
 // Players fetch a subtitle in windows, many times a session: each played
 // subtitle is considered once per playedTTL on a server.
 func TestFirstPlayRemembersForATime(t *testing.T) {

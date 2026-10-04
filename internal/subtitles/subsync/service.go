@@ -331,7 +331,17 @@ func (s *Service) syncPlayed(ctx context.Context, target subtitles.SyncTarget) {
 	if err != nil && !errors.Is(err, ErrSubtitleNotFound) {
 		slog.WarnContext(ctx, "automatic subtitle sync not started", "component", "subsync",
 			"media_file_id", target.MediaFileID, "subtitle_id", target.StoredID, "error", err)
+		// A failure to even ask (an unreadable file, the database) lets the
+		// next fetch of the subtitle try again.
+		s.forgetPlay(target)
 	}
+}
+
+// forgetPlay drops the record that target was considered.
+func (s *Service) forgetPlay(target subtitles.SyncTarget) {
+	s.playedMu.Lock()
+	defer s.playedMu.Unlock()
+	delete(s.played, target)
 }
 
 func (s *Service) syncPlayedSidecar(ctx context.Context, target subtitles.SyncTarget) error {
