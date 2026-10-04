@@ -40,6 +40,13 @@ absent when nothing is cached.
 
 ## Triggers
 
+The embeddings kind also covers the catch-up pass, which every 15 minutes
+embeds items that have no embedding or one from another model: while it runs,
+an embeddings trigger answers `409`, and the embeddings `last_run` may be a
+catch-up run, marked `missing_only: true` in `result`. Catch-up runs that found
+nothing to do are not recorded; failed ones are, so a lock conflict shows as a
+failed run every 15 minutes until it is resolved.
+
 Trigger success means the responding process claimed its running flag and the
 job kind's cluster-wide lock, then launched background work. It does not mean
 that work completed. There is no job ID, Location header, durable acceptance, or
@@ -69,9 +76,9 @@ after re-embedding replaces it.
 
 Every item that lost its embedding gets a catalog search index update, so the
 next index syncs replace its stored vector with none. Semantic search stays
-off until the new model covers enough of the catalog again. Run the embedding
-job after the reset (a restart also starts it when no embeddings exist); the
-next embedding writes a new lock for the configured model.
+off until the new model covers enough of the catalog again. The embedding
+catch-up pass starts re-embedding the catalog within 15 minutes, or run the embedding job
+after the reset; the next embedding writes a new lock for the configured model.
 
 ## Clients
 
