@@ -28717,6 +28717,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "embeddings_skipped": {
+            "format": "int64",
+            "type": "integer"
+          },
           "episodes_created": {
             "format": "int64",
             "type": "integer"
@@ -28786,6 +28790,7 @@
           "links_created",
           "credits_replaced",
           "embeddings_imported",
+          "embeddings_skipped",
           "skipped"
         ],
         "type": "object"

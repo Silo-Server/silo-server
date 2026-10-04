@@ -1557,7 +1557,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else if api := blobstore.NewBucketAPI(deps.Blobs.Operational); api != nil {
 			privateStore = api
 		}
-		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB)), jobRepo, privateStore)
+		catalogSeedService := catalogseed.NewService(deps.DB, deps.PersonRepo, recommendations.NewRepo(deps.DB))
+		if deps.Config != nil {
+			catalogSeedService.WithEmbeddingModel(deps.Config.Recommendations.EmbeddingModel)
+		}
+		catalogSeedHandler = handlers.NewCatalogSeedHandler(catalogSeedService, jobRepo, privateStore)
 		catalogSeedHandler.RealtimeHub = deps.RealtimeHub
 		adminJobsHandler = handlers.NewAdminJobsHandler(jobRepo, privateStore)
 		adminJobsHandler.CancelRegistry = deps.AdminJobCancelRegistry

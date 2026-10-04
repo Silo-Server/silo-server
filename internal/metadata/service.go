@@ -7242,6 +7242,21 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 			`,
 			args: []any{fromContentID, toContentID},
 		},
+		// A target with no embedding keeps the source's until the backfill
+		// re-embeds it from the target's own text, as the provider-ID merge
+		// does. The source's row goes with the source item (ON DELETE
+		// CASCADE), and stays when the source item survives.
+		{
+			name: "merge embeddings",
+			sql: `
+				INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text, created_at, updated_at)
+				SELECT $2, embedding, model, canonical_text, created_at, updated_at
+				FROM media_item_embeddings
+				WHERE media_item_id = $1
+				ON CONFLICT (media_item_id) DO NOTHING
+			`,
+			args: []any{fromContentID, toContentID},
+		},
 		{
 			name: "delete orphaned skeleton",
 			sql: `

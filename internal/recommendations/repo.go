@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -202,19 +203,27 @@ func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []f
 
 // GetEmbeddingLock retrieves the embedding lock metadata from server_settings.
 func (r *Repo) GetEmbeddingLock(ctx context.Context) (*EmbeddingLock, error) {
+	return ReadEmbeddingLock(ctx, r.pool)
+}
+
+// RowQuerier runs a query that returns at most one row. *pgxpool.Pool and
+// pgx.Tx satisfy it.
+type RowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// ReadEmbeddingLock reads the embedding lock through q, which may be a
+// transaction. It returns nil when no lock is set.
+func ReadEmbeddingLock(ctx context.Context, q RowQuerier) (*EmbeddingLock, error) {
 	var raw string
-	err := r.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
+	err := q.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get embedding lock: %w", err)
 	}
-	lock, err := ParseEmbeddingLock(raw)
-	if err != nil {
-		return nil, err
-	}
-	return lock, nil
+	return ParseEmbeddingLock(raw)
 }
 
 // SetEmbeddingLock stores the embedding lock metadata in server_settings.
@@ -488,13 +497,19 @@ func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel, afterID 
 	return ids, nil
 }
 
+// ListEmbeddingTextCandidates returns items embedded with currentModel whose
+// stored canonical text differs from the text rebuilt here in SQL, ordered by
+// content_id and paged via afterID (pass "" for the first page). The SQL text
+// approximates embeddings.BuildEmbeddingText, so callers re-check each row in
+// Go before re-embedding it.
 func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error) {
 	query := fmt.Sprintf(`
-		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
-		-- the embedding job page over only missing, model-stale, or text-stale rows.
+		-- Keep current_text in sync with embeddings.BuildEmbeddingText.
 		-- Book lines map to embeddings.mediaTypeLabel + the author/narrator
 		-- branch in BuildEmbeddingText; any divergence here forces book items
-		-- to re-embed every job run.
+		-- to re-embed every job run. People sort like sortItemPeople in Go:
+		-- sort_order, then name and character compared byte by byte
+		-- (COLLATE "C"), then person_id.
 		WITH text_candidates AS (
 			SELECT mi.content_id,
 			       COALESCE(e.model, '') AS model,
@@ -534,7 +549,7 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			LEFT JOIN LATERAL (
 				SELECT COALESCE(string_agg(
 					CASE WHEN ranked.character <> '' THEN ranked.name || ' as ' || ranked.character ELSE ranked.name END,
-					', ' ORDER BY ranked.sort_order
+					', ' ORDER BY ranked.sort_order, ranked.name COLLATE "C", ranked.character COLLATE "C", ranked.person_id
 				), '') AS names
 				FROM (
 					SELECT COALESCE(p.name, '') AS name,
@@ -545,33 +560,33 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 					JOIN people p ON p.id = ip.person_id
 					WHERE ip.content_id = mi.content_id
 					  AND ip.kind = 1
-					ORDER BY ip.sort_order, p.name, COALESCE(ip.character, ''), ip.person_id
+					ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id
 					LIMIT 5
 				) ranked
 			) actors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 2
 			) directors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 3
 			) writers ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 7
 			) authors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
@@ -584,9 +599,8 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 		       mi.model,
 		       mi.canonical_text
 		FROM   text_candidates mi
-		WHERE  mi.model = ''
-		   OR  mi.model != $2
-		   OR  mi.canonical_text IS DISTINCT FROM mi.current_text
+		WHERE  mi.model = $2
+		  AND  mi.canonical_text IS DISTINCT FROM mi.current_text
 		ORDER  BY mi.content_id
 		LIMIT  $3
 	`, embeddingEligibilityWhereClause())

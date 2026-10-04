@@ -3392,7 +3392,8 @@ func main() {
 		}
 		adminJobRunner = adminjob.NewRunner(
 			adminjob.NewRepository(deps.DB),
-			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)),
+			catalogseed.NewService(deps.DB, catalog.NewPersonRepository(deps.DB), recommendations.NewRepo(deps.DB)).
+				WithEmbeddingModel(cfg.Recommendations.EmbeddingModel),
 			artifactStore,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
@@ -3413,11 +3414,13 @@ func main() {
 			recWorker.Start()
 			defer recWorker.Stop()
 
-			// Check if this is first run (no embeddings yet).
-			embCount, _ := recommendations.NewRepo(deps.DB).EmbeddingCount(appCtx)
-			if embCount == 0 {
-				slog.Info("first run detected, triggering initial embedding")
-				recWorker.RunEmbeddingsNow()
+			// Resume a first or interrupted backfill now rather than at the
+			// next catch-up tick.
+			if needed, err := recEngine.NeedsEmbedding(appCtx); err != nil {
+				slog.WarnContext(appCtx, "checking for items that need embeddings failed", "component", "recommendations", "error", err)
+			} else if needed {
+				slog.InfoContext(appCtx, "items need embeddings; starting the embedding catch-up", "component", "recommendations")
+				recWorker.EmbedMissingNow()
 			}
 		}
 

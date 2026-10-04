@@ -144,10 +144,26 @@ type jobResult interface {
 	failures() int
 }
 
+// idleResult is a jobResult that can tell when its run found nothing to do.
+type idleResult interface {
+	jobResult
+	idle() bool
+}
+
 type job struct {
 	name    JobName
 	timeout time.Duration
 	run     func(ctx context.Context) (jobResult, error)
+	// quietWhenIdle logs the job at Debug and leaves a run out of history
+	// when it succeeds and its result reports nothing done. Frequent
+	// catch-up runs use it so history holds only runs that did something.
+	quietWhenIdle bool
+}
+
+// isIdleRun reports a successful run whose result says it did nothing.
+func isIdleRun(result jobResult, err error) bool {
+	idle, ok := result.(idleResult)
+	return err == nil && ok && idle.idle()
 }
 
 func jobLabel(name JobName) string {
@@ -217,7 +233,11 @@ func (w *Worker) executeJob(j job) {
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
 	defer workmetrics.Profile(ctx)()
 
-	slog.InfoContext(ctx, "recommendation job started", "component", "recommendations", "job", j.name, "timeout", j.timeout)
+	startLevel := slog.LevelInfo
+	if j.quietWhenIdle {
+		startLevel = slog.LevelDebug
+	}
+	slog.Log(ctx, startLevel, "recommendation job started", "component", "recommendations", "job", j.name, "timeout", j.timeout)
 	started := time.Now()
 	result, err := j.run(ctx)
 	completed := time.Now()
@@ -235,6 +255,9 @@ func (w *Worker) executeJob(j job) {
 
 	attrs := []any{"component", "recommendations", "job", j.name, "duration", completed.Sub(started), "result", string(resultData)}
 	switch {
+	case j.quietWhenIdle && isIdleRun(result, err):
+		slog.DebugContext(ctx, "recommendation job found nothing to do", attrs...)
+		return
 	case err != nil:
 		slog.ErrorContext(ctx, "recommendation job failed", append(attrs, "error", err)...)
 	case result != nil && result.failures() > 0:

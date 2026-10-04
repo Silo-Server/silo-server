@@ -67,7 +67,13 @@ field errors that explain the affected source roots.
 
 Direct import runs the existing catalog transaction and returns its committed
 counts. If a response is lost, callers must inspect the catalog before deciding
-whether to submit again. The web explicitly offers background execution or
+whether to submit again.
+
+Import keeps a bundle's embeddings only when they come from this installation's
+embedding model: the model in the recommendations embedding lock, or the
+configured embedding model when nothing is locked yet. `embeddings_skipped`
+counts the others; the embedding backfill embeds those items with the local
+model. Import never writes the embedding lock. The web explicitly offers background execution or
 "Import and wait"; it does not fall back between them after an error. All transfer
 mutations disable automatic mutation and authentication retries.
 
