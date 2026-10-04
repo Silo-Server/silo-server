@@ -833,8 +833,9 @@ func TestRelevanceTypeSupplementsStayInTheTail(t *testing.T) {
 }
 
 // A media type the profile has no titles of is never queried for
-// supplements: the toy catalog has no books, and a movies-only scope no
-// series. A type the scope has but the candidates lack is queried.
+// supplements: a movies-only scope has no series. A type the scope has but
+// the candidates lack is queried. Books are outside recommendableMediaTypes,
+// so they are never queried.
 func TestRelevanceTypeSupplementsSkipAbsentTypes(t *testing.T) {
 	c := newToyCatalog()
 	scoped := func(allowed func(*toyItem) bool) map[string]int {

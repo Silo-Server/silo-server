@@ -84,7 +84,7 @@ func TestRecentCompletedItemIDsSkipDeletedItemsPostgres(t *testing.T) {
 		t.Fatalf("store path anchors = %v, want %v", viaStore, want)
 	}
 
-	existing, err := repo.ExistingItemIDs(ctx, []string{movieA, movieC, episodes[0], series})
+	existing, err := repo.RecommendableItemIDs(ctx, []string{movieA, movieC, episodes[0], series})
 	if err != nil {
 		t.Fatal(err)
 	}

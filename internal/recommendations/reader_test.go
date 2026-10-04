@@ -174,8 +174,9 @@ func TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres(t *testing.T) {
 }
 
 // fakeReaderRepo serves the Reader's reads from memory. Every item is
-// accessible unless listed in hidden or, when the filter names allowed
-// libraries, its library in libraries is not one of them.
+// accessible unless listed in hidden, its type in types is not one of
+// recommendableMediaTypes or, when the filter names allowed libraries, its
+// library in libraries is not one of them.
 type fakeReaderRepo struct {
 	meta     *TasteProfileMeta
 	clusters []TasteCluster
@@ -185,6 +186,8 @@ type fakeReaderRepo struct {
 	global    map[string][]ScoredItem
 	hidden    map[string]struct{}
 	libraries map[string]int
+	// types holds item media types; an item missing from it is a movie.
+	types map[string]string
 	// genres holds the cached genre samplers by genre.
 	genres map[string][]ScoredItem
 	// defaults holds the live default rows by kind, best first;
@@ -222,10 +225,13 @@ func (f *fakeReaderRepo) GetTopGenres(context.Context, int) ([]string, error) {
 	return nil, nil
 }
 
-func (f *fakeReaderRepo) FilterAccessibleItemIDs(_ context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
+func (f *fakeReaderRepo) FilterRecommendableItemIDs(_ context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	accessible := make(map[string]struct{}, len(itemIDs))
 	for _, id := range itemIDs {
 		if _, hidden := f.hidden[id]; hidden {
+			continue
+		}
+		if mediaType, ok := f.types[id]; ok && !slices.Contains(recommendableMediaTypes, mediaType) {
 			continue
 		}
 		if filter.AllowedLibraryIDs != nil && !slices.Contains(filter.AllowedLibraryIDs, f.libraries[id]) {
@@ -244,7 +250,7 @@ func (f *fakeReaderRepo) ListDefaultRowItems(ctx context.Context, filter catalog
 	for _, item := range f.defaults[kind] {
 		ids = append(ids, item.MediaItemID)
 	}
-	accessible, _ := f.FilterAccessibleItemIDs(ctx, ids, filter)
+	accessible, _ := f.FilterRecommendableItemIDs(ctx, ids, filter)
 	items := []ScoredItem{}
 	for _, item := range f.defaults[kind] {
 		if _, ok := accessible[item.MediaItemID]; ok && !slices.Contains(exclude, item.MediaItemID) && len(items) < limit {

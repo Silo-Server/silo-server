@@ -140,13 +140,15 @@ func TestPlaceTypeSupplementsFillsOnlyTheTail(t *testing.T) {
 	}
 }
 
-// Room is made only from types above the floor, so supplements for one type
-// never push another below it.
+// Room is made only from types above the floor, so a type's supplements
+// never push its own titles at the row's end back out. Only
+// recommendableMediaTypes are supplemented: the pool's audiobooks stay out.
 func TestPlaceTypeSupplementsKeepsOtherTypesAtTheirFloor(t *testing.T) {
 	types := map[string]string{}
-	row := append(typedRow("m", "movie", 47, 0.9, types), typedRow("s", "series", 13, 0.8, types)...)
+	row := append(typedRow("s", "series", 50, 0.9, types), typedRow("m", "movie", 10, 0.8, types)...)
+	movies := typedRow("n", "movie", 5, 0.5, types)
 	books := typedRow("a", "audiobook", 15, 0.4, types)
-	pool := append(append([]ScoredItem(nil), row...), books...)
+	pool := append(append(append([]ScoredItem(nil), row...), movies...), books...)
 
 	got := placeTypeSupplements(row, pool, types)
 
@@ -154,9 +156,14 @@ func TestPlaceTypeSupplementsKeepsOtherTypesAtTheirFloor(t *testing.T) {
 	if !slices.Equal(mmrItemIDs(got[:ServedRowSize]), mmrItemIDs(row[:ServedRowSize])) {
 		t.Fatalf("served window changed: %v", mmrItemIDs(got[:ServedRowSize]))
 	}
-	for mediaType, want := range map[string]int{"movie": len(row) - 2*floor, "series": floor, "audiobook": floor} {
+	for mediaType, want := range map[string]int{"movie": floor, "series": len(row) - floor, "audiobook": 0} {
 		if n := countMediaType(got, types, mediaType); n != want {
 			t.Fatalf("%s count = %d, want %d in %v", mediaType, n, want, mmrItemIDs(got))
+		}
+	}
+	for _, id := range mmrItemIDs(row[50:]) {
+		if !slices.Contains(mmrItemIDs(got), id) {
+			t.Fatalf("row %v lost movie %s", mmrItemIDs(got), id)
 		}
 	}
 }

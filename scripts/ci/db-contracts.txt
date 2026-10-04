@@ -144,13 +144,15 @@
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
 
 # Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
-# order, taste levels, per-interest anchors, quality prior, rubric leakage.
+# order, taste levels, per-interest anchors, quality prior, rubric leakage,
+# media types of personal rows.
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
 ./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
 ./internal/recommendations TestGenreSamplerIsRatingLedPostgres
 ./internal/recommendations TestGetItemQualityRatingsPostgres
 ./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
 ./internal/recommendations TestHighlyRatedRowPostgres
+./internal/recommendations TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres
 ./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
 ./internal/recommendations TestPresentMediaTypesPostgres
 ./internal/recommendations TestRecentlyAddedRowPostgres

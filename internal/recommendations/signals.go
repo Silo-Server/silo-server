@@ -20,7 +20,7 @@ type signalRepo interface {
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
 	ResolveCanonicalItemIDs(ctx context.Context, contentIDs []string) (map[string]string, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
-	ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error)
+	RecommendableItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error)
 	HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error)
 }
 
@@ -223,8 +223,10 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 }
 
 // RecentCompletedItemIDs returns the canonical IDs of the profile's most
-// recently completed titles that are still in the catalog, newest first.
-// Completions of deleted items are skipped, so they never become anchors.
+// recently completed titles that are still in the catalog and of
+// recommendableMediaTypes, newest first. Completions of deleted items and of
+// other types, such as a finished audiobook, are skipped, so they never
+// become anchors.
 func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
@@ -320,8 +322,9 @@ type itemRatingReader interface {
 }
 
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
-// its most recently completed titles still in the catalog, newest first, of
-// the latest anchorCandidateLimit, leaving out those it rated
+// its most recently completed titles of recommendableMediaTypes still in the
+// catalog, newest first, of the latest anchorCandidateLimit, leaving out
+// those it rated
 // DislikedRatingMax or lower. A row headed "Because You Watched" a title the
 // profile disliked contradicts its taste. With no ratings reader nothing is
 // left out. The worker, the Reader and Watch Tonight all choose anchors here,
@@ -369,8 +372,9 @@ func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []Watc
 }
 
 // liveCompletedRows canonicalizes rows and drops those whose canonical ID is
-// no longer in the catalog: a deleted movie, or an episode whose series was
-// deleted and so no longer resolves to it.
+// no longer in the catalog (a deleted movie, or an episode whose series was
+// deleted and so no longer resolves to it) or is not of
+// recommendableMediaTypes.
 func liveCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) ([]WatchProgressRow, error) {
 	if len(rows) == 0 {
 		return rows, nil
@@ -382,7 +386,7 @@ func liveCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgres
 	for i, row := range rows {
 		ids[i] = row.MediaItemID
 	}
-	existing, err := repo.ExistingItemIDs(ctx, ids)
+	existing, err := repo.RecommendableItemIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}

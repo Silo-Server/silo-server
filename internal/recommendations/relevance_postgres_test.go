@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -388,4 +389,178 @@ func rowSizes(rows []ForYouRow) []string {
 		sizes[i] = fmt.Sprintf("%s %q: %d", row.Type, row.Label, len(row.Items))
 	}
 	return sizes
+}
+
+// Personal rows offer only recommendableMediaTypes. The fixture puts
+// matched books exactly on the profile's taste, makes a finished audiobook
+// its latest completion, co-watches books with its latest movie and has
+// three peers rate them, so a row built from any of those paths without the
+// type rule would carry one. A book still anchors its own "More like this".
+func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
+	f := newRelevanceFixture(t, "types")
+	ctx := t.Context()
+	const axis = 2600
+	genres := [][]string{{"Drama"}, {"Mystery"}, {"Adventure"}}
+
+	var movies []string
+	for i := range 50 {
+		movies = append(movies, f.movie(t, fmt.Sprintf("movie-%02d", i), genres[i%3], "PG-13", 13, axisVector(axis, map[int]float32{axis + 1 + i: 0.05})))
+	}
+	book := func(name, mediaType string, i int) string {
+		t.Helper()
+		id := f.prefix + name
+		seedRecoMediaItem(t, f.pool, id, mediaType, "matched")
+		if _, err := f.pool.Exec(ctx, `UPDATE media_items SET genres = $2 WHERE content_id = $1`, id, genres[i%3]); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repo.UpsertEmbedding(ctx, id, axisVector(axis, nil), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	var books []string
+	for i := range 6 {
+		books = append(books, book(fmt.Sprintf("audiobook-%02d", i), "audiobook", i))
+	}
+	books = append(books, book("ebook", "ebook", 0))
+	finishedBook := book("finished-audiobook", "audiobook", 1)
+
+	userID, _ := newTasteTestAccount(t, f.pool, f.prefix+"account-")
+	viewer := f.profile(t, userID, "Viewer", "")
+	finished := movies[:12]
+	// The audiobook is the latest completion; the movies follow it.
+	f.finish(t, userID, viewer, append([]string{finishedBook}, finished...)...)
+
+	// The latest movie is co-watched with an audiobook and the ebook, and the
+	// finished audiobook with another audiobook.
+	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{
+		{ItemID: finished[0], SimilarItemID: books[0], JaccardScore: 0.9, CowatchCount: 5},
+		{ItemID: finished[0], SimilarItemID: books[6], JaccardScore: 0.9, CowatchCount: 5},
+		{ItemID: finished[0], SimilarItemID: movies[40], JaccardScore: 0.5, CowatchCount: 3},
+		{ItemID: finishedBook, SimilarItemID: books[1], JaccardScore: 0.9, CowatchCount: 5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(t.Context(), `DELETE FROM item_cowatch WHERE item_id LIKE $1 OR similar_item_id LIKE $1`, f.prefix+"%")
+	})
+
+	// Three peer accounts share the taste and rate two books and an open
+	// movie.
+	open := movies[45]
+	for i := range minSimilarUsersPeerAccounts {
+		peerID, peer := newTasteTestAccount(t, f.pool, fmt.Sprintf("%speer-%d-", f.prefix, i))
+		if err := f.repo.UpsertTasteProfile(ctx, peerID, peer, axisVector(axis, nil), map[string]int{"rated_5": 3}, "", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range []string{books[2], books[6], open} {
+			if _, err := f.pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, peerID, peer, item); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if err := f.worker.refreshProfile(ctx, userID, viewer); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+
+	isBook := map[string]bool{finishedBook: true}
+	for _, id := range books {
+		isBook[id] = true
+	}
+	check := func(stage string, rows map[string][]string) {
+		t.Helper()
+		for key, ids := range rows {
+			for _, id := range ids {
+				if isBook[id] {
+					t.Errorf("%s row %q holds book %s", stage, key, id)
+				}
+			}
+		}
+	}
+
+	// Candidate queries: the books are the nearest titles, and none comes
+	// back, for the main row, a cluster row or a type supplement.
+	filter, err := f.engine.profileAccessFilter(ctx, userID, viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nearest, _, err := f.repo.FindTasteProfileCandidates(ctx, axisVector(axis, nil), nil, nil, 10, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clustered, _, err := f.repo.FindTasteProfileCandidates(ctx, axisVector(axis, nil), nil, []string{"Drama"}, 10, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("candidates", map[string][]string{"taste": scoredIDs(nearest), "genre": scoredIDs(clustered)})
+	if len(nearest) != 10 || len(clustered) != 10 {
+		t.Fatalf("candidates = %d and %d, want 10 movies each", len(nearest), len(clustered))
+	}
+	for _, mediaType := range []string{"audiobook", "ebook"} {
+		extra, _, err := f.repo.FindTasteProfileCandidatesByMediaType(ctx, axisVector(axis, nil), nil, nil, 10, filter, mediaType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(extra) != 0 {
+			t.Errorf("%s supplement = %v, want none", mediaType, scoredIDs(extra))
+		}
+	}
+
+	// The finished audiobook never anchors: the anchors are the three latest
+	// movies, on the SQL path and the user-store path.
+	sqlAnchors, err := f.repo.GetRecentCompletedItemIDs(ctx, userID, viewer, becauseYouWatchedAnchors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchors, err := anchorItemIDs(ctx, f.engine.signalReader(), nil, userID, viewer, becauseYouWatchedAnchors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, got := range [][]string{sqlAnchors, anchors} {
+		if want := finished[:becauseYouWatchedAnchors]; !slices.Equal(got, want) {
+			t.Fatalf("anchors = %v, want the latest movies %v", got, want)
+		}
+	}
+
+	cached := f.cachedPersonalRows(t, userID, viewer)
+	if len(cached[RecTypeForYouMain+"|"]) < 10 {
+		t.Fatalf("main row = %v, want a built row of at least 10 titles", cached[RecTypeForYouMain+"|"])
+	}
+	if _, ok := cached[RecTypeBecauseWatched+"|"+finishedBook]; ok {
+		t.Errorf("cached rows %v hold a Because You Watched row for the finished audiobook", slices.Collect(maps.Keys(cached)))
+	}
+	byw := cached[RecTypeBecauseWatched+"|"+finished[0]]
+	if !slices.Contains(byw, movies[40]) {
+		t.Errorf("Because You Watched %s = %v, want its co-watched movie %s", finished[0], byw, movies[40])
+	}
+	if !slices.Contains(cached[RecTypeSimilarUsersLiked+"|"], open) {
+		t.Errorf("Similar Users = %v, want the open movie the peers rated", cached[RecTypeSimilarUsersLiked+"|"])
+	}
+	clusterRows := 0
+	for key, ids := range cached {
+		if strings.HasPrefix(key, RecTypeForYouClusterPrefix) && len(ids) > 0 {
+			clusterRows++
+		}
+	}
+	if clusterRows == 0 {
+		t.Errorf("cached rows %v, want a built cluster row", slices.Collect(maps.Keys(cached)))
+	}
+	check("cached", cached)
+	check("served", f.servedRows(t, userID, viewer))
+
+	// "More like this" keeps to the item's own type: a movie's list holds no
+	// co-watched book, and an audiobook's may hold another audiobook.
+	similar, err := f.engine.SimilarItems(ctx, finished[0], 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("movie similar", map[string][]string{"similar": scoredIDs(similar)})
+	bookSimilar, err := f.engine.SimilarItems(ctx, finishedBook, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(scoredIDs(bookSimilar), books[1]) {
+		t.Errorf("audiobook similar = %v, want the co-watched audiobook %s", scoredIDs(bookSimilar), books[1])
+	}
 }

@@ -66,3 +66,42 @@ func TestGetForYouPageServesTheMainRowFirst(t *testing.T) {
 		t.Fatalf("main row = %v, want %v", main, want)
 	}
 }
+
+// Rows cached before personal rows were kept to recommendableMediaTypes still
+// hold books until they are rebuilt. A read serves none of them, and a row
+// holding only books drops out.
+func TestReadsServeOnlyRecommendableMediaTypes(t *testing.T) {
+	repo := &fakeReaderRepo{
+		meta:     &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
+		clusters: []TasteCluster{{ClusterIdx: 0, Label: "Drama"}},
+		personal: map[string][]ScoredItem{
+			RecTypeForYouMain + "|":                {{MediaItemID: "audiobook"}, {MediaItemID: "movie"}, {MediaItemID: "ebook"}, {MediaItemID: "series"}},
+			RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "audiobook-2"}},
+			RecTypeSimilarUsersLiked + "|":         {{MediaItemID: "ebook"}, {MediaItemID: "movie-2"}},
+		},
+		types: map[string]string{
+			"audiobook": "audiobook", "audiobook-2": "audiobook", "ebook": "ebook",
+			"movie": "movie", "movie-2": "movie", "series": "series",
+		},
+	}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+
+	rows, err := r.GetForYouPage(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := rowLabels(rows), []string{"For You"}; !slices.Equal(got, want) {
+		t.Fatalf("rows = %v, want %v: the audiobook-only Drama row drops out", got, want)
+	}
+	if got, want := scoredIDs(rows[0].Items), []string{"movie", "series"}; !slices.Equal(got, want) {
+		t.Fatalf("main row = %v, want %v", got, want)
+	}
+
+	similar, err := r.GetSimilarUsersLiked(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := scoredIDs(similar), []string{"movie-2"}; !slices.Equal(got, want) {
+		t.Fatalf("Similar Users = %v, want %v", got, want)
+	}
+}

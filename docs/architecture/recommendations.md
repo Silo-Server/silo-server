@@ -164,10 +164,10 @@ Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are
 shown on their own. Below the floor the row is cached empty.
 
-The rows that are not personal (Popular, the genre rows and the default rows)
-and the taste-seed picker offer matched movies and series only, the types in
-`recommendableMediaTypes`. Popular counts login accounts, not profiles: a
-title needs at least 2 accounts that watched it in the last 90 days, so a
+Every row, personal or not, and the taste-seed picker offer matched movies
+and series only, the types in `recommendableMediaTypes` (see Media types
+under Ranking). Popular counts login accounts, not profiles: a title needs
+at least 2 accounts that watched it in the last 90 days, so a
 single-account server has no Popular row, and the cached row keeps 200 titles
 for reads to filter. Genre rows rank a genre's titles by rating reliability
 (IMDb, then a TMDB rating below 9.5) and rating, with watching accounts only
@@ -233,9 +233,10 @@ library sections, which scope the whole row to their libraries.
   than half of the served window while the row has other titles to offer.
   It deletes nothing and moves nothing past the window.
 - **Type supplements.** The main row holds at least a fifth of its length of
-  each media type the viewer can see, so a library section fills. The extra
-  titles go after the served window, replacing tail titles of types above
-  that floor; a type the viewer has no titles of is not queried.
+  each of `recommendableMediaTypes` the viewer can see, so a library section
+  fills. The extra titles go after the served window, replacing tail titles
+  of types above that floor; a type the viewer has no titles of is not
+  queried.
 - **Cluster rows.** A cluster row is built `max(3, 60 × weight share) + 20`
   long (at most 60) from candidates sharing one of its dominant genres, then
   loses the main row's served 20, so the page does not repeat its opening.
@@ -296,10 +297,19 @@ library sections, which scope the whole row to their libraries.
   row it serves when that row is one every profile is offered, so a new
   profile's section reads "Popular on This Server". A heading an admin chose
   is never replaced.
-- **Rows for everyone.** Popular, the genre rows, the live default rows
-  (Highly Rated in Your Library, Recently Added) and the taste-seed picker
-  offer only `recommendableMediaTypes`, movies and series; personal rows
-  keep every type. See Rows for how each ranks.
+- **Media types.** Every row offers only `recommendableMediaTypes`, movies
+  and series: Popular, the genre rows, the live default rows (Highly Rated
+  in Your Library, Recently Added), the taste-seed picker, and the personal
+  rows. For personal rows the list gates the taste candidates (the main
+  row, cluster rows, type supplements and Watch Tonight's discover
+  candidates), Because You Watched anchors (a finished audiobook is passed
+  over for the next movie or series), co-watch neighbors and Similar Users
+  candidates. Reads drop other types from cached rows in the access check
+  they already run, so rows cached before a type left the list stop
+  showing it at once. Books still shape the taste vector. An item's own
+  "More like this" list keeps to the item's type, co-watch neighbors
+  included, so an audiobook's page can still list audiobooks. See Rows for
+  how each row ranks.
 
 ## Reads
 
@@ -318,11 +328,11 @@ A read that
 finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
-profile's three most recent completed titles that still exist in the catalog,
-taken from its latest ten completions and passing over those it rated 2 stars
-or lower; the worker, the reads and Watch Tonight choose them the same way. A
-read asks for a refresh only when there are anchors and none has a cached
-row.
+profile's three most recent completed titles of `recommendableMediaTypes` that
+still exist in the catalog, taken from its latest ten such completions and
+passing over those it rated 2 stars or lower; the worker, the reads and
+Watch Tonight choose them the same way. A read asks for a refresh only when
+there are anchors and none has a cached row.
 
 List reads return at most 50 items per row (default 20); the v1 for-you and
 similar-users reads keep 20, and section "see all" reads return up to 60, a

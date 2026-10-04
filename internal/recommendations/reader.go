@@ -45,7 +45,7 @@ type readerRepo interface {
 	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error)
 	ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error)
 	GetTopGenres(ctx context.Context, limit int) ([]string, error)
-	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+	FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error)
 }
 
@@ -751,10 +751,11 @@ func servedJaccard(a, b []ScoredItem, served int) float64 {
 	return float64(shared) / float64(union)
 }
 
-// filterRows drops from rows the items the profile cannot access, those in its
-// recommendation exclusion set (watched and favorited titles), and those it
-// rated 2 or lower, then drops the rows left empty. Rows cached before a title
-// was watched or favorited are cleaned here.
+// filterRows drops from rows the items the profile cannot access, those not of
+// recommendableMediaTypes, those in its recommendation exclusion set (watched
+// and favorited titles), and those it rated 2 or lower, then drops the rows
+// left empty. Rows cached before a title was watched or favorited, or before
+// rows were kept to recommendableMediaTypes, are cleaned here.
 func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, rows []ForYouRow, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	return r.newRowRead(userID, profileID, filter).filter(ctx, rows)
 }
@@ -821,7 +822,7 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 
 	accessible := map[string]struct{}{}
 	if len(itemIDs) > 0 {
-		accessible, err = r.repo.FilterAccessibleItemIDs(ctx, itemIDs, rr.access)
+		accessible, err = r.repo.FilterRecommendableItemIDs(ctx, itemIDs, rr.access)
 		if err != nil {
 			return nil, err
 		}

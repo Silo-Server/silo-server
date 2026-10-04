@@ -42,11 +42,17 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
 
-	// 4. Co-watch neighbors.
+	// 4. Co-watch neighbors of the source item's media type: co-watch counts
+	// ebook reading too, and the rail keeps to one type like the embedding
+	// search. A source of unknown type keeps every neighbor.
+	var cowatchTypes []string
+	if sourceType != "" {
+		cowatchTypes = []string{sourceType}
+	}
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
-	cowatchMap := make(map[string]float64, len(cowatchPairs))
-	for _, p := range cowatchPairs {
-		cowatchMap[p.SimilarItemID] = p.JaccardScore
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, catalog.AccessFilter{}, cowatchTypes)
+	if err != nil {
+		return nil, fmt.Errorf("filter co-watch neighbors: %w", err)
 	}
 
 	// 5. Blend scores (70% embedding, 30% co-watch).

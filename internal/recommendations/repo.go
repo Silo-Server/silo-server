@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -77,27 +78,39 @@ watched_activity AS (
 )`, catalog.EbookFinishedProgressThresholdSQL)
 
 // recentCompletedItemIDsQuery lists a profile's most recently completed
-// titles that are still in the catalog. Progress outlives a deleted item, and
-// an episode of a deleted series no longer rolls up to it, so a dead ID would
-// otherwise take an anchor's place.
+// titles that are still in the catalog and of the media types bound at $4
+// (recommendableMediaTypes). Progress outlives a deleted item, and an episode
+// of a deleted series no longer rolls up to it, so a dead ID would otherwise
+// take an anchor's place; a finished book is passed over the same way.
 var recentCompletedItemIDsQuery = fmt.Sprintf(`
 	WITH %s
 	SELECT item_id
 	FROM   watched_activity
 	WHERE  user_id = $1 AND profile_id = $2 AND completed = true
-	  AND  EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = watched_activity.item_id)
+	  AND  EXISTS (
+		SELECT 1 FROM media_items mi
+		WHERE  mi.content_id = watched_activity.item_id AND mi.type = ANY($4)
+	  )
 	GROUP  BY item_id
 	ORDER  BY MAX(updated_at) DESC, item_id ASC
 	LIMIT  $3
 `, watchedActivityCTE)
 
-// recommendableMediaTypes are the media types the non-personal rows (the
-// default rows, Popular and the genre rows) and the taste-seed picker offer.
-// 1.0 supports movies and series; adding a type here extends those rows and
-// the picker to it. Personal rows do not read it.
+// recommendableMediaTypes are the media types every recommendation row
+// offers: the personal rows (For You, the cluster rows and type supplements,
+// Because You Watched and its anchors, Similar Users, Watch Tonight's
+// candidates), the non-personal rows (the default rows, Popular and the genre
+// rows) and the taste-seed picker, and the Reader drops other types from
+// cached rows. 1.0 supports movies and series; adding a type here extends all
+// of them to it. Other types still shape the taste vector, and an item's own
+// "More like this" list keeps to the item's type.
 //
 //nolint:goconst // The list is data: media types as media_items.type stores them.
 var recommendableMediaTypes = []string{"movie", "series"}
+
+// matchedTitleSQL admits, over media_items aliased mi, the matched titles the
+// taste candidate queries draw from.
+const matchedTitleSQL = "mi.status = 'matched'"
 
 // crowdMinAccounts is how many login accounts must have watched a title
 // before the server's viewing counts as a crowd: one household's profiles
@@ -398,8 +411,9 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 }
 
 // FindTasteProfileCandidates returns full-library discover candidates for a
-// user's taste-profile embedding, optionally constrained to items sharing at
-// least one selected genre and to the caller's access scope.
+// user's taste-profile embedding: matched titles of recommendableMediaTypes,
+// optionally constrained to items sharing at least one selected genre and to
+// the caller's access scope.
 func (r *Repo) FindTasteProfileCandidates(
 	ctx context.Context,
 	embedding []float32,
@@ -411,6 +425,8 @@ func (r *Repo) FindTasteProfileCandidates(
 	return r.findTasteProfileCandidates(ctx, embedding, excludeIDs, genres, limit, filter, "")
 }
 
+// FindTasteProfileCandidatesByMediaType is FindTasteProfileCandidates for
+// one media type. A type outside recommendableMediaTypes has no candidates.
 func (r *Repo) FindTasteProfileCandidatesByMediaType(
 	ctx context.Context,
 	embedding []float32,
@@ -439,20 +455,24 @@ func (r *Repo) findTasteProfileCandidates(
 		excludeIDs = []string{}
 	}
 
+	// Candidates are matched titles of recommendableMediaTypes; a type
+	// supplement asks for one of them.
+	mediaTypes := recommendableMediaTypes
+	if mediaType != "" {
+		if !slices.Contains(recommendableMediaTypes, mediaType) {
+			return []ScoredItem{}, map[string][]string{}, nil
+		}
+		mediaTypes = []string{mediaType}
+	}
 	conditions := []string{
-		"(mi.status = 'matched' OR mi.type = 'audiobook')",
+		matchedTitleSQL,
+		"mi.type = ANY($3)",
 		"e.media_item_id != ALL($2)",
 	}
-	args := []any{pgvector.NewVector(embedding), excludeIDs}
-	argIdx := 3
+	args := []any{pgvector.NewVector(embedding), excludeIDs, mediaTypes}
+	argIdx := 4
 	genreMatchCountSQL := "0"
 	annLimit := limit
-
-	if mediaType != "" {
-		conditions = append(conditions, fmt.Sprintf("mi.type = $%d", argIdx))
-		args = append(args, mediaType)
-		argIdx++
-	}
 
 	if len(genres) > 0 {
 		annLimit = limit * 5
@@ -2098,6 +2118,18 @@ func (r *Repo) GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[st
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given
 // access filter. The returned map is keyed by media_items.content_id.
 func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
+	return r.filterItemIDs(ctx, itemIDs, filter, nil)
+}
+
+// FilterRecommendableItemIDs is FilterAccessibleItemIDs keeping only titles
+// of recommendableMediaTypes.
+func (r *Repo) FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
+	return r.filterItemIDs(ctx, itemIDs, filter, recommendableMediaTypes)
+}
+
+// filterItemIDs returns the IDs in itemIDs that filter admits and, when
+// mediaTypes is not nil, whose media type is one of mediaTypes.
+func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter, mediaTypes []string) (map[string]struct{}, error) {
 	if len(itemIDs) == 0 {
 		return map[string]struct{}{}, nil
 	}
@@ -2105,6 +2137,12 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	conditions := []string{"mi.content_id = ANY($1)"}
 	args := []any{itemIDs}
 	argIdx := 2
+
+	if mediaTypes != nil {
+		conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d)", argIdx))
+		args = append(args, mediaTypes)
+		argIdx++
+	}
 
 	if filter.AllowedContentIDs != nil {
 		if len(filter.AllowedContentIDs) == 0 {
@@ -2184,8 +2222,7 @@ const presentMediaTypesQuery = `
 
 // PresentMediaTypes returns the media types among mediaTypes that have a
 // title the taste candidate queries could return under filter: embedded,
-// matched (audiobooks need not be), and inside the viewer's libraries and
-// maturity limits.
+// matched, and inside the viewer's libraries and maturity limits.
 func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	present := make(map[string]struct{}, len(mediaTypes))
 	if len(mediaTypes) == 0 || (filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0) {
@@ -2193,7 +2230,7 @@ func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filte
 	}
 	conditions := []string{
 		"mi.type = t.media_type",
-		"(mi.status = 'matched' OR mi.type = 'audiobook')",
+		matchedTitleSQL,
 	}
 	args := []any{mediaTypes}
 	argIdx := 2
@@ -2380,13 +2417,14 @@ func (r *Repo) GetFavoriteItemIDs(ctx context.Context, userID int, profileID str
 	return ids, nil
 }
 
-// GetRecentCompletedItemIDs returns the most recently completed canonical item IDs for a profile.
+// GetRecentCompletedItemIDs returns the most recently completed canonical item
+// IDs of recommendableMediaTypes for a profile.
 func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
 	}
 
-	rows, err := r.pool.Query(ctx, recentCompletedItemIDsQuery, userID, profileID, limit)
+	rows, err := r.pool.Query(ctx, recentCompletedItemIDsQuery, userID, profileID, limit, recommendableMediaTypes)
 	if err != nil {
 		return nil, fmt.Errorf("get recent completed item IDs: %w", err)
 	}
@@ -2464,20 +2502,20 @@ func (r *Repo) ResolveCanonicalItemIDs(ctx context.Context, itemIDs []string) (m
 	return resolved, nil
 }
 
-// ExistingItemIDs returns the IDs in itemIDs that still have a media_items
-// row.
-func (r *Repo) ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
+// RecommendableItemIDs returns the IDs in itemIDs that still have a
+// media_items row of recommendableMediaTypes.
+func (r *Repo) RecommendableItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
 	existing := make(map[string]struct{}, len(itemIDs))
 	if len(itemIDs) == 0 {
 		return existing, nil
 	}
-	rows, err := r.pool.Query(ctx, `SELECT content_id FROM media_items WHERE content_id = ANY($1)`, itemIDs)
+	rows, err := r.pool.Query(ctx, `SELECT content_id FROM media_items WHERE content_id = ANY($1) AND type = ANY($2)`, itemIDs, recommendableMediaTypes)
 	if err != nil {
-		return nil, fmt.Errorf("find existing item IDs: %w", err)
+		return nil, fmt.Errorf("find recommendable item IDs: %w", err)
 	}
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return nil, fmt.Errorf("find existing item IDs: %w", err)
+		return nil, fmt.Errorf("find recommendable item IDs: %w", err)
 	}
 	for _, id := range ids {
 		existing[id] = struct{}{}

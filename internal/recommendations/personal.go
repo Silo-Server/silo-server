@@ -12,8 +12,6 @@ import (
 
 const aggregateMediaTypeFloorDivisor = 5
 
-var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook", "ebook"}
-
 // rowStore is the part of *Repo that builds a profile's personal rows.
 type rowStore interface {
 	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
@@ -232,7 +230,7 @@ func (b rowBuilder) addTypeSupplements(
 
 	floor := mediaTypeFloor(len(row))
 	var short []string
-	for _, mediaType := range aggregateSupplementMediaTypes {
+	for _, mediaType := range recommendableMediaTypes {
 		if countMediaType(pool, mediaTypes, mediaType) < floor {
 			short = append(short, mediaType)
 		}
@@ -282,7 +280,7 @@ func placeTypeSupplements(row, pool []ScoredItem, mediaTypes map[string]string) 
 	}
 
 	var added []ScoredItem
-	for _, mediaType := range aggregateSupplementMediaTypes {
+	for _, mediaType := range recommendableMediaTypes {
 		for _, candidate := range pool {
 			if counts[mediaType] >= floor {
 				break
@@ -417,9 +415,10 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
 	}
 
-	// Get co-watch neighbors the viewer can see.
+	// Get co-watch neighbors the viewer can see. Co-watch counts ebook
+	// reading too, so neighbors are kept to recommendableMediaTypes.
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
-	cowatchMap, err := e.accessibleCowatchScores(ctx, cowatchPairs, filter)
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, recommendableMediaTypes)
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
@@ -447,10 +446,11 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 	return result, nil
 }
 
-// accessibleCowatchScores maps each co-watch neighbor filter admits to its
-// Jaccard score. Co-watch neighbors bypass the access predicates of the
-// embedding query, so they are checked here.
-func (e *Engine) accessibleCowatchScores(ctx context.Context, pairs []CowatchPair, filter catalog.AccessFilter) (map[string]float64, error) {
+// cowatchScores maps each co-watch neighbor filter admits, and whose media
+// type is one of mediaTypes, to its Jaccard score. Co-watch neighbors bypass
+// the access and type predicates of the embedding query, so they are checked
+// here.
+func (e *Engine) cowatchScores(ctx context.Context, pairs []CowatchPair, filter catalog.AccessFilter, mediaTypes []string) (map[string]float64, error) {
 	scores := make(map[string]float64, len(pairs))
 	if len(pairs) == 0 {
 		return scores, nil
@@ -459,7 +459,7 @@ func (e *Engine) accessibleCowatchScores(ctx context.Context, pairs []CowatchPai
 	for i, p := range pairs {
 		ids[i] = p.SimilarItemID
 	}
-	accessible, err := e.repo.FilterAccessibleItemIDs(ctx, ids, filter)
+	accessible, err := e.repo.filterItemIDs(ctx, ids, filter, mediaTypes)
 	if err != nil {
 		return nil, err
 	}
