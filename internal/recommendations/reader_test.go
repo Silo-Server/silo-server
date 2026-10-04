@@ -326,6 +326,48 @@ func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 	}
 }
 
+// With recommendations disabled a fully personalized profile is served the
+// global rows only, though its personal rows are still cached, and no
+// personal row is read for a section or Discover.
+func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
+	repo := &fakeReaderRepo{
+		meta:     &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": 12, signalCountPositiveTitles: ColdStartFullPersonalized}},
+		clusters: []TasteCluster{{ClusterIdx: 0, Label: "Drama", DominantGenres: []string{"Drama"}}},
+		personal: map[string][]ScoredItem{
+			RecTypeForYouMain + "|":                {{MediaItemID: "personal-main"}},
+			RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "personal-drama", Reason: clusterTitle("Drama")}},
+			RecTypeSimilarUsersLiked + "|":         {{MediaItemID: "peer-pick"}},
+		},
+		global: map[string][]ScoredItem{
+			RecTypePopular:                      {{MediaItemID: "popular"}},
+			RecTypeRecentlyAdded:                {{MediaItemID: "recent"}},
+			RecTypeGenreSamplerPrefix + "Drama": {{MediaItemID: "top-drama"}},
+		},
+	}
+	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}).WithPersonalRows(false)
+	ctx := t.Context()
+
+	rows, err := r.getForYouPageRows(ctx, 7, "p1", ServedRowSize, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rowLabels(rows); !slices.Equal(got, []string{"Popular on This Server", "Recently Added"}) {
+		t.Fatalf("rows = %v, want the global rows only", got)
+	}
+	if items, err := r.GetSimilarUsersLiked(ctx, 7, "p1", 20, catalog.AccessFilter{}); err != nil || len(items) != 0 {
+		t.Fatalf("similar users = %v, %v; want none", items, err)
+	}
+	if items, anchor, err := r.SectionBecauseYouWatched(ctx, 7, "p1", "", nil, catalog.AccessFilter{}); err != nil || len(items) != 0 || anchor != "" {
+		t.Fatalf("because you watched = %v %q, %v; want none", items, anchor, err)
+	}
+	if row, err := r.SectionTasteMatchRow(ctx, 7, "p1", "Drama", catalog.AccessFilter{}); err != nil || row == nil || row.Type != genreSamplerRowType {
+		t.Fatalf("taste match = %+v, %v; want the global genre row", row, err)
+	}
+	if row, err := r.loadSectionRow(ctx, 7, "p1", SectionKindForYouMain, ""); err != nil || row != nil {
+		t.Fatalf("for you section = %+v, %v; want none", row, err)
+	}
+}
+
 // A profile with positive signals but no personal rows asks for them even at
 // level 0, since its titles may have gained embeddings since its last
 // refresh; a profile with nothing positive, or with its rows, does not.

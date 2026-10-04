@@ -59,6 +59,8 @@ type Reader struct {
 	// now is the clock personal rows are rotated by; nil is time.Now. Its
 	// location sets the day a rotation lasts.
 	now func() time.Time
+	// personalOff serves no personal rows (see WithPersonalRows).
+	personalOff bool
 }
 
 // NewReader creates a cache-backed recommendations reader.
@@ -85,6 +87,18 @@ func ratingReader(repo *catalog.RatingsRepo) itemRatingReader {
 func (r *Reader) WithUserStoreOutsidePostgres(outside bool) *Reader {
 	if r != nil && r.signals != nil {
 		r.signals.storeOutsidePostgres = outside
+	}
+	return r
+}
+
+// WithPersonalRows sets whether the reader serves personal rows (the main
+// For You row, cluster rows, Because You Watched and Similar Users) and
+// returns it. Recommendations are disabled without them: reads then serve
+// the global and default rows only, ignoring personal rows still cached from
+// before.
+func (r *Reader) WithPersonalRows(enabled bool) *Reader {
+	if r != nil {
+		r.personalOff = !enabled
 	}
 	return r
 }
@@ -182,6 +196,9 @@ func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID
 }
 
 func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if r.personalOff {
+		return []ScoredItem{}, nil
+	}
 	items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
 	if err != nil {
 		return nil, err
@@ -265,7 +282,7 @@ func (r *Reader) GetBecauseYouWatchedRows(ctx context.Context, userID int, profi
 // when given, else the profile's anchors (see anchorItemIDs) in turn,
 // passing over an anchor whose row filters empty.
 func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileID, sourceItemID string, maxRows int, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	if maxRows <= 0 {
+	if maxRows <= 0 || r.personalOff {
 		return nil, nil
 	}
 	sourceIDs := []string{}
@@ -343,9 +360,12 @@ func scopeToLibraries(filter catalog.AccessFilter, libraryIDs []int) catalog.Acc
 // auto-picks: every taste cluster qualifies (strongest first), and the global
 // fallback uses the server-wide top genre.
 func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*ForYouRow, error) {
-	clusters, err := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
-	if err != nil {
-		return nil, err
+	var clusters []TasteCluster
+	if !r.personalOff {
+		var err error
+		if clusters, err = r.repo.GetTasteClusterMeta(ctx, userID, profileID); err != nil {
+			return nil, err
+		}
 	}
 
 	matching := make([]TasteCluster, 0, len(clusters))
@@ -440,6 +460,13 @@ func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID st
 // defaultRows) rather than the cached Recently Added row.
 func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool, served int) ([]ForYouRow, error) {
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
+	if r.personalOff {
+		globalRows, err := rr.globalRows(ctx, liveDefaults)
+		if err != nil {
+			return nil, err
+		}
+		return rr.filter(ctx, globalRows)
+	}
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
@@ -849,9 +876,11 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 
 	// 2. Similar users row.
 	var extraRows []ForYouRow
-	similarItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
-	if err != nil {
-		return nil, err
+	var similarItems []ScoredItem
+	if !r.personalOff {
+		if similarItems, err = r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, ""); err != nil {
+			return nil, err
+		}
 	}
 	if len(similarItems) > 0 {
 		extraRows = append(extraRows, ForYouRow{
@@ -992,6 +1021,12 @@ func (r *Reader) GetSection(
 }
 
 func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind, key string) (*ForYouRow, error) {
+	if r.personalOff {
+		switch kind {
+		case SectionKindForYouMain, SectionKindCluster, SectionKindSimilarUsers:
+			return nil, nil
+		}
+	}
 	switch kind {
 	case SectionKindForYouMain:
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "")

@@ -3560,7 +3560,8 @@ func main() {
 				compatRecRefresh = recWorker
 			}
 			compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
-				WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+				WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite").
+				WithPersonalRows(cfg.Recommendations.Enabled)
 			// /Items/{id}/Similar ranks by embeddings when recommendations
 			// are enabled, and by genre otherwise.
 			if recEngine != nil {
