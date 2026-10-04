@@ -190,6 +190,45 @@ func TestHLSPlanningRegistryV3EnablesValidatedLocalToneMapWithoutRestart(t *test
 	}
 }
 
+// TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes
+// verifies that, with tone mapping enabled, a recipe without a tone-map step
+// neither waits on nor fails with the local tone-map probe.
+func TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true}
+	}
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "2", Available: true},
+	}))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+	}}
+	var probes atomic.Int32
+	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+		probes.Add(1)
+		return nil, context.DeadlineExceeded
+	}
+	h264 := playback.TransformationV3{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: "2"}
+
+	sdr := playback.PlannerResultV3{Plan: &playback.PlanV3{Transformations: []playback.TransformationV3{h264}}}
+	if transportErr := handler.validateLocalTransportCapabilitiesV3(context.Background(), sdr); transportErr != nil {
+		t.Fatalf("SDR recipe rejected: %#v", transportErr)
+	}
+	if got := probes.Load(); got != 0 {
+		t.Fatalf("SDR recipe ran %d tone-map probes, want 0", got)
+	}
+
+	toneMapped := playback.PlannerResultV3{Plan: &playback.PlanV3{Transformations: []playback.TransformationV3{h264, {
+		Name: playback.TransformationHDRToSDRToneMapV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
+	}}}}
+	transportErr := handler.validateLocalTransportCapabilitiesV3(context.Background(), toneMapped)
+	if transportErr == nil || !transportErr.retryable || !errors.Is(transportErr.cause, context.DeadlineExceeded) {
+		t.Fatalf("tone-mapped recipe error = %#v, want retryable probe deadline", transportErr)
+	}
+}
+
 // TestLocalToneMapCapabilitiesV3UsesLivePlaybackHardware verifies that the
 // handler always delegates cache decisions to the shared capability probe.
 func TestLocalToneMapCapabilitiesV3UsesLivePlaybackHardware(t *testing.T) {
