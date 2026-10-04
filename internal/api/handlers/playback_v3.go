@@ -43,17 +43,18 @@ import (
 )
 
 const (
-	maxPlaybackV3BodyBytes       = 256 << 10
-	maxPlaybackV3EventBodyBytes  = 32 << 10
-	replanLeaseDurationV3        = 15 * time.Second
-	replanReleaseTimeoutV3       = 3 * time.Second
-	v3NodeCapabilityTTL          = time.Minute
-	playbackNodeIntegratedV3     = "integrated"
-	subtitleFormatVTTV3          = "vtt"
-	subtitleCodecPGSFFmpegV3     = "hdmv_pgs_subtitle"
-	subtitleMIMEVTTV3            = "text/vtt"
-	subtitleUnavailableReasonV3  = "subtitle_artifact_unavailable"
-	transcodeStartFailedReasonV3 = "transcode_start_failed"
+	maxPlaybackV3BodyBytes        = 256 << 10
+	maxPlaybackV3EventBodyBytes   = 32 << 10
+	replanLeaseDurationV3         = 15 * time.Second
+	replanReleaseTimeoutV3        = 3 * time.Second
+	v3NodeCapabilityTTL           = time.Minute
+	playbackNodeIntegratedV3      = "integrated"
+	subtitleFormatVTTV3           = "vtt"
+	subtitleCodecPGSFFmpegV3      = "hdmv_pgs_subtitle"
+	subtitleMIMEVTTV3             = "text/vtt"
+	subtitleUnavailableReasonV3   = "subtitle_artifact_unavailable"
+	transcodeStartFailedReasonV3  = "transcode_start_failed"
+	capabilityUnavailableReasonV3 = "transcode_node_capability_unavailable"
 	// transportStartupReadyV3 is the "outcome" of a transport startup whose
 	// first manifest became ready.
 	transportStartupReadyV3 = "ready"
@@ -2412,22 +2413,30 @@ func (h *PlaybackHandler) validateLocalTransportCapabilitiesV3(ctx context.Conte
 	if !planRequiresServerTransformationsV3(result.Plan) {
 		return nil
 	}
-	localRegistry, capabilityErr := h.localHLSExecutionRegistryV3(ctx)
-	if capabilityErr != nil {
-		return &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "Local transcode capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
+	// Only a tone-mapped recipe depends on the tone-map probe. Any other recipe
+	// is checked against the base registry, so an SDR transcode never waits on
+	// a cold probe or fails when one times out.
+	requiresToneMap := planRequiresToneMapV3(result.Plan)
+	localRegistry := h.transformationRegistryV3(ctx)
+	if requiresToneMap {
+		var capabilityErr error
+		localRegistry, capabilityErr = h.localHLSExecutionRegistryV3(ctx)
+		if capabilityErr != nil {
+			return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "Local transcode capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
+		}
 	}
 	if err := validateAdvertisedTransformationsV3(result.Plan, localRegistry.Advertised()); err != nil {
-		return &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected playback recipe.", retryable: true, cause: err}
 	}
-	if !planRequiresToneMapV3(result.Plan) {
+	if !requiresToneMap {
 		return nil
 	}
 	capabilities, capabilityErr := h.localToneMapCapabilitiesForTransportV3(ctx)
 	if capabilityErr != nil {
-		return &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "Local tone-map capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "Local tone-map capability validation is temporarily unavailable.", retryable: true, cause: capabilityErr}
 	}
 	if err := validateToneMapExecutorV3(result, capabilities); err != nil {
-		return &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err}
+		return &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "No available transcode executor can run the selected tone-map recipe.", retryable: true, cause: err}
 	}
 	return nil
 }
@@ -3225,7 +3234,7 @@ func (h *PlaybackHandler) escalateRefusedProgressiveRemuxV3(ctx context.Context,
 		// nothing is known about whether HLS would run. Ask the client to retry
 		// rather than report the remux terminal as final.
 		return result, &transportErrorV3{
-			reason:    "transcode_node_capability_unavailable",
+			reason:    capabilityUnavailableReasonV3,
 			message:   "Transcode capability validation is temporarily unavailable.",
 			retryable: true,
 			cause:     capabilityErr,
@@ -3931,7 +3940,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	if result.ToneMapMode != "" {
 		capabilities, err := h.remoteToneMapCapabilitiesV3(r.Context(), node.URL, false)
 		if err != nil || !capabilities.Supports(result.ToneMapMode, result.ToneMapSourceKind) {
-			return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err}
+			return preparedTransportV3{}, &transportErrorV3{reason: capabilityUnavailableReasonV3, message: "The selected node cannot run the tone-map recipe.", retryable: true, cause: err}
 		}
 		toneMapFilter = capabilities.FilterFor(result.ToneMapMode, result.ToneMapSourceKind)
 		if result.ToneMapMode == tonemap.ModeHardware {
@@ -6133,10 +6142,10 @@ func (h *PlaybackHandler) plannerSettingsV3Result(ctx context.Context) (settings
 		if errs[3] != nil {
 			return settings, fmt.Errorf("load HEVC encoding setting: %w", errs[3])
 		}
-		settings.Allow4KTranscode = strings.EqualFold(values[0], "true")
-		settings.HardwareToneMapEnabled = strings.EqualFold(values[1], "true")
-		settings.SoftwareToneMapEnabled = strings.EqualFold(values[2], "true")
-		settings.AllowHEVCEncoding = strings.EqualFold(values[3], "true")
+		settings.Allow4KTranscode = config.AdminSettingEnabled(keys[0], values[0])
+		settings.HardwareToneMapEnabled = config.AdminSettingEnabled(keys[1], values[1])
+		settings.SoftwareToneMapEnabled = config.AdminSettingEnabled(keys[2], values[2])
+		settings.AllowHEVCEncoding = config.AdminSettingEnabled(keys[3], values[3])
 	}
 	return settings, nil
 }

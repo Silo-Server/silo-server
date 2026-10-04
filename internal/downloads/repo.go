@@ -56,16 +56,37 @@ const downloadQuotaLockClassID = 0x646c6f61 // "dloa"
 // used only as its holder — fn's own statements run through the pool and
 // commit before the lock releases, so the next holder sees them.
 func (r *Repository) WithUserQuotaLock(ctx context.Context, userID int, fn func(ctx context.Context) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin download quota lock: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	// Do not wait on pg_advisory_xact_lock while holding a pool connection.
+	// Concurrent callers would each occupy a connection while waiting, leaving
+	// the callback unable to acquire one from a small pool and deadlocking the
+	// quota path. Polling with pg_try_advisory_xact_lock releases the connection
+	// between attempts while preserving the transaction-scoped lock once won.
+	for {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin download quota lock: %w", err)
+		}
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, userID); err != nil {
-		return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
+		var acquired bool
+		err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, userID).Scan(&acquired)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
+		}
+		if acquired {
+			defer func() { _ = tx.Rollback(ctx) }()
+			return fn(ctx)
+		}
+		_ = tx.Rollback(ctx)
+
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return fn(ctx)
 }
 
 // scanInto scans a single download row's columns (in downloadColumns order)

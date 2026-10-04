@@ -480,6 +480,7 @@ func TestResolveToneMapTargetKeepsPermanentCapabilityAndPartialInventoryOutcomes
 			settings: staticDownloadSettings{
 				config.Allow4KTranscodeSettingKey:                 "true",
 				config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
+				config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
 			},
 		}
 		_, err := manager.resolveToneMapTarget(context.Background(), hdrDownloadTestFile(), playback.PrepareTarget{CodecVideo: "h264", Resolution: "1080p"})

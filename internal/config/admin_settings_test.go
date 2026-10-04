@@ -2,10 +2,14 @@
 package config
 
 import (
+	"context"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
@@ -186,25 +190,40 @@ func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 	}
 }
 
-func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
+// TestPlaybackTranscodeDefaults pins the transcode capability defaults and
+// checks that a runtime reader of an unset row sees the same value as the
+// Admin UI.
+func TestPlaybackTranscodeDefaults(t *testing.T) {
 	effective := EffectiveAdminSettings(nil)
-	if got := effective[chapterThumbnailSoftwareToneMapKey]; got != "false" {
-		t.Fatalf("software tone-map default = %q, want false", got)
+	for key, want := range map[string]bool{
+		Allow4KTranscodeSettingKey:                  true,
+		PlaybackAllowHEVCEncodingSettingKey:         false,
+		PlaybackTranscodeHardwareToneMapSettingKey:  true,
+		PlaybackTranscodeSoftwareToneMapSettingKey:  true,
+		ChapterThumbnailSoftwareToneMapSettingKey:   true,
+		playback.TranscodeThrottleEnabledSettingKey: true,
+	} {
+		if got := effective[key]; got != strconv.FormatBool(want) {
+			t.Errorf("%s default = %q, want %t", key, got, want)
+		}
+		if got := AdminSettingEnabled(key, ""); got != want {
+			t.Errorf("AdminSettingEnabled(%s, unset) = %t, want %t", key, got, want)
+		}
+		if got := AdminSettingEnabled(key, " "+strconv.FormatBool(!want)+" "); got == want {
+			t.Errorf("AdminSettingEnabled(%s, stored %t) ignored the stored value", key, !want)
+		}
+	}
+	if got := playback.ConfiguredTranscodeThrottleSeconds(t.Context(), mapSettings{}); got != playback.DefaultTranscodeThrottleSeconds {
+		t.Errorf("throttle with no stored settings = %d, want %d", got, playback.DefaultTranscodeThrottleSeconds)
+	}
+	if got := playback.ConfiguredTranscodeThrottleSeconds(t.Context(), mapSettings{playback.TranscodeThrottleEnabledSettingKey: "false"}); got != 0 {
+		t.Errorf("throttle explicitly disabled = %d, want 0", got)
 	}
 }
 
-// TestTranscodeToneMapPoliciesDefaultDisabled verifies tone mapping remains opt-in.
-func TestTranscodeToneMapPoliciesDefaultDisabled(t *testing.T) {
-	effective := EffectiveAdminSettings(nil)
-	for _, key := range []string{
-		PlaybackTranscodeHardwareToneMapSettingKey,
-		PlaybackTranscodeSoftwareToneMapSettingKey,
-	} {
-		if got := effective[key]; got != "false" {
-			t.Fatalf("%s default = %q, want false", key, got)
-		}
-	}
-}
+type mapSettings map[string]string
+
+func (m mapSettings) Get(_ context.Context, key string) (string, error) { return m[key], nil }
 
 func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	if cfg.S3.Public.URLAuth == "" {
@@ -237,7 +256,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	}{
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
-		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
+		{key: ChapterThumbnailSoftwareToneMapSettingKey, value: "maybe"},
 		{key: PlaybackTranscodeHardwareToneMapSettingKey, value: "maybe"},
 		{key: PlaybackTranscodeSoftwareToneMapSettingKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
