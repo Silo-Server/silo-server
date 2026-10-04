@@ -40,10 +40,9 @@ under `recommendations.embeddings`, `recommendations.taste_profiles`,
 | Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first |
 
 At startup the worker also builds the global rows when none are cached, so
-cold-start rows exist before the first nightly cache run. Each global row
-needs activity to fill (watches, ratings, or titles added in the last 14
-days), so on an idle server the build can write none, and it is not retried
-until the next cache run.
+cold-start rows exist before the first nightly cache run. Recently Added
+fills from any matched movie or series; Popular needs viewing by at least two
+accounts and stays empty on smaller servers.
 
 ## Embeddings
 
@@ -160,6 +159,28 @@ Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are
 shown on their own. Below the floor the row is cached empty.
 
+The rows that are not personal (Popular, the genre rows and the default rows)
+and the taste-seed picker offer matched movies and series only, the types in
+`recommendableMediaTypes`. Popular counts login accounts, not profiles: a
+title needs at least 2 accounts that watched it in the last 90 days, so a
+single-account server has no Popular row, and the cached row keeps 200 titles
+for reads to filter. Genre rows rank a genre's titles by rating reliability
+(IMDb, then a TMDB rating below 9.5) and rating, with watching accounts only
+as a tie-break. The 16 cached genres are those most accounts watched, once at
+least 2 share one, then the largest. The picker interleaves its best 600
+candidates by first genre, then continues in rank order.
+
+Discover and its section pages serve two default rows live: Highly Rated in
+Your Library (a catalog rating of at least 7.0, movies and series
+interleaved in proportion to how many of each the viewer can see) and
+Recently Added (by the title's or its latest episode's addition, with no
+window). Reads query them under the viewer's access filter and exclusion
+set, so they show on a fresh server, with recommendations disabled, and for
+a restricted profile. Highly Rated is never cached. The cached global
+Recently Added row uses the same query without the access filter and also
+has no window, so on a server with no Popular row a new profile's cached
+reads still get a row.
+
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
 the new run's expiry; a global row whose rebuild finds nothing, and a genre row
@@ -188,10 +209,14 @@ nightly taste job skips such profiles, as the purge migration does.
 
 ## Reads
 
-The Reader serves cached rows; the one live query is the server's top genre,
-for a taste-match section with no genre and no matching cluster. The
-standalone popular and recently-added list endpoints query the catalog live
-rather than reading the cache. A read that
+The Reader serves cached rows, except the default rows on Discover and their
+section pages; home and library sections keep the cached Recently Added row
+instead, since a library has its own shelves. The other live query
+is the server's top genre, for a taste-match section with no genre and no
+matching cluster. The standalone popular and recently-added list endpoints
+query the catalog live rather than reading the cache. Discover leaves out of
+each row the items earlier rows show, but not those they cut at the row limit.
+A read that
 finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the

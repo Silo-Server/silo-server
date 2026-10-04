@@ -302,22 +302,27 @@ func TestBuildTasteClustersDeterministic(t *testing.T) {
 	}
 }
 
-func TestDeduplicateThenTrimKeepsBackfillCandidates(t *testing.T) {
+func TestDeduplicateKeepsBackfillCandidates(t *testing.T) {
 	seen := map[string]struct{}{"already-seen": {}}
 	items := []ScoredItem{
 		{MediaItemID: "already-seen", Score: 1.0},
 		{MediaItemID: "next-best", Score: 0.9},
 		{MediaItemID: "backfill", Score: 0.8},
+		{MediaItemID: "not-shown", Score: 0.7},
 	}
 
-	row := ForYouRow{Items: deduplicateItems(items, seen)}
-	rows := trimRows([]ForYouRow{row}, 2)
+	kept := deduplicateItems(items, seen, 2)
 
-	if len(rows[0].Items) != 2 {
-		t.Fatalf("got %d items, want 2", len(rows[0].Items))
+	if len(kept) != 2 || kept[0].MediaItemID != "next-best" || kept[1].MediaItemID != "backfill" {
+		t.Fatalf("unexpected retained items: %#v", kept)
 	}
-	if rows[0].Items[0].MediaItemID != "next-best" || rows[0].Items[1].MediaItemID != "backfill" {
-		t.Fatalf("unexpected retained items: %#v", rows[0].Items)
+	// Only shown items are spent: the row's third survivor stays free for a
+	// later row.
+	if _, spent := seen["not-shown"]; spent {
+		t.Fatal("an item past the row's limit was marked seen")
+	}
+	if later := deduplicateItems([]ScoredItem{{MediaItemID: "backfill"}, {MediaItemID: "not-shown"}}, seen, 2); len(later) != 1 || later[0].MediaItemID != "not-shown" {
+		t.Fatalf("later row kept %#v, want only not-shown", later)
 	}
 }
 

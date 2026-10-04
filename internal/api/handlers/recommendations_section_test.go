@@ -34,6 +34,7 @@ func TestDiscoverRowSectionKey(t *testing.T) {
 		{"popular", "popular", "Popular on This Server", 0, recommendations.SectionKindPopular, ""},
 		{"recently added", "recently_added", "Recently Added", 0, recommendations.SectionKindRecentlyAdded, ""},
 		{"top rated", "top_rated", "Top Rated", 0, recommendations.SectionKindTopRated, ""},
+		{"highly rated", "top_rated", "Highly Rated in Your Library", 0, recommendations.SectionKindTopRated, ""},
 		{"genre warm", "genre_sampler", "Popular in Drama", 0, recommendations.SectionKindGenre, "Drama"},
 		{"genre cold", "genre_sampler", "Top Sci-Fi", 0, recommendations.SectionKindGenre, "Sci-Fi"},
 		{"unknown row", "watch_tonight", "Watch Tonight", 0, "", ""},

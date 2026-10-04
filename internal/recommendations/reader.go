@@ -45,6 +45,7 @@ type readerRepo interface {
 	ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error)
 	GetTopGenres(ctx context.Context, limit int) ([]string, error)
 	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error)
 }
 
 // Reader assembles recommendation rows from cache-backed data sources.
@@ -403,10 +404,13 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 // profile, is level 0 and gets only the global rows, even when personal rows
 // from an earlier taste profile are still cached.
 func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx)
+	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx, false)
 }
 
-func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
+// forYouPageRows is getForYouPageRows for this read. With liveDefaults the
+// global rows are the cached Popular row and the live default rows (see
+// defaultRows) rather than the cached Recently Added row.
+func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]ForYouRow, error) {
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
@@ -414,7 +418,7 @@ func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
 	}
 	level := coldStartLevelOf(meta)
 
-	globalRows, err := r.getGlobalRows(ctx)
+	globalRows, err := rr.globalRows(ctx, liveDefaults)
 	if err != nil {
 		return nil, err
 	}
@@ -457,20 +461,83 @@ func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
 	return rows, nil
 }
 
-func (r *Reader) getGlobalRows(ctx context.Context) ([]ForYouRow, error) {
-	popular, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypePopular, "")
+// globalRows reads the rows every profile is offered: the cached Popular
+// row, then the cached Recently Added row or, with liveDefaults, the live
+// default rows. The rows are not yet filtered for the viewer.
+func (rr *rowRead) globalRows(ctx context.Context, liveDefaults bool) ([]ForYouRow, error) {
+	repo := rr.reader.repo
+	popular, err := repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypePopular, "")
 	if err != nil {
 		return nil, err
 	}
-	recentlyAdded, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "")
+	if liveDefaults {
+		defaults, err := rr.defaultRows(ctx, CacheCandidateLimit)
+		if err != nil {
+			return nil, err
+		}
+		return append(buildColdStartRows(popular, nil, nil), defaults...), nil
+	}
+	recentlyAdded, err := repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "")
 	if err != nil {
 		return nil, err
 	}
-	topRated, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeTopRated, "")
-	if err != nil {
-		return nil, err
+	return buildColdStartRows(popular, recentlyAdded, nil), nil
+}
+
+// The live default rows: titles the viewer can see and has not watched or
+// favorited, queried at read time rather than cached, so they show on a
+// fresh server, with recommendations disabled, and for a restricted profile
+// the global cache holds little for. Discover and the section pages serve
+// them; home and library sections do not, as a library has its own shelves.
+const (
+	highlyRatedLabel   = "Highly Rated in Your Library"
+	recentlyAddedLabel = "Recently Added"
+)
+
+// defaultRowKinds are the live default rows in display order: a quality
+// ranking first, since a freshly imported library's additions are in scan
+// order.
+var defaultRowKinds = []string{RecTypeTopRated, RecTypeRecentlyAdded}
+
+// defaultRows reads the live default rows of up to limit items each,
+// dropping empty ones. Like the cached rows, they are not yet filtered.
+func (rr *rowRead) defaultRows(ctx context.Context, limit int) ([]ForYouRow, error) {
+	rows := make([]ForYouRow, 0, len(defaultRowKinds))
+	for _, kind := range defaultRowKinds {
+		row, err := rr.defaultRow(ctx, kind, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(row.Items) > 0 {
+			rows = append(rows, row)
+		}
 	}
-	return buildColdStartRows(popular, recentlyAdded, topRated, map[string][]ScoredItem{}), nil
+	return rows, nil
+}
+
+// defaultRow reads one live default row, RecTypeTopRated or
+// RecTypeRecentlyAdded, leaving out the profile's exclusion set in the query
+// so the row fills past it.
+func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForYouRow, error) {
+	excluded, err := rr.exclusionSet(ctx)
+	if err != nil {
+		return ForYouRow{}, err
+	}
+	if rr.excludedIDs == nil {
+		rr.excludedIDs = make([]string, 0, len(excluded))
+		for id := range excluded {
+			rr.excludedIDs = append(rr.excludedIDs, id)
+		}
+	}
+	items, err := rr.reader.repo.ListDefaultRowItems(ctx, rr.access, kind, rr.excludedIDs, limit)
+	if err != nil {
+		return ForYouRow{}, err
+	}
+	label := recentlyAddedLabel
+	if kind == RecTypeTopRated {
+		label = highlyRatedLabel
+	}
+	return ForYouRow{Type: kind, Label: label, Items: items}, nil
 }
 
 func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID string) ([]ForYouRow, bool, error) {
@@ -547,28 +614,28 @@ type rowRead struct {
 	profileID string
 	access    catalog.AccessFilter
 	excluded  map[string]struct{}
+	// excludedIDs is excluded as a list, built when a live row needs it.
+	excludedIDs []string
 }
 
 func (r *Reader) newRowRead(userID int, profileID string, access catalog.AccessFilter) *rowRead {
 	return &rowRead{reader: r, userID: userID, profileID: profileID, access: access}
 }
 
-// exclusions returns the profile's recommendation exclusion set, loading it on
-// the first call.
-func (rr *rowRead) exclusions(ctx context.Context) (map[string]struct{}, error) {
-	if rr.excluded != nil {
-		return rr.excluded, nil
+// exclusionSet is the profile's recommendation exclusion set, loaded on
+// first use.
+func (rr *rowRead) exclusionSet(ctx context.Context) (map[string]struct{}, error) {
+	if rr.excluded == nil {
+		excluded, err := rr.reader.signalReader().RecommendationExclusionSet(ctx, rr.userID, rr.profileID)
+		if err != nil {
+			return nil, err
+		}
+		if excluded == nil {
+			excluded = map[string]struct{}{}
+		}
+		rr.excluded = excluded
 	}
-	excluded, err := rr.reader.signalReader().RecommendationExclusionSet(ctx, rr.userID, rr.profileID)
-	if err != nil {
-		return nil, err
-	}
-	if excluded == nil {
-		// A non-nil set records that it was loaded.
-		excluded = map[string]struct{}{}
-	}
-	rr.excluded = excluded
-	return excluded, nil
+	return rr.excluded, nil
 }
 
 // filter is filterRows for this read.
@@ -578,7 +645,7 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 	}
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 
-	excluded, err := rr.exclusions(ctx)
+	excluded, err := rr.exclusionSet(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -632,24 +699,24 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 }
 
 // GetDiscoverRows assembles all rows for the discover/recommendations page.
-// It combines personalized for-you rows, similar-users, and random genre-based
-// popular rows. All data is read from cache — no live aggregation queries.
+// It combines personalized for-you rows, the live default rows,
+// similar-users, and daily genre rows. Every row but the default rows is read
+// from cache. A row shows an item no earlier row shows.
 func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
 	read := r.newRowRead(userID, profileID, filter)
 
 	// 1. For-you rows (personalized + cold-start blended, already filtered).
-	forYouRows, err := read.forYouPageRows(ctx)
+	forYouRows, err := read.forYouPageRows(ctx, true)
 	if err != nil {
 		return nil, err
 	}
 
-	// Track seen items for cross-row deduplication.
+	// Track shown items for cross-row deduplication.
 	seen := make(map[string]struct{})
 	for i := range forYouRows {
-		forYouRows[i].Items = deduplicateItems(forYouRows[i].Items, seen)
+		forYouRows[i].Items = deduplicateItems(forYouRows[i].Items, seen, limit)
 	}
-	forYouRows = trimRows(forYouRows, limit)
 	// Drop rows emptied by dedup.
 	forYouRows = dropEmptyRows(forYouRows)
 
@@ -698,7 +765,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 			items := genreSamplers[genre]
 			extraRows = append(extraRows, ForYouRow{
 				Type:  "genre_sampler",
-				Label: "Popular in " + genre,
+				Label: genreRowLabel(genre),
 				Items: items,
 			})
 		}
@@ -710,9 +777,8 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		return nil, err
 	}
 	for i := range extraRows {
-		extraRows[i].Items = deduplicateItems(extraRows[i].Items, seen)
+		extraRows[i].Items = deduplicateItems(extraRows[i].Items, seen, limit)
 	}
-	extraRows = trimRows(extraRows, limit)
 	extraRows = dropEmptyRows(extraRows)
 
 	// Interleave: for-you rows first, then genre rows woven after every 2 for-you rows,
@@ -763,13 +829,28 @@ func (r *Reader) GetSection(
 	if limit <= 0 || limit > CacheCandidateLimit {
 		limit = CacheCandidateLimit
 	}
+	read := r.newRowRead(userID, profileID, filter)
 
-	row, err := r.loadSectionRow(ctx, userID, profileID, kind, key)
+	var row *ForYouRow
+	var err error
+	switch kind {
+	case SectionKindTopRated, SectionKindRecentlyAdded:
+		// The live default rows, as Discover shows them.
+		recType := RecTypeRecentlyAdded
+		if kind == SectionKindTopRated {
+			recType = RecTypeTopRated
+		}
+		var live ForYouRow
+		live, err = read.defaultRow(ctx, recType, limit)
+		row = &live
+	default:
+		row, err = r.loadSectionRow(ctx, userID, profileID, kind, key)
+	}
 	if err != nil || row == nil {
 		return nil, err
 	}
 
-	rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{*row}, filter)
+	rows, err := read.filter(ctx, []ForYouRow{*row})
 	if err != nil {
 		return nil, err
 	}
@@ -836,20 +917,6 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		}
 		return &ForYouRow{Type: RecTypePopular, Label: "Popular on This Server", Items: items}, nil
 
-	case SectionKindRecentlyAdded:
-		items, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeRecentlyAdded, "")
-		if err != nil || len(items) == 0 {
-			return nil, err
-		}
-		return &ForYouRow{Type: RecTypeRecentlyAdded, Label: "Recently Added", Items: items}, nil
-
-	case SectionKindTopRated:
-		items, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeTopRated, "")
-		if err != nil || len(items) == 0 {
-			return nil, err
-		}
-		return &ForYouRow{Type: RecTypeTopRated, Label: "Top Rated", Items: items}, nil
-
 	case SectionKindGenre:
 		if key == "" {
 			return nil, fmt.Errorf("genre section requires a key")
@@ -858,7 +925,7 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: "genre_sampler", Label: "Popular in " + key, Items: items}, nil
+		return &ForYouRow{Type: genreSamplerRowType, Label: genreRowLabel(key), Items: items}, nil
 	}
 
 	return nil, nil
@@ -867,6 +934,15 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 // clusterRowType is the type the API reports for the main row and every
 // taste-cluster row.
 const clusterRowType = "cluster"
+
+// genreSamplerRowType is the type of a genre row.
+const genreSamplerRowType = "genre_sampler"
+
+// genreRowLabel titles a genre row. Its titles are the genre's best rated,
+// not its most watched.
+func genreRowLabel(genre string) string {
+	return "Top " + genre
+}
 
 // selectDailyGenres picks up to n genres from the available list using a
 // deterministic daily seed so the selection is stable within a day for a given profile.
@@ -903,11 +979,20 @@ func selectDailyGenres(genres []string, profileID string, n int) []string {
 	return genres[:n]
 }
 
-// deduplicateItems removes items whose MediaItemID is already in the seen set,
-// and adds surviving items to the set.
-func deduplicateItems(items []ScoredItem, seen map[string]struct{}) []ScoredItem {
-	result := make([]ScoredItem, 0, len(items))
+// deduplicateItems keeps, in order, up to limit items whose MediaItemID is
+// not in the seen set (every one when limit is not positive), and adds only
+// the kept items to the set: items a row does not show stay free for later
+// rows.
+func deduplicateItems(items []ScoredItem, seen map[string]struct{}, limit int) []ScoredItem {
+	capacity := len(items)
+	if limit > 0 {
+		capacity = min(capacity, limit)
+	}
+	result := make([]ScoredItem, 0, capacity)
 	for _, item := range items {
+		if limit > 0 && len(result) == limit {
+			break
+		}
 		if _, ok := seen[item.MediaItemID]; ok {
 			continue
 		}

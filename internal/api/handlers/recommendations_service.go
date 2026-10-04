@@ -105,9 +105,10 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 
 // PopularItems answers the server-wide popular items of the last days,
 // minus what the profile has watched. It is not viewer-filtered: v1 filters
-// it with keepAccessible and v2 as it renders the cards.
+// it with keepAccessible and v2 as it renders the cards. Unlike the cached
+// Popular row, a title one account watched counts.
 func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetPopularItems(ctx, days, limit)
+	items, err := h.recsRepo.GetPopularItems(ctx, days, 1, limit)
 	if err != nil {
 		slog.WarnContext(ctx, "PopularItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch popular items")

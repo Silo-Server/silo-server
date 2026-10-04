@@ -723,9 +723,8 @@ func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
 
 // globalRowStore is the part of Repo that builds and caches the global rows.
 type globalRowStore interface {
-	GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
+	GetPopularItems(ctx context.Context, days, minAccounts, limit int) ([]ScoredItem, error)
 	GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
-	GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]ScoredItem, error)
 	GetTopGenres(ctx context.Context, limit int) ([]string, error)
 	GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error)
 	UpsertRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string, items []ScoredItem, expiresAt string) error
@@ -733,10 +732,21 @@ type globalRowStore interface {
 	DeleteGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, keep []string) (int64, error)
 }
 
+// Global row sizes. Popular keeps a deeper pool than other rows because
+// reads filter it for each viewer's access and watch history afterwards.
+const (
+	popularWindowDays = 90
+	popularPoolSize   = 200
+	// genreMenuSize is how many genre rows are cached; Discover draws
+	// four of them a day for each profile.
+	genreMenuSize = 16
+)
+
 // cacheGlobalRows generates and caches non-personalized rows. A row whose
 // query or write fails keeps its previously cached version until the new
 // rows' expiry, so one failed run does not empty it. A row whose query finds
-// nothing, and a genre row whose genre left the menu, is deleted.
+// nothing, and a genre row whose genre left the menu, is deleted. Highly Rated
+// in Your Library is not cached: reads query it live for each viewer.
 func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expires string) (written, failed int) {
 	// keep extends the cached rows of recType (every type starting with it
 	// when prefix is set) after their rebuild failed with cause.
@@ -770,14 +780,14 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 		}
 	}
 
-	popular, err := store.GetPopularItems(ctx, 30, CacheCandidateLimit)
+	popular, err := store.GetPopularItems(ctx, popularWindowDays, crowdMinAccounts, popularPoolSize)
 	put(RecTypePopular, popular, err)
-	recentlyAdded, err := store.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit)
+	// No window: a quiet library's newest titles still make a row for a new
+	// profile when no Popular row is cached.
+	recentlyAdded, err := store.GetRecentlyAddedItems(ctx, 0, CacheCandidateLimit)
 	put(RecTypeRecentlyAdded, recentlyAdded, err)
-	topRated, err := store.GetTopRatedItems(ctx, 5, CacheCandidateLimit)
-	put(RecTypeTopRated, topRated, err)
 
-	topGenres, err := store.GetTopGenres(ctx, 8)
+	topGenres, err := store.GetTopGenres(ctx, genreMenuSize)
 	if err != nil {
 		keep(RecTypeGenreSamplerPrefix, true, err)
 		return written, failed
