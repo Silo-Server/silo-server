@@ -41,7 +41,7 @@ type DownloadEntry struct {
 // DownloadPreparation is a preparing entry's place in the server's
 // preparation queue, or its running encode's progress.
 type DownloadPreparation struct {
-	State            string   `json:"state" enum:"queued,running,retrying" doc:"retrying: an attempt failed and the job waits out its backoff."`
+	State            string   `json:"state" enum:"queued,running,retrying,paused" doc:"retrying: an attempt failed and the job waits out its backoff. paused: an administrator paused the job; it isn't claimed until resumed."`
 	QueuePosition    int      `json:"queue_position,omitempty" minimum:"1" doc:"1-based place among every queued preparation on this server; present only while queued."`
 	Progress         *float64 `json:"progress,omitempty" minimum:"0" maximum:"1" doc:"Encoded fraction, once a running encode reports it."`
 	RemainingSeconds *int     `json:"remaining_seconds,omitempty" minimum:"0" doc:"Estimated seconds left at the encode's reported speed."`

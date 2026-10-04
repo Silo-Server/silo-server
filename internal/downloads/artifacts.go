@@ -112,6 +112,8 @@ type ArtifactManager struct {
 	ffmpegLogs     playback.FFmpegLogSink
 	lastDiskSweep  time.Time
 	lastStaleSweep time.Time
+	// localAttempts cancels the attempts this replica runs, by artifact id.
+	localAttempts map[string]*localAttempt
 }
 
 // toneMapCapabilityProvider exposes the pooled executor inventory and local
@@ -382,7 +384,7 @@ func (m *ArtifactManager) newArtifact(file *models.MediaFile, format string, tar
 		ToneMapDVBLCompatIDPresent: target.ToneMapDVBLCompatIDPresent,
 		ToneMapDVBLPresent:         target.ToneMapDVBLPresent,
 		ToneMapDVRPUPresent:        target.ToneMapDVRPUPresent,
-		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash),
+		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash, id),
 		MaxAttempts:                artifactMaxAttempts,
 	}
 	if playback.PreparedTracksAvailable(file) {
@@ -394,7 +396,7 @@ func (m *ArtifactManager) newArtifact(file *models.MediaFile, format string, tar
 	}
 	if artifactUsesExecutionFingerprint(a) {
 		a.ParamsHash = request.ExecutionFingerprint()
-		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash)
+		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash, a.ID)
 	}
 	return a, nil
 }
@@ -877,7 +879,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	defer cancelHB()
 	// heartbeatLoop cancels hbCtx if the lease is lost; PrepareFile runs on hbCtx
 	// so that cancellation aborts ffmpeg, ensuring we never keep writing the
-	// output path after another worker has taken the job.
+	// output path after another worker has taken the job. An administrator
+	// pause or cancel on this replica cancels it at once.
+	defer m.trackLocalAttempt(a.ID, cancelHB)()
 	go m.heartbeatLoop(hbCtx, cancelHB, a.ID)
 
 	file, err := m.fileRepo.GetByID(ctx, a.MediaFileID)
@@ -918,8 +922,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 			// recovery (here or on another node) reclaims it.
 			return
 		case hbCtx.Err() != nil:
-			// We lost the lease mid-encode; another worker now owns the job.
-			slog.WarnContext(ctx, "download artifact encode aborted; lease lost", "component", "downloads", "artifact_id", a.ID)
+			// We lost the lease mid-encode: another worker now owns the job, or
+			// an administrator paused or canceled it.
+			slog.WarnContext(ctx, "download artifact encode aborted; lease lost or job stopped", "component", "downloads", "artifact_id", a.ID)
 			return
 		default:
 			slog.WarnContext(ctx, "download artifact encode failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -964,6 +969,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	if !applied {
 		slog.WarnContext(ctx, "download artifact ready skipped; lease lost", "component", "downloads", "artifact_id", a.ID)
 		m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
+		m.removeCanceledLocalOutput(ctx, a.ID, prepared)
 		return
 	}
 	observation.Finish("success")

@@ -30,7 +30,7 @@ func TestAttachPreparationsPostgres(t *testing.T) {
  id text PRIMARY KEY, status text NOT NULL, created_at timestamptz NOT NULL, completed_at timestamptz, next_retry_at timestamptz,
  lease_expires_at timestamptz,
  progress_encoded_seconds double precision, progress_duration_seconds double precision, progress_speed double precision,
- progress_updated_at timestamptz, progress_unavailable boolean NOT NULL DEFAULT false)`); err != nil {
+ progress_updated_at timestamptz, progress_unavailable boolean NOT NULL DEFAULT false, paused_at timestamptz)`); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(-time.Hour)
@@ -62,6 +62,11 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// Paused by an administrator ahead of "mine-second": reported as paused,
+	// and not counted in anyone's queue position.
+	if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at,paused_at) VALUES('held','queued',$1,now())`, base.Add(150*time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	rows := []*Download{
 		{ID: "a", Status: StatusPreparing, ArtifactID: "running"},
 		{ID: "b", Status: StatusPreparing, ArtifactID: "mine-second"},
@@ -72,6 +77,7 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 		{ID: "g", Status: StatusPreparing, ArtifactID: "stalled"},
 		{ID: "i", Status: StatusPreparing, ArtifactID: "silent"},
 		{ID: "j", Status: StatusPreparing, ArtifactID: "unreported"},
+		{ID: "k", Status: StatusPreparing, ArtifactID: "held"},
 	}
 	if err := repo.attachPreparations(t.Context(), rows); err != nil {
 		t.Fatal(err)
@@ -89,6 +95,9 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 	}
 	if p := rows[6].Preparation; p == nil || p.State != PreparationQueued || p.QueuePosition != 3 || p.Progress != nil {
 		t.Fatalf("expired lease %+v", p)
+	}
+	if p := rows[9].Preparation; p == nil || p.State != PreparationPaused || p.QueuePosition != 0 || p.Progress != nil {
+		t.Fatalf("paused %+v", p)
 	}
 	for _, row := range rows[7:9] {
 		if p := row.Preparation; p == nil || p.State != PreparationRunning || p.Progress != nil || p.RemainingSeconds != nil {

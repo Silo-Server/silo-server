@@ -216,8 +216,9 @@ verify-route-inventory:
 # only changed lines. It is the one gocritic check the repo enables (see
 # .golangci.yml), and the tree passes it today, so this can gate CI while the
 # rest of `make lint` cannot.
+# Tests are excluded from this rule, so do not analyze their package variants.
 lint-router-recovery:
-	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+	golangci-lint run --tests=false --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
 # CI gives test-go ownership of these Go assertions and passes 0 to avoid

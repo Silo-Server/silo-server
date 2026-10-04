@@ -2481,6 +2481,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPlaybackSessions = adminHandler
 		if deps.DB != nil && deps.ArtifactManager != nil {
 			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
+			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
 		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler

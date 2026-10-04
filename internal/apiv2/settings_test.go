@@ -376,10 +376,11 @@ func TestSettingValueValidation(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-nope", "", settingsOwner()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile&profile_id=p-other", "", with(bearer(apiKeyToken), "X-Profile-Id", "p-locked")), TypePermissionDenied)
 	// Class denials.
+	demo := newTestHandler(t, parityDeps(true))
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", nil), TypeAuthenticationRequired)
-	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x"}`, settingsOwner()), TypePermissionDenied)
-	requireProblem(t, do(t, newTestHandler(t, parityDeps(true)), http.MethodDelete, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypePermissionDenied)
+	requireProblem(t, do(t, demo, http.MethodPut, "/api/v2/settings/values/ui.theme?scope=profile", `{"value":"x"}`, settingsOwner()), TypePermissionDenied)
+	requireProblem(t, do(t, demo, http.MethodDelete, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypePermissionDenied)
 	deps := pilotDeps(nil, nil)
 	deps.SettingValues = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/settings/values/ui.theme?scope=profile", "", settingsOwner()), TypeDependencyUnavailable)

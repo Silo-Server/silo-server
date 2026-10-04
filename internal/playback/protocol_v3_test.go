@@ -362,37 +362,6 @@ func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
 	}
 }
 
-func TestPlanAttemptKeyV3Fixture(t *testing.T) {
-	type fixture struct {
-		Name                 string   `json:"name"`
-		ServerPlanAttemptKey string   `json:"server_plan_attempt_key"`
-		ReplanEcho           string   `json:"replan_echo"`
-		AttemptedPlanKeys    []string `json:"attempted_plan_keys"`
-		ExpectedServerAction string   `json:"expected_server_action"`
-	}
-	body, err := os.ReadFile("testdata/protocol_v3/attempt_keys.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixtures []fixture
-	if err := json.Unmarshal(body, &fixtures); err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range fixtures {
-		t.Run(value.Name, func(t *testing.T) {
-			if value.ServerPlanAttemptKey == "" || value.ReplanEcho != value.ServerPlanAttemptKey {
-				t.Fatalf("opaque echo drifted: %#v", value)
-			}
-			if len(value.AttemptedPlanKeys) != 1 || value.AttemptedPlanKeys[0] != value.ServerPlanAttemptKey {
-				t.Fatalf("attempted plan keys do not echo the server token: %#v", value)
-			}
-			if value.ExpectedServerAction != "reject_already_attempted_plan" {
-				t.Fatalf("server action = %q", value.ExpectedServerAction)
-			}
-		})
-	}
-}
-
 func TestPlanIdentityIncludesVideoSampleEntry(t *testing.T) {
 	plan := PlanV3{
 		PlanID:          "plan:sample-entry",

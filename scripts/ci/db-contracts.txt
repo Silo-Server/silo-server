@@ -91,6 +91,8 @@
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
+./internal/downloads TestPreparationControlsPauseResumeAndCancel
+./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

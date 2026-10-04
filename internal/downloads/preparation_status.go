@@ -10,7 +10,7 @@ import (
 // PreparationStatus is how far the server has got preparing one download's
 // file, as the device that asked for it sees it.
 type PreparationStatus struct {
-	State string // PreparationQueued, PreparationRunning or PreparationRetrying
+	State string // PreparationQueued, PreparationRunning, PreparationRetrying or PreparationPaused
 	// QueuePosition is the 1-based place among every queued preparation on
 	// this server, in claim order; 0 unless queued.
 	QueuePosition int
