@@ -167,22 +167,41 @@ var matroskaTracksReadTimeout = 30 * time.Second
 
 var errMatroskaTracksReadTimeout = errors.New("reading Matroska tracks timed out")
 
+// matroskaTracksReadSlots caps Tracks reads in flight across the process. A
+// read abandoned on stalled storage keeps its goroutine and open file until
+// the kernel returns, so without a cap intermittent stalls could pile them up
+// over a long backfill. Healthy reads finish in milliseconds and free their
+// slot; the backfill's four workers and concurrent scans fit well under it.
+var matroskaTracksReadSlots = make(chan struct{}, 32)
+
+var errMatroskaTracksReadBusy = errors.New("too many Matroska track reads are waiting on stalled storage")
+
 // readMatroskaTracks opens path and reads its Tracks element, returning the
 // opened file's info even when the tracks cannot be read.
 //
 // A call on a stalled network mount cannot be interrupted, so the open, stat
 // and read run in their own goroutine, which is abandoned when ctx ends or the
 // timeout passes, the same way boundedProbeInputReadable treats storage
-// checks. The abandoned goroutine finishes whenever the syscall returns.
+// checks. The abandoned goroutine finishes whenever the syscall returns and
+// holds one of matroskaTracksReadSlots until then; with every slot held the
+// read is refused with errMatroskaTracksReadBusy.
 func readMatroskaTracks(ctx context.Context, path string) ([]mediaprobe.MatroskaTrack, os.FileInfo, error) {
 	type readResult struct {
 		tracks []mediaprobe.MatroskaTrack
 		info   os.FileInfo
 		err    error
 	}
+	// One read of the setting: the goroutine must release the slot it took.
+	slots := matroskaTracksReadSlots
+	select {
+	case slots <- struct{}{}:
+	default:
+		return nil, nil, errMatroskaTracksReadBusy
+	}
 	done := make(chan readResult, 1)
 	go func() {
 		tracks, info, err := readMatroskaTracksFile(path)
+		<-slots
 		done <- readResult{tracks, info, err}
 	}()
 	timer := time.NewTimer(matroskaTracksReadTimeout)

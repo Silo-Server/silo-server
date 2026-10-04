@@ -40,3 +40,42 @@ func TestReadMatroskaTracksAbandonsStalledRead(t *testing.T) {
 		t.Fatalf("err = %v, want the caller's cancellation", err)
 	}
 }
+
+// A read abandoned on stalled storage keeps its slot until the kernel
+// returns; with every slot held, further reads are refused instead of piling
+// up more stuck goroutines and open files.
+func TestReadMatroskaTracksCapsStalledReads(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stalled.mkv")
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	savedSlots, savedTimeout := matroskaTracksReadSlots, matroskaTracksReadTimeout
+	matroskaTracksReadSlots = make(chan struct{}, 1)
+	matroskaTracksReadTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { matroskaTracksReadSlots, matroskaTracksReadTimeout = savedSlots, savedTimeout })
+
+	if _, _, err := readMatroskaTracks(context.Background(), path); !errors.Is(err, errMatroskaTracksReadTimeout) {
+		t.Fatalf("first read: err = %v, want a timeout", err)
+	}
+	if _, _, err := readMatroskaTracks(context.Background(), "testdata/subtitles.mkv"); !errors.Is(err, errMatroskaTracksReadBusy) {
+		t.Fatalf("read while the stalled one holds the slot: err = %v, want busy", err)
+	}
+
+	// Storage recovers: the stuck open returns and frees its slot.
+	w, err := os.OpenFile(path, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	matroskaTracksReadTimeout = time.Minute
+	deadline := time.Now().Add(5 * time.Second)
+	for len(matroskaTracksReadSlots) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("stalled read never released its slot")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if tracks, _, err := readMatroskaTracks(context.Background(), "testdata/subtitles.mkv"); err != nil || len(tracks) != 4 {
+		t.Fatalf("read after recovery: %d tracks, err = %v", len(tracks), err)
+	}
+}

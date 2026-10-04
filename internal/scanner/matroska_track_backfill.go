@@ -218,8 +218,9 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 	return candidates, lastID, rowCount, nil
 }
 
-// backfillFile returns an error only for a database failure, which ends the
-// pass. A file that cannot be read or matched is an outcome, not an error.
+// backfillFile returns an error for a database failure or for storage too
+// stalled to take another read, either of which ends the pass. A file that
+// cannot be read or matched is an outcome, not an error.
 func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTrackCandidate) (matroskaTrackOutcome, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -227,6 +228,11 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	tracks, info, err := readMatroskaTracks(ctx, c.path)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return 0, ctxErr
+	}
+	if errors.Is(err, errMatroskaTracksReadBusy) {
+		// Earlier reads are still stuck on storage. Reading more would only
+		// add to them, so the pass ends here and the next run resumes.
+		return 0, fmt.Errorf("%w: %w", errMatroskaTrackStorageStalled, err)
 	}
 	if errors.Is(err, errMatroskaTracksReadTimeout) {
 		slog.WarnContext(ctx, "scanner: Matroska track read timed out",
