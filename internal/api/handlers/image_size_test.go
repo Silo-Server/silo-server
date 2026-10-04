@@ -92,3 +92,32 @@ func TestRequestImageSizeIgnoresInvalidValue(t *testing.T) {
 		t.Fatalf("requestImageSize = %q, want Unset for an invalid value", got)
 	}
 }
+
+// A listing card's logo is the file item detail serves: unsized is the medium
+// rung, the same key an explicit medium names, never the full original.
+func TestSizedLogoPathMatchesItemDetail(t *testing.T) {
+	const logo = "tmdb/movies/550/logo/original.png"
+	tests := []struct {
+		size imagesize.Size
+		want string
+	}{
+		{imagesize.Unset, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Small, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Medium, "tmdb/movies/550/logo/w500.png"},
+		{imagesize.Large, "tmdb/movies/550/logo/w1280.png"},
+		{imagesize.Original, logo},
+	}
+	if got := sizedFeaturedLogoPath(logo, imagesize.Unset); got != logo {
+		t.Errorf("sizedFeaturedLogoPath(Unset) = %q, want stored path %q", got, logo)
+	}
+	for _, tt := range tests {
+		if got := sizedLogoPath(logo, tt.size); got != tt.want {
+			t.Errorf("sizedLogoPath(%q, %q) = %q, want %q", logo, tt.size, got, tt.want)
+		}
+	}
+	for _, path := range []string{"https://image.tmdb.org/t/p/original/xyz.png", "plugin://tmdb/movies/550/logo/original.png", ""} {
+		if got := sizedLogoPath(path, imagesize.Unset); got != path {
+			t.Errorf("sizedLogoPath(%q, Unset) = %q, want it unchanged", path, got)
+		}
+	}
+}

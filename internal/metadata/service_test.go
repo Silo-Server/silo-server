@@ -115,6 +115,22 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	return nil
 }
 
+func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[contentID]
+	if !ok {
+		return false, fmt.Errorf("%w: %s", catalog.ErrItemNotFound, contentID)
+	}
+	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return false, nil
+	}
+	cp := *item
+	cp.Status = status
+	r.items[contentID] = &cp
+	return true, nil
+}
+
 func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -1753,6 +1769,45 @@ func TestCreateOrFindSkeleton_WithFolderIDs(t *testing.T) {
 	}
 }
 
+func TestCreateOrFindSkeleton_UntaggedVersionRespectsTaggedSibling(t *testing.T) {
+	const root = "/media/movies/Dune (2021)"
+	for _, tc := range []struct {
+		name        string
+		siblingPath string
+		wantFlagged bool
+	}{
+		{name: "tagged sibling", siblingPath: root + "/Dune (2021) [imdbid-tt1160419] [Bluray-1080p].mkv"},
+		{name: "untagged sibling", siblingPath: root + "/Dune (2021) [Bluray-1080p].mkv", wantFlagged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			h.service.folderRepo = &fakeMetadataFolderRepo{
+				folders: map[int]*models.MediaFolder{
+					10: {ID: 10, Type: "movies", Enabled: true},
+				},
+			}
+			sibling := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: tc.siblingPath, ObservedRootPath: root}
+			file := &models.MediaFile{
+				ID:               2,
+				MediaFolderID:    10,
+				FilePath:         root + "/Dune (2021) [Bluray-2160p].mkv",
+				ObservedRootPath: root,
+			}
+			h.fileRepo.setGroupFiles(10, 1, "dune", sibling, file)
+
+			if _, err := h.service.createOrFindSkeleton(ctx, file, 10); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			_, flagged := h.skippedRootRepo.skipped["10:"+root]
+			if flagged != tc.wantFlagged {
+				t.Fatalf("root flagged = %v, want %v", flagged, tc.wantFlagged)
+			}
+		})
+	}
+}
+
 func TestCreateOrFindSkeleton_IDTaggedMovieFolderBeatsDivergentReleaseFilename(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -1950,6 +2005,24 @@ func TestCreateOrFindSkeleton_MixedLibraryEpisodeShapedMovieStaysMovie(t *testin
 	}
 	if result.RootPath != "/media/mixed/s01e03 (2020) {imdb-tt12261772} {tmdb-588077}" {
 		t.Fatalf("RootPath = %q", result.RootPath)
+	}
+}
+
+// A provisional status never replaces an accepted match: the item may have
+// been matched after the caller read it.
+func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
+	for _, status := range []string{"unmatched", "pending", "ambiguous"} {
+		t.Run(status, func(t *testing.T) {
+			h := newTestHarness()
+			h.itemRepo.items["matched-item"] = &models.MediaItem{ContentID: "matched-item", Type: "movie", Title: "Matched", Status: "matched"}
+			changed, err := h.service.updateItemStatus(t.Context(), "matched-item", status)
+			if err != nil || changed {
+				t.Fatalf("updateItemStatus(%s) = %v, %v; want unchanged", status, changed, err)
+			}
+			if got := h.itemRepo.items["matched-item"].Status; got != "matched" {
+				t.Fatalf("status = %q, want matched", got)
+			}
+		})
 	}
 }
 

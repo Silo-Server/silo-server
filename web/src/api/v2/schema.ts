@@ -18938,6 +18938,11 @@ export interface components {
       pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
+      /**
+       * Format: int64
+       * @description The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise
+       */
+      play_season_number?: number;
       playback_variants?: components["schemas"]["PlaybackVariant"][];
       /**
        * Format: double

@@ -19,21 +19,21 @@ function makeSub(overrides: Partial<PlayerSubtitleInfo>): PlayerSubtitleInfo {
 }
 
 describe("sortSubtitlesBySource", () => {
-  it("sorts external before downloaded before embedded", () => {
+  it("sorts embedded before external before downloaded", () => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded" }),
-      makeSub({ index: 1, source: "downloaded" }),
-      makeSub({ index: 2, source: "external" }),
+      makeSub({ index: 0, source: "downloaded" }),
+      makeSub({ index: 1, source: "external" }),
+      makeSub({ index: 2, source: "embedded" }),
     ];
     const sorted = sortSubtitlesBySource(tracks);
-    expect(sorted.map((t) => t.source)).toEqual(["external", "downloaded", "embedded"]);
+    expect(sorted.map((t) => t.source)).toEqual(["embedded", "external", "downloaded"]);
   });
 
   it("preserves relative order within same source", () => {
     const tracks = [
-      makeSub({ index: 0, source: "external", language: "en" }),
-      makeSub({ index: 1, source: "external", language: "es" }),
-      makeSub({ index: 2, source: "embedded", language: "fr" }),
+      makeSub({ index: 0, source: "embedded", language: "en" }),
+      makeSub({ index: 1, source: "embedded", language: "es" }),
+      makeSub({ index: 2, source: "external", language: "fr" }),
     ];
     const sorted = sortSubtitlesBySource(tracks);
     expect(sorted.map((t) => t.language)).toEqual(["en", "es", "fr"]);
@@ -41,11 +41,11 @@ describe("sortSubtitlesBySource", () => {
 
   it("treats missing source as embedded", () => {
     const tracks = [
-      makeSub({ index: 0, source: undefined }),
-      makeSub({ index: 1, source: "external" }),
+      makeSub({ index: 0, source: "external" }),
+      makeSub({ index: 1, source: undefined }),
     ];
     const sorted = sortSubtitlesBySource(tracks);
-    expect(sorted.map((t) => t.source)).toEqual(["external", undefined]);
+    expect(sorted.map((t) => t.source)).toEqual([undefined, "external"]);
   });
 
   it("does not mutate the original array", () => {
@@ -77,10 +77,10 @@ describe("findPreferredSubtitleIndex", () => {
     expect(findPreferredSubtitleIndex(tracks, "en-US")).toBe(1);
   });
 
-  it("prefers external over embedded for same language", () => {
+  it("prefers embedded over external for same language", () => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en" }),
-      makeSub({ index: 1, source: "external", language: "en" }),
+      makeSub({ index: 0, source: "external", language: "en" }),
+      makeSub({ index: 1, source: "embedded", language: "en" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
@@ -93,10 +93,10 @@ describe("findPreferredSubtitleIndex", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("prefers downloaded over embedded", () => {
+  it("prefers embedded over downloaded", () => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en" }),
-      makeSub({ index: 1, source: "downloaded", language: "en" }),
+      makeSub({ index: 0, source: "downloaded", language: "en" }),
+      makeSub({ index: 1, source: "embedded", language: "en" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
@@ -202,14 +202,14 @@ describe("resolveSubtitleAutoSelect", () => {
       ).toBeNull();
     });
 
-    it("prefers external over embedded for same language", () => {
+    it("prefers embedded over external for same language", () => {
       expect(
         resolveSubtitleAutoSelect(
           opts({
             mode: "always",
             tracks: [
-              { index: 0, language: "en", source: "embedded" },
-              { index: 1, language: "en", source: "external" },
+              { index: 0, language: "en", source: "external" },
+              { index: 1, language: "en", source: "embedded" },
             ],
             preferredLanguage: "en",
           }),
@@ -240,8 +240,8 @@ describe("resolveSubtitleAutoSelect", () => {
           opts({
             mode: "auto",
             tracks: [
-              { index: 0, language: "en", forced: true, source: "embedded" },
-              { index: 1, language: "en", forced: true, source: "external" },
+              { index: 0, language: "en", forced: true, source: "external" },
+              { index: 1, language: "en", forced: true, source: "embedded" },
             ],
             preferredLanguage: "fr",
             audioLanguage: "en",
@@ -438,8 +438,8 @@ describe("resolveSubtitleAutoSelect", () => {
           opts({
             mode: "off",
             tracks: [
-              { index: 0, language: "en", forced: true, source: "embedded" },
-              { index: 1, language: "en", forced: true, source: "external" },
+              { index: 0, language: "en", forced: true, source: "external" },
+              { index: 1, language: "en", forced: true, source: "embedded" },
             ],
             audioLanguage: "en",
             profileLanguage: "en",
@@ -463,6 +463,74 @@ describe("bitmap (PGS) codec deprioritization", () => {
     const tracks = [
       makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
       makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("prefers an external text track over an embedded PGS track, which the web player burns in", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("ranks embedded PGS as burn-in even when the server offers it as a sidecar", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: false }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("prefers an external text track over an embedded track that needs burn-in", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "dvd_subtitle" }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("prefers embedded text over an external PGS file, which can only be burned in", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "external", language: "en", codec: "pgs" }),
+      makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("prefers a full external track over an embedded forced one", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "subrip", forced: true }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("prefers a plain external track over an embedded SDH one", () => {
+    const tracks = [
+      makeSub({
+        index: 0,
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        hearing_impaired: true,
+      }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("honors the server's burn_in_only flag on a text track", () => {
+    const tracks = [
+      makeSub({
+        index: 0,
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        burn_in_only: true,
+      }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });

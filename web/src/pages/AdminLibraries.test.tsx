@@ -573,6 +573,11 @@ describe("AdminLibraries", () => {
       fireEvent.click(header(/Stale External IDs/));
 
       expect(within(header(/Troubleshooting/)).getByText("1")).toBeDefined();
+      expect(
+        screen.getByText(
+          "Roots with no provider IDs in the folder name or, for movies, in a file name.",
+        ),
+      ).toBeDefined();
       expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
       fireEvent.click(header(/Stale External IDs/));
       expect(within(header(/Stale External IDs/)).getByText("120")).toBeDefined();
