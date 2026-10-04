@@ -101,7 +101,9 @@ func anchorCluster(idx int, vec []float32, members int, weight float64) TasteClu
 }
 
 // Clusters anchor the main row only for a profile with enough titles and at
-// least two distinct interests; near-identical centroids are one anchor.
+// least two clusters. Every cluster is its own anchor, heaviest first, even
+// one whose centroid lies near another's: buildTasteClusters has already
+// decided which titles are one interest.
 func TestMainRowAnchors(t *testing.T) {
 	horror, romance := []float32{1, 0, 0}, []float32{0, 1, 0}
 	nearHorror := []float32{0.95, 0.05, 0.2}
@@ -111,19 +113,19 @@ func TestMainRowAnchors(t *testing.T) {
 		anchorCluster(1, romance, 6, 5),
 		anchorCluster(2, nearHorror, 4, 2),
 	})
-	if len(anchors) != 2 {
-		t.Fatalf("anchors = %d, want horror and romance", len(anchors))
+	var weights []float64
+	for _, a := range anchors {
+		weights = append(weights, a.weight)
 	}
-	if anchors[0].weight != 6 || cosineSimilarity(anchors[0].embedding, horror) < 0.95 {
-		t.Fatalf("first anchor = %+v, want the merged horror interest, heaviest first", anchors[0])
+	if !slices.Equal(weights, []float64{5, 4, 2}) {
+		t.Fatalf("anchor weights = %v, want romance 5, horror 4, near-horror 2", weights)
 	}
-	if anchors[1].weight != 5 {
-		t.Fatalf("second anchor weight = %v, want romance's 5", anchors[1].weight)
+	if !slices.Equal(anchors[1].embedding, horror) || !slices.Equal(anchors[2].embedding, nearHorror) {
+		t.Fatalf("anchors = %+v, want each cluster's own centroid", anchors)
 	}
 
 	for name, clusters := range map[string][]TasteCluster{
 		"under ten titles": {anchorCluster(0, horror, 5, 4), anchorCluster(1, romance, 4, 3)},
-		"one interest":     {anchorCluster(0, horror, 8, 4), anchorCluster(1, nearHorror, 6, 3)},
 		"one cluster":      {anchorCluster(0, horror, 30, 9)},
 	} {
 		if got := mainRowAnchors(clusters); got != nil {

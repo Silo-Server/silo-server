@@ -127,6 +127,17 @@ refresh marks the profile stale again, so the stale sweep retries both.
   not pull the vector away from themselves. A 3-star rating adds no weight of
   its own and halves the title's watch and intent weight, so a 3-star
   completion weighs less than an unrated one.
+- Clusters split the same titles into interests. A profile under 10 titles
+  has one cluster. A larger one gets 2 (10-19 titles), 3 (20-59), 4
+  (60-199) or 5 (200 or more), or more, up to 5, when a partition into
+  more has a higher silhouette (cosine distance) and one of at least 0.1;
+  every cluster holds at least 3 titles. A partition is the best of up to 8
+  deterministic k-means++ seedings (fewer above 100 titles, one from 800),
+  by inertia, among those leaving no cluster under 3 titles. One seeding
+  can put two seeds in one interest and leave a sliver that merging folds
+  away together with every other interest. Real distinct
+  interests scored 0.13-0.22 and one interest cut in two under 0.08
+  (gemini-embedding-001 on a real catalog).
 - Watch, rewatch, favorite and watchlist counts in `signal_counts` count each
   canonical title once (a watch in the bucket of its strongest watch), so one
   long series is one title.
@@ -237,19 +248,25 @@ serves the first `ServedRowSize` (20) by default. Ranking shapes those 20
 for the viewer, and the rest is headroom for read-time filters and for
 library sections, which scope the whole row to their libraries.
 
-- **Main row.** A profile with at least 10 positive titles gets a row
-  composed per interest when its clusters make at least two anchors;
-  clusters whose centroids have a cosine above 0.9 merge into one anchor.
-  Anchors get slots in proportion to
+- **Main row.** A profile with at least 10 positive titles and at least two
+  clusters gets a row composed per cluster, each cluster an anchor. Anchors
+  are not merged by centroid cosine: a centroid averages away its titles'
+  differences, so centroids of large clusters of different genres sit
+  above 0.9 (most pairs with 50 or more titles on a real catalog), while
+  centroids of 3-title halves of one genre sit near 0.82. The clustering
+  decides what is one interest. Anchors get slots in proportion to
   their weight by largest remainder, each at least `min(3, limit/anchors)`.
   Each anchor fetches 3 candidates per slot around its centroid and ranks
   them by MMR, and a smooth weighted round-robin interleaves the anchors'
   rankings without repeats, so every prefix of the row holds each interest's
   share. Any other profile, or one whose anchors find nothing, gets the
   candidates nearest its averaged taste vector, ranked by MMR.
-- **Genre pass.** A stable reorder of the MMR order lets no genre hold more
-  than half of the served window while the row has other titles to offer.
-  It deletes nothing and moves nothing past the window.
+- **Genre pass.** In a row from the averaged taste vector, a stable reorder
+  of the MMR order lets no genre hold more than half of the served window
+  while the row has other titles to offer. It deletes nothing and moves
+  nothing past the window. A composed row skips it: its slots already
+  spread the window over the interests by weight, and the cap would cut an
+  interest heavier than half the profile below its share.
 - **Type supplements.** The main row holds at least a fifth of its length of
   each of `recommendableMediaTypes` the viewer can see, so a library section
   fills. The extra titles go after the served window, replacing tail titles
