@@ -960,7 +960,7 @@ func detectContainer(formatName string) string {
 		p = strings.TrimSpace(p)
 		switch p {
 		case "matroska", "webm":
-			return "mkv"
+			return containerMKV
 		case "mov", "mp4", "m4a":
 			return "mp4"
 		case "avi":

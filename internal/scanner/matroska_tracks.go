@@ -35,6 +35,9 @@ var errMatroskaLayoutMismatch = errors.New("matroska tracks do not match the pro
 const (
 	ffmpegCodecWebVTT = "webvtt"
 	ffmpegCodecASS    = "ass"
+	ffmpegCodecSubRip = "subrip"
+	// containerMKV is the normalized container of Matroska and WebM files.
+	containerMKV = "mkv"
 )
 
 // ffmpegMatroskaSubtitleCodecs mirrors the subtitle rows of FFmpeg's
@@ -45,7 +48,7 @@ var ffmpegMatroskaSubtitleCodecs = []struct{ prefix, codec string }{
 	{"D_WEBVTT/CAPTIONS", ffmpegCodecWebVTT},
 	{"D_WEBVTT/DESCRIPTIONS", ffmpegCodecWebVTT},
 	{"D_WEBVTT/METADATA", ffmpegCodecWebVTT},
-	{"S_TEXT/UTF8", "subrip"},
+	{"S_TEXT/UTF8", ffmpegCodecSubRip},
 	{"S_TEXT/ASCII", "text"},
 	{"S_TEXT/ASS", ffmpegCodecASS},
 	{"S_TEXT/SSA", ffmpegCodecASS},
@@ -213,7 +216,7 @@ func readMatroskaTracksFile(path string) ([]mediaprobe.MatroskaTrack, error) {
 // Matroska subtitle tracks that FFprobe left without one. Failure is not a
 // probe failure: the tracks keep an empty ID and play through extraction.
 func applyMatroskaSubtitleTrackIDs(ctx context.Context, filePath string, probe *ProbeData) {
-	if probe == nil || probe.Container != "mkv" || !subtitleTracksMissingContainerID(probe.SubtitleTracks) {
+	if probe == nil || probe.Container != containerMKV || !subtitleTracksMissingContainerID(probe.SubtitleTracks) {
 		return
 	}
 	subtitles := make([]matroskaSubtitleStream, len(probe.SubtitleTracks))
