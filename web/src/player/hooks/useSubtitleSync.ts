@@ -122,6 +122,9 @@ export function useSubtitleSync({
   // When a realtime result last reloaded each subtitle's track.
   const pushReloadRef = useRef(new Map<string, number>());
   const pollingRef = useRef(new Set<string>());
+  // Reads asked for while one was in flight: that one may answer from
+  // before what prompted them, so another read follows it.
+  const rereadRef = useRef(new Set<string>());
   // Every observation takes the next number; a read remembers the number
   // current when it was sent, so its answer cannot undo a newer one.
   const observationRef = useRef(0);
@@ -143,6 +146,7 @@ export function useSubtitleSync({
     pushedAtRef.current = new Map();
     pushReloadRef.current = new Map();
     pollingRef.current = new Set();
+    rereadRef.current = new Set();
     observedRef.current = new Map();
     jobsRef.current = new Map();
     setEntries({});
@@ -230,6 +234,7 @@ export function useSubtitleSync({
     knownTimingRef.current.delete(key);
     jobsRef.current.delete(key);
     pollStartedRef.current.delete(key);
+    pushReloadRef.current.delete(key);
     setEntries((prev) => {
       if (!(key in prev)) return prev;
       const { [key]: _gone, ...rest } = prev;
@@ -285,33 +290,44 @@ export function useSubtitleSync({
 
   const readOne = useCallback(
     async (key: string) => {
-      if (!playerConfig || !mediaFileId || pollingRef.current.has(key)) return;
+      if (!playerConfig || !mediaFileId) return;
+      if (pollingRef.current.has(key)) {
+        rereadRef.current.add(key);
+        return;
+      }
       const current = capture();
-      // Release on the set this read locked: a context reset swaps in a new
-      // set, so the release can never unlock a newer context's read.
+      // Release on the sets this read used: a context reset swaps in new
+      // ones, so the release can never unlock a newer context's read.
       const locks = pollingRef.current;
+      const rereads = rereadRef.current;
       locks.add(key);
-      const sentAt = observationRef.current;
       try {
-        const res = await playerV2(
-          playerConfig,
-          "GET /api/v2/subtitles/{media_file_id}/sync/{key}",
-          {
-            path: { media_file_id: String(mediaFileId), key },
-          },
-        );
-        if (current() && res?.subtitle) observe(res.subtitle, { sentAt });
-      } catch (err) {
-        if (!current()) return;
-        if (err instanceof PlayerFetchError && err.status === 404) {
-          // The subtitle is gone, and its jobs with it.
-          forget(key, sentAt);
-        } else {
-          // Any other failure stops polling; a later reload re-arms it.
-          patch(key, { pollExpired: true });
-        }
+        do {
+          const sentAt = observationRef.current;
+          try {
+            const res = await playerV2(
+              playerConfig,
+              "GET /api/v2/subtitles/{media_file_id}/sync/{key}",
+              {
+                path: { media_file_id: String(mediaFileId), key },
+              },
+            );
+            if (current() && res?.subtitle) observe(res.subtitle, { sentAt });
+          } catch (err) {
+            if (!current()) return;
+            if (err instanceof PlayerFetchError && err.status === 404) {
+              // The subtitle is gone, and its jobs with it.
+              forget(key, sentAt);
+            } else {
+              // Any other failure stops polling; a later reload re-arms it.
+              patch(key, { pollExpired: true });
+            }
+            return;
+          }
+        } while (rereads.delete(key) && current());
       } finally {
         locks.delete(key);
+        rereads.delete(key);
       }
     },
     [playerConfig, mediaFileId, capture, observe, patch, forget],

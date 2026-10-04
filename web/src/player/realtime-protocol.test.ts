@@ -208,9 +208,27 @@ describe("realtime protocol", () => {
     }
   });
 
+  it("derives the sync key of a stored subtitle from an older server's timing event", () => {
+    expect(
+      parsePlaybackRealtimeMessage(
+        JSON.stringify({
+          type: "event",
+          session_id: "session-1",
+          name: "subtitle_timing_changed",
+          payload: { session_id: "session-1", file_id: 42, subtitle_id: 7 },
+        }),
+      ),
+    ).toEqual({
+      type: "event",
+      session_id: "session-1",
+      name: "subtitle_timing_changed",
+      payload: { session_id: "session-1", file_id: 42, subtitle_id: 7, sync_key: "stored-7" },
+    });
+  });
+
   it.each([
     { session_id: "session-1", file_id: 42 },
-    { session_id: "session-1", file_id: 42, subtitle_id: 7 },
+    { session_id: "session-1", file_id: 42, sync_key: 7, subtitle_id: 7 },
     { session_id: "session-1", file_id: "42", sync_key: "stored-7" },
     { session_id: "session-1", file_id: 42, sync_key: "stored-7", subtitle_id: "7" },
     { session_id: "session-1", file_id: 42, sync_key: "stored-7", track: { combined_index: 3 } },

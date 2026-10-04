@@ -502,6 +502,56 @@ describe("useSubtitleSync", () => {
     expect(result.current.entries[SIDECAR]?.state.sync?.phase).toBe("matching");
   });
 
+  it("reads again for a timing event that came while a read was in flight", async () => {
+    let answerFirst: (value: unknown) => void = () => {};
+    const running = stored({ key: SIDECAR, source: "external", sync: job("running") });
+    let reads = 0;
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({ subtitles: [running] }),
+      [READ]: () => {
+        reads++;
+        if (reads === 1) {
+          return new Promise((resolve) => {
+            answerFirst = resolve;
+          });
+        }
+        return {
+          subtitle: { ...running, sync: job("synced"), timing: { offset_ms: 1200, scale: 1 } },
+        };
+      },
+    });
+    const onTimingChanged = vi.fn();
+    const { result } = renderSync({ onTimingChanged });
+    await flush();
+    await tick();
+    expect(calls(READ)).toHaveLength(1);
+
+    // The result reloads the track; its timing event, coalesced with that
+    // reload, comes while the poll is in flight.
+    const timing = { offset_ms: 900, scale: 1 };
+    act(() =>
+      result.current.syncUpdated({
+        session_id: "session-1",
+        file_id: 42,
+        sync_key: SIDECAR,
+        timing,
+        job: job("synced", timing),
+      }),
+    );
+    act(() => result.current.timingChanged(SIDECAR));
+    expect(onTimingChanged).toHaveBeenCalledOnce();
+    await act(async () => {
+      answerFirst({ subtitle: running });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // The poll's answer predates the result and is dropped; the read that
+    // follows it finds a newer timing, which reloads the track again.
+    expect(calls(READ)).toHaveLength(2);
+    expect(result.current.entries[SIDECAR]?.state.timing).toEqual({ offset_ms: 1200, scale: 1 });
+    expect(onTimingChanged).toHaveBeenCalledTimes(2);
+  });
+
   it("reads all subtitles again for an update about one it has not loaded", async () => {
     serve({
       [STATUS]: () => ({ state: "available" }),
