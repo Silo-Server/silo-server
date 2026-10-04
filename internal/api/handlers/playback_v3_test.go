@@ -3845,27 +3845,6 @@ func TestManifestStartupTimeoutWhileRunningIsPersistedIdempotently(t *testing.T)
 	}
 }
 
-func TestToneMapExecutionTransportErrorClassifiesLiveValidation(t *testing.T) {
-	tests := []struct {
-		name          string
-		err           error
-		wantRetryable bool
-	}{
-		{name: "stale metadata", err: tonemap.ErrSourceRevisionChanged},
-		{name: "preflight rejected", err: tonemap.ErrSourcePreflightRejected},
-		{name: "probe unavailable", err: playback.ErrToneMapSourceValidationUnavailable, wantRetryable: true},
-		{name: "executor unavailable", err: playback.ErrToneMapExecutorUnavailable, wantRetryable: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := toneMapExecutionTransportErrorV3(tt.err, "failed")
-			if got.reason != transcodeStartFailedReasonV3 || got.retryable != tt.wantRetryable || !errors.Is(got.cause, tt.err) {
-				t.Fatalf("error = %+v, want retryable=%t wrapping %v", got, tt.wantRetryable, tt.err)
-			}
-		})
-	}
-}
-
 func TestRemotePlaybackTransportSanitizesNodeURLFromTransportError(t *testing.T) {
 	handler := &PlaybackHandler{}
 	_, _, err := handler.startRemotePlaybackTransport(

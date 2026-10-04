@@ -111,14 +111,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe("admin history import editors", () => {
-  it("shows failed mapping requests and retries without claiming there are no mappings", async () => {
+  it("shows pending and failed mapping requests, then retries without claiming there are no mappings", async () => {
     let fail = true;
+    let rejectMappings!: (error: Error) => void;
+    const pendingMappings = new Promise<never>((_resolve, reject) => {
+      rejectMappings = reject;
+    });
     vi.mocked(v2).mockImplementation((operation, options) => {
       if (operation === "GET /api/v2/admin/history-imports/mappings" && fail)
-        return Promise.reject(new Error("mapping database unavailable"));
+        return pendingMappings;
       return baseline(operation, options);
     });
     mount();
+    expect(await screen.findByText("Loading user mappings…")).toBeTruthy();
+    expect(screen.queryByText(/No user mappings yet/)).toBeNull();
+    act(() => rejectMappings(new Error("mapping database unavailable")));
     expect(await screen.findByText("User mappings could not be loaded.")).toBeTruthy();
     expect(screen.queryByText(/No user mappings yet/)).toBeNull();
     expect(screen.queryByText("Discover users")).toBeNull();
@@ -126,16 +133,6 @@ describe("admin history import editors", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry user mappings" }));
     expect(await screen.findByText("External")).toBeTruthy();
     expect(screen.queryByText("User mappings could not be loaded.")).toBeNull();
-  });
-
-  it("shows loading while the selected source mappings are pending", async () => {
-    vi.mocked(v2).mockImplementation((operation, options) => {
-      if (operation === "GET /api/v2/admin/history-imports/mappings") return new Promise(() => {});
-      return baseline(operation, options);
-    });
-    mount();
-    expect(await screen.findByText("Loading user mappings…")).toBeTruthy();
-    expect(screen.queryByText(/No user mappings yet/)).toBeNull();
   });
 
   it("preserves source draft and original tag on background refresh and412 until explicit reload", async () => {
