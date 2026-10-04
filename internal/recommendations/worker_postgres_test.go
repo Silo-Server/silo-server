@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -428,5 +429,68 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		if !slices.Contains(ids, row.mustHave) {
 			t.Fatalf("%s row %v is missing %s", row.recType, ids, row.mustHave)
 		}
+	}
+}
+
+func TestDeleteGlobalRecommendationCachePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	repo := NewRepo(pool)
+	var userID int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		"cache-delete-"+uuid.NewString()).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	base := "test_delete_" + uuid.NewString() + "_"
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM recommendation_cache WHERE starts_with(rec_type, $1)`, base)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+	})
+
+	expires := time.Now().Add(cacheTTL).Format(time.RFC3339)
+	items := []ScoredItem{{MediaItemID: "item", Score: 1}}
+	for _, row := range []struct {
+		owner   int
+		recType string
+	}{
+		{GlobalCacheUserID, base + "one"},
+		{GlobalCacheUserID, base + "one_more"},
+		{GlobalCacheUserID, base + "g_kept"},
+		{GlobalCacheUserID, base + "g_dropped"},
+		// An account row is not global, even under the same profile ID and type.
+		{userID, base + "g_dropped"},
+	} {
+		if err := repo.UpsertRecommendationCache(ctx, row.owner, GlobalCacheProfileID, row.recType, "", items, expires); err != nil {
+			t.Fatal(err)
+		}
+	}
+	remaining := func() []string {
+		t.Helper()
+		rows, err := pool.Query(ctx, `
+			SELECT COALESCE(user_id::text, 'global') || ':' || rec_type FROM recommendation_cache
+			WHERE  starts_with(rec_type, $1) ORDER BY 1`, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	if n, err := repo.DeleteGlobalRecommendationCache(ctx, base+"one", false, nil); err != nil || n != 1 {
+		t.Fatalf("exact delete = %d, %v; want 1 row", n, err)
+	}
+	if n, err := repo.DeleteGlobalRecommendationCache(ctx, base+"g_", true, []string{base + "g_kept"}); err != nil || n != 1 {
+		t.Fatalf("prefix delete = %d, %v; want the 1 row off the kept list", n, err)
+	}
+	want := []string{
+		fmt.Sprintf("%d:%sg_dropped", userID, base),
+		"global:" + base + "g_kept",
+		"global:" + base + "one_more",
+	}
+	if got := remaining(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("remaining rows = %v, want %v", got, want)
 	}
 }

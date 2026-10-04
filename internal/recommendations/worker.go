@@ -635,11 +635,13 @@ type globalRowStore interface {
 	GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error)
 	UpsertRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string, items []ScoredItem, expiresAt string) error
 	ExtendGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, expiresAt string) (int64, error)
+	DeleteGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, keep []string) (int64, error)
 }
 
 // cacheGlobalRows generates and caches non-personalized rows. A row whose
 // query or write fails keeps its previously cached version until the new
-// rows' expiry, so one failed run does not empty it.
+// rows' expiry, so one failed run does not empty it. A row whose query finds
+// nothing, and a genre row whose genre left the menu, is deleted.
 func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expires string) (written, failed int) {
 	// keep extends the cached rows of recType (every type starting with it
 	// when prefix is set) after their rebuild failed with cause.
@@ -650,8 +652,17 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 			slog.WarnContext(ctx, "extending the cached global recommendation row failed", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", err)
 		}
 	}
+	// drop deletes the cached rows of recType (every type starting with it
+	// when prefix is set, except keep) when the rebuild found nothing to
+	// show, so an empty row does not keep serving its old items.
+	drop := func(recType string, prefix bool, keep []string) {
+		if _, err := store.DeleteGlobalRecommendationCache(ctx, recType, prefix, keep); err != nil {
+			slog.WarnContext(ctx, "deleting an empty global recommendation row failed", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", err)
+		}
+	}
 	put := func(recType string, items []ScoredItem, err error) {
 		if err == nil && len(items) == 0 {
+			drop(recType, false, nil)
 			return
 		}
 		if err == nil {
@@ -676,10 +687,14 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 		keep(RecTypeGenreSamplerPrefix, true, err)
 		return written, failed
 	}
+	menu := make([]string, 0, len(topGenres))
 	for _, genre := range topGenres {
 		items, err := store.GetGenreSamplerItems(ctx, genre, CacheCandidateLimit)
 		put(RecTypeGenreSamplerPrefix+genre, items, err)
+		menu = append(menu, RecTypeGenreSamplerPrefix+genre)
 	}
+	// A genre that left the menu would otherwise keep serving its row.
+	drop(RecTypeGenreSamplerPrefix, true, menu)
 	return written, failed
 }
 
