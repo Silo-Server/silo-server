@@ -21,7 +21,7 @@ type fakeSignalRepo struct {
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
 
-	// missing lists canonical IDs ExistingItemIDs reports as deleted from
+	// missing lists canonical IDs RecommendableItemIDs reports as deleted from
 	// the catalog; every other ID exists.
 	missing map[string]struct{}
 
@@ -84,7 +84,7 @@ func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentI
 	return set, nil
 }
 
-func (r *fakeSignalRepo) ExistingItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
+func (r *fakeSignalRepo) RecommendableItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
 	existing := make(map[string]struct{}, len(itemIDs))
 	for _, id := range itemIDs {
 		if _, gone := r.missing[id]; !gone {

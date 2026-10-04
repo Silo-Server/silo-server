@@ -43,24 +43,18 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
 
-	// 4. Co-watch neighbors, kept to those the viewer can see, so they do not
-	// take places in the ranked list either. Without the check they are left
-	// out: they only add to the embedding candidates.
+	// 4. Co-watch neighbors of the source item's media type that the viewer
+	// can see: co-watch counts ebook reading too, the rail keeps to one type
+	// like the embedding search, and hidden neighbors must not take places in
+	// the ranked list. A source of unknown type keeps every type.
+	var cowatchTypes []string
+	if sourceType != "" {
+		cowatchTypes = []string{sourceType}
+	}
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
-	cowatchIDs := make([]string, len(cowatchPairs))
-	for i, p := range cowatchPairs {
-		cowatchIDs[i] = p.SimilarItemID
-	}
-	visible, err := e.repo.FilterAccessibleItemIDs(ctx, cowatchIDs, filter)
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchTypes)
 	if err != nil {
-		slog.WarnContext(ctx, "filtering co-watch neighbors failed; leaving them out", "component", "recommendations", "item_id", itemID, "error", err)
-		visible = nil
-	}
-	cowatchMap := make(map[string]float64, len(cowatchPairs))
-	for _, p := range cowatchPairs {
-		if _, ok := visible[p.SimilarItemID]; ok {
-			cowatchMap[p.SimilarItemID] = p.JaccardScore
-		}
+		return nil, fmt.Errorf("filter co-watch neighbors: %w", err)
 	}
 
 	// 5. Blend scores (70% embedding, 30% co-watch).
