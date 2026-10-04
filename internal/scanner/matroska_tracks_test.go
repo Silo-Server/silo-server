@@ -84,6 +84,20 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			subtitles: []matroskaSubtitleStream{{1, ""}, {2, "subrip"}},
 			want:      []string{"", "3"},
 		},
+		{
+			// Legacy ASS aliases still corroborate the layout, but Media3
+			// drops these tracks, so their numbers would name nothing.
+			name: "legacy ASS codec IDs",
+			tracks: []mediaprobe.MatroskaTrack{
+				mkvTrack(1, mkvVideo, "V_MPEG4/ISO/AVC"),
+				mkvTrack(2, mkvSubtitle, "S_ASS"),
+				mkvTrack(3, mkvSubtitle, "S_SSA"),
+				mkvTrack(4, mkvSubtitle, "S_TEXT/ASS"),
+			},
+			video:     1,
+			subtitles: []matroskaSubtitleStream{{1, "ass"}, {2, "ass"}, {3, "ass"}},
+			want:      []string{"", "", "4"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -140,6 +154,11 @@ func TestMatroskaSubtitleTrackIDsRejectsUncertainLayouts(t *testing.T) {
 			return tracks
 		}, 1, 1, subtitles},
 		{"codec disagrees", base, 1, 1, []matroskaSubtitleStream{{2, "ass"}}},
+		{"legacy ASS alias on a SubRip stream", func() []mediaprobe.MatroskaTrack {
+			tracks := base()
+			tracks[2].CodecID = "S_SSA"
+			return tracks
+		}, 1, 1, subtitles},
 		{"index out of range", base, 1, 1, []matroskaSubtitleStream{{7, "subrip"}}},
 	}
 	for _, tc := range tests {

@@ -36,6 +36,9 @@ const (
 	ffmpegCodecWebVTT = "webvtt"
 	ffmpegCodecASS    = "ass"
 	ffmpegCodecSubRip = "subrip"
+	// Legacy Matroska codec IDs for ASS and SSA subtitles.
+	matroskaCodecIDASSLegacy = "S_ASS"
+	matroskaCodecIDSSALegacy = "S_SSA"
 	// containerMKV is the normalized container of Matroska and WebM files.
 	containerMKV = "mkv"
 )
@@ -52,14 +55,23 @@ var ffmpegMatroskaSubtitleCodecs = []struct{ prefix, codec string }{
 	{"S_TEXT/ASCII", "text"},
 	{"S_TEXT/ASS", ffmpegCodecASS},
 	{"S_TEXT/SSA", ffmpegCodecASS},
-	{"S_ASS", ffmpegCodecASS},
-	{"S_SSA", ffmpegCodecASS},
+	{matroskaCodecIDASSLegacy, ffmpegCodecASS},
+	{matroskaCodecIDSSALegacy, ffmpegCodecASS},
 	{"S_VOBSUB", "dvd_subtitle"},
 	{"S_DVBSUB", "dvb_subtitle"},
 	{"S_HDMV/PGS", "hdmv_pgs_subtitle"},
 	{"S_HDMV/TEXTST", "hdmv_text_subtitle"},
 	{"S_ARIBSUB", "arib_caption"},
 }
+
+// unresolvableMatroskaCodecIDs are legacy aliases FFmpeg accepts but players
+// that identify tracks by TrackNumber do not: Media3's MatroskaExtractor
+// matches only S_TEXT/ASS and S_TEXT/SSA and drops these tracks entirely, so
+// no player track carries the number. Both report as FFmpeg's "ass", so a
+// client's capability cannot exclude them. Recording the number would send
+// the planner down a native route that fails and replans; without it the
+// track keeps server extraction.
+var unresolvableMatroskaCodecIDs = map[string]bool{matroskaCodecIDASSLegacy: true, matroskaCodecIDSSALegacy: true}
 
 func ffmpegMatroskaSubtitleCodec(codecID string) string {
 	for _, row := range ffmpegMatroskaSubtitleCodecs {
@@ -155,6 +167,9 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 		if !strings.EqualFold(codec, sub.Codec) {
 			return nil, fmt.Errorf("%w: stream %d is %q, track %d is %q",
 				errMatroskaLayoutMismatch, sub.Index, sub.Codec, track.Number, track.CodecID)
+		}
+		if unresolvableMatroskaCodecIDs[track.CodecID] {
+			continue
 		}
 		ids[i] = strconv.FormatUint(track.Number, 10)
 	}
