@@ -186,6 +186,17 @@ Recently Added row uses the same query without the access filter and also
 has no window, so on a server with no Popular row a new profile's cached
 reads still get a row.
 
+Both queries read each media type from its own index
+(`idx_media_items_type_added_at`, `idx_media_items_type_catalog_rating`)
+only as deep as the row needs, so a read's cost does not grow with the
+catalog. The index expressions repeat `addedAtSQL` and
+`catalogRatingOrderSQL` and must change with them. Each read is planned for
+its own exclusion set rather than reusing a generic plan. The per-type
+title counts Highly Rated interleaves by are the one part that reads every
+title, so each server reuses an access scope's counts for 10 minutes.
+Discover reads the profile's watched set once per request and shares it
+between its rows and the airings it blends in.
+
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
 the new run's expiry; a global row whose rebuild finds nothing, and a genre row

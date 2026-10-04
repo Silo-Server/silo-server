@@ -173,6 +173,10 @@
 
 ./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
 ./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Discover's default rows read each media type from its own index, however
+# large the catalog.
+./internal/recommendations TestDefaultRowQueriesWalkTypeIndexesPostgres
+
 # Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB

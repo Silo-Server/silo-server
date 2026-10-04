@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -98,10 +99,54 @@ func (s *SignalReader) HasSignals(ctx context.Context, userID int, profileID str
 	return len(progress) > 0, nil
 }
 
+// watchedSetMemoKey keys the context value WithWatchedSetMemo installs.
+type watchedSetMemoKey struct{}
+
+// watchedSetMemo holds the watched sets read under one context, by account
+// and profile.
+type watchedSetMemo struct {
+	mu   sync.Mutex
+	sets map[watchedSetMemoProfile]map[string]struct{}
+}
+
+type watchedSetMemoProfile struct {
+	userID    int
+	profileID string
+}
+
+// WithWatchedSetMemo returns ctx carrying a memo for WatchedItemIDSet: under
+// it, a profile's watched set is read once however many SignalReaders ask,
+// so one request that filters rows and then blends airings walks the
+// profile's history once. A set read through the memo is shared and must not
+// be modified.
+func WithWatchedSetMemo(ctx context.Context) context.Context {
+	return context.WithValue(ctx, watchedSetMemoKey{}, &watchedSetMemo{sets: map[watchedSetMemoProfile]map[string]struct{}{}})
+}
+
 // WatchedItemIDSet returns the canonical IDs of the titles the profile has
 // watched: progress completed or at least half way, episodes counting for
-// their series, plus finished ebooks.
+// their series, plus finished ebooks. Under WithWatchedSetMemo it reuses the
+// set read earlier for the profile.
 func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	memo, _ := ctx.Value(watchedSetMemoKey{}).(*watchedSetMemo)
+	if memo == nil {
+		return s.readWatchedItemIDSet(ctx, userID, profileID)
+	}
+	key := watchedSetMemoProfile{userID, profileID}
+	memo.mu.Lock()
+	defer memo.mu.Unlock()
+	if set, ok := memo.sets[key]; ok {
+		return set, nil
+	}
+	set, err := s.readWatchedItemIDSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	memo.sets[key] = set
+	return set, nil
+}
+
+func (s *SignalReader) readWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err

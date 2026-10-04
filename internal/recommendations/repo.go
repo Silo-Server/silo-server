@@ -130,6 +130,8 @@ const (
 	// catalogRatingSQL is a title's rating: IMDb first, else trusted TMDB.
 	catalogRatingSQL = `COALESCE(mi.rating_imdb, ` + guardedTMDBRatingSQL + `)`
 	// catalogRatingOrderSQL ranks by reliability tier, then catalogRatingSQL.
+	// idx_media_items_type_catalog_rating indexes this order per media type;
+	// keep the two identical.
 	catalogRatingOrderSQL = ratingTierSQL + ` DESC, mi.rating_imdb DESC NULLS LAST, ` + guardedTMDBRatingSQL + ` DESC NULLS LAST`
 )
 
@@ -198,12 +200,13 @@ func interleaveByGenre(ranked []tasteSeedCandidate) []string {
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	titleCounts *titleCountCache
 }
 
 // NewRepo creates a new Repo with the given connection pool.
 func NewRepo(pool *pgxpool.Pool) *Repo {
-	return &Repo{pool: pool}
+	return &Repo{pool: pool, titleCounts: newTitleCountCache()}
 }
 
 func hnswEfSearch(candidateLimit int) int {
@@ -1796,21 +1799,37 @@ func recommendableItemConditions() []string {
 }
 
 // addedAtSQL is when a title was added to the library: for a series, when
-// its latest episode was, if that is later.
+// its latest episode was, if that is later. idx_media_items_type_added_at
+// indexes it per media type; keep the two identical.
 const addedAtSQL = `GREATEST(mi.created_at, COALESCE(mi.latest_episode_added_at, mi.created_at))`
+
+// perTypeItemConditions starts the conditions of a query that reads each
+// recommendable media type through its own index walk: an eligible title of
+// the type typeColumn names.
+func perTypeItemConditions(typeColumn string) []string {
+	return []string{recommendationItemEligibilityWhereClause("mi"), "mi.type = " + typeColumn}
+}
 
 // recentlyAddedQuery lists the Recently Added row: matched
 // recommendableMediaTypes titles (bound at $1) newest addedAtSQL first, ties
 // by content ID, scored by that time in Unix seconds. conditions are further
 // predicates; the limit binds at limitArg. The cached global row and the
-// live, access-filtered default row both read it.
+// live, access-filtered default row both read it. Each type is read newest
+// first from idx_media_items_type_added_at and the types are then merged, so
+// the query stops once the row is full.
 func recentlyAddedQuery(conditions []string, limitArg int) string {
 	return fmt.Sprintf(`
-		SELECT mi.content_id, EXTRACT(EPOCH FROM %[1]s)::float8
-		FROM   media_items mi
-		WHERE  %[2]s
-		ORDER  BY %[1]s DESC, mi.content_id
-		LIMIT  $%[3]d`, addedAtSQL, strings.Join(append(recommendableItemConditions(), conditions...), " AND "), limitArg)
+		SELECT c.content_id, EXTRACT(EPOCH FROM c.added_at)::float8
+		FROM   unnest($1::text[]) AS t(type)
+		CROSS  JOIN LATERAL (
+			SELECT mi.content_id, %[1]s AS added_at
+			FROM   media_items mi
+			WHERE  %[2]s
+			ORDER  BY %[1]s DESC, mi.content_id
+			LIMIT  $%[3]d
+		) c
+		ORDER  BY c.added_at DESC, c.content_id
+		LIMIT  $%[3]d`, addedAtSQL, strings.Join(append(perTypeItemConditions("t.type"), conditions...), " AND "), limitArg)
 }
 
 // GetRecentlyAddedItems returns up to limit titles of the server's Recently
@@ -1866,6 +1885,11 @@ const highlyRatedMinRating = 7.0
 // filter admits, so a movie-heavy library is not led by series, whose
 // ratings run higher. Recently Added orders by when the title, or for a
 // series its latest episode, was added. Both break ties by content ID.
+//
+// Each type is read from its own index (see recentlyAddedQuery and
+// idx_media_items_type_catalog_rating) only as deep as the row needs, and
+// each read is planned for its own exclusions and access, so the cost does
+// not grow with the catalog.
 func (r *Repo) ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error) {
 	if kind != RecTypeTopRated && kind != RecTypeRecentlyAdded {
 		return nil, fmt.Errorf("list default row items: unknown kind %q", kind)
@@ -1875,63 +1899,107 @@ func (r *Repo) ListDefaultRowItems(ctx context.Context, filter catalog.AccessFil
 		(filter.AllowedContentIDs != nil && len(filter.AllowedContentIDs) == 0) {
 		return []ScoredItem{}, nil
 	}
-	if exclude == nil {
-		exclude = []string{}
+	var titles []int64
+	if kind == RecTypeTopRated {
+		var err error
+		if titles, err = r.titleCounts.get(ctx, r, filter); err != nil {
+			return nil, fmt.Errorf("list %s default row items: %w", kind, err)
+		}
 	}
-	// $1 binds recommendableMediaTypes and $2 exclude.
-	var access []string
-	args := []any{recommendableMediaTypes, exclude}
-	argIdx := 3
-	if filter.AllowedContentIDs != nil {
-		access = append(access, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
-		args = append(args, filter.AllowedContentIDs)
-		argIdx++
-	}
-	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &access, &args, &argIdx)
-	catalog.ApplyMaturityLimits("mi", filter, &access, &args, &argIdx)
-	args = append(args, limit)
-
-	var query string
-	switch kind {
-	case RecTypeTopRated:
-		// The row shows at most limit titles of a type, so each type is
-		// ranked only that deep.
-		query = fmt.Sprintf(`
-			WITH accessible AS (
-				SELECT mi.content_id, mi.type, mi.rating_imdb, mi.rating_tmdb
-				FROM   media_items mi
-				WHERE  %[1]s
-			),
-			type_counts AS (
-				SELECT type, COUNT(*) AS titles FROM accessible GROUP BY type
-			),
-			rated AS (
-				SELECT mi.content_id, mi.rating, tc.titles,
-				       ROW_NUMBER() OVER (PARTITION BY mi.type ORDER BY %[3]s, mi.content_id) AS type_rank
-				FROM   type_counts tc
-				CROSS JOIN LATERAL (
-					SELECT mi.content_id, mi.type, mi.rating_imdb, mi.rating_tmdb, %[2]s AS rating
-					FROM   accessible mi
-					WHERE  mi.type = tc.type
-					  AND  %[2]s >= %[4]v
-					  AND  mi.content_id <> ALL($2)
-					ORDER  BY %[3]s, mi.content_id
-					LIMIT  $%[5]d
-				) mi
-			)
-			SELECT content_id, rating::float8
-			FROM   rated
-			ORDER  BY type_rank::float8 / titles, rating DESC, content_id
-			LIMIT  $%[5]d`, strings.Join(append(recommendableItemConditions(), access...), " AND "), catalogRatingSQL, catalogRatingOrderSQL, highlyRatedMinRating, argIdx)
-	case RecTypeRecentlyAdded:
-		query = recentlyAddedQuery(append([]string{"mi.content_id <> ALL($2)"}, access...), argIdx)
-	}
-
-	items, err := r.scoredItems(ctx, query, args, kind, limit)
+	query, args := defaultRowQuery(filter, kind, exclude, titles, limit)
+	// An unnamed statement plans each read for its own exclusion list, which a
+	// generic plan would scan linearly for every title it reads.
+	items, err := r.scoredItems(ctx, query, append([]any{pgx.QueryExecModeCacheDescribe}, args...), kind, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list %s default row items: %w", kind, err)
 	}
 	return items, nil
+}
+
+// defaultRowQuery builds the query of ListDefaultRowItems. titles holds, for
+// Highly Rated, how many titles of each recommendableMediaTypes entry filter
+// admits, in that order.
+func defaultRowQuery(filter catalog.AccessFilter, kind string, exclude []string, titles []int64, limit int) (string, []any) {
+	if exclude == nil {
+		exclude = []string{}
+	}
+	// $1 binds recommendableMediaTypes and $2 exclude.
+	conditions := []string{"mi.content_id <> ALL($2)"}
+	args := []any{recommendableMediaTypes, exclude}
+	argIdx := 3
+	appendAccessConditions(filter, &conditions, &args, &argIdx)
+
+	if kind == RecTypeRecentlyAdded {
+		args = append(args, limit)
+		return recentlyAddedQuery(conditions, argIdx), args
+	}
+	args = append(args, titles, limit)
+	// The row shows at most limit titles of a type, so each type is ranked
+	// only that deep.
+	return fmt.Sprintf(`
+		WITH rated AS (
+			SELECT c.content_id, c.rating, tc.titles,
+			       ROW_NUMBER() OVER (PARTITION BY tc.type ORDER BY c.tier DESC, c.rating_imdb DESC NULLS LAST, c.tmdb DESC NULLS LAST, c.content_id) AS type_rank
+			FROM   unnest($1::text[], $%[6]d::bigint[]) AS tc(type, titles)
+			CROSS  JOIN LATERAL (
+				SELECT mi.content_id, %[2]s AS tier, mi.rating_imdb, %[3]s AS tmdb, %[4]s AS rating
+				FROM   media_items mi
+				WHERE  %[1]s
+				  AND  %[4]s >= %[5]v
+				ORDER  BY %[7]s, mi.content_id
+				LIMIT  $%[8]d
+			) c
+		)
+		SELECT content_id, rating::float8
+		FROM   rated
+		ORDER  BY type_rank::float8 / titles, rating DESC, content_id
+		LIMIT  $%[8]d`,
+		strings.Join(append(perTypeItemConditions("tc.type"), conditions...), " AND "),
+		ratingTierSQL, guardedTMDBRatingSQL, catalogRatingSQL, highlyRatedMinRating,
+		argIdx, catalogRatingOrderSQL, argIdx+1), args
+}
+
+// appendAccessConditions adds the predicates limiting media_items aliased mi
+// to what filter admits.
+func appendAccessConditions(filter catalog.AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	if filter.AllowedContentIDs != nil {
+		*conditions = append(*conditions, fmt.Sprintf("mi.content_id = ANY($%d)", *argIdx))
+		*args = append(*args, filter.AllowedContentIDs)
+		*argIdx++
+	}
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, conditions, args, argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, conditions, args, argIdx)
+}
+
+// countTitlesByType counts the titles of each recommendableMediaTypes entry
+// filter admits, in that order. It reads every such title.
+func (r *Repo) countTitlesByType(ctx context.Context, filter catalog.AccessFilter) ([]int64, error) {
+	conditions := recommendableItemConditions()
+	args := []any{recommendableMediaTypes}
+	argIdx := 2
+	appendAccessConditions(filter, &conditions, &args, &argIdx)
+	rows, err := r.pool.Query(ctx, `SELECT mi.type, COUNT(*) FROM media_items mi WHERE `+strings.Join(conditions, " AND ")+` GROUP BY mi.type`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count titles by type: %w", err)
+	}
+	defer rows.Close()
+	byType := make(map[string]int64, len(recommendableMediaTypes))
+	for rows.Next() {
+		var mediaType string
+		var n int64
+		if err := rows.Scan(&mediaType, &n); err != nil {
+			return nil, fmt.Errorf("scan title count: %w", err)
+		}
+		byType[mediaType] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("count titles by type: %w", err)
+	}
+	counts := make([]int64, len(recommendableMediaTypes))
+	for i, mediaType := range recommendableMediaTypes {
+		counts[i] = byType[mediaType]
+	}
+	return counts, nil
 }
 
 // GetTasteSeedCandidates returns a page of content IDs of

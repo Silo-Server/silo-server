@@ -139,6 +139,9 @@ func (h *RecommendationsHandler) Discover(ctx context.Context, userID int, profi
 	if h.reader == nil || h.Fetcher == nil {
 		return discoverResponse{Rows: []discoverRowResponse{}}, nil
 	}
+	// The rows and the airings blend both leave out what the profile watched;
+	// read that once.
+	ctx = recommendations.WithWatchedSetMemo(ctx)
 	rows, err := h.reader.GetDiscoverRows(ctx, userID, profileID, recommendationsDefaultLimit, filter)
 	if err != nil {
 		slog.ErrorContext(ctx, "Discover failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
