@@ -11005,6 +11005,26 @@
       "body_file": "list_unmatched_items_ok.json"
     },
     {
+      "name": "list_unsupported_files_ok",
+      "operation_id": "listUnsupportedFiles",
+      "scenario": "The first page of folders holding files that scans skip because of their type.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/libraries/unsupported-files?limit=2",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/UnsupportedFileCollection",
+      "body_file": "list_unsupported_files_ok.json"
+    },
+    {
       "name": "list_watch_tonight_cards_ok",
       "operation_id": "listWatchTonightCards",
       "scenario": "A page of discover-mode swipe cards filtered to two genres, minus one already swiped.",

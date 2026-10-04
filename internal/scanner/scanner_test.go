@@ -56,7 +56,7 @@ func TestCollectLogicalFilePaths_PreservesLogicalSymlinkRootPaths(t *testing.T) 
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{logicalRoot}, "series", nil)
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{logicalRoot}, "series", nil)
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestCollectLogicalFilePaths_DedupesSharedPhysicalDirsAndCycles(t *testing.T
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{physicalRoot, aliasRoot}, "movie", nil)
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{physicalRoot, aliasRoot}, "movie", nil)
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}

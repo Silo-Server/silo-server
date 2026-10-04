@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   useLibraryProviderDefaults: vi.fn(),
   useLibraryRefreshJobs: vi.fn(),
   useSkippedLibraryRoots: vi.fn(),
+  useUnsupportedLibraryFiles: vi.fn(),
   useStaleMediaIDs: vi.fn(),
   useCheckLibraryMount: vi.fn(),
   useCreateLibrary: vi.fn(),
@@ -53,6 +54,7 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryProviderDefaults: (...args: unknown[]) => mocks.useLibraryProviderDefaults(...args),
   useLibraryRefreshJobs: (...args: unknown[]) => mocks.useLibraryRefreshJobs(...args),
   useSkippedLibraryRoots: (...args: unknown[]) => mocks.useSkippedLibraryRoots(...args),
+  useUnsupportedLibraryFiles: (...args: unknown[]) => mocks.useUnsupportedLibraryFiles(...args),
   useStaleMediaIDs: (...args: unknown[]) => mocks.useStaleMediaIDs(...args),
   flattenStaleMediaIDs: (data?: { pages: { staleIDs: unknown[] }[] }) =>
     data?.pages.flatMap((page) => page.staleIDs) ?? [],
@@ -212,6 +214,15 @@ describe("AdminLibraries", () => {
     mocks.useSkippedLibraryRoots.mockReturnValue({
       data: { pages: [{ roots: [] }] },
       isLoading: false,
+    });
+    mocks.useUnsupportedLibraryFiles.mockReturnValue({
+      data: { pages: [{ groups: [], total: 0 }] },
+      isError: false,
+      refetch: vi.fn(),
+      isRefetching: false,
+      hasNextPage: false,
+      fetchNextPage: vi.fn(),
+      isFetchingNextPage: false,
     });
     mocks.useStaleMediaIDs.mockReturnValue({
       data: undefined,

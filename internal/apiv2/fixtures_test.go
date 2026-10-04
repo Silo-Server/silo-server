@@ -1753,7 +1753,11 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminCollectionCapabilityFixtureCases()...)
 	cases = append(cases, personalCollectionContainsFixtureCases()...)
 	cases = append(cases, loginSessionFixtureCases()...)
-	return append(cases, adminDownloadStorageFixtureCases()...)
+	cases = append(cases, adminDownloadStorageFixtureCases()...)
+	return append(cases, fixtureCase{name: "list_unsupported_files_ok", operationID: opListUnsupportedFiles,
+		scenario: "The first page of folders holding files that scans skip because of their type.",
+		method:   http.MethodGet, path: "/api/v2/libraries/unsupported-files?limit=2", headers: bearer(adminToken),
+		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/UnsupportedFileCollection"})
 }
 
 // personalCollectionContainsFixtureCases pin the collection list marked for
