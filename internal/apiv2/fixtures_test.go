@@ -1767,7 +1767,11 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, seasonalThemeFixtureCases()...)
 	cases = append(cases, personalListMembershipFixtureCases()...)
 	cases = append(cases, sectionItemLimitFixtureCases()...)
-	return append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogItemsFixtureCases()...)
+	return append(cases, fixtureCase{name: "list_unsupported_files_ok", operationID: opListUnsupportedFiles,
+		scenario: "The first page of folders holding files that scans skip because of their type.",
+		method:   http.MethodGet, path: "/api/v2/libraries/unsupported-files?limit=2", headers: bearer(adminToken),
+		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/UnsupportedFileCollection"})
 }
 
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate

@@ -45,6 +45,7 @@ import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefres
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
 import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
 import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
+import { UnsupportedFilesSection } from "@/components/admin/libraries/UnsupportedFilesSection";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -811,6 +812,7 @@ function LibrariesPage() {
         <MetadataMatcherQueuesSection libraries={libraries} />
         <AmbiguousRootsSection libraries={libraries} />
         <SkippedRootsSection />
+        <UnsupportedFilesSection libraries={libraries} />
         <StaleIDsSection />
       </div>
       {/* After the content so its padded row never pushes the page header down. */}

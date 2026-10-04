@@ -5,14 +5,15 @@ complete request and response schemas are generated in `contracts/api/v2/openapi
 The frozen v1 bridge keeps its existing responses.
 
 `GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`,
-`GET /api/v2/libraries/stale-ids`, and `GET /api/v2/libraries/unmatched-items` return
+`GET /api/v2/libraries/unsupported-files`, `GET /api/v2/libraries/stale-ids`, and
+`GET /api/v2/libraries/unmatched-items` return
 `{items, page, total}` collections, where `total`
 counts the matches across every page. `limit` defaults to 50 and is
 at most 200. Continue with `page.next_cursor` while `page.has_more` is true. A cursor
 is bound to the acting administrator and query filters; changing a filter starts a
 new listing without a cursor.
 
-All four operations accept a trimmed, case-insensitive substring query `q`. Search
+All five operations accept a trimmed, case-insensitive substring query `q`. Search
 runs before database pagination, so a match can be found without loading preceding
 pages. Percent signs and underscores are literal characters.
 
@@ -20,13 +21,22 @@ pages. Percent signs and underscores are literal characters.
 | --- | --- | --- |
 | Roots | Root path, title, sample file path | Required `library_id`; optional `state` |
 | Skipped roots | Root path, library name, reason | None |
+| Unsupported files | Directory path, file names, reason, library name | None |
 | Stale IDs | Title, provider, provider ID, library name | Actionable provider IDs only |
 | Unmatched items | Title, type, status, library name | Optional `ignored` |
 
+Unsupported files are the files scans find but do not catalog because of their type: DVD
+VOBs, disc images, RealMedia, and streams in a Blu-ray or AVCHD disc folder. There is one
+entry per directory and reason, newest first by when each was first found, with the file
+count and up to 100 file names. A library scan replaces the library's entries and a subtree scan the entries
+under its subtree. Entries the scan could not verify (under an unreachable or suspect-empty
+root, or a path it could not read) are kept, as are entries another scan refreshed while it
+ran.
+
 The web administration page loads diagnostics when their section opens. It requests
 more results through **Load more** and starts a new first page when the search changes.
-Unmatched items are the exception: they load with the page, for the section's count,
-and page through a page bar.
+Unmatched items and **Files Not Cataloged** are the exceptions: they load with the page,
+for the section's count. Unmatched items page through a page bar.
 Sorting controls on diagnostic tables sort the loaded results.
 
 Library poster uploads allow a file of up to 10 MiB plus 1 MiB of multipart framing.

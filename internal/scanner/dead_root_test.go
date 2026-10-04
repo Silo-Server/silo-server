@@ -116,7 +116,7 @@ func TestCollectLogicalFilePathsReportsUnreadableEntries(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
 	if err != nil {
 		t.Fatalf("collectLogicalFilePaths: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestCollectLogicalFilePathsVanishedScopeRoot(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{tc.scope}, "movies", []string{tc.libraryRoot})
+			files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{tc.scope}, "movies", []string{tc.libraryRoot})
 			if err != nil {
 				t.Fatalf("collectLogicalFilePaths: %v", err)
 			}
@@ -204,7 +204,7 @@ func TestCollectLogicalFilePathsUnstattableScopeRootStaysAFailure(t *testing.T) 
 	}
 	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
 
-	_, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{filepath.Join(blocked, "Movie (2001)")}, "movies", []string{library})
+	_, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{filepath.Join(blocked, "Movie (2001)")}, "movies", []string{library})
 	if err != nil {
 		t.Fatalf("collectLogicalFilePaths: %v", err)
 	}
