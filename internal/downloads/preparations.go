@@ -119,10 +119,12 @@ func NewPreparationReader(pool *pgxpool.Pool, profileNames ProfileNamesFunc) *Pr
 // Available reports whether the reader can serve lists.
 func (r *PreparationReader) Available() bool { return r != nil && r.pool != nil }
 
-// The unready predicate matches download_artifacts_unready_idx.
+// The unready predicate matches download_artifacts_unready_idx. A running job
+// whose lease expired is queued again, as the claim query treats it.
 const preparationStatesCTE = `WITH listed AS (
 	SELECT a.*,
-	       CASE WHEN a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') THEN 'running'
+	       CASE WHEN a.status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')
+	                 AND (a.lease_expires_at IS NULL OR a.lease_expires_at >= now()) THEN 'running'
 	            WHEN a.status = 'failed' THEN 'failed'
 	            WHEN a.next_retry_at > now() THEN 'retrying'
 	            ELSE 'queued' END AS state

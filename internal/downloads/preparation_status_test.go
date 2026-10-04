@@ -28,23 +28,29 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 	repo := statusEventTestRepo(t)
 	if _, err := repo.pool.Exec(t.Context(), `CREATE TABLE download_artifacts(
  id text PRIMARY KEY, status text NOT NULL, created_at timestamptz NOT NULL, completed_at timestamptz, next_retry_at timestamptz,
+ lease_expires_at timestamptz,
  progress_encoded_seconds double precision, progress_duration_seconds double precision, progress_speed double precision)`); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(-time.Hour)
+	leased := time.Now().Add(time.Minute)
+	expired := time.Now().Add(-time.Minute)
 	for i, a := range []struct {
 		id, status string
 		retry      *time.Time
+		lease      *time.Time
 		encoded    *float64
 	}{
-		{id: "running", status: "tracks_v1_running", encoded: new(300.0)},
+		{id: "running", status: "tracks_v1_running", lease: &leased, encoded: new(300.0)},
 		{id: "other-user-first", status: "tracks_v1_queued"},
 		{id: "backing-off", status: "tracks_v1_queued", retry: new(time.Now().Add(time.Hour))},
 		{id: "mine-second", status: "queued"},
 		{id: "done", status: "tracks_v1_ready"},
+		// Its worker died: claimable again, so queued, and its last report is stale.
+		{id: "stalled", status: "tracks_v1_running", lease: &expired, encoded: new(600.0)},
 	} {
-		if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at,next_retry_at,progress_encoded_seconds,progress_duration_seconds,progress_speed) VALUES($1,$2,$3,$4,$5,1200,6)`,
-			a.id, a.status, base.Add(time.Duration(i)*time.Minute), a.retry, a.encoded); err != nil {
+		if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at,next_retry_at,lease_expires_at,progress_encoded_seconds,progress_duration_seconds,progress_speed) VALUES($1,$2,$3,$4,$5,$6,1200,6)`,
+			a.id, a.status, base.Add(time.Duration(i)*time.Minute), a.retry, a.lease, a.encoded); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -55,6 +61,7 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 		{ID: "d", Status: StatusPreparing, ArtifactID: "done"},
 		{ID: "e", Status: StatusReady, ArtifactID: "running"},
 		{ID: "f", Status: StatusPreparing},
+		{ID: "g", Status: StatusPreparing, ArtifactID: "stalled"},
 	}
 	if err := repo.attachPreparations(t.Context(), rows); err != nil {
 		t.Fatal(err)
@@ -70,7 +77,10 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 	if p := rows[2].Preparation; p == nil || p.State != PreparationRetrying || p.QueuePosition != 0 {
 		t.Fatalf("retrying %+v", p)
 	}
-	for _, row := range rows[3:] {
+	if p := rows[6].Preparation; p == nil || p.State != PreparationQueued || p.QueuePosition != 3 || p.Progress != nil {
+		t.Fatalf("expired lease %+v", p)
+	}
+	for _, row := range rows[3:6] {
 		if row.Preparation != nil {
 			t.Fatalf("%s: %+v", row.ID, row.Preparation)
 		}
