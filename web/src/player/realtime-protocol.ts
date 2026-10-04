@@ -431,27 +431,31 @@ function isSubtitleReadyPayload(value: unknown): value is PlaybackSubtitleReadyP
   );
 }
 
+function isSubtitleTimingChangedPayload(
+  value: unknown,
+): value is PlaybackSubtitleTimingChangedPayload {
+  return (
+    isRecord(value) &&
+    typeof value.session_id === "string" &&
+    typeof value.file_id === "number" &&
+    typeof value.sync_key === "string" &&
+    (value.subtitle_id === undefined || typeof value.subtitle_id === "number") &&
+    isOptionalSubtitleInventoryItem(value.track)
+  );
+}
+
 /**
  * Reads a subtitle_timing_changed payload. A server from before sidecar sync
  * (an older API server during a rolling upgrade) names only a stored
  * subtitle's `subtitle_id`; its sync key is derived from that.
  */
 function subtitleTimingChangedPayload(value: unknown): PlaybackSubtitleTimingChangedPayload | null {
-  if (
-    !isRecord(value) ||
-    typeof value.session_id !== "string" ||
-    typeof value.file_id !== "number" ||
-    (value.subtitle_id !== undefined && typeof value.subtitle_id !== "number") ||
-    !isOptionalSubtitleInventoryItem(value.track)
-  ) {
-    return null;
+  if (isSubtitleTimingChangedPayload(value)) return value;
+  if (isRecord(value) && value.sync_key === undefined && typeof value.subtitle_id === "number") {
+    const legacy = { ...value, sync_key: `stored-${value.subtitle_id}` };
+    return isSubtitleTimingChangedPayload(legacy) ? legacy : null;
   }
-  if (typeof value.sync_key === "string") return value as PlaybackSubtitleTimingChangedPayload;
-  if (value.sync_key !== undefined || typeof value.subtitle_id !== "number") return null;
-  return {
-    ...value,
-    sync_key: `stored-${value.subtitle_id}`,
-  } as PlaybackSubtitleTimingChangedPayload;
+  return null;
 }
 
 function isSubtitleSyncTiming(value: unknown): value is PlaybackSubtitleSyncTiming {

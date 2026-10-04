@@ -50,6 +50,17 @@ describe("syncKeyOf", () => {
     expect(syncKeyOf(track({ source: "downloaded", sync_key: "stored-7" }))).toBe("stored-7");
   });
 
+  it("reads a stored subtitle's key from its URL in a plan without sync keys", () => {
+    const legacy = track({
+      source: "downloaded",
+      sync_key: undefined,
+      url: "/api/v2/playback/sessions/s1/subtitles/2.vtt?downloaded_subtitle_id=7",
+    });
+    expect(syncKeyOf(legacy)).toBe("stored-7");
+    expect(syncKeyOf({ ...legacy, url: "/subtitles/2.vtt?downloaded_subtitle_id=0" })).toBeNull();
+    expect(syncKeyOf({ ...legacy, source: "external" })).toBeNull();
+  });
+
   it.each([
     ["embedded", track({ source: "embedded", sync_key: undefined })],
     ["live", track({ live: true })],

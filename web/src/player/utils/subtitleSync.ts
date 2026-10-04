@@ -8,14 +8,29 @@ export type SubtitleTiming = components["schemas"]["SubtitleTiming"];
 export type SubtitleSyncStatus = SubtitleSyncJob["status"];
 export type SubtitleSyncFailure = NonNullable<SubtitleSyncJob["failure"]>;
 
+/** The query parameter that pins a downloaded-track URL to its stored row. */
+const STORED_ID_PARAM = "downloaded_subtitle_id";
+
 /**
  * The sync key of a track whose timing the server can correct (a stored
  * subtitle or a subtitle file next to the media), or null. The plan's
  * inventory publishes it as `sync_key`; a live translation has none yet.
+ *
+ * A plan from a server before sidecar sync (an older API server during a
+ * rolling upgrade) has no `sync_key`. Its downloaded tracks still pin their
+ * URL to the stored row with `downloaded_subtitle_id`, which names the key.
  */
 export function syncKeyOf(track: PlayerSubtitleInfo | null | undefined): string | null {
-  if (!track || track.live || !track.sync_key) return null;
-  return track.sync_key;
+  if (!track || track.live) return null;
+  if (track.sync_key) return track.sync_key;
+  if (track.source !== "downloaded" || !track.url) return null;
+  let raw: string | null;
+  try {
+    raw = new URL(track.url, "http://player.invalid").searchParams.get(STORED_ID_PARAM);
+  } catch {
+    return null;
+  }
+  return raw && /^[1-9][0-9]*$/.test(raw) ? `stored-${raw}` : null;
 }
 
 /** The sync state a stored subtitle returned by a download or upload carries. */
