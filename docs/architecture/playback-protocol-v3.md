@@ -537,7 +537,7 @@ Each `deliveries` entry describes one class:
 | `failure_reason` | Optional free text explaining a `false` above; diagnostics only |
 | `containers`, `video_codecs`, `audio_decode_codecs` | Flat lowercase name lists |
 | `audio_passthrough_codecs` | Bitstream-out candidates; only ever honoured under the `exact` tier (§3) |
-| `max_channels` | Optional ceiling applied to audio routing |
+| `max_channels` | Optional ceiling on the channel count of the audio stream this class delivers: the most channels the client can play from it. A track above it is never copied to this class: the planner converts it to AAC within the ceiling, on a video-copy remux when the video can be copied there. A value of zero or less means no ceiling. A client whose player downmixes surround itself omits it; one whose output cannot render more channels than it sets it. Per-sink passthrough limits belong in `output.audio_passthrough.entries` |
 | `hdr_details` | Optional per-class HDR support, overriding the device-level value |
 | `subtitles` | `sidecar_text`, `ass_styling`, `embedded_bitmap`, `sidecar_bitmap`, `font_attachments`, the legacy `embedded_text` hint, and optional `native_embedded` attestations (§8) |
 | `features` | Class-scoped feature strings |

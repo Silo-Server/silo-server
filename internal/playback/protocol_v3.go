@@ -525,20 +525,25 @@ type DeliverySubtitleCapabilitiesV3 struct {
 }
 
 type DeliveryCapabilityV3 struct {
-	Enabled                bool                           `json:"enabled"`
-	SupportedOnDevice      bool                           `json:"supported_on_device"`
-	FailureReason          string                         `json:"failure_reason,omitempty"`
-	Containers             []string                       `json:"containers"`
-	VideoCodecs            []string                       `json:"video_codecs"`
-	AudioDecodeCodecs      []string                       `json:"audio_decode_codecs"`
-	AudioPassthroughCodecs []string                       `json:"audio_passthrough_codecs"`
-	MaxChannels            *int                           `json:"max_channels,omitempty"`
-	HDRDetails             *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
-	Subtitles              DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
-	Features               []string                       `json:"features"`
-	AuthHeaderRefresh      bool                           `json:"auth_header_refresh"`
-	ValidatedClaims        []string                       `json:"validated_claims"`
-	Transformations        []TransformationV3             `json:"transformations"`
+	Enabled                bool     `json:"enabled"`
+	SupportedOnDevice      bool     `json:"supported_on_device"`
+	FailureReason          string   `json:"failure_reason,omitempty"`
+	Containers             []string `json:"containers"`
+	VideoCodecs            []string `json:"video_codecs"`
+	AudioDecodeCodecs      []string `json:"audio_decode_codecs"`
+	AudioPassthroughCodecs []string `json:"audio_passthrough_codecs"`
+	// MaxChannels caps the channel count of the audio stream this class
+	// delivers: the most channels the client can play from it. A client whose
+	// player downmixes surround itself omits it. A source track above it is
+	// converted to AAC within the ceiling, on a video-copy remux when the
+	// video can be copied. Zero or less means unset.
+	MaxChannels       *int                           `json:"max_channels,omitempty"`
+	HDRDetails        *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
+	Subtitles         DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
+	Features          []string                       `json:"features"`
+	AuthHeaderRefresh bool                           `json:"auth_header_refresh"`
+	ValidatedClaims   []string                       `json:"validated_claims"`
+	Transformations   []TransformationV3             `json:"transformations"`
 }
 
 // ClientPlaybackContextV3 carries the client's execution context. Feature

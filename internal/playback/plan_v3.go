@@ -554,8 +554,14 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// video stream-copy route: the avc1/fMP4 segment would desync strict
 	// decoders. Skipping the remux branch drops through to the HLS transcode.
 	if videoOK && !source.VideoCopyUnsafe && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
-		progressiveAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
-		hlsAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
+		// A source with more channels than the delivery's ceiling cannot be
+		// copied there even when the codec is supported. Adapt only the audio
+		// so the video stays a copy instead of falling through to a transcode.
+		progressiveChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels)
+		hlsChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels)
+		progressiveAudioOK := noAudioTrack || !progressiveChannelLimited &&
+			deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
+		hlsCodecAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 			deliverySupportsAudioClaimV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, audioClaims, audioOK)
 		// AAC frames in Matroska use a millisecond packet clock while each frame
 		// contains 1024 samples. Copying those rounded timestamps into MP4/fMP4
@@ -565,8 +571,25 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// playback above remains byte-for-byte direct play.
 		firefoxAACTimingQuirk, normalizeMatroskaAAC := firefoxMatroskaAACTimingQuirkV3(source, input.Request)
 		progressiveTranscodeAudio := !progressiveAudioOK || normalizeMatroskaAAC
-		hlsTranscodeAudio := !hlsAudioOK || normalizeMatroskaAAC
+		hlsCodecTranscodeAudio := !hlsCodecAudioOK || normalizeMatroskaAAC
+		hlsTranscodeAudio := hlsCodecTranscodeAudio || hlsChannelLimited
 		hlsAudioQuirk, hlsAudioQuirkOK := hlsEAC3AudioCorrectionV3(source, input.Request)
+		// The device quirk owns the conversion of a codec HLS could otherwise
+		// copy, including one that only exceeds the channel ceiling, so its
+		// validated stereo recipe and applied-quirk record are kept.
+		hlsQuirkConvertsAudio := hlsAudioQuirkOK && !hlsCodecTranscodeAudio
+		hlsAACChannels := 0
+		switch {
+		case hlsQuirkConvertsAudio:
+			hlsAACChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
+		case hlsTranscodeAudio:
+			// HLS packaging cannot safely copy non-native codecs such as DTS,
+			// TrueHD, or Opus. Preserve surround when adapting those codecs,
+			// and keep as many channels as a channel ceiling allows; a native
+			// codec rejected by the scoped client claim keeps the normal
+			// compatibility downmix policy.
+			hlsAACChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, hlsChannelLimited || !hlsNativeAudioCodecV3(source.AudioCodec))
+		}
 		progressiveAudioConvertOK := false
 		if progressiveTranscodeAudio && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
 			progressiveAudioConvertOK = input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
@@ -608,7 +631,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			progressivePlan.DecisionReason = decisionReasonContainerNormalizationV3
 			progressiveAudioChannels := 0
 			if progressiveTranscodeAudio && progressiveAudioConvertOK {
-				progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, false)
+				progressiveAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels, progressiveChannelLimited)
 				progressivePlan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 				progressivePlan.EffectiveRecipe.AudioChannels = intPointerV3(progressiveAudioChannels)
 				progressivePlan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(progressiveAudioChannels)
@@ -625,7 +648,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			}
 			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
 			tryProgressive := func() (PlannerResultV3, bool) {
-				if !remuxSubtitleOK || !progressiveExecutable || input.ServerBitrateCapKbps > 0 && progressiveTranscodeAudio {
+				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, source, progressiveAudioChannels) {
 					return PlannerResultV3{}, false
 				}
 				candidate := cloneRemuxPlanCandidateV3(progressivePlan)
@@ -643,7 +666,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					return result
 				}
 			}
-			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (input.ServerBitrateCapKbps <= 0 || (!hlsTranscodeAudio && !hlsAudioQuirkOK))
+			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (!hlsTranscodeAudio && !hlsAudioQuirkOK || audioRemuxFitsServerCapV3(input, source, hlsAACChannels))
 			if hlsRouteOK && (hlsTranscodeAudio || hlsAudioQuirkOK) && !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
 				// HLS needs an AAC conversion that no HLS executor offers. Skip
 				// only this route: a later recipe (the Dolby Vision HDR10 strip)
@@ -651,7 +674,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				// every remux recipe is exhausted.
 				hlsRouteOK = false
 				hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
-				if !hlsTranscodeAudio {
+				if hlsQuirkConvertsAudio {
 					hlsAudioConversionUnavailable = "The device-specific HLS route requires the validated AAC conversion toolchain."
 				}
 			}
@@ -661,25 +684,25 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
 				hlsAudioChannels := 0
-				if hlsTranscodeAudio {
-					// HLS packaging cannot safely copy non-native codecs such as
-					// DTS, TrueHD, or Opus. Preserve surround when adapting those
-					// codecs; a native codec rejected by the scoped client claim
-					// keeps the normal compatibility downmix policy.
-					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, !hlsNativeAudioCodecV3(source.AudioCodec))
+				if hlsTranscodeAudio && !hlsQuirkConvertsAudio {
+					hlsAudioChannels = hlsAACChannels
 					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
 					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
 					plan.Claims.Audio = AudioClaimsV3{Codec: audioCodecAACV3, Reason: hlsAudioAdaptationReasonV3}
 					plan.Transformations = append(plan.Transformations, TransformationV3{Name: TransformationAudioToAACV3, Executor: ExecutorServerV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, ValidatedClaims: []string{ClaimAudioDecodeV3}})
-					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: "The selected audio track is converted to AAC for HLS delivery."})
+					message := "The selected audio track is converted to AAC for HLS delivery."
+					if !hlsCodecTranscodeAudio {
+						message = fmt.Sprintf("The selected audio track is converted to AAC %s to fit this output's channel limit.", audioLayoutForChannelsV3(hlsAudioChannels))
+					}
+					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: message})
 				}
 				if normalizeMatroskaAAC {
 					appendAppliedQuirkV3(&plan, *firefoxAACTimingQuirk, "")
 				}
-				if hlsAudioQuirkOK && !hlsTranscodeAudio {
+				if hlsQuirkConvertsAudio {
 					hlsTranscodeAudio = true
-					hlsAudioChannels = aacOutputChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels, false)
+					hlsAudioChannels = hlsAACChannels
 					plan.EffectiveRecipe.AudioCodec = audioCodecAACV3
 					plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
 					plan.EffectiveRecipe.AudioLayout = audioLayoutForChannelsV3(hlsAudioChannels)
@@ -717,8 +740,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			return terminalPlannerResultV3(TerminalAudioConversionUnsupportedV3, hlsAudioConversionUnavailable, true)
 		}
 		if input.ServerBitrateCapKbps > 0 && (progressiveTranscodeAudio || hlsTranscodeAudio || hlsAudioQuirkOK) {
-			// Audio re-encoding can raise a copy remux above a source that only
-			// just fits the cap. Encode both tracks with an explicit budget.
+			// The audio-converting remux could not prove it stays inside the cap
+			// (or was already attempted). Encode both tracks with an explicit
+			// budget.
 			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "", false)
 		}
 	}
@@ -2078,6 +2102,31 @@ func deliverySupportsAudioClaimV3(request StartRequestV3, deliveryClass, codec s
 	return containsFoldV3(supportedCodecs, codec)
 }
 
+// deliveryExceedsMaxChannelsV3 reports whether an audio stream with the given
+// channel count exceeds the delivery's max_channels ceiling. Planning and the
+// finished-plan check in deliverySupportsPlanV3 share it; a ceiling of zero or
+// less means unset, matching aacOutputChannelsV3.
+func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass string, channels int) bool {
+	capability, ok := request.ClientPlaybackContext.Deliveries[deliveryClass]
+	return ok && capability.MaxChannels != nil && *capability.MaxChannels > 0 && channels > *capability.MaxChannels
+}
+
+// audioRemuxFitsServerCapV3 reports whether a video-copy remux that converts
+// the selected audio to AAC stays inside the administrator's bitrate cap. The
+// source bitrate already counts the audio track the AAC output replaces, so
+// adding the full AAC rate is an upper bound. An unknown source bitrate cannot
+// be bounded and needs the budgeted transcode.
+func audioRemuxFitsServerCapV3(input PlannerInputV3, source SourceDescriptorV3, aacChannels int) bool {
+	if input.ServerBitrateCapKbps <= 0 {
+		return true
+	}
+	if source.BitrateKbps <= 0 {
+		return false
+	}
+	_, aacKbps := ResolveAACOutputV3(aacChannels, 0)
+	return source.BitrateKbps+aacKbps <= input.ServerBitrateCapKbps
+}
+
 // deliverySupportsPlanV3 applies the capability limits scoped to the delivery
 // class after a concrete recipe has been built. Empty lists preserve clients
 // that only advertise class availability; non-empty lists are authoritative
@@ -2105,7 +2154,7 @@ func deliverySupportsPlanV3(request StartRequestV3, deliveryClass string, plan P
 			}
 		}
 	}
-	if capability.MaxChannels != nil && plan.EffectiveRecipe.AudioChannels != nil && *plan.EffectiveRecipe.AudioChannels > *capability.MaxChannels {
+	if plan.EffectiveRecipe.AudioChannels != nil && deliveryExceedsMaxChannelsV3(request, deliveryClass, *plan.EffectiveRecipe.AudioChannels) {
 		return false
 	}
 	clientManagedOriginalRange := deliveryClass == DeliveryClassOriginalHTTPV3 &&
