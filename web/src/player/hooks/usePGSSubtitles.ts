@@ -87,9 +87,9 @@ function clampSpan(start: number, size: number, min: number, max: number): numbe
 
 /**
  * Where one object lands in the player box. It keeps its place on the plane,
- * then stays inside the box with a small margin, shrinking when it is wider
- * than the box (a Fill crop on a narrow screen); lower-half objects also stay
- * above `bottomInsetPx`.
+ * then stays inside the box with a small margin, shrinking when it does not
+ * fit (a Fill crop on a narrow screen, or a tall object over a short player);
+ * lower-half objects also stay above `bottomInsetPx`.
  */
 export function placePGSObject({
   object,
@@ -116,13 +116,15 @@ export function placePGSObject({
   const marginY = boxHeight * EDGE_MARGIN_RATIO;
   let width = source.width * scaleX;
   let height = source.height * scaleY;
-  const shrink = Math.max(0, Math.min(1, (boxWidth - 2 * marginX) / width));
   const centerX = plane.x + object.x * scaleX + width / 2;
   const centerY = plane.y + object.y * scaleY + height / 2;
-  width *= shrink;
-  height *= shrink;
   const lowerHalf = centerY > boxHeight / 2;
   const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
+  const roomX = boxWidth - 2 * marginX;
+  const roomY = bottom - marginY;
+  const shrink = Math.max(0, Math.min(1, roomX / width, roomY / height));
+  width *= shrink;
+  height *= shrink;
   return {
     x: clampSpan(centerX - width / 2, width, marginX, boxWidth - marginX),
     y: clampSpan(centerY - height / 2, height, marginY, bottom),
@@ -323,9 +325,10 @@ export function usePGSSubtitles({
     function renderFrame() {
       frameRequest = 0;
       if (cancelled) return;
-      // A window on the wire may still bring the clear for the last screen;
-      // with none, the timeline ends at the last window that loaded.
-      const loadedUntil = inflight ? Infinity : windowEnd + 1;
+      // The clear for the last screen may not have arrived yet, so the
+      // timeline only reaches the last finished window or, past it, the
+      // latest segment the parser has read.
+      const loadedUntil = Math.max(windowEnd, parser?.receivedUntil ?? -Infinity) + 1;
       const composition = pgsCompositionAt(timeline, sourceTime(), loadedUntil);
       const key = `${canvasEl.clientWidth}x${canvasEl.clientHeight}@${window.devicePixelRatio}:${videoEl.videoWidth}x${videoEl.videoHeight}:${layoutRevisionRef.current}`;
       if (composition !== painted.composition || key !== painted.key) {

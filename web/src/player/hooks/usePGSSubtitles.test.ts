@@ -78,6 +78,24 @@ describe("placePGSObject", () => {
     expect(rect.y).toBe(60);
   });
 
+  it("shrinks an object taller than the room above the control bar", () => {
+    const picture = videoContentRect(640, 360, 1920, 1080, "contain");
+    const tall = { x: 160, y: 300, width: 1600, height: 700 };
+    const rect = placePGSObject({
+      object: tall,
+      source: { x: 0, y: 0, width: tall.width, height: tall.height },
+      plane: pgsPlaneRect(picture, 1920, 1080),
+      planeWidth: 1920,
+      planeHeight: 1080,
+      boxWidth: 640,
+      boxHeight: 360,
+      bottomInsetPx: 120,
+    });
+    expect(rect.y).toBeGreaterThanOrEqual(0);
+    expect(rect.y + rect.height).toBeLessThanOrEqual(360 - 120);
+    expect(rect.width / rect.height).toBeCloseTo(1600 / 700);
+  });
+
   it("keeps a line inside a narrow Fill viewport", () => {
     const rect = place(390, 844, "cover");
     expect(rect.x).toBeGreaterThanOrEqual(0);

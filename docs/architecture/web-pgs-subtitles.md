@@ -35,17 +35,18 @@ start is not blamed on it.
   far into a file do not download the whole track. An extend window keeps the
   parser's epoch state; a fresh window after a seek starts a new parser, so a
   screen whose epoch began before the window shows from the next epoch start.
-- A screen stays up until the next display set replaces it, but never past the
-  loaded windows: when no window is on the wire, nothing is drawn beyond the
-  last one that finished. Screens more than one window behind the playhead are
-  dropped.
+- A screen stays up until the next display set replaces it, but never past
+  what has loaded: the end of the last finished window or, beyond it, the
+  latest segment read from the window on the wire. Screens more than one window
+  behind the playhead are dropped.
 - Each composition is drawn on a canvas that spans the player, scaled from the
   PGS video size onto the picture rectangle (`web/src/player/utils/videoFit.ts`)
   for both contain and cover fits. The plane matches the picture along its
   uncropped side, so subtitles authored in a letterbox or pillarbox stay
-  there. Objects stay inside the player, shrinking when a Fill crop leaves
-  less width than they need, and lower-half objects stay above the control
-  bar while it is up, whatever the text position setting says.
+  there. Objects stay inside the player, shrinking when they do not fit (a
+  Fill crop, or a tall object over a short player), and lower-half objects
+  stay above the control bar while it is up, whatever the text position
+  setting says.
 - The subtitle delay and the stream's timeline origin apply as they do for text
   cues.
 - A plan whose subtitle mode is still `burn_in` is left to the server, and the

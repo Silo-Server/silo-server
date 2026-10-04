@@ -242,6 +242,14 @@ describe("PGSStreamParser", () => {
     expect(next!.objects[0]!.palette[1]! >>> 24).toBe(255);
   });
 
+  it("reports how far into the stream it has read", () => {
+    const parser = new PGSStreamParser();
+    expect(parser.receivedUntil).toBe(-Infinity);
+    parser.push(new Uint8Array([...displaySetWithObject(4), ...pcs(7, { state: 0 })]));
+    // The clear at 7 has no END yet, but its presentation segment arrived.
+    expect(parser.receivedUntil).toBe(7);
+  });
+
   it("skips garbage before the next segment", () => {
     const parser = new PGSStreamParser();
     const compositions = parser.push(new Uint8Array([1, 2, 0x50, 3, ...displaySetWithObject(4)]));

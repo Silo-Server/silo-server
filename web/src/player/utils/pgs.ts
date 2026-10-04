@@ -192,6 +192,15 @@ export class PGSStreamParser {
   private objects = new Map<number, ObjectDefinition>();
   private pendingObject: PendingObject | null = null;
   private presentation: PresentationSegment | null = null;
+  private received = -Infinity;
+
+  /**
+   * Source time, in seconds, of the latest complete segment read. Segments
+   * arrive in time order, so nothing before this point is still to come.
+   */
+  get receivedUntil(): number {
+    return this.received;
+  }
 
   /**
    * Discards partial input before the stream continues from another window.
@@ -226,6 +235,7 @@ export class PGSStreamParser {
       const end = offset + SEGMENT_HEADER_BYTES + size;
       if (end > bytes.byteLength) break;
       const body = bytes.subarray(offset + SEGMENT_HEADER_BYTES, end);
+      this.received = Math.max(this.received, pts / PGS_TIMESCALE);
       const composition = this.handleSegment(type, pts, body);
       if (composition) completed.push(composition);
       offset = end;
