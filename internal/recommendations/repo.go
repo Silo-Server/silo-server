@@ -975,6 +975,29 @@ func (r *Repo) ExtendGlobalRecommendationCache(ctx context.Context, recType stri
 	return tag.RowsAffected(), nil
 }
 
+const deleteGlobalRecommendationCacheQuery = `
+		DELETE FROM recommendation_cache
+		WHERE  user_id IS NULL
+		  AND  profile_id     = $1
+		  AND  source_item_id = ''
+		  AND  (rec_type = $2 OR ($3 AND starts_with(rec_type, $2)))
+		  AND  rec_type <> ALL($4::text[])`
+
+// DeleteGlobalRecommendationCache deletes the global row recType, or every
+// global row whose type starts with recType when prefix is set, except the
+// types in keep. It returns the number of rows it deleted.
+func (r *Repo) DeleteGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, keep []string) (int64, error) {
+	if keep == nil {
+		// A NULL array would make the ALL comparison NULL and delete nothing.
+		keep = []string{}
+	}
+	tag, err := r.pool.Exec(ctx, deleteGlobalRecommendationCacheQuery, GlobalCacheProfileID, recType, prefix, keep)
+	if err != nil {
+		return 0, fmt.Errorf("delete global recommendation cache %s: %w", recType, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // GetRecommendationCache retrieves cached recommendation results that have not
 // yet expired. Returns nil, nil on cache miss or expiry.
 func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error) {

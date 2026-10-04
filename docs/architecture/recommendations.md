@@ -125,7 +125,8 @@ shown on their own. Below the floor the row is cached empty.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
-the new run's expiry.
+the new run's expiry; a global row whose rebuild finds nothing, and a genre row
+whose genre left the menu, is deleted.
 
 ## Access
 

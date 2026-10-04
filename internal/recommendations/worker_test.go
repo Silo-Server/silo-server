@@ -329,6 +329,7 @@ type fakeGlobalRows struct {
 	expires   string
 	extended  []string // "type" or "type*" for a prefix, with its expiry
 	extendErr error
+	deleted   []string // "type" or "type*" for a prefix, with the kept types
 }
 
 func (f *fakeGlobalRows) result(name string, items []ScoredItem) ([]ScoredItem, error) {
@@ -384,6 +385,14 @@ func (f *fakeGlobalRows) ExtendGlobalRecommendationCache(_ context.Context, recT
 	return 1, f.extendErr
 }
 
+func (f *fakeGlobalRows) DeleteGlobalRecommendationCache(_ context.Context, recType string, prefix bool, keep []string) (int64, error) {
+	if prefix {
+		recType += "*"
+	}
+	f.deleted = append(f.deleted, recType+"-"+strings.Join(keep, "+"))
+	return 1, nil
+}
+
 func (f *fakeGlobalRows) HasGlobalRecommendationCache(context.Context) (bool, error) {
 	return f.cached, f.cacheErr
 }
@@ -405,13 +414,17 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	written, failed := w.cacheGlobalRows(t.Context(), store, "expiry")
 	// Popular's query, Comedy's query, and Drama's write fail, so their cached
 	// rows are kept until the new expiry. Top rated is empty, which is not a
-	// failure: its row is neither rewritten nor kept.
+	// failure: its row is deleted, as is every genre row off the menu.
 	if written != 1 || failed != 3 || writtenTypes(store) != RecTypeRecentlyAdded {
 		t.Fatalf("written=%d failed=%d rows=%s", written, failed, writtenTypes(store))
 	}
 	wantKept := []string{RecTypePopular + "@expiry", RecTypeGenreSamplerPrefix + "Drama@expiry", RecTypeGenreSamplerPrefix + "Comedy@expiry"}
 	if strings.Join(store.extended, ",") != strings.Join(wantKept, ",") {
 		t.Fatalf("kept rows = %v, want %v", store.extended, wantKept)
+	}
+	wantDeleted := []string{RecTypeTopRated + "-", RecTypeGenreSamplerPrefix + "*-" + RecTypeGenreSamplerPrefix + "Drama+" + RecTypeGenreSamplerPrefix + "Comedy"}
+	if strings.Join(store.deleted, ",") != strings.Join(wantDeleted, ",") {
+		t.Fatalf("deleted rows = %v, want %v", store.deleted, wantDeleted)
 	}
 
 	// Without the top genres, every cached genre sampler is kept.
@@ -422,6 +435,9 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	}
 	if strings.Join(store.extended, ",") != RecTypeGenreSamplerPrefix+"*@expiry" {
 		t.Fatalf("genre failure kept %v, want every genre sampler", store.extended)
+	}
+	if strings.Join(store.deleted, ",") != RecTypeTopRated+"-" {
+		t.Fatalf("genre failure deleted %v, want only the empty top rated row", store.deleted)
 	}
 
 	// A failed extend is only logged; the run goes on.
