@@ -10,12 +10,12 @@ ALTER TABLE public.users
 
 UPDATE public.users
 SET permissions = array_append(permissions, 'subtitle_upload')
-WHERE NOT ('subtitle_upload' = ANY (permissions));
+WHERE array_position(permissions, 'subtitle_upload') IS NULL;
 
 UPDATE public.access_groups
 SET allowed_permissions = array_append(allowed_permissions, 'subtitle_upload')
 WHERE allowed_permissions IS NOT NULL
-  AND NOT ('subtitle_upload' = ANY (allowed_permissions));
+  AND array_position(allowed_permissions, 'subtitle_upload') IS NULL;
 -- +goose StatementEnd
 
 -- +goose Down
