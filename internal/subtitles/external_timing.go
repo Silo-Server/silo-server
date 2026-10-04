@@ -36,9 +36,10 @@ func ContentSHA256(data []byte) string { return subtitleContentHash(data) }
 
 // ExternalDelivery returns the bytes a client receives for a sidecar, data
 // with the correction stored for exactly these bytes applied, and a revision
-// that changes whenever they do: with the file on disk or with its
-// correction. Without a lookup or a format Retime can rewrite, data is
-// returned unchanged.
+// that changes whenever they do. It hashes the delivered bytes: a correction
+// row recreated after a media file replacement restarts its revision, so the
+// revision number alone could repeat for different bytes. Without a lookup
+// or a format Retime can rewrite, data is returned unchanged.
 func ExternalDelivery(ctx context.Context, timings ExternalTimingLookup, mediaFileID int, format SubtitleFormat, data []byte) ([]byte, string, error) {
 	sha := ContentSHA256(data)
 	if timings == nil || !SupportsRetime(format) {
@@ -55,7 +56,7 @@ func ExternalDelivery(ctx context.Context, timings ExternalTimingLookup, mediaFi
 	if err != nil {
 		return nil, "", fmt.Errorf("retime sidecar subtitle: %w", err)
 	}
-	return out, externalRevision(sha, row), nil
+	return out, externalRevision(ContentSHA256(out), row), nil
 }
 
 // ExternalDeliveryBytes is ExternalDelivery without the revision.

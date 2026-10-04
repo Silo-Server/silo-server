@@ -53,8 +53,14 @@ func TestExternalDelivery(t *testing.T) {
 
 	lookup := timingLookup{sha: {ID: 1, MediaFileID: 7, ContentSHA256: sha, Timing: Timing{Scale: 1, OffsetMS: 1500}, Revision: 3}}
 	timed, revision, err := ExternalDelivery(ctx, lookup, 7, FormatSRT, srt)
-	if err != nil || !strings.Contains(string(timed), "00:00:02,500 --> 00:00:03,500") || revision != sha[:16]+"-3" {
+	if err != nil || !strings.Contains(string(timed), "00:00:02,500 --> 00:00:03,500") || revision != ContentSHA256(timed)[:16]+"-3" {
 		t.Fatalf("corrected: %q %q %v", timed, revision, err)
+	}
+	// A correction recreated after a media file replacement can reach the
+	// same revision with another timing; the delivered bytes tell them apart.
+	recreated := timingLookup{sha: {ID: 2, MediaFileID: 7, ContentSHA256: sha, Timing: Timing{Scale: 1, OffsetMS: -400}, Revision: 3}}
+	if _, other, err := ExternalDelivery(ctx, recreated, 7, FormatSRT, srt); err != nil || other == revision {
+		t.Fatalf("recreated correction revision %q, first %q, err %v", other, revision, err)
 	}
 
 	// Other bytes (the sidecar was edited on disk) do not match the row.

@@ -404,7 +404,8 @@ func TestSidecarSubtitleTimingAndRevision(t *testing.T) {
 	b.externalTimings = timings
 	got := b.buildSubtitles(context.Background(), &Download{ID: "dl1", MediaFileID: 99}, file, nil)
 	timed := "1\n00:00:01,500 --> 00:00:02,500\nHello\n"
-	if len(got) != 1 || got[0].Revision != sha[:16]+"-2" || got[0].FileSize != int64(len(timed)) {
+	// The revision follows the delivered (corrected) bytes and the correction's revision.
+	if len(got) != 1 || got[0].Revision != subtitles.ContentSHA256([]byte(timed))[:16]+"-2" || got[0].FileSize != int64(len(timed)) {
 		t.Fatalf("manifest sidecar = %+v", got)
 	}
 
