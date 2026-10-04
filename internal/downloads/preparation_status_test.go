@@ -115,3 +115,21 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 		t.Fatalf("after TTL: %+v %v", late[0].Preparation, err)
 	}
 }
+
+func TestFailedPreparationRefreshIsSharedPostgres(t *testing.T) {
+	// No download_artifacts table: the ranking query fails.
+	repo := statusEventTestRepo(t)
+	rows := []*Download{{ID: "a", Status: StatusPreparing, ArtifactID: "job"}}
+	if err := repo.attachPreparations(t.Context(), rows); err == nil {
+		t.Fatal("expected the first refresh to fail")
+	}
+	// Until the snapshot expires, readers share the failed refresh instead of
+	// repeating the query, and get no preparation.
+	if err := repo.attachPreparations(t.Context(), rows); err != nil || rows[0].Preparation != nil {
+		t.Fatalf("within TTL after a failure: %+v %v", rows[0].Preparation, err)
+	}
+	repo.preparations.at = time.Now().Add(-preparationSnapshotTTL)
+	if err := repo.attachPreparations(t.Context(), rows); err == nil {
+		t.Fatal("expected a refresh after the TTL")
+	}
+}

@@ -72,6 +72,19 @@ func (r *Repository) preparationStatuses(ctx context.Context) (map[string]Prepar
 	if snap := r.preparations; snap != nil && time.Since(snap.at) < preparationSnapshotTTL {
 		return snap.byJobID, nil
 	}
+	byJobID, err := r.rankPreparations(ctx)
+	if err != nil {
+		// Readers waiting on this refresh get an empty snapshot rather than
+		// each repeating the failing query; the next refresh tries again.
+		r.preparations = &preparationSnapshot{at: time.Now(), byJobID: map[string]PreparationStatus{}}
+		return nil, err
+	}
+	r.preparations = &preparationSnapshot{at: time.Now(), byJobID: byJobID}
+	return byJobID, nil
+}
+
+// rankPreparations reads every unfinished preparation's status.
+func (r *Repository) rankPreparations(ctx context.Context) (map[string]PreparationStatus, error) {
 	result, err := r.pool.Query(ctx, preparationStatesCTE+`,
 	ranked AS (
 		SELECT l.id, l.state, l.progress_encoded_seconds, l.progress_duration_seconds, l.progress_speed,
@@ -105,7 +118,6 @@ func (r *Repository) preparationStatuses(ctx context.Context) (map[string]Prepar
 	if err := result.Err(); err != nil {
 		return nil, fmt.Errorf("reading download preparations: %w", err)
 	}
-	r.preparations = &preparationSnapshot{at: time.Now(), byJobID: byJobID}
 	return byJobID, nil
 }
 
