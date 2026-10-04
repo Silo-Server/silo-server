@@ -50,7 +50,7 @@ func TestScopedWalksInheritIgnoreRules(t *testing.T) {
 				var got []string
 				switch kind {
 				case "series":
-					files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, kind, []string{root})
+					files, failures, _, err := collectLogicalFilePaths(t.Context(), []string{scope}, kind, []string{root})
 					if err != nil || len(failures) != 0 {
 						t.Fatalf("walk: %v, failures: %v", err, failures)
 					}
@@ -132,7 +132,7 @@ func TestUnreadableIgnoreFileIsAWalkFailure(t *testing.T) {
 					var got, failures []string
 					switch kind {
 					case "series":
-						files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{walkRoot}, kind, []string{root})
+						files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{walkRoot}, kind, []string{root})
 						if err != nil {
 							t.Fatal(err)
 						}

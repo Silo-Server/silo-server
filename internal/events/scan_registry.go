@@ -30,6 +30,9 @@ type ScanRunResult struct {
 	TotalFiles              int    `json:"total_files,omitempty"`
 	FilesDiscovered         int    `json:"files_discovered,omitempty"`
 	FilesProcessed          int    `json:"files_processed,omitempty"`
+	// UnsupportedFiles counts the files the scan skipped because of their
+	// type (DVD VOBs, disc images, RealMedia, Blu-ray disc streams).
+	UnsupportedFiles int `json:"unsupported_files"`
 }
 
 type ScanRun struct {

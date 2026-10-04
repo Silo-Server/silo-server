@@ -35,6 +35,7 @@ import {
   type LibraryScanGroup,
 } from "@/components/admin/libraries/libraryActivityHelpers";
 import { LibraryCatalogHealthPanel } from "@/components/admin/libraries/LibraryCatalogHealthPanel";
+import { UnsupportedFilesSection } from "@/components/admin/libraries/UnsupportedFilesSection";
 import {
   LibraryActionMenu,
   LibraryLastScanned,
@@ -518,6 +519,7 @@ function LibrariesPage() {
             matcherCount={matcherTotal}
             matcherError={matcherQueuesQuery.isError && matcherQueuesQuery.data === undefined}
           />
+          <UnsupportedFilesSection libraries={libraries} />
         </TabsContent>
       </Tabs>
     </div>

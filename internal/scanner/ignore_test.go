@@ -21,7 +21,7 @@ func writeTestFile(t *testing.T, path string, content string) {
 
 func collectTestFilePaths(t *testing.T, root string, libraryType string) []string {
 	t.Helper()
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
 	writeTestFile(t, filepath.Join(nested, "Kept Book.epub"), "test")
 	roots := []string{nested, lib}
 
-	full, failures, err := collectLogicalFilePaths(t.Context(), compactScanRoots(roots), "movies", roots)
+	full, failures, _, err := collectLogicalFilePaths(t.Context(), compactScanRoots(roots), "movies", roots)
 	if err != nil || len(failures) != 0 {
 		t.Fatalf("full walk: %v, failures: %v", err, failures)
 	}
@@ -279,7 +279,7 @@ func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
 		nested: {"nested/Kept (2024)/Kept (2024).mkv"},
 		filepath.Join(nested, "Excluded Movie (2024)"): nil,
 	} {
-		files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", roots)
+		files, failures, _, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", roots)
 		if err != nil || len(failures) != 0 {
 			t.Fatalf("scoped walk of %s: %v, failures: %v", scope, err, failures)
 		}
@@ -323,7 +323,7 @@ func TestIgnoreFilePatternsAtLibraryRootSkipOnlyMatches(t *testing.T) {
 	assertFilePaths(t, files, root, []string{"Show/Season 01/Episode 01.mkv"})
 
 	scope := filepath.Join(root, "Show", "Season 01")
-	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "series", []string{root})
+	files, walkFailures, _, err := collectLogicalFilePaths(t.Context(), []string{scope}, "series", []string{root})
 	if err != nil || len(walkFailures) != 0 {
 		t.Fatalf("scoped walk: %v, failures: %v", err, walkFailures)
 	}
