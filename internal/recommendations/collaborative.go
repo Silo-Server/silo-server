@@ -221,13 +221,7 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 	embMap, _ := e.repo.GetBatchEmbeddings(ctx, resultIDs)
 	results = applyMMR(results, embMap, e.mmrLambda(), limit)
 
-	// Apply genre cap to "Similar Users Liked" for cross-genre diversity.
+	// Keep any one genre from taking over the served window.
 	genres, _ := e.repo.GetItemAllGenres(ctx, resultIDs)
-	results = applyGenreCap(results, genres, GenreCapPercent)
-
-	if len(results) > limit {
-		results = results[:limit]
-	}
-
-	return results, nil
+	return applyGenreCap(results, genres), nil
 }

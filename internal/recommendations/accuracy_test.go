@@ -1,36 +1,87 @@
 package recommendations
 
 import (
+	"fmt"
 	"math"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-func TestApplyGenreCapCountsAllGenres(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "a", Score: 1.0},
-		{MediaItemID: "b", Score: 0.9},
-		{MediaItemID: "c", Score: 0.8},
-		{MediaItemID: "d", Score: 0.7},
-	}
-	genres := map[string][]string{
-		"a": {"Action", "Drama"},
-		"b": {"Action", "Comedy"},
-		"c": {"Action", "Thriller"},
-		"d": {"Comedy"},
-	}
-
-	capped := applyGenreCap(items, genres, 0.67)
-
-	if len(capped) != 3 {
-		t.Fatalf("expected 3 capped items, got %d", len(capped))
-	}
-	for _, item := range capped {
-		if item.MediaItemID == "c" {
-			t.Fatalf("expected lowest-scored Action item to be removed, got %#v", capped)
+// The genre pass keeps MMR's order: an over-represented genre's later items
+// move out of the served window, the window fills from the other genres in
+// order, and the rest of the row keeps its order with nothing removed.
+func TestApplyGenreCapDemotesWithinTheServedWindow(t *testing.T) {
+	row := make([]ScoredItem, 60)
+	genres := map[string][]string{}
+	for i := range row {
+		id := fmt.Sprintf("i%02d", i)
+		row[i] = ScoredItem{MediaItemID: id, Score: 1 - float64(i)/100}
+		switch {
+		case i < 30 && i%2 == 0:
+			genres[id] = []string{"Thriller", "Crime"}
+		case i < 30:
+			genres[id] = []string{"Thriller"}
+		case i%2 == 0:
+			genres[id] = []string{"Drama"}
+		default:
+			genres[id] = []string{"Comedy", "Comedy"}
 		}
+	}
+
+	got := mmrItemIDs(applyGenreCap(row, genres))
+
+	var want []string
+	for _, span := range [][2]int{{0, 10}, {30, 40}, {10, 30}, {40, 60}} {
+		for i := span[0]; i < span[1]; i++ {
+			want = append(want, fmt.Sprintf("i%02d", i))
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("applyGenreCap = %v, want %v", got, want)
+	}
+}
+
+// A row with nothing else to offer keeps its order and length: the window
+// fills with the over-represented genre instead of coming up short.
+func TestApplyGenreCapFillsFromTheSkippedItems(t *testing.T) {
+	row := make([]ScoredItem, 30)
+	genres := map[string][]string{}
+	for i := range row {
+		id := fmt.Sprintf("i%02d", i)
+		row[i] = ScoredItem{MediaItemID: id}
+		genres[id] = []string{"Science Fiction", "Drama"}
+	}
+
+	if got := applyGenreCap(row, genres); !slices.Equal(mmrItemIDs(got), mmrItemIDs(row)) {
+		t.Fatalf("applyGenreCap = %v, want the row unchanged", mmrItemIDs(got))
+	}
+}
+
+// Items without genre data are never counted against a genre's places.
+func TestApplyGenreCapIgnoresItemsWithoutGenres(t *testing.T) {
+	row := make([]ScoredItem, 30)
+	genres := map[string][]string{}
+	for i := range row {
+		id := fmt.Sprintf("i%02d", i)
+		row[i] = ScoredItem{MediaItemID: id}
+		if i < 15 {
+			genres[id] = []string{"Thriller"}
+		}
+	}
+
+	got := mmrItemIDs(applyGenreCap(row, genres))
+
+	var want []string
+	for _, span := range [][2]int{{0, 10}, {15, 25}, {10, 15}, {25, 30}} {
+		for i := span[0]; i < span[1]; i++ {
+			want = append(want, fmt.Sprintf("i%02d", i))
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("applyGenreCap = %v, want %v", got, want)
 	}
 }
 
@@ -56,146 +107,72 @@ func TestHNSWEfSearchUsesCandidateLimitWithinBounds(t *testing.T) {
 	}
 }
 
-func TestApplyMediaTypeFloorAddsAvailableSupplementalType(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "s1", Score: 1.00},
-		{MediaItemID: "s2", Score: 0.99},
-		{MediaItemID: "s3", Score: 0.98},
-		{MediaItemID: "s4", Score: 0.97},
-		{MediaItemID: "s5", Score: 0.96},
-		{MediaItemID: "s6", Score: 0.95},
-		{MediaItemID: "s7", Score: 0.94},
-		{MediaItemID: "s8", Score: 0.93},
-		{MediaItemID: "s9", Score: 0.92},
-		{MediaItemID: "s10", Score: 0.91},
+// typedRow returns n items of mediaType named prefix00, prefix01, …, scored
+// from top down, and records their type.
+func typedRow(prefix, mediaType string, n int, top float64, types map[string]string) []ScoredItem {
+	items := make([]ScoredItem, n)
+	for i := range items {
+		id := fmt.Sprintf("%s%02d", prefix, i)
+		items[i] = ScoredItem{MediaItemID: id, Score: top - float64(i)/1000}
+		types[id] = mediaType
 	}
-	candidates := append([]ScoredItem(nil), items...)
-	candidates = append(candidates,
-		ScoredItem{MediaItemID: "m1", Score: 0.90},
-		ScoredItem{MediaItemID: "m2", Score: 0.89},
-	)
-	mediaTypes := map[string]string{
-		"s1": "series", "s2": "series", "s3": "series", "s4": "series", "s5": "series",
-		"s6": "series", "s7": "series", "s8": "series", "s9": "series", "s10": "series",
-		"m1": "movie", "m2": "movie",
-	}
+	return items
+}
 
-	mixed := applyMediaTypeFloor(items, candidates, mediaTypes)
+// A movie-only row gets the pool's best series after its served window, in
+// place of its last movies, so a TV library section scoping the row still
+// fills; the served window does not change.
+func TestPlaceTypeSupplementsFillsOnlyTheTail(t *testing.T) {
+	types := map[string]string{}
+	row := typedRow("m", "movie", CacheCandidateLimit, 0.9, types)
+	series := typedRow("s", "series", 20, 0.5, types)
+	pool := append(append([]ScoredItem(nil), row...), series...)
 
-	if got := len(mixed); got != len(items) {
-		t.Fatalf("expected result length to stay %d, got %d", len(items), got)
+	got := placeTypeSupplements(row, pool, types)
+
+	if len(got) != len(row) {
+		t.Fatalf("row length = %d, want %d", len(got), len(row))
 	}
-	if got := countMediaType(mixed, mediaTypes, "movie"); got != 2 {
-		t.Fatalf("expected 2 movies from supplemental candidates, got %d in %#v", got, mixed)
-	}
-	if slices.ContainsFunc(mixed, func(item ScoredItem) bool { return item.MediaItemID == "s10" }) {
-		t.Fatalf("expected lowest-ranked series tail item to be replaced, got %#v", mixed)
+	floor := mediaTypeFloor(len(row))
+	want := append(mmrItemIDs(row[:len(row)-floor]), mmrItemIDs(series[:floor])...)
+	if !slices.Equal(mmrItemIDs(got), want) {
+		t.Fatalf("placeTypeSupplements = %v, want %v", mmrItemIDs(got), want)
 	}
 }
 
-func TestApplyMediaTypeFloorAddsAvailableAudiobooks(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "m1", Score: 1.00},
-		{MediaItemID: "m2", Score: 0.99},
-		{MediaItemID: "m3", Score: 0.98},
-		{MediaItemID: "m4", Score: 0.97},
-		{MediaItemID: "m5", Score: 0.96},
-		{MediaItemID: "m6", Score: 0.95},
-		{MediaItemID: "m7", Score: 0.94},
-		{MediaItemID: "m8", Score: 0.93},
-		{MediaItemID: "m9", Score: 0.92},
-		{MediaItemID: "m10", Score: 0.91},
-	}
-	candidates := append([]ScoredItem(nil), items...)
-	candidates = append(candidates,
-		ScoredItem{MediaItemID: "a1", Score: 0.90},
-		ScoredItem{MediaItemID: "a2", Score: 0.89},
-	)
-	mediaTypes := map[string]string{
-		"m1": "movie", "m2": "movie", "m3": "movie", "m4": "movie", "m5": "movie",
-		"m6": "movie", "m7": "movie", "m8": "movie", "m9": "movie", "m10": "movie",
-		"a1": "audiobook", "a2": "audiobook",
-	}
+// Room is made only from types above the floor, so supplements for one type
+// never push another below it.
+func TestPlaceTypeSupplementsKeepsOtherTypesAtTheirFloor(t *testing.T) {
+	types := map[string]string{}
+	row := append(typedRow("m", "movie", 47, 0.9, types), typedRow("s", "series", 13, 0.8, types)...)
+	books := typedRow("a", "audiobook", 15, 0.4, types)
+	pool := append(append([]ScoredItem(nil), row...), books...)
 
-	mixed := applyMediaTypeFloor(items, candidates, mediaTypes)
+	got := placeTypeSupplements(row, pool, types)
 
-	if got := countMediaType(mixed, mediaTypes, "audiobook"); got != 2 {
-		t.Fatalf("expected 2 audiobooks from supplemental candidates, got %d in %#v", got, mixed)
+	floor := mediaTypeFloor(len(row))
+	if !slices.Equal(mmrItemIDs(got[:ServedRowSize]), mmrItemIDs(row[:ServedRowSize])) {
+		t.Fatalf("served window changed: %v", mmrItemIDs(got[:ServedRowSize]))
+	}
+	for mediaType, want := range map[string]int{"movie": len(row) - 2*floor, "series": floor, "audiobook": floor} {
+		if n := countMediaType(got, types, mediaType); n != want {
+			t.Fatalf("%s count = %d, want %d in %v", mediaType, n, want, mmrItemIDs(got))
+		}
 	}
 }
 
-func TestApplyMediaTypeFloorNoopsWithoutSupplementalType(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "s1", Score: 1.00},
-		{MediaItemID: "s2", Score: 0.99},
-		{MediaItemID: "s3", Score: 0.98},
-		{MediaItemID: "s4", Score: 0.97},
-		{MediaItemID: "s5", Score: 0.96},
+// A row no longer than the served window, or a pool with no other type,
+// stays as it is.
+func TestPlaceTypeSupplementsNoops(t *testing.T) {
+	types := map[string]string{}
+	short := typedRow("m", "movie", ServedRowSize, 0.9, types)
+	series := typedRow("s", "series", 20, 0.5, types)
+	if got := placeTypeSupplements(short, append(short, series...), types); !slices.Equal(mmrItemIDs(got), mmrItemIDs(short)) {
+		t.Fatalf("short row = %v, want unchanged", mmrItemIDs(got))
 	}
-	mediaTypes := map[string]string{
-		"s1": "series", "s2": "series", "s3": "series", "s4": "series", "s5": "series",
-	}
-
-	mixed := applyMediaTypeFloor(items, items, mediaTypes)
-
-	if !slices.EqualFunc(mixed, items, func(a, b ScoredItem) bool {
-		return a.MediaItemID == b.MediaItemID && a.Score == b.Score
-	}) {
-		t.Fatalf("expected unchanged result without supplemental type, got %#v", mixed)
-	}
-}
-
-func TestApplyMediaTypeFloorIncludesEbookSupplement(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "s1", Score: 1.00},
-		{MediaItemID: "s2", Score: 0.99},
-		{MediaItemID: "s3", Score: 0.98},
-		{MediaItemID: "s4", Score: 0.97},
-		{MediaItemID: "s5", Score: 0.96},
-	}
-	candidates := append([]ScoredItem(nil), items...)
-	candidates = append(candidates, ScoredItem{MediaItemID: "e1", Score: 0.95})
-	mediaTypes := map[string]string{
-		"s1": "series",
-		"s2": "series",
-		"s3": "series",
-		"s4": "series",
-		"s5": "series",
-		"e1": "ebook",
-	}
-
-	mixed := applyMediaTypeFloor(items, candidates, mediaTypes)
-
-	if got := countMediaType(mixed, mediaTypes, "ebook"); got != 1 {
-		t.Fatalf("expected 1 ebook from supplemental candidates, got %d in %#v", got, mixed)
-	}
-}
-
-func TestApplyGenreCapDoesNotCollapseConcentratedRows(t *testing.T) {
-	items := []ScoredItem{
-		{MediaItemID: "a", Score: 1.0},
-		{MediaItemID: "b", Score: 0.9},
-		{MediaItemID: "c", Score: 0.8},
-		{MediaItemID: "d", Score: 0.7},
-		{MediaItemID: "e", Score: 0.6},
-		{MediaItemID: "f", Score: 0.5},
-	}
-	genres := map[string][]string{
-		"a": {"Science Fiction", "Drama"},
-		"b": {"Science Fiction", "Drama"},
-		"c": {"Science Fiction", "Drama"},
-		"d": {"Science Fiction", "Drama"},
-		"e": {"Science Fiction", "Drama"},
-		"f": {"Science Fiction", "Drama"},
-	}
-
-	capped := applyGenreCap(items, genres, 0.4)
-
-	if len(capped) != 3 {
-		t.Fatalf("got %d capped items, want retained half of concentrated row", len(capped))
-	}
-	if capped[0].MediaItemID != "a" || capped[1].MediaItemID != "b" || capped[2].MediaItemID != "c" {
-		t.Fatalf("unexpected capped items: %#v", capped)
+	row := typedRow("x", "movie", CacheCandidateLimit, 0.9, types)
+	if got := placeTypeSupplements(row, row, types); !slices.Equal(mmrItemIDs(got), mmrItemIDs(row)) {
+		t.Fatalf("single-type row = %v, want unchanged", mmrItemIDs(got))
 	}
 }
 
@@ -350,5 +327,25 @@ func clusterTestItem(id string, embedding []float32, weight float64, genre strin
 		embedding: embedding,
 		weight:    weight,
 		genres:    []string{genre},
+	}
+}
+
+// The recency boost multiplies a new title's score and leaves the order MMR
+// chose alone.
+func TestApplyRecencyBoostKeepsOrder(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	items := []ScoredItem{{MediaItemID: "old", Score: 0.9}, {MediaItemID: "new", Score: 0.8}, {MediaItemID: "undated", Score: 0.7}}
+	added := map[string]time.Time{"old": now.AddDate(-1, 0, 0), "new": now}
+
+	got := applyRecencyBoost(items, added, now)
+
+	if !slices.Equal(mmrItemIDs(got), mmrItemIDs(items)) {
+		t.Fatalf("order = %v, want %v", mmrItemIDs(got), mmrItemIDs(items))
+	}
+	if want := 0.8 * RecencyBoostMultiplier; math.Abs(got[1].Score-want) > 1e-9 {
+		t.Fatalf("new title score = %f, want %f", got[1].Score, want)
+	}
+	if got[0].Score != 0.9 || got[2].Score != 0.7 {
+		t.Fatalf("scores = %v, want old and undated titles unchanged", got)
 	}
 }

@@ -1976,6 +1976,87 @@ func (r *Repo) GetItemAddedDates(ctx context.Context, itemIDs []string) (map[str
 	return result, rows.Err()
 }
 
+// presentMediaTypesQuery keeps each media type of $1 that has an embedded,
+// recommendable title; the access conditions follow. EXISTS stops at the
+// first such title.
+const presentMediaTypesQuery = `
+		SELECT t.media_type
+		FROM   unnest($1::text[]) AS t(media_type)
+		WHERE  EXISTS (
+			SELECT 1
+			FROM   media_items mi
+			JOIN   media_item_embeddings e ON e.media_item_id = mi.content_id
+			WHERE  %s
+		)`
+
+// PresentMediaTypes returns the media types among mediaTypes that have a
+// title the taste candidate queries could return under filter: embedded,
+// matched (audiobooks need not be), and inside the viewer's libraries and
+// maturity limits.
+func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
+	present := make(map[string]struct{}, len(mediaTypes))
+	if len(mediaTypes) == 0 || (filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0) {
+		return present, nil
+	}
+	conditions := []string{
+		"mi.type = t.media_type",
+		"(mi.status = 'matched' OR mi.type = 'audiobook')",
+	}
+	args := []any{mediaTypes}
+	argIdx := 2
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(presentMediaTypesQuery, strings.Join(conditions, " AND ")), args...)
+	if err != nil {
+		return nil, fmt.Errorf("find present media types: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var mediaType string
+		if err := rows.Scan(&mediaType); err != nil {
+			return nil, fmt.Errorf("scan present media type: %w", err)
+		}
+		present[mediaType] = struct{}{}
+	}
+	return present, rows.Err()
+}
+
+// itemQualityRatingsQuery reads the rating the quality prior uses: IMDb's,
+// else TMDB's below 9.5 (higher TMDB scores come from a handful of votes), as
+// the taste-seed picker orders by.
+const itemQualityRatingsQuery = `
+		SELECT content_id, quality
+		FROM   (
+			SELECT content_id,
+			       COALESCE(rating_imdb, CASE WHEN rating_tmdb < 9.5 THEN rating_tmdb END) AS quality
+			FROM   media_items
+			WHERE  content_id = ANY($1)
+		) rated
+		WHERE  quality IS NOT NULL`
+
+// GetItemQualityRatings returns the quality rating of each item that has one.
+func (r *Repo) GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error) {
+	result := make(map[string]float64, len(itemIDs))
+	if len(itemIDs) == 0 {
+		return result, nil
+	}
+	rows, err := r.pool.Query(ctx, itemQualityRatingsQuery, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get item quality ratings: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var rating float64
+		if err := rows.Scan(&id, &rating); err != nil {
+			return nil, fmt.Errorf("scan item quality rating: %w", err)
+		}
+		result[id] = rating
+	}
+	return result, rows.Err()
+}
+
 // listCacheRefreshCandidatesQuery orders profiles by the age of their main
 // row, those without one first. A run that exhausts its time budget leaves the
 // newest rows for last, so the next run starts with the profiles it missed.

@@ -462,13 +462,21 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		mustHave        string
 	}{
 		{RecTypeForYouMain, "", watchlist},
-		{RecTypeForYouClusterPrefix + "0", "", watchlist},
+		// The main row's served window takes every title this small catalog
+		// has, so the cluster row is cached empty: built, not missing.
+		{RecTypeForYouClusterPrefix + "0", "", ""},
 		{RecTypeSimilarUsersLiked, "", plain[0]},
 		{RecTypeBecauseWatched, watched, plain[1]},
 	} {
 		items, err := repo.GetRecommendationCache(ctx, userID, profile, row.recType, row.source)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if row.mustHave == "" {
+			if items == nil || len(items) != 0 {
+				t.Fatalf("%s row = %v, want it cached empty", row.recType, items)
+			}
+			continue
 		}
 		ids := make([]string, len(items))
 		for i, item := range items {

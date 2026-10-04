@@ -314,7 +314,11 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 			return nil, err
 		}
 		if len(items) == 0 {
-			r.requestRefresh(ctx, userID, profileID)
+			// A row cached empty was built; only a missing one needs a
+			// refresh.
+			if items == nil {
+				r.requestRefresh(ctx, userID, profileID)
+			}
 			continue
 		}
 
@@ -454,7 +458,9 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 			return nil, false, err
 		}
 		if len(items) == 0 {
-			missing = true
+			// A row cached empty (the main row took its titles) was built;
+			// only a missing one is.
+			missing = missing || items == nil
 			continue
 		}
 		rows = append(rows, clusterRow(cluster, items))
@@ -894,7 +900,7 @@ func trimRows(rows []ForYouRow, limit int) []ForYouRow {
 // asked for a positive limit, and at most maxRecommendationLimit, the v2
 // limit parameter's maximum.
 const (
-	defaultRecommendationLimit = 20
+	defaultRecommendationLimit = ServedRowSize
 	maxRecommendationLimit     = 50
 )
 

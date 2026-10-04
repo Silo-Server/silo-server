@@ -817,27 +817,33 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	}
 	excludeIDs := scoredItemIDsFromSet(excluded)
 
-	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	rows := w.engine.rowBuilder()
+	var mainItems []ScoredItem
+	aggregatedRow, err := rows.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		fail("main_row", err)
 	} else {
-		var items []ScoredItem
 		if aggregatedRow != nil {
-			items = aggregatedRow.Items
+			mainItems = aggregatedRow.Items
 		}
-		putOrDrop(RecTypeForYouMain, "", items)
+		putOrDrop(RecTypeForYouMain, "", mainItems)
 	}
 
-	// Cache per-cluster ForYou rows. buildClusterRows logs each cluster whose
+	// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
 	// candidate query failed and returns no row for it, so its cached row
-	// stays.
-	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	// stays. A row that rebuilds empty, or that the main row's titles empty,
+	// is cached empty: it replaces the old row, and reads know it was built.
+	clusterRows, failedClusters, err := rows.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	res.failed += failedClusters
 	if err != nil {
 		fail("cluster_rows", err)
 	}
-	for _, row := range clusterRows {
-		putOrDrop(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
+	for _, row := range withoutMainRowItems(clusterRows, mainItems) {
+		items := row.Items
+		if items == nil {
+			items = []ScoredItem{}
+		}
+		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", items)
 	}
 
 	// An empty Similar Users row is cached too: it records that the row was
