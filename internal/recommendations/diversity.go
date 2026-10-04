@@ -14,6 +14,10 @@ const minGenreCapRetainedFraction = 0.5
 //	score = λ × normalizedRelevance - (1-λ) × maxSimilarityToSelected
 //
 // Candidates without an entry in embeddings are scored by relevance alone.
+//
+// Each remaining candidate keeps its highest similarity to the picks so far,
+// updated against only the newest pick, so a call costs O(n·k) cosines for n
+// candidates and k picks rather than O(n·k²).
 func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda float64, limit int) []ScoredItem {
 	if len(candidates) == 0 || limit <= 0 {
 		return nil
@@ -33,14 +37,35 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 		maxScore = 1 // avoid division by zero
 	}
 
-	// Track which candidates remain available and which have been selected.
+	// remaining holds the candidates still available; maxSim[i] is
+	// remaining[i]'s highest similarity to a pick with an embedding. Picks
+	// remove their entry from both slices together.
 	remaining := make([]int, len(candidates))
 	for i := range remaining {
 		remaining[i] = i
 	}
-
+	maxSim := make([]float64, len(candidates))
 	selected := make([]ScoredItem, 0, limit)
-	selectedEmbeddings := make([][]float32, 0, limit)
+
+	take := func(at int) {
+		pick := candidates[remaining[at]]
+		selected = append(selected, pick)
+		remaining = append(remaining[:at], remaining[at+1:]...)
+		maxSim = append(maxSim[:at], maxSim[at+1:]...)
+		pickEmb, ok := embeddings[pick.MediaItemID]
+		if !ok {
+			return
+		}
+		for i, ri := range remaining {
+			candidateEmb := embeddings[candidates[ri].MediaItemID]
+			if candidateEmb == nil {
+				continue
+			}
+			if sim := cosineSimilarity(candidateEmb, pickEmb); sim > maxSim[i] {
+				maxSim[i] = sim
+			}
+		}
+	}
 
 	// First pick: highest relevance score.
 	bestIdx := 0
@@ -49,12 +74,7 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 			bestIdx = i
 		}
 	}
-	first := remaining[bestIdx]
-	selected = append(selected, candidates[first])
-	if emb, ok := embeddings[candidates[first].MediaItemID]; ok {
-		selectedEmbeddings = append(selectedEmbeddings, emb)
-	}
-	remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
+	take(bestIdx)
 
 	// Subsequent picks via MMR scoring.
 	for len(selected) < limit && len(remaining) > 0 {
@@ -63,24 +83,13 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 
 		for i, ri := range remaining {
 			normalizedRelevance := candidates[ri].Score / maxScore
-			candidateEmb := embeddings[candidates[ri].MediaItemID]
-
-			var maxSim float64
-			if candidateEmb != nil && len(selectedEmbeddings) > 0 {
-				for _, selEmb := range selectedEmbeddings {
-					sim := cosineSimilarity(candidateEmb, selEmb)
-					if sim > maxSim {
-						maxSim = sim
-					}
-				}
-			}
 
 			var mmrScore float64
-			if candidateEmb == nil {
+			if embeddings[candidates[ri].MediaItemID] == nil {
 				// No embedding available — use relevance only.
 				mmrScore = normalizedRelevance
 			} else {
-				mmrScore = lambda*normalizedRelevance - (1-lambda)*maxSim
+				mmrScore = lambda*normalizedRelevance - (1-lambda)*maxSim[i]
 			}
 
 			if mmrScore > bestMMRScore {
@@ -89,12 +98,7 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 			}
 		}
 
-		pick := remaining[bestMMRIdx]
-		selected = append(selected, candidates[pick])
-		if emb, ok := embeddings[candidates[pick].MediaItemID]; ok {
-			selectedEmbeddings = append(selectedEmbeddings, emb)
-		}
-		remaining = append(remaining[:bestMMRIdx], remaining[bestMMRIdx+1:]...)
+		take(bestMMRIdx)
 	}
 
 	return selected

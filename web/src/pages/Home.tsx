@@ -20,6 +20,7 @@ import {
 import { planNextHomeSectionBatch } from "./homeSectionQueue";
 import { buildHomeSectionViewModel, type HomeSectionSlot } from "./homeSectionState";
 import { collectCachedHomeSections } from "./homeSectionCache";
+import { dropCrossSectionDuplicates, useAvoidDuplicateSectionTypes } from "./sectionDedupe";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
@@ -208,9 +209,14 @@ export default function Home() {
     });
   }, [completedIds, inFlightIds, layout, queryClient]);
 
+  const avoidDuplicateTypes = useAvoidDuplicateSectionTypes();
+  const visibleSections = useMemo(
+    () => dropCrossSectionDuplicates(layout, loadedSections, avoidDuplicateTypes),
+    [avoidDuplicateTypes, layout, loadedSections],
+  );
   const viewModel = buildHomeSectionViewModel({
     layout,
-    loadedSections,
+    loadedSections: visibleSections,
     failedIds,
   });
 

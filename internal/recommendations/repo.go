@@ -12,7 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
@@ -23,7 +22,15 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 }
 
 const embeddingLockSettingKey = "recommendations.embedding_lock"
-const minHNSWEfSearch = 200
+
+// hnsw.ef_search bounds: scans below the floor lose recall, and pgvector
+// rejects values above its maximum, 1000. The relaxed_order iterative scan
+// keeps reading past ef_search until the query's LIMIT fills, so the cap does
+// not shorten a deeper candidate pull.
+const (
+	minHNSWEfSearch = 200
+	maxHNSWEfSearch = 1000
+)
 
 // watchedActivityCTE unifies video watch progress and ebook reader progress
 // into one activity stream. Episodes roll up to their parent series via
@@ -69,11 +76,16 @@ watched_activity AS (
 	  )
 )`, catalog.EbookFinishedProgressThresholdSQL)
 
+// recentCompletedItemIDsQuery lists a profile's most recently completed
+// titles that are still in the catalog. Progress outlives a deleted item, and
+// an episode of a deleted series no longer rolls up to it, so a dead ID would
+// otherwise take an anchor's place.
 var recentCompletedItemIDsQuery = fmt.Sprintf(`
 	WITH %s
 	SELECT item_id
 	FROM   watched_activity
 	WHERE  user_id = $1 AND profile_id = $2 AND completed = true
+	  AND  EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = watched_activity.item_id)
 	GROUP  BY item_id
 	ORDER  BY MAX(updated_at) DESC, item_id ASC
 	LIMIT  $3
@@ -117,7 +129,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 }
 
 func hnswEfSearch(candidateLimit int) int {
-	return max(candidateLimit, minHNSWEfSearch)
+	return min(max(candidateLimit, minHNSWEfSearch), maxHNSWEfSearch)
 }
 
 func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn func(pgx.Tx) error) error {
@@ -1061,8 +1073,22 @@ func lockTasteClusters(ctx context.Context, tx pgx.Tx, userID int, profileID str
 
 // GetTasteClusters retrieves all clusters for a user/profile.
 func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error) {
+	return r.queryTasteClusters(ctx, userID, profileID, true)
+}
+
+// GetTasteClusterMeta returns the profile's taste clusters without their
+// embeddings, for reads that only label, match and order cluster rows.
+func (r *Repo) GetTasteClusterMeta(ctx context.Context, userID int, profileID string) ([]TasteCluster, error) {
+	return r.queryTasteClusters(ctx, userID, profileID, false)
+}
+
+func (r *Repo) queryTasteClusters(ctx context.Context, userID int, profileID string, withEmbedding bool) ([]TasteCluster, error) {
+	columns := "cluster_idx, dominant_genres, label, member_count, total_weight, updated_at"
+	if withEmbedding {
+		columns += ", embedding"
+	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT cluster_idx, embedding, dominant_genres, label, member_count, total_weight, updated_at
+		SELECT `+columns+`
 		FROM   user_taste_clusters
 		WHERE  user_id = $1 AND profile_id = $2
 		ORDER  BY cluster_idx`,
@@ -1077,12 +1103,18 @@ func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID strin
 		var c TasteCluster
 		var v pgvector.Vector
 		var genresJSON []byte
-		if err := rows.Scan(&c.ClusterIdx, &v, &genresJSON, &c.Label, &c.MemberCount, &c.TotalWeight, &c.UpdatedAt); err != nil {
+		dest := []any{&c.ClusterIdx, &genresJSON, &c.Label, &c.MemberCount, &c.TotalWeight, &c.UpdatedAt}
+		if withEmbedding {
+			dest = append(dest, &v)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan cluster: %w", err)
 		}
 		c.UserID = userID
 		c.ProfileID = profileID
-		c.Embedding = v.Slice()
+		if withEmbedding {
+			c.Embedding = v.Slice()
+		}
 		if err := json.Unmarshal(genresJSON, &c.DominantGenres); err != nil {
 			return nil, fmt.Errorf("unmarshal cluster genres: %w", err)
 		}
@@ -1093,31 +1125,48 @@ func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID strin
 
 // --- Co-Watch Operations ---
 
-// UpsertCowatchPairs bulk-upserts co-watch pairs. Operates in a single transaction.
+// UpsertCowatchPairs bulk-upserts co-watch pairs in one statement, stamping
+// each with the transaction time. A batch must not repeat an (item, similar
+// item) pair.
 func (r *Repo) UpsertCowatchPairs(ctx context.Context, pairs []CowatchPair) error {
 	if len(pairs) == 0 {
 		return nil
 	}
-	tx, err := r.pool.Begin(ctx)
+	itemIDs := make([]string, len(pairs))
+	similarIDs := make([]string, len(pairs))
+	scores := make([]float64, len(pairs))
+	counts := make([]int32, len(pairs))
+	for i, p := range pairs {
+		itemIDs[i] = p.ItemID
+		similarIDs[i] = p.SimilarItemID
+		scores[i] = p.JaccardScore
+		counts[i] = int32(p.CowatchCount)
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO item_cowatch (item_id, similar_item_id, jaccard_score, cowatch_count, updated_at)
+		SELECT item_id, similar_item_id, jaccard_score, cowatch_count, NOW()
+		FROM   unnest($1::text[], $2::text[], $3::float8[], $4::int4[])
+		       AS p(item_id, similar_item_id, jaccard_score, cowatch_count)
+		ON CONFLICT (item_id, similar_item_id) DO UPDATE
+			SET jaccard_score = EXCLUDED.jaccard_score,
+			    cowatch_count = EXCLUDED.cowatch_count,
+			    updated_at    = EXCLUDED.updated_at`,
+		itemIDs, similarIDs, scores, counts)
 	if err != nil {
-		return fmt.Errorf("begin tx for cowatch: %w", err)
+		return fmt.Errorf("upsert cowatch pairs: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	return nil
+}
 
-	for _, p := range pairs {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO item_cowatch (item_id, similar_item_id, jaccard_score, cowatch_count, updated_at)
-			VALUES ($1, $2, $3, $4, NOW())
-			ON CONFLICT (item_id, similar_item_id) DO UPDATE
-				SET jaccard_score = EXCLUDED.jaccard_score,
-				    cowatch_count = EXCLUDED.cowatch_count,
-				    updated_at    = NOW()`,
-			p.ItemID, p.SimilarItemID, p.JaccardScore, p.CowatchCount)
-		if err != nil {
-			return fmt.Errorf("upsert cowatch pair: %w", err)
-		}
+// DeleteCowatchPairsBefore deletes the co-watch pairs last written before
+// cutoff and returns how many it deleted.
+func (r *Repo) DeleteCowatchPairsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM item_cowatch WHERE updated_at IS NULL OR updated_at < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale cowatch pairs: %w", err)
 	}
-	return tx.Commit(ctx)
+	return tag.RowsAffected(), nil
 }
 
 // GetCowatchNeighbors returns the top co-watch neighbors for an item.
@@ -1452,6 +1501,9 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 // (watcher, item) before ranking and aggregation so a lone binge-watcher
 // cannot satisfy the minimum-watchers threshold ($2) by itself and the
 // per-user recency cap ($1) counts distinct items rather than raw rows.
+// Progress outlives deleted items, and an episode of a deleted series no
+// longer rolls up to it, so only items still in media_items are ranked: a
+// dead ID neither enters the matrix nor uses up a watcher's recency cap.
 //
 // Watcher identity is (user_id, profile_id) for the Jaccard math — profiles of
 // one account legitimately have distinct tastes — but the minimum-watchers
@@ -1466,6 +1518,7 @@ var itemWatchersQuery = fmt.Sprintf(`
 		       item_id AS media_item_id,
 		       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY MAX(updated_at) DESC) AS rn
 		FROM   watched_activity
+		WHERE  EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = watched_activity.item_id)
 		GROUP  BY user_id, profile_id, watcher_id, item_id
 	)
 	SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
@@ -1916,38 +1969,6 @@ func (r *Repo) GetFavoriteItemIDs(ctx context.Context, userID int, profileID str
 	return ids, nil
 }
 
-// GetWatchedItemIDSetFromStore derives watched item IDs from a user store,
-// then canonicalizes episode progress rows to their parent series IDs.
-func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore.UserStore, profileID string) (map[string]struct{}, error) {
-	if store == nil {
-		return map[string]struct{}{}, nil
-	}
-
-	const pageSize = 1000
-	rawIDs := make([]string, 0, pageSize)
-	offset := 0
-
-	for {
-		progress, err := store.ListProgress(ctx, profileID, "all", pageSize, offset)
-		if err != nil {
-			return nil, fmt.Errorf("list progress from store: %w", err)
-		}
-
-		for _, wp := range progress {
-			if wp.Completed || (wp.DurationSeconds > 0 && wp.PositionSeconds/wp.DurationSeconds >= 0.5) {
-				rawIDs = append(rawIDs, wp.MediaItemID)
-			}
-		}
-
-		if len(progress) < pageSize {
-			break
-		}
-		offset += len(progress)
-	}
-
-	return r.ResolveCanonicalItemIDSet(ctx, rawIDs)
-}
-
 // GetRecentCompletedItemIDs returns the most recently completed canonical item IDs for a profile.
 func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
@@ -2030,6 +2051,27 @@ func (r *Repo) ResolveCanonicalItemIDs(ctx context.Context, itemIDs []string) (m
 		return nil, fmt.Errorf("iterate canonical item IDs: %w", err)
 	}
 	return resolved, nil
+}
+
+// ExistingItemIDs returns the IDs in itemIDs that still have a media_items
+// row.
+func (r *Repo) ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{}, len(itemIDs))
+	if len(itemIDs) == 0 {
+		return existing, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT content_id FROM media_items WHERE content_id = ANY($1)`, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("find existing item IDs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("find existing item IDs: %w", err)
+	}
+	for _, id := range ids {
+		existing[id] = struct{}{}
+	}
+	return existing, nil
 }
 
 // ResolveCanonicalItemIDSet maps episode IDs to their parent series IDs and

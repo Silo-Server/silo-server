@@ -8,7 +8,6 @@ import (
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
@@ -77,11 +76,11 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
+			// Unlike the aggregate read, which keeps the page up with an
+			// empty row, a failed single section answers an error, so a
+			// client can tell it from a section with nothing to show.
 			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
-			}
+			return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 		}
 		withItems.ItemLimit = s.ItemLimit
 		items := []sections.SectionWithItems{withItems}

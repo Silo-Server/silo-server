@@ -33,7 +33,7 @@ func TestApplyGenreCapCountsAllGenres(t *testing.T) {
 	}
 }
 
-func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
+func TestHNSWEfSearchUsesCandidateLimitWithinBounds(t *testing.T) {
 	tests := []struct {
 		name           string
 		candidateLimit int
@@ -42,6 +42,8 @@ func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
 		{name: "raises small scans", candidateLimit: 40, want: minHNSWEfSearch},
 		{name: "keeps exact floor", candidateLimit: minHNSWEfSearch, want: minHNSWEfSearch},
 		{name: "keeps larger scans", candidateLimit: 900, want: 900},
+		{name: "keeps exact cap", candidateLimit: maxHNSWEfSearch, want: maxHNSWEfSearch},
+		{name: "caps at the pgvector maximum", candidateLimit: 1200, want: 1000},
 	}
 
 	for _, tt := range tests {
@@ -217,7 +219,10 @@ func TestCowatchMatrixTreatsProfilesAsDistinctWatchers(t *testing.T) {
 		"b": {"1:p1", "1:p2"},
 	}
 
-	pairs := computeCowatchMatrix(watchers, 2, 2, 10)
+	pairs, err := computeCowatchMatrix(t.Context(), watchers, 2, 2, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(pairs) != 2 {
 		t.Fatalf("got %d co-watch pairs, want 2: %#v", len(pairs), pairs)
 	}

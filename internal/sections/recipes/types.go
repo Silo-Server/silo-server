@@ -65,10 +65,10 @@ type DBPool interface{}
 
 // RecommendationReader matches the recommendation reader interface in sections/fetcher.go.
 type RecommendationReader interface {
-	GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
-	GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
+	SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
 }
 
 // ResolverContext is everything a resolver needs to resolve.

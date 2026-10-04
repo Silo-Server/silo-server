@@ -489,25 +489,36 @@ func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProf
 }
 
 type cowatchResult struct {
-	Items int `json:"items"`
-	Pairs int `json:"pairs"`
+	Items  int   `json:"items"`
+	Pairs  int   `json:"pairs"`
+	Pruned int64 `json:"pruned"`
 }
 
 func (cowatchResult) failures() int { return 0 }
 
+// doCowatch rebuilds item_cowatch from current watch history. Once every
+// batch is stored it deletes the pairs this run did not write: pairs of items
+// deleted since the last run, pairs that fell below the shared-watcher floor,
+// and pairs pushed out of an item's top neighbors. The table then holds only
+// this run's pairs.
 func (w *Worker) doCowatch(ctx context.Context) (cowatchResult, error) {
 	var res cowatchResult
 	repo := w.engine.repo
+	// The database clock stamps updated_at, so the cutoff comes from it too.
+	runStart, err := repo.Now(ctx)
+	if err != nil {
+		return res, fmt.Errorf("read run start: %w", err)
+	}
 	watchers, err := repo.GetItemWatchers(ctx, DefaultMinWatchers, DefaultMaxWatchesPerUser)
 	if err != nil {
 		return res, fmt.Errorf("get item watchers: %w", err)
 	}
 	res.Items = len(watchers)
-	if len(watchers) == 0 {
-		return res, nil
-	}
 
-	pairs := computeCowatchMatrix(watchers, DefaultMinWatchers, DefaultMinShared, DefaultTopN)
+	pairs, err := computeCowatchMatrix(ctx, watchers, DefaultMinWatchers, DefaultMinShared, DefaultTopN)
+	if err != nil {
+		return res, fmt.Errorf("compute co-watch matrix: %w", err)
+	}
 
 	// Batch insert in chunks of 1000.
 	const batchSize = 1000
@@ -517,6 +528,11 @@ func (w *Worker) doCowatch(ctx context.Context) (cowatchResult, error) {
 			return res, fmt.Errorf("upsert co-watch pairs from %d: %w", i, err)
 		}
 		res.Pairs = end
+	}
+
+	res.Pruned, err = repo.DeleteCowatchPairsBefore(ctx, runStart)
+	if err != nil {
+		return res, fmt.Errorf("delete stale co-watch pairs: %w", err)
 	}
 	return res, nil
 }

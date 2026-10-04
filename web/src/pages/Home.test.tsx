@@ -19,6 +19,7 @@ import { bumpHomeRefreshSignal } from "./homeSurfaceRefresh";
 
 const mockUseHomeLayout = vi.fn();
 const mockFetchHomeSectionItems = vi.fn();
+const mockFetchRecipeCatalog = vi.fn();
 const SAFARI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.6 Safari/605.1.15";
 const FIREFOX_USER_AGENT =
@@ -31,6 +32,10 @@ vi.mock("@/hooks/queries/sections", () => ({
   fetchHomeSectionItems: (...args: unknown[]) => mockFetchHomeSectionItems(...args),
   HOME_SECTION_STALE_TIME: 10 * 60 * 1000,
   HOME_SECTION_GC_TIME: 60 * 60 * 1000,
+}));
+
+vi.mock("@/lib/recipes", () => ({
+  fetchRecipeCatalog: () => mockFetchRecipeCatalog(),
 }));
 
 vi.mock("@/hooks/useDocumentTitle", () => ({
@@ -75,6 +80,8 @@ describe("Home", () => {
       refetch: vi.fn(),
     });
     mockFetchHomeSectionItems.mockReset();
+    mockFetchRecipeCatalog.mockReset();
+    mockFetchRecipeCatalog.mockResolvedValue({ categories: {} });
   });
 
   afterEach(async () => {
@@ -728,6 +735,80 @@ describe("Home", () => {
     });
   });
 
+  it("drops what an earlier row shows from avoid-duplicates rows, whatever order rows load in", async () => {
+    mockFetchRecipeCatalog.mockResolvedValue({
+      categories: {
+        personalized: [
+          {
+            type: "recommended_for_you",
+            category: "personalized",
+            presets: [],
+            avoid_duplicates: true,
+            supports_rotation: false,
+            admin_only: false,
+          },
+          {
+            type: "taste_match",
+            category: "personalized",
+            presets: [],
+            avoid_duplicates: true,
+            supports_rotation: false,
+            admin_only: false,
+          },
+        ],
+      },
+    });
+    const layout = [
+      { ...homeLayout("for-you"), section_type: "recommended_for_you" },
+      { ...homeLayout("top-picks"), section_type: "taste_match" },
+      homeLayout("recent"),
+    ];
+    const rows: Record<string, string[]> = {
+      "for-you": ["Shared", "For You Only"],
+      "top-picks": ["Shared", "Top Pick Only"],
+      recent: ["Shared"],
+    };
+    mockUseHomeLayout.mockReturnValue({
+      data: { sections: layout },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    const requests = deferSectionRequests();
+    const respond = (sectionId: string) => {
+      const request = requests.find((candidate) => candidate.sectionId === sectionId)!;
+      const entry = layout.find((candidate) => candidate.id === sectionId)!;
+      request.respond({
+        section: {
+          ...entry,
+          total_count: rows[sectionId]!.length,
+          items: rows[sectionId]!.map((title) => ({
+            ...homeSection(sectionId).section.items[0],
+            content_id: title,
+            title,
+          })),
+        },
+      });
+    };
+
+    await renderHome(new QueryClient());
+    await waitForRequestCount(requests, 3);
+
+    // The later rows answer first and show the shared title.
+    respond("top-picks");
+    respond("recent");
+    await waitForRenderedFirstItems({ "top-picks": "Shared", recent: "Shared" });
+
+    // Once the first row loads, the later avoid-duplicates row gives it up;
+    // the plain row keeps it.
+    respond("for-you");
+    await waitForRenderedFirstItems({
+      "for-you": "Shared",
+      "top-picks": "Top Pick Only",
+      recent: "Shared",
+    });
+  });
+
   async function renderHome(queryClient: QueryClient) {
     await act(async () => {
       root.render(
@@ -760,6 +841,7 @@ interface DeferredSectionRequest {
   sectionId: string;
   signal: AbortSignal;
   resolve: (label: string) => void;
+  respond: (response: unknown) => void;
   reject: (error: Error) => void;
 }
 
@@ -774,6 +856,7 @@ function deferSectionRequests(): DeferredSectionRequest[] {
           sectionId,
           signal: options.signal,
           resolve: (label) => resolve(homeSection(sectionId, label)),
+          respond: resolve,
           reject,
         });
       }),

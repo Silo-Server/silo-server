@@ -20,6 +20,7 @@ type signalRepo interface {
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
 	ResolveCanonicalItemIDs(ctx context.Context, contentIDs []string) (map[string]string, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
+	ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error)
 	HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error)
 }
 
@@ -97,6 +98,9 @@ func (s *SignalReader) HasSignals(ctx context.Context, userID int, profileID str
 	return len(progress) > 0, nil
 }
 
+// WatchedItemIDSet returns the canonical IDs of the titles the profile has
+// watched: progress completed or at least half way, episodes counting for
+// their series, plus finished ebooks.
 func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
@@ -218,6 +222,9 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 	return rows, nil
 }
 
+// RecentCompletedItemIDs returns the canonical IDs of the profile's most
+// recently completed titles that are still in the catalog, newest first.
+// Completions of deleted items are skipped, so they never become anchors.
 func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
@@ -241,7 +248,8 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 			candidates = append(candidates, wp)
 		}
 	}
-	if err := canonicalizeCompletedRows(ctx, s.repo, candidates); err != nil {
+	candidates, err = liveCompletedRows(ctx, s.repo, candidates)
+	if err != nil {
 		return nil, fmt.Errorf("resolve recent completed item IDs: %w", err)
 	}
 	candidates = recentDistinctCompletedRows(candidates, limit)
@@ -269,7 +277,8 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 				oldestPageTime = updatedAt
 			}
 		}
-		if err := canonicalizeCompletedRows(ctx, s.repo, page); err != nil {
+		page, err = liveCompletedRows(ctx, s.repo, page)
+		if err != nil {
 			return nil, fmt.Errorf("resolve recent completed item IDs: %w", err)
 		}
 		candidates = recentDistinctCompletedRows(append(candidates, page...), limit)
@@ -309,6 +318,33 @@ func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []Watc
 		}
 	}
 	return nil
+}
+
+// liveCompletedRows canonicalizes rows and drops those whose canonical ID is
+// no longer in the catalog: a deleted movie, or an episode whose series was
+// deleted and so no longer resolves to it.
+func liveCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) ([]WatchProgressRow, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	if err := canonicalizeCompletedRows(ctx, repo, rows); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.MediaItemID
+	}
+	existing, err := repo.ExistingItemIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	live := rows[:0]
+	for _, row := range rows {
+		if _, ok := existing[row.MediaItemID]; ok {
+			live = append(live, row)
+		}
+	}
+	return live, nil
 }
 
 func recentDistinctCompletedRows(rows []WatchProgressRow, limit int) []WatchProgressRow {
@@ -386,10 +422,14 @@ func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID 
 	return result, nil
 }
 
+// pageProgress visits the profile's progress rows with the given status a
+// page at a time, newest first. It pages by keyset, so each page costs the
+// same however deep the history goes, and a row whose updated_at moves while
+// the walk runs is neither read twice nor skipped.
 func pageProgress(ctx context.Context, store userstore.UserStore, profileID, status string, visit func([]userstore.WatchProgress) error) error {
-	offset := 0
+	var after *userstore.ProgressKey
 	for {
-		progress, err := store.ListProgress(ctx, profileID, status, signalPageSize, offset)
+		progress, err := store.ListProgressPage(ctx, profileID, status, after, signalPageSize)
 		if err != nil {
 			return fmt.Errorf("list progress from store: %w", err)
 		}
@@ -399,7 +439,8 @@ func pageProgress(ctx context.Context, store userstore.UserStore, profileID, sta
 		if len(progress) < signalPageSize {
 			return nil
 		}
-		offset += len(progress)
+		last := progress[len(progress)-1]
+		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
 	}
 }
 

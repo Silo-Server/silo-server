@@ -175,11 +175,10 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
+			// As on Home, a failed single section answers an error rather
+			// than an empty row.
 			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
-			}
+			return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 		}
 		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.ImageSize)
 		if len(resp.Sections) == 0 {
