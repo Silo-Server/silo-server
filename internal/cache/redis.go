@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -114,14 +113,14 @@ type EventBus interface {
 	Close() error
 }
 
-// NewEventBus returns an EventBus. When redisURL is empty a no-op
+// NewEventBus returns an EventBus. When cfg has no URL a no-op
 // implementation is returned that silently succeeds on every call and
 // has zero external dependencies.
-func NewEventBus(redisURL string) EventBus {
-	if redisURL == "" {
+func NewEventBus(cfg config.RedisConfig) EventBus {
+	if cfg.URL == "" {
 		return &NoopEventBus{}
 	}
-	return newRedisEventBus(redisURL)
+	return newRedisEventBus(cfg)
 }
 
 // ---------------------------------------------------------------------------
@@ -170,11 +169,11 @@ type RedisEventBus struct {
 	done chan struct{}
 }
 
-// newRedisEventBus creates a RedisEventBus connected to the given Redis URL.
-func newRedisEventBus(redisURL string) *RedisEventBus {
-	client, sentinel, err := newRedisClient(redisURL)
+// newRedisEventBus creates a RedisEventBus connected to the Redis cfg names.
+func newRedisEventBus(cfg config.RedisConfig) *RedisEventBus {
+	client, sentinel, err := newRedisClient(cfg)
 	if err != nil {
-		client = redis.NewClient(unparsedRedisOptions(redisURL, err))
+		client = redis.NewClient(unparsedRedisOptions(cfg.URL, err))
 	}
 	return newRedisEventBusFromClient(client, sentinel)
 }
@@ -439,21 +438,21 @@ func NewRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, 
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	client, _, err := newRedisClient(cfg.URL)
+	client, _, err := newRedisClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return instrumentRedis(client, role), nil
 }
 
-// newRedisClient builds the client a redis.url value names and reports
-// whether the value is a Sentinel URL. A Sentinel client asks Sentinel for
-// the master each time it opens a connection, and closes its pooled
-// connections when Sentinel announces a new master.
-func newRedisClient(redisURL string) (*redis.Client, bool, error) {
-	options, failover, err := config.ParseRedisURL(redisURL)
+// newRedisClient builds the client cfg names and reports whether its URL is
+// a Sentinel URL. A Sentinel client asks Sentinel for the master each time it
+// opens a connection, and closes its pooled connections when Sentinel
+// announces a new master.
+func newRedisClient(cfg config.RedisConfig) (*redis.Client, bool, error) {
+	options, failover, err := cfg.Options()
 	if err != nil {
-		return nil, false, fmt.Errorf("invalid redis URL: %w", err)
+		return nil, false, err
 	}
 	if failover != nil {
 		return redis.NewFailoverClient(failover), true, nil

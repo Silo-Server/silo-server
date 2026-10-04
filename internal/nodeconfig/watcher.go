@@ -328,9 +328,7 @@ func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error 
 	if w.bootstrap.JFListen != "" {
 		newCfg.JellyfinCompat.Listen = w.bootstrap.JFListen
 	}
-	if w.bootstrap.RedisURL != "" {
-		newCfg.Redis.URL = w.bootstrap.RedisURL
-	}
+	newCfg.Redis = newCfg.Redis.WithBootstrapURL(w.bootstrap.RedisURL)
 
 	for _, normalize := range w.normalizers {
 		normalize(newCfg)

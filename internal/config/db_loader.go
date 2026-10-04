@@ -382,6 +382,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Redis
 	cfg.Redis.URL = stringOr(m, "redis.url", "")
+	cfg.Redis.DB = stringOr(m, RedisDBSettingKey, "")
 
 	// Rate Limiting
 	rateLimitEnabled, err := boolOr(m, "ratelimit.enabled", true)
