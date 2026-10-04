@@ -726,3 +726,46 @@ func TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB(t *testing.T) {
 		t.Fatalf("preparing downloads = %d, want the 2 free slots shared between both monitors", preparing)
 	}
 }
+
+// TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB pins that a monitor
+// edited or paused after a sync planned its episodes queues no encode jobs for
+// that sync: no download row would link to them.
+func TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB(t *testing.T) {
+	ctx := context.Background()
+	fx := seedMonitorFixture(t, 0, false)
+	t.Cleanup(func() {
+		_, _ = fx.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fx.fileID)
+	})
+	fx.svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(fx.pool), fx.repo, nil, stubQuotaPreparer{}, "monitor-stale-test",
+		func() *config.Config { return nil }, nil,
+	))
+	prepared := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	it := managedItem{file: &models.MediaFile{ID: fx.fileID, ContentID: fx.seriesID, FileSize: 10}, contentID: fx.seriesID, episodeID: fx.episodes[0]}
+	plan := monitorPlan{items: []managedItem{it}, decisions: map[ManagedEntryKey]QualityDecision{managedItemKey(it): prepared}, prepared: true}
+	if _, err := fx.subRepo.Mutate(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, false, func(row *Subscription) error { row.Active = false; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := fx.svc.registerMonitorPlan(ctx, fx.monitor, plan, func(register func(*Subscription, pgx.Tx) error) error {
+		return fx.subRepo.WithLocked(ctx, fx.userID, fx.profileA, fx.deviceA, fx.monitor.ID, func(locked *Subscription, tx pgx.Tx) error {
+			if !locked.Active || !locked.UpdatedAt.Equal(fx.monitor.UpdatedAt) {
+				return nil
+			}
+			return register(locked, tx)
+		})
+	})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("stale monitor registered %+v %v", rows, err)
+	}
+	var jobs int
+	if err := fx.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, fx.fileID).Scan(&jobs); err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 0 {
+		t.Fatalf("stale monitor queued %d encode jobs", jobs)
+	}
+}

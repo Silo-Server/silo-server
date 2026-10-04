@@ -86,6 +86,8 @@
 ./internal/downloads TestSubscriptionQualityPostgres
 ./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
 ./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
+./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
+./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
