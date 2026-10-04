@@ -22,20 +22,7 @@ func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit
 	if err != nil {
 		return nil, fmt.Errorf("get taste profile meta: %w", err)
 	}
-
-	positiveSignals := 0
-	if meta != nil {
-		for k, v := range meta.SignalCounts {
-			switch k {
-			case "rated_low", "watch_low":
-				// negative signals don't count
-			default:
-				positiveSignals += v
-			}
-		}
-	}
-
-	level := coldStartLevel(positiveSignals)
+	level := coldStartLevelOf(meta)
 
 	// Build cold-start rows (always available).
 	coldStartRows, err := e.buildColdStartRows(ctx)
@@ -43,12 +30,12 @@ func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit
 		return nil, fmt.Errorf("build cold start rows: %w", err)
 	}
 
-	watchedSet, err := e.watchedItemIDSet(ctx, userID, profileID)
+	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
+		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
 	}
-	watchedIDs := scoredItemIDsFromSet(watchedSet)
-	coldStartRows = excludeWatchedRows(coldStartRows, watchedSet)
+	excludeIDs := scoredItemIDsFromSet(excluded)
+	coldStartRows = excludeRowItems(coldStartRows, excluded)
 
 	// If no taste profile at all, return cold-start only.
 	if meta == nil || level == 0 {
@@ -57,12 +44,12 @@ func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit
 
 	// Build personalized rows from taste clusters.
 	liveFilter := catalog.AccessFilter{UserID: userID, ProfileID: profileID}
-	personalRows, _, err := e.buildClusterRows(ctx, userID, profileID, limit, watchedIDs, liveFilter)
+	personalRows, _, err := e.buildClusterRows(ctx, userID, profileID, limit, excludeIDs, liveFilter)
 	if err != nil {
 		return nil, fmt.Errorf("build cluster rows: %w", err)
 	}
 
-	aggregatedRow, err := e.buildAggregatedRow(ctx, userID, profileID, limit, watchedIDs, liveFilter)
+	aggregatedRow, err := e.buildAggregatedRow(ctx, userID, profileID, limit, excludeIDs, liveFilter)
 	if err != nil {
 		return nil, fmt.Errorf("build aggregated row: %w", err)
 	}
@@ -401,8 +388,18 @@ func (e *Engine) buildColdStartRows(ctx context.Context) ([]ForYouRow, error) {
 }
 
 // BecauseYouWatched returns items similar to a specific item the user has
-// watched. Blends embedding similarity (70%) with co-watch data (30%).
+// watched. Blends embedding similarity (70%) with co-watch data (30%). Titles
+// in the profile's recommendation exclusion set are left out.
 func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]ScoredItem, error) {
+	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
+	}
+	return e.becauseYouWatched(ctx, sourceItemID, limit, excluded)
+}
+
+// becauseYouWatched is BecauseYouWatched with the exclusion set given.
+func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, limit int, excluded map[string]struct{}) ([]ScoredItem, error) {
 	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
@@ -432,8 +429,10 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		cowatchMap[p.SimilarItemID] = p.JaccardScore
 	}
 
-	// Blend scores.
+	// Blend scores, then drop excluded titles before MMR so they do not take
+	// the row's places.
 	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
+	blended = excludeScoredItems(blended, excluded)
 
 	// Apply MMR re-ranking.
 	candidateIDs := make([]string, len(blended))
@@ -449,22 +448,19 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 		}
 	}
 
-	watchedSet, err := e.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
-	}
-
-	return excludeScoredItems(result, watchedSet), nil
+	return result, nil
 }
 
-func excludeWatchedRows(rows []ForYouRow, watchedSet map[string]struct{}) []ForYouRow {
-	if len(rows) == 0 || len(watchedSet) == 0 {
+// excludeRowItems removes the excluded items from every row and drops the
+// rows left empty.
+func excludeRowItems(rows []ForYouRow, excluded map[string]struct{}) []ForYouRow {
+	if len(rows) == 0 || len(excluded) == 0 {
 		return rows
 	}
 
 	filteredRows := make([]ForYouRow, 0, len(rows))
 	for _, row := range rows {
-		row.Items = excludeScoredItems(row.Items, watchedSet)
+		row.Items = excludeScoredItems(row.Items, excluded)
 		if len(row.Items) == 0 {
 			continue
 		}

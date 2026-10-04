@@ -2,12 +2,14 @@ package recommendations
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestGetBecauseYouWatchedWithSourceReturnsAnchorThatHasCache(t *testing.T) {
@@ -161,4 +163,155 @@ func TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertNothingQueued(t, w, "reads within the throttle interval")
+}
+
+// fakeReaderRepo serves the Reader's reads from memory. Every item is
+// accessible unless listed in hidden.
+type fakeReaderRepo struct {
+	meta     *TasteProfileMeta
+	clusters []TasteCluster
+	// personal holds the profile's cached rows by rec type and source item,
+	// global the global rows by rec type.
+	personal map[string][]ScoredItem
+	global   map[string][]ScoredItem
+	hidden   map[string]struct{}
+}
+
+func (f *fakeReaderRepo) GetTasteProfileMeta(context.Context, int, string) (*TasteProfileMeta, error) {
+	return f.meta, nil
+}
+
+func (f *fakeReaderRepo) GetTasteClusters(context.Context, int, string) ([]TasteCluster, error) {
+	return f.clusters, nil
+}
+
+func (f *fakeReaderRepo) GetRecommendationCache(_ context.Context, userID int, _, recType, sourceItemID string) ([]ScoredItem, error) {
+	if userID == GlobalCacheUserID {
+		return f.global[recType], nil
+	}
+	return f.personal[recType+"|"+sourceItemID], nil
+}
+
+func (f *fakeReaderRepo) ListCachedGenreSamplers(context.Context) (map[string][]ScoredItem, error) {
+	return nil, nil
+}
+
+func (f *fakeReaderRepo) GetTopGenres(context.Context, int) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeReaderRepo) FilterAccessibleItemIDs(_ context.Context, itemIDs []string, _ catalog.AccessFilter) (map[string]struct{}, error) {
+	accessible := make(map[string]struct{}, len(itemIDs))
+	for _, id := range itemIDs {
+		if _, hidden := f.hidden[id]; !hidden {
+			accessible[id] = struct{}{}
+		}
+	}
+	return accessible, nil
+}
+
+func rowLabels(rows []ForYouRow) []string {
+	labels := make([]string, len(rows))
+	for i, row := range rows {
+		labels[i] = row.Label
+	}
+	return labels
+}
+
+// A profile with no positive signal, or no taste profile, is served the
+// global rows only, even while personal rows from an earlier taste profile
+// are still cached; positive signals bring the personal rows in by level.
+func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
+	const (
+		forYou  = "For You"
+		drama   = "Because you enjoy Drama"
+		popular = "Popular on This Server"
+		recent  = "Recently Added"
+	)
+	for _, tc := range []struct {
+		name string
+		meta *TasteProfileMeta
+		want []string
+	}{
+		{"no taste profile", nil, []string{popular, recent}},
+		{"cleared taste vector", &TasteProfileMeta{SignalCounts: map[string]int{}}, []string{popular, recent}},
+		{"only negative signals", &TasteProfileMeta{SignalCounts: map[string]int{"watch_low": 1, "rated_low": 2}}, []string{popular, recent}},
+		{"one positive signal", &TasteProfileMeta{SignalCounts: map[string]int{"favorited": 1, "watch_low": 4}}, []string{popular, recent, forYou}},
+		{"fully personalized", &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}}, []string{forYou, drama, popular, recent}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeReaderRepo{
+				meta:     tc.meta,
+				clusters: []TasteCluster{{ClusterIdx: 0, Label: "Drama"}},
+				personal: map[string][]ScoredItem{
+					RecTypeForYouMain + "|":                {{MediaItemID: "personal-main"}},
+					RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "personal-drama", Reason: clusterTitle("Drama")}},
+				},
+				global: map[string][]ScoredItem{
+					RecTypePopular:       {{MediaItemID: "popular"}},
+					RecTypeRecentlyAdded: {{MediaItemID: "recent"}},
+				},
+			}
+			r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+			rows, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := rowLabels(rows); !slices.Equal(got, tc.want) {
+				t.Fatalf("rows = %v, want %v", got, tc.want)
+			}
+			main, err := r.GetForYouMain(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
+			if err != nil || main == nil || main.Label != tc.want[0] {
+				t.Fatalf("main row = %+v, %v; want %q", main, err, tc.want[0])
+			}
+		})
+	}
+}
+
+// filterRows leaves out what the profile watched or favorited, episodes
+// counting for their series, so rows cached before either happened are
+// cleaned. Watchlist titles stay; another profile's favorites do not count.
+func TestFilterRowsDropsWatchedAndFavoritedTitles(t *testing.T) {
+	store := &fakeSignalStore{
+		progress: []userstore.WatchProgress{
+			{ProfileID: "p1", MediaItemID: "movie-watched", Completed: true},
+			{ProfileID: "p1", MediaItemID: "episode-watched", Completed: true},
+		},
+		favorites: []userstore.Favorite{
+			{ProfileID: "p1", MediaItemID: "movie-seed-pick"},
+			{ProfileID: "p1", MediaItemID: "episode-favorite"},
+			{ProfileID: "p2", MediaItemID: "movie-plain"},
+		},
+		watchlist: []userstore.WatchlistEntry{{ProfileID: "p1", MediaItemID: "movie-watchlist"}},
+	}
+	signals := NewSignalReader(&fakeSignalRepo{canonical: map[string]string{
+		"episode-watched":  "series-watched",
+		"episode-favorite": "series-favorite",
+	}}, fakeSignalProvider{store: store})
+	r := &Reader{repo: &fakeReaderRepo{}, signals: signals}
+
+	items := func(ids ...string) []ScoredItem {
+		out := make([]ScoredItem, len(ids))
+		for i, id := range ids {
+			out[i] = ScoredItem{MediaItemID: id}
+		}
+		return out
+	}
+	rows, err := r.filterRows(t.Context(), 7, "p1", []ForYouRow{
+		{Label: "For You", Items: items("movie-watched", "series-watched", "movie-seed-pick", "series-favorite", "movie-watchlist", "movie-plain")},
+		{Label: "Because You Watched", Items: items("movie-seed-pick", "series-watched")},
+	}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v, want only the For You row: the other held only excluded titles", rowLabels(rows))
+	}
+	var got []string
+	for _, item := range rows[0].Items {
+		got = append(got, item.MediaItemID)
+	}
+	if want := []string{"movie-watchlist", "movie-plain"}; !slices.Equal(got, want) {
+		t.Fatalf("items = %v, want %v", got, want)
+	}
 }

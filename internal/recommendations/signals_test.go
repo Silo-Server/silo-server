@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ type fakeSignalRepo struct {
 	canonical map[string]string
 
 	fallbackWatched         map[string]struct{}
+	fallbackFavorites       []string
 	fallbackProgress        []WatchProgressRow
 	ebookProgress           []WatchProgressRow
 	fallbackRecentCompleted []string
@@ -32,6 +34,10 @@ func (r *fakeSignalRepo) HasSignalRows(_ context.Context, _ int, _ string, inclu
 
 func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
 	return r.fallbackWatched, nil
+}
+
+func (r *fakeSignalRepo) GetFavoriteItemIDs(context.Context, int, string) ([]string, error) {
+	return r.fallbackFavorites, nil
 }
 
 func (r *fakeSignalRepo) GetWatchProgressForUser(context.Context, int, string) ([]WatchProgressRow, error) {
@@ -104,6 +110,27 @@ func (s *fakeSignalStore) ListFavorites(_ context.Context, profileID string, lim
 		}
 	}
 	return pageOf(rows, limit, offset), nil
+}
+
+// ListFavoritesPage pages the profile's favorites in stored order, keyed by
+// media item ID; the fake keeps no timestamps to order by.
+func (s *fakeSignalStore) ListFavoritesPage(_ context.Context, profileID string, after *userstore.ListKey, limit int) ([]userstore.Favorite, error) {
+	var rows []userstore.Favorite
+	started := after == nil
+	for _, f := range s.favorites {
+		if f.ProfileID != profileID {
+			continue
+		}
+		if !started {
+			started = f.MediaItemID == after.MediaItemID
+			continue
+		}
+		rows = append(rows, f)
+		if len(rows) == limit {
+			break
+		}
+	}
+	return rows, nil
 }
 
 func (s *fakeSignalStore) ListWatchlist(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
@@ -548,5 +575,60 @@ func TestSignalReaderHasSignals(t *testing.T) {
 				t.Fatalf("signal row queries = %v, want one without the store tables", repo.signalRowsCalls)
 			}
 		})
+	}
+}
+
+// The exclusion set is the watched set plus every favorite of the profile,
+// read across pages, with episodes resolved to their series. Watchlist
+// entries and in-progress titles are not in it.
+func TestSignalReaderRecommendationExclusionSet(t *testing.T) {
+	favorites := []userstore.Favorite{{ProfileID: "p1", MediaItemID: "episode-favorite"}}
+	for i := range signalPageSize {
+		favorites = append(favorites, userstore.Favorite{ProfileID: "p1", MediaItemID: fmt.Sprintf("seed-%04d", i)})
+	}
+	favorites = append(favorites, userstore.Favorite{ProfileID: "other", MediaItemID: "other-favorite"})
+	store := &fakeSignalStore{
+		progress: []userstore.WatchProgress{
+			{ProfileID: "p1", MediaItemID: "episode-watched", Completed: true},
+			{ProfileID: "p1", MediaItemID: "movie-started", PositionSeconds: 10, DurationSeconds: 100},
+		},
+		favorites: favorites,
+		watchlist: []userstore.WatchlistEntry{{ProfileID: "p1", MediaItemID: "movie-watchlist"}},
+	}
+	repo := &fakeSignalRepo{canonical: map[string]string{
+		"episode-watched":  "series-watched",
+		"episode-favorite": "series-favorite",
+	}}
+
+	excluded, err := NewSignalReader(repo, fakeSignalProvider{store: store}).RecommendationExclusionSet(t.Context(), 7, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(excluded) != signalPageSize+2 {
+		t.Fatalf("excluded %d titles, want %d", len(excluded), signalPageSize+2)
+	}
+	for _, id := range []string{"series-watched", "series-favorite", "seed-0000", fmt.Sprintf("seed-%04d", signalPageSize-1)} {
+		if _, ok := excluded[id]; !ok {
+			t.Fatalf("%s missing from the exclusion set", id)
+		}
+	}
+	for _, id := range []string{"episode-watched", "episode-favorite", "movie-started", "movie-watchlist", "other-favorite"} {
+		if _, ok := excluded[id]; ok {
+			t.Fatalf("%s is in the exclusion set", id)
+		}
+	}
+
+	// Without a user store the repo answers both halves.
+	fallback := &fakeSignalRepo{
+		canonical:         map[string]string{"episode-favorite": "series-favorite"},
+		fallbackWatched:   map[string]struct{}{"movie-watched": {}},
+		fallbackFavorites: []string{"episode-favorite", "movie-favorite"},
+	}
+	excluded, err = NewSignalReader(fallback, nil).RecommendationExclusionSet(t.Context(), 7, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]struct{}{"movie-watched": {}, "series-favorite": {}, "movie-favorite": {}}; !maps.Equal(excluded, want) {
+		t.Fatalf("repo exclusion set = %v, want %v", excluded, want)
 	}
 }

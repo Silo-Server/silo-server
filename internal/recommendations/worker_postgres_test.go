@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,10 +12,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	taskrepository "github.com/Silo-Server/silo-server/internal/taskmanager/repository"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // Two workers on separate pools stand in for two API servers sharing one
@@ -326,5 +329,96 @@ func TestTasteProfileSubjectsReadTheSQLiteStorePostgres(t *testing.T) {
 	engine.WithUserStoreOutsidePostgres(true)
 	if got := subjectsOf(); len(got) != 1 || got[0] != "with-signals" {
 		t.Fatalf("subjects on the SQLite store = %v, want [with-signals]", got)
+	}
+}
+
+// The profile's cached rows leave out what it watched and what it favorited,
+// including taste-seed picks and a favorited episode's series, while its
+// watchlist titles stay recommendable. This covers the main and cluster rows,
+// Because You Watched and Similar Users.
+func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcache-exclude-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	peerID, peer := newTasteTestAccount(t, pool, prefix+"peer-")
+	repo := NewRepo(pool)
+
+	const axis = 2100
+	seedPick, watched, watchlist := prefix+"seed-pick", prefix+"watched", prefix+"watchlist"
+	plain := []string{prefix + "plain-1", prefix + "plain-2", prefix + "plain-3"}
+	series, episode := prefix+"series", prefix+"episode"
+	for i, id := range append([]string{seedPick, watched, watchlist, series}, plain...) {
+		mediaType := "movie"
+		if id == series {
+			mediaType = "series"
+		}
+		seedRecoMediaItem(t, pool, id, mediaType, "matched")
+		if err := repo.UpsertEmbedding(ctx, id, axisVector(axis, map[int]float32{axis + 1 + i: 0.05}), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stmt := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO episodes(content_id, series_id, season_number, episode_number) VALUES($1, $2, 1, 1)`, []any{episode, series}},
+		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW())`, []any{userID, profile, watched}},
+		{`INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, $3), ($1, $2, $4)`, []any{userID, profile, seedPick, episode}},
+		{`INSERT INTO user_watchlist(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, []any{userID, profile, watchlist}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peerID, peer, seedPick, plain[0]}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
+			t.Fatalf("seed %q: %v", stmt.query, err)
+		}
+	}
+	taste := axisVector(axis, nil)
+	now := time.Now()
+	for _, p := range []struct {
+		userID  int
+		profile string
+	}{{userID, profile}, {peerID, peer}} {
+		if err := repo.UpsertTasteProfile(ctx, p.userID, p.profile, taste, map[string]int{"favorited": 2, "watch_high": 1}, "", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.UpsertTasteClusters(ctx, userID, profile, []TasteCluster{{ClusterIdx: 0, Embedding: taste, Label: "Test", MemberCount: 2, TotalWeight: 1.6}}); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{DiversityLambda: 0.7})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(now)); built.failed != 0 {
+		t.Fatalf("cache build = %+v, want no failures", built)
+	}
+
+	excluded := []string{seedPick, watched, series}
+	for _, row := range []struct {
+		recType, source string
+		mustHave        string
+	}{
+		{RecTypeForYouMain, "", watchlist},
+		{RecTypeForYouClusterPrefix + "0", "", watchlist},
+		{RecTypeSimilarUsersLiked, "", plain[0]},
+		{RecTypeBecauseWatched, watched, plain[1]},
+	} {
+		items, err := repo.GetRecommendationCache(ctx, userID, profile, row.recType, row.source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, len(items))
+		for i, item := range items {
+			ids[i] = item.MediaItemID
+		}
+		for _, id := range excluded {
+			if slices.Contains(ids, id) {
+				t.Fatalf("%s row %v holds excluded title %s", row.recType, ids, id)
+			}
+		}
+		if !slices.Contains(ids, row.mustHave) {
+			t.Fatalf("%s row %v is missing %s", row.recType, ids, row.mustHave)
+		}
 	}
 }

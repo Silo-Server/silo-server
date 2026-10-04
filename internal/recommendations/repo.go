@@ -702,6 +702,55 @@ func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID str
 	return nil
 }
 
+// ClearTasteProfile stores a profile that has no positive taste signal. In one
+// transaction it keeps or creates the profile's row with signalCounts and no
+// taste vector, and deletes the profile's taste clusters and every cached row
+// of the profile; global rows are not the profile's. Keeping the row lets
+// MarkProfileStale mark it and lets readers compute its cold-start level.
+// updatedAt is as for UpsertTasteProfile.
+func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, updatedAt time.Time) error {
+	countsJSON, err := json.Marshal(signalCounts)
+	if err != nil {
+		return fmt.Errorf("marshaling signal counts: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx to clear taste profile: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockTasteClusters(ctx, tx, userID, profileID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_taste_profiles
+			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5)
+		ON CONFLICT (user_id, profile_id) DO UPDATE
+			SET embedding          = NULL,
+			    signal_counts      = EXCLUDED.signal_counts,
+			    max_content_rating = EXCLUDED.max_content_rating,
+			    updated_at         = EXCLUDED.updated_at
+	`, userID, profileID, countsJSON, maxContentRating, updatedAt); err != nil {
+		return fmt.Errorf("clear taste vector for user %d profile %s: %w", userID, profileID, err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete taste clusters for user %d profile %s: %w", userID, profileID, err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete cached rows for user %d profile %s: %w", userID, profileID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit cleared taste profile for user %d profile %s: %w", userID, profileID, err)
+	}
+	return nil
+}
+
 // TasteProfileMeta holds the non-vector metadata for a taste profile.
 type TasteProfileMeta struct {
 	SignalCounts     map[string]int
@@ -738,11 +787,12 @@ func (r *Repo) GetTasteProfileMeta(ctx context.Context, userID int, profileID st
 }
 
 // GetTasteProfile retrieves the embedding for a user's taste profile.
-// Returns nil, nil when no profile exists.
+// Returns nil, nil when no profile exists or the profile has no taste vector
+// (see ClearTasteProfile).
 func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error) {
 	var v pgvector.Vector
 	err := r.pool.QueryRow(ctx,
-		`SELECT embedding FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`,
+		`SELECT embedding FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2 AND embedding IS NOT NULL`,
 		userID, profileID,
 	).Scan(&v)
 	if err != nil {
@@ -774,6 +824,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 			       1 - (p.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS score
 			FROM   user_taste_profiles p
 			WHERE  p.user_id     != $2
+			  AND  p.embedding IS NOT NULL
 			  AND  ($3 OR COALESCE(p.max_content_rating, '') = '' OR p.max_content_rating = ANY($4::text[]))
 			ORDER  BY p.embedding::halfvec(3072) <=> $1::halfvec(3072)
 			LIMIT  $5
@@ -963,14 +1014,8 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the replacement, including an empty cluster set, across server
-	// processes. DELETE alone cannot protect rows another refresh has not yet
-	// committed, so concurrent replacements can otherwise collide on INSERT.
-	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
-		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
-		userID, profileID)
-	if err != nil {
-		return fmt.Errorf("lock taste clusters: %w", err)
+	if err := lockTasteClusters(ctx, tx, userID, profileID); err != nil {
+		return err
 	}
 
 	_, err = tx.Exec(ctx,
@@ -998,6 +1043,19 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 	}
 
 	return tx.Commit(ctx)
+}
+
+// lockTasteClusters locks a profile's cluster replacement, including an empty
+// cluster set, across server processes until tx ends. DELETE alone cannot
+// protect rows another refresh has not yet committed, so concurrent
+// replacements can otherwise collide on INSERT.
+func lockTasteClusters(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
+		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("lock taste clusters: %w", err)
+	}
+	return nil
 }
 
 // GetTasteClusters retrieves all clusters for a user/profile.
@@ -1839,6 +1897,22 @@ func (r *Repo) GetWatchedItemIDSet(ctx context.Context, userID int, profileID st
 		return nil, err
 	}
 	return scoredItemIDSet(ids), nil
+}
+
+// GetFavoriteItemIDs returns the content IDs a profile has favorited, as
+// stored: episodes are not resolved to their series.
+func (r *Repo) GetFavoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT media_item_id FROM user_favorites WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get favorite item IDs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("get favorite item IDs: %w", err)
+	}
+	return ids, nil
 }
 
 // GetWatchedItemIDSetFromStore derives watched item IDs from a user store,

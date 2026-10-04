@@ -33,9 +33,19 @@ type ReadRefreshRequester interface {
 	RequestReadRefresh(ctx context.Context, userID int, profileID string)
 }
 
+// readerRepo is the part of *Repo the Reader reads.
+type readerRepo interface {
+	GetTasteProfileMeta(ctx context.Context, userID int, profileID string) (*TasteProfileMeta, error)
+	GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
+	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error)
+	ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error)
+	GetTopGenres(ctx context.Context, limit int) ([]string, error)
+	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+}
+
 // Reader assembles recommendation rows from cache-backed data sources.
 type Reader struct {
-	repo        *Repo
+	repo        readerRepo
 	ratingsRepo *catalog.RatingsRepo
 	refresh     ReadRefreshRequester
 	signals     *SignalReader
@@ -90,7 +100,8 @@ func (r *Reader) signalReader() *SignalReader {
 	if r.signals != nil {
 		return r.signals
 	}
-	return NewSignalReader(r.repo, nil)
+	repo, _ := r.repo.(signalRepo)
+	return NewSignalReader(repo, nil)
 }
 
 // GetForYouMain returns the first row the recommendations page should display.
@@ -286,23 +297,16 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 	return &rows[0], nil
 }
 
+// getForYouPageRows merges the profile's cached personal rows with the global
+// rows by its cold-start level. A profile with no positive signal, or no taste
+// profile, is level 0 and gets only the global rows, even when personal rows
+// from an earlier taste profile are still cached.
 func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	level := 0
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
-	if meta != nil {
-		positiveSignals := 0
-		for key, count := range meta.SignalCounts {
-			switch key {
-			case "rated_low", "watch_low":
-			default:
-				positiveSignals += count
-			}
-		}
-		level = coldStartLevel(positiveSignals)
-	}
+	level := coldStartLevelOf(meta)
 
 	globalRows, err := r.getGlobalRows(ctx)
 	if err != nil {
@@ -328,9 +332,6 @@ func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID st
 		})
 	}
 	personalRows = append(personalRows, clusterRows...)
-	if level == 0 && len(personalRows) > 0 {
-		level = 3
-	}
 
 	rows := mergePersonalizedAndColdStart(personalRows, globalRows, level)
 	rows, err = r.filterRows(ctx, userID, profileID, rows, filter)
@@ -405,12 +406,16 @@ func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 	}
 }
 
+// filterRows drops from rows the items the profile cannot access, those in its
+// recommendation exclusion set (watched and favorited titles), and those it
+// rated 2 or lower, then drops the rows left empty. Rows cached before a title
+// was watched or favorited are cleaned here.
 func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, rows []ForYouRow, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	if len(rows) == 0 {
 		return rows, nil
 	}
 
-	watchedSet, err := r.signalReader().WatchedItemIDSet(ctx, userID, profileID)
+	excluded, err := r.signalReader().RecommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +451,7 @@ func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, r
 			if _, ok := accessible[item.MediaItemID]; !ok {
 				continue
 			}
-			if _, watched := watchedSet[item.MediaItemID]; watched {
+			if _, skip := excluded[item.MediaItemID]; skip {
 				continue
 			}
 			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= 2 {
@@ -536,7 +541,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		}
 	}
 
-	// Filter extra rows (watched + low-rated) and deduplicate across all rows.
+	// Filter extra rows (excluded + low-rated) and deduplicate across all rows.
 	extraRows, err = r.filterRows(ctx, userID, profileID, extraRows, filter)
 	if err != nil {
 		return nil, err
