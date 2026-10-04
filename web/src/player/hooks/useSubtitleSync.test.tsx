@@ -425,6 +425,24 @@ describe("useSubtitleSync", () => {
     expect(onTimingChanged).not.toHaveBeenCalled();
   });
 
+  it("forgets a subtitle the server no longer has", async () => {
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({
+        subtitles: [stored(), stored({ key: SIDECAR, source: "external", sync: job("running") })],
+      }),
+      [READ]: () => {
+        throw new PlayerFetchError(404, "Not Found", "not_found");
+      },
+    });
+    const { result } = renderSync();
+    await flush();
+    await tick();
+    expect(calls(READ)).toHaveLength(1);
+    expect(result.current.entries[SIDECAR]).toBeUndefined();
+    expect(result.current.entries[KEY]).toBeDefined();
+  });
+
   it("reads all subtitles again for an update about one it has not loaded", async () => {
     serve({
       [STATUS]: () => ({ state: "available" }),

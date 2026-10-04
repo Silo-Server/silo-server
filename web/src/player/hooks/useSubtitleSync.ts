@@ -263,9 +263,22 @@ export function useSubtitleSync({
           },
         );
         if (current() && res?.subtitle) observe(res.subtitle, { sentAt });
-      } catch {
-        // A lost subtitle or file stops polling; a later reload re-arms it.
-        if (current()) patch(key, { pollExpired: true });
+      } catch (err) {
+        if (!current()) return;
+        if (err instanceof PlayerFetchError && err.status === 404) {
+          // The subtitle is gone, and its jobs with it: forget it, so no
+          // progress of a job that will never finish stays on screen.
+          knownTimingRef.current.delete(key);
+          jobsRef.current.delete(key);
+          pollStartedRef.current.delete(key);
+          setEntries((prev) => {
+            const { [key]: _gone, ...rest } = prev;
+            return rest;
+          });
+        } else {
+          // Any other failure stops polling; a later reload re-arms it.
+          patch(key, { pollExpired: true });
+        }
       } finally {
         locks.delete(key);
       }
