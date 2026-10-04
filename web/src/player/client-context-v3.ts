@@ -31,8 +31,8 @@ const WEB_APP_VERSION = "web";
  * the server exposes external and embedded text as session-scoped sidecars,
  * which it renders as WebVTT or ASS via JASSUB (with container font
  * attachments). Embedded PGS arrives as a lossless `.sup` sidecar drawn by
- * usePGSSubtitles. DVD/DVB bitmaps and external bitmap files have no sidecar
- * the server can serve, so those are still burned in server-side.
+ * usePGSSubtitles. Embedded DVD/DVB bitmaps have no sidecar, so the server
+ * still burns them in; it refuses external bitmap files outright.
  */
 const WEB_SUBTITLE_CAPABILITIES: DeliverySubtitleCapabilitiesV3 = {
   embedded_text: true,
