@@ -606,7 +606,7 @@ func (l *compatScrobbleLocks) holdersFor(key string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if entry := l.locks[key]; entry != nil {
-		return entry.holders
+		return 1 + len(entry.waiters)
 	}
 	return 0
 }
@@ -628,6 +628,41 @@ func waitForCompatScrobbleHolders(t *testing.T, h *PlaybackHandler, upstreamID s
 			t.Fatalf("fewer than %d callers on the scrobble lock for %s", n, upstreamID)
 		}
 		runtime.Gosched()
+	}
+}
+
+// Callers queued on an upstream session's scrobble lock take it in the order
+// they queued, so a Stopped report cannot overtake a progress report that was
+// already waiting and stage a stop from the position before it.
+func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
+	h := &PlaybackHandler{}
+	locks := &h.compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	const waiters = 8
+	order := make(chan int, waiters)
+	released := make(chan struct{}, waiters)
+	for i := range waiters {
+		go func() {
+			release := locks.lock("upstream")
+			order <- i
+			release()
+			released <- struct{}{}
+		}()
+		// Queue the next caller only once this one is waiting.
+		waitForCompatScrobbleHolders(t, h, "upstream", i+2)
+	}
+	unlock()
+
+	for want := range waiters {
+		if got := <-order; got != want {
+			t.Fatalf("waiter %d took the lock in position %d, want arrival order", got, want)
+		}
+	}
+	for range waiters {
+		<-released
+	}
+	if n := locks.holdersFor("upstream"); n != 0 {
+		t.Fatalf("lock entry kept %d holders after every caller released it", n)
 	}
 }
 
