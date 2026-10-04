@@ -224,6 +224,11 @@ export function stepFeedback(prev: FeedbackState, input: FeedbackInput): Feedbac
         show(outcomeNotice(watched));
       }
     }
+  } else {
+    // The watched job is gone, with the file or session it belonged to:
+    // nothing will finish its progress notice.
+    if (next.applying) next = { ...next, applying: null };
+    if (next.notice?.tone === "progress") show(null);
   }
 
   if (

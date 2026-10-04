@@ -26,6 +26,12 @@ function isOutdatedJob(job: SubtitleSyncJob, known: SubtitleSyncJob): boolean {
   return isSyncInProgress(job.status) && !isSyncInProgress(known.status);
 }
 
+interface ObserveOptions {
+  watch?: string;
+  sentAt?: number;
+  pushed?: boolean;
+}
+
 /** What the player knows about one syncable subtitle's timing and sync. */
 export interface SubtitleSyncEntry {
   state: SubtitleSyncState;
@@ -160,39 +166,44 @@ export function useSubtitleSync({
    * Records a fresh server view of a subtitle and reports a timing change.
    * `watch` marks a job this viewer started. `sentAt` is the observation
    * number a read was sent at: a realtime update that arrived while it was
-   * in flight is newer than its answer, which is then dropped.
+   * in flight is newer than its answer, which is then dropped. `pushed`
+   * marks a realtime update, whose timing change is reported by the
+   * subtitle_timing_changed event that always follows it.
    */
-  const observe = useCallback((state: SubtitleSyncState, watch?: string, sentAt?: number) => {
-    const key = state.key;
-    if (sentAt !== undefined && (observedRef.current.get(key) ?? 0) > sentAt) {
-      if (watch) {
-        setEntries((prev) =>
-          prev[key] ? { ...prev, [key]: { ...prev[key], watchedJobId: watch } } : prev,
-        );
+  const observe = useCallback(
+    (state: SubtitleSyncState, { watch, sentAt, pushed }: ObserveOptions = {}) => {
+      const key = state.key;
+      if (sentAt !== undefined && (observedRef.current.get(key) ?? 0) > sentAt) {
+        if (watch) {
+          setEntries((prev) =>
+            prev[key] ? { ...prev, [key]: { ...prev[key], watchedJobId: watch } } : prev,
+          );
+        }
+        return;
       }
-      return;
-    }
-    observedRef.current.set(key, ++observationRef.current);
-    if (state.sync) jobsRef.current.set(key, state.sync);
-    else jobsRef.current.delete(key);
-    const timing = timingKey(state);
-    const previous = knownTimingRef.current.get(key);
-    knownTimingRef.current.set(key, timing);
-    const inProgress = isSyncInProgress(state.sync?.status);
-    if (!inProgress) pollStartedRef.current.delete(key);
-    setEntries((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        state,
-        pollExpired: inProgress && prev[key]?.pollExpired,
-        watchedJobId: watch ?? prev[key]?.watchedJobId,
-      },
-    }));
-    if (previous !== undefined && previous !== TIMING_DIRTY && previous !== timing) {
-      onTimingChangedRef.current?.(key);
-    }
-  }, []);
+      observedRef.current.set(key, ++observationRef.current);
+      if (state.sync) jobsRef.current.set(key, state.sync);
+      else jobsRef.current.delete(key);
+      const timing = timingKey(state);
+      const previous = knownTimingRef.current.get(key);
+      knownTimingRef.current.set(key, timing);
+      const inProgress = isSyncInProgress(state.sync?.status);
+      if (!inProgress) pollStartedRef.current.delete(key);
+      setEntries((prev) => ({
+        ...prev,
+        [key]: {
+          ...prev[key],
+          state,
+          pollExpired: inProgress && prev[key]?.pollExpired,
+          watchedJobId: watch ?? prev[key]?.watchedJobId,
+        },
+      }));
+      if (!pushed && previous !== undefined && previous !== TIMING_DIRTY && previous !== timing) {
+        onTimingChangedRef.current?.(key);
+      }
+    },
+    [],
+  );
 
   // Sync is a server-wide capability; read it once per host config.
   useEffect(() => {
@@ -226,7 +237,7 @@ export function useSubtitleSync({
           signal: controller.signal,
         });
         if (!current() || controller.signal.aborted) return;
-        for (const state of res?.subtitles ?? []) observe(state, undefined, sentAt);
+        for (const state of res?.subtitles ?? []) observe(state, { sentAt });
       } catch {
         /* Sync status is decoration; the tracks still play without it. */
       }
@@ -251,7 +262,7 @@ export function useSubtitleSync({
             path: { media_file_id: String(mediaFileId), key },
           },
         );
-        if (current() && res?.subtitle) observe(res.subtitle, undefined, sentAt);
+        if (current() && res?.subtitle) observe(res.subtitle, { sentAt });
       } catch {
         // A lost subtitle or file stops polling; a later reload re-arms it.
         if (current()) patch(key, { pollExpired: true });
@@ -302,7 +313,7 @@ export function useSubtitleSync({
       const state = storedSyncState(subtitle);
       pollStartedRef.current.delete(state.key);
       const sync = state.sync;
-      observe(state, sync && isSyncInProgress(sync.status) ? sync.id : undefined);
+      observe(state, { watch: sync && isSyncInProgress(sync.status) ? sync.id : undefined });
     },
     [observe],
   );
@@ -339,7 +350,7 @@ export function useSubtitleSync({
       const known = jobsRef.current.get(update.sync_key);
       if (known && isOutdatedJob(update.job, known)) return;
       pushedAtRef.current.set(update.sync_key, Date.now());
-      observe({ ...entry.state, timing: update.timing, sync: update.job });
+      observe({ ...entry.state, timing: update.timing, sync: update.job }, { pushed: true });
     },
     [observe],
   );
@@ -375,7 +386,7 @@ export function useSubtitleSync({
           },
         );
         if (!current() || !res?.subtitle) return;
-        observe(res.subtitle, res.subtitle.sync?.id, sentAt);
+        observe(res.subtitle, { watch: res.subtitle.sync?.id, sentAt });
         patch(key, { busy: false });
       } catch (err) {
         if (current()) handleActionError(key, err, "Sync failed");

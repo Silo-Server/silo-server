@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayerSubtitleInfo } from "../types";
 import type { SubtitleSyncJob, SubtitleSyncState } from "../utils/subtitleSync";
 import type { SubtitleSync, SubtitleSyncEntry } from "./useSubtitleSync";
-import { SYNC_NOTICE_VISIBLE_MS, useSubtitleSyncFeedback } from "./useSubtitleSyncFeedback";
+import {
+  SYNC_APPLY_TIMEOUT_MS,
+  SYNC_NOTICE_VISIBLE_MS,
+  useSubtitleSyncFeedback,
+} from "./useSubtitleSyncFeedback";
 
 const KEY = "external-" + "d".repeat(64);
 const OTHER = "stored-8";
@@ -171,6 +175,27 @@ describe("useSubtitleSyncFeedback", () => {
     expect(result.current.notice).toBeNull();
     rerender({ entries: { [KEY]: synced }, activeKey: KEY, revision: 1, loadState: "ready" });
     expect(result.current.notice).toMatchObject({ tone: "info", title: "Subtitle timing updated" });
+  });
+
+  it("drops the notice of a sync whose file or session went away", () => {
+    const running = entry(KEY, job("running", { progress: 0.3 }));
+    const { result, rerender } = renderFeedback({
+      entries: { [KEY]: running },
+      activeKey: KEY,
+      revision: 0,
+      loadState: "ready",
+    });
+    expect(result.current.notice).toMatchObject({ tone: "progress" });
+    rerender({ entries: {}, activeKey: null, revision: 0, loadState: "idle" });
+    expect(result.current.notice).toBeNull();
+
+    // Nor does one waiting for its corrected cues come back later.
+    const synced = entry(KEY, job("synced", { id: "71" }), true, { offset_ms: 400, scale: 1 });
+    rerender({ entries: { [KEY]: synced }, activeKey: KEY, revision: 1, loadState: "loading" });
+    expect(result.current.notice).toMatchObject({ title: "Applying new timing…" });
+    rerender({ entries: {}, activeKey: null, revision: 0, loadState: "idle" });
+    act(() => vi.advanceTimersByTime(SYNC_APPLY_TIMEOUT_MS));
+    expect(result.current.notice).toBeNull();
   });
 
   it("can be dismissed", () => {

@@ -3322,8 +3322,31 @@ describe("VideoPlayer subtitle sync", () => {
       ),
     );
     await act(async () => {});
-    expect(subtitleTimeline.cueRevision).toBe(1);
     expect(indicator()).toHaveTextContent("Applying new timing…");
+    // The server follows the result with the timing event: one reload, and a
+    // read that finds the finished job.
+    const routes = playerV2Mock.getMockImplementation()!;
+    playerV2Mock.mockImplementation(async (config: unknown, route: string, options: unknown) =>
+      route === "GET /api/v2/subtitles/{media_file_id}/sync/{key}"
+        ? {
+            subtitle: state(SIDECAR, {
+              timing: { offset_ms: 2300, scale: 1 },
+              sync: {
+                id: "80",
+                status: "synced",
+                trigger: "manual",
+                confidence: 0.9,
+                result: { offset_ms: 2300, scale: 1 },
+                created_at: "2026-01-02T03:04:05.000Z",
+                finished_at: "2026-01-02T03:05:05.000Z",
+              },
+            }),
+          }
+        : routes(config, route, options),
+    );
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, SIDECAR)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
 
     act(() => subtitleTimeline.setLoadState?.("loading"));
     act(() => subtitleTimeline.setLoadState?.("ready"));

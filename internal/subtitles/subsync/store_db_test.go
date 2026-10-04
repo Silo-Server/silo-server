@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/database"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -117,7 +118,12 @@ func TestExternalTimingAndJobsPostgres(t *testing.T) {
 	if _, err := store.Apply(ctx, stale, found, Outcome{Status: string(StatusSynced), Result: &found}); !errors.Is(err, ErrSubtitleChanged) {
 		t.Fatalf("stale job applied: %v", err)
 	}
-	_ = store.Finish(ctx, stale.ID, Outcome{Status: JobFailed})
+	if err := store.Finish(ctx, stale.ID, Outcome{Status: JobFailed}); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	if err := store.Finish(ctx, stale.ID, Outcome{Status: JobFailed}); !errors.Is(err, jobrunner.ErrJobTerminal) {
+		t.Fatalf("finish a finished job: %v", err)
+	}
 
 	// A first manual write for other bytes creates their row.
 	other := strings.Repeat("cd", 32)

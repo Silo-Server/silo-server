@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -24,8 +25,10 @@ type fakeJobs struct {
 	finished map[int64]Outcome
 	applied  map[int64]subtitles.Timing
 	applyErr error
-	hasJob   bool
-	progress []string
+	// finishErr is what Finish answers, as for a job reaped meanwhile.
+	finishErr error
+	hasJob    bool
+	progress  []string
 }
 
 func (f *fakeJobs) Heartbeat(context.Context, int64) error { return nil }
@@ -79,6 +82,9 @@ func (f *fakeJobs) Progress(_ context.Context, _ int64, phase string, progress f
 func (f *fakeJobs) Finish(_ context.Context, id int64, o Outcome) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.finishErr != nil {
+		return f.finishErr
+	}
 	if f.finished == nil {
 		f.finished = map[int64]Outcome{}
 	}
@@ -534,6 +540,22 @@ func TestExecuteRefusesStoredSubtitleOfAnotherFile(t *testing.T) {
 	outcome := f.jobs.finished[job.ID]
 	if outcome.Status != JobFailed || outcome.Error != ErrSubtitleChanged.Error() || len(f.jobs.applied) != 0 || f.decodes != 0 {
 		t.Fatalf("outcome %+v applied %v decodes %d", outcome, f.jobs.applied, f.decodes)
+	}
+}
+
+func TestExecuteDoesNotAnnounceAJobThatEndedMeanwhile(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	sub := f.svc.rows.(*fakeSubtitles).sub
+	job, _, err := f.jobs.Create(context.Background(), sub, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.notifier.updates = nil
+	sub.Revision++ // the job fails as changed
+	f.jobs.finishErr = jobrunner.ErrJobTerminal
+	f.svc.execute(context.Background(), job)
+	if len(f.notifier.updates) != 0 {
+		t.Fatalf("announced %+v", f.notifier.updates)
 	}
 }
 

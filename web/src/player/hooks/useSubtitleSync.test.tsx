@@ -335,6 +335,10 @@ describe("useSubtitleSync", () => {
       ),
     );
     expect(result.current.entries[SIDECAR]?.state.sync?.status).toBe("synced");
+    // The cues reload once, for the timing event that follows the result.
+    expect(onTimingChanged).not.toHaveBeenCalled();
+    act(() => result.current.timingChanged(SIDECAR));
+    await flush();
     expect(onTimingChanged).toHaveBeenCalledExactlyOnceWith(SIDECAR);
   });
 
@@ -373,7 +377,8 @@ describe("useSubtitleSync", () => {
 
     expect(result.current.entries[SIDECAR]?.state.sync?.status).toBe("synced");
     expect(result.current.entries[SIDECAR]?.state.timing).toEqual(timing);
-    expect(onTimingChanged).toHaveBeenCalledExactlyOnceWith(SIDECAR);
+    // The stale answer's old timing did not read as a second change.
+    expect(onTimingChanged).not.toHaveBeenCalled();
   });
 
   it("ignores a late realtime update about an older job", async () => {

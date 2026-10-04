@@ -347,9 +347,13 @@ type Outcome struct {
 
 // Finish records an outcome that leaves the subtitle as it is.
 func (s *Store) Finish(ctx context.Context, id int64, o Outcome) error {
-	_, err := s.pool.Exec(ctx, finishJobSQL, append([]any{id}, outcomeArgs(o)...)...)
+	tag, err := s.pool.Exec(ctx, finishJobSQL, append([]any{id}, outcomeArgs(o)...)...)
 	if err != nil {
 		return fmt.Errorf("finish subtitle sync job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Reaped, or deleted with a replaced file: the outcome is not news.
+		return jobrunner.ErrJobTerminal
 	}
 	return nil
 }
