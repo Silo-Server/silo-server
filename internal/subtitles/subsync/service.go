@@ -275,7 +275,25 @@ type run struct {
 func (r *run) report(ctx context.Context, phase string, progress float64) {
 	r.job.Status, r.job.Phase, r.job.Progress = JobRunning, phase, &progress
 	_ = r.s.jobs.Progress(context.WithoutCancel(ctx), r.job.ID, phase, progress)
-	r.s.updated(ctx, r.subject.target, r.subject.timing, r.job)
+	r.s.updated(ctx, r.subject.target, r.timingNow(ctx), r.job)
+}
+
+// timingNow is the subject's correction as stored now: another viewer can
+// retime it while the job runs, and an update must not undo that on their
+// screens. The correction read at the start stands in when the row cannot
+// be read.
+func (r *run) timingNow(ctx context.Context) subtitles.Timing {
+	switch {
+	case r.job.ExternalTimingID != 0 && r.s.external != nil:
+		if row, err := r.s.external.ExternalTimingByID(ctx, r.job.ExternalTimingID); err == nil && row != nil {
+			return row.Timing
+		}
+	case r.job.SubtitleID != 0:
+		if row, err := r.s.rows.GetDownloadedSubtitle(ctx, r.job.SubtitleID); err == nil && row != nil {
+			return row.Timing
+		}
+	}
+	return r.subject.timing
 }
 
 // finished tells players of the file how the job ended; timing is the
@@ -303,7 +321,7 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		outcome.Status, outcome.Error, outcome.Failure = JobFailed, err.Error(), failureOf(err)
 		log.WarnContext(ctx, "subtitle sync failed", "stage", stage, "error", err, "failure", outcome.Failure)
 		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
-			r.finished(finishCtx, outcome, r.subject.timing)
+			r.finished(finishCtx, outcome, r.timingNow(finishCtx))
 		}
 	}
 	if err != nil {
@@ -319,7 +337,7 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	if outcome.Status != string(StatusSynced) {
 		log.InfoContext(ctx, "subtitle sync finished")
 		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
-			r.finished(finishCtx, outcome, r.subject.timing)
+			r.finished(finishCtx, outcome, r.timingNow(finishCtx))
 		}
 		return
 	}

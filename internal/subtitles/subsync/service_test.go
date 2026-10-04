@@ -559,6 +559,38 @@ func TestExecuteDoesNotAnnounceAJobThatEndedMeanwhile(t *testing.T) {
 	}
 }
 
+func TestUpdatesCarryTimingAnotherViewerSetMeanwhile(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	sub := f.svc.rows.(*fakeSubtitles).sub
+	sub.Timing = subtitles.Timing{Scale: 1}
+	manual := subtitles.Timing{Scale: 1, OffsetMS: 700}
+	decode := f.svc.sampler.local
+	f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
+		sub.Timing = manual // another viewer sets the timing while this job decodes
+		return decode(ctx, req)
+	}
+	f.jobs.applyErr = ErrSubtitleChanged
+	job, _, err := f.jobs.Create(context.Background(), sub, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.notifier.updates = nil
+	f.svc.execute(context.Background(), job)
+
+	updates := f.notifier.updates
+	if len(updates) < 2 {
+		t.Fatalf("updates %+v", updates)
+	}
+	for _, u := range updates[1:] {
+		if u.Timing != manual {
+			t.Fatalf("update %s/%s carries %+v, want %+v", u.Job.Status, u.Job.Phase, u.Timing, manual)
+		}
+	}
+	if last := updates[len(updates)-1]; last.Job.Status != JobFailed || last.Job.Failure != FailureSubtitleChanged {
+		t.Fatalf("last update %+v", last.Job)
+	}
+}
+
 func TestRequestExternalRefusesFormatsItCannotRetime(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
 	external, _ := sidecarFixture(t, f)

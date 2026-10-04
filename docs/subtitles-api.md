@@ -514,7 +514,8 @@ authoritative.
 - `subtitle_sync_updated` (`session_id`, `file_id`, `sync_key`, `subtitle_id`
   for a stored subtitle, `timing`, `job`) at each step of a job: queued, every
   progress update, and the outcome. `job` has the `SubtitleSyncJobState`
-  shape.
+  shape. `timing` is the subtitle's correction when the update is sent,
+  including one another viewer set while the job ran.
 - `subtitle_timing_changed` (`session_id`, `file_id`, `sync_key`,
   `subtitle_id` for a stored subtitle, optional `track`) whenever a subtitle's
   timing changed: an applied sync, or a timing set or reset.
