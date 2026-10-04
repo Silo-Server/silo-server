@@ -18,12 +18,13 @@ import (
 // fakeCatalog backs the catalog-items operations: it records the request
 // the seam received and answers a fixed page.
 type fakeCatalog struct {
-	sourceOrder bool
-	err         error
-	lastReq     catalogpkg.CatalogRequest
-	lastViewer  handlers.ItemViewer
-	lastGroup   bool
-	lastGroups  catalogpkg.AudiobookGroupsQuery
+	sourceOrder        bool
+	unreadableEpisodes bool
+	err                error
+	lastReq            catalogpkg.CatalogRequest
+	lastViewer         handlers.ItemViewer
+	lastGroup          bool
+	lastGroups         catalogpkg.AudiobookGroupsQuery
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
@@ -158,7 +159,12 @@ func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id 
 	if id != "series:severance-S01" {
 		return nil, notFoundItem()
 	}
-	return []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}, nil
+	episodes := []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}
+	if f.unreadableEpisodes {
+		episodes[0].Files[0].Unreadable = true
+		episodes[0].Files = append(episodes[0].Files, handlers.EpisodeFileView{FileID: 203, Resolution: "1080p"})
+	}
+	return episodes, nil
 }
 
 func fakeSeason() handlers.SeasonView {
@@ -453,6 +459,7 @@ func TestQueryCatalogItems(t *testing.T) {
 
 func TestGetCatalogItem(t *testing.T) {
 	deps, fake := catalogDeps(t)
+	fake.unreadableEpisodes = true
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?library_id=2&file_id=120", "", viewerHeaders())
 	if rec.Code != 200 {
@@ -497,6 +504,16 @@ func TestGetCatalogItem(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/items/series:severance-S01/episodes", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"air_date":"2022-02-18"`) || !strings.Contains(rec.Body.String(), `"files":[{"file_id":"201"`) || !strings.Contains(rec.Body.String(), `"user_data":{"watched_count":1,"unplayed_count":0,"in_progress_count":0,"played":true}`) {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var episodePage struct {
+		Items []struct {
+			Files []map[string]json.RawMessage `json:"files"`
+		} `json:"items"`
+	}
+	decodeJSON(t, rec.Body, &episodePage)
+	if len(episodePage.Items) != 2 || len(episodePage.Items[0].Files) != 2 ||
+		string(episodePage.Items[0].Files[0]["unreadable"]) != "true" || episodePage.Items[0].Files[1]["unreadable"] != nil {
+		t.Fatalf("episode file readability = %+v", episodePage)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/series:nope/episodes", "", viewerHeaders()), TypeNotFound)
 }
@@ -648,31 +665,5 @@ func TestGetCatalogItemScopesVersionsToLibraryWhenEnabled(t *testing.T) {
 	}
 	if fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
-	}
-}
-
-// An unreadable episode file is flagged on the v2 wire and the flag is
-// omitted for every readable file.
-func TestEpisodesOfFlagsUnreadableFiles(t *testing.T) {
-	episodes := episodesOf([]handlers.EpisodeView{{
-		ContentID: "episode:1",
-		Files: []handlers.EpisodeFileView{
-			{FileID: 1, Unreadable: true},
-			{FileID: 2, Resolution: "1080p"},
-		},
-	}})
-	body, err := json.Marshal(episodes[0].Files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var files []map[string]any
-	if err := json.Unmarshal(body, &files); err != nil {
-		t.Fatal(err)
-	}
-	if files[0]["unreadable"] != true {
-		t.Fatalf("unreadable file = %s", body)
-	}
-	if _, ok := files[1]["unreadable"]; ok {
-		t.Fatalf("readable file carries unreadable: %s", body)
 	}
 }

@@ -201,21 +201,6 @@ export type VideoTranscoding =
   | { mode: "unlimited" }
   | { mode: "limit"; max: number };
 
-/**
- * The account's own video transcoding setting; null when both fields follow
- * the default. The rare "inherit on/off, override the count" state reads as a
- * custom value too; the card shows it from the effective policy.
- */
-export function videoTranscodingFromOverrides(
-  allowed: boolean | null,
-  max: number | null,
-): VideoTranscoding | null {
-  if (allowed === null && max === null) return null;
-  if (allowed === false) return { mode: "off" };
-  if (max === null || max === 0) return { mode: "unlimited" };
-  return { mode: "limit", max };
-}
-
 export function videoTranscodingFromEffective(allowed: boolean, max: number): VideoTranscoding {
   if (!allowed) return { mode: "off" };
   return max === 0 ? { mode: "unlimited" } : { mode: "limit", max };

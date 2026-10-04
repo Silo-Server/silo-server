@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { autoscanWebhookURL } from "./webhookURL";
 import { describe, expect, it } from "vitest";
 

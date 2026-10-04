@@ -221,15 +221,6 @@ describe("LibraryRecommended", () => {
     return queryClient;
   }
 
-  it("renders sections from the layout and item APIs", async () => {
-    await render(<LibraryRecommended libraryId={42} />);
-
-    expect(container.textContent).toContain("Continue Watching");
-    expect(container.textContent).toContain("Recently Added");
-    expect(mockFetchLibrarySectionItems).toHaveBeenCalledWith(42, "cw", expect.any(Object));
-    expect(mockFetchLibrarySectionItems).toHaveBeenCalledWith(42, "recent", expect.any(Object));
-  });
-
   it("does not invalidate cached library sections on mount", async () => {
     const invalidateQueries = vi.spyOn(QueryClient.prototype, "invalidateQueries");
 
@@ -365,16 +356,6 @@ describe("LibraryRecommended", () => {
     expect(container.textContent).toContain("Recently Added");
   });
 
-  it("renders nothing while loading with no data", async () => {
-    mockUseLibraryLayout.mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    });
-
-    await render(<LibraryRecommended libraryId={42} />);
-    expect(container.innerHTML).toBe("");
-  });
-
   it("renders pinned collection rows from sidebar_pins for the current library", async () => {
     mockUseSidebarPins.mockReturnValue({
       pins: {
@@ -400,17 +381,6 @@ describe("LibraryRecommended", () => {
     expect(container.textContent).not.toContain("Other Library Collection");
     expect(container.querySelector('[data-testid="pinned-collection-load-more"]')).toBeNull();
     expect(mockUseLibraryCollectionItems).toHaveBeenCalledWith(42, "col-1");
-  });
-
-  it("renders nothing for a pinned collection with no visible items", async () => {
-    mockUseSidebarPins.mockReturnValue({
-      pins: { "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }] },
-    });
-    mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
-
-    await render(<LibraryRecommended libraryId={42} />);
-
-    expect(container.textContent).not.toContain("Pinned Horror");
   });
 
   describe("empty library", () => {

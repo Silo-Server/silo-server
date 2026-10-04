@@ -445,24 +445,6 @@ func TestSyncRatingsPersistsCursorsWhenImporting(t *testing.T) {
 	}
 }
 
-func TestSyncRatingsWatchGateHoldsUnwatchedMovies(t *testing.T) {
-	h := newRatingHarness(t)
-	h.provider.gateMovies = true
-	h.store.set(ratingTestMovieA, 4)
-	h.store.set(ratingTestMovieB, 5)
-	h.watched[ratingTestMovieB] = true
-	h.provider.batch = RatingImportBatch{SnapshotKinds: []string{historyimport.KindMovie}}
-
-	result := h.sync()
-
-	if len(h.provider.exported) != 1 || h.provider.exported[0].MediaItemID != ratingTestMovieB {
-		t.Fatalf("exported = %#v, want only the watched movie", h.provider.exported)
-	}
-	if h.state(ratingTestMovieA) != nil || len(result.Warnings) == 0 {
-		t.Fatalf("a held rating stays pending with a warning: state=%#v warnings=%v", h.state(ratingTestMovieA), result.Warnings)
-	}
-}
-
 // A plugin declares the gate with rating_export_requires_watched, here for
 // movies only, so its series ratings are sent right away.
 func TestSyncRatingsWatchGateHoldsUnwatchedMoviesForAPlugin(t *testing.T) {

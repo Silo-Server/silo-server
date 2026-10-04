@@ -27,27 +27,6 @@ function makeSeason(overrides: Partial<Season> = {}): Season {
 }
 
 describe("SeasonCarousel", () => {
-  it("renders an Embla viewport and container for the season cards", () => {
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/series-1"]}>
-          <SeasonCarousel
-            seasons={[
-              makeSeason(),
-              makeSeason({ content_id: "season-2", season_number: 2, title: "Season 2" }),
-            ]}
-          />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(markup).toContain("embla__viewport");
-    expect(markup).toContain("embla__container");
-    expect(markup).toContain("overflow-hidden");
-    expect(markup).not.toContain('data-slot="scroll-area"');
-    expect(markup).not.toContain('data-slot="scroll-area-scrollbar"');
-  });
-
   it("renders independent season detail and direct-play targets", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>

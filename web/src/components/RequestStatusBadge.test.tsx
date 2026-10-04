@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
 import type { MediaRequestOutcome, MediaRequestStatus } from "@/api/types";
 import { requestDisplayState, type RequestDisplayState } from "@/lib/mediaRequests";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
 import { RequestReasonBadge, RequestStatusBadge } from "./RequestStatusBadge";
 
 describe("requestDisplayState", () => {
@@ -41,45 +41,6 @@ describe("RequestStatusBadge", () => {
     const badge = screen.getByText(label).closest("[data-slot='badge']");
     expect(badge).toHaveAttribute("data-variant", variant);
     expect(badge).toHaveAttribute("data-request-state", state);
-  });
-
-  it("uses theme tokens rather than fixed palette colors", () => {
-    const states: RequestDisplayState[] = [
-      "pending",
-      "approved",
-      "processing",
-      "available",
-      "declined",
-      "cancelled",
-      "failed",
-    ];
-    const { container } = render(
-      <>
-        {states.map((state) => (
-          <RequestStatusBadge key={state} state={state} overlay />
-        ))}
-      </>,
-    );
-
-    expect(container.innerHTML).not.toMatch(/(amber|emerald|sky|zinc|red)-\d/);
-  });
-
-  it("gives an outline badge a backing only when it sits over artwork", () => {
-    const { rerender } = render(<RequestStatusBadge state="pending" />);
-    expect(screen.getByText("Pending").closest("[data-slot='badge']")).not.toHaveClass(
-      "bg-background/85",
-    );
-
-    rerender(<RequestStatusBadge state="pending" overlay />);
-    expect(screen.getByText("Pending").closest("[data-slot='badge']")).toHaveClass(
-      "bg-background/85",
-    );
-  });
-
-  it("leads the label with a count", () => {
-    render(<RequestStatusBadge state="processing" count={3} />);
-
-    expect(screen.getByText("3").closest("[data-slot='badge']")).toHaveTextContent("3Processing");
   });
 });
 

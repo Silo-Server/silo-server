@@ -1,7 +1,3 @@
-import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
 import type { WatchlistTitle } from "@/api/v2/watchlistTitles";
 import { UICustomizationContext } from "@/contexts/uiCustomizationContext";
 import {
@@ -13,6 +9,10 @@ import {
 } from "@/lib/overlays";
 import type { CardCaption } from "@/lib/uiCustomization";
 import { watchlistTitleStatus } from "@/lib/watchlistTitles";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter } from "react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WatchlistTitleCard from "./WatchlistTitleCard";
 
 const NOW = new Date(2026, 8, 30, 12);
@@ -128,6 +128,9 @@ describe("WatchlistTitleCard", () => {
     prefs.items.request_status = { ...prefs.items.request_status, position: "bottom-left" };
     const withBar = renderCard(downloading, prefs);
     expect(withBar.querySelector("[data-request-download-bar]")).not.toBeNull();
+    expect(withBar.querySelector("[data-request-download-bar] > div")).toHaveStyle({
+      width: "43%",
+    });
     // The bottom badge row rises clear of the bar.
     expect(withBar.querySelector('[data-overlay-edge="bottom"]')).toHaveClass("mb-2");
     cleanup();

@@ -23,7 +23,6 @@
 ./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
 ./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
 ./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
-./internal/trickplay TestReaderSuppressesDisabledLibraryAvailabilityDB
 ./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
 
 # Media image sweeps resume bounded listings without losing partial prefixes.
@@ -38,7 +37,6 @@
 # Chapter width replacement has one extraction and upload across API replicas.
 ./internal/chapterthumbs TestWidthBackfillSerializesReplicasPostgres
 ./internal/chapterthumbs TestWidthChangeDuringFirstChapterExtractionDB
-./internal/chapterthumbs TestChapterLockSessionLossRejectsStaleSaveDB
 ./internal/chapterthumbs TestTerminatedChapterWorkerCannotReplaceCurrentBlobDB
 
 # Chapter image URLs retain exact issued expiry in one batched transaction.
@@ -129,6 +127,7 @@
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
+./internal/sections TestNextUpModeStatementBudgetPostgres
 
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery

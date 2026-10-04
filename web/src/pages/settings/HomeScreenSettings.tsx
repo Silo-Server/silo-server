@@ -204,7 +204,7 @@ export function canMutateSectionSettings(
   );
 }
 
-export function shouldRestoreSelectionState(
+function shouldRestoreSelectionState(
   currentSelectionValue: string,
   selectionValueAtSave: string,
 ): boolean {

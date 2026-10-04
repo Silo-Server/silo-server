@@ -3,7 +3,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,6 +78,11 @@ vi.mock("./admin-settings/InviteCodesTab", () => ({
   default: () => <div>Invite codes panel</div>,
 }));
 
+beforeEach(() => {
+  mocks.useAdminServerSettings.mockReset();
+  mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
+});
+
 function LocationProbe() {
   const location = useLocation();
   return <span data-testid="location">{`${location.pathname}${location.search}`}</span>;
@@ -101,119 +106,6 @@ function renderPage(entry = "/admin/users") {
     </MemoryRouter>,
   );
 }
-
-function tab(name: string) {
-  return screen.getByRole("tab", { name });
-}
-
-describe("AdminUsers tabs", () => {
-  beforeEach(() => {
-    setAccessToken("account");
-    setProfileId("owner");
-    setProfileToken(null);
-    mocks.users = [];
-    mocks.reads = 0;
-    mocks.update.mockReset();
-    mocks.useAdminServerSettings.mockReset();
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "false" },
-      isLoading: false,
-    });
-  });
-
-  it("opens on the users tab when no tab is requested", () => {
-    renderPage();
-
-    expect(tab("Users")).toHaveAttribute("aria-selected", "true");
-    expect(tab("Invite Codes")).toHaveAttribute("aria-selected", "false");
-  });
-
-  it("selects the Invite Codes tab from ?tab=invite-codes", () => {
-    renderPage("/admin/users?tab=invite-codes");
-
-    expect(tab("Invite Codes")).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Invite codes panel")).toBeInTheDocument();
-  });
-
-  it("falls back to the users tab for an unknown tab id", () => {
-    renderPage("/admin/users?tab=not-a-tab");
-
-    expect(tab("Users")).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("writes the selected tab to the URL and drops the param on the default tab", async () => {
-    renderPage();
-
-    await userEvent.click(tab("Invitations"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/users?tab=invitations");
-
-    await userEvent.click(tab("Users"));
-    expect(screen.getByTestId("location")).toHaveTextContent("/admin/users");
-    expect(screen.getByTestId("location")).not.toHaveTextContent("tab=");
-  });
-});
-
-describe("AdminUsers public-signup status badge", () => {
-  beforeEach(() => {
-    setAccessToken("account");
-    setProfileId("owner");
-    setProfileToken(null);
-    mocks.users = [];
-    mocks.reads = 0;
-    mocks.update.mockReset();
-    mocks.useAdminServerSettings.mockReset();
-  });
-
-  it("shows a neutral 'off' badge linking to General settings when signups are disabled", () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "false" },
-      isLoading: false,
-    });
-    renderPage();
-
-    const badge = screen.getByText("Public signups off");
-    expect(badge).toHaveAttribute("data-variant", "secondary");
-    const link = badge.closest("a");
-    expect(link).toHaveAttribute("href", "/admin/settings/general");
-  });
-
-  it("shows a positive 'on' badge linking to General settings when signups are enabled", () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "true" },
-      isLoading: false,
-    });
-    renderPage();
-
-    const badge = screen.getByText("Public signups on");
-    expect(badge).toHaveAttribute("data-variant", "outline");
-    const link = badge.closest("a");
-    expect(link).toHaveAttribute("href", "/admin/settings/general");
-  });
-
-  it("renders no signup-status badge while settings are still loading", () => {
-    mocks.useAdminServerSettings.mockReturnValue({ data: undefined, isLoading: true });
-    renderPage();
-
-    expect(screen.queryByText("Public signups on")).not.toBeInTheDocument();
-    expect(screen.queryByText("Public signups off")).not.toBeInTheDocument();
-  });
-
-  it("stays visible regardless of which tab is active", async () => {
-    mocks.useAdminServerSettings.mockReturnValue({
-      data: { "signup.enabled": "true" },
-      isLoading: false,
-    });
-    renderPage();
-
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-
-    await userEvent.click(tab("Invite Codes"));
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-
-    await userEvent.click(tab("Invitations"));
-    expect(screen.getByText("Public signups on")).toBeInTheDocument();
-  });
-});
 
 const adminUser: AdminUser = {
   id: 7,
@@ -358,17 +250,12 @@ describe("AdminUsers row actions", () => {
     expect(screen.getByRole("button", { name: "Delete taylor" })).toBeInTheDocument();
   });
 
-  it("lets the owner manage other admins", () => {
-    mocks.users = [owner, { ...adminUser, id: 9, username: "other", role: "admin" }];
-    renderPage();
-    expect(screen.getByRole("button", { name: "Edit other" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete other" })).toBeInTheDocument();
-  });
-
   it("lets the owner edit itself and view as another admin, but not delete itself", () => {
     mocks.users = [owner, { ...adminUser, id: 8, username: "admin", role: "admin" }];
     renderPage();
     expect(screen.getByRole("button", { name: "View as user: admin" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit admin" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete admin" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit founder" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete founder" })).toBeNull();
     expect(screen.queryByRole("button", { name: "View as user: founder" })).toBeNull();
@@ -390,25 +277,6 @@ describe("AdminUsers row actions", () => {
     mocks.available = false;
     renderPage();
     expect(screen.queryByRole("button", { name: /View as user/ })).toBeNull();
-  });
-
-  it.each([
-    ["link", "View taylor playback history", "View playback history"],
-    ["button", "View as user: taylor", "View as user"],
-    ["button", "Edit taylor", "Edit user"],
-    ["button", "Delete taylor", "Delete user"],
-  ])("shows an immediate hover and focus tooltip for %s %s", (role, name, label) => {
-    vi.useFakeTimers();
-    renderPage();
-    const action = screen.getByRole(role, { name });
-    fireEvent.pointerMove(action, { pointerType: "mouse" });
-    act(() => vi.advanceTimersByTime(0));
-    expect(screen.getByRole("tooltip")).toHaveTextContent(label);
-    fireEvent.pointerLeave(action);
-    act(() => action.focus());
-    expect(action).toHaveFocus();
-    expect(screen.getByRole("tooltip")).toHaveTextContent(label);
-    expect(mocks.impersonate).not.toHaveBeenCalled();
   });
 
   it("explains that actions run as the user and lets the admin cancel", async () => {
@@ -771,21 +639,6 @@ describe("AdminUsers access group column and filter", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  function rowFor(username: string) {
-    return screen.getByRole("link", { name: username }).closest("tr")!;
-  }
-
-  it("shows each user's access group, linking to the group", () => {
-    renderPage();
-    expect(screen.getByRole("columnheader", { name: "Group" })).toBeInTheDocument();
-    expect(within(rowFor("taylor")).getByRole("link", { name: "Kids" })).toHaveAttribute(
-      "href",
-      "/admin/access-groups/1",
-    );
-    expect(within(rowFor("robin")).getByText("No group")).toBeInTheDocument();
-    expect(within(rowFor("root")).getByText("—")).toBeInTheDocument();
-  });
-
   it("reports a failed access group load and retries it", async () => {
     mocks.accessGroups = [];
     mocks.accessGroupsLoaded = false;
@@ -802,7 +655,13 @@ describe("AdminUsers access group column and filter", () => {
 
   it("filters users by access group", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("/admin/users?tab=invite-codes");
+    expect(screen.getByRole("tab", { name: "Invite Codes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Invite codes panel")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Users" }));
     const filter = screen.getByRole("combobox", { name: "Filter by access group" });
 
     await user.click(filter);

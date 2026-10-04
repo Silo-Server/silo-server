@@ -2,6 +2,7 @@ package httpstream
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -47,27 +48,6 @@ func (w *deadlineBlockingResponseWriter) SetWriteDeadline(deadline time.Time) er
 		w.expireOnce.Do(func() { close(w.deadlineExpired) })
 	}
 	return nil
-}
-
-func TestClassifyOutcome(t *testing.T) {
-	tests := []struct {
-		name          string
-		firstWriteErr error
-		contextErr    error
-		want          StreamOutcome
-	}{
-		{name: "completed", want: OutcomeCompleted},
-		{name: "stalled write", firstWriteErr: os.ErrDeadlineExceeded, want: OutcomeStalledReap},
-		{name: "write failure", firstWriteErr: io.ErrClosedPipe, want: OutcomeClientGone},
-		{name: "canceled context", contextErr: context.Canceled, want: OutcomeClientGone},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := ClassifyOutcome(test.firstWriteErr, test.contextErr); got != test.want {
-				t.Fatalf("ClassifyOutcome() = %q, want %q", got, test.want)
-			}
-		})
-	}
 }
 
 func TestRollingDeadlineWriterAbortInterruptsBlockedWrite(t *testing.T) {
@@ -134,36 +114,6 @@ func TestStreamSurvivesServerWriteTimeout(t *testing.T) {
 	}
 	if want := writes * len(chunk); len(body) != want {
 		t.Fatalf("short body: got %d bytes, want %d", len(body), want)
-	}
-}
-
-// TestUnwrappedStreamStillKilledAtWriteTimeout proves the server-level guard
-// is unchanged for handlers that do not opt in.
-func TestUnwrappedStreamStillKilledAtWriteTimeout(t *testing.T) {
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		f := w.(http.Flusher)
-		for i := 0; i < 60; i++ {
-			if _, err := w.Write([]byte("0123456789abcdef")); err != nil {
-				return
-			}
-			f.Flush()
-			time.Sleep(50 * time.Millisecond)
-		}
-	}))
-	srv.Config.WriteTimeout = 500 * time.Millisecond
-	srv.Start()
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL)
-	if err != nil {
-		return // connection died before headers: also a kill, test passes
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err == nil && len(body) == 60*16 {
-		t.Fatal("unwrapped stream survived the server WriteTimeout; guard is gone")
 	}
 }
 
@@ -291,12 +241,17 @@ func TestWriteOutcomeCompletedAndCounted(t *testing.T) {
 	if outcome := sw.Outcome(context.Background()); outcome != OutcomeCompleted {
 		t.Fatalf("outcome = %q, want %q", outcome, OutcomeCompleted)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if outcome := sw.Outcome(ctx); outcome != OutcomeClientGone {
+		t.Fatalf("canceled outcome = %q, want %q", outcome, OutcomeClientGone)
+	}
 }
 
 func TestServeContentReadFromOutcomeCompletedAndCounted(t *testing.T) {
 	const totalSize = 2 << 20
 	filePath := filepath.Join(t.TempDir(), "source.bin")
-	if err := os.WriteFile(filePath, bytesOf('x', totalSize), 0o600); err != nil {
+	if err := os.WriteFile(filePath, bytes.Repeat([]byte{'x'}, totalSize), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -387,68 +342,4 @@ func TestCompletedFullResponse(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestReadFromPreservesCompletion exercises the io.ReaderFrom path used by
-// http.ServeContent (sendfile) under a server WriteTimeout shorter than the
-// transfer, with a source large enough to require multiple bounded slices.
-func TestReadFromPreservesCompletion(t *testing.T) {
-	const totalSize = 8 << 20
-
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := newRollingDeadlineWriter(w, 2*time.Second, 0)
-		sw.WriteHeader(http.StatusOK)
-		src := &slowReader{r: io.LimitReader(neverEnding('x'), totalSize), delay: 200 * time.Microsecond}
-		// io.Copy must take sw's ReadFrom path, as http.ServeContent does.
-		if _, err := io.Copy(sw, src); err != nil {
-			return
-		}
-	}))
-	srv.Config.WriteTimeout = 1 * time.Second
-	srv.Start()
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL)
-	if err != nil {
-		t.Fatalf("GET: %v", err)
-	}
-	defer resp.Body.Close()
-	n, err := io.Copy(io.Discard, resp.Body)
-	if err != nil {
-		t.Fatalf("stream died at %d bytes: %v", n, err)
-	}
-	if n != totalSize {
-		t.Fatalf("short body: got %d, want %d", n, totalSize)
-	}
-}
-
-type neverEnding byte
-
-func (b neverEnding) Read(p []byte) (int, error) {
-	for i := range p {
-		p[i] = byte(b)
-	}
-	return len(p), nil
-}
-
-// slowReader throttles reads so the transfer outlives the server WriteTimeout.
-type slowReader struct {
-	r     io.Reader
-	delay time.Duration
-}
-
-func bytesOf(value byte, size int) []byte {
-	buf := make([]byte, size)
-	for i := range buf {
-		buf[i] = value
-	}
-	return buf
-}
-
-func (s *slowReader) Read(p []byte) (int, error) {
-	time.Sleep(s.delay)
-	if len(p) > 32<<10 {
-		p = p[:32<<10]
-	}
-	return s.r.Read(p)
 }

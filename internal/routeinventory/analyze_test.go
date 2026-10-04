@@ -136,10 +136,7 @@ func TestAnalyzeEnumeratesConditionalAndHelperRoutes(t *testing.T) {
 	if len(wildcard) != len(handleAllMethods) {
 		t.Errorf("wildcard expanded to %d methods, want %d", len(wildcard), len(handleAllMethods))
 	}
-}
 
-func TestAnalyzeResolvesHandlerIdentityAndKinds(t *testing.T) {
-	inv := analyzeFixture(t, "basic")
 	for _, route := range inv.Routes {
 		if route.Method != "POST" || route.Path != "/api/v1/admin/things" {
 			continue

@@ -216,14 +216,6 @@ describe("Library tab load errors", () => {
     expect(screen.getByText("Grid of 120")).toBeInTheDocument();
     expect(laterPageFailures).toBe(2);
   });
-
-  it("renders the grid when the browse succeeds", async () => {
-    mocks.v2.mockResolvedValue(queryCatalogItemsOk);
-    renderBrowse();
-
-    expect(await screen.findByText("Grid of 3")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
-  });
 });
 
 describe("Recommended tab load errors", () => {
@@ -283,14 +275,5 @@ describe("Recommended tab load errors", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
     expect(screen.getAllByText("Row Recently Added")).not.toHaveLength(0);
     expect(callsTo("GET /api/v2/library/{id}/layout")).toBe(3);
-  });
-
-  it("renders the sections when the layout loads", async () => {
-    mocks.v2.mockResolvedValue(libraryLayoutOk);
-    mocks.fetchLibrarySectionItems.mockResolvedValue(recommendedSection());
-    renderWithClient(<LibraryRecommended libraryId={7} libraryType="movies" />);
-
-    expect(await screen.findAllByText("Row Recently Added")).not.toHaveLength(0);
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 });

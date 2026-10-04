@@ -224,13 +224,13 @@ func TestSubtitleReadyNotifierMatchesDownloadedRowIdentity(t *testing.T) {
 			{Codec: "srt", Source: SubtitleSourceDownloadedV3, Language: "es", Label: "Spanish", DownloadedSubtitleID: 88},
 		},
 	}
-	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 77, "es", "Spanish")
+	NewSubtitleReadyNotifier(sessions, hub, resolver).SubtitleReady(context.Background(), 100, 88, "es", "Spanish")
 	var payload SubtitleReadyPayload
 	if err := json.Unmarshal(conn.messages[0].(EventEnvelope).Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Track == nil || payload.Track.CombinedIndex != 0 {
-		t.Fatalf("track = %#v, want exact row 77 at ordinal 0", payload.Track)
+	if payload.Track == nil || payload.Track.CombinedIndex != 1 {
+		t.Fatalf("track = %#v, want exact row 88 at ordinal 1", payload.Track)
 	}
 }
 

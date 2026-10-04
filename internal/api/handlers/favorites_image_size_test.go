@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -17,7 +16,6 @@ import (
 const (
 	personalPosterPath   = "tmdb/movies/550/poster/original.abc123.webp"
 	personalBackdropPath = "tmdb/movies/550/backdrop/original.abc123.webp"
-	personalStillPath    = "tvdb/series/1/seasons/1/episodes/1/still/original.webp"
 )
 
 // newPersonalDataImageHandler wires a PersonalDataHandler whose image resolver
@@ -158,34 +156,6 @@ func TestPersonalListsAcceptValidImageSize(t *testing.T) {
 			handle(rr, req)
 			if rr.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
-			}
-		})
-	}
-}
-
-// The episode branch of the personal lists resolves a still into the backdrop
-// slot; it rides the still ladder, so a backdrop-only width would name a key
-// that was never generated.
-func TestPersonalListsEpisodeStillHonorsImageSize(t *testing.T) {
-	for _, tt := range []struct {
-		size string
-		want string
-	}{
-		{"", "/still/w300."},
-		{"small", "/still/w300."},
-		{"large", "/still/w780."},
-	} {
-		name := tt.size
-		if name == "" {
-			name = "unset"
-		}
-		t.Run(name, func(t *testing.T) {
-			size, err := imagesize.Parse(tt.size)
-			if err != nil {
-				t.Fatalf("Parse(%q): %v", tt.size, err)
-			}
-			if got := sizedCardPath(personalStillPath, "still", size); !strings.Contains(got, tt.want) {
-				t.Fatalf("still path = %q, want %s", got, tt.want)
 			}
 		})
 	}

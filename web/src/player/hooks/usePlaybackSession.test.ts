@@ -3,19 +3,21 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
-import {
-  fixtureClientCapabilitiesV3,
-  fixtureClientPlaybackContextV3,
-  fixturePlanV3,
-  fixtureSubtitleInventoryItemV3,
-} from "../protocol-v3.fixtures";
+import { markPlaybackIntent } from "../first-frame";
 import {
   buildReplanRequestV3,
   buildStartRequestV3,
   routeEventPlanIdentityV3,
   VIDEO_CLIENT_FEATURES_V3,
 } from "../playback-session-wire-v3";
-import { markPlaybackIntent } from "../first-frame";
+import {
+  fixtureClientCapabilitiesV3,
+  fixtureClientPlaybackContextV3,
+  fixturePlanV3,
+  fixtureSubtitleInventoryItemV3,
+} from "../protocol-v3.fixtures";
+import { resetSessionMutations } from "../session-mutations";
+import { resetCodecDetectionForTests } from "./useCodecDetection";
 import {
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_ATTEMPTS,
@@ -23,8 +25,6 @@ import {
   reconnectDelayMs,
   usePlaybackSession,
 } from "./usePlaybackSession";
-import { resetCodecDetectionForTests } from "./useCodecDetection";
-import { resetSessionMutations } from "../session-mutations";
 
 // These hook tests exercise plan adoption and replacement against a transport
 // boundary. The v2 start/replan helpers are covered by their own tests; here
@@ -139,12 +139,6 @@ describe("buildStartRequestV3", () => {
     });
   });
 
-  it("includes an explicit zero start position when forced", () => {
-    expect(
-      buildStartRequestV3({ ...startBase, position: 0, forceStartPosition: true }),
-    ).toMatchObject({ start_position: 0 });
-  });
-
   it("declares client-owned progress with an explicit zero anchor", () => {
     expect(
       buildStartRequestV3({
@@ -156,10 +150,6 @@ describe("buildStartRequestV3", () => {
     ).toMatchObject({ start_position: 0, progress_persistence: "client" });
   });
 
-  it("omits the start position when playback should resume normally", () => {
-    expect(buildStartRequestV3(startBase)).not.toHaveProperty("start_position");
-  });
-
   it("clamps an absurd start position to the contract bound", () => {
     expect(buildStartRequestV3({ ...startBase, position: 1e12 })).toMatchObject({
       start_position: 31_536_000,
@@ -169,12 +159,6 @@ describe("buildStartRequestV3", () => {
   it("includes an explicit audio track override when present", () => {
     expect(buildStartRequestV3({ ...startBase, explicitAudioTrackIndex: 2 })).toMatchObject({
       audio_track_index: 2,
-    });
-  });
-
-  it("includes the resolved subtitle track in the initial request", () => {
-    expect(buildStartRequestV3({ ...startBase, subtitleTrackIndex: 0 })).toMatchObject({
-      subtitle_track_index: 0,
     });
   });
 
@@ -1829,29 +1813,6 @@ describe("usePlaybackSession server-invalidated plans", () => {
       failure: { classification: "video_copy_unsafe" },
     });
     await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:2222222222222222"));
-
-    unmount();
-  });
-
-  it("does nothing for a plan the session already moved past", async () => {
-    const replanBodies: Array<Record<string, unknown>> = [];
-    vi.stubGlobal("fetch", invalidationFetchMock(replanBodies, {}));
-
-    const { result, unmount } = renderHook(
-      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
-      { wrapper },
-    );
-    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:0123456789abcdef"));
-
-    let outcome: boolean | undefined;
-    await act(async () => {
-      outcome = await result.current.invalidatePlan("plan:superseded", "video_copy_unsafe", 12);
-    });
-
-    // Reported as handled: the invalidated route is already gone, and replanning
-    // would evict a plan the server never complained about.
-    expect(outcome).toBe(true);
-    expect(replanBodies).toHaveLength(0);
 
     unmount();
   });

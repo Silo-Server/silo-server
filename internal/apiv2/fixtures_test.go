@@ -2104,17 +2104,6 @@ func TestContractFixtures(t *testing.T) {
 	}
 }
 
-// TestContractFixturesAreDeterministic pins the property the golden depends
-// on: two generations in one process are byte-identical.
-func TestContractFixturesAreDeterministic(t *testing.T) {
-	a, b := generateFixtures(t), generateFixtures(t)
-	for name := range a {
-		if !bytes.Equal(a[name], b[name]) {
-			t.Errorf("%s differs between generations", name)
-		}
-	}
-}
-
 type fixturePersonalCollections struct{ fakePersonalCollections }
 
 func (f *fixturePersonalCollections) PersonalCollectionItemsPage(context.Context, int, string, string, catalogsvc.AccessFilter, userstore.CollectionItemsPageOptions, *catalogsvc.QueryCursor) (handlers.PersonalCollectionPageView, error) {

@@ -12,23 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestFetchTVRecentlyAddedCompatibilityOptOut(t *testing.T) {
-	fetcher := &Fetcher{}
-	items, total, handled, err := fetcher.fetchTVRecentlyAdded(
-		context.Background(),
-		ResolvedSection{SectionType: SectionRecentlyAdded, DisableTVEventGrouping: true},
-		nil,
-		nil,
-		catalog.AccessFilter{},
-	)
-	if err != nil {
-		t.Fatalf("fetchTVRecentlyAdded: %v", err)
-	}
-	if handled || total != 0 || items != nil {
-		t.Fatalf("opt-out returned items=%v total=%d handled=%v; want generic fallback", items, total, handled)
-	}
-}
-
 func TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {

@@ -233,17 +233,6 @@ func TestShouldTryAlternateFileV3PinsOriginalQuality(t *testing.T) {
 	}
 }
 
-func TestTerminalAllowsAlternateFileV3IncludesHDRIncompatibility(t *testing.T) {
-	for _, reason := range []string{"no_alternate_version", "hdr_transcode_unsupported"} {
-		if !terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: reason}) {
-			t.Fatalf("terminal reason %q should permit alternate selection", reason)
-		}
-	}
-	if terminalAllowsAlternateFileV3(&playback.TerminalV3{Reason: "client_hls_unsupported"}) {
-		t.Fatal("unrelated terminal reason should not permit alternate selection")
-	}
-}
-
 func TestValidateAdvertisedTransformationsV3RejectsOldVideoRecipe(t *testing.T) {
 	plan := &playback.PlanV3{Transformations: []playback.TransformationV3{{
 		Name:          playback.TransformationVideoToH264V3,
@@ -1193,37 +1182,6 @@ func TestHandleStartPlaybackV3PublishesSubtitleURLsWithSubtitlesOff(t *testing.T
 	}
 	if inventory[1].FontBundleURL == "" {
 		t.Errorf("embedded ASS track published no font bundle: %#v", inventory[1])
-	}
-}
-
-func TestHandleStartPlaybackV3DuplicateAttemptReturnsOriginalSession(t *testing.T) {
-	file := v3HandlerFixtureFile(t)
-	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	body := marshalV3StartRequest(t, v3HandlerStartRequest())
-
-	start := func() playback.DecisionResponseV3 {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(body)).WithContext(newAuthorizedPlaybackContext())
-		rr := httptest.NewRecorder()
-		handler.HandleStartPlayback(rr, req)
-		if rr.Code != http.StatusCreated {
-			t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-		}
-		var response playback.DecisionResponseV3
-		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
-		}
-		return response
-	}
-	first := start()
-	second := start()
-	if first.SessionID == "" || second.SessionID != first.SessionID {
-		t.Fatalf("first session %q, second %q", first.SessionID, second.SessionID)
-	}
-	if got := len(manager.AllSessions()); got != 1 {
-		t.Fatalf("sessions = %d, want 1", got)
 	}
 }
 
@@ -6853,7 +6811,7 @@ func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegP
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}

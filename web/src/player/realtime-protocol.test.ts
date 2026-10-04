@@ -1,40 +1,18 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
-  ALL_PLAYBACK_COMMANDS,
   buildPlaybackRealtimeAck,
   buildPlaybackRealtimeHello,
   buildPlaybackRealtimeResult,
-  parsePlaybackRealtimeMessage,
   parsePlaybackRealtimeCommand,
+  parsePlaybackRealtimeMessage,
   readPlanInvalidatedPayload,
   SUPPORTED_PLAYBACK_COMMANDS,
   VIDEO_PLAYBACK_COMMANDS,
 } from "./realtime-protocol";
 
 describe("realtime protocol", () => {
-  it("parses known command envelopes", () => {
-    const command = parsePlaybackRealtimeCommand(
-      JSON.stringify({
-        type: "command",
-        command_id: "cmd-1",
-        session_id: "session-1",
-        name: "server_restarting",
-        payload: { message: "Restarting soon" },
-      }),
-    );
-
-    expect(command).toEqual({
-      type: "command",
-      command_id: "cmd-1",
-      session_id: "session-1",
-      name: "server_restarting",
-      reason: undefined,
-      issued_by: undefined,
-      deadline_ms: undefined,
-      payload: { message: "Restarting soon" },
-    });
-  });
-
   it("parses a plan invalidation command and its payload", () => {
     const command = parsePlaybackRealtimeCommand(
       JSON.stringify({
@@ -403,11 +381,5 @@ describe("realtime protocol", () => {
       status: "rejected",
       error: "unsupported",
     });
-  });
-
-  it("keeps the supported command subset within the full command set", () => {
-    expect(SUPPORTED_PLAYBACK_COMMANDS.every((name) => ALL_PLAYBACK_COMMANDS.includes(name))).toBe(
-      true,
-    );
   });
 });

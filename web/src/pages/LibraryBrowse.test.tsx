@@ -73,27 +73,6 @@ describe("LibraryBrowse", () => {
     mocks.itemGridEmptyState = undefined;
   });
 
-  it("loads library browse data through the catalog query hook", () => {
-    renderToStaticMarkup(
-      <LibraryBrowse
-        libraryId={7}
-        libraryType="mixed"
-        browseType="series"
-        queryDefinition={{
-          library_ids: [],
-          media_scope: "movie",
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        }}
-        onBrowseTypeChange={() => {}}
-        onQueryDefinitionChange={() => {}}
-      />,
-    );
-
-    expect(mocks.useCatalogWindow).toHaveBeenCalled();
-  });
-
   it("does not show the estimated item count as an exact result count", () => {
     mocks.useCatalogWindow.mockReturnValue({
       data: {
@@ -121,38 +100,10 @@ describe("LibraryBrowse", () => {
     );
 
     expect(markup).toContain("Filters");
+    expect(markup).toContain("Grid");
+    expect(mocks.useLibraryHasItems).toHaveBeenCalledWith(7, { enabled: false });
+    expect(mocks.itemGridEmptyState).toBeUndefined();
     expect(markup).not.toContain("1,234 items");
-  });
-
-  it("does not show an item count loading state when exact totals are skipped", () => {
-    mocks.useCatalogWindow.mockReturnValue({
-      data: {
-        totalItems: 0,
-        pages: new Map(),
-      },
-      isLoading: true,
-    });
-
-    const markup = renderToStaticMarkup(
-      <LibraryBrowse
-        libraryId={7}
-        libraryType="mixed"
-        browseType="series"
-        queryDefinition={{
-          library_ids: [],
-          media_scope: "movie",
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        }}
-        onBrowseTypeChange={() => {}}
-        onQueryDefinitionChange={() => {}}
-      />,
-    );
-
-    expect(markup).toContain("Filters");
-    expect(markup).not.toContain("Loading item count");
-    expect(markup).not.toContain("0 items");
   });
 
   it("maps last_air_date into the catalog query definition", () => {
@@ -232,30 +183,6 @@ describe("LibraryBrowse", () => {
     expect(state.query_definition.media_scope).toBe("audiobook");
   });
 
-  it("uses ebook media scope for ebook libraries", () => {
-    renderToStaticMarkup(
-      <LibraryBrowse
-        libraryId={11}
-        libraryType="ebooks"
-        browseType="series"
-        queryDefinition={{
-          library_ids: [],
-          match: "all",
-          groups: [],
-          sort: { field: "title", order: "asc" },
-        }}
-        onBrowseTypeChange={() => {}}
-        onQueryDefinitionChange={() => {}}
-      />,
-    );
-
-    const [state] = mocks.useCatalogWindow.mock.calls[
-      mocks.useCatalogWindow.mock.calls.length - 1
-    ] as [CatalogSearchState, Record<string, unknown>];
-    expect(state.library_id).toBe(11);
-    expect(state.query_definition.media_scope).toBe("ebook");
-  });
-
   it("normalizes video-only sorts away through the shared ebook relevance scope", () => {
     renderToStaticMarkup(
       <LibraryBrowse
@@ -276,6 +203,8 @@ describe("LibraryBrowse", () => {
     const [state] = mocks.useCatalogWindow.mock.calls[
       mocks.useCatalogWindow.mock.calls.length - 1
     ] as [CatalogSearchState, Record<string, unknown>];
+    expect(state.library_id).toBe(11);
+    expect(state.query_definition.media_scope).toBe("ebook");
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
@@ -362,23 +291,6 @@ describe("LibraryBrowse", () => {
 
       expect(markup).toContain("Grid loading");
       expect(markup).not.toContain("is empty");
-    });
-
-    it("leaves a non-empty library untouched and skips the library check", () => {
-      mocks.useCatalogWindow.mockReturnValue({
-        data: {
-          totalItems: 1,
-          pages: new Map([[0, [{ content_id: "movie-1", title: "Heat", type: "movie" }]]]),
-        },
-        isLoading: false,
-        isError: false,
-      });
-
-      const markup = renderBrowse(unfilteredQuery);
-
-      expect(markup).toContain("Grid");
-      expect(mocks.useLibraryHasItems).toHaveBeenCalledWith(7, { enabled: false });
-      expect(mocks.itemGridEmptyState).toBeUndefined();
     });
   });
 });

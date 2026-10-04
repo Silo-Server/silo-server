@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type {
@@ -11,7 +12,6 @@ import type {
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
-import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { HLS_STARTUP_TIMEOUT_MS } from "../utils/hlsStartupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -601,6 +601,14 @@ describe("VideoPlayer room catch-up", () => {
     video.currentTime = 100.2;
     fireEvent.timeUpdate(video);
     expect(controls.current!.currentTime).toBe(target);
+
+    video.currentTime = target + 0.5;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target + 0.5);
+
+    video.currentTime = target + 2;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target + 2);
   });
 
   it.each([1500, 30])("holds a room seek to %ss through stale seeked events", async (target) => {
@@ -3667,12 +3675,6 @@ describe("VideoPlayer controls auto-hide", () => {
     expect(controls.current?.visible).toBe(true);
 
     menu.remove();
-    await act(() => vi.advanceTimersByTimeAsync(3_000));
-    expect(controls.current?.visible).toBe(false);
-  });
-
-  it("hides idle controls during playback when no menu is open", async () => {
-    renderPlaying();
     await act(() => vi.advanceTimersByTimeAsync(3_000));
     expect(controls.current?.visible).toBe(false);
   });

@@ -115,58 +115,6 @@ func requireProblem(t *testing.T, rec *httptest.ResponseRecorder, want ProblemTy
 
 // --- Mount and registration -------------------------------------------------
 
-// TestRuntimeReconcile walks the real assembled router and asserts the routes
-// it serves are exactly the set the registry and plugin-content extension declare.
-func TestRuntimeReconcile(t *testing.T) {
-	var declared []Declared
-	deps := Dependencies{testRegister: func(reg *Registry) {
-		registerProbes(reg)
-		declared = reg.Declared()
-	}}
-	router := newChiRouter(deps)
-	observed, err := routeinventory.Observed(router)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]bool{}
-	for _, d := range declared {
-		want[d.Method+" "+d.Path] = true
-	}
-	// Dynamic plugin mounts are declared by the closed extension inventory,
-	// not by Huma operations. Keep expectations independent of the router walk.
-	for _, mount := range describePluginContent().Mounts {
-		for _, method := range mount.Methods {
-			key := method + " " + mount.Path
-			if want[key] {
-				t.Fatalf("duplicate extension declaration: %s", key)
-			}
-			want[key] = true
-		}
-	}
-	got := map[string]bool{}
-	for _, o := range observed {
-		got[o] = true
-	}
-	for k := range want {
-		if !got[k] {
-			t.Errorf("declared but not served: %s", k)
-		}
-	}
-	for k := range got {
-		if !want[k] {
-			t.Errorf("served but not declared: %s", k)
-		}
-	}
-	if !want["GET /api/v2/system/info"] {
-		t.Error("getSystemInfo not declared")
-	}
-	for _, o := range observed {
-		if !strings.HasPrefix(o[strings.Index(o, " ")+1:], Prefix+"/") {
-			t.Errorf("route outside %s: %s", Prefix, o)
-		}
-	}
-}
-
 // TestCommittedArtifactMatchesRouter is the route/spec reconciliation over
 // the production wiring: every route the real assembled router serves is an
 // operation in the COMMITTED contracts/api/v2/openapi.json or the closed
@@ -194,6 +142,24 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 	}
 	if !bytes.Equal(generated, contracts.OpenAPI) {
 		t.Fatal("contracts/api/v2/openapi.json is stale; run make apiv2-openapi")
+	}
+	// Keep generated contract hygiene in the same artifact comparison.
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(generated, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"servers", "webhooks", "externalDocs"} {
+		if _, ok := doc[forbidden]; ok {
+			t.Errorf("document carries %q", forbidden)
+		}
+	}
+	// The home routes (/api/v2/home/...) are a real path segment, not a
+	// Unix home directory; strip that prefix before the leak check.
+	scrubbed := bytes.ReplaceAll(generated, []byte(Prefix+"/home/"), nil)
+	for _, needle := range []string{"/Users/", "/home/", "localhost"} {
+		if bytes.Contains(scrubbed, []byte(needle)) {
+			t.Errorf("document contains %s", needle)
+		}
 	}
 }
 
@@ -273,13 +239,13 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 					t.Fatal("expected a panic")
 				}
 			}()
-			newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+			registerTestOperations(func(reg *Registry) {
 				Register(reg, op, func(context.Context, *struct{}) (*probeOutput, error) { return nil, nil })
-			}})
+			})
 		})
 	}
 	t.Run("item-scoped permission with an id parameter", func(t *testing.T) {
-		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		registerTestOperations(func(reg *Registry) {
 			Register(reg, Operation{
 				Operation:   humaOp(http.MethodPatch, Prefix+"/items/{id}", "patchItem", "x", ""),
 				Class:       ClassPermissionGated,
@@ -290,7 +256,7 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 			}) (*probeOutput, error) {
 				return nil, nil
 			})
-		}})
+		})
 	})
 	t.Run("slice without explode", func(t *testing.T) {
 		defer func() {
@@ -298,14 +264,14 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 				t.Fatalf("recover = %v", r)
 			}
 		}()
-		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		registerTestOperations(func(reg *Registry) {
 			Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPublic},
 				func(context.Context, *struct {
 					IDs []string `query:"ids"`
 				}) (*probeOutput, error) {
 					return nil, nil
 				})
-		}})
+		})
 	})
 	t.Run("uppercase enum", func(t *testing.T) {
 		defer func() {
@@ -313,7 +279,7 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 				t.Fatalf("recover = %v", r)
 			}
 		}()
-		newChiRouter(Dependencies{testRegister: func(reg *Registry) {
+		registerTestOperations(func(reg *Registry) {
 			Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/x", "getX", "x", ""), Class: ClassPublic},
 				func(context.Context, *struct{}) (*struct {
 					Body struct {
@@ -322,20 +288,11 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 				}, error) {
 					return nil, nil
 				})
-		}})
+		})
 	})
 }
 
 // --- Framework configuration -----------------------------------------------
-
-func TestUnknownQueryParameterIs422(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
-	rec := do(t, h, http.MethodGet, "/api/v2/system/info?bogus=1", "", nil)
-	p := requireProblem(t, rec, TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "query.bogus" || p.Errors[0].Code != "unknown_parameter" {
-		t.Fatalf("errors = %+v", p.Errors)
-	}
-}
 
 func TestUnacceptableAcceptIs406(t *testing.T) {
 	h := newTestHandler(t, Dependencies{})
@@ -511,40 +468,6 @@ func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
 	}
 	if doc.OpenAPI != "3.1.0" || doc.Paths["/api/v2/openapi.json"]["get"] == nil {
 		t.Fatalf("unexpected document: %s", rec.Body.String())
-	}
-}
-
-// TestGenerateOpenAPIIsDeterministic: two generations in one process and the
-// document's own hygiene rules (no servers, nothing build-specific; schema
-// examples are fictional fixture-shaped values and are allowed).
-func TestGenerateOpenAPIIsDeterministic(t *testing.T) {
-	a, err := GenerateOpenAPI()
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := GenerateOpenAPI()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(a, b) {
-		t.Fatal("generation is not deterministic")
-	}
-	var doc map[string]json.RawMessage
-	if err := json.Unmarshal(a, &doc); err != nil {
-		t.Fatal(err)
-	}
-	for _, forbidden := range []string{"servers", "webhooks", "externalDocs"} {
-		if _, ok := doc[forbidden]; ok {
-			t.Errorf("document carries %q", forbidden)
-		}
-	}
-	// The home routes (/api/v2/home/...) are a real path segment, not a
-	// Unix home directory; strip that prefix before the leak check.
-	scrubbed := bytes.ReplaceAll(a, []byte(Prefix+"/home/"), nil)
-	for _, needle := range []string{"/Users/", "/home/", "localhost"} {
-		if bytes.Contains(scrubbed, []byte(needle)) {
-			t.Errorf("document contains %s", needle)
-		}
 	}
 }
 

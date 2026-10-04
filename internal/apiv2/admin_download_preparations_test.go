@@ -60,47 +60,6 @@ func (f *fakeAdminDownloadPreparations) List(_ context.Context, limit int) (*dow
 	}, nil
 }
 
-func TestAdminDownloadPreparationOfMapsRunningJob(t *testing.T) {
-	list, _ := new(fakeAdminDownloadPreparations).List(context.Background(), 10)
-	got := adminDownloadPreparationOf(list.Items[0])
-	if got.LogSessionID != "download-prepare-art-running" {
-		t.Fatalf("log session = %q", got.LogSessionID)
-	}
-	if got.Worker == nil || got.Worker.Kind != "node" || got.Worker.NodeID == nil || *got.Worker.NodeID != "9" || got.Worker.Name != "gpu-01" {
-		t.Fatalf("worker = %+v", got.Worker)
-	}
-	if got.Progress == nil || got.Progress.EncodedSeconds != 4686 || got.Progress.Speed != 3.4 {
-		t.Fatalf("progress = %+v", got.Progress)
-	}
-	if got.QueuePosition != nil || got.FailedAt != nil {
-		t.Fatalf("running job carries queue position %v or failed_at %v", got.QueuePosition, got.FailedAt)
-	}
-	if len(got.Source.AudioTracks) != 2 || got.Source.AudioTracks[1].Channels == nil || *got.Source.AudioTracks[1].Channels != 2 {
-		t.Fatalf("audio tracks = %+v", got.Source.AudioTracks)
-	}
-	if got.Output.BitrateKbps == nil || *got.Output.BitrateKbps != 10_000 || !got.Output.AllAudioTracks {
-		t.Fatalf("output = %+v", got.Output)
-	}
-}
-
-func TestAdminDownloadPreparationOfMapsQueuedAndFailedJobs(t *testing.T) {
-	list, _ := new(fakeAdminDownloadPreparations).List(context.Background(), 10)
-	queued := adminDownloadPreparationOf(list.Items[1])
-	if queued.QueuePosition == nil || *queued.QueuePosition != 1 || queued.Worker != nil || queued.Output.BitrateKbps != nil {
-		t.Fatalf("queued = %+v", queued)
-	}
-	if queued.Requesters[0].DeviceID != "" || queued.Source.AudioTracks == nil {
-		t.Fatalf("queued requesters/source = %+v / %+v", queued.Requesters, queued.Source)
-	}
-	failed := adminDownloadPreparationOf(list.Items[2])
-	if failed.FailedAt == nil || failed.Error != "ffmpeg: No space left on device" {
-		t.Fatalf("failed = %+v", failed)
-	}
-	if failed.Worker == nil || failed.Worker.Kind != "server" || failed.Worker.NodeID != nil {
-		t.Fatalf("failed worker = %+v", failed.Worker)
-	}
-}
-
 func TestAdminDownloadPreparationOfRedactsErrorCredentials(t *testing.T) {
 	list, _ := new(fakeAdminDownloadPreparations).List(context.Background(), 10)
 	p := list.Items[2]

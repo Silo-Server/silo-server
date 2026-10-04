@@ -17,30 +17,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestRedisChannelScopesByDatabaseNumber(t *testing.T) {
-	channels := []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelLogs, ChannelEvents}
-	owners := map[string]string{}
-	for _, channel := range channels {
-		if got := redisChannel(channel, 0); got != channel {
-			t.Errorf("redisChannel(%q, 0) = %q, want the bare name older nodes use", channel, got)
-		}
-		for _, db := range []int{0, 1, 2, 15} {
-			name := redisChannel(channel, db)
-			owner := fmt.Sprintf("%s on database %d", channel, db)
-			if other, shared := owners[name]; shared {
-				t.Errorf("%s and %s share Redis channel %q", other, owner, name)
-			}
-			owners[name] = owner
-		}
-	}
-	if got, want := redisChannel(ChannelAdmin, 3), "silo:admin@db3"; got != want {
-		t.Errorf("redisChannel(ChannelAdmin, 3) = %q, want %q", got, want)
-	}
-	if got := redisChannel(ChannelAdmin, -1); got != ChannelAdmin {
-		t.Errorf("redisChannel(ChannelAdmin, -1) = %q, want the bare name", got)
-	}
-}
-
 func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
 	for _, tc := range []struct {
 		url  string

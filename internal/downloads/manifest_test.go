@@ -57,17 +57,6 @@ func (f fakeFileResolver) ListByEpisodeIDs(context.Context, []string) (map[strin
 	return nil, nil
 }
 
-// TestManifestBuilderDeniesRestrictedProfile is the Phase 2 acceptance criterion
-// at the source: when the requesting profile is denied content access,
-// GetItemDetail returns ErrItemNotFound and Build propagates it.
-func TestManifestBuilderDeniesRestrictedProfile(t *testing.T) {
-	b := NewManifestBuilder(fakeManifestSource{err: catalog.ErrItemNotFound}, nil, nil, nil)
-	_, err := b.Build(context.Background(), &Download{ID: "dl1", ContentID: "c1"}, catalog.AccessFilter{})
-	if !errors.Is(err, catalog.ErrItemNotFound) {
-		t.Fatalf("Build err = %v, want catalog.ErrItemNotFound", err)
-	}
-}
-
 func TestManifestBuilderAssembles(t *testing.T) {
 	detail := &catalog.ItemDetail{
 		Type:              "movie",

@@ -159,14 +159,6 @@ it("shows the linked identity and keeps it when it is the only way in", async ()
   expect(screen.queryByRole("button", { name: /Connect/ })).toBeNull();
 });
 
-it("says when an identity was never used or checked", async () => {
-  // An admin link the person has not signed in with yet.
-  identities = [{ ...IDENTITY, last_sign_in_at: null, last_checked_at: null }];
-  mount();
-  await screen.findByText(/^Connected .+ · Not used to sign in yet$/);
-  expect(screen.queryByText(/Last checked/)).toBeNull();
-});
-
 it("disconnects while the local password still signs in", async () => {
   identities = [IDENTITY];
   mount();

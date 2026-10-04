@@ -21,29 +21,6 @@ async function expandChapters(): Promise<void> {
 }
 
 describe("ChaptersSection", () => {
-  it("renders chapter section collapsed by default", () => {
-    render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: /Prologue/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Memory/ })).not.toBeInTheDocument();
-    // Header toggle is visible.
-    expect(screen.getByRole("button", { name: /^chapters/i })).toBeInTheDocument();
-  });
-
-  it("expands when the header is clicked", async () => {
-    render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
-    await expandChapters();
-    expect(screen.getByRole("button", { name: /Prologue/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Memory/ })).toBeInTheDocument();
-  });
-
-  it("highlights the currently-listening chapter once expanded", async () => {
-    render(<ChaptersSection files={files} currentPositionSeconds={250} onSelect={vi.fn()} />);
-    await expandChapters();
-    const row = screen.getByRole("button", { name: /Memory/ });
-    expect(row).toHaveAttribute("data-current", "true");
-    expect(within(row).getByText("listening")).toBeInTheDocument();
-  });
-
   it("sort menu switches between position and longest-first orders", async () => {
     render(<ChaptersSection files={files} currentPositionSeconds={null} onSelect={vi.fn()} />);
     await expandChapters();

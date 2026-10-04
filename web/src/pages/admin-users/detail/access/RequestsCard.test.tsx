@@ -486,25 +486,6 @@ describe("RequestsCard", () => {
     expect(calls(PUT_USER_LIMIT)).toHaveLength(0);
   });
 
-  it("names the account's switch and the server switch", async () => {
-    serve({
-      [SETTINGS_OP]: () => ({ body: { ...SETTINGS, requests_enabled: false } }),
-      [GROUP_LIMIT]: () => ({ body: GROUP_INHERITS }),
-      [USER_LIMIT]: () => ({
-        body: { user_id: "7", limit_mode: "inherit", approval_mode: "auto", ...INHERIT },
-      }),
-    });
-    mount({
-      ...USER,
-      requests_allowed: false,
-      effective_policy: { ...USER.effective_policy, requests_allowed: false },
-    });
-    expect(await row("Can request media")).toBe("NoGroup: yesCUSTOM");
-    expect(
-      await screen.findByText("Requests are turned off for the whole server."),
-    ).toBeInTheDocument();
-  });
-
   it("offers a retry when the request settings can't load", async () => {
     serve({
       [SETTINGS_OP]: () => new Error("down"),

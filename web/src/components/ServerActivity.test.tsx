@@ -61,6 +61,7 @@ describe("ServerActivity task progress", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Server activity: 1 active" }));
 
+    expect(screen.queryByText("Preparing downloads")).not.toBeInTheDocument();
     expect(screen.getByText("Running")).toBeInTheDocument();
     expect(screen.queryByText("0%")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cache Metadata Images" })).toHaveAttribute(
@@ -79,11 +80,6 @@ describe("ServerActivity download preparation", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: `Server activity: ${activeCount} active` }));
   }
-
-  it("hides the section when the server has no preparation queue", () => {
-    openPopover(1);
-    expect(screen.queryByText("Preparing downloads")).not.toBeInTheDocument();
-  });
 
   it("counts running and queued jobs and shows live progress", () => {
     mocks.preparations = makePreparationList(

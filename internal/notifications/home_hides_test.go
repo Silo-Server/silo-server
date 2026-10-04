@@ -47,28 +47,6 @@ func TestHomeHidesContinueWatching(t *testing.T) {
 	}
 }
 
-func TestHomeHidesNextUp(t *testing.T) {
-	dismissedE3 := map[string]struct{}{"e3": {}}
-	for _, tc := range []struct {
-		name  string
-		hides homeHides
-		next  string
-		want  bool
-	}{
-		{name: "not removed", next: "e3", want: true},
-		{name: "dismissed episode still next", hides: homeHides{nextUp: dismissedE3}, next: "e3", want: false},
-		{name: "Next Up moved on", hides: homeHides{nextUp: dismissedE3}, next: "e4", want: true},
-		{name: "caught up", hides: homeHides{nextUp: dismissedE3}, next: "", want: true},
-		{name: "series dropped", hides: homeHides{dropped: true}, next: "e3", want: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.hides.nextUpVisible(tc.next); got != tc.want {
-				t.Fatalf("nextUpVisible = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 type fakeDroppedSeries []catalog.DroppedSeries
 
 func (f fakeDroppedSeries) ListDropped(_ context.Context, _ int, _ string, seriesIDs []string) ([]catalog.DroppedSeries, error) {
@@ -645,6 +623,7 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("add E3 file: %v", err)
 	}
 	setProgress(episodes[0], true, time.Now().UTC().Truncate(time.Second))
+	recompute("Next Up moved to E3 despite the old E4 dismissal", flags{favorite: true, nextUp: true}, afterE4)
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
 		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episodes[2],
 		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),

@@ -175,7 +175,9 @@ func TestListRatingsKeysetStable(t *testing.T) {
 		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 2, RatedAt: at.Add(-3 * time.Hour)},
 		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: at.Add(-4 * time.Hour)},
 	}}
-	h := newTestHandler(t, ratingsDeps(ratings))
+	deps := ratingsDeps(ratings)
+	deps.CursorSecret = []byte("ratings-cursor-test-key")
+	h := newTestHandler(t, deps)
 	type page struct {
 		Items []struct {
 			ItemID string `json:"item_id"`
@@ -220,7 +222,7 @@ func TestListRatingsKeysetStable(t *testing.T) {
 		t.Fatalf("page 3 = %+v", third)
 	}
 	// A cursor whose rated_at is not an instant is refused, not a 500.
-	bad, _ := NewCursors([]byte("other-test-cursor-key")).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
+	bad, _ := NewCursors(deps.CursorSecret).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
 }
 

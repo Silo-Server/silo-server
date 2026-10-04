@@ -36,7 +36,7 @@ interface CatalogFilterBarProps {
 
 export const CATALOG_SOURCE_ORDER_SORT_FIELD = "__source_order";
 
-export const CATALOG_MEDIA_SCOPE_OPTIONS = [
+const CATALOG_MEDIA_SCOPE_OPTIONS = [
   { value: "all", label: "All Media" },
   { value: "video", label: "Movies & Series" },
   { value: "movie", label: "Movies" },

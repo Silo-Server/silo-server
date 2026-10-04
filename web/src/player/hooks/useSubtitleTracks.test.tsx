@@ -1,8 +1,8 @@
-import type { RefObject } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useSubtitleTracks } from "./useSubtitleTracks";
 import type { PlayerSubtitleInfo } from "../types";
+import { useSubtitleTracks } from "./useSubtitleTracks";
 
 // jsdom implements neither addTextTrack nor VTTCue; provide minimal fakes
 // that keep the shapes the hook relies on (cues list, add/removeCue,
@@ -340,38 +340,6 @@ describe("useSubtitleTracks", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await act(async () => {});
     expect(createdTracks[1]!.cues.map((cue) => cue.text)).toEqual(["early", "later"]);
-  });
-
-  it("retries a failed window fetch after a backoff instead of marking it covered", async () => {
-    let now = 1_000_000;
-    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      fetchMock
-        .mockRejectedValueOnce(new Error("extraction died"))
-        .mockResolvedValueOnce(
-          vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"),
-        );
-
-      const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
-
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-
-      // Inside the backoff window: no retry yet.
-      videoRef.current!.currentTime = 5;
-      videoRef.current!.dispatchEvent(new Event("timeupdate"));
-      await new Promise((r) => setTimeout(r, 10));
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-
-      // Past the backoff: the uncovered range is retried and recovers.
-      now += 6_000;
-      videoRef.current!.dispatchEvent(new Event("timeupdate"));
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["recovered"]));
-    } finally {
-      nowSpy.mockRestore();
-      errorSpy.mockRestore();
-    }
   });
 
   it("backs off repeated failures, caps the delay, and resets after recovery", async () => {

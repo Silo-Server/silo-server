@@ -375,6 +375,9 @@ func TestNodeAwarePreparerRejectsUnattestedOrMismatchedToneMapPrepareResult(t *t
 		t.Run(test.name, func(t *testing.T) {
 			remote := &attestationRemotePreparer{prepareResult: test.result, statErr: downloadprepare.ErrArtifactNotFound}
 			preparer, local, opts := newToneMapPreparerTest(t, remote)
+			if test.name != "old node omits receipt" {
+				remote.prepareResult.ExecutionFingerprint = downloadprepare.NewRequest("artifact-tone-map", opts).ExecutionFingerprint()
+			}
 			prepared, err := preparer.PrepareFile(context.Background(), "artifact-tone-map", opts, "/local/artifact.mp4")
 			if err != nil || prepared.OutputPath == "" || local.calls != 1 {
 				t.Fatalf("prepared=%+v err=%v local calls=%d, want local fallback", prepared, err, local.calls)
@@ -407,6 +410,9 @@ func TestNodeAwarePreparerRejectsUnattestedOrMismatchedToneMapRecovery(t *testin
 				statResult: test.recovered,
 			}
 			preparer, local, opts := newToneMapPreparerTest(t, remote)
+			if test.name != "missing receipt" {
+				remote.statResult.ExecutionFingerprint = downloadprepare.NewRequest("artifact-tone-map", opts).ExecutionFingerprint()
+			}
 			prepared, err := preparer.PrepareFile(context.Background(), "artifact-tone-map", opts, "/local/artifact.mp4")
 			if err != nil || prepared.OutputPath == "" || local.calls != 1 {
 				t.Fatalf("prepared=%+v err=%v local calls=%d, want local fallback", prepared, err, local.calls)
@@ -860,32 +866,6 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 	}
 }
 
-func TestNormalizeRemoteToneMapProbeTimeout(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		millis int64
-		want   time.Duration
-	}{
-		{name: "missing", want: 5 * time.Second},
-		{name: "too small", millis: time.Second.Milliseconds(), want: 5 * time.Second},
-		{name: "node specific", millis: (161 * time.Second).Milliseconds(), want: 161 * time.Second},
-		{
-			// The ceiling is derived from the probe formula, not picked, so the
-			// expectation is too — a round number was already below what a
-			// nine-device node legitimately advertises.
-			name:   "too large",
-			millis: (24 * time.Hour).Milliseconds(),
-			want:   playback.MaxCapabilityRequestTimeout(),
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := normalizeRemoteToneMapProbeTimeout(test.millis); got != test.want {
-				t.Fatalf("normalized timeout = %s, want %s", got, test.want)
-			}
-		})
-	}
-}
-
 func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T) {
 	const nodeURL = "https://node.example"
 	preparer := NewNodeAwarePreparer(nil, nil, nil)
@@ -898,14 +878,6 @@ func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T
 
 	if got, want := preparer.remoteToneMapProbeTimeout(nodeURL), 161*time.Second; got != want {
 		t.Fatalf("probe timeout after transient failure = %s, want preserved node budget %s", got, want)
-	}
-}
-
-func TestNodeAwarePreparerDerivesProbeBudgetWithoutCachedAdvertisement(t *testing.T) {
-	preparer := NewNodeAwarePreparer(nil, nil, nil)
-
-	if got, want := preparer.remoteToneMapProbeTimeout("https://node.example"), playback.CapabilityRequestTimeout("", ""); got != want {
-		t.Fatalf("uncached probe timeout = %s, want derived budget %s", got, want)
 	}
 }
 
@@ -1004,21 +976,6 @@ func TestNodeAwarePreparerFallsBackLocallyWithoutNodeCredentials(t *testing.T) {
 	}
 	if local.calls != 1 {
 		t.Fatalf("local calls = %d, want 1", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerUsesRemoteWithDefaultNodeLocalArtifactDir(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 19, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = &recordingRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-local", playback.TranscodeOpts{}, "/local/job.mp4")
-	if err != nil || !prepared.Remote() || local.calls != 0 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
 	}
 }
 

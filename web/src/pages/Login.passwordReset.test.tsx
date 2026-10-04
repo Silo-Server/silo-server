@@ -54,7 +54,7 @@ function renderLogin() {
   return client;
 }
 
-it("offers Forgot password? when the server offers self-service reset", async () => {
+it("carries the typed username to the reset request", async () => {
   renderLogin();
   const link = await screen.findByRole("link", { name: "Forgot password?" });
   expect(link.getAttribute("href")).toBe("/forgot-password");
@@ -62,11 +62,6 @@ it("offers Forgot password? when the server offers self-service reset", async ()
     "GET /api/v2/capabilities/password-reset",
     expect.objectContaining({ retryAuthentication: false }),
   );
-});
-
-it("carries the typed username to the reset request", async () => {
-  renderLogin();
-  const link = await screen.findByRole("link", { name: "Forgot password?" });
   fireEvent.change(screen.getByLabelText("Username"), {
     target: { value: " alice@example.test " },
   });

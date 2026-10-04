@@ -111,7 +111,6 @@ describe("useCatalogWindow", () => {
     ["a locally shortened page", {}, { items: [] }],
     ["a missing continuation", {}, { next_cursor: undefined }],
     ["a refreshing page", { fetchStatus: "fetching" }, {}],
-    ["an invalidated page", { isInvalidated: true }, {}],
     ["a failed page", { status: "error" }, {}],
   ])(
     "seeks independently after %s instead of reusing its boundary",

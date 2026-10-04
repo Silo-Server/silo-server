@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -115,15 +117,6 @@ describe("UI customization contract helpers", () => {
         ],
       }),
     ).toEqual({ items: [] });
-  });
-
-  it("builds the native web primary-menu baseline", () => {
-    const menu = defaultWebPrimaryMenu();
-    expect(menu.items.map(menuItemKey)).toEqual([
-      "builtin:home",
-      "builtin:for_you",
-      "builtin:calendar",
-    ]);
   });
 
   it("moves items without mutating the source and ignores an out-of-range move", () => {

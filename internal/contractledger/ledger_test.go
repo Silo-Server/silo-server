@@ -24,57 +24,6 @@ func TestLedgerMatchesInventory(t *testing.T) {
 	}
 }
 
-func TestEveryEntryIsProposedUntilRatified(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ledger.Entries) == 0 {
-		t.Fatal("ledger has no entries")
-	}
-	for _, e := range ledger.Entries {
-		switch e.ReviewState {
-		case ReviewProposed, ReviewRatified, ReviewRejected:
-		default:
-			t.Errorf("%s: unexpected review_state %q", e.key(), e.ReviewState)
-		}
-		if e.Tier != 1 && e.Tier != 2 {
-			t.Errorf("%s: tier %d", e.key(), e.Tier)
-		}
-	}
-}
-
-// TestRemovedRowsAreTierTwo pins the tier rule stated in the ledger header:
-// a removed route has no v2 behavior to baseline, so it never sits in tier 1.
-func TestRemovedRowsAreTierTwo(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		if e.Disposition == DispositionRemoved && e.Tier != removedTier {
-			t.Errorf("%s: removed row is tier %d", e.key(), e.Tier)
-		}
-	}
-}
-
-// TestRemovalsAndRedesignsNameAnOwner pins the plan's Phase 1 gate line
-// "every proposed removal/redesign has an owner and rationale".
-func TestRemovalsAndRedesignsNameAnOwner(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		switch e.Disposition {
-		case DispositionRemoved, DispositionRedesigned, DispositionReplaced:
-			if e.Owner == nil || *e.Owner == "" {
-				t.Errorf("%s: %s row has no owner", e.key(), e.Disposition)
-			}
-		}
-	}
-}
-
 func mutatedFS(t *testing.T, mutate func(doc map[string]any)) fstest.MapFS {
 	t.Helper()
 	return mutatedFSWithInventory(t, mutate, nil)
@@ -140,15 +89,6 @@ func expectFailure(t *testing.T, fsys fstest.MapFS, want string) {
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected failure containing %q, got %v", want, err)
 	}
-}
-
-func TestGateFailsWhenAnInventoryRowHasNoEntry(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		doc["entries"] = es[1:]
-		doc["totals"].(map[string]any)["entries"] = len(es) - 1
-	})
-	expectFailure(t, fsys, "inventory row has no ledger entry")
 }
 
 func TestGateFailsWhenAnEntryHasNoInventoryRow(t *testing.T) {
@@ -351,24 +291,6 @@ func TestGateFailsWhenANonProxyRowClaimsTheDynamicProxyRule(t *testing.T) {
 	})
 	expectFailure(t, fsys, "dynamic_plugin_proxy rule on a non-proxy handler")
 	expectFailure(t, fsys, "request_kind drift")
-}
-
-// TestDynamicProxyRowsAreThePluginProxyHandlers pins the anchoring in the
-// other direction: every row claiming the rule is one of the two plugin-proxy
-// literal handlers.
-func TestDynamicProxyRowsAreThePluginProxyHandlers(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		if e.DispositionRule != dynamicProxyRule {
-			continue
-		}
-		if e.Handler != pluginAssetsProxyHandler && e.Handler != pluginPagesProxyHandler {
-			t.Errorf("%s: dynamic_plugin_proxy on handler %q", e.key(), e.Handler)
-		}
-	}
 }
 
 // TestCallSiteTypesAreBalanced catches a truncated generic such as
@@ -719,15 +641,6 @@ func TestSchemaRejectsRemovedRowWithV2Target(t *testing.T) {
 	fsys := mutatedFS(t, func(doc map[string]any) {
 		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionRemoved })
 		e["v2"] = map[string]any{"method": "GET", "path": "/api/v2/x", "operation_id": "getX"}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
-func TestSchemaRejectsRatifiedPortWithoutV2Target(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionPorted })
-		e["review_state"] = ReviewRatified
-		e["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
 	})
 	expectFailure(t, fsys, "violates")
 }

@@ -1,4 +1,4 @@
-package handlers
+package plugins
 
 import (
 	"encoding/json"
@@ -55,9 +55,9 @@ func TestAdminFormToJSONSchemaFields(t *testing.T) {
 		},
 	}
 
-	form := adminFormToJSON(descriptor)
+	form := AdminFormViewFromProto(descriptor)
 	if form == nil {
-		t.Fatal("adminFormToJSON returned nil")
+		t.Fatal("AdminFormViewFromProto returned nil")
 	}
 
 	raw, err := json.Marshal(form)
@@ -164,8 +164,8 @@ var protoInternalFields = map[string]bool{
 }
 
 // TestAdminFormDTOCompleteness is a guard against the C1-class bug: the
-// hand-written adminFormToJSON allowlist (pluginAdminFormFieldJSON /
-// pluginAdminFormSectionJSON / pluginAdminFormJSON) silently dropping a NEW
+// hand-written AdminFormViewFromProto allowlist (AdminFormFieldView /
+// AdminFormSectionView / AdminFormView) silently dropping a NEW
 // proto field added to AdminFormField / AdminFormDescriptor / AdminFormSection
 // later. It reflects over each proto message's exported fields and asserts the
 // corresponding JSON DTO struct has a field mapping to it (by identical Go name,
@@ -180,9 +180,9 @@ func TestAdminFormDTOCompleteness(t *testing.T) {
 		proto reflect.Type
 		dto   reflect.Type
 	}{
-		{"AdminFormField", reflect.TypeOf(pluginv1.AdminFormField{}), reflect.TypeOf(pluginAdminFormFieldJSON{})},
-		{"AdminFormDescriptor", reflect.TypeOf(pluginv1.AdminFormDescriptor{}), reflect.TypeOf(pluginAdminFormJSON{})},
-		{"AdminFormSection", reflect.TypeOf(pluginv1.AdminFormSection{}), reflect.TypeOf(pluginAdminFormSectionJSON{})},
+		{"AdminFormField", reflect.TypeOf(pluginv1.AdminFormField{}), reflect.TypeOf(AdminFormFieldView{})},
+		{"AdminFormDescriptor", reflect.TypeOf(pluginv1.AdminFormDescriptor{}), reflect.TypeOf(AdminFormView{})},
+		{"AdminFormSection", reflect.TypeOf(pluginv1.AdminFormSection{}), reflect.TypeOf(AdminFormSectionView{})},
 	}
 
 	for _, tc := range cases {
@@ -206,7 +206,7 @@ func TestAdminFormDTOCompleteness(t *testing.T) {
 				}
 				if !dtoFields[want] {
 					t.Errorf("proto field %s.%s has no corresponding field %q in the JSON DTO %s; "+
-						"adminFormToJSON would silently drop it. Add the field to the DTO + serializer "+
+						"AdminFormViewFromProto would silently drop it. Add the field to the DTO + serializer "+
 						"(or record an intentional rename in adminFormDTOMappingRenames).",
 						tc.name, pf.Name, want, tc.dto.Name())
 				}

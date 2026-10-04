@@ -61,10 +61,6 @@ const (
 	remoteToneMapProbeMinTimeout    = 5 * time.Second
 )
 
-func normalizeRemoteToneMapProbeTimeout(millis int64) time.Duration {
-	return playback.NormalizeProbeRequestTimeout(millis, remoteToneMapProbeMinTimeout)
-}
-
 // eligibleTranscodeWorkPlanner reserves work only on nodes that satisfy a
 // lock-safe capability predicate.
 type eligibleTranscodeWorkPlanner interface {
@@ -566,7 +562,7 @@ func (p *NodeAwarePreparer) fetchToneMapCapabilitiesForNode(ctx context.Context,
 		transformations:     append([]playback.TransformationV3(nil), info.Transformations...),
 		transportFeatures:   append([]string(nil), info.TransportFeatures...),
 		expiresAt:           time.Now().Add(remoteToneMapCapabilityTTL),
-		probeRequestTimeout: normalizeRemoteToneMapProbeTimeout(info.ProbeRequestTimeoutMillis),
+		probeRequestTimeout: playback.NormalizeProbeRequestTimeout(info.ProbeRequestTimeoutMillis, remoteToneMapProbeMinTimeout),
 	}
 	p.capabilityMu.Lock()
 	if p.capabilityInvalidations[nodeURL] == generation {

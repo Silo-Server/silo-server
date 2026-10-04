@@ -11,10 +11,7 @@ import (
 
 func TestRequiredProfilePairingCannotShrink(t *testing.T) {
 	for _, remove := range []bool{false, true} {
-		catalogs, err := Load()
-		if err != nil {
-			t.Fatal(err)
-		}
+		catalogs := loadPairingCatalogs(t)
 		pilot, err := ProfileListAcceptance(catalogs)
 		if err != nil {
 			t.Fatal(err)
@@ -65,10 +62,7 @@ func TestPairingSchemaAndOperation(t *testing.T) {
 func TestRequiredDevicePairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceListScenarios {
 		for _, remove := range []bool{false, true} {
-			catalogs, err := Load()
-			if err != nil {
-				t.Fatal(err)
-			}
+			catalogs := loadPairingCatalogs(t)
 			pilot, err := DeviceListAcceptance(catalogs)
 			if err != nil {
 				t.Fatal(err)
@@ -93,10 +87,7 @@ func TestRequiredDevicePairingCannotShrink(t *testing.T) {
 }
 
 func TestRequiredDevicePairingRejectsDuplicate(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	pilot, err := DeviceListAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -159,10 +150,7 @@ func testMutationPairingCannotShrink(t *testing.T, required []string, selectCase
 	for _, id := range required {
 		for _, failure := range []string{"missing case", "missing pair", "missing read-after"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				pilot, err := selectCases(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -199,10 +187,7 @@ func TestRequiredAPIKeyDeletePairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAPIKeyDeleteScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := APIKeyDeleteAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -244,10 +229,7 @@ func TestRequiredAPIKeyListPairingCannotShrink(t *testing.T) {
 		}
 		for _, failure := range failures {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := APIKeyListAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -284,10 +266,7 @@ func TestRequiredAPIKeyScopesPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAPIKeyScopesScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := APIKeyScopesAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -324,10 +303,7 @@ func TestRequiredAPIKeyCreateRefusalPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAPIKeyCreateRefusalScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := APIKeyCreateRefusalAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -364,10 +340,7 @@ func TestRequiredAPIKeyCreatePairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAPIKeyCreateScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := APIKeyCreateAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -404,10 +377,7 @@ func TestRequiredAccountCapabilityPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAccountCapabilityScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := AccountCapabilityAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -444,10 +414,7 @@ func TestRequiredAuthProvidersPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAuthProvidersScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := AuthProvidersAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -484,10 +451,7 @@ func TestRequiredSignupStatusPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSignupStatusScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SignupStatusAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -524,10 +488,7 @@ func TestRequiredSetupStatusPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSetupStatusScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SetupStatusAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -564,10 +525,7 @@ func TestRequiredBuildInfoPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredBuildInfoScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := BuildInfoAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -604,10 +562,7 @@ func TestRequiredLoginSessionsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredLoginSessionsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := LoginSessionsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -644,10 +599,7 @@ func TestRequiredDeviceCapabilityPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceCapabilityScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceCapabilityAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -684,10 +636,7 @@ func TestRequiredDeviceLookupPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceLookupScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceLookupAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -724,10 +673,7 @@ func TestRequiredBuildAuthorityPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredBuildAuthorityScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := BuildAuthorityAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -764,10 +710,7 @@ func TestRequiredDeviceLookupErrorsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceLookupErrorsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceLookupErrorsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -804,10 +747,7 @@ func TestRequiredSetupRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSetupRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SetupRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -844,10 +784,7 @@ func TestRequiredSessionDeleteRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSessionDeleteRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SessionDeleteRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -884,10 +821,7 @@ func TestRequiredResourceRefusalPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredResourceRefusalScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := ResourceRefusalAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -924,10 +858,7 @@ func TestRequiredDeviceStartRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceStartRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceStartRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -964,10 +895,7 @@ func TestRequiredRefreshRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredRefreshRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := RefreshRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1004,10 +932,7 @@ func TestRequiredPasswordRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredPasswordRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := PasswordRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1044,10 +969,7 @@ func TestRequiredPasswordAuthorityPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredPasswordAuthorityScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := PasswordAuthorityAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1084,10 +1006,7 @@ func TestRequiredHardwareRefusalPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredHardwareRefusalScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := HardwareRefusalAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1124,10 +1043,7 @@ func TestRequiredLogoutRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredLogoutRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := LogoutRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1164,10 +1080,7 @@ func TestRequiredDeviceDenyRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceDenyRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceDenyRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1204,10 +1117,7 @@ func TestRequiredDeviceApproveRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDeviceApproveRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DeviceApproveRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1244,10 +1154,7 @@ func TestRequiredHandoffRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredHandoffRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := HandoffRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1284,10 +1191,7 @@ func TestRequiredApprovalStateRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredApprovalStateRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := ApprovalStateRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1324,10 +1228,7 @@ func TestRequiredImpersonationRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredImpersonationRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := ImpersonationRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1364,10 +1265,7 @@ func TestRequiredLoginInputPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredLoginInputScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := LoginInputAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1404,10 +1302,7 @@ func TestRequiredLoginCredentialsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredLoginCredentialsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := LoginCredentialsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1444,10 +1339,7 @@ func TestRequiredDevicePollRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDevicePollRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DevicePollRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1484,10 +1376,7 @@ func TestRequiredDevicePollStatesPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredDevicePollStatesScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := DevicePollStatesAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1524,10 +1413,7 @@ func TestRequiredSignupRefusalsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSignupRefusalsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SignupRefusalsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1564,10 +1450,7 @@ func TestRequiredSignupCodesPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredSignupCodesScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := SignupCodesAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1604,10 +1487,7 @@ func TestRequiredMeImpersonationPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredMeImpersonationScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := MeImpersonationAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1644,10 +1524,7 @@ func TestRequiredAccountReadsPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredAccountReadsScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := AccountReadsAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1684,10 +1561,7 @@ func TestRequiredLogoutSuccessPairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredLogoutSuccessScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "unsupported requirements"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := LogoutSuccessAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1724,10 +1598,7 @@ func TestRequiredOutagePairingCannotShrink(t *testing.T) {
 	for _, id := range RequiredOutageScenarios {
 		for _, failure := range []string{"missing case", "missing pair", "database requirement", "no requirement", "wrong operation", "follow-up"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := OutageAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)
@@ -1771,10 +1642,7 @@ func TestRequiredRetainedProbeSelectionCannotShrink(t *testing.T) {
 	for _, id := range RequiredRetainedProbeScenarios {
 		for _, failure := range []string{"missing case", "paired", "requirement moved", "non-public"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
-				catalogs, err := Load()
-				if err != nil {
-					t.Fatal(err)
-				}
+				catalogs := loadPairingCatalogs(t)
 				selected, err := RetainedProbeAcceptance(catalogs)
 				if err != nil {
 					t.Fatal(err)

@@ -1415,26 +1415,6 @@ type segmentState struct {
 	detectedAt *time.Time
 }
 
-// applySegmentPatch merges the patched start/end into the segment state, then
-// gates the write on the shared priority check. Returns true if the state was
-// mutated. The legacy `markers_source` field is consulted as a fallback when
-// the segment-specific source is nil but the segment already has a range.
-func applySegmentPatch(
-	state *segmentState,
-	legacySharedSource *string,
-	source string,
-	provider *string,
-	confidence *float64,
-	algorithm string,
-	patchStart, patchEnd *float64,
-	duration float64,
-	segmentName string,
-	mutationAt time.Time,
-) (bool, error) {
-	return applySegmentRanges(state, legacySharedSource, source, provider, confidence, algorithm,
-		patchStart, patchEnd, nil, duration, segmentName, mutationAt)
-}
-
 func applySegmentRanges(
 	state *segmentState, legacySharedSource *string, source string, provider *string,
 	confidence *float64, algorithm string, patchStart, patchEnd *float64,

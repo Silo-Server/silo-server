@@ -124,7 +124,7 @@ describe("AudiobookContent playback actions", () => {
     };
   });
 
-  it("sends every Play-from-Start click to the shared audiobook player", async () => {
+  it("sends resume and Listen-from-Start with the correct start positions", async () => {
     render(
       <MemoryRouter>
         <AudiobookContent item={bookWithProgress(5000)} />
@@ -132,29 +132,6 @@ describe("AudiobookContent playback actions", () => {
     );
 
     expect(mocks.startPlayback).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
-    expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
-    expect(mocks.startPlayback.mock.calls[0]?.[0]).toMatchObject({
-      contentId: "book-1",
-      title: "Test Book",
-      initialPositionSeconds: 0,
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
-    expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
-    expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
-      contentId: "book-1",
-      initialPositionSeconds: 0,
-    });
-  });
-
-  it("sends resume and Listen-from-Start with the correct start positions", async () => {
-    render(
-      <MemoryRouter>
-        <AudiobookContent item={bookWithProgress(5000)} />
-      </MemoryRouter>,
-    );
 
     await userEvent.click(screen.getByRole("button", { name: /^resume/i }));
     expect(mocks.startPlayback).toHaveBeenCalledTimes(1);
@@ -166,6 +143,15 @@ describe("AudiobookContent playback actions", () => {
     await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
     expect(mocks.startPlayback).toHaveBeenCalledTimes(2);
     expect(mocks.startPlayback.mock.calls[1]?.[0]).toMatchObject({
+      contentId: "book-1",
+      title: "Test Book",
+      initialPositionSeconds: 0,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /listen from start/i }));
+    expect(mocks.startPlayback).toHaveBeenCalledTimes(3);
+    expect(mocks.startPlayback.mock.calls[2]?.[0]).toMatchObject({
+      contentId: "book-1",
       initialPositionSeconds: 0,
     });
   });

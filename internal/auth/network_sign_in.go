@@ -252,9 +252,6 @@ type networkPreviews struct {
 	mu      sync.Mutex
 	entries map[networkPreviewKey]networkPreviewEntry
 	lookups singleflight.Group
-	// joined, when set (tests), runs once a cache miss has joined or
-	// started the shared lookup, before it waits for the answer.
-	joined func()
 }
 
 // networkPreview answers who the plugin says the request's peer is, or nil
@@ -278,9 +275,6 @@ func (s *Service) networkPreview(ctx context.Context, provider *PluginProvider) 
 		defer cancel()
 		return s.lookupNetworkPreview(lookupCtx, key), nil
 	})
-	if s.previews.joined != nil {
-		s.previews.joined()
-	}
 	preview, _ := (<-lookup).Val.(*NetworkIdentityPreview)
 	return preview
 }

@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, renderHook } from "@testing-library/react";
 import { createElement, useEffect, type MutableRefObject, type ReactNode } from "react";
 import { PlayerConfigProvider, type PlayerConfig } from "@/player";
-import {
-  audiobookAbsoluteTime,
-  useAudiobookPlayback,
-  type AudiobookPlayback,
-} from "./useAudiobookPlayback";
+import { useAudiobookPlayback, type AudiobookPlayback } from "./useAudiobookPlayback";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
 import type { PlaybackRealtimeCommandEnvelope } from "@/player/realtime-protocol";
 import { resetCodecDetectionForTests } from "@/player/hooks/useCodecDetection";
@@ -330,13 +326,6 @@ describe("useAudiobookPlayback", () => {
     });
   });
 
-  it("returns a flattened chapter list across files", () => {
-    const { result } = renderAudiobookPlayback();
-    expect(result.current.chapters).toHaveLength(2);
-    expect(result.current.chapters[0]!.start_seconds).toBe(0);
-    expect(result.current.chapters[1]!.start_seconds).toBe(300);
-  });
-
   it("starts a playback session and builds a tokenized stream URL", async () => {
     const { result } = renderAudiobookPlayback();
 
@@ -610,15 +599,32 @@ describe("useAudiobookPlayback", () => {
       }),
     );
 
-    const { result } = renderAudiobookPlayback({ initialPositionSeconds: 300 });
-    const audio = makeAudio();
-    act(() => {
-      (result.current.audioRef as MutableRefObject<HTMLAudioElement>).current = audio;
-    });
+    const onPlayback = vi.fn<(playback: AudiobookPlayback) => void>();
+    function Harness() {
+      const playback = useAudiobookPlayback({
+        contentId: "c",
+        files,
+        initialPositionSeconds: 300,
+      });
+      useEffect(() => {
+        onPlayback(playback);
+      }, [playback]);
+      return createElement("audio", {
+        ref: playback.audioRef,
+        src: playback.streamUrl || undefined,
+      });
+    }
+    const { container } = render(createElement(Harness), { wrapper });
     await flushAsyncWork();
-    expect(audiobookAbsoluteTime(0, 300, 5)).toBe(305);
+    const audio = container.querySelector("audio");
+    if (!audio) throw new Error("expected audio element");
+    act(() => {
+      audio.currentTime = 5;
+      fireEvent.timeUpdate(audio);
+    });
+    expect(onPlayback.mock.lastCall?.[0].currentTime).toBe(305);
 
-    act(() => result.current.seekTo(360));
+    act(() => onPlayback.mock.lastCall?.[0].seekTo(360));
     await flushAsyncWork();
     const starts = vi
       .mocked(fetch)

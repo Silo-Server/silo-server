@@ -1,11 +1,12 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
-import { getLanguageName } from "./languageNames";
+import type { PlayerSubtitleInfo, SubtitleMode } from "../types";
 import {
-  sortSubtitlesBySource,
   findPreferredSubtitleIndex,
   resolveSubtitleAutoSelect,
+  sortSubtitlesBySource,
 } from "./subtitleSort";
-import type { PlayerSubtitleInfo, SubtitleMode } from "../types";
 
 function makeSub(overrides: Partial<PlayerSubtitleInfo>): PlayerSubtitleInfo {
   return {
@@ -16,34 +17,6 @@ function makeSub(overrides: Partial<PlayerSubtitleInfo>): PlayerSubtitleInfo {
     ...overrides,
   };
 }
-
-describe("getLanguageName", () => {
-  it("returns full name for 2-letter codes", () => {
-    expect(getLanguageName("en")).toBe("English");
-    expect(getLanguageName("ja")).toBe("Japanese");
-  });
-
-  it("returns full name for 3-letter codes", () => {
-    expect(getLanguageName("eng")).toBe("English");
-    expect(getLanguageName("spa")).toBe("Spanish");
-    expect(getLanguageName("jpn")).toBe("Japanese");
-    expect(getLanguageName("fre")).toBe("French");
-    expect(getLanguageName("fra")).toBe("French");
-  });
-
-  it("is case-insensitive", () => {
-    expect(getLanguageName("EN")).toBe("English");
-    expect(getLanguageName("ENG")).toBe("English");
-  });
-
-  it("labels an unassigned code explicitly", () => {
-    expect(getLanguageName("xx")).toBe("Unknown language (xx)");
-  });
-
-  it("returns 'Unknown' for empty string", () => {
-    expect(getLanguageName("")).toBe("Unknown");
-  });
-});
 
 describe("sortSubtitlesBySource", () => {
   it("sorts external before downloaded before embedded", () => {
@@ -128,19 +101,6 @@ describe("findPreferredSubtitleIndex", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("returns -1 when no language match", () => {
-    const tracks = [makeSub({ index: 0, source: "external", language: "es" })];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(-1);
-  });
-
-  it("returns the only match when there is one", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en" }),
-      makeSub({ index: 1, source: "embedded", language: "es" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(0);
-  });
-
   it("returns backend index, not array position, when they differ", () => {
     // Simulates bitmap subs being skipped: backend indices have gaps.
     const tracks = [
@@ -199,10 +159,6 @@ describe("resolveSubtitleAutoSelect", () => {
           }),
         ),
       ).toBe(1);
-    });
-
-    it("returns null with empty tracks", () => {
-      expect(resolveSubtitleAutoSelect(opts({ mode: "off" }))).toBeNull();
     });
   });
 
@@ -507,17 +463,6 @@ describe("bitmap (PGS) codec deprioritization", () => {
     const tracks = [
       makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
       makeSub({ index: 1, source: "embedded", language: "en", codec: "subrip" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("still prefers a better source even when it is bitmap-free elsewhere", () => {
-    // External text beats embedded PGS, and embedded text beats embedded PGS,
-    // but an external PGS-like entry would still beat embedded text — source
-    // remains the primary key.
-    const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "subrip" }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });

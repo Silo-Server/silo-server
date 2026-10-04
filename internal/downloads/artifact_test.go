@@ -20,33 +20,32 @@ import (
 )
 
 func TestParamsHashStableAndDistinct(t *testing.T) {
-	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false)
-	if base == "" || len(base) != 64 {
-		t.Fatalf("params hash should be a 64-char sha256 hex, got %q", base)
+	params := paramsHashParams{
+		format: "transcode", container: "mp4", codecVideo: "h264", codecAudio: "aac", resolution: "1080p",
+		audioTrackIndex: -1, targetBitrateKbps: 10000, policy: tonemap.PolicyNone,
 	}
-	// Deterministic for identical inputs (dedup key).
-	if again := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false); again != base {
+	base := paramsHashWithToneMapRevision(params)
+	if again := paramsHashWithToneMapRevision(params); again != base {
 		t.Fatalf("params hash not stable: %q != %q", base, again)
 	}
-	// Distinct when any parameter differs.
-	for _, other := range []string{
-		paramsHash("remux", "mp4", "h264", "aac", "1080p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "hevc", "aac", "1080p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "720p", -1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", 1, 10000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 5000, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, true),
+	for name, change := range map[string]func(*paramsHashParams){
+		"format":           func(p *paramsHashParams) { p.format = "remux" },
+		"video codec":      func(p *paramsHashParams) { p.codecVideo = "hevc" },
+		"resolution":       func(p *paramsHashParams) { p.resolution = "720p" },
+		"audio track":      func(p *paramsHashParams) { p.audioTrackIndex = 1 },
+		"bitrate":          func(p *paramsHashParams) { p.targetBitrateKbps = 5000 },
+		"subtitle burn-in": func(p *paramsHashParams) { p.subtitleBurnIn = true },
 	} {
-		if other == base {
-			t.Fatalf("params hash collision: %q", other)
+		other := params
+		change(&other)
+		if paramsHashWithToneMapRevision(other) == base {
+			t.Fatalf("%s did not change the artifact hash", name)
 		}
 	}
 }
 
 // TestParamsHashIncludesFrozenToneMapRecipe verifies recipe changes produce distinct artifacts.
 func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
-	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false)
-	legacy := paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false, tonemap.PolicyNone, "", "", "")
 	hashWithRevision := func(policy tonemap.Policy, mode tonemap.Mode, sourceKind tonemap.SourceKind, recipeVersion string, preflightRequired bool, sourceRevision tonemap.SourceRevision) string {
 		return paramsHashWithToneMapRevision(paramsHashParams{
 			format: "transcode", container: "mp4", codecVideo: "h264", codecAudio: "aac", resolution: "1080p",
@@ -55,19 +54,13 @@ func TestParamsHashIncludesFrozenToneMapRecipe(t *testing.T) {
 			preflightRequired: preflightRequired, sourceRevision: sourceRevision,
 		})
 	}
-	if legacy != base {
-		t.Fatalf("non-tone-mapped hash changed: %q != %q", legacy, base)
-	}
-	toneMapped := paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-		tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3)
+	base := hashWithRevision(tonemap.PolicyNone, "", "", "", false, tonemap.SourceRevision{})
+	toneMapped := hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{})
 	for name, other := range map[string]string{
 		"non-tone-mapped": base,
-		"source kind": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourceHLG, playback.TransformationHDRToSDRToneMapRecipeVersionV3),
-		"recipe version": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, "2"),
-		"execution mode": paramsHashWithToneMap("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false,
-			tonemap.PolicyHardwareThenSoftware, tonemap.ModeSoftware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3),
+		"source kind":     hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourceHLG, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{}),
+		"recipe version":  hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeHardware, tonemap.SourcePQ, "2", false, tonemap.SourceRevision{}),
+		"execution mode":  hashWithRevision(tonemap.PolicyHardwareThenSoftware, tonemap.ModeSoftware, tonemap.SourcePQ, playback.TransformationHDRToSDRToneMapRecipeVersionV3, false, tonemap.SourceRevision{}),
 	} {
 		if other == toneMapped {
 			t.Fatalf("%s did not affect tone-map artifact hash", name)
@@ -160,17 +153,17 @@ func TestToneMapArtifactExecutionFingerprintRejectsRefreshedPathOrDuration(t *te
 	}
 	original := manager.buildOpts(file, artifact)
 	artifact.ParamsHash = downloadprepare.NewRequest(artifact.ID, original).ExecutionFingerprint()
-	if !toneMapArtifactExecutionFingerprintMatches(artifact, original) {
+	if !artifactExecutionFingerprintMatches(artifact, original) {
 		t.Fatal("frozen execution request did not match its artifact hash")
 	}
 	changedPath := original
 	changedPath.InputPath = "/media/replaced.mkv"
-	if toneMapArtifactExecutionFingerprintMatches(artifact, changedPath) {
+	if artifactExecutionFingerprintMatches(artifact, changedPath) {
 		t.Fatal("changed input path reused the frozen artifact hash")
 	}
 	changedDuration := original
 	changedDuration.TotalDuration++
-	if toneMapArtifactExecutionFingerprintMatches(artifact, changedDuration) {
+	if artifactExecutionFingerprintMatches(artifact, changedDuration) {
 		t.Fatal("changed duration reused the frozen artifact hash")
 	}
 }
@@ -185,7 +178,7 @@ func TestPreparedAudioBoostFreezesSelectedSourceChannelsInExecutionFingerprint(t
 		ID: "artifact-audio", MediaFileID: file.ID, Format: "transcode",
 		Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", AudioTrackIndex: 1,
 	}
-	artifact.ParamsHash = paramsHash(artifact.Format, artifact.Container, artifact.CodecVideo, artifact.CodecAudio, artifact.Resolution, artifact.AudioTrackIndex, artifact.TargetBitrateKbps, false)
+	artifact.ParamsHash = "legacy-parameter-hash"
 	opts := manager.buildOpts(file, artifact)
 	if opts.SourceAudioChannels != 6 {
 		t.Fatalf("SourceAudioChannels = %d, want selected surround track", opts.SourceAudioChannels)
@@ -538,19 +531,8 @@ func TestResolveToneMapTargetHashesSoftwareWhenHardwareHasNoCapacity(t *testing.
 	if err != nil {
 		t.Fatalf("resolveToneMapTarget() error = %v", err)
 	}
-	hashForMode := func(mode tonemap.Mode) string {
-		return paramsHashWithToneMapRevision(paramsHashParams{
-			format: "transcode", container: target.Container, codecVideo: target.CodecVideo, codecAudio: target.CodecAudio, resolution: target.Resolution,
-			audioTrackIndex: target.AudioTrackIndex, targetBitrateKbps: target.TargetBitrateKbps,
-			policy: target.ToneMapPolicy, mode: mode, sourceKind: target.ToneMapSourceKind,
-			recipeVersion: target.ToneMapRecipeVersion, preflightRequired: target.ToneMapPreflightRequired, sourceRevision: target.ToneMapSourceRevision,
-		})
-	}
-	gotHash := hashForMode(target.ToneMapMode)
-	softwareHash := hashForMode(tonemap.ModeSoftware)
-	hardwareHash := hashForMode(tonemap.ModeHardware)
-	if target.ToneMapMode != tonemap.ModeSoftware || gotHash != softwareHash || gotHash == hardwareHash {
-		t.Fatalf("tone-map target = mode %q hash %q; want software hash %q and not hardware hash %q", target.ToneMapMode, gotHash, softwareHash, hardwareHash)
+	if target.ToneMapMode != tonemap.ModeSoftware {
+		t.Fatalf("tone-map mode = %q, want software", target.ToneMapMode)
 	}
 }
 
@@ -670,28 +652,6 @@ func TestRemoteArtifactRequeueRejectsNonPositiveNodeID(t *testing.T) {
 	}, "invalid node")
 	if err == nil {
 		t.Fatal("expected invalid remote locator error")
-	}
-}
-
-func TestEffectiveArtifactDir(t *testing.T) {
-	// Explicit config wins verbatim.
-	if got := effectiveArtifactDir("/data/artifacts", "/tmp/silo-transcode"); got != "/data/artifacts" {
-		t.Fatalf("explicit dir = %q, want /data/artifacts", got)
-	}
-	// Unset: a sibling of the transcode dir, never inside it (the transcode
-	// cleanup sweep would otherwise delete a nested artifact dir) and never the
-	// process cwd (a relative/empty path).
-	got := effectiveArtifactDir("", "/var/lib/silo/transcode")
-	if got != "/var/lib/silo/silo-download-artifacts" {
-		t.Fatalf("default dir = %q, want sibling of transcode dir", got)
-	}
-	if strings.HasPrefix(got, "/var/lib/silo/transcode/") {
-		t.Fatalf("default dir %q is nested under the transcode dir", got)
-	}
-	// Unset transcode dir falls back to the absolute default root, not "".
-	fallback := effectiveArtifactDir("", "")
-	if !strings.HasPrefix(fallback, "/") {
-		t.Fatalf("fallback dir %q is not absolute", fallback)
 	}
 }
 

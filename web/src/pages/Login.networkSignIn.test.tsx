@@ -120,12 +120,6 @@ it("signs the device owner in with one press, without a password", async () => {
   expect(screen.getByLabelText("Password")).toBeTruthy();
 });
 
-it("falls back to the provider name when the owner is unnamed", () => {
-  auth.providers = [LOCAL, { ...TAILSCALE, network_identity: undefined }];
-  renderLogin();
-  expect(screen.getByRole("button", { name: "Continue with Tailscale" })).toBeTruthy();
-});
-
 it("shows no password form when the network provider is the only way in", () => {
   auth.providers = [TAILSCALE];
   renderLogin();

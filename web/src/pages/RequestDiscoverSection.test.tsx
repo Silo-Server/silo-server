@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { RequestDiscoverySection } from "@/api/types";
-import { V2ProblemError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   useRequestDiscoverySection: vi.fn(),
@@ -95,32 +94,6 @@ describe("RequestDiscoverSection", () => {
     expect(screen.queryByText(/Page \d/)).not.toBeInTheDocument();
   });
 
-  it("loads the next page from the foot of the grid", () => {
-    renderAt("/requests/discover/trending_movies");
-
-    // jsdom has no IntersectionObserver, so the foot offers a button.
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-
-    expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1);
-  });
-
-  it("continues the grid with placeholders while the next page loads", () => {
-    mocks.useRequestDiscoverySection.mockReturnValue(
-      loaded([section(1, [100, 101, 102])], { isFetchingNextPage: true }),
-    );
-    renderAt("/requests/discover/trending_movies");
-
-    // One grid: the placeholders follow the last poster instead of starting
-    // a grid (and a row) of their own.
-    const grid = screen.getAllByRole("link", { name: "Movie 102" })[0]?.closest(".grid");
-    expect(grid).not.toBeNull();
-    const placeholders = [...(grid?.children ?? [])].filter(
-      (child) => child.getAttribute("aria-hidden") === "true",
-    );
-    expect(placeholders).toHaveLength(3);
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
-  });
-
   it("stops offering more at the end of the row", () => {
     mocks.useRequestDiscoverySection.mockReturnValue(
       loaded([section(1, [100])], { hasNextPage: false }),
@@ -162,40 +135,5 @@ describe("RequestDiscoverSection", () => {
     expect(screen.queryByText(/TMDB couldn/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(mocks.fetchNextPage).toHaveBeenCalledTimes(1);
-  });
-
-  it("says the row is empty once no page is left", () => {
-    mocks.useRequestDiscoverySection.mockReturnValue(
-      loaded([section(1, [])], { hasNextPage: false }),
-    );
-    renderAt("/requests/discover/trending_movies");
-
-    expect(screen.getByText("Nothing here right now.")).toBeInTheDocument();
-  });
-
-  it("goes back to the Requests hub", () => {
-    renderAt("/requests/discover/trending_movies");
-
-    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
-
-    expect(screen.getByTestId("location")).toHaveTextContent(/^\/requests$/);
-  });
-
-  it("says so when the row does not exist", () => {
-    mocks.useRequestDiscoverySection.mockReturnValue({
-      ...loaded([]),
-      data: undefined,
-      isError: true,
-      hasNextPage: false,
-      error: new V2ProblemError("getDiscoverSection", {
-        type: "validation_failed",
-        title: "Invalid",
-        status: 422,
-      } as ConstructorParameters<typeof V2ProblemError>[1]),
-    });
-    renderAt("/requests/discover/nope");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Not found" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
   });
 });

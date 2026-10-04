@@ -318,6 +318,9 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}))
 	defer server.Close()
 	client := HTTPPreparer{}
+	if _, err := client.Stat(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+		t.Fatalf("invalid artifact Stat error = %v, want invalid artifact id", err)
+	}
 	result, err := client.Stat(context.Background(), server.URL, "secret", "artifact-1")
 	if err != nil || result != (Result{ArtifactID: "artifact-1", FileSize: 42}) {
 		t.Fatalf("Stat = (%+v, %v)", result, err)
@@ -401,12 +404,6 @@ func TestHTTPPreparerDeleteStopsStalledErrorBodyRead(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("stalled delete response took %s, want a bounded failure", elapsed)
-	}
-}
-
-func TestHTTPPreparerRejectsArtifactPathTraversal(t *testing.T) {
-	if _, err := (HTTPPreparer{}).Stat(context.Background(), "http://node", "secret", "../escape"); err == nil {
-		t.Fatal("expected invalid artifact id error")
 	}
 }
 
@@ -566,8 +563,8 @@ func TestHTTPPreparerProgress(t *testing.T) {
 	if _, err := p.Progress(context.Background(), server.URL, "secret", "other-id"); err == nil {
 		t.Fatal("accepted progress for a different artifact id")
 	}
-	if _, err := p.Progress(context.Background(), server.URL, "secret", "../escape"); err == nil {
-		t.Fatal("accepted an invalid artifact id")
+	if _, err := p.Progress(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+		t.Fatalf("invalid artifact Progress error = %v, want invalid artifact id", err)
 	}
 }
 

@@ -9,14 +9,14 @@ func TestReconcileSchedulesContinuationAfterReleasingClusterLockDB(t *testing.T)
 	f := newFixture(t)
 	q := &reconcileQueue{fakeQueue: newFakeQueue(), reconcile: func(_ context.Context, call int) (ReconcileStats, error) {
 		if call <= reconcilePassBatches {
-			return ReconcileStats{Added: reconcileBatch}, nil
+			return ReconcileStats{Removed: reconcileBatch}, nil
 		}
 		return ReconcileStats{Added: 1}, nil
 	}}
 	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
 	s.pool = f.pool
 	stats, ran, err := s.Reconcile(t.Context())
-	if err != nil || !ran || stats.Added != reconcileBatch*reconcilePassBatches {
+	if err != nil || !ran || stats.Removed != reconcileBatch*reconcilePassBatches {
 		t.Fatalf("first pass=%+v ran=%v error=%v", stats, ran, err)
 	}
 	select {

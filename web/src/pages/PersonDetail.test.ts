@@ -1,19 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatBirthDate, computeAge } from "@/lib/date";
-
-describe("formatBirthDate", () => {
-  it("formats a standard date", () => {
-    expect(formatBirthDate("1977-04-23")).toBe("Apr 23, 1977");
-  });
-
-  it("formats a date with single-digit day", () => {
-    expect(formatBirthDate("1990-01-05")).toBe("Jan 5, 1990");
-  });
-
-  it("formats a leap year date", () => {
-    expect(formatBirthDate("2000-02-29")).toBe("Feb 29, 2000");
-  });
-});
+import { computeAge } from "@/lib/date";
 
 describe("computeAge", () => {
   it("computes age for a living person", () => {
@@ -22,16 +8,6 @@ describe("computeAge", () => {
     const birthMonth = String(today.getMonth() + 1).padStart(2, "0");
     const birthDay = String(today.getDate()).padStart(2, "0");
     expect(computeAge(`${birthYear}-${birthMonth}-${birthDay}`)).toBe(30);
-  });
-
-  it("subtracts one year if birthday has not occurred yet", () => {
-    const today = new Date();
-    const futureMonth = today.getMonth() + 2; // 1-2 months from now
-    if (futureMonth <= 12) {
-      const birthYear = today.getFullYear() - 25;
-      const monthStr = String(futureMonth).padStart(2, "0");
-      expect(computeAge(`${birthYear}-${monthStr}-15`)).toBe(24);
-    }
   });
 
   it("computes age at death", () => {

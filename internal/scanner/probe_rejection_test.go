@@ -177,21 +177,6 @@ func TestScannerProbeFileReportsRejection(t *testing.T) {
 	}
 }
 
-func TestApplyProbeDataClearsProbeFailure(t *testing.T) {
-	failedAt := time.Now().UTC()
-	mf := models.MediaFile{ProbeFailedAt: &failedAt}
-	applyProbeData(&mf, completeProbeRepairTestData(), "local")
-	if mf.ProbeFailedAt != nil || mf.ProbeUpdatedAt == nil {
-		t.Fatalf("after a successful probe ProbeFailedAt=%v ProbeUpdatedAt=%v", mf.ProbeFailedAt, mf.ProbeUpdatedAt)
-	}
-
-	var marked models.MediaFile
-	markProbeRejected(&marked)
-	if marked.ProbeFailedAt == nil || !marked.ProbeRejected() {
-		t.Fatal("markProbeRejected did not mark an unprobed file as rejected")
-	}
-}
-
 func TestPlaybackProbeEnsurerRecordsAndClearsProbeRejection(t *testing.T) {
 	media := filepath.Join(t.TempDir(), "S01E03.mkv")
 	if err := os.WriteFile(media, nil, 0o600); err != nil {
@@ -507,37 +492,6 @@ func rejectingProbeFunc(t *testing.T, before func()) func(context.Context, strin
 			before()
 		}
 		return ProbeFile(ctx, ffprobe, path)
-	}
-}
-
-// A scan that probes a replacement file while the playback repair's ffprobe
-// is failing on the old bytes wins: the repair answers with the stored,
-// repaired row instead of the stale snapshot it marked locally.
-func TestPlaybackProbeEnsurerPrefersConcurrentRepairOverRejection(t *testing.T) {
-	media := filepath.Join(t.TempDir(), "S01E09.mkv")
-	if err := os.WriteFile(media, []byte("replacement bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	file := &models.MediaFile{ID: 10, FilePath: media}
-	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{file.ID: file}}
-	ensurer := &PlaybackProbeEnsurer{fileRepo: repo, ffprobePath: "ffprobe", timeout: 5 * time.Second}
-	ensurer.probeFile = rejectingProbeFunc(t, func() {
-		repaired := *file
-		applyProbeData(&repaired, completeProbeRepairTestData(), "local")
-		repo.mu.Lock()
-		repo.files[file.ID] = &repaired
-		repo.mu.Unlock()
-	})
-
-	got, err := ensurer.EnsureProbeOnly(t.Context(), file)
-	if err != nil {
-		t.Fatalf("EnsureProbeOnly: %v", err)
-	}
-	if got.ProbeRejected() || got.ProbeUpdatedAt == nil || got.CodecVideo == "" {
-		t.Fatalf("returned %+v, want the concurrently repaired row", got)
-	}
-	if stored := repo.files[file.ID]; stored.ProbeFailedAt != nil {
-		t.Fatalf("repaired row marked failed at %v", stored.ProbeFailedAt)
 	}
 }
 

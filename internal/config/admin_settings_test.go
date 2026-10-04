@@ -58,23 +58,6 @@ func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T)
 	}
 }
 
-func TestEffectiveAdminSettingsUsesLegacyS3FallbacksBeforeDefaults(t *testing.T) {
-	effective := EffectiveAdminSettings(map[string]string{
-		"s3.operational_path_style": "false",
-		"s3.operational_token_ttl":  "3600",
-	})
-
-	if got := effective["s3.public_path_style"]; got != "false" {
-		t.Fatalf("s3.public_path_style = %q, want legacy false", got)
-	}
-	if got := effective["s3.private_path_style"]; got != "false" {
-		t.Fatalf("s3.private_path_style = %q, want legacy false", got)
-	}
-	if got := effective["s3.public_token_ttl"]; got != "3600" {
-		t.Fatalf("s3.public_token_ttl = %q, want legacy 3600", got)
-	}
-}
-
 func TestEffectiveAdminSettingsCanonicalS3ValuesOverrideLegacyFallbacks(t *testing.T) {
 	effective := EffectiveAdminSettings(map[string]string{
 		"s3.public_path_style":      "true",

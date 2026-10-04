@@ -46,6 +46,7 @@ describe("LibraryEmptyState", () => {
 
   it("points admins at scanning and library management", () => {
     mocks.isActingAdmin = true;
+    mocks.activeScans = [{ id: "scan-1", library_id: 8, status: "running" }];
 
     const markup = render();
 
@@ -62,12 +63,5 @@ describe("LibraryEmptyState", () => {
 
     expect(markup).toContain("Scanning this library");
     expect(markup).not.toContain("This library is empty");
-  });
-
-  it("ignores scans of other libraries", () => {
-    mocks.isActingAdmin = true;
-    mocks.activeScans = [{ id: "scan-1", library_id: 8, status: "running" }];
-
-    expect(render()).toContain("This library is empty");
   });
 });

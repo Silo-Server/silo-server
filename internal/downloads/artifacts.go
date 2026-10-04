@@ -274,7 +274,7 @@ func (m *ArtifactManager) artifactDir() string {
 			transcodeDir = c.Playback.TranscodeDir
 		}
 	}
-	return effectiveArtifactDir(artifactDir, transcodeDir)
+	return config.EffectiveDownloadArtifactDir(artifactDir, transcodeDir)
 }
 
 // Ensure deduplicates and (when new) enqueues an encode job for file in the
@@ -564,12 +564,6 @@ func (m *ArtifactManager) RunOnce(ctx context.Context) error {
 	}
 	m.recoverReadyArtifacts(ctx)
 	return m.drain(ctx)
-}
-
-// recover is retained as the focused recovery entrypoint used by tests.
-func (m *ArtifactManager) recover(ctx context.Context) {
-	m.recoverQueueState(ctx)
-	m.recoverReadyArtifacts(ctx)
 }
 
 func (m *ArtifactManager) recoverQueueState(ctx context.Context) {
@@ -968,13 +962,6 @@ func artifactExecutionFingerprintMatches(a *Artifact, opts playback.TranscodeOpt
 	}
 	fingerprint := downloadprepare.NewRequest(a.ID, opts).ExecutionFingerprint()
 	return fingerprint != "" && fingerprint == a.ParamsHash
-}
-
-// toneMapArtifactExecutionFingerprintMatches preserves the package's existing
-// test/helper name while audio-sensitive recipes now share the same durable
-// execution fence.
-func toneMapArtifactExecutionFingerprintMatches(a *Artifact, opts playback.TranscodeOpts) bool {
-	return artifactExecutionFingerprintMatches(a, opts)
 }
 
 func (m *ArtifactManager) cleanupRejectedPrepared(ctx context.Context, artifactID string, prepared PreparedArtifact) {

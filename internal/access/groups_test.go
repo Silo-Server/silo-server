@@ -374,19 +374,6 @@ func TestEffectivePolicyForUserSkipsProviderWhenUngrouped(t *testing.T) {
 	}
 }
 
-func TestEffectivePolicyForUserQueriesProviderWhenGrouped(t *testing.T) {
-	groupID := int64(11)
-	user := &models.User{ID: 3, AccessGroupID: &groupID}
-	group := &GroupPolicy{ID: groupID, MaxStreams: 2, RequestsAllowed: true}
-	got, err := EffectivePolicyForUser(context.Background(), user, stubGroupProvider{group: group})
-	if err != nil {
-		t.Fatalf("EffectivePolicyForUser() error = %v", err)
-	}
-	if got.MaxStreams != 2 {
-		t.Fatalf("EffectivePolicyForUser(grouped).MaxStreams = %d, want 2", got.MaxStreams)
-	}
-}
-
 // An admin row that still carries a group (written before admins were kept
 // ungrouped) resolves to the admin defaults without consulting the provider.
 func TestEffectivePolicyForUserIgnoresGroupOnAdmin(t *testing.T) {

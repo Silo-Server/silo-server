@@ -101,7 +101,7 @@ type Fetcher struct {
 	candidateGroup   singleflight.Group
 
 	// Clock returns the current time. Defaults to recipes.RealClock{}.
-	// Tests inject recipes.FixedClock for deterministic seasonal/editorial behavior.
+	// Clock controls time-based seasonal and editorial resolution.
 	Clock recipes.Clock
 }
 

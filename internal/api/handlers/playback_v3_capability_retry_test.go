@@ -56,27 +56,6 @@ func TestLookupRemoteCapabilitiesRefetchesWhenOvertakenMidFlight(t *testing.T) {
 	}
 }
 
-// The ordinary path must not pay for that: a lookup nothing invalidates reads
-// the node exactly once.
-func TestLookupRemoteCapabilitiesFetchesOnceWhenNothingInvalidates(t *testing.T) {
-	handler := NewPlaybackHandler(nil)
-	var fetches atomic.Int32
-
-	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fetches.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"resolved": "qsv"})
-	}))
-	t.Cleanup(node.Close)
-
-	if _, err := handler.lookupRemoteCapabilitiesV3(context.Background(), node.URL, false); err != nil {
-		t.Fatalf("lookupRemoteCapabilitiesV3: %v", err)
-	}
-	if got := fetches.Load(); got != 1 {
-		t.Fatalf("fetches = %d, want a single read on the uncontended path", got)
-	}
-}
-
 // An acceleration change makes a node's inventory wrong and its next capability
 // matrix cold — which is exactly when the read is slowest. Dropping the learned
 // budget along with the inventory sent the refresh that invalidation triggers

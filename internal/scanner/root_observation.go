@@ -48,19 +48,6 @@ func ObserveRoot(filePath string, libraryType string, libraryRoots ...string) (R
 	return observationFromAssignment(assignment), true
 }
 
-func collectRootObservations(filePaths []string, libraryType string) []RootObservation {
-	return inferRootAssignments(filePaths, libraryType, 0, nil).Observations
-}
-
-func collectScannedRoots(
-	filePaths []string,
-	libraryType string,
-	folderID int,
-	overrides map[string]models.MediaRootOverride,
-) []models.ScannedMediaRoot {
-	return inferRootAssignments(filePaths, libraryType, folderID, overrides).Snapshots
-}
-
 func inferRootAssignments(
 	filePaths []string,
 	libraryType string,

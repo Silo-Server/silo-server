@@ -68,13 +68,11 @@ type SessionManagerInterface interface {
 	// stop can withdraw.
 	WatchTransportStop(sessionID string) (<-chan struct{}, func())
 	SetRemoteTransport(sessionID string, remote bool) error
-	SetEffectiveMediaFileID(sessionID string, fileID int) error
 	SetTranscodeNodeURL(sessionID, url string) error
 	SetTranscodeRoute(sessionID string, route playback.TranscodeRoute) error
 	ApplyReplacement(sessionID string, replacement playback.SessionReplacement) (playback.SessionReplacementRollback, error)
 	ApplyReplacementIfRoute(sessionID string, expected playback.TranscodeRoute, replacement playback.SessionReplacement) (playback.SessionReplacementRollback, bool, error)
 	RollbackReplacement(sessionID string, rollback playback.SessionReplacementRollback) error
-	SetWebSocket(sessionID string, connected bool) error
 	SetRealtimeConnection(sessionID string, connected bool) error
 	SetProgressPersistenceDisabled(sessionID string, disabled bool) error
 	StopSession(sessionID string) error

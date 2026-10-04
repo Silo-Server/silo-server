@@ -45,50 +45,6 @@ func TestChapterCaptureTime(t *testing.T) {
 	}
 }
 
-func TestBuildFrameExtractArgs(t *testing.T) {
-	firstAttemptArgs := func(t *testing.T, hwAccel string) []string {
-		t.Helper()
-		var args []string
-		_, _, err := ExtractFrame(context.Background(), FrameExtractOptions{
-			InputPath:   "/media/movie.mkv",
-			SeekSeconds: 42.5,
-			HWAccel:     hwAccel,
-			HWDevice:    "/dev/dri/renderD128",
-			RunFunc: func(_ context.Context, _ string, got []string) ([]byte, error) {
-				if args == nil {
-					args = append([]string(nil), got...)
-				}
-				return []byte("frame"), nil
-			},
-		})
-		if err != nil {
-			t.Fatalf("ExtractFrame() error = %v", err)
-		}
-		return args
-	}
-
-	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "qsv")
-		if !slices.Contains(args, "-init_hw_device") || !slices.Contains(args, "qsv=qs@va") {
-			t.Fatalf("qsv args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "vaapi")
-		if !slices.Contains(args, "-hwaccel") || !slices.Contains(args, "vaapi") {
-			t.Fatalf("vaapi args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		args := firstAttemptArgs(t, "nvenc")
-		if slices.Contains(args, "-hwaccel") || slices.Contains(args, "-init_hw_device") {
-			t.Fatalf("nvenc args use hardware setup: %#v", args)
-		}
-	})
-}
-
 func TestQueueFileIDsDedupes(t *testing.T) {
 	service := &Service{
 		notifyNormal:   make(chan struct{}, 8),

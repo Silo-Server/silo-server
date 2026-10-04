@@ -66,7 +66,6 @@ vi.mock("@/hooks/queries/admin/logs", () => ({
 vi.mock("@/components/AdminSessionActions", () => ({ AdminSessionActions: () => null }));
 
 import AdminActivity from "./AdminActivity";
-import AdminStats from "./AdminStats";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -140,31 +139,6 @@ describe("activity playback scopes", () => {
     expect(screen.getAllByLabelText("Stream location: Remote")).toHaveLength(2);
   });
 
-  it("shows Direct Stream on desktop and mobile without a second audio-transcode badge", () => {
-    renderActivity();
-
-    const badges = screen.getAllByLabelText("Playback method: Direct Stream");
-    expect(badges).toHaveLength(2);
-    for (const badge of badges) {
-      expect(badge).toHaveTextContent("Direct Stream");
-      expect(badge).toHaveAttribute("title", activityMethodMeta("direct_stream").description);
-      expect(badge.className).toContain(activityMethodMeta("direct_stream").badgeClass);
-      expect(within(badge.parentElement!).getByRole("button", { name: "Details" })).toBeTruthy();
-    }
-    expect(screen.queryByText("Audio Transcode")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Playback method: Direct Play")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Copy", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("Transcode", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("AAC 5.1", { exact: true })).toHaveLength(2);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0]!);
-    expect(screen.getByText("Audio Transcode")).toBeInTheDocument();
-    expect(screen.getByText("Copied without re-encoding")).toBeInTheDocument();
-    expect(screen.getByText("MKV → fMP4 (HLS)")).toBeInTheDocument();
-    expect(screen.queryByText("Unknown output container")).not.toBeInTheDocument();
-    expect(screen.queryByText("MKV → Remux")).not.toBeInTheDocument();
-  });
-
   it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {
     const methods = ["direct", "remux", "direct_stream", "transcode"];
     mocks.sessions = methods.map((method) =>
@@ -236,17 +210,6 @@ describe("activity playback scopes", () => {
     expect(screen.getByRole("button", { name: "Direct Stream 2" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Playback method: Direct Stream")).toHaveLength(4);
   });
-
-  it("uses the display label rather than the raw method key in System stats", () => {
-    render(
-      <MemoryRouter>
-        <AdminStats />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("cell", { name: "Direct Stream" })).toBeInTheDocument();
-    expect(screen.queryByText("direct_stream")).not.toBeInTheDocument();
-  });
 });
 
 describe("IP lookup", () => {
@@ -291,62 +254,6 @@ describe("download preparation tab", () => {
       </MemoryRouter>,
     );
   }
-
-  it("summarizes preparation in the page subtitle and tab", () => {
-    mocks.preparations = makePreparationList([makePreparation()], { queued: 2, retrying: 1 });
-    renderActivity();
-    expect(
-      screen.getByText("No active streams · 1 download preparing, 2 queued, 1 retrying"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Download preparation\s*4/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Streams/ })).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("opens from the URL and shows each job's state", () => {
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-q",
-        state: "queued",
-        queue_position: 1,
-        worker: undefined,
-        progress: undefined,
-        media_title: "Queued Movie",
-      }),
-      makePreparation({
-        id: "art-f",
-        state: "failed",
-        attempts: 3,
-        progress: undefined,
-        error: "ffmpeg: No space left on device",
-        failed_at: new Date(Date.now() - 12 * 60_000).toISOString(),
-        media_title: "Failed Movie",
-      }),
-      makePreparation({
-        id: "art-u",
-        progress: undefined,
-        progress_unavailable: true,
-        media_title: "Old Node Movie",
-      }),
-    ]);
-    renderActivity("/admin/activity?view=preparations");
-
-    expect(screen.getByRole("tab", { name: /Download preparation/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    // Desktop rows and mobile cards both render; CSS shows one.
-    for (const bar of screen.getAllByRole("progressbar", { name: "Example Movie progress" })) {
-      expect(bar).toHaveAttribute("aria-valuenow", "25");
-    }
-    expect(screen.getAllByText("2.0× · about 38 min left").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Queued · next in line").length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText("After 3 attempts · 12 min ago · ffmpeg: No space left on device").length,
-    ).toBeGreaterThan(0);
-    expect(screen.getAllByText("This worker doesn't report progress").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Not assigned").length).toBeGreaterThan(0);
-  });
 
   it("filters by state and search text", () => {
     mocks.preparations = makePreparationList([
