@@ -17,9 +17,6 @@ const (
 	// minAnchorTitles is how many positive titles a profile needs before its
 	// clusters anchor the main row. Under it the profile has one cluster.
 	minAnchorTitles = 10
-	// anchorMergeCosine merges anchors whose centroids are more similar than
-	// this, so one interest split across two clusters is one anchor.
-	anchorMergeCosine = 0.9
 	// anchorMinSlots is the fewest slots an anchor gets when the row has room
 	// for that many per anchor.
 	anchorMinSlots = 3
@@ -35,9 +32,15 @@ type mainRowAnchor struct {
 }
 
 // mainRowAnchors returns the anchors of a profile's main row: its clusters,
-// heaviest first, with those whose centroids are within anchorMergeCosine
-// merged. A profile under minAnchorTitles positive titles, or left with fewer
-// than two anchors, gets none: its main row comes from the averaged vector.
+// heaviest first. A profile under minAnchorTitles positive titles, or with
+// fewer than two clusters, gets none: its main row comes from the averaged
+// vector.
+//
+// Clusters are not merged by how close their centroids are. A centroid
+// averages away its titles' differences, so the more titles two clusters
+// hold, the closer their centroids sit, whatever their genres:
+// buildTasteClusters already decides which titles are one interest, against
+// the profile's own spread.
 func mainRowAnchors(clusters []TasteCluster) []mainRowAnchor {
 	sorted := slices.Clone(clusters)
 	slices.SortStableFunc(sorted, func(a, b TasteCluster) int {
@@ -53,25 +56,11 @@ func mainRowAnchors(clusters []TasteCluster) []mainRowAnchor {
 		if len(c.Embedding) == 0 || c.TotalWeight <= 0 {
 			continue
 		}
-		merged := false
-		for i, a := range anchors {
-			if cosineSimilarity(a.embedding, c.Embedding) > anchorMergeCosine {
-				anchors[i] = mainRowAnchor{
-					embedding: weightedAverage([][]float32{a.embedding, c.Embedding}, []float64{a.weight, c.TotalWeight}),
-					weight:    a.weight + c.TotalWeight,
-				}
-				merged = true
-				break
-			}
-		}
-		if !merged {
-			anchors = append(anchors, mainRowAnchor{embedding: c.Embedding, weight: c.TotalWeight})
-		}
+		anchors = append(anchors, mainRowAnchor{embedding: c.Embedding, weight: c.TotalWeight})
 	}
 	if titles < minAnchorTitles || len(anchors) < 2 {
 		return nil
 	}
-	slices.SortStableFunc(anchors, func(a, b mainRowAnchor) int { return cmp.Compare(b.weight, a.weight) })
 	return anchors
 }
 
@@ -191,18 +180,17 @@ func interleaveAnchors(lists [][]ScoredItem, slots []int, limit int) []ScoredIte
 // anchoredRow composes a main row of up to limit items from anchors. Each
 // anchor fetches anchorPoolFactor candidates per slot with no genre filter,
 // MMR ranks them, and interleaveAnchors merges the anchors' rankings. It
-// returns the row, every candidate fetched, and their genres. An anchor whose
-// query fails is logged and left out.
-func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem, genres map[string][]string) {
+// returns the row and every candidate fetched. An anchor whose query fails is
+// logged and left out.
+func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem) {
 	weights := make([]float64, len(anchors))
 	for i, a := range anchors {
 		weights[i] = a.weight
 	}
 	slots := allocateAnchorSlots(weights, limit)
-	genres = make(map[string][]string)
 	lists := make([][]ScoredItem, len(anchors))
 	for i, a := range anchors {
-		candidates, candidateGenres, err := b.store.FindTasteProfileCandidates(ctx, a.embedding, excludeIDs, nil, anchorPoolFactor*slots[i], filter)
+		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, a.embedding, excludeIDs, nil, anchorPoolFactor*slots[i], filter)
 		if err != nil {
 			slog.WarnContext(ctx, "main row anchor candidates failed", "component", "recommendations", "anchor", i, "error", err)
 			continue
@@ -216,9 +204,6 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 		// anchor's picks; the rest stand in when another anchor runs out.
 		lists[i] = applyMMR(candidates, embMap, b.lambda, len(candidates))
 		pool = mergeScoredCandidates(pool, candidates)
-		for id, g := range candidateGenres {
-			genres[id] = g
-		}
 	}
-	return interleaveAnchors(lists, slots, limit), pool, genres
+	return interleaveAnchors(lists, slots, limit), pool
 }

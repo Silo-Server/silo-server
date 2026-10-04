@@ -24,25 +24,62 @@ const kmeansMaxIterations = 50
 // kmeansConvergenceThreshold is the minimum centroid movement to continue iterating.
 const kmeansConvergenceThreshold = 1e-6
 
-// kmeansMinClusterSize is the minimum number of members a cluster must have
-// before it gets merged into a neighbor.
+// kmeansMinClusterSize is the fewest titles a taste cluster holds; a smaller
+// one is merged into a neighbor.
 const kmeansMinClusterSize = 3
 
+// kmeansMaxClusters is the most taste clusters a profile gets.
+const kmeansMaxClusters = 5
+
+// A single k-means++ seeding can settle on a poor partition: two seeds in one
+// interest leave a sliver cluster that merging then folds away, and with it
+// every other interest. Each cluster count is tried with up to kmeansRestarts
+// seedings, as many as kmeansRestartBudget titles allow, so a profile of 200
+// titles costs about what one of 1,500 always did, and one of 800 or more
+// runs once.
+const (
+	kmeansRestarts      = 8
+	kmeansRestartBudget = 800
+)
+
+// kmeansMinSilhouette is the silhouette a partition into more clusters than
+// determinClusterCount gives must reach to be chosen. Distinct interests in
+// real profiles score 0.13 to 0.22; one interest cut into parts scores under
+// 0.08, where the best count changes with any new title.
+const kmeansMinSilhouette = 0.1
+
 // kmeansCluster partitions items into k groups using k-means with k-means++
-// initialization. Centroids are computed as weighted averages using each item's
-// signal weight and are L2-normalized after each update. Returns a slice of
-// length len(items) mapping each item index to its assigned cluster index.
+// initialization, seeded by kmeansSeed. Returns a slice of length len(items)
+// mapping each item index to its assigned cluster index.
 func kmeansCluster(items []clusterItem, k int) []int {
+	assignments, _ := kmeansRun(items, k, kmeansSeed(items, k))
+	return assignments
+}
+
+// kmeansRestartSeed is the seed of restart r of k-means over items; restart 0
+// uses kmeansSeed itself.
+func kmeansRestartSeed(items []clusterItem, k, r int) int64 {
+	return kmeansSeed(items, k) ^ int64(r)*0x5851f42d4c957f2d
+}
+
+// kmeansRun partitions items into k groups using k-means with k-means++
+// initialization from seed. Centroids are computed as weighted averages using
+// each item's signal weight and are L2-normalized after each update. Returns a
+// slice of length len(items) mapping each item index to its assigned cluster
+// index, and the partition's inertia: the sum of the items' squared distances
+// to their centroids. It leaves weights out, so a choice between partitions
+// by inertia does not change as the weights decay.
+func kmeansRun(items []clusterItem, k int, seed int64) ([]int, float64) {
 	n := len(items)
 	if n == 0 || k <= 0 {
-		return nil
+		return nil, 0
 	}
 	if k > n {
 		k = n
 	}
 
 	dims := len(items[0].embedding)
-	rng := rand.New(rand.NewSource(kmeansSeed(items, k)))
+	rng := rand.New(rand.NewSource(seed))
 
 	// --- k-means++ initialization ---
 	// Select the first centroid uniformly at random.
@@ -141,6 +178,7 @@ func kmeansCluster(items []clusterItem, k int) []int {
 	}
 
 	// Final assignment pass to ensure consistency with final centroids.
+	inertia := 0.0
 	for i := range items {
 		bestCluster := 0
 		bestDist := math.MaxFloat64
@@ -152,9 +190,10 @@ func kmeansCluster(items []clusterItem, k int) []int {
 			}
 		}
 		assignments[i] = bestCluster
+		inertia += bestDist
 	}
 
-	return assignments
+	return assignments, inertia
 }
 
 // kmeansSeed derives the k-means seed from k and the item IDs only. Weights
@@ -275,6 +314,126 @@ func mergSmallClusters(items []clusterItem, assignments []int, k int) []int {
 	return compactAssignments(assignments)
 }
 
+// clusterAssignments partitions items into taste clusters. A profile under 10
+// titles has one. A larger one gets determinClusterCount clusters, or more,
+// up to kmeansMaxClusters, when a partition into more scores a higher
+// silhouette and at least kmeansMinSilhouette. The silhouette compares each
+// title's distance to its own cluster with its distance to the nearest other,
+// so it judges interests against the profile's own spread: a third interest
+// of three titles gets a cluster of its own, while one interest is not cut up
+// for the sake of a count. Each count's partition is its best seeding (see
+// bestSeeding). When determinClusterCount's count has none, and no larger
+// count qualifies, that count is run once and its small clusters merged.
+func clusterAssignments(items []clusterItem) []int {
+	n := len(items)
+	minK := determinClusterCount(n)
+	if minK <= 1 {
+		return make([]int, n)
+	}
+	maxK := max(minK, min(kmeansMaxClusters, n/kmeansMinClusterSize))
+	restarts := max(1, min(kmeansRestarts, kmeansRestartBudget/n))
+
+	var best []int
+	bestScore := math.Inf(-1)
+	var distances [][]float64
+	for k := minK; k <= maxK; k++ {
+		assignments := bestSeeding(items, k, restarts)
+		if assignments == nil {
+			continue
+		}
+		if minK == maxK {
+			return compactAssignments(assignments)
+		}
+		if distances == nil {
+			distances = cosineDistances(items)
+		}
+		score := silhouette(distances, assignments)
+		if k > minK && score < kmeansMinSilhouette {
+			continue
+		}
+		if score > bestScore {
+			best, bestScore = assignments, score
+		}
+	}
+	if best == nil {
+		return mergSmallClusters(items, kmeansCluster(items, minK), minK)
+	}
+	return compactAssignments(best)
+}
+
+// bestSeeding partitions items into k clusters with restarts k-means++
+// seedings and returns the partition with the lowest inertia whose clusters
+// all hold kmeansMinClusterSize items, or nil when no seeding gives one.
+func bestSeeding(items []clusterItem, k, restarts int) []int {
+	var best []int
+	bestInertia := math.Inf(1)
+	for r := range restarts {
+		assignments, inertia := kmeansRun(items, k, kmeansRestartSeed(items, k, r))
+		if inertia < bestInertia && clustersHoldMinimum(assignments, k) {
+			best, bestInertia = assignments, inertia
+		}
+	}
+	return best
+}
+
+// clustersHoldMinimum reports whether each of the k clusters of assignments
+// holds at least kmeansMinClusterSize items.
+func clustersHoldMinimum(assignments []int, k int) bool {
+	sizes := make([]int, k)
+	for _, c := range assignments {
+		sizes[c]++
+	}
+	return !slices.ContainsFunc(sizes, func(size int) bool { return size < kmeansMinClusterSize })
+}
+
+// cosineDistances returns the cosine distance, 1 - cosine similarity, between
+// every pair of items.
+func cosineDistances(items []clusterItem) [][]float64 {
+	d := make([][]float64, len(items))
+	for i := range d {
+		d[i] = make([]float64, len(items))
+	}
+	for i := range items {
+		for j := i + 1; j < len(items); j++ {
+			dist := 1 - cosineSimilarity(items[i].embedding, items[j].embedding)
+			d[i][j], d[j][i] = dist, dist
+		}
+	}
+	return d
+}
+
+// silhouette is the mean silhouette of a partition, from -1 to 1: for each
+// item, how much nearer it is, on average, to its own cluster's other members
+// than to the members of the nearest other cluster.
+func silhouette(distances [][]float64, assignments []int) float64 {
+	k := slices.Max(assignments) + 1
+	sizes := make([]int, k)
+	for _, c := range assignments {
+		sizes[c]++
+	}
+	total := 0.0
+	for i, own := range assignments {
+		if sizes[own] < 2 {
+			continue // a lone member scores 0
+		}
+		sums := make([]float64, k)
+		for j, c := range assignments {
+			sums[c] += distances[i][j]
+		}
+		within := sums[own] / float64(sizes[own]-1)
+		nearest := math.Inf(1)
+		for c := range k {
+			if c != own && sizes[c] > 0 {
+				nearest = min(nearest, sums[c]/float64(sizes[c]))
+			}
+		}
+		if spread := max(within, nearest); spread > 0 {
+			total += (nearest - within) / spread
+		}
+	}
+	return total / float64(len(assignments))
+}
+
 // compactAssignments remaps cluster indices to be contiguous starting from 0.
 func compactAssignments(assignments []int) []int {
 	seen := make(map[int]int)
@@ -310,14 +469,8 @@ func buildTasteClusters(items []clusterItem) []TasteCluster {
 		return nil
 	}
 
-	// Step 1: Determine how many clusters to target.
-	k := determinClusterCount(len(valid))
-
-	// Step 2: Run k-means clustering.
-	assignments := kmeansCluster(valid, k)
-
-	// Step 3: Merge clusters that are too small.
-	assignments = mergSmallClusters(valid, assignments, k)
+	// Steps 1-3: Choose the cluster count and partition the items.
+	assignments := clusterAssignments(valid)
 
 	// Step 4: Build the output TasteCluster for each cluster.
 	clusterMap := make(map[int][]int) // cluster index -> item indices

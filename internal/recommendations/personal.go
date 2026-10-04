@@ -156,10 +156,12 @@ func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
 
 // mainRow builds the "For You" row of a profile with a taste profile. A
 // profile with several interests gets a row composed per interest (see
-// mainRowAnchors); any other, or one whose anchors find nothing, a row of the
-// candidates nearest its averaged taste vector, ranked by MMR. Either way the
-// genre pass then shapes the served window, and type supplements fill the
-// rest of the row.
+// mainRowAnchors), whose every prefix holds each interest's share by weight;
+// any other, or one whose anchors find nothing, a row of the candidates
+// nearest its averaged taste vector, ranked by MMR, whose served window the
+// genre pass then shapes. The genre pass leaves a composed row alone: capping
+// a genre at half the window would cut an interest heavier than half the
+// profile below its share. Type supplements fill the rest of either row.
 func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
 	embedding, err := b.store.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
@@ -174,23 +176,22 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 	}
 
 	var row, pool []ScoredItem
-	var genreMap map[string][]string
 	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
-		row, pool, genreMap = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter)
+		row, pool = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter)
 	}
 	if len(row) == 0 {
+		var genreMap map[string][]string
 		pool, genreMap, err = b.store.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
 		if err != nil {
 			return nil, fmt.Errorf("find similar for aggregated: %w", err)
 		}
 		pool = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, pool, 0))
 		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
-		row = applyMMR(pool, embMap, b.lambda, limit)
+		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), genreMap)
 	}
 	if len(row) == 0 {
 		return nil, nil
 	}
-	row = applyGenreCap(row, genreMap)
 	row = b.addTypeSupplements(ctx, embedding, excludeIDs, filter, pool, row, limit)
 
 	for i := range row {

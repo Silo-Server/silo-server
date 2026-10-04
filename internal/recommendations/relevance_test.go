@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -1110,5 +1111,59 @@ func TestRelevanceFreshnessAddsNewTitlesWithoutDisplacingTheHead(t *testing.T) {
 	}
 	if gained < 2 {
 		t.Fatalf("new titles in the served main rows rose by %d across personas, want at least 2", gained)
+	}
+}
+
+// A profile whose interests weigh about 3:1 is served about 3:1: the composed
+// row keeps the heavier interest's share of the served window rather than
+// capping its genre at half.
+func TestRelevanceComposedRowKeepsAHeavyInterestsShare(t *testing.T) {
+	c := newToyCatalog()
+	history := append(titles(c.pick(gHorror, "movie", 0, 12), 5), titles(c.pick(gRomance, "movie", 0, 6), 5)...)
+	for i := range 4 {
+		history[i].rated5 = true
+	}
+	r := buildPersonaRows(t, c, persona{name: "heavy horror", history: history, tastes: []string{gHorror, gRomance}})
+	want, got := r.anchorCounts()
+	if len(want) != 2 {
+		t.Fatalf("anchors = %d, want horror and romance", len(want))
+	}
+	if got[0] < want[0]-1 {
+		t.Fatalf("horror anchor is nearest %d served items, want its %d slots (want %v, got %v)", got[0], want[0], want, got)
+	}
+	if n := r.tasteCount(served(r.main), gHorror); n <= ServedRowSize/2 {
+		t.Fatalf("%d of the served %d carry %s, want more than half", n, ServedRowSize, gHorror)
+	}
+}
+
+// A third interest of three titles gets a cluster of its own and its share of
+// the served window, and the profile's two earlier interests keep theirs.
+func TestRelevanceNewInterestJoinsTheMainRow(t *testing.T) {
+	c := newToyCatalog()
+	base := append(titles(c.pick(gHorror, "movie", 0, 8), 10), titles(c.pick(gRomance, "movie", 0, 6), 10)...)
+	base[0].rated5, base[1].rated5, base[8].rated5 = true, true, true
+	docs := titles(c.pick(gDocumentary, "movie", 0, 3), 0)
+	for i := range docs {
+		docs[i].rated5 = true
+	}
+	tastes := []string{gHorror, gRomance, gDocumentary}
+	before := buildPersonaRows(t, c, persona{name: "two tastes", history: base, tastes: tastes})
+	after := buildPersonaRows(t, c, persona{name: "a third taste", history: append(slices.Clone(base), docs...), tastes: tastes})
+
+	if n := len(before.store.clusters); n != 2 {
+		t.Fatalf("before: %d clusters, want horror and romance", n)
+	}
+	sizes := map[string]int{}
+	for _, cl := range after.store.clusters {
+		sizes[cl.DominantGenres[0]] = cl.MemberCount
+	}
+	if want := map[string]int{gHorror: 8, gRomance: 6, gDocumentary: 3}; !maps.Equal(sizes, want) {
+		t.Fatalf("after: cluster sizes by first dominant genre %v, want %v", sizes, want)
+	}
+	want, got := after.anchorCounts()
+	for i := range want {
+		if got[i] < want[i]/2 {
+			t.Fatalf("after: anchor %d is nearest %d served items, want at least half its %d slots (want %v, got %v)", i, got[i], want[i], want, got)
+		}
 	}
 }
