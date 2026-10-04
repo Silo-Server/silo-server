@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -63,10 +64,12 @@ func registerSubtitleUploads(reg *Registry) {
 		return Operation{Operation: humaOp(http.MethodPost, Prefix+path, id, "subtitles", "Submit a bounded subtitle multipart form."), Class: ClassProfileScoped, ProfileOptional: true, MaxBodyBytes: subtitles.MaxUploadSize + (256 << 10)}
 	}
 	upload := op("/subtitles/upload", "uploadSubtitle")
+	// Uploading needs subtitle_upload; detection stays open to any viewer.
+	upload.Class, upload.Permission, upload.ProfileOptional = ClassPermissionGated, policy.PermissionSubtitleUpload, false
 	upload.ServiceBacked = true
 	upload.DemoRestricted = true
 	upload.RetrySafety = RetrySafetyNonRetryable
-	upload.Description = "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
+	upload.Description = "Store a user subtitle file. Requires the subtitle_upload permission (implicit for an acting admin); without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit."
 	Register(reg, upload, func(ctx context.Context, in *SubtitleUploadInput) (*SubtitleDownloadOutput, error) {
 		form := in.RawBody.Data()
 		if form == nil {

@@ -23,8 +23,16 @@ afterEach(() => {
 
 const version = { file_id: 42 } as FileVersion;
 
-function renderDialog() {
-  render(<SubtitleSearchDialog open onOpenChange={() => {}} version={version} title="Synthetic" />);
+function renderDialog(uploadEnabled = true) {
+  render(
+    <SubtitleSearchDialog
+      open
+      onOpenChange={() => {}}
+      version={version}
+      title="Synthetic"
+      uploadEnabled={uploadEnabled}
+    />,
+  );
 }
 
 it("keeps upload but hides online search when the server reports no providers", () => {
@@ -46,15 +54,34 @@ it.each([
   expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
 });
 
+it("hides upload but keeps online search without the subtitle_upload permission", () => {
+  mocks.providerStatus.mockReturnValue({ data: { enabled: true, providers: ["opensubtitles"] } });
+  renderDialog(false);
+  expect(screen.queryByText("Upload form")).not.toBeInTheDocument();
+  expect(screen.getByText("Search online")).toBeInTheDocument();
+});
+
 it("keeps focus inside the dialog when a late probe removes the focused search control", async () => {
   mocks.providerStatus.mockReturnValue({ data: undefined });
   const view = render(
-    <SubtitleSearchDialog open onOpenChange={() => {}} version={version} title="Synthetic" />,
+    <SubtitleSearchDialog
+      open
+      onOpenChange={() => {}}
+      version={version}
+      title="Synthetic"
+      uploadEnabled
+    />,
   );
   screen.getByRole("button", { name: "Search" }).focus();
   mocks.providerStatus.mockReturnValue({ data: { enabled: false, providers: [] } });
   view.rerender(
-    <SubtitleSearchDialog open onOpenChange={() => {}} version={version} title="Synthetic" />,
+    <SubtitleSearchDialog
+      open
+      onOpenChange={() => {}}
+      version={version}
+      title="Synthetic"
+      uploadEnabled
+    />,
   );
   expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() =>

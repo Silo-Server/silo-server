@@ -465,7 +465,8 @@ describe("Library access", () => {
     mount(GUEST);
     const library = await edit(ui, "Library access");
     expect(within(library).getByRole("switch", { name: "Metadata curation" })).toBeDisabled();
-    expect(within(library).getByText("Guests group doesn't allow this")).toBeInTheDocument();
+    expect(within(library).getByRole("switch", { name: "Subtitle upload" })).toBeDisabled();
+    expect(within(library).getAllByText("Guests group doesn't allow this")).toHaveLength(2);
     expect(within(library).getByRole("switch", { name: "Marker editing" })).toBeEnabled();
     expect(within(library).getByText("The Guests group allows this")).toBeInTheDocument();
   });

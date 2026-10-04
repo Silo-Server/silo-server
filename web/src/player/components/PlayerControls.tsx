@@ -85,6 +85,7 @@ interface PlayerControlsProps {
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
   storedSubtitleSync?: StoredSubtitleSync;
+  canUploadSubtitles?: boolean;
   // Audio
   audioTracks: PlayerAudioTrack[];
   activeAudioIndex: number;
@@ -160,6 +161,7 @@ export function PlayerControls({
   sessionId,
   getSubtitleStartPosition,
   storedSubtitleSync,
+  canUploadSubtitles,
   audioTracks,
   activeAudioIndex,
   onAudioSelect,
@@ -354,6 +356,7 @@ export function PlayerControls({
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
               storedSubtitleSync={storedSubtitleSync}
+              uploadEnabled={canUploadSubtitles}
               audioTracks={audioTracks}
             />
             <QualityMenu
@@ -531,6 +534,7 @@ export function PlayerControls({
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
                 storedSubtitleSync={storedSubtitleSync}
+                uploadEnabled={canUploadSubtitles}
                 audioTracks={audioTracks}
               />
 

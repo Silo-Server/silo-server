@@ -1,7 +1,13 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { canEditMarkers, isActingAdmin, PERMISSION_MARKER_EDIT } from "./permissions";
+import {
+  canEditMarkers,
+  canUploadSubtitles,
+  isActingAdmin,
+  PERMISSION_MARKER_EDIT,
+  PERMISSION_SUBTITLE_UPLOAD,
+} from "./permissions";
 
 describe("permissions", () => {
   it("allows admins with no profile selected to edit markers", () => {
@@ -33,6 +39,27 @@ describe("permissions", () => {
 
   it("rejects users without marker edit permission", () => {
     expect(canEditMarkers({ role: "user", permissions: [] }, null)).toBe(false);
+  });
+});
+
+describe("canUploadSubtitles", () => {
+  it("allows acting admins without an assigned permission", () => {
+    expect(canUploadSubtitles({ role: "admin", permissions: [] }, null)).toBe(true);
+  });
+
+  it("rejects admins on a non-primary profile without the assigned permission", () => {
+    expect(canUploadSubtitles({ role: "admin", permissions: [] }, { is_primary: false })).toBe(
+      false,
+    );
+  });
+
+  it("follows the assigned permission for users", () => {
+    expect(
+      canUploadSubtitles({ role: "user", permissions: [PERMISSION_SUBTITLE_UPLOAD] }, null),
+    ).toBe(true);
+    expect(canUploadSubtitles({ role: "user", permissions: [PERMISSION_MARKER_EDIT] }, null)).toBe(
+      false,
+    );
   });
 });
 

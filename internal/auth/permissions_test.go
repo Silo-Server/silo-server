@@ -29,9 +29,9 @@ func TestNormalizePermissions_RejectsUnknownPermission(t *testing.T) {
 	}
 }
 
-func TestDefaultUserPermissionsIncludesMarkerEditOnly(t *testing.T) {
+func TestDefaultUserPermissionsGrantMarkerEditAndSubtitleUpload(t *testing.T) {
 	got := DefaultUserPermissions()
-	want := []string{"marker_edit"}
+	want := []string{"marker_edit", "subtitle_upload"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("default permissions = %#v, want %#v", got, want)
 	}

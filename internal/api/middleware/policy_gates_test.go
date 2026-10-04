@@ -248,6 +248,100 @@ func TestPolicyMarkerEditMiddlewareEvalErrorIsInternal(t *testing.T) {
 	}
 }
 
+func TestPolicySubtitleUploadMiddlewareParity(t *testing.T) {
+	pdp := newMiddlewarePolicyPDP(t)
+	userErr := errors.New("user store down")
+
+	uploader := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{policy.PermissionSubtitleUpload}}
+	markerOnly := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{policy.PermissionMarkerEdit}}
+	disabledUploader := &models.User{ID: 7, Role: "user", Enabled: false, Permissions: []string{policy.PermissionSubtitleUpload}}
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true}
+	disabledAdmin := &models.User{ID: 7, Role: "admin", Enabled: false}
+	assignedAdmin := &models.User{ID: 7, Role: "admin", Enabled: true, Permissions: []string{policy.PermissionSubtitleUpload}}
+
+	tests := []struct {
+		name      string
+		claims    *auth.Claims
+		user      *models.User
+		userErr   error
+		profileID string
+		check     PrimaryProfileChecker
+		wantCode  int
+	}{
+		{name: "missing_claims", wantCode: http.StatusUnauthorized},
+		{name: "acting_admin_no_profile", claims: adminClaims(), user: admin, wantCode: http.StatusNoContent},
+		{name: "disabled_admin", claims: adminClaims(), user: disabledAdmin, wantCode: http.StatusForbidden},
+		{name: "acting_admin_primary_profile", claims: adminClaims(), user: admin, profileID: "prof-1", check: primaryChecker(true, true, nil), wantCode: http.StatusNoContent},
+		{name: "non_primary_admin_without_assigned_permission", claims: adminClaims(), user: admin, profileID: "prof-2", check: primaryChecker(false, true, nil), wantCode: http.StatusForbidden},
+		{name: "non_primary_admin_with_assigned_permission", claims: adminClaims(), user: assignedAdmin, profileID: "prof-2", check: primaryChecker(false, true, nil), wantCode: http.StatusNoContent},
+		{name: "primary_check_error", claims: adminClaims(), user: admin, profileID: "prof-1", check: primaryChecker(false, false, errors.New("profiles down")), wantCode: http.StatusInternalServerError},
+		{name: "user_with_permission", claims: userClaims(), user: uploader, wantCode: http.StatusNoContent},
+		{name: "user_without_permission", claims: userClaims(), user: markerOnly, wantCode: http.StatusForbidden},
+		{name: "user_disabled", claims: userClaims(), user: disabledUploader, wantCode: http.StatusForbidden},
+		{name: "user_loader_error", claims: userClaims(), userErr: userErr, wantCode: http.StatusForbidden},
+		{name: "user_not_found", claims: userClaims(), wantCode: http.StatusForbidden},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			legacy := captureSubtitleUploadResponse(
+				NewPermissionMiddleware(fakePermissionUserLoader{user: test.user, err: test.userErr}, nil, test.check),
+				test.claims,
+				test.profileID,
+			)
+			policyBacked := captureSubtitleUploadResponse(
+				NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: test.user, err: test.userErr}, nil, test.check, pdp),
+				test.claims,
+				test.profileID,
+			)
+			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
+			if policyBacked.code != test.wantCode {
+				t.Fatalf("status = %d body = %s, want %d", policyBacked.code, policyBacked.body, test.wantCode)
+			}
+		})
+	}
+}
+
+func TestSubtitleUploadMiddlewareAppliesGroupPermissionMask(t *testing.T) {
+	groupID := int64(3)
+	user := &models.User{
+		ID:            7,
+		Role:          "user",
+		Enabled:       true,
+		AccessGroupID: &groupID,
+		Permissions:   []string{policy.PermissionSubtitleUpload},
+	}
+	groups := middlewareGroupProvider{group: &access.GroupPolicy{
+		AllowedPermissions:       []string{policy.PermissionMarkerEdit},
+		DownloadAllowed:          true,
+		DownloadTranscodeAllowed: true,
+		RequestsAllowed:          true,
+	}}
+	for name, gate := range map[string]subtitleUploadGate{
+		"legacy": NewPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, nil, groups),
+		"policy": NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, nil, newMiddlewarePolicyPDP(t), groups),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := captureSubtitleUploadResponse(gate, userClaims(), "")
+			if rec.code != http.StatusForbidden {
+				t.Fatalf("status = %d body = %s, want forbidden", rec.code, rec.body)
+			}
+		})
+	}
+}
+
+func TestPolicySubtitleUploadMiddlewareEvalErrorIsInternal(t *testing.T) {
+	user := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{policy.PermissionSubtitleUpload}}
+	rec := captureSubtitleUploadResponse(
+		NewPolicyPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, nil, errorPermissionDecider{}),
+		userClaims(),
+		"",
+	)
+	if rec.code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body %s", rec.code, http.StatusInternalServerError, rec.body)
+	}
+}
+
 func newMiddlewarePolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
 	engine, err := policy.NewEngine(context.Background())
@@ -322,6 +416,26 @@ func captureMarkerEditResponse(mw markerEditGate, claims *auth.Claims) middlewar
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	req := httptest.NewRequest(http.MethodPut, "/markers/files/5", nil)
+	if claims != nil {
+		req = req.WithContext(SetClaims(req.Context(), claims))
+	}
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, req)
+	return middlewareResponse{code: rec.Code, body: rec.Body.String()}
+}
+
+type subtitleUploadGate interface {
+	RequireSubtitleUpload(http.Handler) http.Handler
+}
+
+func captureSubtitleUploadResponse(mw subtitleUploadGate, claims *auth.Claims, profileID string) middlewareResponse {
+	next := mw.RequireSubtitleUpload(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/subtitles/upload", nil)
+	if profileID != "" {
+		req.Header.Set("X-Profile-Id", profileID)
+	}
 	if claims != nil {
 		req = req.WithContext(SetClaims(req.Context(), claims))
 	}

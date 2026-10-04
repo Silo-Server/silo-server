@@ -18,6 +18,7 @@ const (
 	activeProfileVerificationFailedMsg = "Failed to verify active profile"
 	metadataCurationRequiredMsg        = "Metadata curation permission required"
 	markerEditRequiredMsg              = "Marker editing permission required"
+	subtitleUploadRequiredMsg          = "Subtitle upload permission required"
 	itemIDRequiredMsg                  = "Item ID is required"
 )
 
@@ -230,6 +231,19 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 // the legacy handler check, admins are not short-circuited: the decision runs
 // through the policy so group masks and custom overrides can tighten it.
 func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler {
+	return m.requirePermission(policy.PermissionMarkerEdit, markerEditRequiredMsg, "Failed to verify marker edit permission", next)
+}
+
+// RequireSubtitleUpload gates manual subtitle uploads through the policy PDP.
+// An acting admin passes; anyone else needs subtitle_upload in the account's
+// group-masked permissions.
+func (m *PolicyPermissionMiddleware) RequireSubtitleUpload(next http.Handler) http.Handler {
+	return m.requirePermission(policy.PermissionSubtitleUpload, subtitleUploadRequiredMsg, "Failed to verify subtitle upload permission", next)
+}
+
+// requirePermission runs one account-scoped permission decision with the
+// caller's group-masked permissions and acting-admin facts.
+func (m *PolicyPermissionMiddleware) requirePermission(permission, deniedMsg, failedMsg string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := GetClaims(r.Context())
 		if claims == nil {
@@ -237,7 +251,7 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 		if m == nil || m.users == nil || m.pdp == nil {
-			writeForbidden(w, markerEditRequiredMsg)
+			writeForbidden(w, deniedMsg)
 			return
 		}
 
@@ -248,12 +262,12 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 		}
 		user, err := m.users.GetByID(r.Context(), claims.UserID)
 		if err != nil || user == nil || !user.Enabled {
-			writeForbidden(w, markerEditRequiredMsg)
+			writeForbidden(w, deniedMsg)
 			return
 		}
 		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
 		if err != nil {
-			writeForbidden(w, markerEditRequiredMsg)
+			writeForbidden(w, deniedMsg)
 			return
 		}
 
@@ -262,16 +276,16 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			Role:                user.Role,
 			UserEnabled:         user.Enabled,
 			AssignedPermissions: slices.Clone(effective.Permissions),
-			Permission:          policy.PermissionMarkerEdit,
+			Permission:          permission,
 			DeclaredProfileID:   declaredProfileID,
 			ActingAsPrimary:     actingAsPrimary,
 		})
 		if err != nil {
-			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify marker edit permission")
+			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, failedMsg)
 			return
 		}
 		if !decision.Allowed {
-			writeForbidden(w, markerEditRequiredMsg)
+			writeForbidden(w, deniedMsg)
 			return
 		}
 

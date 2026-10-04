@@ -152,7 +152,8 @@ func parityDeps(demo bool) Dependencies {
 		ViewerAccess: apimw.NewViewerAccessMiddleware(fakeResolver{}),
 		ActingAdmin:  apimw.RequireActingAdmin(primary),
 		PermissionGates: map[string]func(http.Handler) http.Handler{
-			"marker_edit": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary).RequireMarkerEdit,
+			"marker_edit":     apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary).RequireMarkerEdit,
+			"subtitle_upload": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary).RequireSubtitleUpload,
 		},
 		DemoSettings: fakeSettings{demo: demo},
 	}

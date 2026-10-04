@@ -21,6 +21,8 @@ const (
 	PermissionMarkerEdit = "marker_edit"
 	// PermissionMetadataCuration mirrors auth.PermissionMetadataCuration.
 	PermissionMetadataCuration = "metadata_curation"
+	// PermissionSubtitleUpload mirrors auth.PermissionSubtitleUpload.
+	PermissionSubtitleUpload = "subtitle_upload"
 )
 
 // ScopeInput is the policy input document for resolving an authenticated
@@ -134,6 +136,7 @@ const (
 	ReasonCodeMarkerEditPermissionRequired = "marker_edit_permission_required"
 	ReasonCodeMetadataCurationRequired     = "metadata_curation_permission_required"
 	ReasonCodeItemOutsideUserLibraries     = "item_outside_user_libraries"
+	ReasonCodeSubtitleUploadRequired       = "subtitle_upload_permission_required"
 
 	// Action decisions.
 	ReasonCodeUnknownAction                = "unknown_action"

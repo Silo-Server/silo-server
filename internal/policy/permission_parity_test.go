@@ -26,6 +26,7 @@ func TestPermissionPayloadParity(t *testing.T) {
 		{name: "none"},
 		{name: "marker_edit", permissions: []string{string(auth.PermissionMarkerEdit)}},
 		{name: "both", permissions: []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration)}},
+		{name: "all", permissions: []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration), string(auth.PermissionSubtitleUpload)}},
 	}
 	groupCases := []struct {
 		name    string
@@ -36,6 +37,7 @@ func TestPermissionPayloadParity(t *testing.T) {
 		{name: "group_unmasked", grouped: true},
 		{name: "group_masks_all", grouped: true, allowed: []string{}},
 		{name: "group_allows_curation", grouped: true, allowed: []string{string(auth.PermissionMetadataCuration)}},
+		{name: "group_allows_subtitle_upload", grouped: true, allowed: []string{string(auth.PermissionSubtitleUpload)}},
 	}
 	profileCases := []struct {
 		name              string
@@ -49,6 +51,7 @@ func TestPermissionPayloadParity(t *testing.T) {
 	permissions := []auth.Permission{
 		auth.PermissionMarkerEdit,
 		auth.PermissionMetadataCuration,
+		auth.PermissionSubtitleUpload,
 	}
 
 	for _, role := range []string{"admin", "user"} {
@@ -104,8 +107,8 @@ func TestPermissionDisabledAccountDenied(t *testing.T) {
 	ctx := context.Background()
 	pdp := newPermissionParityPDP(t)
 	for _, role := range []string{"admin", "user"} {
-		user := &models.User{ID: 7, Role: role, Permissions: []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration)}}
-		for _, permission := range []string{PermissionMarkerEdit, PermissionMetadataCuration} {
+		user := &models.User{ID: 7, Role: role, Permissions: []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration), string(auth.PermissionSubtitleUpload)}}
+		for _, permission := range []string{PermissionMarkerEdit, PermissionMetadataCuration, PermissionSubtitleUpload} {
 			decision, _, err := pdp.CheckPermission(ctx, permissionInputForUser(user, permission))
 			if err != nil {
 				t.Fatalf("CheckPermission(%s) error: %v", permission, err)

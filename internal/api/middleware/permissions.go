@@ -152,6 +152,47 @@ func (m *PermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler
 	})
 }
 
+// RequireSubtitleUpload is the legacy subtitle-upload gate: acting admins
+// pass, everyone else needs subtitle_upload in the account's group-masked
+// permissions. Proxy/test wiring only — production takes the PDP-backed gate.
+func (m *PermissionMiddleware) RequireSubtitleUpload(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			writeUnauthorized(w, "Authentication required", ReasonAuthenticationRequired)
+			return
+		}
+		if m == nil || m.users == nil {
+			writeForbidden(w, subtitleUploadRequiredMsg)
+			return
+		}
+		// Load the account first so a disabled admin is refused, as the
+		// policy-backed gate does.
+		user, err := m.users.GetByID(r.Context(), claims.UserID)
+		if err != nil || user == nil || !user.Enabled {
+			writeForbidden(w, subtitleUploadRequiredMsg)
+			return
+		}
+		if user.Role == "admin" {
+			actingAdmin, err := actingAdminAllowed(r, claims.UserID, m.checkPrimary)
+			if err != nil {
+				writePermissionError(w, http.StatusInternalServerError, "internal_error", activeProfileVerificationFailedMsg)
+				return
+			}
+			if actingAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil || !slices.Contains(effective.Permissions, string(auth.PermissionSubtitleUpload)) {
+			writeForbidden(w, subtitleUploadRequiredMsg)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func metadataTargetWithinUserLibraries(allowed []int, target []int) bool {
 	if allowed == nil {
 		return true

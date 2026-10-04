@@ -13,6 +13,8 @@ base_decision := acting_admin_decision(input) if {
 	input.permission == "marker_edit"
 } else := metadata_curation_decision(input) if {
 	input.permission == "metadata_curation"
+} else := subtitle_upload_decision(input) if {
+	input.permission == "subtitle_upload"
 } else := deny("unknown permission", "unknown_permission")
 
 acting_admin_decision(i) := allow if {
@@ -40,6 +42,17 @@ metadata_curation_decision(i) := allow if {
 } else := deny("metadata curation permission required", "metadata_curation_permission_required") if {
 	not assigned_permission(i, "metadata_curation")
 } else := deny("item is outside user libraries", "item_outside_user_libraries")
+
+# Like metadata_curation, the role-derived grant applies only while acting as
+# admin; an admin on a non-primary profile needs the assigned permission.
+subtitle_upload_decision(i) := allow if {
+	acting_admin_allowed(i)
+} else := allow if {
+	user_enabled(i)
+	assigned_permission(i, "subtitle_upload")
+} else := deny("user disabled", "user_disabled") if {
+	not user_enabled(i)
+} else := deny("subtitle upload permission required", "subtitle_upload_permission_required")
 
 effective_permission_allowed(i, permission) if {
 	user_enabled(i)
@@ -74,6 +87,7 @@ target_libraries_allowed(i) if {
 
 assignable_permission("marker_edit")
 assignable_permission("metadata_curation")
+assignable_permission("subtitle_upload")
 
 assigned_permission(i, permission) if {
 	some idx

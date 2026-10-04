@@ -6,7 +6,11 @@ import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
-import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
+import {
+  useCanAddSubtitles,
+  useDeleteSubtitlePreference,
+  useSetSubtitlePreference,
+} from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -43,6 +47,7 @@ import {
 } from "@/lib/permissions";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { useCanUploadSubtitles } from "@/hooks/useCanUploadSubtitles";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 
 export default function MovieContent({
@@ -65,6 +70,8 @@ export default function MovieContent({
   const qualityPreference = useQualityPreference(currentProfile?.quality_preference);
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
+  const canUploadSubtitles = useCanUploadSubtitles();
+  const canAddSubtitles = useCanAddSubtitles(canUploadSubtitles);
 
   const refreshMetadataMutation = useRefreshItemMetadata();
   const redetectMarkersMutation = useRedetectItemMarkers();
@@ -335,7 +342,9 @@ export default function MovieContent({
                   : undefined
               }
               onSearchSubtitles={
-                item.versions.length > 0 ? () => setSubtitleSearchOpen(true) : undefined
+                canAddSubtitles && item.versions.length > 0
+                  ? () => setSubtitleSearchOpen(true)
+                  : undefined
               }
               qualityPreference={qualityPreference}
               audioSelectionMode={audioSelectionMode}
@@ -388,6 +397,7 @@ export default function MovieContent({
             onOpenChange={setSubtitleSearchOpen}
             version={selectedVersion}
             title={title}
+            uploadEnabled={canUploadSubtitles}
           />
           {canCurateMetadata && (
             <MediaInfoDialog

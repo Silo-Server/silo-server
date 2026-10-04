@@ -1,0 +1,31 @@
+-- +goose Up
+-- +goose StatementBegin
+-- subtitle_upload is granted by default so existing accounts keep uploading.
+-- Admins hold it implicitly, as with marker_edit. A group with a null
+-- allowed_permissions already allows every assignable permission.
+ALTER TABLE public.users
+    ALTER COLUMN permissions SET DEFAULT ARRAY['marker_edit', 'subtitle_upload']::text[];
+
+UPDATE public.users
+SET permissions = array_append(permissions, 'subtitle_upload')
+WHERE role <> 'admin'
+  AND NOT ('subtitle_upload' = ANY (permissions));
+
+UPDATE public.access_groups
+SET allowed_permissions = array_append(allowed_permissions, 'subtitle_upload')
+WHERE allowed_permissions IS NOT NULL
+  AND NOT ('subtitle_upload' = ANY (allowed_permissions));
+-- +goose StatementEnd
+
+-- +goose Down
+-- +goose StatementBegin
+UPDATE public.access_groups
+SET allowed_permissions = array_remove(allowed_permissions, 'subtitle_upload')
+WHERE allowed_permissions IS NOT NULL;
+
+UPDATE public.users
+SET permissions = array_remove(permissions, 'subtitle_upload');
+
+ALTER TABLE public.users
+    ALTER COLUMN permissions SET DEFAULT ARRAY['marker_edit']::text[];
+-- +goose StatementEnd

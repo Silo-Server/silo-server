@@ -221,6 +221,7 @@ interface VideoPlayerProps {
   markerSegments?: PlayerMarkerSegment[];
   autoPlayNextPreview?: boolean;
   canEditMarkers?: boolean;
+  canUploadSubtitles?: boolean;
   /** Notified after a successful in-player marker edit so the host can patch local state. */
   onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
   duration?: number;
@@ -389,6 +390,7 @@ export function VideoPlayer({
   markerSegments,
   autoPlayNextPreview = false,
   canEditMarkers = true,
+  canUploadSubtitles = true,
   onMarkersEdited,
   duration: propDuration,
   seriesContext,
@@ -4105,6 +4107,7 @@ export function VideoPlayer({
           getSubtitleStartPosition={getSubtitleStartPosition}
           onSubtitleJobAccepted={handleSubtitleJobAccepted}
           storedSubtitleSync={storedSubtitleSync}
+          canUploadSubtitles={canUploadSubtitles}
           audioTracks={audioTracks}
           activeAudioIndex={activeAudioIndex}
           onAudioSelect={onAudioSelect}

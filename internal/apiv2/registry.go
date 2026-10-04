@@ -126,6 +126,7 @@ var knownPermissions = map[string]bool{
 	policy.PermissionActingAdmin:      true,
 	policy.PermissionMarkerEdit:       true,
 	policy.PermissionMetadataCuration: true,
+	policy.PermissionSubtitleUpload:   true,
 }
 
 // Operation is a Huma operation plus Silo's declarations.

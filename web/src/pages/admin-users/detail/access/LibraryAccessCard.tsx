@@ -29,6 +29,7 @@ import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
+  PERMISSION_SUBTITLE_UPLOAD,
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
@@ -59,6 +60,11 @@ const PERMISSIONS = [
     permission: PERMISSION_METADATA_CURATION,
     label: "Metadata curation",
     description: "Edit, refresh, and rematch metadata",
+  },
+  {
+    permission: PERMISSION_SUBTITLE_UPLOAD,
+    label: "Subtitle upload",
+    description: "Upload subtitle files shared with everyone who can see the item",
   },
 ] as const;
 

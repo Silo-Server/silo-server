@@ -177,6 +177,64 @@ test_metadata_curation_non_primary_admin_allows_assigned_permission if {
 	got.allowed
 }
 
+test_subtitle_upload_acting_admin_implicit_grant if {
+	got := decision with input as object.union(base_input, {
+		"role": "admin",
+		"permission": "subtitle_upload",
+	})
+	got.allowed
+}
+
+test_subtitle_upload_assigned_grant if {
+	got := decision with input as object.union(base_input, {
+		"permission": "subtitle_upload",
+		"assigned_permissions": ["subtitle_upload"],
+	})
+	got.allowed
+}
+
+test_subtitle_upload_rejects_missing_permission if {
+	got := decision with input as object.union(base_input, {
+		"permission": "subtitle_upload",
+		"assigned_permissions": ["marker_edit"],
+	})
+	not got.allowed
+	got.reason == "subtitle upload permission required"
+	got.reason_code == "subtitle_upload_permission_required"
+}
+
+test_subtitle_upload_rejects_disabled_user if {
+	got := decision with input as object.union(base_input, {
+		"permission": "subtitle_upload",
+		"user_enabled": false,
+		"assigned_permissions": ["subtitle_upload"],
+	})
+	not got.allowed
+	got.reason_code == "user_disabled"
+}
+
+test_subtitle_upload_non_primary_admin_requires_assigned_permission if {
+	got := decision with input as object.union(base_input, {
+		"role": "admin",
+		"permission": "subtitle_upload",
+		"declared_profile_id": "prof-2",
+		"acting_as_primary": false,
+	})
+	not got.allowed
+	got.reason_code == "subtitle_upload_permission_required"
+}
+
+test_subtitle_upload_non_primary_admin_allows_assigned_permission if {
+	got := decision with input as object.union(base_input, {
+		"role": "admin",
+		"permission": "subtitle_upload",
+		"declared_profile_id": "prof-2",
+		"acting_as_primary": false,
+		"assigned_permissions": ["subtitle_upload"],
+	})
+	got.allowed
+}
+
 test_unknown_permission_rejected if {
 	got := decision with input as object.union(base_input, {
 		"permission": "download_all_the_things",

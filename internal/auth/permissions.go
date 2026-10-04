@@ -14,11 +14,13 @@ type Permission string
 const (
 	PermissionMarkerEdit       Permission = "marker_edit"
 	PermissionMetadataCuration Permission = "metadata_curation"
+	PermissionSubtitleUpload   Permission = "subtitle_upload"
 )
 
 var assignablePermissions = map[Permission]struct{}{
 	PermissionMarkerEdit:       {},
 	PermissionMetadataCuration: {},
+	PermissionSubtitleUpload:   {},
 }
 
 func isAssignablePermission(permission Permission) bool {
@@ -53,7 +55,7 @@ func NormalizePermissions(values []string) ([]string, error) {
 }
 
 func DefaultUserPermissions() []string {
-	return []string{string(PermissionMarkerEdit)}
+	return []string{string(PermissionMarkerEdit), string(PermissionSubtitleUpload)}
 }
 
 // PolicyPermissions reports the account's permissions after the access-group

@@ -37,6 +37,7 @@ vi.mock("@/hooks/useViewTransition", () => ({
 }));
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ user: { id: 1 } }),
+  useOptionalAuth: () => ({ user: { id: 1 } }),
 }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: { id: "profile-1" } }),
