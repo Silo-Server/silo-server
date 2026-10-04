@@ -49,9 +49,15 @@ func ConfiguredTranscodeThrottleSeconds(ctx context.Context, settings TranscodeT
 	if settings == nil {
 		return 0
 	}
+	// An unreadable setting disables throttling rather than overriding a
+	// stored "false" with the default.
+	raw, err := settings.Get(ctx, TranscodeThrottleEnabledSettingKey)
+	if err != nil {
+		return 0
+	}
 	enabled := DefaultTranscodeThrottleEnabled
-	if raw, _ := settings.Get(ctx, TranscodeThrottleEnabledSettingKey); strings.TrimSpace(raw) != "" {
-		enabled = strings.EqualFold(strings.TrimSpace(raw), "true")
+	if raw = strings.TrimSpace(raw); raw != "" {
+		enabled = strings.EqualFold(raw, "true")
 	}
 	if !enabled {
 		return 0
