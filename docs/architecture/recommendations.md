@@ -290,7 +290,10 @@ library sections, which scope the whole row to their libraries.
   than half (Jaccard index), and otherwise takes the first of its dominant
   genres its title does not name yet. A row whose cached title its cluster
   no longer has keeps it. A hidden row was built, so it does not count as
-  missing. The "see all" page keeps the cached title.
+  missing. A cluster row's "see all" page reads the profile's page rows the
+  same way, for a 20-item window and the day's rotation, and takes the
+  title they give its row, so it matches the row it was opened from; a row
+  they hide keeps the cached title.
 - **Rotation.** Reads rotate the main row and the cluster rows daily, after
   filtering and before trimming; Because You Watched, Similar Users, Watch
   Tonight, the global and default rows and "see all" pages stay in rank

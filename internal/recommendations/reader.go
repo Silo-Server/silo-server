@@ -731,6 +731,27 @@ func renameClusterRow(row *ForYouRow, cluster TasteCluster, rows []ForYouRow, ke
 	}
 }
 
+// titleAsServed gives a cluster row read for its see-all page the title
+// Discover and the For You rows give it. distinguishClusterRows may have
+// renamed it there, by the profile's other cluster rows and the day's
+// rotation, so its cached title alone does not say. A row those reads do not
+// show, such as one hidden as a repeat, keeps its title.
+func (rr *rowRead) titleAsServed(ctx context.Context, row *ForYouRow) error {
+	// The page rows as Discover reads them, a row of ServedRowSize items;
+	// the default rows it adds do not change a cluster row's title.
+	rows, err := rr.forYouPageRows(ctx, false, ServedRowSize)
+	if err != nil {
+		return err
+	}
+	for _, served := range rows {
+		if served.personalKey == row.personalKey {
+			row.Label, row.Subject = served.Label, served.Subject
+			break
+		}
+	}
+	return nil
+}
+
 // servedJaccard is the Jaccard index of the first served items of a and b.
 func servedJaccard(a, b []ScoredItem, served int) float64 {
 	a, b = a[:min(len(a), served)], b[:min(len(b), served)]
@@ -1000,6 +1021,11 @@ func (r *Reader) GetSection(
 		var live ForYouRow
 		live, err = read.defaultRow(ctx, recType, limit)
 		row = &live
+	case SectionKindCluster:
+		row, err = r.loadSectionRow(ctx, userID, profileID, kind, key)
+		if err == nil && row != nil {
+			err = read.titleAsServed(ctx, row)
+		}
 	default:
 		row, err = r.loadSectionRow(ctx, userID, profileID, kind, key)
 	}
