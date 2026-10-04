@@ -240,6 +240,62 @@ func (r *Reader) SectionForYouMain(ctx context.Context, userID int, profileID st
 	return r.forYouMain(ctx, userID, profileID, ServedRowSize, CacheCandidateLimit, filter)
 }
 
+// SectionForYouFill returns what a library's For You section serves after
+// the main row's titles in that library. The main row ranks every title the
+// profile can see, so a library holding a small share of them can be left
+// with few or none, while a taste cluster or a watched title of the profile
+// sits in it. The fill is the profile's other personal rows in one list: the
+// taste-cluster rows, heaviest cluster first, then the Because You Watched
+// rows of its anchors (see anchorItemIDs), most recent first, then Similar
+// Users. Each row keeps its rank order, each item appears once at its first
+// place, and the list is filtered for the viewer like every row. A missing
+// row asks for no refresh: reading the main row already does. With personal
+// rows off the fill is empty.
+func (r *Reader) SectionForYouFill(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if r.personalOff {
+		return []ScoredItem{}, nil
+	}
+	clusters, rows, _, err := r.getClusterRows(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	weights := make(map[int]float64, len(clusters))
+	for _, cluster := range clusters {
+		weights[cluster.ClusterIdx] = cluster.TotalWeight
+	}
+	slices.SortStableFunc(rows, func(a, b ForYouRow) int {
+		return cmp.Compare(weights[b.ClusterIndex], weights[a.ClusterIndex])
+	})
+
+	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
+	if err != nil {
+		return nil, err
+	}
+	for _, anchor := range anchors {
+		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, anchor)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, ForYouRow{Type: RecTypeBecauseWatched, Items: items})
+	}
+	similar, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
+	if err != nil {
+		return nil, err
+	}
+	rows = append(rows, ForYouRow{Type: RecTypeSimilarUsersLiked, Items: similar})
+
+	rows, err = r.filterRows(ctx, userID, profileID, rows, filter)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{})
+	fill := []ScoredItem{}
+	for _, row := range rows {
+		fill = append(fill, deduplicateItems(row.Items, seen, 0)...)
+	}
+	return fill, nil
+}
+
 // SectionSimilarUsersLiked is GetSimilarUsersLiked's row for a home or
 // library section.
 func (r *Reader) SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ScoredItem, error) {

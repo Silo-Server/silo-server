@@ -63,8 +63,10 @@ const slowAggregateFetchThreshold = time.Second
 // recommendationReader reads the recommendation rows sections show. Each
 // read returns the row's whole cached pool; the fetcher scopes it to the
 // section's libraries and trims it to the section's item limit.
+// SectionForYouFill is read only when a library leaves the For You row short.
 type recommendationReader interface {
 	SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouFill(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
 	SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
@@ -1697,16 +1699,23 @@ func (f *Fetcher) scopeRecommendationItems(ctx context.Context, scored []recomme
 	return orderMediaItems(items, ids), nil
 }
 
-// limitRecommendationItems cuts a recommendation row to the section's item
-// limit, defaultRecommendationSectionLimit when it sets none.
+// limitRecommendationItems cuts a recommendation row to the section's row
+// size (see recommendationSectionLimit).
 func limitRecommendationItems(items []*models.MediaItem, itemLimit int) []*models.MediaItem {
-	if itemLimit <= 0 {
-		itemLimit = defaultRecommendationSectionLimit
-	}
+	itemLimit = recommendationSectionLimit(itemLimit)
 	if len(items) > itemLimit {
 		return items[:itemLimit]
 	}
 	return items
+}
+
+// recommendationSectionLimit is a recommendation section's row size: its
+// item limit, or defaultRecommendationSectionLimit when it sets none.
+func recommendationSectionLimit(itemLimit int) int {
+	if itemLimit <= 0 {
+		return defaultRecommendationSectionLimit
+	}
+	return itemLimit
 }
 
 // defaultRecommendationSectionLimit is the row size of a recommendation

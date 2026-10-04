@@ -358,7 +358,15 @@ there are anchors and none has a cached row.
 List reads return at most 50 items per row (default 20); the v1 for-you and
 similar-users reads keep 20, and section "see all" reads return up to 60, a
 whole cached row. Home and library sections read the whole cached pool,
-scope it to the section's libraries, then trim to the section's size.
+scope it to the section's libraries, then trim to the section's size. The
+main row is ranked for every title the profile can see, so a library with a
+small share of the catalog can hold few of its titles. A library's For You
+section that the main row leaves short continues with the library's titles
+from the profile's other personal rows: the cluster rows, heaviest cluster
+first, then the Because You Watched rows, most recent anchor first, then
+Similar Users, each title once. The fill is read only when the section is
+short, and a new profile's global row is never filled: the section is titled
+after it.
 Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
 truthfully: up to two Because You Watched rows under their anchor's title,
 dropped when the viewer cannot see the anchor, and the taste-cluster rows

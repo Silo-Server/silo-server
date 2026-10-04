@@ -18,13 +18,17 @@ import (
 
 // poolReader answers every section read with fixed rows and records the
 // library scope Because You Watched was asked for. The For You and taste
-// match rows have rowType and rowLabel when set.
+// match rows have rowType and rowLabel when set. The For You fill is fill,
+// read fillReads times, failing with fillError when set.
 type poolReader struct {
 	pool              []recommendations.ScoredItem
 	anchor            string
 	scopes            [][]int
 	readError         error
 	rowType, rowLabel string
+	fill              []recommendations.ScoredItem
+	fillReads         int
+	fillError         error
 }
 
 func (p *poolReader) row(label string) *recommendations.ForYouRow {
@@ -39,6 +43,11 @@ func (p *poolReader) SectionForYouMain(context.Context, int, string, catalog.Acc
 		return nil, p.readError
 	}
 	return p.row(recommendations.ForYouLabel), nil
+}
+
+func (p *poolReader) SectionForYouFill(context.Context, int, string, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	p.fillReads++
+	return p.fill, p.fillError
 }
 
 func (p *poolReader) SectionBecauseYouWatched(_ context.Context, _ int, _, _ string, libraryIDs []int, _ catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
@@ -180,6 +189,122 @@ func TestRecommendationSectionsFillFromTheWholePoolPostgres(t *testing.T) {
 	fetch(SectionBecauseYouWatched, 20, nil)
 	if len(reader.scopes) != 2 || !slices.Equal(reader.scopes[0], []int{libraries[1]}) || reader.scopes[1] != nil {
 		t.Fatalf("anchor scopes = %v, want [[%d] []]", reader.scopes, libraries[1])
+	}
+}
+
+// A library's For You section the main row leaves short continues with the
+// profile's other personal rows in that library, in the reader's order and
+// without repeating a main-row title. A row the main row fills, a home
+// section and a row every profile is offered read no fill.
+func TestForYouSectionFillsALibraryFromOtherPersonalRowsPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	prefix := "recs-fill-" + uuid.NewString()[:8] + "-"
+	var movies, anime int
+	for name, id := range map[string]*int{"movies": &movies, "anime": &anime} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, prefix+name).Scan(id); err != nil {
+			t.Fatalf("seed library: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = ANY($1)`, []int{movies, anime})
+	})
+	seed := func(name string, n, library int) []recommendations.ScoredItem {
+		t.Helper()
+		items := make([]recommendations.ScoredItem, n)
+		for i := range items {
+			id := fmt.Sprintf("%s%s-%02d", prefix, name, i)
+			items[i] = recommendations.ScoredItem{MediaItemID: id, Score: float64(n - i)}
+			if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
+				t.Fatalf("seed item: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, $3)`, id, library, time.Now()); err != nil {
+				t.Fatalf("seed membership: %v", err)
+			}
+		}
+		return items
+	}
+	// The main row holds 30 titles, all in the movie library. The fill holds
+	// 25 anime titles, 5 more movie titles and 2 main-row titles.
+	main := seed("main", 30, movies)
+	animeFill := seed("anime", 25, anime)
+	movieFill := seed("movie", 5, movies)
+	fill := slices.Concat(animeFill[:10], main[:2], movieFill, animeFill[10:])
+	reader := &poolReader{pool: main, rowType: "cluster", fill: fill}
+	fetcher := NewFetcher(pool)
+	fetcher.RecommendationReader = reader
+
+	fetch := func(itemLimit int, libraryID *int) []string {
+		t.Helper()
+		got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: itemLimit}, libraryID, nil, 7, "p1", catalog.AccessFilter{})
+		if err != nil {
+			t.Fatalf("FetchOne: %v", err)
+		}
+		if got.TotalCount != len(got.Items) {
+			t.Fatalf("total %d for %d items", got.TotalCount, len(got.Items))
+		}
+		if len(got.Items) > 0 && got.Title != "Recommended for You" {
+			t.Fatalf("title = %q, want the section's heading", got.Title)
+		}
+		return contentIDs(got.Items)
+	}
+	ids := func(items ...[]recommendations.ScoredItem) []string {
+		var out []string
+		for _, row := range items {
+			for _, item := range row {
+				out = append(out, item.MediaItemID)
+			}
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name      string
+		itemLimit int
+		libraryID *int
+		want      []string
+		fillReads int
+	}{
+		{"anime library, no main-row title in it", 20, &anime, ids(animeFill[:20]), 1},
+		{"movie library the main row fills", 20, &movies, ids(main[:20]), 0},
+		{"movie library past the main row", 40, &movies, ids(main, movieFill), 1},
+		{"home", 100, nil, ids(main), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader.fillReads = 0
+			if got := fetch(tc.itemLimit, tc.libraryID); !slices.Equal(got, tc.want) {
+				t.Fatalf("items = %v, want %v", got, tc.want)
+			}
+			if reader.fillReads != tc.fillReads {
+				t.Fatalf("fill reads = %d, want %d", reader.fillReads, tc.fillReads)
+			}
+		})
+	}
+
+	// A new profile's Popular row is served as it is, titled after itself.
+	reader.rowType, reader.rowLabel, reader.fillReads = recommendations.RecTypePopular, "Popular on This Server", 0
+	got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, Title: "Recommended for You", ItemLimit: 20}, &anime, nil, 7, "p1", catalog.AccessFilter{})
+	if err != nil || len(got.Items) != 0 || reader.fillReads != 0 {
+		t.Fatalf("Popular row in the anime library = %d items, %d fill reads, %v; want an empty row and no fill", len(got.Items), reader.fillReads, err)
+	}
+}
+
+// A failed fill fails the section, like a failed main-row read.
+func TestForYouSectionFillErrorFailsTheSection(t *testing.T) {
+	library := 3
+	fetcher := &Fetcher{RecommendationReader: &poolReader{rowType: "cluster", fillError: fmt.Errorf("cache read failed")}}
+	if _, err := fetcher.FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, ItemLimit: 20}, &library, nil, 7, "p1", catalog.AccessFilter{}); err == nil {
+		t.Fatal("FetchOne succeeded, want the fill's error")
 	}
 }
 

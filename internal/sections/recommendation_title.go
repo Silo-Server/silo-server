@@ -2,6 +2,7 @@ package sections
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -17,6 +18,8 @@ import (
 // outside the shared, user-agnostic cache.
 func (f *Fetcher) fetchRecommendationRowWithTitle(ctx context.Context, section ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter, reader recommendationReader) (SectionWithItems, error) {
 	result := SectionWithItems{ResolvedSection: section, Items: []*models.MediaItem{}}
+	// The main row and its fill share one walk of the watch history.
+	ctx = recommendations.WithWatchedSetMemo(ctx)
 	var row *recommendations.ForYouRow
 	var err error
 	switch section.SectionType {
@@ -37,12 +40,46 @@ func (f *Fetcher) fetchRecommendationRowWithTitle(ctx context.Context, section R
 	if err != nil {
 		return SectionWithItems{}, err
 	}
+	if section.SectionType == SectionRecommendedForYou && libraryID != nil && !row.Global() &&
+		len(items) < recommendationSectionLimit(section.ItemLimit) {
+		if items, err = f.fillForYouSection(ctx, items, row, libraryID, libraryIDs, userID, profileID, filter, reader); err != nil {
+			return SectionWithItems{}, err
+		}
+	}
 	result.Items = limitRecommendationItems(items, section.ItemLimit)
 	result.TotalCount = len(result.Items)
 	if len(result.Items) > 0 {
 		result.Title = recommendationSectionTitle(section.Title, row)
 	}
 	return result, nil
+}
+
+// fillForYouSection follows a library's For You items, the main row's titles
+// in the library, with the library's titles from the profile's other
+// personal rows (see Reader.SectionForYouFill). The main row is ranked for
+// everything the profile can see, so a library with a small share of the
+// catalog can hold few of its titles. A row every profile is offered, such
+// as a new profile's Popular row, is not filled: the section is titled after
+// it.
+func (f *Fetcher) fillForYouSection(ctx context.Context, items []*models.MediaItem, row *recommendations.ForYouRow, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter, reader recommendationReader) ([]*models.MediaItem, error) {
+	fill, err := reader.SectionForYouFill(ctx, userID, profileID, filter)
+	if err != nil {
+		return nil, err
+	}
+	// The main row's titles in the library are already in items.
+	inMain := make(map[string]struct{}, len(row.Items))
+	for _, item := range row.Items {
+		inMain[item.MediaItemID] = struct{}{}
+	}
+	fill = slices.DeleteFunc(fill, func(item recommendations.ScoredItem) bool {
+		_, ok := inMain[item.MediaItemID]
+		return ok
+	})
+	more, err := f.scopeRecommendationItems(ctx, fill, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, more...), nil
 }
 
 // The headings For You and taste-match sections are created with.
