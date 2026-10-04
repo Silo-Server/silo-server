@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import type { PolicyInheritHints } from "@/components/UserPolicyFields";
+import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPolicyDefaults, useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
@@ -87,18 +88,21 @@ function toBody(draft: SignInDraft, base: AdminUser): UpdateUserRequest {
 /**
  * The profile limit Default resolves to once the draft saves. A role change
  * moves the account out of or into a group: an admin is never grouped, and a
- * demoted admin joins the default group.
+ * demoted admin joins the default group, or no group when none is the default.
+ * Groups are undefined while they load.
  */
 function inheritedProfileLimit(
   role: string,
   base: AdminUser,
-  groups: AccessGroup[],
+  groups: AccessGroup[] | undefined,
   hints: PolicyInheritHints,
   defaults: AdminPolicyDefaults | undefined,
 ): number | undefined {
   if (role === base.role) return hints.max_profiles;
   if (role === "admin") return defaults?.admin.max_profiles;
-  return groups.find((group) => group.is_default)?.max_profiles;
+  if (groups === undefined) return undefined;
+  const defaultGroup = groups.find((group) => group.is_default);
+  return defaultGroup ? defaultGroup.max_profiles : defaults?.ungrouped.max_profiles;
 }
 
 // A Custom limit with nothing valid in place of a saved override can't be
@@ -133,6 +137,7 @@ export function SignInCard({
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const profiles = useAdminUserProfiles(user.id);
   const policyDefaults = useAdminPolicyDefaults().data;
+  const loadedGroups = useAccessGroups().data;
   const draft = useAccountCardDraft({
     id: "signin",
     editor,
@@ -151,7 +156,7 @@ export function SignInCard({
   const d = draft.draft;
   const base = draft.base ?? user;
   const inheritedProfiles = d
-    ? inheritedProfileLimit(d.role, base, groups, hints, policyDefaults)
+    ? inheritedProfileLimit(d.role, base, loadedGroups, hints, policyDefaults)
     : hints.max_profiles;
   // Only the server owner may grant the admin role; nobody changes their own
   // role or disables themselves; the owner stays an enabled admin.
