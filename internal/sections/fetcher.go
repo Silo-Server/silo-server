@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2825,7 +2826,9 @@ func collectionRailQueryAccess(filter catalog.AccessFilter, libraryID *int, libr
 		if effectiveLibraryIDs == nil {
 			result.AllowedLibraryIDs = nil
 		} else {
-			result.AllowedLibraryIDs = append([]int(nil), effectiveLibraryIDs...)
+			// Clone keeps an empty scope non-nil, so it still denies; append
+			// onto nil would turn it into nil, which means every library.
+			result.AllowedLibraryIDs = slices.Clone(effectiveLibraryIDs)
 		}
 		return result
 	}
