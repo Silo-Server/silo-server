@@ -104,19 +104,22 @@ type Deps struct {
 
 // Service runs subtitle sync jobs.
 type Service struct {
-	jobs      jobStore
-	rows      subtitleRows
-	content   subtitleContent
-	external  externalRows
-	readFile  func(path string) ([]byte, error)
-	files     mediaFiles
-	artifacts artifactStore
-	settings  SettingsReader
-	sampler   *sampler
-	runner    *jobrunner.Runner
-	notifier  Notifier
-	node      string
-	now       func() time.Time
+	jobs     jobStore
+	rows     subtitleRows
+	content  subtitleContent
+	external externalRows
+	readFile func(path string) ([]byte, error)
+	// inlineUpdates sends progress on the worker itself, so tests see every
+	// step in order.
+	inlineUpdates bool
+	files         mediaFiles
+	artifacts     artifactStore
+	settings      SettingsReader
+	sampler       *sampler
+	runner        *jobrunner.Runner
+	notifier      Notifier
+	node          string
+	now           func() time.Time
 }
 
 // NewService builds a Service and starts its stale-job recovery.
@@ -270,6 +273,13 @@ type run struct {
 	subject subject
 	// stop ends the run's work early once its job is known to have ended.
 	stop context.CancelCauseFunc
+	// progress sends progress steps off the worker; nil sends them inline.
+	progress *updateQueue
+}
+
+// send tells players of the file about the job as given.
+func (r *run) send(ctx context.Context, job Job) {
+	r.s.updated(ctx, r.subject.target, r.timingNow(context.WithoutCancel(ctx)), job)
 }
 
 // report records a running job's phase and progress, on the job row and for
@@ -284,7 +294,11 @@ func (r *run) report(ctx context.Context, phase string, progress float64) {
 		}
 		return
 	}
-	r.s.updated(ctx, r.subject.target, r.timingNow(ctx), r.job)
+	if r.progress == nil {
+		r.send(ctx, r.job)
+		return
+	}
+	r.progress.offer(r.job)
 }
 
 // timingNow is the subject's correction as stored now: another viewer can
@@ -308,6 +322,9 @@ func (r *run) timingNow(ctx context.Context) subtitles.Timing {
 // finished tells players of the file how the job ended; timing is the
 // subtitle's correction now.
 func (r *run) finished(ctx context.Context, o Outcome, timing subtitles.Timing) {
+	if r.progress != nil {
+		r.progress.close()
+	}
 	r.job.Status, r.job.Phase, r.job.Progress = o.Status, "", nil
 	r.job.Confidence, r.job.Result, r.job.Error, r.job.Failure = o.Confidence, o.Result, o.Error, o.Failure
 	r.job.FinishedAt = new(r.s.now())
@@ -322,6 +339,10 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	r := &run{s: s, job: *job, stop: stop}
+	if !s.inlineUpdates {
+		r.progress = newUpdateQueue(func(job Job) { r.send(ctx, job) })
+		defer r.progress.close()
+	}
 	outcome, err := s.align(ctx, r)
 	log := slog.With("component", "subsync", "job_id", job.ID, "subtitle_id", job.SubtitleID,
 		"external_timing_id", job.ExternalTimingID, "media_file_id", job.MediaFileID, "trigger", job.Trigger,
@@ -359,6 +380,12 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	if err := subtitles.ValidateTiming(found); err != nil {
 		fail(err, "result out of range")
 		return
+	}
+	if job.ExternalTimingID != 0 {
+		if err := s.sidecarStillCurrent(finishCtx, r); err != nil {
+			fail(err, "apply")
+			return
+		}
 	}
 	if _, err := s.jobs.Apply(finishCtx, job, found, outcome); err != nil {
 		// A job that is already terminal (reaped, or deleted with a replaced
@@ -418,28 +445,53 @@ func (s *Service) loadSubject(ctx context.Context, job *Job, file func() (*model
 	if row.Revision != job.BaseRevision || row.MediaFileID != job.MediaFileID {
 		return subj, ErrSubtitleChanged
 	}
-	data, err := s.readFile(row.Path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return subj, ErrSubtitleChanged
-	}
-	if err != nil {
-		return subj, fmt.Errorf("read sidecar subtitle: %w", err)
-	}
-	if subtitles.ContentSHA256(data) != row.ContentSHA256 {
-		return subj, ErrSubtitleChanged
-	}
 	f, err := file()
 	if err != nil {
 		return subj, err
 	}
-	for _, sidecar := range f.ExternalSubtitles {
-		if sidecar.Path == row.Path {
-			subj.format, subj.language, subj.data = row.Format, sidecar.Language, data
-			return subj, nil
+	data, sidecar, err := s.currentSidecar(row.Path, row.ContentSHA256, f)
+	if err != nil {
+		return subj, err
+	}
+	subj.format, subj.language, subj.data = row.Format, sidecar.Language, data
+	return subj, nil
+}
+
+// currentSidecar reads the sidecar at path. It is ErrSubtitleChanged when
+// the file is gone, its bytes are not the ones contentSHA256 names, or the
+// scanner no longer lists it under file.
+func (s *Service) currentSidecar(path, contentSHA256 string, file *models.MediaFile) ([]byte, *models.ExternalSubtitle, error) {
+	data, err := s.readFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, ErrSubtitleChanged
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("read sidecar subtitle: %w", err)
+	}
+	if subtitles.ContentSHA256(data) != contentSHA256 {
+		return nil, nil, ErrSubtitleChanged
+	}
+	for i := range file.ExternalSubtitles {
+		if file.ExternalSubtitles[i].Path == path {
+			return data, &file.ExternalSubtitles[i], nil
 		}
 	}
-	// The scanner no longer lists the sidecar under this file.
-	return subj, ErrSubtitleChanged
+	return nil, nil, ErrSubtitleChanged
+}
+
+// sidecarStillCurrent checks, before a sidecar job applies its result, that
+// the sidecar was not edited, removed, or dropped from the catalog while its
+// audio was analyzed: the result would apply to bytes no longer served.
+func (s *Service) sidecarStillCurrent(ctx context.Context, r *run) error {
+	file, err := s.files.GetByID(ctx, r.job.MediaFileID)
+	if err != nil {
+		return fmt.Errorf("load media file: %w", err)
+	}
+	if file == nil {
+		return ErrSubtitleChanged
+	}
+	_, _, err = s.currentSidecar(r.subject.target.ExternalPath, subtitles.ContentSHA256(r.subject.data), file)
+	return err
 }
 
 // Progress the phases report: decoding speech fills most of the bar, since

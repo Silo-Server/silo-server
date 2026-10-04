@@ -147,16 +147,21 @@ func (f *fakeArtifacts) RecordFailure(_ context.Context, failure mediaartifact.F
 }
 
 type fakeNotifier struct {
+	mu      sync.Mutex
 	calls   int
 	targets []subtitles.SyncTarget
 	updates []Update
 }
 
 func (f *fakeNotifier) SubtitleSyncUpdated(_ context.Context, update Update) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.updates = append(f.updates, update)
 }
 
 func (f *fakeNotifier) SubtitleTimingChanged(_ context.Context, target subtitles.SyncTarget) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	f.targets = append(f.targets, target)
 }
@@ -196,6 +201,7 @@ func newFixture(t *testing.T, truth subtitles.Timing, settings settingsMap, layo
 	f.svc = &Service{
 		jobs: f.jobs, rows: &fakeSubtitles{sub: sub}, content: &fakeSubtitles{sub: sub, data: subtitles.SerializeSRT(cues)},
 		files: fakeFiles{file}, artifacts: f.artifacts, settings: settings, notifier: f.notifier, node: "test", now: time.Now,
+		inlineUpdates: true,
 	}
 	f.svc.sampler = newSampler(settings, nil, func() string { return "ffmpeg" })
 	f.svc.sampler.local = func(_ context.Context, req mediasample.Request) (mediasample.Result, error) {
@@ -608,6 +614,59 @@ func TestUpdatesCarryTimingAnotherViewerSetMeanwhile(t *testing.T) {
 	}
 	if last := updates[len(updates)-1]; last.Job.Status != JobFailed || last.Job.Failure != FailureSubtitleChanged {
 		t.Fatalf("last update %+v", last.Job)
+	}
+}
+
+// A sidecar edited, deleted, or dropped from the catalog while its audio is
+// analyzed keeps the correction it had: the result would apply to bytes no
+// longer served.
+func TestExecuteSidecarChangedDuringAnalysis(t *testing.T) {
+	for name, change := range map[string]func(f *fixture){
+		"edited on disk": func(f *fixture) {
+			f.svc.readFile = func(string) ([]byte, error) { return []byte("1\n00:00:01,000 --> 00:00:02,000\nEdited\n"), nil }
+		},
+		"deleted":           func(f *fixture) { f.svc.readFile = func(string) ([]byte, error) { return nil, fs.ErrNotExist } },
+		"no longer scanned": func(f *fixture) { f.svc.files.(fakeFiles).file.ExternalSubtitles = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+			external, _ := sidecarFixture(t, f)
+			job, _, err := f.jobs.CreateExternal(context.Background(), external.row, TriggerManual, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decode := f.svc.sampler.local
+			f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
+				change(f)
+				return decode(ctx, req)
+			}
+			f.svc.execute(context.Background(), job)
+			outcome := f.jobs.finished[job.ID]
+			if outcome.Status != JobFailed || outcome.Failure != FailureSubtitleChanged || len(f.jobs.applied) != 0 {
+				t.Fatalf("outcome %+v applied %v", outcome, f.jobs.applied)
+			}
+		})
+	}
+}
+
+// Progress travels off the worker; the outcome still reaches players last.
+func TestExecuteSendsProgressOffTheWorker(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1800}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	f.svc.inlineUpdates = false
+	job, _, err := f.jobs.Create(context.Background(), f.svc.rows.(*fakeSubtitles).sub, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.notifier.updates = nil
+	f.svc.execute(context.Background(), job)
+	updates := f.notifier.updates
+	if len(updates) < 2 || updates[len(updates)-1].Job.Status != string(StatusSynced) {
+		t.Fatalf("updates %+v", updates)
+	}
+	for _, u := range updates[:len(updates)-1] {
+		if u.Job.Status != JobRunning {
+			t.Fatalf("step after the outcome or out of place: %+v", u.Job)
+		}
 	}
 }
 
