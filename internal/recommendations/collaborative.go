@@ -184,6 +184,9 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 		if _, ok := accessible[id]; !ok {
 			continue
 		}
+		if _, skip := excluded[id]; skip {
+			continue
+		}
 		supportCounts[id] = len(candidate.accounts)
 		results = append(results, ScoredItem{
 			MediaItemID: id,
@@ -191,7 +194,6 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 			Reason:      "similar_users_liked",
 		})
 	}
-	results = excludeScoredItems(results, excluded)
 	if len(results) == 0 {
 		return []ScoredItem{}, nil
 	}

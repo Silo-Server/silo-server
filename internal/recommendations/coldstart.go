@@ -41,11 +41,10 @@ func coldStartLevelOf(meta *TasteProfileMeta) int {
 	}
 	positive := 0
 	for kind, count := range meta.SignalCounts {
-		switch kind {
-		case signalKindRatedLow, signalKindWatchLow:
-		default:
-			positive += count
+		if kind == signalKindRatedLow || kind == signalKindWatchLow {
+			continue
 		}
+		positive += count
 	}
 	return coldStartLevel(positive)
 }

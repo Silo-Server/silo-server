@@ -111,6 +111,15 @@ func (s *Service) WithDefaultWatchState(provider userstore.UserStoreProvider) *S
 	return s.WithUserStoreProvider(provider).WithWatchState(watchstate.NewService(provider))
 }
 
+// WithSignalsChangedNotifier installs where a sync run reports that its
+// imports changed the profile's recommendation signals.
+func (s *Service) WithSignalsChangedNotifier(notifier SignalsChangedNotifier) *Service {
+	if s != nil {
+		s.signals = notifier
+	}
+	return s
+}
+
 func (s *Service) ListProviders() []ProviderSummary {
 	return s.registry.List()
 }

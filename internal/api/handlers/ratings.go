@@ -52,10 +52,6 @@ func (h *RatingsHandler) SetLocalRatingEventDispatcher(dispatcher LocalRatingEve
 	h.ratingDispatcher = dispatcher
 }
 
-func (h *RatingsHandler) markStale(ctx context.Context, userID int, profileID string) {
-	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-}
-
 func (h *RatingsHandler) dispatchRatingChange(ctx context.Context, userID int, profileID, itemID string) {
 	if h.ratingDispatcher == nil {
 		return
@@ -130,7 +126,7 @@ func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, i
 	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, rating); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to set rating")
 	}
-	h.markStale(ctx, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }
@@ -160,7 +156,7 @@ func (h *RatingsHandler) DeleteRating(ctx context.Context, userID int, profileID
 	if err := h.ratingsRepo.Delete(ctx, userID, profileID, itemID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete rating")
 	}
-	h.markStale(ctx, userID, profileID)
+	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
 	h.dispatchRatingChange(ctx, userID, profileID, itemID)
 	return nil
 }
