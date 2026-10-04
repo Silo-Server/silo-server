@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -621,5 +622,30 @@ func TestClusterRowsWithOneTitleAreToldApartOrHidden(t *testing.T) {
 	}
 	if refresher.calls != 0 {
 		t.Fatalf("refreshes = %d, want none: a hidden row was built", refresher.calls)
+	}
+
+	// A row's see-all page carries the title Discover shows it under, renamed
+	// or not. The hidden repeat, which Discover does not show, keeps its own.
+	discover, err := r.GetDiscoverRows(t.Context(), 7, "p1", ServedRowSize, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := map[int]ForYouRow{}
+	for _, row := range discover {
+		if strings.HasPrefix(row.personalKey, RecTypeForYouClusterPrefix) {
+			served[row.ClusterIndex] = row
+		}
+	}
+	if len(served) != 4 || served[2].Label != "Because you enjoy Family, Comedy" {
+		t.Fatalf("Discover cluster rows = %v, want clusters 1 to 4 with cluster 2 renamed", rowLabels(discover))
+	}
+	for idx, want := range map[int]string{0: "Because you enjoy Family", 1: served[1].Label, 2: served[2].Label, 3: served[3].Label, 4: served[4].Label} {
+		row, err := r.GetSection(t.Context(), 7, "p1", SectionKindCluster, itoa(idx), CacheCandidateLimit, catalog.AccessFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row == nil || row.Label != want || row.Subject != clusterSubject(want) {
+			t.Fatalf("see-all page of cluster %d = %+v, want title %q", idx, row, want)
+		}
 	}
 }
