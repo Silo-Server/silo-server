@@ -2851,6 +2851,11 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
 		taskMgr.Register(tasks.NewBackfillMediaItemAliasesTask(catalog.NewItemAliasRepository(deps.DB)))
+		// The backfill reads media files, so it runs only where the scanner
+		// does: those processes have the libraries mounted.
+		if deps.FileRepo != nil {
+			taskMgr.Register(tasks.NewBackfillMatroskaTrackNumbersTask(deps.DB, scanner.NewMatroskaTrackBackfiller(deps.FileRepo)))
+		}
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
