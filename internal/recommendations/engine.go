@@ -100,8 +100,9 @@ func (e *Engine) ActiveEmbeddingModel(ctx context.Context) (string, error) {
 	return lock.Model, nil
 }
 
-func (e *Engine) watchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
-	return e.signalReader().WatchedItemIDSet(ctx, userID, profileID)
+// recommendationExclusionSet is SignalReader.RecommendationExclusionSet.
+func (e *Engine) recommendationExclusionSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	return e.signalReader().RecommendationExclusionSet(ctx, userID, profileID)
 }
 
 func (e *Engine) signalReader() *SignalReader {

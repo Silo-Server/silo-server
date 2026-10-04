@@ -20,6 +20,15 @@ const (
 	maxSeasonContributionShare = 0.35
 )
 
+// lowProgressThreshold is the progress below which a title left unfinished
+// counts as abandoned, once it is older than abandonedProgressAge.
+const lowProgressThreshold = 0.15
+
+// abandonedProgressAge is how long a low-progress title must go untouched
+// before it counts against the profile's taste. A title paused early tonight
+// is more likely being watched than abandoned.
+const abandonedProgressAge = 14 * 24 * time.Hour
+
 type canonicalContentRef struct {
 	Kind         canonicalContentKind
 	CanonicalID  string
@@ -70,7 +79,11 @@ func parseSignalTime(raw string, fallback time.Time) time.Time {
 	return fallback
 }
 
-func implicitWatchWeight(wp WatchProgressRow) (float64, bool) {
+// implicitWatchWeight returns the taste weight of one progress row at now,
+// and false when the row carries none. Progress below lowProgressThreshold is
+// negative only once the row is older than abandonedProgressAge; a row with no
+// timestamp counts as recent, as it does for time decay.
+func implicitWatchWeight(wp WatchProgressRow, now time.Time) (float64, bool) {
 	var progressPct float64
 	if wp.Completed {
 		progressPct = 1.0
@@ -85,7 +98,10 @@ func implicitWatchWeight(wp WatchProgressRow) (float64, bool) {
 		return WeightWatchHigh, true
 	case progressPct >= 0.5:
 		return WeightWatchMed, true
-	case progressPct < 0.15:
+	case progressPct < lowProgressThreshold:
+		if wp.UpdatedAt.IsZero() || now.Sub(wp.UpdatedAt) < abandonedProgressAge {
+			return 0, false
+		}
 		return WeightWatchLow, true
 	default:
 		return 0, false
@@ -115,12 +131,18 @@ func combineCanonicalWeight(rating *int, explicitWeight, implicitWeight, intentW
 	}
 }
 
+// aggregateSeriesImplicitScore combines a series' season scores into its
+// implicit weight. Recent, well-sampled seasons get larger shares of the mean,
+// and the mean decays once by the series' most recent signal, as a movie
+// decays by its last watch. Decay inside the shares alone cancels out, since
+// the shares always sum to 1.
 func aggregateSeriesImplicitScore(seasons []seasonAggregate, now time.Time, halfLife float64) float64 {
 	if len(seasons) == 0 {
 		return 0
 	}
 
 	rawWeights := make([]float64, len(seasons))
+	var latest time.Time
 	for i, season := range seasons {
 		sampleCount := season.SampleCount
 		if sampleCount <= 0 {
@@ -133,7 +155,13 @@ func aggregateSeriesImplicitScore(seasons []seasonAggregate, now time.Time, half
 		if lastSignalAt.IsZero() {
 			lastSignalAt = now
 		}
+		if lastSignalAt.After(latest) {
+			latest = lastSignalAt
+		}
 		rawWeights[i] = float64(sampleCount) * timeDecay(lastSignalAt, now, halfLife)
+	}
+	if latest.IsZero() {
+		return 0
 	}
 
 	shares := cappedNormalizedWeights(rawWeights, maxSeasonContributionShare)
@@ -141,7 +169,7 @@ func aggregateSeriesImplicitScore(seasons []seasonAggregate, now time.Time, half
 	for i, share := range shares {
 		score += share * seasons[i].Score
 	}
-	return score
+	return score * timeDecay(latest, now, halfLife)
 }
 
 func cappedNormalizedWeights(rawWeights []float64, cap float64) []float64 {
@@ -230,7 +258,7 @@ func buildCanonicalImplicitSignals(progress []WatchProgressRow, rewatches []Rewa
 		if !ok || ref.CanonicalID == "" {
 			continue
 		}
-		weight, ok := implicitWatchWeight(wp)
+		weight, ok := implicitWatchWeight(wp, now)
 		if !ok {
 			continue
 		}

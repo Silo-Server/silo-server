@@ -380,8 +380,9 @@ func (w *Worker) doEmbedMissing(ctx context.Context) (embeddingsResult, error) {
 type tasteProfilesResult struct {
 	Profiles  int `json:"profiles"`
 	Refreshed int `json:"refreshed"`
-	// NoOp counts profiles whose refresh wrote nothing: no signals, or none
-	// of their titles has an embedding yet.
+	// NoOp counts profiles whose refresh stored no taste vector: no positive
+	// signal, or none of their positively signaled titles has an embedding
+	// yet. Their previous vector, clusters and personal rows are cleared.
 	NoOp      int `json:"no_op"`
 	Failed    int `json:"failed"`
 	Remaining int `json:"remaining"`
@@ -416,7 +417,7 @@ func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, erro
 		}
 	}
 	if res.Refreshed == 0 && res.NoOp > 0 {
-		slog.WarnContext(ctx, "taste profile job wrote no profiles; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
+		slog.WarnContext(ctx, "taste profile job stored no taste vectors; their titles may have no embeddings yet", "component", "recommendations", "profiles", res.Profiles, "no_op", res.NoOp)
 	}
 	return res, nil
 }
@@ -693,15 +694,18 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		res.cached++
 	}
 
-	watchedSet, err := w.engine.watchedItemIDSet(ctx, userID, profileID)
+	// Watched and favorited titles (taste-seed picks are favorites) never
+	// enter any row's candidates. Rows built without the set would carry
+	// them, so a profile whose set cannot be read keeps its cached rows.
+	excluded, err := w.engine.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
-		fail("watched_items", err)
-		watchedSet = nil
+		fail("excluded_items", err)
+		return res
 	}
-	watchedIDs := scoredItemIDsFromSet(watchedSet)
+	excludeIDs := scoredItemIDsFromSet(excluded)
 	accessFilter := w.engine.profileAccessFilter(ctx, userID, profileID)
 
-	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter)
+	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		fail("main_row", err)
 	} else if aggregatedRow != nil && len(aggregatedRow.Items) > 0 {
@@ -710,7 +714,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 
 	// Cache per-cluster ForYou rows. buildClusterRows logs each cluster whose
 	// candidate query failed.
-	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, watchedIDs, accessFilter)
+	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	res.failed += failedClusters
 	if err != nil {
 		fail("cluster_rows", err)
@@ -722,7 +726,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
 	}
 
-	items, err := w.engine.SimilarUsersLiked(ctx, userID, profileID, CacheCandidateLimit)
+	items, err := w.engine.similarUsersLiked(ctx, userID, profileID, CacheCandidateLimit, excluded)
 	if err != nil {
 		fail("similar_users", err)
 	} else if len(items) > 0 {
@@ -735,7 +739,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		return res
 	}
 	for _, sourceItemID := range recentCompleted {
-		items, err := w.engine.BecauseYouWatched(ctx, userID, profileID, sourceItemID, CacheCandidateLimit)
+		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded)
 		if err != nil {
 			fail("because_you_watched", err, "source_item_id", sourceItemID)
 			continue

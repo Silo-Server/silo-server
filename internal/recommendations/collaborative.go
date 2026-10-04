@@ -20,9 +20,19 @@ func addCollaborativeSupport(candidates map[string]collaborativeCandidate, itemI
 
 // SimilarUsersLiked returns items highly rated or favorited by users with
 // similar taste profiles. Scores are weighted by the similarity of each peer
-// user to the requesting user. Items already rated or watched by the target
-// user are filtered out. Applies MMR re-ranking for diversity.
+// user to the requesting user. Items the target profile already rated, and
+// those in its recommendation exclusion set, are filtered out. Applies MMR
+// re-ranking for diversity.
 func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int) ([]ScoredItem, error) {
+	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get recommendation exclusions for user %d profile %s: %w", userID, profileID, err)
+	}
+	return e.similarUsersLiked(ctx, userID, profileID, limit, excluded)
+}
+
+// similarUsersLiked is SimilarUsersLiked with the exclusion set given.
+func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID string, limit int, excluded map[string]struct{}) ([]ScoredItem, error) {
 	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get taste profile meta for user %d profile %s: %w", userID, profileID, err)
@@ -106,7 +116,7 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 		return nil, fmt.Errorf("list rated items for filtering: %w", err)
 	}
 
-	// Build scored result list, excluding already-rated or already-watched items.
+	// Build scored result list, excluding already-rated and excluded items.
 	results := make([]ScoredItem, 0, len(candidates))
 	supportCounts := make(map[string]int, len(candidates))
 	for id, candidate := range candidates {
@@ -120,12 +130,7 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 			Reason:      "similar_users_liked",
 		})
 	}
-
-	watchedSet, err := e.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched items for user %d profile %s: %w", userID, profileID, err)
-	}
-	results = excludeScoredItems(results, watchedSet)
+	results = excludeScoredItems(results, excluded)
 
 	// Sort by score descending.
 	sort.Slice(results, func(i, j int) bool {

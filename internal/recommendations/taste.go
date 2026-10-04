@@ -147,9 +147,10 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 	return err
 }
 
-// refreshTasteProfile is RefreshTasteProfile, also reporting whether it wrote
-// a profile. It writes nothing when the profile has no signals or none of its
-// signaled titles has an embedding.
+// refreshTasteProfile is RefreshTasteProfile, also reporting whether it stored
+// a taste vector. A profile with no positive signal, or none whose title has
+// an embedding yet, gets none: its vector, clusters and cached personal rows
+// are cleared instead (see clearTasteProfile).
 func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID string) (bool, error) {
 	started, err := e.repo.Now(ctx)
 	if err != nil {
@@ -262,36 +263,11 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 			signalCounts["rated_3"]++
 		default:
 			s.ExplicitWeight += WeightRatedLow * decay
-			signalCounts["rated_low"]++
+			signalCounts[signalKindRatedLow]++
 		}
 	}
 
-	for _, wp := range watchProgress {
-		ref, ok := refs[wp.MediaItemID]
-		if !ok || ref.CanonicalID == "" {
-			continue
-		}
-		weight, ok := implicitWatchWeight(wp)
-		if !ok {
-			continue
-		}
-		switch weight {
-		case WeightWatchHigh:
-			signalCounts["watch_high"]++
-		case WeightWatchMed:
-			signalCounts["watch_med"]++
-		case WeightWatchLow:
-			signalCounts["watch_low"]++
-		}
-	}
-
-	for _, rc := range rewatchCounts {
-		ref, ok := refs[rc.MediaItemID]
-		if !ok || ref.CanonicalID == "" || rc.Count < 2 {
-			continue
-		}
-		signalCounts["rewatch"]++
-	}
+	countWatchSignals(signalCounts, watchProgress, rewatchCounts, refs, now)
 
 	implicitSignals, completedSet := buildCanonicalImplicitSignals(watchProgress, rewatchCounts, refs, now, halfLife)
 	for canonicalID, weight := range implicitSignals {
@@ -321,7 +297,7 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	}
 
 	if len(signals) == 0 {
-		return false, nil
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started)
 	}
 
 	allIDs := make([]string, 0, len(signals))
@@ -385,11 +361,6 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		}
 	}
 
-	profile := weightedAverage(vecs, embWeights)
-	if profile == nil {
-		return false, nil
-	}
-
 	maxContentRating := ""
 	if len(allIDs) > 0 && items != nil {
 		crMap := make(map[string]string, len(items))
@@ -399,22 +370,80 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
 	}
 
+	// Without a positive weight the average points away from the titles the
+	// profile disliked or abandoned, and would recommend their opposites.
+	profile := weightedAverage(vecs, embWeights)
+	if len(positiveItems) == 0 || profile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started)
+	}
+
 	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
 		return false, fmt.Errorf("upsert taste profile: %w", err)
 	}
 
-	if len(positiveItems) > 0 {
-		clusters := buildTasteClusters(positiveItems)
-		for i := range clusters {
-			clusters[i].UserID = userID
-			clusters[i].ProfileID = profileID
-		}
-		if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
-			return false, fmt.Errorf("upsert taste clusters: %w", err)
-		}
+	clusters := buildTasteClusters(positiveItems)
+	for i := range clusters {
+		clusters[i].UserID = userID
+		clusters[i].ProfileID = profileID
+	}
+	if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
+		return false, fmt.Errorf("upsert taste clusters: %w", err)
 	}
 
 	return true, nil
+}
+
+// clearTasteProfile stores a profile that has no positive signal, or none
+// whose title has an embedding: its signal counts without a taste vector, and
+// none of the clusters or cached personal rows an earlier vector produced.
+// Readers then treat it as having no taste profile.
+func (e *Engine) clearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, started time.Time) error {
+	if err := e.repo.ClearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started); err != nil {
+		return fmt.Errorf("clear taste profile: %w", err)
+	}
+	return nil
+}
+
+// countWatchSignals adds the watch and rewatch signal counts to counts, once
+// per canonical title: a series counts as one title however many of its
+// episodes were watched, in the bucket of its strongest watch.
+func countWatchSignals(counts map[string]int, progress []WatchProgressRow, rewatches []RewatchCount, refs map[string]canonicalContentRef, now time.Time) {
+	strongest := make(map[string]float64)
+	for _, wp := range progress {
+		ref, ok := refs[wp.MediaItemID]
+		if !ok || ref.CanonicalID == "" {
+			continue
+		}
+		weight, ok := implicitWatchWeight(wp, now)
+		if !ok {
+			continue
+		}
+		if best, seen := strongest[ref.CanonicalID]; !seen || weight > best {
+			strongest[ref.CanonicalID] = weight
+		}
+	}
+	for _, weight := range strongest {
+		switch weight {
+		case WeightWatchHigh:
+			counts["watch_high"]++
+		case WeightWatchMed:
+			counts["watch_med"]++
+		case WeightWatchLow:
+			counts[signalKindWatchLow]++
+		}
+	}
+
+	rewatched := make(map[string]struct{})
+	for _, rc := range rewatches {
+		ref, ok := refs[rc.MediaItemID]
+		if !ok || ref.CanonicalID == "" || rc.Count < 2 {
+			continue
+		}
+		rewatched[ref.CanonicalID] = struct{}{}
+	}
+	if len(rewatched) > 0 {
+		counts["rewatch"] += len(rewatched)
+	}
 }
 
 // GetTasteProfileSummary returns a human-readable summary of the user's taste

@@ -13,6 +13,7 @@ const signalPageSize = 1000
 
 type signalRepo interface {
 	GetWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error)
+	GetFavoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
 	GetWatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetEbookReaderProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error)
 	GetRecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error)
@@ -127,6 +128,61 @@ func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profile
 	}
 
 	return s.repo.ResolveCanonicalItemIDSet(ctx, rawIDs)
+}
+
+// RecommendationExclusionSet returns the canonical IDs the profile's
+// recommendations leave out: the watched set and the profile's favorites,
+// which include its taste-seed picks. A favorited episode excludes its series,
+// as a watched one does. Watchlist titles stay recommendable.
+func (s *SignalReader) RecommendationExclusionSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	excluded, err := s.WatchedItemIDSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	favoriteIDs, err := s.favoriteItemIDs(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	favorites, err := s.repo.ResolveCanonicalItemIDSet(ctx, favoriteIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve favorite item IDs: %w", err)
+	}
+	merged := make(map[string]struct{}, len(excluded)+len(favorites))
+	for id := range excluded {
+		merged[id] = struct{}{}
+	}
+	for id := range favorites {
+		merged[id] = struct{}{}
+	}
+	return merged, nil
+}
+
+// favoriteItemIDs lists every content ID the profile has favorited.
+func (s *SignalReader) favoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
+	store, ok, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return s.repo.GetFavoriteItemIDs(ctx, userID, profileID)
+	}
+
+	var ids []string
+	var after *userstore.ListKey
+	for {
+		page, err := store.ListFavoritesPage(ctx, profileID, after, signalPageSize)
+		if err != nil {
+			return nil, fmt.Errorf("list favorites from store: %w", err)
+		}
+		for _, f := range page {
+			ids = append(ids, f.MediaItemID)
+		}
+		if len(page) < signalPageSize {
+			return ids, nil
+		}
+		last := page[len(page)-1]
+		after = &userstore.ListKey{AddedAt: last.AddedAt, MediaItemID: last.MediaItemID}
+	}
 }
 
 func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, profileID string) ([]WatchProgressRow, error) {
