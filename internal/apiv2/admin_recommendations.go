@@ -142,24 +142,18 @@ func (reg *Registry) getAdminRecommendationsStatus(ctx context.Context, _ *struc
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	counts := map[recommendations.JobName]int{
-		recommendations.JobEmbeddings:      embedded,
-		recommendations.JobTasteProfiles:   taste,
-		recommendations.JobCowatch:         cowatch,
-		recommendations.JobRecommendations: cache,
-	}
-	jobStatus := func(name recommendations.JobName) AdminRecommendationJobStatus {
-		status := AdminRecommendationJobStatus{Running: w.IsRunning(name), Count: counts[name]}
+	jobStatus := func(name recommendations.JobName, count int) AdminRecommendationJobStatus {
+		status := AdminRecommendationJobStatus{Running: w.IsRunning(name), Count: count}
 		if run, ok := lastRuns[name]; ok {
 			status.LastRun = adminRecommendationJobRunOf(run)
 		}
 		return status
 	}
 	out := &AdminRecommendationsStatusOutput{Body: AdminRecommendationsStatus{
-		Embeddings:       jobStatus(recommendations.JobEmbeddings),
-		TasteProfiles:    jobStatus(recommendations.JobTasteProfiles),
-		Cowatch:          jobStatus(recommendations.JobCowatch),
-		Recommendations:  jobStatus(recommendations.JobRecommendations),
+		Embeddings:       jobStatus(recommendations.JobEmbeddings, embedded),
+		TasteProfiles:    jobStatus(recommendations.JobTasteProfiles, taste),
+		Cowatch:          jobStatus(recommendations.JobCowatch, cowatch),
+		Recommendations:  jobStatus(recommendations.JobRecommendations, cache),
 		LockConflict:     conflict,
 		CacheRefreshedAt: instantPtr(refreshedAt),
 	}}

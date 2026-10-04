@@ -612,11 +612,8 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 		if recErr != nil {
 			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
 				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)
-		}
-		if recErr == nil && len(scored) > 0 {
-			if h.writeSimilarFromScored(w, r, session, scored, limit) {
-				return
-			}
+		} else if len(scored) > 0 && h.writeSimilarFromScored(w, r, session, scored, limit) {
+			return
 		}
 	}
 

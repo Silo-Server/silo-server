@@ -461,8 +461,10 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 // Items cached without a cluster title fall back to the cluster's label.
 func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 	title := clusterTitle(cluster.Label)
-	if len(items) > 0 && len(items[0].Reason) > len(clusterTitlePrefix) && strings.HasPrefix(items[0].Reason, clusterTitlePrefix) {
-		title = items[0].Reason
+	if len(items) > 0 {
+		if label, ok := strings.CutPrefix(items[0].Reason, clusterTitlePrefix); ok && label != "" {
+			title = items[0].Reason
+		}
 	}
 	return ForYouRow{
 		Type:         "cluster",
@@ -495,6 +497,24 @@ func (r *Reader) newRowRead(userID int, profileID string, access catalog.AccessF
 	return &rowRead{reader: r, userID: userID, profileID: profileID, access: access}
 }
 
+// exclusions returns the profile's recommendation exclusion set, loading it on
+// the first call.
+func (rr *rowRead) exclusions(ctx context.Context) (map[string]struct{}, error) {
+	if rr.excluded != nil {
+		return rr.excluded, nil
+	}
+	excluded, err := rr.reader.signalReader().RecommendationExclusionSet(ctx, rr.userID, rr.profileID)
+	if err != nil {
+		return nil, err
+	}
+	if excluded == nil {
+		// A non-nil set records that it was loaded.
+		excluded = map[string]struct{}{}
+	}
+	rr.excluded = excluded
+	return excluded, nil
+}
+
 // filter is filterRows for this read.
 func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, error) {
 	if len(rows) == 0 {
@@ -502,15 +522,9 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 	}
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 
-	if rr.excluded == nil {
-		excluded, err := r.signalReader().RecommendationExclusionSet(ctx, userID, profileID)
-		if err != nil {
-			return nil, err
-		}
-		if excluded == nil {
-			excluded = map[string]struct{}{}
-		}
-		rr.excluded = excluded
+	excluded, err := rr.exclusions(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	itemIDs := make([]string, 0)
@@ -522,7 +536,6 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 
 	lowRatings := map[string]int{}
 	if len(itemIDs) > 0 && r.ratingsRepo != nil {
-		var err error
 		lowRatings, err = r.ratingsRepo.ListForItems(ctx, userID, profileID, itemIDs)
 		if err != nil {
 			return nil, err
@@ -531,7 +544,6 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 
 	accessible := map[string]struct{}{}
 	if len(itemIDs) > 0 {
-		var err error
 		accessible, err = r.repo.FilterAccessibleItemIDs(ctx, itemIDs, rr.access)
 		if err != nil {
 			return nil, err
@@ -545,7 +557,7 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 			if _, ok := accessible[item.MediaItemID]; !ok {
 				continue
 			}
-			if _, skip := rr.excluded[item.MediaItemID]; skip {
+			if _, skip := excluded[item.MediaItemID]; skip {
 				continue
 			}
 			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= 2 {

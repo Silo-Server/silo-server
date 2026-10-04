@@ -62,15 +62,6 @@ func (s *Service) WithRatingStore(store ratingStore) *Service {
 	return s
 }
 
-// WithSignalsChangedNotifier installs where a sync run reports that its
-// imports changed the profile's recommendation signals.
-func (s *Service) WithSignalsChangedNotifier(notifier SignalsChangedNotifier) *Service {
-	if s != nil {
-		s.signals = notifier
-	}
-	return s
-}
-
 // starsFromProviderRating converts a provider rating (1 to 10) to stars,
 // rounding half up: 1-2 is 1 star, 3-4 is 2 stars, and 9-10 is 5 stars.
 func starsFromProviderRating(rating int) int {

@@ -49,12 +49,27 @@ export function dropCrossSectionDuplicates(
 }
 
 /**
+ * useDedupedSections is dropCrossSectionDuplicates over the loaded sections,
+ * rerun whenever the layout, a loaded section, or the recipe gallery changes.
+ */
+export function useDedupedSections(
+  layout: readonly ResolvedSectionLayout[],
+  loadedSections: ReadonlyMap<string, ResolvedSection>,
+): Map<string, ResolvedSection> {
+  const avoidDuplicateTypes = useAvoidDuplicateSectionTypes();
+  return useMemo(
+    () => dropCrossSectionDuplicates(layout, loadedSections, avoidDuplicateTypes),
+    [avoidDuplicateTypes, layout, loadedSections],
+  );
+}
+
+/**
  * useAvoidDuplicateSectionTypes returns the section types whose recipe sets
  * avoid_duplicates, from the recipe gallery (shared with the settings pages'
  * cache entry). Until it loads, or if it fails, no section type avoids
  * duplicates and rows show as served.
  */
-export function useAvoidDuplicateSectionTypes(): ReadonlySet<string> {
+function useAvoidDuplicateSectionTypes(): ReadonlySet<string> {
   const { data } = useQuery({
     queryKey: ["recipe-catalog"],
     queryFn: fetchRecipeCatalog,

@@ -119,8 +119,7 @@ func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, r
 		{cowatchCron, JobCowatch},
 		{recommendationsCron, JobRecommendations},
 	} {
-		name := schedule.name
-		if _, err := w.cron.AddFunc(schedule.spec, func() { w.runScheduled(name) }); err != nil {
+		if _, err := w.cron.AddFunc(schedule.spec, func() { w.runScheduled(schedule.name) }); err != nil {
 			return nil, err
 		}
 	}
@@ -474,7 +473,8 @@ func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProf
 	if err := rows.Err(); err != nil {
 		return nil, failed, fmt.Errorf("list taste profile subjects: %w", err)
 	}
-	if !w.engine.signalReader().storeIsSeparate() {
+	signals := w.engine.signalReader()
+	if !signals.storeIsSeparate() {
 		return subjects, failed, nil
 	}
 
@@ -500,7 +500,7 @@ func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProf
 			if _, ok := seen[s]; ok {
 				continue
 			}
-			has, err := w.engine.signalReader().HasSignals(ctx, userID, profileID)
+			has, err := signals.HasSignals(ctx, userID, profileID)
 			if err != nil {
 				failed++
 				slog.WarnContext(ctx, "checking a profile's signals for the taste job failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
@@ -660,19 +660,19 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 			slog.WarnContext(ctx, "deleting an empty global recommendation row failed", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", err)
 		}
 	}
-	put := func(recType string, items []ScoredItem, err error) {
-		if err == nil && len(items) == 0 {
+	put := func(recType string, items []ScoredItem, buildErr error) {
+		switch {
+		case buildErr != nil:
+			keep(recType, false, buildErr)
+		case len(items) == 0:
 			drop(recType, false, nil)
-			return
+		default:
+			if err := store.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, recType, "", items, expires); err != nil {
+				keep(recType, false, err)
+				return
+			}
+			written++
 		}
-		if err == nil {
-			err = store.UpsertRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, recType, "", items, expires)
-		}
-		if err != nil {
-			keep(recType, false, err)
-			return
-		}
-		written++
 	}
 
 	popular, err := store.GetPopularItems(ctx, 30, CacheCandidateLimit)

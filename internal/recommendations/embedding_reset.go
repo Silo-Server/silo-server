@@ -170,16 +170,17 @@ func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, so
 	if err == nil && sourceDimensions > 0 {
 		err = lock.Validate(baseURL, model, sourceDimensions)
 	}
-	switch {
-	case err == nil:
-	case lock.BaseURL != "" && lock.BaseURL != baseURL:
-		return "Embeddings were created with a different provider base URL. Reset embeddings before switching providers."
-	case lock.Model != "" && lock.Model != model:
-		return fmt.Sprintf("Embeddings were created with model %q, not %q. Reset embeddings before switching models.", lock.Model, model)
-	case lock.SourceDimensions != 0 && lock.SourceDimensions != sourceDimensions:
-		return fmt.Sprintf("Embeddings were created with %d-dimension vectors, but the model now returns %d. Reset embeddings before switching models.", lock.SourceDimensions, sourceDimensions)
-	default:
-		return fmt.Sprintf("Embeddings were stored at %d dimensions; this server stores %d. Reset embeddings.", lock.StorageDimensions, CanonicalEmbeddingDimensions)
+	if err != nil {
+		switch {
+		case lock.BaseURL != "" && lock.BaseURL != baseURL:
+			return "Embeddings were created with a different provider base URL. Reset embeddings before switching providers."
+		case lock.Model != "" && lock.Model != model:
+			return fmt.Sprintf("Embeddings were created with model %q, not %q. Reset embeddings before switching models.", lock.Model, model)
+		case lock.SourceDimensions != 0 && lock.SourceDimensions != sourceDimensions:
+			return fmt.Sprintf("Embeddings were created with %d-dimension vectors, but the model now returns %d. Reset embeddings before switching models.", lock.SourceDimensions, sourceDimensions)
+		default:
+			return fmt.Sprintf("Embeddings were stored at %d dimensions; this server stores %d. Reset embeddings.", lock.StorageDimensions, CanonicalEmbeddingDimensions)
+		}
 	}
 	if lock.SourceDimensions <= 0 || lock.SourceDimensions > CanonicalEmbeddingDimensions {
 		return fmt.Sprintf("The embedding lock records %d-dimension vectors; Silo stores 1 to %d. Reset embeddings and use a model that returns at most %d dimensions.",

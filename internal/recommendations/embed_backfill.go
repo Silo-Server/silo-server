@@ -360,10 +360,10 @@ func (b *embedBackfill) embedOne(ctx context.Context, text string) (vector []flo
 	if err == nil || runStopError(ctx, err) != nil || utf8.RuneCountInString(text) <= embedRetryRunes {
 		return vector, 0, err
 	}
-	for _, limit := range []int{embedRetryRunes, embedRetryShortRunes} {
-		vector, err = b.embedText(ctx, embeddings.TruncateRunes(text, limit))
+	for _, runes := range []int{embedRetryRunes, embedRetryShortRunes} {
+		vector, err = b.embedText(ctx, embeddings.TruncateRunes(text, runes))
 		if err == nil {
-			return vector, limit, nil
+			return vector, runes, nil
 		}
 		if runStopError(ctx, err) != nil {
 			break
