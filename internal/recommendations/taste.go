@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -482,8 +483,46 @@ func countWatchSignals(counts map[string]int, progress []WatchProgressRow, rewat
 	}
 }
 
+// summaryTopGenres is how many genres the taste-profile summary names.
+const summaryTopGenres = 5
+
+// clusterTopGenres returns up to n genres of a profile's taste clusters, the
+// genres its personal rows are built from: the first dominant genre of each
+// cluster, heaviest cluster first, then the second of each, and so on,
+// skipping repeats. Taking turns lets a second interest show even when the
+// heaviest cluster has genres to fill every place. A profile without clusters
+// has none.
+func clusterTopGenres(clusters []TasteCluster, n int) []string {
+	sorted := slices.Clone(clusters)
+	slices.SortStableFunc(sorted, func(a, b TasteCluster) int {
+		if c := cmp.Compare(b.TotalWeight, a.TotalWeight); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ClusterIdx, b.ClusterIdx)
+	})
+	genres := []string{}
+	for rank := 0; len(genres) < n; rank++ {
+		more := false
+		for _, c := range sorted {
+			if rank >= len(c.DominantGenres) {
+				continue
+			}
+			more = true
+			if g := c.DominantGenres[rank]; g != "" && !slices.Contains(genres, g) && len(genres) < n {
+				genres = append(genres, g)
+			}
+		}
+		if !more {
+			break
+		}
+	}
+	return genres
+}
+
 // GetTasteProfileSummary returns a human-readable summary of the user's taste
-// profile including top genres and directors.
+// profile. Its genres are those of the taste clusters the personal rows are
+// built from (see clusterTopGenres); its directors those of the titles the
+// profile rated 4 stars or more or favorited.
 func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*TasteProfileSummary, error) {
 	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
@@ -498,7 +537,13 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 		}, nil
 	}
 
-	// Gather top-rated and favorited item IDs to derive genre/director preferences.
+	clusters, err := e.repo.GetTasteClusterMeta(ctx, userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get taste clusters for summary: %w", err)
+	}
+	topGenres := clusterTopGenres(clusters, summaryTopGenres)
+
+	// Gather top-rated and favorited item IDs to derive director preferences.
 	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list ratings for summary: %w", err)
@@ -553,7 +598,6 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 		idSet[ref.CanonicalID] = struct{}{}
 	}
 
-	topGenres := []string{}
 	topDirectors := []string{}
 
 	if len(idSet) > 0 {
@@ -567,21 +611,14 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 			return nil, fmt.Errorf("get items for summary: %w", err)
 		}
 
-		genreCounts := make(map[string]int)
 		directorCounts := make(map[string]int)
-
 		for _, item := range items {
-			for _, g := range item.Genres {
-				genreCounts[g]++
-			}
 			for _, p := range item.People {
 				if p.Kind == models.PersonKindDirector {
 					directorCounts[p.Name]++
 				}
 			}
 		}
-
-		topGenres = topN(genreCounts, 5)
 		topDirectors = topN(directorCounts, 5)
 	}
 

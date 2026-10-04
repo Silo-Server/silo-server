@@ -642,3 +642,54 @@ func TestDeleteGlobalRecommendationCachePostgres(t *testing.T) {
 		t.Fatalf("remaining rows = %v, want %v", got, want)
 	}
 }
+
+// A completion the profile rated one star gets no Because You Watched row,
+// and the next completion anchors the row the home section shows.
+func TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcache-disliked-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	repo := NewRepo(pool)
+
+	const axis = 2200
+	disliked, liked := prefix+"disliked", prefix+"liked"
+	neighbors := []string{prefix + "neighbor-1", prefix + "neighbor-2"}
+	for i, id := range append([]string{disliked, liked}, neighbors...) {
+		seedRecoMediaItem(t, pool, id, "movie", "matched")
+		if err := repo.UpsertEmbedding(ctx, id, axisVector(axis, map[int]float32{axis + 1 + i: 0.05}), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stmt := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW()), ($1, $2, $4, true, NOW() - INTERVAL '1 day')`, []any{userID, profile, disliked, liked}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 1)`, []any{userID, profile, disliked}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
+			t.Fatalf("seed %q: %v", stmt.query, err)
+		}
+	}
+
+	ratings := catalog.NewRatingsRepo(pool)
+	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{DiversityLambda: 0.7})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(time.Now())); built.failed != 0 {
+		t.Fatalf("cache build = %+v, want no failures", built)
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeBecauseWatched, disliked); err != nil || items != nil {
+		t.Fatalf("disliked anchor row = %v, %v; want none built", items, err)
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeBecauseWatched, liked); err != nil || len(items) == 0 {
+		t.Fatalf("liked anchor row = %v, %v; want it built", items, err)
+	}
+
+	_, source, err := NewReader(repo, ratings, nil, pgstore.NewPostgresProvider(pool)).SectionBecauseYouWatched(ctx, userID, profile, "", nil, catalog.AccessFilter{})
+	if err != nil || source != liked {
+		t.Fatalf("section anchor = %q, %v; want %q", source, err, liked)
+	}
+}

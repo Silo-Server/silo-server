@@ -277,9 +277,15 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		f.logSlowSectionFetch(resolved, libraryID, libraryIDs, result, time.Since(start), err)
 	}()
 
-	if resolved.SectionType == SectionBecauseYouWatched && f.RecommendationReader != nil {
-		result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
-		return result, err
+	if f.RecommendationReader != nil {
+		switch resolved.SectionType {
+		case SectionBecauseYouWatched:
+			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
+			return result, err
+		case SectionRecommendedForYou, SectionTasteMatch:
+			result, err = f.fetchRecommendationRowWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
+			return result, err
+		}
 	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
@@ -1654,38 +1660,16 @@ func limitUserCollectionSectionItems(items []*models.MediaItem, limit int) ([]*m
 // fetchRecommendationSection reads the row's whole cached pool, scopes it to
 // the section's libraries, then trims it to the section's item limit, so a
 // library's row fills from every cached candidate in that library rather than
-// only those in the row's first page. Because You Watched takes the
-// FetchOne branch whenever a reader is wired.
+// only those in the row's first page. Because You Watched, For You and taste
+// match take a FetchOne branch whenever a reader is wired, which titles the
+// section after the row it serves.
 func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
-	if f.RecommendationReader == nil {
+	if f.RecommendationReader == nil || s.SectionType != SectionSimilarUsersLiked {
 		return []*models.MediaItem{}, 0, nil // graceful degradation
 	}
-
-	cfg := parseRecommendationSectionConfig(s.Config)
-	var scoredItems []recommendations.ScoredItem
-	switch s.SectionType {
-	case SectionRecommendedForYou:
-		row, err := f.RecommendationReader.SectionForYouMain(ctx, userID, profileID, filter)
-		if err != nil || row == nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = row.Items
-	case SectionSimilarUsersLiked:
-		items, err := f.RecommendationReader.SectionSimilarUsersLiked(ctx, userID, profileID, filter)
-		if err != nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = items
-	case SectionTasteMatch:
-		// An empty genre is valid: the reader auto-picks the profile's
-		// strongest taste cluster (falling back to the server top genre).
-		row, err := f.RecommendationReader.SectionTasteMatchRow(ctx, userID, profileID, strings.TrimSpace(cfg.Genre), filter)
-		if err != nil || row == nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = row.Items
-	default:
-		return []*models.MediaItem{}, 0, nil
+	scoredItems, err := f.RecommendationReader.SectionSimilarUsersLiked(ctx, userID, profileID, filter)
+	if err != nil {
+		return []*models.MediaItem{}, 0, err
 	}
 
 	orderedItems, err := f.scopeRecommendationItems(ctx, scoredItems, libraryID, libraryIDs, filter)

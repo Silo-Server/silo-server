@@ -303,6 +303,54 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 	return ids, nil
 }
 
+// Because You Watched anchors on the profile's latest completions.
+const (
+	// becauseYouWatchedAnchors is how many anchors a profile's Because You
+	// Watched rows are built and read for.
+	becauseYouWatchedAnchors = 3
+	// anchorCandidateLimit is how many of the latest completions the anchors
+	// are chosen from, so disliked ones can be passed over.
+	anchorCandidateLimit = 10
+)
+
+// itemRatingReader reads a profile's star ratings of the given items, keyed
+// by item. *catalog.RatingsRepo implements it.
+type itemRatingReader interface {
+	ListForItems(ctx context.Context, userID int, profileID string, itemIDs []string) (map[string]int, error)
+}
+
+// anchorItemIDs returns up to n Because You Watched anchors for the profile:
+// its most recently completed titles still in the catalog, newest first, of
+// the latest anchorCandidateLimit, leaving out those it rated
+// DislikedRatingMax or lower. A row headed "Because You Watched" a title the
+// profile disliked contradicts its taste. With no ratings reader nothing is
+// left out. The worker, the Reader and Watch Tonight all choose anchors here,
+// since a read can only use an anchor whose row the worker cached.
+func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
+	if n <= 0 {
+		return []string{}, nil
+	}
+	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, max(n, anchorCandidateLimit))
+	if err != nil {
+		return nil, err
+	}
+	if ratings != nil && len(recent) > 0 {
+		rated, err := ratings.ListForItems(ctx, userID, profileID, recent)
+		if err != nil {
+			return nil, fmt.Errorf("read ratings of recent completions: %w", err)
+		}
+		liked := make([]string, 0, len(recent))
+		for _, id := range recent {
+			if rating, ok := rated[id]; ok && rating <= DislikedRatingMax {
+				continue
+			}
+			liked = append(liked, id)
+		}
+		recent = liked
+	}
+	return recent[:min(n, len(recent))], nil
+}
+
 func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) error {
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {

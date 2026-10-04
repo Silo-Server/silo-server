@@ -332,7 +332,7 @@ func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Cont
 
 	filtered := make([]recommendations.ScoredItem, 0, len(items))
 	for _, item := range items {
-		if rating, ok := ratings[item.MediaItemID]; ok && rating <= 2 {
+		if rating, ok := ratings[item.MediaItemID]; ok && rating <= recommendations.DislikedRatingMax {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -365,7 +365,7 @@ type sectionDetailResponse struct {
 const (
 	discoverForYouMaxItems     = 28
 	discoverUpcomingWindowDays = 14
-	discoverForYouLabel        = "For You"
+	discoverForYouLabel        = recommendations.ForYouLabel
 	sectionDetailDefaultLimit  = recommendations.CacheCandidateLimit
 )
 
@@ -589,12 +589,9 @@ func discoverRowSectionKey(rowType, label string, clusterIndex int) (string, str
 	case recommendations.RecTypeTopRated:
 		return recommendations.SectionKindTopRated, ""
 	case "genre_sampler":
-		// Cold-start labels rows "Top X"; the warm-discover path labels them
-		// "Popular in X". The genre name is always the label suffix.
-		for _, prefix := range []string{"Popular in ", "Top "} {
-			if name, ok := strings.CutPrefix(label, prefix); ok && name != "" {
-				return recommendations.SectionKindGenre, name
-			}
+		// Genre rows are titled "Top <genre>".
+		if name, ok := strings.CutPrefix(label, "Top "); ok && name != "" {
+			return recommendations.SectionKindGenre, name
 		}
 	}
 	return "", ""
@@ -861,7 +858,7 @@ func rankUpcomingCandidates(
 		if _, watched := watchedSet[candidate.DisplayID]; watched {
 			continue
 		}
-		if rating, rated := lowRatings[candidate.DisplayID]; rated && rating <= 2 {
+		if rating, rated := lowRatings[candidate.DisplayID]; rated && rating <= recommendations.DislikedRatingMax {
 			continue
 		}
 

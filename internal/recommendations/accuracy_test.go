@@ -335,12 +335,27 @@ func clusterTestItem(id string, embedding []float32, weight float64, genre strin
 	}
 }
 
-// The recency boost multiplies a new title's score and leaves the order MMR
-// chose alone.
+// The recency boost multiplies a new title's score by up to
+// RecencyBoostMultiplier, less the older it is, and keeps the pool's order;
+// old, undated and negatively scored titles keep their scores.
 func TestApplyRecencyBoostKeepsOrder(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	items := []ScoredItem{{MediaItemID: "old", Score: 0.9}, {MediaItemID: "new", Score: 0.8}, {MediaItemID: "undated", Score: 0.7}}
-	added := map[string]time.Time{"old": now.AddDate(-1, 0, 0), "new": now}
+	items := []ScoredItem{
+		{MediaItemID: "old", Score: 0.9}, {MediaItemID: "new", Score: 0.8}, {MediaItemID: "undated", Score: 0.7},
+		{MediaItemID: "week-old", Score: 0.6}, {MediaItemID: "old-2", Score: 0.5}, {MediaItemID: "old-3", Score: 0.4},
+		{MediaItemID: "old-4", Score: 0.3}, {MediaItemID: "new-negative", Score: -0.1},
+	}
+	added := map[string]time.Time{
+		"old": now.AddDate(-1, 0, 0), "new": now, "week-old": now.AddDate(0, 0, -RecencyBoostDays/2),
+		"old-2": now.AddDate(0, 0, -RecencyBoostDays), "old-3": now.AddDate(-1, 0, 0), "old-4": now.AddDate(-1, 0, 0),
+		"new-negative": now,
+	}
+	// Four more old titles keep the new ones at a quarter of the pool.
+	for i := range 4 {
+		id := fmt.Sprintf("old-%d", 5+i)
+		items = append(items, ScoredItem{MediaItemID: id, Score: 0.2})
+		added[id] = now.AddDate(-1, 0, 0)
+	}
 
 	got := applyRecencyBoost(items, added, now)
 
@@ -350,7 +365,64 @@ func TestApplyRecencyBoostKeepsOrder(t *testing.T) {
 	if want := 0.8 * RecencyBoostMultiplier; math.Abs(got[1].Score-want) > 1e-9 {
 		t.Fatalf("new title score = %f, want %f", got[1].Score, want)
 	}
-	if got[0].Score != 0.9 || got[2].Score != 0.7 {
-		t.Fatalf("scores = %v, want old and undated titles unchanged", got)
+	if want := 0.6 * (1 + (RecencyBoostMultiplier-1)/2); math.Abs(got[3].Score-want) > 1e-9 {
+		t.Fatalf("half-window title score = %f, want %f", got[3].Score, want)
+	}
+	for _, i := range []int{0, 2, 4, 5, 6, 7, 8, 9, 10, 11} {
+		if got[i].Score != items[i].Score {
+			t.Fatalf("%s score = %f, want it unchanged at %f", items[i].MediaItemID, got[i].Score, items[i].Score)
+		}
+	}
+	if items[1].Score != 0.8 {
+		t.Fatalf("input changed: %v", items)
+	}
+}
+
+// A pool with more than a quarter of its titles inside the window, such as
+// a freshly imported library, keeps every score: boosting it would rank by
+// scan order.
+func TestApplyRecencyBoostSkipsBulkImports(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	items := scoredRun("item", 8)
+	added := map[string]time.Time{}
+	for i, item := range items {
+		added[item.MediaItemID] = now.AddDate(-1, 0, 0)
+		if i < 3 {
+			added[item.MediaItemID] = now.AddDate(0, 0, -i)
+		}
+	}
+	if got := applyRecencyBoost(items, added, now); !slices.Equal(got, items) {
+		t.Fatalf("3 of 8 new: scores %v, want them unchanged", got)
+	}
+	added[items[2].MediaItemID] = now.AddDate(-1, 0, 0)
+	if got := applyRecencyBoost(items, added, now); got[0].Score == items[0].Score || got[2].Score != items[2].Score {
+		t.Fatalf("2 of 8 new: scores %v, want only the new titles boosted", got)
+	}
+}
+
+// Applied before selection, the boost lets a new title just below the
+// selection margin into the row, while a new title far below it stays out.
+func TestRecencyBoostLiftsNearMissesIntoTheRow(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	var pool []ScoredItem
+	added := map[string]time.Time{}
+	for i := range 40 {
+		id := fmt.Sprintf("old-%02d", i)
+		pool = append(pool, ScoredItem{MediaItemID: id, Score: 0.80 - 0.005*float64(i)})
+		added[id] = now.AddDate(-1, 0, 0)
+	}
+	// The row takes 20: the margin is old-19 at 0.705.
+	pool = append(pool, ScoredItem{MediaItemID: "new-near", Score: 0.69}, ScoredItem{MediaItemID: "new-far", Score: 0.55})
+	added["new-near"], added["new-far"] = now, now
+
+	pick := func(items []ScoredItem) []string {
+		return mmrItemIDs(applyMMR(items, nil, defaultMMRLambda, ServedRowSize))
+	}
+	if got := pick(pool); slices.Contains(got, "new-near") {
+		t.Fatalf("without the boost the row %v holds new-near", got)
+	}
+	got := pick(applyRecencyBoost(pool, added, now))
+	if !slices.Contains(got, "new-near") || slices.Contains(got, "new-far") {
+		t.Fatalf("boosted row %v, want new-near in and new-far out", got)
 	}
 }

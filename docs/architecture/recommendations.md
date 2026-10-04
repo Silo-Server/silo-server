@@ -147,6 +147,11 @@ again, so the stale sweep retries both.
 - Clusters are seeded from item IDs only, so decaying weights do not reshuffle
   them between rebuilds. A cached cluster row carries the title of the build
   that produced it.
+- The taste-profile summary's genres come from the clusters: the first
+  dominant genre of each cluster, heaviest first, then the second of each,
+  without repeats, at most five, so a second interest shows next to the
+  heaviest. A profile without clusters has none. Favorite directors still
+  come from titles rated 4 stars or more and favorites.
 
 ## Rows
 
@@ -207,6 +212,95 @@ on both user-store backends. A refresh that runs afterwards writes no taste row
 for a profile the user store no longer lists, and on the Postgres store the
 nightly taste job skips such profiles, as the purge migration does.
 
+## Ranking
+
+A cached personal row holds `CacheCandidateLimit` (60) titles; a public read
+serves the first `ServedRowSize` (20) by default. Ranking shapes those 20
+for the viewer, and the rest is headroom for read-time filters and for
+library sections, which scope the whole row to their libraries.
+
+- **Main row.** A profile with at least 10 positive titles gets a row
+  composed per interest when its clusters make at least two anchors;
+  clusters whose centroids have a cosine above 0.9 merge into one anchor.
+  Anchors get slots in proportion to
+  their weight by largest remainder, each at least `min(3, limit/anchors)`.
+  Each anchor fetches 3 candidates per slot around its centroid and ranks
+  them by MMR, and a smooth weighted round-robin interleaves the anchors'
+  rankings without repeats, so every prefix of the row holds each interest's
+  share. Any other profile, or one whose anchors find nothing, gets the
+  candidates nearest its averaged taste vector, ranked by MMR.
+- **Genre pass.** A stable reorder of the MMR order lets no genre hold more
+  than half of the served window while the row has other titles to offer.
+  It deletes nothing and moves nothing past the window.
+- **Type supplements.** The main row holds at least a fifth of its length of
+  each media type the viewer can see, so a library section fills. The extra
+  titles go after the served window, replacing tail titles of types above
+  that floor; a type the viewer has no titles of is not queried.
+- **Cluster rows.** A cluster row is built `max(3, 60 × weight share) + 20`
+  long (at most 60) from candidates sharing one of its dominant genres, then
+  loses the main row's served 20, so the page does not repeat its opening.
+  A row left with fewer than 10 titles is cached empty, and a row cached
+  empty counts as built: reads do not ask for a rebuild of it.
+- **Quality prior.** Before MMR a candidate's score becomes
+  `score + 0.5 × sd(pool scores) × clamp(z, −1, 1)`, where `z` standardizes
+  its rating (IMDb, else a TMDB rating below 9.5) among the pool's rated
+  candidates of the same media type. A type with fewer than 10 rated
+  candidates or no spread in ratings is left alone, and cluster and Because
+  You Watched pools under 30 candidates get no prior.
+- **Freshness.** Before MMR, on the main row's pools and the cluster pools,
+  the positive score of a title added in the last 14 days is multiplied by up
+  to 1.05, less the older it is. A pool with more than a quarter of its
+  candidates inside the window, such as a freshly imported library, gets no
+  boost, so it never ranks by scan order. The date is the title's own, so a
+  new episode of an older series does not count, and the boost cannot reach
+  a title its candidate query did not retrieve.
+- **Labels.** A cluster's label names the genres that set it apart: those
+  that at least 40% of its titles carry, and carry at least 1.5 times as
+  often as the profile's positive titles do, most distinctive first, with
+  its most common genre (a tie goes to the genre of the heavier titles)
+  always among them, at most two in all. Genres are joined with ", ", since
+  TMDB genres such as "Sci-Fi & Fantasy" contain "&". A cluster with no such
+  genre, such as a profile's only cluster, is labeled by its most common
+  genre, and one whose titles carry no genres has an empty label, titled
+  "Picked from your history". The dominant genres that drive retrieval, the
+  Discover genre exclusion and the taste-match section stay the top three
+  by count. The thresholds were tuned on synthetic profiles.
+- **Repeated titles.** A read never shows two cluster rows under one title
+  it can tell apart. Visiting the heaviest cluster first, a row titled like
+  a heavier one is hidden when their first served items overlap by more
+  than half (Jaccard index), and otherwise takes the first of its dominant
+  genres its title does not name yet. A row whose cached title its cluster
+  no longer has keeps it. A hidden row was built, so it does not count as
+  missing. The "see all" page keeps the cached title.
+- **Rotation.** Reads rotate the main row and the cluster rows daily, after
+  filtering and before trimming; Because You Watched, Similar Users, Watch
+  Tonight, the global and default rows and "see all" pages stay in rank
+  order. For a window of `limit` items, when the row is longer and `limit`
+  is above 10, the first `min(10, limit/2)` stay, and the other
+  `take = limit − pin` are drawn from the next `2 × take`, the title at tail
+  index `i` with weight `1/(i+5)`: the draw keeps the `take` largest
+  `ln(u)·(i+5)`, with `u` from `sha256(userID|profileID|rowKey|date|itemID)`.
+  The draws keep rank order and the titles not drawn follow them, so
+  nothing is lost. `rowKey` is the row's cache key, so a title two rows
+  share is drawn independently in each, and `date` is the server's local
+  `YYYY-MM-DD`, so rows change overnight. The draw needs no shared state:
+  every node serves the same rotation, provided all nodes run in the same
+  time zone. Home and library sections rotate the main and taste-match rows
+  like a 20-item page.
+- **Titles.** Row titles come from one vocabulary in
+  `internal/recommendations/titles.go`: For You, `Because you enjoy
+  <label>`, Because You Watched, Profiles Like You Enjoyed, Popular on This
+  Server, Recently Added, Highly Rated in Your Library and `Top <genre>`. A
+  For You or taste-match section whose heading is still a default
+  ("Recommended for You", "Top Picks Today" or empty) takes the title of the
+  row it serves when that row is one every profile is offered, so a new
+  profile's section reads "Popular on This Server". A heading an admin chose
+  is never replaced.
+- **Rows for everyone.** Popular, the genre rows, the live default rows
+  (Highly Rated in Your Library, Recently Added) and the taste-seed picker
+  offer only `recommendableMediaTypes`, movies and series; personal rows
+  keep every type. See Rows for how each ranks.
+
 ## Reads
 
 The Reader serves cached rows, except the default rows on Discover and their
@@ -221,8 +315,10 @@ finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
 profile's three most recent completed titles that still exist in the catalog,
-and a read asks for a refresh only when there are anchors and none has a
-cached row.
+taken from its latest ten completions and passing over those it rated 2 stars
+or lower; the worker, the reads and Watch Tonight choose them the same way. A
+read asks for a refresh only when there are anchors and none has a cached
+row.
 
 List reads return at most 50 items per row (default 20); the v1 for-you and
 similar-users reads keep 20, and section "see all" reads return up to 60, a

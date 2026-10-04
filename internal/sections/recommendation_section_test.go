@@ -17,19 +17,28 @@ import (
 )
 
 // poolReader answers every section read with fixed rows and records the
-// library scope Because You Watched was asked for.
+// library scope Because You Watched was asked for. The For You and taste
+// match rows have rowType and rowLabel when set.
 type poolReader struct {
-	pool      []recommendations.ScoredItem
-	anchor    string
-	scopes    [][]int
-	readError error
+	pool              []recommendations.ScoredItem
+	anchor            string
+	scopes            [][]int
+	readError         error
+	rowType, rowLabel string
+}
+
+func (p *poolReader) row(label string) *recommendations.ForYouRow {
+	if p.rowLabel != "" {
+		label = p.rowLabel
+	}
+	return &recommendations.ForYouRow{Type: p.rowType, Label: label, Items: p.pool}
 }
 
 func (p *poolReader) SectionForYouMain(context.Context, int, string, catalog.AccessFilter) (*recommendations.ForYouRow, error) {
 	if p.readError != nil {
 		return nil, p.readError
 	}
-	return &recommendations.ForYouRow{Label: "For You", Items: p.pool}, nil
+	return p.row(recommendations.ForYouLabel), nil
 }
 
 func (p *poolReader) SectionBecauseYouWatched(_ context.Context, _ int, _, _ string, libraryIDs []int, _ catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
@@ -45,7 +54,40 @@ func (p *poolReader) SectionTasteMatchRow(context.Context, int, string, string, 
 	if p.readError != nil {
 		return nil, p.readError
 	}
-	return &recommendations.ForYouRow{Items: p.pool}, nil
+	return p.row(""), nil
+}
+
+// A For You or taste-match section keeps a default heading only while it
+// serves the profile's own row; served a row every profile gets, it takes
+// that row's title. A heading an admin chose is never replaced.
+func TestRecommendationSectionTitle(t *testing.T) {
+	popular := &recommendations.ForYouRow{Type: recommendations.RecTypePopular, Label: "Popular on This Server"}
+	genre := &recommendations.ForYouRow{Type: "genre_sampler", Label: "Top Drama"}
+	highlyRated := &recommendations.ForYouRow{Type: recommendations.RecTypeTopRated, Label: "Highly Rated in Your Library"}
+	recent := &recommendations.ForYouRow{Type: recommendations.RecTypeRecentlyAdded, Label: "Recently Added"}
+	forYou := &recommendations.ForYouRow{Type: "cluster", Label: recommendations.ForYouLabel}
+	cluster := &recommendations.ForYouRow{Type: "cluster", Label: "Because you enjoy Crime"}
+	for _, tc := range []struct {
+		name, title string
+		row         *recommendations.ForYouRow
+		want        string
+	}{
+		{"new profile's For You row", "Recommended for You", popular, "Popular on This Server"},
+		{"default heading in another case", "  recommended FOR you ", recent, "Recently Added"},
+		{"highly rated", "Recommended for You", highlyRated, "Highly Rated in Your Library"},
+		{"taste match without a cluster", "Top Picks Today", genre, "Top Drama"},
+		{"untitled section", "", genre, "Top Drama"},
+		{"profile's own row", "Recommended for You", forYou, "Recommended for You"},
+		{"profile's cluster row", "Top Picks Today", cluster, "Top Picks Today"},
+		{"admin title", "Tonight's Picks", popular, "Tonight's Picks"},
+		{"no row", "Recommended for You", nil, "Recommended for You"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := recommendationSectionTitle(tc.title, tc.row); got != tc.want {
+				t.Fatalf("title = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestLimitRecommendationItems(t *testing.T) {
@@ -154,5 +196,53 @@ func TestRecommendationSectionReadErrorFailsTheSection(t *testing.T) {
 	got, err := (&Fetcher{}).FetchOne(context.Background(), ResolvedSection{ID: "recs", SectionType: SectionRecommendedForYou, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
 	if err != nil || len(got.Items) != 0 {
 		t.Fatalf("FetchOne without a reader = %d items, %v; want an empty section", len(got.Items), err)
+	}
+}
+
+// FetchOne titles a For You or taste-match section after the row it serves
+// when that row is not the profile's own, and keeps an admin's heading; a
+// row filtered empty leaves the heading alone.
+func TestRecommendationSectionsTakeTheServedRowTitlePostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	id := "recs-title-" + uuid.NewString()[:8]
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, id) })
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'movie', $1, 'matched', '{}'::text[])`, id); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	fetcher := NewFetcher(pool)
+	for _, tc := range []struct {
+		name              string
+		sectionType       SectionType
+		title             string
+		rowType, rowLabel string
+		pool              []recommendations.ScoredItem
+		want              string
+	}{
+		{"new profile", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Popular on This Server"},
+		{"warm profile", SectionRecommendedForYou, "Recommended for You", "cluster", recommendations.ForYouLabel, []recommendations.ScoredItem{{MediaItemID: id}}, "Recommended for You"},
+		{"taste match fallback", SectionTasteMatch, "Top Picks Today", "genre_sampler", "Top Drama", []recommendations.ScoredItem{{MediaItemID: id}}, "Top Drama"},
+		{"admin title", SectionRecommendedForYou, "Movie Night", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id}}, "Movie Night"},
+		{"row filtered empty", SectionRecommendedForYou, "Recommended for You", recommendations.RecTypePopular, "Popular on This Server", []recommendations.ScoredItem{{MediaItemID: id + "-missing"}}, "Recommended for You"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fetcher.RecommendationReader = &poolReader{pool: tc.pool, rowType: tc.rowType, rowLabel: tc.rowLabel}
+			got, err := fetcher.FetchOne(ctx, ResolvedSection{ID: "recs", SectionType: tc.sectionType, Title: tc.title, ItemLimit: 20}, nil, nil, 7, "p1", catalog.AccessFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Title != tc.want {
+				t.Fatalf("title = %q, want %q", got.Title, tc.want)
+			}
+		})
 	}
 }

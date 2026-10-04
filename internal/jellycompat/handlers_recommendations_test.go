@@ -163,7 +163,7 @@ func TestCompatRecommendationsSendOnlyTruthfulHeadings(t *testing.T) {
 			clusterRow(0, "Science Fiction & Thriller", "scifi-1", "shared"),
 			{Type: "cluster", Label: "Because you enjoy For You", ClusterIndex: 1, Items: []recommendations.ScoredItem{{MediaItemID: "unlabeled-1"}}},
 			clusterRow(2, "Comedy", "comedy-1"),
-			scoredRow("similar_users_liked", "Fans Like You Also Enjoyed", "fans-1"),
+			scoredRow("similar_users_liked", "Profiles Like You Enjoyed", "fans-1"),
 			scoredRow("popular", "Popular on This Server", "popular-1"),
 			scoredRow("recently_added", "Recently Added", "recent-1"),
 			scoredRow("top_rated", "Top Rated", "top-1"),

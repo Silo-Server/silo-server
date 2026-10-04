@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"slices"
 	"sort"
 	"time"
 )
@@ -87,7 +88,7 @@ func buildColdStartRows(popular, recentlyAdded []ScoredItem, genreSamplers map[s
 	if len(popular) > 0 {
 		rows = append(rows, ForYouRow{
 			Type:  RecTypePopular,
-			Label: "Popular on This Server",
+			Label: popularLabel,
 			Items: popular,
 		})
 	}
@@ -95,7 +96,7 @@ func buildColdStartRows(popular, recentlyAdded []ScoredItem, genreSamplers map[s
 	if len(recentlyAdded) > 0 {
 		rows = append(rows, ForYouRow{
 			Type:  RecTypeRecentlyAdded,
-			Label: "Recently Added",
+			Label: recentlyAddedLabel,
 			Items: recentlyAdded,
 		})
 	}
@@ -111,8 +112,8 @@ func buildColdStartRows(popular, recentlyAdded []ScoredItem, genreSamplers map[s
 		items := genreSamplers[genre]
 		if len(items) > 0 {
 			rows = append(rows, ForYouRow{
-				Type:  "genre_sampler",
-				Label: "Top " + genre,
+				Type:  genreSamplerRowType,
+				Label: genreRowLabel(genre),
 				Items: items,
 			})
 		}
@@ -166,38 +167,50 @@ func mergePersonalizedAndColdStart(personalRows, coldStartRows []ForYouRow, leve
 	}
 }
 
-// applyRecencyBoost multiplies the score of recently added items by a boost
-// factor that decays linearly from RecencyBoostMultiplier to 1.0 over
-// RecencyBoostDays. Items not present in addedDates or older than the window
-// are left unchanged. The returned slice is a new copy in the order of items:
-// re-sorting by score would undo the order MMR chose.
+// recencyBoostMaxShare is the largest share of a candidate pool added within
+// RecencyBoostDays that still gets the recency boost. On a freshly imported
+// library nearly every title is new, and boosting would rank by scan order.
+const recencyBoostMaxShare = 0.25
+
+// applyRecencyBoost multiplies the positive score of each recently added
+// candidate by a factor that decays linearly from RecencyBoostMultiplier to
+// 1.0 over RecencyBoostDays, so a new title near the selection margin makes
+// the row. It is applied to a candidate pool before MMR selects from it, and
+// returns a new slice in the order of items. Items without an added date or
+// older than the window keep their scores, and a pool with more than
+// recencyBoostMaxShare of its items inside the window keeps every score.
+//
+// The added date is the title's own, so a new season or episode of a series
+// does not count as new, and the boost cannot help a title the candidate
+// query did not retrieve.
 func applyRecencyBoost(items []ScoredItem, addedDates map[string]time.Time, now time.Time) []ScoredItem {
 	boostWindow := time.Duration(RecencyBoostDays) * 24 * time.Hour
+	boosted := slices.Clone(items)
 
-	boosted := make([]ScoredItem, len(items))
+	// fractions[i] is how much of the window item i has left, 0 for an item
+	// outside it.
+	fractions := make([]float64, len(items))
+	recent := 0
 	for i, item := range items {
-		boosted[i] = item
-
 		addedAt, ok := addedDates[item.MediaItemID]
 		if !ok {
 			continue
 		}
-
-		age := now.Sub(addedAt)
-		if age < 0 {
-			// Added in the future (clock skew) — apply full boost.
-			age = 0
-		}
+		// An item added in the future (clock skew) gets the full boost.
+		age := max(now.Sub(addedAt), 0)
 		if age >= boostWindow {
 			continue
 		}
-
-		// Linear decay: fraction goes from 1.0 (just added) to 0.0 (at window edge).
-		fraction := 1.0 - float64(age)/float64(boostWindow)
-		// Multiplier ranges from RecencyBoostMultiplier down to 1.0.
-		multiplier := 1.0 + (RecencyBoostMultiplier-1.0)*fraction
-		boosted[i].Score *= multiplier
+		fractions[i] = 1.0 - float64(age)/float64(boostWindow)
+		recent++
 	}
-
+	if float64(recent) > recencyBoostMaxShare*float64(len(items)) {
+		return boosted
+	}
+	for i := range boosted {
+		if fractions[i] > 0 && boosted[i].Score > 0 {
+			boosted[i].Score *= 1.0 + (RecencyBoostMultiplier-1.0)*fractions[i]
+		}
+	}
 	return boosted
 }

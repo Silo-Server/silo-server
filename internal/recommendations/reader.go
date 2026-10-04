@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -50,20 +51,32 @@ type readerRepo interface {
 
 // Reader assembles recommendation rows from cache-backed data sources.
 type Reader struct {
-	repo        readerRepo
-	ratingsRepo *catalog.RatingsRepo
+	repo readerRepo
+	// ratingsRepo reads the profile's ratings; nil leaves rated titles in.
+	ratingsRepo itemRatingReader
 	refresh     ReadRefreshRequester
 	signals     *SignalReader
+	// now is the clock personal rows are rotated by; nil is time.Now. Its
+	// location sets the day a rotation lasts.
+	now func() time.Time
 }
 
 // NewReader creates a cache-backed recommendations reader.
 func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ReadRefreshRequester, storeProvider userstore.UserStoreProvider) *Reader {
 	return &Reader{
 		repo:        repo,
-		ratingsRepo: ratingsRepo,
+		ratingsRepo: ratingReader(ratingsRepo),
 		refresh:     refresh,
 		signals:     NewSignalReader(repo, storeProvider),
 	}
+}
+
+// ratingReader is repo as an itemRatingReader, nil when repo is nil.
+func ratingReader(repo *catalog.RatingsRepo) itemRatingReader {
+	if repo == nil {
+		return nil
+	}
+	return repo
 }
 
 // WithUserStoreOutsidePostgres records whether the user store keeps watch
@@ -74,6 +87,14 @@ func (r *Reader) WithUserStoreOutsidePostgres(outside bool) *Reader {
 		r.signals.storeOutsidePostgres = outside
 	}
 	return r
+}
+
+// today is the time a read's rotation is for, in the server's time zone.
+func (r *Reader) today() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // requestRefresh asks for the profile's cached rows to be rebuilt.
@@ -112,11 +133,14 @@ func (r *Reader) signalReader() *SignalReader {
 
 // GetForYouMain returns the first row the recommendations page should display.
 func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	return r.forYouMain(ctx, userID, profileID, normalizeRecommendationLimit(limit), filter)
+	limit = normalizeRecommendationLimit(limit)
+	return r.forYouMain(ctx, userID, profileID, limit, limit, filter)
 }
 
-func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+// forYouMain returns the page's first row, rotated for a window of served
+// items and trimmed to limit.
+func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, served, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, served, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +154,7 @@ func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, l
 // GetForYouRows returns the remaining recommendations-page rows after the main row.
 func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +169,7 @@ func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string
 // It is GetForYouMain and GetForYouRows in one read.
 func (r *Reader) GetForYouPage(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +197,8 @@ func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID st
 	}
 
 	rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{{
-		Type:  "similar_users_liked",
-		Label: "Fans Like You Also Enjoyed",
+		Type:  RecTypeSimilarUsersLiked,
+		Label: similarUsersLabel,
 		Items: items,
 	}}, filter)
 	if err != nil {
@@ -193,9 +217,10 @@ func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID st
 // scopes the row to its libraries and trims it to its own item limit
 // afterwards, and trimming first would leave a library's row short or empty.
 
-// SectionForYouMain is GetForYouMain's row for a home or library section.
+// SectionForYouMain is GetForYouMain's row for a home or library section,
+// rotated like a page of the default size.
 func (r *Reader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*ForYouRow, error) {
-	return r.forYouMain(ctx, userID, profileID, CacheCandidateLimit, filter)
+	return r.forYouMain(ctx, userID, profileID, ServedRowSize, CacheCandidateLimit, filter)
 }
 
 // SectionSimilarUsersLiked is GetSimilarUsersLiked's row for a home or
@@ -206,9 +231,9 @@ func (r *Reader) SectionSimilarUsersLiked(ctx context.Context, userID int, profi
 
 // SectionBecauseYouWatched returns a cached Because You Watched row for a
 // home or library section and the anchor it was built from. It uses
-// sourceItemID as the anchor when given, else the profile's most recent
-// completed titles in turn: the first whose row keeps an item after
-// filtering wins. When libraryIDs is not nil an item must also be in one of
+// sourceItemID as the anchor when given, else the profile's anchors (see
+// anchorItemIDs) in turn: the first whose row keeps an item after filtering
+// wins. When libraryIDs is not nil an item must also be in one of
 // those libraries, so a section picks an anchor with recommendations in its
 // own scope. A caller must access-check the anchor before displaying it.
 func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
@@ -237,7 +262,7 @@ func (r *Reader) GetBecauseYouWatchedRows(ctx context.Context, userID int, profi
 
 // becauseYouWatchedRows reads the cached Because You Watched rows of up to
 // maxRows anchors, filtered with filter. It uses sourceItemID as the anchor
-// when given, else the profile's most recent completed titles in turn,
+// when given, else the profile's anchors (see anchorItemIDs) in turn,
 // passing over an anchor whose row filters empty.
 func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileID, sourceItemID string, maxRows int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	if maxRows <= 0 {
@@ -247,11 +272,11 @@ func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileI
 	if sourceItemID != "" {
 		sourceIDs = append(sourceIDs, sourceItemID)
 	} else {
-		recentCompleted, err := r.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
+		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
 		if err != nil {
 			return nil, err
 		}
-		sourceIDs = append(sourceIDs, recentCompleted...)
+		sourceIDs = append(sourceIDs, anchors...)
 	}
 
 	read := r.newRowRead(userID, profileID, filter)
@@ -271,7 +296,7 @@ func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileI
 		cached = true
 		filtered, err := read.filter(ctx, []ForYouRow{{
 			Type:         RecTypeBecauseWatched,
-			Label:        "Because You Watched",
+			Label:        becauseYouWatchedRowLabel,
 			Items:        items,
 			AnchorItemID: sourceID,
 		}})
@@ -359,7 +384,7 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 		if err != nil {
 			return nil, err
 		}
-		rows = trimRows(rows, CacheCandidateLimit)
+		rows = trimRows(read.rotatePersonalRows(rows, ServedRowSize), CacheCandidateLimit)
 		if len(rows) == 0 {
 			// This cluster's cached items were entirely filtered out (e.g.
 			// access restrictions) — try the next-strongest cluster instead of
@@ -385,8 +410,8 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 		return nil, nil
 	}
 	rows, err := read.filter(ctx, []ForYouRow{{
-		Type:  "genre_sampler",
-		Label: "Top " + genre,
+		Type:  genreSamplerRowType,
+		Label: genreRowLabel(genre),
 		Items: items,
 	}})
 	if err != nil {
@@ -402,15 +427,18 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 // getForYouPageRows merges the profile's cached personal rows with the global
 // rows by its cold-start level. A profile with no positive title, or no taste
 // profile, is level 0 and gets only the global rows, even when personal rows
-// from an earlier taste profile are still cached.
-func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
-	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx, false)
+// from an earlier taste profile are still cached. The personal rows are
+// rotated for a window of served items (see rotateTail), and a cluster row
+// whose title a heavier one already has is told apart or hidden (see
+// distinguishClusterRows). The rows are not trimmed.
+func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, served int, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx, false, served)
 }
 
 // forYouPageRows is getForYouPageRows for this read. With liveDefaults the
 // global rows are the cached Popular row and the live default rows (see
 // defaultRows) rather than the cached Recently Added row.
-func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]ForYouRow, error) {
+func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool, served int) ([]ForYouRow, error) {
 	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
@@ -423,7 +451,7 @@ func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]For
 		return nil, err
 	}
 
-	clusterRows, missingClusters, err := r.getClusterRows(ctx, userID, profileID)
+	clusters, clusterRows, missingClusters, err := r.getClusterRows(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -438,9 +466,10 @@ func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]For
 	missingPersonalized := positiveSignalCount(meta) > 0 && (len(mainItems) == 0 || missingClusters)
 	if len(mainItems) > 0 {
 		personalRows = append(personalRows, ForYouRow{
-			Type:  clusterRowType,
-			Label: "For You",
-			Items: mainItems,
+			Type:        clusterRowType,
+			Label:       ForYouLabel,
+			Items:       mainItems,
+			personalKey: RecTypeForYouMain,
 		})
 	}
 	personalRows = append(personalRows, clusterRows...)
@@ -450,6 +479,8 @@ func (rr *rowRead) forYouPageRows(ctx context.Context, liveDefaults bool) ([]For
 	if err != nil {
 		return nil, err
 	}
+	// A hidden cluster row was built, so it does not count as missing.
+	rows = distinguishClusterRows(rr.rotatePersonalRows(rows, served), clusters, served)
 
 	switch {
 	case missingPersonalized:
@@ -484,19 +515,13 @@ func (rr *rowRead) globalRows(ctx context.Context, liveDefaults bool) ([]ForYouR
 	return buildColdStartRows(popular, recentlyAdded, nil), nil
 }
 
-// The live default rows: titles the viewer can see and has not watched or
+// The live default rows are titles the viewer can see and has not watched or
 // favorited, queried at read time rather than cached, so they show on a
 // fresh server, with recommendations disabled, and for a restricted profile
 // the global cache holds little for. Discover and the section pages serve
 // them; home and library sections do not, as a library has its own shelves.
-const (
-	highlyRatedLabel   = "Highly Rated in Your Library"
-	recentlyAddedLabel = "Recently Added"
-)
-
-// defaultRowKinds are the live default rows in display order: a quality
-// ranking first, since a freshly imported library's additions are in scan
-// order.
+// defaultRowKinds lists them in display order: a quality ranking first, since
+// a freshly imported library's additions are in scan order.
 var defaultRowKinds = []string{RecTypeTopRated, RecTypeRecentlyAdded}
 
 // defaultRows reads the live default rows of up to limit items each,
@@ -540,13 +565,15 @@ func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForY
 	return ForYouRow{Type: kind, Label: label, Items: items}, nil
 }
 
-func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID string) ([]ForYouRow, bool, error) {
+// getClusterRows reads the profile's clusters and their cached rows, and
+// reports whether a cluster has no cached row.
+func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID string) ([]TasteCluster, []ForYouRow, bool, error) {
 	clusters, err := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	if len(clusters) == 0 {
-		return []ForYouRow{}, false, nil
+		return nil, []ForYouRow{}, false, nil
 	}
 
 	rows := make([]ForYouRow, 0, len(clusters))
@@ -554,7 +581,7 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 	for _, cluster := range clusters {
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouClusterPrefix+itoa(cluster.ClusterIdx), "")
 		if err != nil {
-			return nil, false, err
+			return nil, nil, false, err
 		}
 		if len(items) == 0 {
 			// A row cached empty (the main row took its titles) was built;
@@ -564,7 +591,7 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 		}
 		rows = append(rows, clusterRow(cluster, items))
 	}
-	return rows, missing, nil
+	return clusters, rows, missing, nil
 }
 
 // clusterRow titles a cached cluster row from its items, which carry the title
@@ -573,7 +600,7 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 	title := clusterTitle(cluster.Label)
 	if len(items) > 0 {
-		if label, ok := strings.CutPrefix(items[0].Reason, clusterTitlePrefix); ok && label != "" {
+		if _, ok := clusterTitleLabel(items[0].Reason); ok {
 			title = items[0].Reason
 		}
 	}
@@ -583,18 +610,118 @@ func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 		ClusterIndex: cluster.ClusterIdx,
 		Items:        items,
 		Subject:      clusterSubject(title),
+		personalKey:  RecTypeForYouClusterPrefix + itoa(cluster.ClusterIdx),
 	}
 }
 
 // clusterSubject is the genre label a cluster row titled title is about: the
-// title without its prefix. It is "" for a cluster whose label names no genre,
-// an unlabeled one or one whose history carried no genres.
+// title without its prefix. It is "" for a cluster whose label names no
+// genre.
 func clusterSubject(title string) string {
-	label, ok := strings.CutPrefix(title, clusterTitlePrefix)
-	if !ok || label == "" || label == unlabeledClusterLabel || label == buildClusterLabel(nil) {
-		return ""
-	}
+	label, _ := clusterTitleLabel(title)
 	return label
+}
+
+// clusterRepeatJaccard is the overlap of two same-titled cluster rows' served
+// items, as a Jaccard index, above which the lighter row is a repeat.
+const clusterRepeatJaccard = 0.5
+
+// distinguishClusterRows keeps two cluster rows from sharing a title. Rows
+// are visited heaviest cluster first; a row titled like a heavier one is
+// hidden when their first served items overlap by more than
+// clusterRepeatJaccard, and otherwise renamed with the first of its
+// cluster's dominant genres its title does not name yet. A row whose cluster
+// has no such genre, or whose cached title its cluster no longer has (the
+// clusters were rebuilt after the row was cached), keeps its title. Other
+// rows, and the order of every row kept, are unchanged.
+func distinguishClusterRows(rows []ForYouRow, clusters []TasteCluster, served int) []ForYouRow {
+	byIndex := make(map[int]TasteCluster, len(clusters))
+	for _, c := range clusters {
+		byIndex[c.ClusterIdx] = c
+	}
+	var order []int
+	for i, row := range rows {
+		if strings.HasPrefix(row.personalKey, RecTypeForYouClusterPrefix) {
+			order = append(order, i)
+		}
+	}
+	if len(order) < 2 {
+		return rows
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(byIndex[rows[b].ClusterIndex].TotalWeight, byIndex[rows[a].ClusterIndex].TotalWeight)
+	})
+
+	hidden := make(map[int]bool)
+	var kept []int
+	for _, i := range order {
+		same := slices.IndexFunc(kept, func(k int) bool { return rows[k].Label == rows[i].Label })
+		if same >= 0 {
+			if servedJaccard(rows[i].Items, rows[kept[same]].Items, served) > clusterRepeatJaccard {
+				hidden[i] = true
+				continue
+			}
+			renameClusterRow(&rows[i], byIndex[rows[i].ClusterIndex], rows, kept)
+		}
+		kept = append(kept, i)
+	}
+	if len(hidden) == 0 {
+		return rows
+	}
+	out := make([]ForYouRow, 0, len(rows)-len(hidden))
+	for i, row := range rows {
+		if !hidden[i] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// renameClusterRow adds to row's title the first of cluster's dominant
+// genres the title does not name yet that leaves it unlike every title in
+// kept, when there is one. The items' reasons take the new title too.
+func renameClusterRow(row *ForYouRow, cluster TasteCluster, rows []ForYouRow, kept []int) {
+	label, ok := clusterTitleLabel(row.Label)
+	if !ok || label == "" || clusterTitle(cluster.Label) != row.Label {
+		return
+	}
+	named := strings.Split(label, clusterLabelSeparator)
+	for _, genre := range cluster.DominantGenres {
+		if slices.Contains(named, genre) {
+			continue
+		}
+		title := clusterTitle(label + clusterLabelSeparator + genre)
+		if slices.ContainsFunc(kept, func(k int) bool { return rows[k].Label == title }) {
+			continue
+		}
+		row.Label, row.Subject = title, clusterSubject(title)
+		items := slices.Clone(row.Items)
+		for i := range items {
+			items[i].Reason = title
+		}
+		row.Items = items
+		return
+	}
+}
+
+// servedJaccard is the Jaccard index of the first served items of a and b.
+func servedJaccard(a, b []ScoredItem, served int) float64 {
+	a, b = a[:min(len(a), served)], b[:min(len(b), served)]
+	in := make(map[string]struct{}, len(a))
+	for _, item := range a {
+		in[item.MediaItemID] = struct{}{}
+	}
+	shared := 0
+	for _, item := range b {
+		if _, ok := in[item.MediaItemID]; ok {
+			shared++
+		}
+	}
+	union := len(a) + len(b) - shared
+	if union == 0 {
+		return 0
+	}
+	return float64(shared) / float64(union)
 }
 
 // filterRows drops from rows the items the profile cannot access, those in its
@@ -683,7 +810,7 @@ func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, e
 			if _, skip := excluded[item.MediaItemID]; skip {
 				continue
 			}
-			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= 2 {
+			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= DislikedRatingMax {
 				continue
 			}
 			filteredItems = append(filteredItems, item)
@@ -707,7 +834,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	read := r.newRowRead(userID, profileID, filter)
 
 	// 1. For-you rows (personalized + cold-start blended, already filtered).
-	forYouRows, err := read.forYouPageRows(ctx, true)
+	forYouRows, err := read.forYouPageRows(ctx, true, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -728,8 +855,8 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	}
 	if len(similarItems) > 0 {
 		extraRows = append(extraRows, ForYouRow{
-			Type:  "similar_users_liked",
-			Label: "Users Like You Also Enjoyed",
+			Type:  RecTypeSimilarUsersLiked,
+			Label: similarUsersLabel,
 			Items: similarItems,
 		})
 	}
@@ -764,7 +891,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		for _, genre := range selected {
 			items := genreSamplers[genre]
 			extraRows = append(extraRows, ForYouRow{
-				Type:  "genre_sampler",
+				Type:  genreSamplerRowType,
 				Label: genreRowLabel(genre),
 				Items: items,
 			})
@@ -787,7 +914,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	var genreRows []ForYouRow
 	var similarRow *ForYouRow
 	for i := range extraRows {
-		if extraRows[i].Type == "similar_users_liked" {
+		if extraRows[i].Type == RecTypeSimilarUsersLiked {
 			similarRow = &extraRows[i]
 		} else {
 			genreRows = append(genreRows, extraRows[i])
@@ -871,7 +998,7 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: clusterRowType, Label: "For You", Items: items}, nil
+		return &ForYouRow{Type: clusterRowType, Label: ForYouLabel, Items: items}, nil
 
 	case SectionKindCluster:
 		idx, err := strconv.Atoi(key)
@@ -905,8 +1032,8 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 			return nil, err
 		}
 		return &ForYouRow{
-			Type:  "similar_users_liked",
-			Label: "Users Like You Also Enjoyed",
+			Type:  RecTypeSimilarUsersLiked,
+			Label: similarUsersLabel,
 			Items: items,
 		}, nil
 
@@ -915,7 +1042,7 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: RecTypePopular, Label: "Popular on This Server", Items: items}, nil
+		return &ForYouRow{Type: RecTypePopular, Label: popularLabel, Items: items}, nil
 
 	case SectionKindGenre:
 		if key == "" {
@@ -931,18 +1058,12 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 	return nil, nil
 }
 
-// clusterRowType is the type the API reports for the main row and every
-// taste-cluster row.
-const clusterRowType = "cluster"
-
-// genreSamplerRowType is the type of a genre row.
-const genreSamplerRowType = "genre_sampler"
-
-// genreRowLabel titles a genre row. Its titles are the genre's best rated,
-// not its most watched.
-func genreRowLabel(genre string) string {
-	return "Top " + genre
-}
+// Row types the API reports. clusterRowType is the type of the main row and
+// of every taste-cluster row; genreSamplerRowType of a genre row.
+const (
+	clusterRowType      = "cluster"
+	genreSamplerRowType = "genre_sampler"
+)
 
 // selectDailyGenres picks up to n genres from the available list using a
 // deterministic daily seed so the selection is stable within a day for a given profile.

@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -58,5 +59,75 @@ func TestKmeansSeedIgnoresWeights(t *testing.T) {
 	bc := []clusterItem{{itemID: "a"}, {itemID: "bc"}}
 	if kmeansSeed(ab, 2) == kmeansSeed(bc, 2) {
 		t.Fatal("different ID lists produced the same seed")
+	}
+}
+
+// A cluster's label names the genres that set it apart from the profile,
+// most distinctive first, with its most common genre always among them, at
+// most two, joined with ", ".
+func TestClusterLabelNamesWhatSetsAClusterApart(t *testing.T) {
+	titles := func(n int, weight float64, genres ...string) []clusterItem {
+		out := make([]clusterItem, n)
+		for i := range out {
+			out[i] = clusterItem{itemID: fmt.Sprint(i), weight: weight, genres: genres}
+		}
+		return out
+	}
+	join := func(groups ...[]clusterItem) []clusterItem { return slices.Concat(groups...) }
+	profileOf := func(items []clusterItem) (map[string]int, int) {
+		counts := map[string]int{}
+		for _, item := range items {
+			for _, g := range distinctGenres(item.genres) {
+				counts[g]++
+			}
+		}
+		return counts, len(items)
+	}
+
+	// A thriller profile split into a horror side and a drama side: Thriller
+	// is on every title, so it sets neither cluster apart but names both.
+	horror := join(titles(8, 1, "Thriller", "Horror"), titles(2, 1, "Thriller"))
+	drama := join(titles(6, 1, "Thriller", "Drama"), titles(4, 1, "Thriller", "Crime"))
+	profile, n := profileOf(join(horror, drama))
+	for _, tc := range []struct {
+		name    string
+		members []clusterItem
+		want    string
+	}{
+		{"distinctive genre with the common one", horror, "Horror, Thriller"},
+		// Drama and Crime are both twice as common there as in the profile;
+		// Drama, on more of the cluster, takes the one place beside Thriller.
+		{"most distinctive first", drama, "Drama, Thriller"},
+		{"the profile's only cluster", join(horror, drama), "Thriller"},
+		{"no genres", titles(3, 1), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clusterLabel(tc.members, profile, n); got != tc.want {
+				t.Fatalf("label = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// A TMDB genre containing "&" stays one genre in the label.
+	scifi := titles(5, 1, "Sci-Fi & Fantasy", "Drama")
+	profile, n = profileOf(join(scifi, titles(15, 1, "Drama")))
+	if got := clusterLabel(scifi, profile, n); got != "Sci-Fi & Fantasy, Drama" {
+		t.Fatalf("label = %q, want \"Sci-Fi & Fantasy, Drama\"", got)
+	}
+
+	// A genre on under 40% of the cluster is not named, however rare it is
+	// elsewhere.
+	western := join(titles(2, 1, "Horror", "Western"), titles(4, 1, "Horror"))
+	profile, n = profileOf(join(western, titles(14, 1, "Drama")))
+	if got := clusterLabel(western, profile, n); got != "Horror" {
+		t.Fatalf("label = %q, want Horror", got)
+	}
+
+	// A tie for the most common genre goes to the heavier titles, which pull
+	// the row toward them, not to the first name.
+	tied := join(titles(3, 0.1, "Comedy"), titles(3, 0.9, "Crime"))
+	profile, n = profileOf(tied)
+	if got := clusterLabel(tied, profile, n); got != "Crime" {
+		t.Fatalf("label = %q, want Crime", got)
 	}
 }

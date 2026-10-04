@@ -14,21 +14,6 @@ const aggregateMediaTypeFloorDivisor = 5
 
 var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook", "ebook"}
 
-// clusterTitlePrefix starts every cluster row title and the Reason of every
-// item in a cluster row.
-const clusterTitlePrefix = "Because you enjoy "
-
-// unlabeledClusterLabel stands in for a cluster with no label.
-const unlabeledClusterLabel = "For You"
-
-// clusterTitle is the title of the cluster row with the given label.
-func clusterTitle(label string) string {
-	if label == "" {
-		label = unlabeledClusterLabel
-	}
-	return clusterTitlePrefix + label
-}
-
 // rowStore is the part of *Repo that builds a profile's personal rows.
 type rowStore interface {
 	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
@@ -103,20 +88,9 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
-		candidates = b.withQualityPrior(ctx, candidates, qualityMinSmallPool)
-
-		// Apply MMR re-ranking.
-		candidateIDs := make([]string, len(candidates))
-		for i, item := range candidates {
-			candidateIDs[i] = item.MediaItemID
-		}
-
-		embMap, _ := b.store.GetBatchEmbeddings(ctx, candidateIDs)
+		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, qualityMinSmallPool))
+		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
 		reranked := applyMMR(candidates, embMap, b.lambda, clusterLimit)
-
-		// Apply recency boost.
-		addedDates, _ := b.store.GetItemAddedDates(ctx, candidateIDs)
-		reranked = applyRecencyBoost(reranked, addedDates, b.now)
 
 		// Every item carries the row title, so a reader can title the cached
 		// row from the build that produced it (see clusterRow).
@@ -134,6 +108,21 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 	}
 
 	return rows, failed, nil
+}
+
+// withRecencyBoost applies applyRecencyBoost to a candidate pool with its
+// candidates' added dates. A pool whose dates cannot be read keeps its
+// scores.
+func (b rowBuilder) withRecencyBoost(ctx context.Context, pool []ScoredItem) []ScoredItem {
+	if len(pool) == 0 {
+		return pool
+	}
+	added, err := b.store.GetItemAddedDates(ctx, scoredItemIDs(pool))
+	if err != nil {
+		slog.WarnContext(ctx, "candidate added dates failed; candidates keep their scores", "component", "recommendations", "error", err)
+		return pool
+	}
+	return applyRecencyBoost(pool, added, b.now)
 }
 
 // minClusterRowItems is the fewest items a cluster row keeps once the main
@@ -196,7 +185,7 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 		if err != nil {
 			return nil, fmt.Errorf("find similar for aggregated: %w", err)
 		}
-		pool = b.withQualityPrior(ctx, pool, 0)
+		pool = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, pool, 0))
 		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
 		row = applyMMR(pool, embMap, b.lambda, limit)
 	}
@@ -212,7 +201,7 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 
 	return &ForYouRow{
 		Type:  clusterRowType,
-		Label: "For You",
+		Label: ForYouLabel,
 		Items: row,
 	}, nil
 }

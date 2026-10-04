@@ -689,3 +689,54 @@ func TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres(t *testing.T
 		t.Fatalf("meta = %+v, %v; want rated_3 counted and both titles positive", meta, err)
 	}
 }
+
+// The taste card's genres are the clusters' genres, taken in turns from the
+// heaviest cluster down, so a second interest shows even when the heaviest
+// cluster has genres to fill the card.
+func TestClusterTopGenresTakeTurnsAcrossClusters(t *testing.T) {
+	horror := TasteCluster{ClusterIdx: 0, DominantGenres: []string{"Horror", "Thriller", "Mystery"}, TotalWeight: 12}
+	romance := TasteCluster{ClusterIdx: 1, DominantGenres: []string{"Romance", "Comedy", "Drama"}, TotalWeight: 13}
+	horrorComedy := TasteCluster{ClusterIdx: 2, DominantGenres: []string{"Horror", "Comedy"}, TotalWeight: 5}
+	for _, tc := range []struct {
+		name     string
+		clusters []TasteCluster
+		want     []string
+	}{
+		{"two interests", []TasteCluster{horror, romance}, []string{"Romance", "Horror", "Comedy", "Thriller", "Drama"}},
+		{"a repeated genre counts once", []TasteCluster{horror, romance, horrorComedy}, []string{"Romance", "Horror", "Comedy", "Thriller", "Drama"}},
+		{"one cluster", []TasteCluster{horrorComedy}, []string{"Horror", "Comedy"}},
+		{"no clusters", nil, []string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clusterTopGenres(tc.clusters, summaryTopGenres); !slices.Equal(got, tc.want) {
+				t.Fatalf("genres = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The taste-profile summary takes its genres from the profile's clusters,
+// so a profile that never rated or favorited a title still has them.
+func TestTasteProfileSummaryGenresComeFromTheClustersPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	repo := NewRepo(pool)
+	userID, profile := newTasteTestAccount(t, pool, "ttaste-card-")
+	taste := axisVector(1830, nil)
+	if err := repo.UpsertTasteProfile(ctx, userID, profile, taste, map[string]int{"watch_high": 25, signalCountPositiveTitles: 25}, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertTasteClusters(ctx, userID, profile, []TasteCluster{
+		{ClusterIdx: 0, Embedding: taste, DominantGenres: []string{"Horror", "Thriller"}, Label: "Horror", MemberCount: 12, TotalWeight: 9},
+		{ClusterIdx: 1, Embedding: taste, DominantGenres: []string{"Romance", "Comedy"}, Label: "Romance", MemberCount: 13, TotalWeight: 10},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := newTasteTestEngine(pool).GetTasteProfileSummary(ctx, userID, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Romance", "Horror", "Comedy", "Thriller"}; !slices.Equal(summary.TopGenres, want) {
+		t.Fatalf("top genres = %v, want %v", summary.TopGenres, want)
+	}
+}

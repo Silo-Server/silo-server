@@ -937,12 +937,12 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
-	recentCompleted, err := w.engine.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
+	anchors, err := anchorItemIDs(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, becauseYouWatchedAnchors)
 	if err != nil {
 		fail("recent_completed", err)
 		return res
 	}
-	for _, sourceItemID := range recentCompleted {
+	for _, sourceItemID := range anchors {
 		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
 		if err != nil {
 			fail("because_you_watched", err, "source_item_id", sourceItemID)

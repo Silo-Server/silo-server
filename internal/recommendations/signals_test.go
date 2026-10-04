@@ -52,8 +52,8 @@ func (r *fakeSignalRepo) GetEbookReaderProgressForUser(context.Context, int, str
 	return r.ebookProgress, nil
 }
 
-func (r *fakeSignalRepo) GetRecentCompletedItemIDs(context.Context, int, string, int) ([]string, error) {
-	return r.fallbackRecentCompleted, nil
+func (r *fakeSignalRepo) GetRecentCompletedItemIDs(_ context.Context, _ int, _ string, limit int) ([]string, error) {
+	return r.fallbackRecentCompleted[:min(limit, len(r.fallbackRecentCompleted))], nil
 }
 
 func (r *fakeSignalRepo) GetRewatchCounts(context.Context, int, string) ([]RewatchCount, error) {

@@ -36,7 +36,6 @@ function TasteProfileCard({
     | {
         top_genres: string[];
         favorite_directors: string[];
-        signal_counts: Record<string, number>;
       }
     | undefined;
   isLoading: boolean;
@@ -54,18 +53,9 @@ function TasteProfileCard({
     return null;
   }
 
-  const totalSignals = Object.values(profile.signal_counts).reduce((a, b) => a + b, 0);
-
   return (
     <div className="glass-subtle space-y-4 rounded-xl p-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">Your Taste Profile</h2>
-        {totalSignals > 0 && (
-          <span className="text-muted-foreground text-xs">
-            {totalSignals} signal{totalSignals !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
+      <h2 className="text-base font-semibold">Your Taste Profile</h2>
 
       {profile.top_genres.length > 0 && (
         <div className="space-y-1.5">
