@@ -110,9 +110,11 @@ budget: a slower refresh finishes in the background and is not queued again.
 At most 4 run at once per server; past that the refresh is queued.
 
 A refresh records the database time it started, stores the taste profile with
-that time as `updated_at`, and clears only stale marks set before it. A mark
-set during the refresh survives, and a failed refresh marks the profile stale
-again, so the stale sweep retries both.
+that time as `updated_at`, and clears only stale marks set before it. A
+refresh request made on the same server while the refresh runs makes it run
+once more as soon as it ends, so a burst of changes is applied within seconds.
+A mark set during the refresh from another server survives, and a failed
+refresh marks the profile stale again, so the stale sweep retries both.
 
 - Episodes roll up to their series. A series decays once by its most recent
   signal, as a movie decays by its last watch. A series with no signal for

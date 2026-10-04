@@ -51,7 +51,7 @@ func eventually(t *testing.T, what string, cond func() bool) {
 
 // RefreshProfileNow waits for the refresh it starts, and holds the profile's
 // pending key while it runs, so neither the queue nor a second call starts a
-// duplicate on this server.
+// duplicate on this server; their requests make it run once more instead.
 func TestRefreshNowWaitsAndHoldsThePendingKey(t *testing.T) {
 	w, _ := newRefreshTestWorker()
 	ctx := t.Context()
@@ -71,6 +71,9 @@ func TestRefreshNowWaitsAndHoldsThePendingKey(t *testing.T) {
 	}
 
 	close(refresh.release)
+	receive(t, refresh.finished, "the refresh to finish")
+	// The requests made while it ran make it run once more.
+	receive(t, refresh.finished, "the refresh to run again")
 	if !receive(t, result, "the call to return") {
 		t.Fatal("call reported the finished refresh as unfinished")
 	}
@@ -157,5 +160,38 @@ func TestRefreshProfileNowMarksStaleFirst(t *testing.T) {
 	}
 	if marker.calls != 2 {
 		t.Fatalf("stale marks for invalid profiles = %d, want none", marker.calls-2)
+	}
+}
+
+// A refresh request made while a profile's refresh runs makes it run once
+// more as soon as it ends, instead of leaving the change to the stale sweep;
+// a request made while the refresh is only queued is read by it, so it adds
+// no run.
+func TestProfileRefreshRunsAgainForAChangeMadeWhileItRuns(t *testing.T) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = &Engine{}
+	refresh := newBlockingRefresh()
+	key := profileRefreshKey(1, "p")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("could not claim the profile refresh")
+	}
+	w.RequestProfileRefresh(t.Context(), 1, "p") // while queued
+
+	done := make(chan struct{})
+	go func() {
+		w.runProfileRefresh(context.Background(), 1, "p", refresh.run)
+		close(done)
+	}()
+	receive(t, refresh.started, "the first run")
+	w.RequestProfileRefresh(t.Context(), 1, "p") // while running
+	refresh.release <- struct{}{}
+	receive(t, refresh.finished, "the first run to finish")
+
+	receive(t, refresh.started, "a second run")
+	refresh.release <- struct{}{}
+	receive(t, refresh.finished, "the second run to finish")
+	receive(t, done, "the refresh to end after two runs")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("the pending key was not released")
 	}
 }

@@ -84,10 +84,13 @@ type Worker struct {
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
-	refreshesNow          atomic.Int32 // RefreshProfileNow refreshes running
-	readRefreshes         refreshThrottle
-	cancelFunc            context.CancelFunc
-	embeddingsJobTimeout  time.Duration
+	// profileRefreshAgain holds pending profiles whose signals changed while
+	// their refresh ran; see runProfileRefresh.
+	profileRefreshAgain  map[string]struct{}
+	refreshesNow         atomic.Int32 // RefreshProfileNow refreshes running
+	readRefreshes        refreshThrottle
+	cancelFunc           context.CancelFunc
+	embeddingsJobTimeout time.Duration
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -297,6 +300,9 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
 	if !w.claimProfileRefresh(key) {
+		// A refresh queued here reads this change when it starts; one already
+		// running may have read the signals before it, so it runs again.
+		w.askProfileRefreshAgain(key)
 		return
 	}
 
@@ -335,7 +341,8 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 // running to completion, and it is not queued again. It holds the profile's
 // pending key, so the queue and the stale sweep on this server do not start a
 // duplicate; when a refresh is already queued or running here it returns at
-// once and leaves the work to that one. When maxRefreshesNow are already
+// once and leaves the work to that one, which runs again if it already
+// started. When maxRefreshesNow are already
 // running it queues the refresh instead.
 func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
@@ -356,6 +363,7 @@ func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, w
 	key := profileRefreshKey(userID, profileID)
 	if !w.claimProfileRefresh(key) {
 		w.refreshesNow.Add(-1)
+		w.askProfileRefreshAgain(key)
 		return false
 	}
 
@@ -364,10 +372,7 @@ func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, w
 	go func() {
 		defer close(done)
 		defer w.refreshesNow.Add(-1)
-		defer w.clearProfileRefreshPending(key)
-		if err := refresh(refreshCtx, userID, profileID); err != nil {
-			slog.ErrorContext(refreshCtx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
-		}
+		w.runProfileRefresh(refreshCtx, userID, profileID, refresh)
 	}()
 
 	timer := time.NewTimer(wait)
@@ -1004,7 +1009,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 		if !w.claimProfileRefresh(key) {
 			continue // already queued or refreshing on this server
 		}
-		w.runProfileRefresh(ctx, p.UserID, p.ProfileID)
+		w.runProfileRefresh(ctx, p.UserID, p.ProfileID, w.refreshProfile)
 	}
 }
 
@@ -1014,17 +1019,29 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			w.runProfileRefresh(ctx, req.userID, req.profileID)
+			w.runProfileRefresh(ctx, req.userID, req.profileID, w.refreshProfile)
 		}
 	}
 }
 
-// runProfileRefresh refreshes a profile whose pending key the caller claimed,
-// then releases the key.
-func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string) {
-	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
-	if err := w.refreshProfile(ctx, userID, profileID); err != nil {
-		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+// runProfileRefresh runs refresh for a profile whose pending key the caller
+// claimed, then releases the key. A refresh request made while it runs makes
+// it run once more as soon as it ends, so a burst of changes is fully applied
+// in seconds rather than at the next stale sweep. A failed run stops: it marks
+// the profile stale, and the sweep retries it.
+func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string, refresh func(context.Context, int, string) error) {
+	key := profileRefreshKey(userID, profileID)
+	for {
+		// A request made before this run started is read by it.
+		w.dropProfileRefreshAgain(key)
+		if err := refresh(ctx, userID, profileID); err != nil {
+			slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+			w.clearProfileRefreshPending(key)
+			return
+		}
+		if !w.finishProfileRefresh(key) {
+			return
+		}
 	}
 }
 
@@ -1082,6 +1099,38 @@ func (w *Worker) clearProfileRefreshPending(key string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.profileRefreshPending, key)
+	delete(w.profileRefreshAgain, key)
+}
+
+// askProfileRefreshAgain asks a pending profile refresh to run once more.
+func (w *Worker) askProfileRefreshAgain(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.profileRefreshAgain == nil {
+		w.profileRefreshAgain = make(map[string]struct{})
+	}
+	w.profileRefreshAgain[key] = struct{}{}
+}
+
+// dropProfileRefreshAgain forgets a request to run again.
+func (w *Worker) dropProfileRefreshAgain(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.profileRefreshAgain, key)
+}
+
+// finishProfileRefresh ends a refresh run. It reports true, keeping the
+// pending key, when a request to run again arrived; otherwise it releases the
+// key. Both happen under one lock, so a request is never caught between them.
+func (w *Worker) finishProfileRefresh(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, again := w.profileRefreshAgain[key]; again {
+		delete(w.profileRefreshAgain, key)
+		return true
+	}
+	delete(w.profileRefreshPending, key)
+	return false
 }
 
 func profileRefreshKey(userID int, profileID string) string {
