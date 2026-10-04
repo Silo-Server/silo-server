@@ -44,7 +44,7 @@ type userCollectionSource interface {
 	Get(ctx context.Context, userID int, profileID, key string, visibleLibraryIDs []int) (*usercollections.ServerVisibleCollection, error)
 	AnyVisible(ctx context.Context, userID int, profileID string, visibleLibraryIDs []int) (bool, error)
 	ImageCandidates(ctx context.Context, key string) ([]usercollections.ServerVisibleCollection, error)
-	CountVisible(ctx context.Context, userID int, collections []usercollections.ServerVisibleCollection, access catalog.AccessFilter) map[string]int
+	CountVisible(ctx context.Context, owners catalog.PersonalCollectionAccess, userID int, viewerProfileID string, collections []usercollections.ServerVisibleCollection, viewer catalog.AccessFilter) (counts map[string]int, unavailable map[string]bool)
 }
 
 // compatCollection is one collection on the BoxSet surface. Personal
@@ -81,12 +81,15 @@ func newPersonalCompatCollection(c usercollections.ServerVisibleCollection) *com
 }
 
 // withVisibleItemCounts sets each personal collection's ItemCount to the
-// items it shows this viewer, the count the native collection routes report.
-// The stored item_count is written only by import syncs, so it stays only as
-// the fallback when a count cannot be read.
-func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Session, collections []*compatCollection) {
+// items it shows this viewer, the count the native collection routes report:
+// for another profile's collection, only the titles its owner can access too.
+// It returns the collections whose owner could not be resolved, which callers
+// leave out rather than count under the viewer's access alone. The stored
+// item_count is written only by import syncs, so it stays only as the
+// fallback when a count cannot be read.
+func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Session, collections []*compatCollection) map[string]bool {
 	if h.userCollections == nil {
-		return
+		return nil
 	}
 	var sources []usercollections.ServerVisibleCollection
 	for _, c := range collections {
@@ -95,14 +98,15 @@ func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Sessi
 		}
 	}
 	if len(sources) == 0 {
-		return
+		return nil
 	}
-	counts := h.userCollections.CountVisible(ctx, session.StreamAppUserID, sources, h.personalMemberAccess(ctx, session))
+	counts, unavailable := h.userCollections.CountVisible(ctx, h.collectionOwners, session.StreamAppUserID, session.ProfileID, sources, h.personalMemberAccess(ctx, session))
 	for _, c := range collections {
 		if n, ok := counts[c.ID]; ok && c.personal {
 			c.ItemCount = n
 		}
 	}
+	return unavailable
 }
 
 // libraryCollectionFromUser adapts a personal collection to the library
@@ -368,9 +372,19 @@ func (h *ItemsHandler) loadVisibleLibraryCollection(ctx context.Context, session
 // and item counts the session's viewer sees. Library collections without an
 // uploaded poster show that viewer's collage; personal collections show their
 // own poster and never enter the collage lookup, which knows only library
-// collections.
-func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*compatCollection) []baseItemDTO {
-	h.withVisibleItemCounts(ctx, session, collections)
+// collections. A shared personal collection whose owner cannot be resolved is
+// left out; dropped counts them.
+func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*compatCollection) (items []baseItemDTO, dropped int) {
+	if unavailable := h.withVisibleItemCounts(ctx, session, collections); len(unavailable) > 0 {
+		kept := make([]*compatCollection, 0, len(collections))
+		for _, c := range collections {
+			if c.personal && unavailable[c.ID] {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		dropped, collections = len(collections)-len(kept), kept
+	}
 	library := make([]*models.LibraryCollection, 0, len(collections))
 	for _, c := range collections {
 		if !c.personal {
@@ -385,7 +399,7 @@ func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Sess
 		}
 		posters = viewerCollectionPosters(ctx, h.collectionPosters, access, library)
 	}
-	items := make([]baseItemDTO, 0, len(collections))
+	items = make([]baseItemDTO, 0, len(collections))
 	for _, c := range collections {
 		poster := posters[c.ID]
 		if c.personal {
@@ -393,7 +407,7 @@ func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Sess
 		}
 		items = append(items, h.boxSetFromCollection(ctx, c, poster))
 	}
-	return items
+	return items, dropped
 }
 
 // boxSetFromCollection maps a collection to a Jellyfin BoxSet DTO showing
@@ -516,7 +530,8 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 			collections = append(collections, collection)
 		}
 	}
-	return h.boxSetsFromCollections(ctx, session, collections), nil
+	items, _ := h.boxSetsFromCollections(ctx, session, collections)
+	return items, nil
 }
 
 // handleBoxSetsList serves GET /Items with IncludeItemTypes=BoxSet by listing
@@ -619,10 +634,10 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	if query.countOnly {
 		page = nil
 	}
-	items := h.boxSetsFromCollections(r.Context(), session, page)
+	items, dropped := h.boxSetsFromCollections(r.Context(), session, page)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
-		TotalRecordCount: len(matched),
+		TotalRecordCount: len(matched) - dropped,
 		StartIndex:       query.startIndex,
 	})
 }
@@ -669,7 +684,14 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.boxSetsFromCollections(r.Context(), session, []*compatCollection{collection})[0])
+	items, _ := h.boxSetsFromCollections(r.Context(), session, []*compatCollection{collection})
+	if len(items) == 0 {
+		// Fail closed: never describe a shared collection under the viewer's
+		// access alone.
+		writeCompatUpstreamError(w, catalog.ErrPersonalCollectionOwnerAccess)
+		return
+	}
+	writeJSON(w, http.StatusOK, items[0])
 }
 
 // HandleItemCollections serves GET /Items/{id}/Collections (Jellyfin 12.0+,
@@ -753,7 +775,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 	for _, c := range page {
 		compat = append(compat, &compatCollection{LibraryCollection: c})
 	}
-	dtos := h.boxSetsFromCollections(r.Context(), session, compat)
+	dtos, _ := h.boxSetsFromCollections(r.Context(), session, compat)
 	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            dtos,

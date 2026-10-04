@@ -27,6 +27,9 @@ type CollectionHandler struct {
 	ArtworkStore       blobstore.Store
 	ArtworkResolver    artworkurl.Resolver
 	HTTPClient         *http.Client
+	// CollectionOwners resolves the owner's access for another profile's
+	// shared collection; without it those collections cannot be read.
+	CollectionOwners catalog.PersonalCollectionAccess
 }
 
 // NewCollectionHandler creates a new CollectionHandler.

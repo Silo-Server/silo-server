@@ -54,6 +54,11 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 	if err != nil {
 		return out, err
 	}
+	// Another profile's collection shows only what its owner can access too.
+	access, err = catalog.PersonalCollectionFilter(ctx, h.CollectionOwners, access, userID, profileID, c.CreatorProfileID)
+	if err != nil {
+		return out, collectionPageError(err)
+	}
 	if catalog.IsLiveQueryType(c.CollectionType) {
 		if opts.Revision != 0 && opts.Revision != witness {
 			return out, collectionPageError(userstore.ErrCollectionChanged)

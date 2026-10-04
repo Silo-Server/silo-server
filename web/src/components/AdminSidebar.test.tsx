@@ -127,11 +127,12 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("fixed top-0 bottom-0 left-0");
   });
 
-  it("includes a Sections link in the content navigation", () => {
+  it("includes a Home rows link in the content navigation", () => {
     const markup = renderSidebar();
 
-    expect(markup).toContain('href="/admin/sections"');
-    expect(markup).toContain(">Sections<");
+    expect(markup).toContain('href="/admin/home-rows"');
+    expect(markup).toContain(">Home rows<");
+    expect(markup).not.toContain('href="/admin/sections"');
   });
 
   it("includes Diagnostics next to the operational overview links", () => {

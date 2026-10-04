@@ -75,7 +75,7 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 	groups := <-groupsCh
 
 	resp := PersonalCollectionListView{
-		Collections: h.collectionViews(ctx, store, userID, collections),
+		Collections: h.collectionViews(ctx, store, userID, profileID, collections),
 		Groups:      make([]CollectionGroupView, 0, len(groups)),
 	}
 	for _, g := range groups {
@@ -164,7 +164,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			collection = refreshed
 		}
 	}
-	return h.collectionView(ctx, store, cmd.UserID, *collection), nil
+	return h.collectionView(ctx, store, cmd.UserID, cmd.ProfileID, *collection)
 }
 
 // ReorderPersonalCollections replaces the order of one group's collections.
@@ -303,18 +303,27 @@ func executorPool(executor *catalog.QueryExecutor) *pgxpool.Pool {
 }
 
 // collectionViews renders stored collections with their posters presigned and
-// item_count set to the members the acting profile can see.
-func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, collections []userstore.Collection) []PersonalCollectionView {
+// item_count set to the members profileID can see: for another profile's
+// collection, only those its owner can access too. A collection whose owner
+// cannot be resolved is left out.
+func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
 	var counts map[string]int
+	var unavailable map[string]bool
 	if userstore.HasCatalogSQLState(store) {
-		sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+		sources := make([]catalog.OwnedPersonalCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
-			sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
+			sources = append(sources, catalog.OwnedPersonalCollectionDefinition{
+				PersonalCollectionDefinition: catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition},
+				CreatorProfileID:             c.CreatorProfileID,
+			})
 		}
-		counts = catalog.CountVisiblePersonalCollections(ctx, executorPool(h.Executor), userID, sources, AccessFilterFromContext(ctx, ""))
+		counts, unavailable = catalog.CountOwnerScopedPersonalCollections(ctx, executorPool(h.Executor), h.CollectionOwners, userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
+		if unavailable[c.ID] {
+			continue
+		}
 		if n, ok := counts[c.ID]; ok {
 			c.ItemCount = n
 		}
@@ -325,9 +334,14 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 	return views
 }
 
-// collectionView renders one stored collection as collectionViews does.
-func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, c userstore.Collection) PersonalCollectionView {
-	return h.collectionViews(ctx, store, userID, []userstore.Collection{c})[0]
+// collectionView renders one stored collection as collectionViews does, and
+// fails when its owner's access cannot be resolved.
+func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.UserStore, userID int, profileID string, c userstore.Collection) (PersonalCollectionView, error) {
+	views := h.collectionViews(ctx, store, userID, profileID, []userstore.Collection{c})
+	if len(views) == 0 {
+		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+	}
+	return views[0], nil
 }
 
 func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {

@@ -32,6 +32,10 @@ import {
 } from "./CollectionGuidedRulesEditor";
 import CollectionGuidedRulesEditor from "./CollectionGuidedRulesEditor";
 
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
 function emptyState(): GuidedFormState {
   return {
     mediaScope: "all",

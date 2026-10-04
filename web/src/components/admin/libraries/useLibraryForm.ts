@@ -141,6 +141,8 @@ export function useLibraryForm({
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
+  const savedTrickplay = library?.trickplay_enabled ?? false;
+  const [trickplayEnabled, setTrickplayEnabled] = useState(savedTrickplay);
   // A new library follows its type's default until the switch is set:
   // detection is on for series and mixed libraries and off for movies.
   const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
@@ -279,6 +281,12 @@ export function useLibraryForm({
       trailer_kinds: settingSupport.trailers ? trailerKinds : [],
       realtime_monitoring: realtimeMonitoring,
     };
+    // Sent only when it changes: servers without seek previews reject the
+    // member, and a web build can reach one during a rolling upgrade.
+    const trickplay = settingSupport.trickplay && trickplayEnabled;
+    if (trickplay !== savedTrickplay) {
+      body.trickplay_enabled = trickplay;
+    }
 
     if (library) {
       updateMutation.mutate(
@@ -340,6 +348,8 @@ export function useLibraryForm({
     setAutoTranslateMetadata,
     chapterThumbnailsEnabled,
     setChapterThumbnailsEnabled,
+    trickplayEnabled,
+    setTrickplayEnabled,
     introDetectionEnabled,
     setIntroDetectionEnabled,
     trailerKinds,

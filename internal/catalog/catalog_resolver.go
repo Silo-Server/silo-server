@@ -170,6 +170,9 @@ type CatalogResolver struct {
 	// to observe how many times the executor is asked for a result page.
 	previewExecutorForScope func(scope string, snapshot *time.Time) previewExecutor
 	watchlistPromoter       WatchlistPromoter
+	// collectionOwners limits another profile's shared personal collection
+	// to its owner's access. Without it such a collection cannot be read.
+	collectionOwners PersonalCollectionAccess
 }
 
 // WatchlistPromoter moves a profile's watchlist entries for titles the
@@ -207,6 +210,23 @@ func (r *CatalogResolver) WithUserStoreProvider(provider userstore.UserStoreProv
 	}
 	r.storeProvider = provider
 	return r
+}
+
+// WithPersonalCollectionAccess installs the owner access user_collection
+// reads apply to another profile's shared collection.
+func (r *CatalogResolver) WithPersonalCollectionAccess(owners PersonalCollectionAccess) *CatalogResolver {
+	if r == nil {
+		return nil
+	}
+	r.collectionOwners = owners
+	return r
+}
+
+// userCollectionAccess is the filter a user_collection read of collection
+// uses: the viewer's, limited to the owner's access when another profile
+// owns it.
+func (r *CatalogResolver) userCollectionAccess(ctx context.Context, viewer AccessFilter, collection *userstore.Collection) (AccessFilter, error) {
+	return PersonalCollectionFilter(ctx, r.collectionOwners, viewer, viewer.UserID, viewer.ProfileID, collection.CreatorProfileID)
 }
 
 func (r *CatalogResolver) WithEpisodeRepository(repo *EpisodeRepository) *CatalogResolver {
@@ -689,12 +709,12 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 	collection *models.LibraryCollection,
 	collectionRepo *LibraryCollectionRepository,
 ) (*CatalogResult, error) {
-	if IsLiveQueryType(collection.CollectionType) {
-		return r.resolveLiveLibraryCollectionSource(ctx, req, access, collection)
+	membership, err := catalogLibraryCollectionMembership(collection, access)
+	if err != nil {
+		return nil, err
 	}
-
-	if catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
-		return r.resolveLiveLibraryCollectionSource(ctx, req, access, collection)
+	if membership.Live {
+		return r.resolveLiveLibraryCollectionSource(ctx, req, access, membership)
 	}
 
 	collectionItems, err := collectionRepo.ListItems(ctx, collection.ID)
@@ -708,17 +728,11 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 	return r.resolveExactOrderedItems(ctx, contentIDs, req, access)
 }
 
-func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter, collection *models.LibraryCollection) (*CatalogResult, error) {
-	def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parsing library collection query_definition: %v", ErrInvalidCatalogRequest, err)
+func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter, membership LibraryCollectionMembership) (*CatalogResult, error) {
+	if membership.OutOfScope {
+		return &CatalogResult{Items: []*models.MediaItem{}, TotalExact: true}, nil
 	}
-	if len(collection.LibraryIDs) > 0 {
-		def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
-	} else if collection.LibraryID > 0 {
-		def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
-	}
-	def = ApplySmartCollectionItemLimit(def)
+	def := membership.Query
 	if catalogRequestHasOverlay(req) {
 		items, err := r.resolveCollectionQueryBaseItems(ctx, def, stripCatalogUserScope(access))
 		if err != nil {
@@ -748,6 +762,10 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 	collection, err := store.GetCollection(ctx, req.CollectionID)
 	if err != nil || !ProfileCanAccessCollection(collection, access.ProfileID) {
 		return nil, ErrCatalogSourceNotFound
+	}
+	access, err = r.userCollectionAccess(ctx, access, collection)
+	if err != nil {
+		return nil, err
 	}
 
 	return r.resolveCollectionWithEffectiveSort(
@@ -2010,19 +2028,14 @@ func bytesTrimSpace(raw []byte) []byte {
 	return []byte(strings.TrimSpace(string(raw)))
 }
 
-func catalogCollectionUsesLiveQuery(raw json.RawMessage) bool {
-	trimmed := strings.TrimSpace(string(raw))
-	return trimmed != "" && trimmed != "{}" && trimmed != "null"
-}
-
-func intersectCatalogDefinitionLibraries(existing, required []int) []int {
-	if len(required) == 0 {
-		return existing
+// catalogLibraryCollectionMembership resolves how the catalog lists a library
+// collection's members for the viewer, within the libraries access allows.
+func catalogLibraryCollectionMembership(collection *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
+	membership, err := ResolveLibraryCollectionMembership(collection, access.AllowedLibraryIDs)
+	if err != nil {
+		return LibraryCollectionMembership{}, fmt.Errorf("%w: library collection query_definition: %w", ErrInvalidCatalogRequest, err)
 	}
-	if len(existing) == 0 {
-		return append([]int(nil), required...)
-	}
-	return intersectInts(existing, required)
+	return membership, nil
 }
 
 func stripCatalogUserScope(access AccessFilter) AccessFilter {
@@ -2161,17 +2174,15 @@ func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req
 		if err != nil || collection.Visibility != LibraryCollectionVisibilityVisible {
 			return nil, ErrCatalogSourceNotFound
 		}
-		if IsLiveQueryType(collection.CollectionType) || catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
-			def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
-			if err != nil {
-				return nil, fmt.Errorf("%w: parsing library collection query_definition: %v", ErrInvalidCatalogRequest, err)
-			}
-			if len(collection.LibraryIDs) > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
-			} else if collection.LibraryID > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
-			}
-			return r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), stripCatalogUserScope(access))
+		membership, err := catalogLibraryCollectionMembership(collection, access)
+		if err != nil {
+			return nil, err
+		}
+		if membership.OutOfScope {
+			return []*models.MediaItem{}, nil
+		}
+		if membership.Live {
+			return r.resolveCollectionQueryBaseItems(ctx, membership.Query, stripCatalogUserScope(access))
 		}
 
 		collectionItems, err := collectionRepo.ListItems(ctx, collection.ID)
@@ -2191,6 +2202,10 @@ func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req
 		collection, err := store.GetCollection(ctx, req.CollectionID)
 		if err != nil || !ProfileCanAccessCollection(collection, access.ProfileID) {
 			return nil, ErrCatalogSourceNotFound
+		}
+		access, err = r.userCollectionAccess(ctx, access, collection)
+		if err != nil {
+			return nil, err
 		}
 		var items []*models.MediaItem
 		if IsLiveQueryType(collection.CollectionType) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -169,7 +170,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated collection")
 	}
 
-	return h.collectionView(ctx, store, userID, *collection), nil
+	return h.collectionView(ctx, store, userID, profileID, *collection)
 }
 
 func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req PersonalCollectionPreviewRequest, filter catalog.AccessFilter) (PersonalCollectionPreviewView, error) {
@@ -227,7 +228,9 @@ func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID
 }
 
 // ListPersonalCollectionItems preserves the unpaged bridge response. V2 callers
-// must use the bounded continuation service instead.
+// must use the bounded continuation service instead. It lists the stored
+// members the reader can access: for another profile's collection, only those
+// its owner can access too, as on every other read.
 func (h *CollectionHandler) ListPersonalCollectionItems(ctx context.Context, userID int, profileID, collectionID string) (PersonalCollectionItemsView, error) {
 	var none PersonalCollectionItemsView
 
@@ -235,7 +238,7 @@ func (h *CollectionHandler) ListPersonalCollectionItems(ctx context.Context, use
 		return none, apiError(http.StatusBadRequest, "bad_request", "Collection ID is required")
 	}
 
-	store, _, err := h.personalCollectionStore(ctx, userID, profileID, collectionID, false)
+	store, collection, err := h.personalCollectionStore(ctx, userID, profileID, collectionID, false)
 	if err != nil {
 		return none, err
 	}
@@ -243,6 +246,10 @@ func (h *CollectionHandler) ListPersonalCollectionItems(ctx context.Context, use
 	items, err := store.ListCollectionItems(ctx, collectionID)
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
+	}
+	items, err = h.accessibleCollectionItems(ctx, userID, profileID, collection.CreatorProfileID, items)
+	if err != nil {
+		return none, err
 	}
 
 	resp := PersonalCollectionItemsView{
@@ -258,6 +265,38 @@ func (h *CollectionHandler) ListPersonalCollectionItems(ctx context.Context, use
 	}
 
 	return resp, nil
+}
+
+// accessibleCollectionItems keeps the stored members of ownerProfileID's
+// collection that profileID may see (catalog.PersonalCollectionFilter), in
+// their stored order. Hidden members stay stored.
+func (h *CollectionHandler) accessibleCollectionItems(ctx context.Context, userID int, profileID, ownerProfileID string, items []userstore.CollectionItem) ([]userstore.CollectionItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	filter, err := catalog.PersonalCollectionFilter(ctx, h.CollectionOwners, AccessFilterFromContext(ctx, ""), userID, profileID, ownerProfileID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
+	}
+	reader, err := h.itemReader()
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.MediaItemID)
+	}
+	visible, err := reader.GetByIDsWithAccess(ctx, ids, filter)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collection items")
+	}
+	allowed := make(map[string]bool, len(visible))
+	for _, item := range visible {
+		if item != nil {
+			allowed[item.ContentID] = true
+		}
+	}
+	return slices.DeleteFunc(items, func(item userstore.CollectionItem) bool { return !allowed[item.MediaItemID] }), nil
 }
 
 func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userID int, profileID, collectionID, itemID string, position int) error {
@@ -394,7 +433,7 @@ func (h *CollectionHandler) GetPersonalCollection(ctx context.Context, userID in
 	if err != nil {
 		return PersonalCollectionView{}, err
 	}
-	return h.collectionView(ctx, store, userID, *c), nil
+	return h.collectionView(ctx, store, userID, profileID, *c)
 }
 
 // UploadPersonalCollectionPoster stores uploaded image bytes for a collection's

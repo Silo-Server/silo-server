@@ -39,11 +39,8 @@ import CollectionGuidedRulesEditor from "./CollectionGuidedRulesEditor";
 import CollectionOrderingEditor from "./CollectionOrderingEditor";
 import CollectionPreviewPane from "./CollectionPreviewPane";
 import CollectionRulesEditor from "./CollectionRulesEditor";
-import {
-  SMART_COLLECTION_DEFAULT_LIMIT,
-  SMART_COLLECTION_MAX_LIMIT,
-  withSmartCollectionLimit,
-} from "./smartCollectionLimits";
+import { GUIDED_UNAVAILABLE_MESSAGE, isGuidedRepresentable } from "./guidedRepresentable";
+import { normalizeSmartCollectionLimit } from "./smartCollectionLimits";
 
 export interface CollectionBuilderValue {
   title: string;
@@ -96,7 +93,7 @@ export function createCollectionBuilderValue(
     visibility: overrides?.visibility ?? "visible",
     featured: overrides?.featured ?? false,
     query_definition:
-      collectionType === "smart" ? withSmartCollectionLimit(queryDefinition) : queryDefinition,
+      collectionType === "smart" ? normalizeSmartCollectionLimit(queryDefinition) : queryDefinition,
     sort_config: overrides?.sort_config ?? {},
     access: overrides?.access ?? { is_shared: false, allowed_profile_ids: [] },
     include_in_server_collections: overrides?.include_in_server_collections ?? false,
@@ -134,6 +131,12 @@ export default function CollectionBuilder({
   children,
 }: CollectionBuilderProps) {
   const [advanced, setAdvanced] = useState(defaultAdvanced);
+  const guidedAvailable = isGuidedRepresentable(value.query_definition);
+  // Rules Guided can't show move the editor to Advanced. It stays there once
+  // they're fixed, so the view doesn't jump back to Guided mid-edit.
+  if (!guidedAvailable && !advanced) {
+    setAdvanced(true);
+  }
 
   const previewRequest = buildCollectionBuilderPreviewRequest(value);
   const adminPreview = useAdminCollectionPreview(mode === "admin" ? previewRequest : null);
@@ -166,6 +169,7 @@ export default function CollectionBuilder({
             variant="outline"
             size="sm"
             onClick={() => setAdvanced((current) => !current)}
+            disabled={!guidedAvailable}
           >
             {advanced ? "Switch to Guided" : "Switch to Advanced"}
           </Button>
@@ -195,7 +199,7 @@ export default function CollectionBuilder({
                   collection_type: next as "manual" | "smart",
                   query_definition:
                     next === "smart"
-                      ? withSmartCollectionLimit(value.query_definition)
+                      ? normalizeSmartCollectionLimit(value.query_definition)
                       : value.query_definition,
                 })
               }
@@ -268,6 +272,9 @@ export default function CollectionBuilder({
         <>
           <section className="space-y-4">
             <h2 className="text-lg font-semibold">{advanced ? "Rules" : "Filters"}</h2>
+            {guidedAvailable ? null : (
+              <p className="text-muted-foreground text-sm">{GUIDED_UNAVAILABLE_MESSAGE}</p>
+            )}
             {advanced ? (
               <CollectionRulesEditor
                 value={value.query_definition}
@@ -391,11 +398,15 @@ export function SmartCollectionLimitField({
 }) {
   function commit(input: HTMLInputElement) {
     const parsed = Number.parseInt(input.value, 10);
-    const limit =
-      Number.isFinite(parsed) && parsed > 0
-        ? Math.min(parsed, SMART_COLLECTION_MAX_LIMIT)
-        : SMART_COLLECTION_DEFAULT_LIMIT;
-    input.value = String(limit);
+    // Blank means no limit. Anything else that isn't a positive number, such
+    // as 0, keeps the current limit.
+    let limit = query.limit;
+    if (input.value.trim() === "") {
+      limit = undefined;
+    } else if (parsed > 0) {
+      limit = parsed;
+    }
+    input.value = limit === undefined ? "" : String(limit);
     if (query.limit !== limit) {
       onQueryChange({ ...query, limit });
     }
@@ -405,18 +416,15 @@ export function SmartCollectionLimitField({
     <div className="grid gap-3 rounded-lg border px-4 py-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center">
       <div>
         <Label htmlFor="smart-collection-limit">Max items</Label>
-        <p className="text-muted-foreground mt-1 text-xs">
-          Caps saved collection results. Use 1-{SMART_COLLECTION_MAX_LIMIT}.
-        </p>
+        <p className="text-muted-foreground mt-1 text-xs">Leave blank for no limit.</p>
       </div>
       <Input
-        key={query.limit ?? SMART_COLLECTION_DEFAULT_LIMIT}
+        key={query.limit ?? ""}
         id="smart-collection-limit"
         type="number"
         min={1}
-        max={SMART_COLLECTION_MAX_LIMIT}
         step={1}
-        defaultValue={query.limit ?? SMART_COLLECTION_DEFAULT_LIMIT}
+        defaultValue={query.limit ?? ""}
         disabled={readOnly}
         onBlur={(event) => commit(event.currentTarget)}
         onKeyDown={(event) => {

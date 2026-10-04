@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiClientError } from "../api/client";
 import type { Profile, User } from "../api/types";
-import { V2ProblemError } from "../api/v2/request";
+import { V2ProblemError, V2TimeoutError } from "../api/v2/request";
 import {
   endImpersonationWithRecovery,
   getBootstrapProfile,
@@ -220,6 +220,82 @@ describe("initializeAuthSession", () => {
 
     expect(recoverPreservedAdminSession).not.toHaveBeenCalled();
     expect(clearTokens).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("initializeAuthSession when the account read fails", () => {
+  const user: User = {
+    id: 1,
+    username: "admin",
+    email: "admin@example.com",
+    role: "admin",
+    permissions: [],
+    download_allowed: true,
+    impersonation: null,
+  };
+
+  async function run(
+    fetchCurrentUser: () => Promise<User>,
+    hasStoredImpersonationAdminSession = false,
+  ) {
+    const calls = {
+      clearTokens: vi.fn(),
+      clearActiveAuthState: vi.fn(),
+      markRestoreUnavailable: vi.fn(),
+      recoverPreservedAdminSession: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      applyCurrentUser: vi.fn(),
+    };
+    await initializeAuthSession({
+      refreshToken: "refresh-token",
+      hasStoredImpersonationAdminSession,
+      bootstrapAccessToken: () => Promise.resolve(true),
+      fetchCurrentUser,
+      applyCurrentUser: calls.applyCurrentUser,
+      restoreProfile: vi.fn(),
+      recoverPreservedAdminSession: calls.recoverPreservedAdminSession,
+      clearTokens: calls.clearTokens,
+      clearActiveAuthState: calls.clearActiveAuthState,
+      markRestoreUnavailable: calls.markRestoreUnavailable,
+    });
+    return calls;
+  }
+
+  it.each([
+    ["a timeout", new V2TimeoutError("getCurrentUser", 30_000)],
+    ["a network error", new TypeError("Failed to fetch")],
+    [
+      "a 503",
+      new V2ProblemError("getCurrentUser", {
+        type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+        title: "Unavailable",
+        status: 503,
+        detail: "Try later.",
+        instance: "/api/v2/account/me",
+      }),
+    ],
+  ])("keeps the restored session when the read fails with %s", async (_kind, error) => {
+    const calls = await run(vi.fn<() => Promise<User>>().mockRejectedValue(error), true);
+    expect(calls.markRestoreUnavailable).toHaveBeenCalledTimes(1);
+    expect(calls.clearTokens).not.toHaveBeenCalled();
+    expect(calls.clearActiveAuthState).not.toHaveBeenCalled();
+    expect(calls.recoverPreservedAdminSession).not.toHaveBeenCalled();
+    expect(calls.applyCurrentUser).not.toHaveBeenCalled();
+  });
+
+  it("signs out when the server refuses the restored session", async () => {
+    const calls = await run(
+      vi
+        .fn<() => Promise<User>>()
+        .mockRejectedValue(new ApiClientError(401, "unauthorized", "expired")),
+    );
+    expect(calls.clearTokens).toHaveBeenCalledTimes(1);
+    expect(calls.markRestoreUnavailable).not.toHaveBeenCalled();
+  });
+
+  it("applies the account when the read succeeds", async () => {
+    const calls = await run(vi.fn<() => Promise<User>>().mockResolvedValue(user));
+    expect(calls.applyCurrentUser).toHaveBeenCalledWith(user);
+    expect(calls.markRestoreUnavailable).not.toHaveBeenCalled();
   });
 });
 

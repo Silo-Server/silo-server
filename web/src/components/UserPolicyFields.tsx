@@ -1,6 +1,12 @@
 import { useId, useState, type ReactNode } from "react";
 
-import type { AccessGroup, AdminUser, AdminUserEffectivePolicy, Library } from "@/api/types";
+import type {
+  AccessGroup,
+  AdminPolicyDefaults,
+  AdminUser,
+  AdminUserEffectivePolicy,
+  Library,
+} from "@/api/types";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import { Input } from "@/components/ui/input";
@@ -91,31 +97,19 @@ export function policyCreateFields(state: UserPolicyState): PolicyCreatePayload 
 // policy minus permissions, which have no inherit control here.
 export type PolicyInheritHints = Partial<Omit<AdminUserEffectivePolicy, "permissions">>;
 
-// Mirrors access.NoGroupPolicy(): the layer under an account that belongs to
-// no access group. Keep in sync with internal/access/groups.go.
-const NO_GROUP_POLICY = {
-  library_ids: null,
-  max_playback_quality: "",
-  max_streams: 0,
-  max_transcodes: 0,
-  max_remote_stream_bitrate_kbps: 0,
-  max_local_stream_bitrate_kbps: 0,
-  transcode_allowed: true,
-  audio_transcode_allowed: true,
-  download_allowed: true,
-  download_transcode_allowed: false,
-  requests_allowed: true,
-} satisfies Required<PolicyInheritHints>;
-
-// Inherit hints for the group currently selected in the form — not the group
-// the account was last saved with, so the hints follow the picker instead of
-// going stale. Returns undefined when the selected group is not in the loaded
-// list (still loading, or since deleted) so callers can fall back.
+// Inherit hints for the role and group currently selected in the form — not
+// the ones the account was last saved with, so the hints follow the pickers
+// instead of going stale. An admin or an ungrouped account takes the server's
+// built-in defaults. Returns undefined while those or the selected group are
+// not loaded (or the group was since deleted) so callers can fall back.
 export function policyInheritHints(
+  role: string,
   accessGroupID: number | null,
   accessGroups: AccessGroup[],
+  defaults: AdminPolicyDefaults | undefined,
 ): PolicyInheritHints | undefined {
-  if (accessGroupID === null) return NO_GROUP_POLICY;
+  if (role === "admin") return defaults?.admin;
+  if (accessGroupID === null) return defaults?.ungrouped;
   const group = accessGroups.find((candidate) => candidate.id === accessGroupID);
   if (group === undefined) return undefined;
   return {
@@ -156,8 +150,9 @@ export function effectiveAccessGroupID(role: string, accessGroupID: number | nul
 }
 
 // Where a field that is not overridden gets its value. Only a grouped account
-// inherits; an admin or an account outside every group gets the server's fixed
-// no-group defaults, so its fields name that source instead of a group.
+// inherits; an admin gets the server's admin defaults (full access) and an
+// account outside every group the no-group defaults, so their fields name that
+// source instead of a group.
 export type PolicyDefaultSource = "group" | "admin" | "server";
 
 export function policyDefaultSource(

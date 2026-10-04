@@ -50,6 +50,10 @@ func (f fakeAccounts) CurrentUser(_ context.Context, claims *auth.Claims) (handl
 	return view, nil
 }
 
+func (f fakeAccounts) OAuthUserView(_ context.Context, user *models.User) handlers.UserView {
+	return f.users[user.ID]
+}
+
 // passwordChangeAllowed mirrors the v1 rule: a plain login session on the
 // primary profile, or an admin with no profile declared. parityDeps' primary
 // checker knows p-primary only for the admin account (user 2).
@@ -479,7 +483,10 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	}
 	deps.Devices = fixtureDevices()
 	deps.Sessions = &fakeSessionService{signupOn: true}
-	deps.OAuth = fakeOAuth{codes: map[string]auth.OAuthCompletion{"c0de": {AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600, NextURL: "/me"}}}
+	deps.OAuth = fakeOAuth{codes: map[string]auth.OAuthCompletion{
+		"c0de":   {AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600, NextURL: "/me", UserID: 1, SessionID: "s1", Kind: auth.OAuthFlowWeb},
+		"n4tive": {AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600, NextURL: "/", UserID: 1, SessionID: "s2", Kind: auth.OAuthFlowNative},
+	}}
 	deps.Progress = progress
 	if profiles == nil {
 		profiles = &fakeProfiles{view: fixtureProfileView(), sessions: []handlers.PlaybackSessionView{fixtureSession(), fixtureProfilelessSession()}}
@@ -1020,6 +1027,8 @@ type fakeDeviceRequest struct {
 	// approvedBy is set once approved; a poll then collects tokens.
 	approvedBy int
 	profileID  string
+	// opened marks a pending request an approver has looked up.
+	opened bool
 }
 
 func (f fakeDevices) DeviceLoginConfigured() bool { return f.configured }
@@ -1036,9 +1045,9 @@ func (f fakeDevices) StartDeviceLogin(_ context.Context, in auth.DeviceLoginStar
 		return nil, &handlers.APIError{Status: 400, Code: "bad_request", Message: "Invalid device login purpose", Field: "client_purpose"}
 	}
 	return &auth.DeviceLoginStartResult{
-		DeviceCode: "dev-1", UserCode: "ABCD-1234", MatchCode: "42",
-		VerificationURI: in.BaseURL + "/link", VerificationURIComplete: in.BaseURL + "/link?code=ABCD-1234",
-		ExpiresAt: fixedTime().Add(10 * time.Minute), ExpiresIn: 600, Interval: 5,
+		DeviceCode: "dev-1", UserCode: "4821-7730", MatchCode: "warm pony",
+		VerificationURI: in.BaseURL + "/activate", VerificationURIComplete: in.BaseURL + "/activate?code=48217730",
+		ExpiresAt: fixedTime().Add(15 * time.Minute), ExpiresIn: 900, Interval: 5,
 		DeviceName: in.DeviceName, DevicePlatform: in.DevicePlatform, ClientPurpose: purpose, Temporary: in.Temporary,
 	}, nil
 }
@@ -1061,8 +1070,8 @@ func (f fakeDevices) LookupDeviceLogin(_ context.Context, in auth.DeviceLoginLoo
 	if err != nil {
 		return nil, err
 	}
-	info := &auth.DeviceLoginInfo{Status: r.Status, UserCode: "ABCD-1234", MatchCode: "42", DeviceName: "Living room TV",
-		DevicePlatform: "tvos", IPAddressHint: "192.168.1.x", ExpiresAt: r.ExpiresAt, ClientPurpose: r.Purpose, Temporary: r.Temporary}
+	info := &auth.DeviceLoginInfo{Status: r.Status, UserCode: "4821-7730", MatchCode: "warm pony", DeviceName: "Living room TV",
+		DevicePlatform: "tvos", IPAddressHint: "192.168.1.x", ExpiresAt: r.ExpiresAt, RequestedAt: fixedTime(), ClientPurpose: r.Purpose, Temporary: r.Temporary}
 	if r.Status == "expired" {
 		info.UserCode, info.MatchCode = "", ""
 	}
@@ -1077,7 +1086,10 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode string) (*han
 	if r == nil {
 		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
 	}
-	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5}
+	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5, Opened: r.opened && r.Status == auth.DeviceLoginStatusPending}
+	if r.Status == auth.DeviceLoginStatusPending {
+		view.ExpiresAt = r.ExpiresAt
+	}
 	if r.Status == auth.DeviceLoginStatusApproved {
 		view.Tokens = &handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
 			User: handlers.UserView{ID: r.approvedBy, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{}, DownloadAllowed: true}}
@@ -1103,8 +1115,25 @@ func (f fakeDevices) decide(in auth.DeviceLoginLookupInput, want string) (handle
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "consumed", Message: "Device login request has already been used"}
 	case auth.DeviceLoginStatusDenied:
 		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "denied", Message: "Device login request has already been denied"}
+	case auth.DeviceLoginStatusCanceled:
+		return handlers.DeviceLoginDecision{}, &handlers.APIError{Status: 409, Code: "denied", Message: "Device login request was canceled on the device"}
 	}
 	return handlers.DeviceLoginDecision{Status: want}, nil
+}
+
+func (f fakeDevices) CancelDeviceLogin(_ context.Context, deviceCode string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	r := f.requests[deviceCode]
+	if r == nil {
+		return "", &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+	}
+	switch r.Status {
+	case auth.DeviceLoginStatusPending, auth.DeviceLoginStatusApproved:
+		return auth.DeviceLoginStatusCanceled, nil
+	}
+	return r.Status, nil
 }
 
 func (f fakeDevices) ApproveDeviceLogin(_ context.Context, in auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error) {
@@ -1143,8 +1172,12 @@ func fixtureDevices() fakeDevices {
 	approved := &fakeDeviceRequest{Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, approvedBy: 1}
 	handoff := &fakeDeviceRequest{Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeRemote, Temporary: true, ExpiresAt: exp, approvedBy: 1, profileID: "p-owner"}
 	remotePending := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeRemote, Temporary: true, ExpiresAt: exp}
+	opened := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, opened: true}
+	canceled := &fakeDeviceRequest{Status: auth.DeviceLoginStatusCanceled, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp}
 	return fakeDevices{configured: true, requests: map[string]*fakeDeviceRequest{
-		"dev-pending": pending, "br-pending": pending, "ABCD-1234": pending,
+		"dev-pending": pending, "br-pending": pending, "4821-7730": pending, "48217730": pending,
+		"dev-opened":   opened,
+		"dev-canceled": canceled, "br-canceled": canceled,
 		"dev-approved": approved,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,
@@ -1168,8 +1201,17 @@ type fakeSessionService struct {
 	setupDone bool
 	signupOn  bool
 	err       error
+	// localLoginOff leaves the local provider out of discovery, as the
+	// server does while auth.local_password_login is off.
+	localLoginOff bool
 	// lastLogin is the input the most recent Login received.
 	lastLogin handlers.LoginInput
+	// networkPeer makes discovery list the network provider (installation
+	// 5), as for a request that came through that provider's overlay.
+	// NetworkSignIn signs laura in at installation 5 and answers installation
+	// 7 as a request from off the overlay; lastNetwork is its last input.
+	networkPeer bool
+	lastNetwork handlers.NetworkSignInInput
 }
 
 func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
@@ -1186,6 +1228,10 @@ func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (h
 			User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 	case in.Username == "off":
 		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "user_disabled", Message: "User account is disabled"}
+	case in.Username == "newcomer":
+		// The directory admitted the person; the server has no account and
+		// does not create one. v1 answers not_permitted with this cause.
+		return handlers.TokenPairView{}, (&handlers.APIError{Status: 403, Code: "not_permitted", Message: "This account is not permitted to sign in to this server"}).WithCause(auth.ErrAccountRequired)
 	}
 	return handlers.TokenPairView{}, &handlers.APIError{Status: 401, Code: "invalid_credentials", Message: "Invalid username or password"}
 }
@@ -1209,11 +1255,37 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 	return nil
 }
 
-func (f *fakeSessionService) ListProviders() []auth.LoginProviderInfo {
-	return []auth.LoginProviderInfo{
-		{ID: "local", DisplayName: "Silo account", Mode: "credentials", Default: true},
-		{ID: "plugin-3", DisplayName: "Example SSO", Mode: "oauth", IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3},
+func (f *fakeSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
+	sso := auth.LoginProviderInfo{ID: "plugin-3", DisplayName: "Example SSO", Mode: auth.ProviderModeOAuth, IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3}
+	var discovery auth.ProviderDiscovery
+	if f.localLoginOff {
+		sso.Default = true
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}
+	} else {
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
+			{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
+		}, PasswordLogin: true}
 	}
+	if f.networkPeer {
+		discovery.Providers = append(discovery.Providers, auth.LoginProviderInfo{
+			ID: "plugin:5:tailscale", DisplayName: "Tailscale", Mode: auth.ProviderModeNetwork, InstallationID: 5,
+			NetworkIdentity: &auth.NetworkIdentityPreview{DisplayName: "Laura Example", Username: "laura@example.test"},
+		})
+	}
+	return discovery, nil
+}
+
+func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error) {
+	f.lastNetwork = in
+	switch in.InstallationID {
+	case 5:
+	case 7:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "network_identity_required", Message: "Open this server through the provider's network address to sign in this way"}
+	default:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {
@@ -1222,6 +1294,11 @@ func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.
 		return handlers.RefreshedTokensView{AccessToken: "acc2", RefreshToken: "ref2", ExpiresIn: 3600}, nil
 	case "revoked":
 		return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "session_revoked", Message: "Session has been revoked"}
+	case "provider-down":
+		// A due provider re-check could not reach the provider under the
+		// fail_closed outage policy (the v1 handler answers 401 with this
+		// cause).
+		return handlers.RefreshedTokensView{}, fmt.Errorf("refresh: %w", auth.ErrProviderUnavailable)
 	}
 	return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "invalid_token", Message: "Invalid or expired refresh token"}
 }
@@ -1321,31 +1398,73 @@ func (f *fakeSessionService) PluginLaunchToken(claims *auth.Claims, profileID st
 	return "plugin-" + claims.SessionID + "-" + strings.TrimSpace(profileID), nil
 }
 
-// fakeOAuth stands in for *auth.OAuthHandler: one redeemable code and a
-// fixed provider handshake.
+// fakeOAuth stands in for *auth.OAuthHandler: redeemable codes (a native
+// one bound to fixtureNativeVerifier), a fixed provider handshake on
+// installation 3, and link tickets for the password "right password".
 type fakeOAuth struct {
 	codes map[string]auth.OAuthCompletion
 }
+
+// fixtureNativeVerifier is the verifier the fixture's native code "n4tive"
+// is bound to (RFC 7636 appendix B).
+const fixtureNativeVerifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+
+// fixtureCompletionCookie is the completion cookie of the browser the
+// fixture web code was issued to.
+const fixtureCompletionCookie = "browser-binding"
+
+// completionCookie is the Cookie header of that browser.
+var completionCookie = map[string]string{"Cookie": auth.OAuthCompletionCookieName + "=" + fixtureCompletionCookie}
 
 func (fakeOAuth) CallbackURL(prefix string, installID int) string {
 	return "https://silo.example.test" + prefix + "/auth/oauth/" + strconv.Itoa(installID) + "/callback"
 }
 
-func (fakeOAuth) Init(_ context.Context, installID int, next, redirectURI string) (string, error) {
-	if installID != 3 {
-		return "", &auth.OAuthHandshakeError{Status: 502, Message: "auth plugin unavailable"}
+func (fakeOAuth) PublicURL(path string, query url.Values) string {
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
-	return "https://sso.example.test/authorize?redirect_uri=" + url.QueryEscape(redirectURI) + "&next=" + url.QueryEscape(next), nil
+	return "https://silo.example.test" + path
 }
 
-func (fakeOAuth) Callback(_ context.Context, in auth.OAuthCallbackInput) string {
-	if in.InstallID != 3 || in.State != "st" || in.Code != "pc" {
-		return "/login?error=oauth_failed&reason=state_invalid"
+func (fakeOAuth) NativeSignInAvailable() bool { return true }
+
+func (fakeOAuth) ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int) {
+	if req.InstallID != 3 {
+		http.Error(w, "auth plugin unavailable", http.StatusBadGateway)
+		return
 	}
-	return "https://silo.example.test/login/oauth-complete?code=c0de"
+	if req.LinkTicket != "" && !req.Native {
+		http.Error(w, "link_ticket is accepted by the native start only", http.StatusBadRequest)
+		return
+	}
+	if req.Native && (!auth.ValidCodeChallenge(req.CodeChallenge) || !auth.ValidAppState(req.AppState)) {
+		http.Error(w, "code_challenge must be an S256 challenge", http.StatusBadRequest)
+		return
+	}
+	if bounceURL != "" && r.URL.Query().Get(auth.OAuthBounceParameter) == "" && r.Host != "silo.example.test" {
+		http.Redirect(w, r, bounceURL, bounceStatus)
+		return
+	}
+	redirectURI := "https://silo.example.test" + req.Prefix + "/auth/oauth/3/callback"
+	http.SetCookie(w, &http.Cookie{Name: "silo_oauth_fixture", Value: "binder", Path: req.Prefix + "/auth/oauth/3/callback", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 600})
+	http.Redirect(w, r, "https://sso.example.test/authorize?redirect_uri="+url.QueryEscape(redirectURI)+"&next="+url.QueryEscape(req.Next), http.StatusFound)
 }
 
-func (f fakeOAuth) Complete(_ context.Context, code string) (auth.OAuthCompletion, error) {
+func (fakeOAuth) ServeCallback(w http.ResponseWriter, r *http.Request, _ string, installID int) {
+	q := r.URL.Query()
+	if q.Get("state") == "" || (q.Get("code") == "" && q.Get("error") == "") {
+		http.Error(w, "missing code or state", http.StatusBadRequest)
+		return
+	}
+	location := "https://silo.example.test/login/oauth-complete?code=c0de"
+	if installID != 3 || q.Get("state") != "st" || q.Get("code") != "pc" {
+		location = "/login?error=oauth_failed&reason=state_invalid"
+	}
+	http.Redirect(w, r, location, http.StatusFound)
+}
+
+func (f fakeOAuth) Complete(_ context.Context, code, verifier, browser string) (auth.OAuthCompletion, error) {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return auth.OAuthCompletion{}, auth.ErrOAuthCodeRequired
@@ -1354,5 +1473,74 @@ func (f fakeOAuth) Complete(_ context.Context, code string) (auth.OAuthCompletio
 	if !ok {
 		return auth.OAuthCompletion{}, auth.ErrOAuthCompletionInvalid
 	}
+	if c.Kind != auth.OAuthFlowNative && browser != fixtureCompletionCookie {
+		return auth.OAuthCompletion{}, auth.ErrOAuthCompletionBrowser
+	}
+	if (c.Kind == auth.OAuthFlowNative) != (verifier != "") || (verifier != "" && verifier != fixtureNativeVerifier) {
+		return auth.OAuthCompletion{}, auth.ErrOAuthInvalidGrant
+	}
+	c.User = &models.User{ID: c.UserID}
 	return c, nil
+}
+
+func (fakeOAuth) LinkingAvailable() bool { return true }
+
+func (fakeOAuth) IssueLinkTicket(_ context.Context, userID, installationID int, password string) (auth.OAuthLinkTicket, error) {
+	switch {
+	case installationID != 3:
+		return auth.OAuthLinkTicket{}, auth.ErrUnknownAuthInstallation
+	case password == "no local password":
+		return auth.OAuthLinkTicket{}, auth.ErrPasswordLoginDisabled
+	case password != "right password":
+		return auth.OAuthLinkTicket{}, auth.ErrLinkTicketPassword
+	}
+	return auth.OAuthLinkTicket{Ticket: fixtureLinkTicket, UserID: userID, InstallationID: installationID,
+		ExpiresAt: time.Date(2026, 1, 2, 3, 9, 5, 678000000, time.UTC)}, nil
+}
+
+func (fakeOAuth) ProviderLogoutAvailable() bool { return true }
+
+func (f fakeOAuth) PostLogoutRedirectURL() string { return f.PublicURL("/login", nil) }
+
+func (fakeOAuth) ProviderLogoutURL(_ context.Context, userID int) (string, error) {
+	if userID == 1 {
+		return "https://sso.example.test/logout?post_logout_redirect_uri=https%3A%2F%2Fsilo.example.test%2Flogin", nil
+	}
+	return "", nil
+}
+
+// fixtureLinkTicket is the ticket IssueLinkTicket hands out; fixtureLinkCode
+// the code a native linking flow parked for account 1.
+const (
+	fixtureLinkTicket = "9d2c5f0e8b7a41c3a6e5d4c3b2a19087f6e5d4c3b2a1908f7e6d5c4b3a291807"
+	fixtureLinkCode   = "l1nk"
+)
+
+// OnPublicOrigin treats the fake public origin and httptest's default host
+// as public.
+func (fakeOAuth) OnPublicOrigin(r *http.Request) bool {
+	return r.Host == "silo.example.test" || r.Host == "example.com"
+}
+
+func (fakeOAuth) StartLink(_ context.Context, userID int, prefix, ticket, next string) (auth.OAuthStartResult, error) {
+	if ticket != fixtureLinkTicket || userID != 1 {
+		return auth.OAuthStartResult{}, auth.ErrOAuthLinkTicketInvalid
+	}
+	callback := "https://silo.example.test" + prefix + "/auth/oauth/3/callback"
+	return auth.OAuthStartResult{
+		AuthorizeURL: "https://sso.example.test/authorize?prompt=login&redirect_uri=" + url.QueryEscape(callback) + "&next=" + url.QueryEscape(next),
+		Cookie:       &http.Cookie{Name: "silo_oauth_fixture", Value: "binder", Path: prefix + "/auth/oauth/3/callback", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode, MaxAge: 600},
+	}, nil
+}
+
+func (fakeOAuth) CompleteLink(_ context.Context, userID int, code, verifier string) error {
+	switch {
+	case strings.TrimSpace(code) == "":
+		return auth.ErrOAuthCodeRequired
+	case code != fixtureLinkCode || userID != 1:
+		return auth.ErrOAuthCompletionInvalid
+	case verifier != fixtureNativeVerifier:
+		return auth.ErrOAuthInvalidGrant
+	}
+	return nil
 }

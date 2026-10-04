@@ -33,4 +33,4 @@ jobs:
   ci:
     uses: Silo-Server/silo-server/.github/workflows/trusted-linux-ci.yml@main
     with:
-      self_hosted: ${{ github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref))) }}
+      self_hosted: false

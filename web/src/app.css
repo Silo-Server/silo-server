@@ -569,17 +569,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   * {
     border-color: var(--border);
   }
+  /* Root size is relative to the browser's default font size (16px unless the
+     user changed it), so rem-based text follows the browser text-size setting.
+     The in-app text scale multiplies on top of it. */
   html {
-    font-size: 16px;
+    font-size: 100%;
     font-weight: 400;
     --ui-text-scale-factor: 1;
+    /* Unitless root font size over 16px, for text whose size is not rem-based
+       (card overlay badges scale with the card in container units). Browsers
+       without CSS trigonometry fall back to the in-app scale factor. */
+    --ui-root-text-ratio: var(--ui-text-scale-factor);
+  }
+  @supports (width: calc(1px * tan(atan2(1rem, 16px)))) {
+    html {
+      --ui-root-text-ratio: tan(atan2(1rem, 16px));
+    }
   }
   html[data-text-scale="large"] {
-    font-size: 18px;
+    font-size: 112.5%;
     --ui-text-scale-factor: 1.12;
   }
   html[data-text-scale="x-large"] {
-    font-size: 20px;
+    font-size: 125%;
     --ui-text-scale-factor: 1.24;
   }
   html[data-text-weight="strong"] {

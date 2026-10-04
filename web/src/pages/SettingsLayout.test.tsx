@@ -221,6 +221,18 @@ describe("SettingsLayout", () => {
     expect(screen.getByText("3 matches")).toBeInTheDocument();
   });
 
+  it("finds Home Screen when searching for home rows", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "home rows");
+
+    expect(screen.getAllByRole("link", { name: /Home Screen/ })).toHaveLength(1);
+  });
+
   it("matches individual personal setting labels", async () => {
     render(
       <MemoryRouter initialEntries={["/settings/playback"]}>

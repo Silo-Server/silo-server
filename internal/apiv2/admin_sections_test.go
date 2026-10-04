@@ -23,6 +23,7 @@ type fakeAdminSections struct {
 	mismatch, readMismatch, deleted                                       bool
 	preview                                                               []*models.MediaItem
 	previewRequest                                                        handlers.AdminSectionPreviewRequest
+	recipeChecks                                                          []bool
 }
 
 func newFakeAdminSections() *fakeAdminSections {
@@ -54,6 +55,7 @@ func (f *fakeAdminSections) AdminSectionOrder(_ context.Context, scope string, l
 }
 func (f *fakeAdminSections) CreateAdminSection(_ context.Context, in handlers.AdminSectionCreate) (handlers.AdminSection, error) {
 	f.creates++
+	f.recipeChecks = append(f.recipeChecks, in.ValidateRecipe)
 	f.view.Scope = in.Scope
 	f.view.LibraryID = in.LibraryID
 	f.view.Title = in.Title
@@ -62,6 +64,7 @@ func (f *fakeAdminSections) CreateAdminSection(_ context.Context, in handlers.Ad
 }
 func (f *fakeAdminSections) UpdateAdminSection(_ context.Context, _ string, in handlers.AdminSectionUpdate) (handlers.AdminSection, error) {
 	f.updates++
+	f.recipeChecks = append(f.recipeChecks, in.ValidateRecipe)
 	f.revision++
 	f.scopeRevision++
 	if f.mismatch {
@@ -196,6 +199,24 @@ func TestAdminSectionsDatabaseConflictAndReadRace(t *testing.T) {
 	}
 	f.readMismatch = true
 	requireProblem(t, do(t, h, http.MethodGet, path, "", bearer(adminToken)), TypeConflict)
+}
+
+// v2 writes run the section type's own config check; the shared service skips
+// it for the frozen /api/v1 routes.
+func TestAdminSectionsWritesRunTheRecipeCheck(t *testing.T) {
+	f := newFakeAdminSections()
+	h := adminSectionsTestHandler(t, f)
+	created := do(t, h, http.MethodPost, Prefix+"/admin/sections", `{"scope":"home","section_type":"recently_added","title":"New","config":{}}`, bearer(adminToken))
+	if created.Code != 201 {
+		t.Fatalf("create %d %s", created.Code, created.Body)
+	}
+	updated := do(t, h, http.MethodPatch, Prefix+"/admin/sections/s1", `{"title":"Edited"}`, with(bearer(adminToken), "If-Match", "*"))
+	if updated.Code != 200 {
+		t.Fatalf("update %d %s", updated.Code, updated.Body)
+	}
+	if !slices.Equal(f.recipeChecks, []bool{true, true}) {
+		t.Fatalf("recipe checks requested = %v, want create and update", f.recipeChecks)
+	}
 }
 func TestAdminSectionsNullsScopeAndConfig(t *testing.T) {
 	f := newFakeAdminSections()

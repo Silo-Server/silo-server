@@ -49,9 +49,17 @@ const subtitleTimeline = vi.hoisted(() => ({
   liveCues: [] as Array<{ text: string }>,
   liveKey: null as string | null,
   streamGeneration: 0,
+  cueRevision: 0,
+  assCueRevision: 0,
 }));
 const toastError = vi.hoisted(() => vi.fn());
-const hlsJS = vi.hoisted(() => ({ supported: false, constructed: vi.fn() }));
+const hlsJS = vi.hoisted(() => ({
+  supported: false,
+  constructed: vi.fn(),
+  startLoad: vi.fn(),
+  stopLoad: vi.fn(),
+  latest: null as null | { emit: (event: string, data: unknown) => void },
+}));
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn(), message: vi.fn() } }));
 
@@ -74,12 +82,14 @@ vi.mock("../hooks/useSubtitleTracks", () => ({
     subtitleTimeline.liveCues = args[7] as Array<{ text: string }>;
     subtitleTimeline.liveKey = args[8] as string | null;
     subtitleTimeline.streamGeneration = args[9] as number;
+    subtitleTimeline.cueRevision = args[11] as number;
     return [];
   },
 }));
 vi.mock("../hooks/useASSSubtitles", () => ({
   useASSSubtitles: (...args: unknown[]) => {
     subtitleTimeline.assOffsetSeconds = args[4] as number;
+    subtitleTimeline.assCueRevision = args[9] as number;
     return { isActive: false };
   },
 }));
@@ -103,11 +113,21 @@ vi.mock("hls.js", () => ({
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     static isSupported = () => hlsJS.supported;
 
+    handlers = new Map<string, (event: string, data: unknown) => void>();
+    startLoad = hlsJS.startLoad;
+    stopLoad = hlsJS.stopLoad;
+
     constructor(config?: unknown) {
       hlsJS.constructed(config);
+      hlsJS.latest = this;
     }
 
-    on() {}
+    on(event: string, handler: (event: string, data: unknown) => void) {
+      this.handlers.set(event, handler);
+    }
+    emit(event: string, data: unknown) {
+      this.handlers.get(event)?.(event, data);
+    }
     loadSource() {}
     attachMedia() {}
     destroy() {}
@@ -3110,6 +3130,89 @@ describe("VideoPlayer server-invalidated transport swap", () => {
   });
 });
 
+describe("VideoPlayer stored subtitle timing", () => {
+  const storedTrack: PlayerSubtitleInfo = {
+    index: 2,
+    language: "en",
+    label: "English",
+    source: "downloaded",
+    codec: "srt",
+    url: "/api/v1/stream/session-1/subtitles/2.vtt?file_id=7&downloaded_subtitle_id=31",
+  };
+  const timingChanged = (fileId: number, subtitleId: number): PlaybackRealtimeEventEnvelope => ({
+    type: "event",
+    session_id: "session-1",
+    name: "subtitle_timing_changed",
+    payload: { session_id: "session-1", file_id: fileId, subtitle_id: subtitleId },
+  });
+
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    playerV2Mock
+      .mockReset()
+      .mockImplementation(
+        async (_config: unknown, route: string, options: { path?: { id?: string } }) => {
+          const subtitle = { id: "31", media_file_id: "7", timing: { offset_ms: 0, scale: 1 } };
+          if (route === "GET /api/v2/subtitles/{media_file_id}") return { subtitles: [subtitle] };
+          if (route === "GET /api/v2/subtitles/stored/{id}/sync") {
+            return {
+              subtitle: {
+                ...subtitle,
+                id: options.path?.id,
+                timing: { offset_ms: 1200, scale: 1 },
+              },
+            };
+          }
+          return {};
+        },
+      );
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("refetches the active stored track when its timing changes on this file", async () => {
+    renderPlayer({ subtitleUrls: [storedTrack] });
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        2,
+      ),
+    );
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    // Another file's subtitle and an inactive subtitle leave the cues alone.
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(8, 31)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 99)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 31)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    expect(subtitleTimeline.assCueRevision).toBe(1);
+    // The follow-up read refreshes the menu's status without a second reload.
+    expect(playerV2Mock).toHaveBeenCalledWith(
+      playerConfig,
+      "GET /api/v2/subtitles/stored/{id}/sync",
+      { path: { id: "31" } },
+    );
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    const sync = (
+      controls.current as unknown as {
+        storedSubtitleSync: { entries: Record<string, { subtitle: { timing: unknown } }> };
+      }
+    ).storedSubtitleSync;
+    expect(sync.entries["31"]?.subtitle.timing).toEqual({ offset_ms: 1200, scale: 1 });
+  });
+});
+
 describe("VideoPlayer translation handoff", () => {
   beforeEach(() => {
     toastError.mockClear();
@@ -3572,5 +3675,271 @@ describe("VideoPlayer controls auto-hide", () => {
     renderPlaying();
     await act(() => vi.advanceTimersByTimeAsync(3_000));
     expect(controls.current?.visible).toBe(false);
+  });
+});
+
+describe("VideoPlayer lost connection", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    hlsJS.supported = false;
+    hlsJS.constructed.mockClear();
+    hlsJS.startLoad.mockClear();
+    hlsJS.stopLoad.mockClear();
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function setNetworkError(video: HTMLVideoElement) {
+    Object.defineProperty(video, "error", {
+      configurable: true,
+      value: { code: 2, message: "PIPELINE_ERROR_NETWORK" },
+    });
+  }
+
+  it("hands a network error on a stream that played to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    fireFrameTimeUpdate(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    // The viewer seeks past the buffered range while the server is down.
+    act(() => controls.current?.onSeek(1_200));
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+    expect(screen.queryByText("Go Back")).not.toBeInTheDocument();
+  });
+
+  it("sends a replacement transport's network error before its first frame to route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    // A quality change hands over a new route that never shows a frame.
+    const nextPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:2222222222222222",
+      plan_attempt_key: "v3:2222222222222222",
+    });
+    rerenderPlayer({ plan: nextPlan, planRevision: 2 });
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    // Once that transport plays, a network error is a lost connection again.
+    const thirdPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:3333333333333333",
+      plan_attempt_key: "v3:3333333333333333",
+    });
+    rerenderPlayer({ plan: thirdPlan, planRevision: 3 });
+    fireFrameTimeUpdate(video);
+    fireEvent.error(video);
+    expect(onConnectionLost).toHaveBeenCalledOnce();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a network error before the first frame on route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("pauses behind a reconnecting notice the viewer can leave", async () => {
+    const onExit = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onExit, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    vi.mocked(HTMLMediaElement.prototype.pause).mockClear();
+
+    rerenderPlayer({ connectionStatus: "reconnecting" });
+
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Reconnecting…");
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(screen.queryByText("Try again")).not.toBeInTheDocument();
+    // Route failures of the dead transport are not reported while reconnecting.
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Go Back" }));
+    await waitFor(() => expect(onExit).toHaveBeenCalled());
+  });
+
+  it("offers Try again once reconnecting gave up", () => {
+    const onRetryConnection = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      onRetryConnection,
+      onPlanFailure,
+      connectionStatus: "lost",
+      connectionErrorTitle: "Connection lost",
+      connectionError: "Silo lost its connection to the server and couldn't reconnect.",
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost");
+    expect(screen.queryByText(/could not start playback/)).not.toBeInTheDocument();
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetryConnection).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("keeps subtitles off when a reconnect had to start a new session", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const sidecarTrack: PlayerSubtitleInfo = {
+      index: 2,
+      media_file_id: 7,
+      track_id: "file:7:subtitle:2",
+      language: "en",
+      codec: "srt",
+      label: "English",
+      source: "external",
+      url: "/stream/session-1/subtitles/2.vtt",
+    };
+    const withSubtitle = fixturePlanV3({
+      ...directPlan,
+      selected_tracks: { ...directPlan.selected_tracks, subtitle: { id: "", index: 2 } },
+    });
+    const { rerenderPlayer } = renderPlayer({
+      plan: withSubtitle,
+      subtitleUrls: [sidecarTrack],
+      subtitleMode: "always",
+      preferredSubtitleLanguage: "en",
+      onSubtitleTrackChange,
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(2));
+
+    // The viewer turns subtitles off, and the replan for it lands.
+    act(() =>
+      (
+        controls.current as unknown as { onSubtitleSelect: (i: number | null) => void }
+      ).onSubtitleSelect(null),
+    );
+    await waitFor(() => expect(onSubtitleTrackChange).toHaveBeenCalledWith(null, 0));
+    rerenderPlayer({ plan: directPlan, planRevision: 2 });
+
+    // The server restarts: the reconnect starts session-2 with no subtitle.
+    rerenderPlayer({ plan: directPlan, planRevision: 2, connectionStatus: "reconnecting" });
+    const restarted = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:restarted",
+      session_id: "session-2",
+    });
+    rerenderPlayer({
+      plan: restarted,
+      planRevision: 3,
+      sessionId: "session-2",
+      connectionStatus: "connected",
+    });
+    await act(async () => Promise.resolve());
+
+    expect(controls.current?.activeSubtitleIndex).toBeNull();
+    expect(onSubtitleTrackChange).toHaveBeenCalledOnce();
+  });
+
+  it("hands a fatal hls.js network error on a stream that played to the reconnect", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({ plan, onConnectionLost });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    const fatalNetworkError = {
+      fatal: true,
+      type: "networkError",
+      details: "fragLoadError",
+    };
+    // Before the first frame, hls.js keeps its startup recovery.
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    fireFrameTimeUpdate(video);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(onConnectionLost).toHaveBeenCalledOnce();
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+  });
+
+  it("gives a replacement HLS transport that never played its startup recovery", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    // Direct play has been running; a quality change moves it to a transcode
+    // on a node this browser cannot reach.
+    const { container, rerenderPlayer } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:2222222222222222",
+      plan_attempt_key: "v3:2222222222222222",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    rerenderPlayer({ plan: hlsPlan, planRevision: 2 });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    const fatalNetworkError = { fatal: true, type: "networkError", details: "fragLoadError" };
+    vi.spyOn(Date, "now").mockReturnValue(10_000);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    // The startup guard gives up on a second fatal network error and reports
+    // the route as failed, so the server can pick another one.
+    vi.spyOn(Date, "now").mockReturnValue(20_000);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
   });
 });

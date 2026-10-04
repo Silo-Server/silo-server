@@ -88,11 +88,14 @@ func (h *CollectionHandler) PersonalCollectionOrderEditor(ctx context.Context, u
 	if err != nil {
 		return out, err
 	}
-	view, err := h.ListPersonalCollections(ctx, userID, profileID)
+	// The order covers every collection the profile lists, read from the
+	// store: it needs no member counts, so it never depends on resolving
+	// another owner's access.
+	collections, err := store.ListCollections(ctx, profileID)
 	if err != nil {
-		return out, err
+		return out, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collections")
 	}
-	for _, c := range view.Collections {
+	for _, c := range collections {
 		same := c.GroupID == nil && groupID == nil
 		if c.GroupID != nil && groupID != nil {
 			same = *c.GroupID == *groupID

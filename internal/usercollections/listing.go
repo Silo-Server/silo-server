@@ -184,23 +184,27 @@ func (s *Store) Get(ctx context.Context, userID int, profileID, key string, visi
 	return &c, nil
 }
 
-// CountVisible returns how many items each collection shows the viewer under
-// access, keyed by collection ID; see catalog.CountVisiblePersonalCollections.
-// A collection whose count cannot be read is absent from the result.
-func (s *Store) CountVisible(ctx context.Context, userID int, collections []ServerVisibleCollection, access catalog.AccessFilter) map[string]int {
-	return catalog.CountVisiblePersonalCollections(ctx, s.pool, userID, CountDefinitions(collections), access)
+// CountVisible returns how many items each collection shows viewerProfileID
+// under viewer, limited to its owner's access when another profile owns it;
+// see catalog.CountOwnerScopedPersonalCollections. unavailable lists the
+// collections whose owner could not be resolved, which callers leave out.
+func (s *Store) CountVisible(ctx context.Context, owners catalog.PersonalCollectionAccess, userID int, viewerProfileID string, collections []ServerVisibleCollection, viewer catalog.AccessFilter) (counts map[string]int, unavailable map[string]bool) {
+	return catalog.CountOwnerScopedPersonalCollections(ctx, s.pool, owners, userID, viewerProfileID, CountDefinitions(collections), viewer)
 }
 
 // CountDefinitions returns the part of each collection that decides which
-// items it shows, for catalog.CountVisiblePersonalCollections.
-func CountDefinitions(collections []ServerVisibleCollection) []catalog.PersonalCollectionDefinition {
-	defs := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+// items it shows, and its owner, for catalog.CountOwnerScopedPersonalCollections.
+func CountDefinitions(collections []ServerVisibleCollection) []catalog.OwnedPersonalCollectionDefinition {
+	defs := make([]catalog.OwnedPersonalCollectionDefinition, 0, len(collections))
 	for _, c := range collections {
-		defs = append(defs, catalog.PersonalCollectionDefinition{
-			ID:                     c.ID,
-			CollectionType:         c.CollectionType,
-			QueryDefinition:        c.QueryDefinition,
-			DisplayQueryDefinition: c.DisplayQueryDefinition,
+		defs = append(defs, catalog.OwnedPersonalCollectionDefinition{
+			PersonalCollectionDefinition: catalog.PersonalCollectionDefinition{
+				ID:                     c.ID,
+				CollectionType:         c.CollectionType,
+				QueryDefinition:        c.QueryDefinition,
+				DisplayQueryDefinition: c.DisplayQueryDefinition,
+			},
+			CreatorProfileID: c.CreatorProfileID,
 		})
 	}
 	return defs

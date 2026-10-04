@@ -27,6 +27,7 @@ import HomeLayoutTransfer from "@/components/sections/HomeLayoutTransfer";
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
+import { buildProfileGallerySection } from "@/lib/homeRows/payloads";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 import { canAddAdminOnlyRecipes, isTraktConfig } from "@/lib/sectionTypes";
@@ -58,6 +59,8 @@ import {
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+
+export { buildProfileGallerySection };
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
@@ -233,24 +236,6 @@ function toEditableSection(section: SettingsSectionEntry): EditableSectionViewMo
     hidden: section.hidden,
     isCustom: section.is_custom,
     config: section.config,
-  };
-}
-
-export function buildProfileGallerySection(
-  payload: AddPayload,
-  position: number,
-): SettingsSectionEntry {
-  return {
-    id: randomUUID(),
-    section_type: payload.section_type,
-    title: payload.title,
-    featured: payload.featured,
-    item_limit: payload.item_limit,
-    hidden: false,
-    is_custom: true,
-    customized: true,
-    position,
-    config: payload.config,
   };
 }
 

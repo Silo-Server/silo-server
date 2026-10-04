@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,8 +85,25 @@ func updateServerSettingsAtomically(
 	store ServerSettingsStore,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return updateServerSettingsInTransaction(ctx, store, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+func updateServerSettingsInTransaction(
+	ctx context.Context,
+	store ServerSettingsStore,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if updater, ok := store.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return updater.UpdateAtomicInTransaction(ctx, update)
+	}
 	if updater, ok := store.(serverSettingsAtomicUpdater); ok {
-		return updater.UpdateAtomic(ctx, update)
+		return updater.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return update(current, nil)
+		})
 	}
 	return errors.New("settings store does not support atomic updates")
 }
@@ -339,6 +355,9 @@ type AdminUserView struct {
 	PasswordLogin          bool `json:"-"`
 	PasswordChangeRequired bool `json:"-"`
 	IsOwner                bool `json:"-"`
+	// BreakGlass is v2-only: the account keeps local password sign-in when
+	// the server turns it off.
+	BreakGlass bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -427,6 +446,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
+		BreakGlass:                 u.BreakGlass,
 		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:                 effective.LibraryIDs,
 			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
@@ -1004,6 +1024,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
+	enableLocalLoginWithPassword(&updateInput)
+
 	// As in v2, the Owner rules run against the target account locked in the
 	// transaction that updates it and revokes its sign-ins.
 	repo, ok := h.userRepo.(adminAccountRepository)
@@ -1017,7 +1039,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1025,6 +1047,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
 		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
 			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		}
+		// The frozen v1 route keeps the break-glass invariant v2 enforces:
+		// with local password sign-in off, the last usable break-glass admin
+		// cannot be demoted or disabled.
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, &updateInput); err != nil {
+			return false, breakGlassError(err)
 		}
 		revoked = updateRequiresSessionRevocation(current, updateInput)
 		return revoked, nil
@@ -1081,9 +1109,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	// As for updates, the Owner rules run against the target account locked
 	// in the transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, nil); err != nil {
+			return false, breakGlassError(err)
 		}
 		return true, nil
 	})
@@ -1351,15 +1382,24 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
+// the current account to compare against: any credential or enabled change
+// might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Role != nil ||
-		input.Enabled != nil ||
-		input.Permissions != nil ||
-		input.MaxPlaybackQuality.Set ||
-		input.AccessGroupID.Set
+		input.Enabled != nil
 }
 
+// updateRequiresSessionRevocation reports whether an account update signs the
+// user out everywhere: a new password or an enabled change.
+//
+// Policy changes (permissions, playback-quality override, access group) do
+// not; they bump access_policy_revision, every request resolves the current
+// policy, and connected realtime sockets tell their clients to refresh. A role
+// change does not either: RequireAuth refuses access tokens minted under the
+// old role with token_refresh_required, and a refresh issues the new role.
+// The impersonation sessions a demoted admin started end in the same
+// transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
 		return true
@@ -1367,53 +1407,10 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if current == nil {
 		return updateMayRequireSessionRevocation(input)
 	}
-	if input.Role != nil && *input.Role != current.Role {
-		return true
-	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true
 	}
-	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
-		return true
-	}
-	if input.MaxPlaybackQuality.Set && !qualityOverrideEqual(input.MaxPlaybackQuality.Value, current.MaxPlaybackQuality) {
-		return true
-	}
-	if input.AccessGroupID.Set && !accessGroupIDEqual(input.AccessGroupID.Value, current.AccessGroupID) {
-		return true
-	}
 	return false
-}
-
-func qualityOverrideEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return access.NormalizePlaybackQuality(*a) == access.NormalizePlaybackQuality(*b)
-}
-
-func accessGroupIDEqual(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
-	if h.pool == nil {
-		return nil
-	}
-	sessionRepo := auth.NewSessionRepository(h.pool)
-	if err := sessionRepo.RevokeAllByUser(ctx, userID); err != nil {
-		return err
-	}
-	if err := sessionRepo.RevokeAllByImpersonator(ctx, userID); err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(ctx, userID)
-	}
-	return nil
 }
 
 // HandleListUnmatched handles GET /admin/unmatched.
@@ -1681,6 +1678,7 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
+	config.MediaImageSweepCheckpointKey:         true,
 	config.ChapterThumbnailOriginalsCleanupKey:  true,
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
@@ -2479,6 +2477,24 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 	return normalized != "" && effectiveChanged
 }
 
+// checkLocalLoginSetting refuses turning local password sign-in off while no
+// break-glass admin could still sign in with a password. It runs inside the
+// settings mutation, which holds the settings lock that break-glass changes
+// also take.
+func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
+	key := config.AuthLocalPasswordLoginSettingKey
+	if before[key] == after[key] {
+		return nil
+	}
+	if tx != nil {
+		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+	}
+	if h.pool == nil {
+		return ErrAdminSettingsUnavailable
+	}
+	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
+}
+
 // HandleUpdateSettings handles PUT /admin/settings. Every requested value is
 // normalized and validated with the prospective values it depends on before
 // SetMany performs one transaction, so a multi-field save is all-or-nothing.
@@ -2558,8 +2574,8 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2580,6 +2596,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			activeProspective := h.activeAdminSettings(prospective)
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			// Cross-field checks run against the complete prospective state, so a
 			// value the batch clears is gone even when the store still has it and
 			// the current process is still running on it.
@@ -2919,8 +2939,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2973,6 +2993,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			effectiveChanged = before[key] != after[key]
 			if shouldPersistAdminSetting(stored, key, req.Value, effectiveChanged) {
 				return map[string]string{key: req.Value}, nil

@@ -52,10 +52,13 @@ type fakeUserCollectionSource struct {
 	gotProfileID  string
 	gotLibraryIDs []int
 
-	// counts answers CountVisible; a missing ID mimics a count that failed.
+	// counts answers CountVisible; a missing ID mimics a count that failed,
+	// and an ID in unavailable an owner that could not be resolved.
 	counts         map[string]int
+	unavailable    map[string]bool
 	gotCountIDs    []string
 	gotCountAccess catalog.AccessFilter
+	gotCountViewer string
 }
 
 type fakePersonalCollectionResolver struct {
@@ -112,17 +115,22 @@ func (f *fakeUserCollectionSource) AnyVisible(_ context.Context, userID int, pro
 	return false, nil
 }
 
-func (f *fakeUserCollectionSource) CountVisible(_ context.Context, userID int, collections []usercollections.ServerVisibleCollection, access catalog.AccessFilter) map[string]int {
-	f.gotUserID, f.gotCountAccess = userID, access
+func (f *fakeUserCollectionSource) CountVisible(_ context.Context, _ catalog.PersonalCollectionAccess, userID int, viewerProfileID string, collections []usercollections.ServerVisibleCollection, viewer catalog.AccessFilter) (map[string]int, map[string]bool) {
+	f.gotUserID, f.gotCountViewer, f.gotCountAccess = userID, viewerProfileID, viewer
 	f.gotCountIDs = f.gotCountIDs[:0]
 	out := make(map[string]int, len(collections))
+	unavailable := make(map[string]bool)
 	for _, c := range collections {
 		f.gotCountIDs = append(f.gotCountIDs, c.ID)
+		if f.unavailable[c.ID] {
+			unavailable[c.ID] = true
+			continue
+		}
 		if n, ok := f.counts[c.ID]; ok {
 			out[c.ID] = n
 		}
 	}
-	return out
+	return out, unavailable
 }
 
 func (f *fakeUserCollectionSource) ImageCandidates(_ context.Context, id string) ([]usercollections.ServerVisibleCollection, error) {
@@ -1242,5 +1250,135 @@ func TestPersonalSmartBoxSetPageStaysPagedDB(t *testing.T) {
 	}
 	if largest := tracer.largest.Load(); largest > 2*pageSize {
 		t.Fatalf("one page read a %d-row SELECT; want at most %d", largest, 2*pageSize)
+	}
+}
+
+// A shared personal collection whose owner cannot be resolved fails closed on
+// the BoxSet surface, as on the native routes: listings and Ids re-hydration
+// leave it out, and its detail route errors instead of describing it under the
+// viewer's access alone.
+func TestPersonalBoxSetUnresolvableOwnerFailsClosed(t *testing.T) {
+	const sharedID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
+	shared := ownedUserCollection(sharedID, "Shared")
+	shared.CreatorProfileID = "profile-2"
+	personal := &fakeUserCollectionSource{
+		rows:        []fakeUserCollection{shared, ownedUserCollection("u-2", "Mine")},
+		unavailable: map[string]bool{sharedID: true},
+	}
+	h := newUserCollectionsTestHandler(&fakeCollectionSource{}, personal,
+		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
+
+	listing := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID)
+	if got := boxSetNames(listing.Items); !slices.Equal(got, []string{"Mine"}) || listing.TotalRecordCount != 1 {
+		t.Fatalf("listing = %v (total %d), want only Mine", got, listing.TotalRecordCount)
+	}
+	if personal.gotCountViewer != "profile-1" {
+		t.Fatalf("counted for viewer %q, want the session profile", personal.gotCountViewer)
+	}
+	routeID := NewResourceIDCodec().EncodeStringID(EncodedIDUserCollection, sharedID)
+	if ids := performItemsRequest(t, h, "/Items?Ids="+routeID); len(ids.Items) != 0 {
+		t.Fatalf("Ids re-hydrated a collection whose owner is unresolved: %+v", ids.Items)
+	}
+	if rec := requestBoxSetItem(t, h, sharedID); rec.Code == http.StatusOK {
+		t.Fatalf("detail served a collection whose owner is unresolved: %s", rec.Body.String())
+	}
+}
+
+// fixedOwnerAccess limits every owner to the given libraries.
+type fixedOwnerAccess struct{ libraries []int }
+
+func (f fixedOwnerAccess) OwnerFilter(context.Context, int, string) (catalog.AccessFilter, error) {
+	return catalog.AccessFilter{AllowedLibraryIDs: f.libraries}, nil
+}
+
+// TestPersonalBoxSetOwnerLimitDB pins that a personal BoxSet shared with
+// another profile shows that profile only the titles the owner can access too,
+// in ChildCount and in its children, while the owner still sees every member.
+func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	var userID, ownerLib, otherLib int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-owner-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	for i, target := range []*int{&ownerLib, &otherLib} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+			fmt.Sprintf("boxset-owner-%s-%d", suffix, i)).Scan(target); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared, private := "boxset-owner-shared-"+suffix, "boxset-owner-private-"+suffix
+	for _, seed := range []struct {
+		id      string
+		library int
+	}{{shared, ownerLib}, {private, otherLib}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, seed.id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shared, private})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{ownerLib, otherLib})
+	})
+
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	viewer := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	for _, s := range []*Session{owner, viewer} {
+		if err := store.CreateProfile(ctx, userstore.Profile{ID: s.ProfileID, Name: "Profile " + s.ProfileID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: owner.ProfileID, Name: "Shared picks", CollectionType: "manual", IsShared: true,
+		AllowedProfileIDs: []string{owner.ProfileID, viewer.ProfileID}, IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, member := range []string{shared, private} {
+		if err := store.AddCollectionItem(ctx, collection.ID, member, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	owners := fixedOwnerAccess{libraries: []int{ownerLib}}
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: ownerLib, Name: "A", Type: "movies"}, {ID: otherLib, Name: "B", Type: "movies"}}, nil)
+	h.userCollections = usercollections.NewStore(pool)
+	h.collectionOwners = owners
+	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
+		WithUserStoreProvider(provider).WithPersonalCollectionAccess(owners)
+	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+		return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{ownerLib, otherLib}}
+	}
+
+	for _, tc := range []struct {
+		name    string
+		session *Session
+		want    int
+	}{
+		{"viewer sees only the owner's titles", viewer, 1},
+		{"owner sees every member", owner, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", tc.session)
+			if len(listing.Items) != 1 {
+				t.Fatalf("expected the shared BoxSet, got %+v", listing.Items)
+			}
+			children := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID, tc.session)
+			if listing.Items[0].ChildCount != tc.want || children.TotalRecordCount != tc.want || len(children.Items) != tc.want {
+				t.Fatalf("ChildCount=%d children=%d of %d, want %d", listing.Items[0].ChildCount, len(children.Items), children.TotalRecordCount, tc.want)
+			}
+		})
 	}
 }

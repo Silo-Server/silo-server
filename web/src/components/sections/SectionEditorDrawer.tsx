@@ -21,8 +21,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import CollectionRulesEditor from "@/components/collections/CollectionRulesEditor";
-import FilterEasyMode from "@/components/FilterEasyMode/FilterEasyMode";
-import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import RecipeParamFields from "@/components/RecipeGallery/RecipeParamFields";
 import {
@@ -31,10 +29,7 @@ import {
   filterRecipeCatalog,
   sectionTypeLabel,
 } from "@/lib/sectionTypes";
-import {
-  finalizeSectionLibraryFilter,
-  LIBRARY_FILTER_SECTION_TYPES,
-} from "@/lib/sectionLibraryFilter";
+import { buildAdminSectionPayload, buildProfileSectionSaveEntry } from "@/lib/homeRows/payloads";
 import {
   matchRecipePreset,
   type Category,
@@ -43,16 +38,11 @@ import {
 } from "@/lib/recipes";
 import {
   queryDefinitionFromSectionConfig,
-  queryDefinitionToSectionConfig,
   type PageSectionConfig,
   type QueryDefinition,
   type SettingsSectionEntry,
 } from "@/api/types";
-import {
-  useAllUserCollections,
-  type CollectionOption,
-} from "@/hooks/queries/useAllUserCollections";
-import { randomUUID } from "@/lib/uuid";
+import { useAllUserCollections } from "@/hooks/queries/useAllUserCollections";
 
 const CATEGORY_LABELS: Record<Category, string> = {
   library_staples: "Library",
@@ -106,150 +96,6 @@ function parseRecipeParams(config: unknown): Record<string, unknown> {
   return {};
 }
 
-function preserveGeneratedSectionMetadata(
-  existingConfig: Record<string, unknown> | undefined,
-  nextConfig: Record<string, unknown>,
-): Record<string, unknown> {
-  if (!existingConfig) {
-    return nextConfig;
-  }
-
-  const merged = { ...nextConfig };
-  if (typeof existingConfig.generated_source === "string" && existingConfig.generated_source) {
-    merged.generated_source = existingConfig.generated_source;
-  }
-  if (
-    typeof existingConfig.filter_library_id === "number" &&
-    Number.isInteger(existingConfig.filter_library_id)
-  ) {
-    merged.filter_library_id = existingConfig.filter_library_id;
-  }
-  return merged;
-}
-
-interface BuildProfileSectionSaveEntryInput {
-  section: SettingsSectionEntry | null;
-  sectionType: string;
-  title: string;
-  itemLimit: number;
-  featured: boolean;
-  queryDefinition: QueryDefinition;
-  selectedCollectionId: string;
-  recipeParams?: Record<string, unknown>;
-  collections?: CollectionOption[];
-}
-
-export function buildProfileSectionSaveEntry({
-  section,
-  sectionType,
-  title,
-  itemLimit,
-  featured,
-  queryDefinition,
-  selectedCollectionId,
-  recipeParams,
-  collections,
-}: BuildProfileSectionSaveEntryInput): SettingsSectionEntry {
-  let config: Record<string, unknown>;
-  if (sectionType === "collection") {
-    const selected = collections?.find((collection) => collection.id === selectedCollectionId);
-    config =
-      selected?.source === "user"
-        ? { user_collection_id: selectedCollectionId }
-        : { library_collection_id: selectedCollectionId };
-  } else if (isLegacyFilterType(sectionType)) {
-    config = preserveGeneratedSectionMetadata(
-      section?.config,
-      queryDefinitionToSectionConfig(queryDefinition),
-    );
-  } else if (recipeParams && LIBRARY_FILTER_SECTION_TYPES.has(sectionType)) {
-    // The params start from the section config and the library picker owns the
-    // filter keys, so restoring the old filter_library_id would widen the selection.
-    config = finalizeSectionLibraryFilter(recipeParams);
-  } else {
-    config = preserveGeneratedSectionMetadata(section?.config, recipeParams ?? {});
-  }
-
-  return {
-    id: section?.id ?? randomUUID(),
-    section_type: sectionType,
-    title: title || sectionTypeLabel(sectionType),
-    featured,
-    item_limit: itemLimit,
-    hidden: section?.hidden ?? false,
-    is_custom: section?.is_custom ?? true,
-    customized: section?.customized ?? false,
-    position: section?.position ?? 0,
-    config,
-  };
-}
-
-interface BuildAdminSectionPayloadInput {
-  section: PageSectionConfig | null;
-  scope: string;
-  currentLibraryId: number | null;
-  sectionType: string;
-  title: string;
-  itemLimit: number;
-  featured: boolean;
-  enabled: boolean;
-  queryDefinition: QueryDefinition;
-  selectedCollectionId: string;
-  recipeParams?: Record<string, unknown>;
-  collections?: CollectionOption[];
-}
-
-export function buildAdminSectionPayload({
-  section,
-  scope,
-  currentLibraryId,
-  sectionType,
-  title,
-  itemLimit,
-  featured,
-  enabled,
-  queryDefinition,
-  selectedCollectionId,
-  recipeParams,
-}: BuildAdminSectionPayloadInput): Partial<PageSectionConfig> & { id?: string } {
-  const base = section?.section_type === sectionType ? { ...section.config } : {};
-  let config: Record<string, unknown>;
-  if (sectionType === "collection") {
-    delete base.user_collection_id;
-    config = { ...base, library_collection_id: selectedCollectionId };
-  } else if (isLegacyFilterType(sectionType)) {
-    // The editor replaces query fields, while keeping recipe metadata it does not edit.
-    delete base.filter_type;
-    delete base.filter_library_id;
-    delete base.filter_library_ids;
-    delete base.order;
-    config = { ...base, ...queryDefinitionToSectionConfig(queryDefinition) };
-  } else if (recipeParams && LIBRARY_FILTER_SECTION_TYPES.has(sectionType)) {
-    // The library picker owns the filter keys; keeping the old ones from base
-    // would re-add a replaced filter_library_id.
-    delete base.filter_library_id;
-    delete base.filter_library_ids;
-    delete base.library_ids;
-    config = finalizeSectionLibraryFilter({ ...base, ...recipeParams });
-  } else {
-    config = { ...base, ...recipeParams };
-  }
-
-  const safeTitle = title.trim() || sectionTypeLabel(sectionType);
-
-  return {
-    ...(section ? { id: section.id } : {}),
-    scope,
-    ...(scope === "library" && currentLibraryId != null ? { library_id: currentLibraryId } : {}),
-    title: safeTitle,
-    section_type: sectionType,
-    item_limit: itemLimit,
-    featured,
-    enabled,
-    config,
-  };
-}
-
 type ProfileDrawerProps = {
   mode: "profile";
   open: boolean;
@@ -297,7 +143,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
   );
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [recipeParams, setRecipeParams] = useState<Record<string, unknown>>({});
-  const [filterMode, setFilterMode] = useState<"easy" | "advanced">("easy");
   const { collections: allCollections, isLoading: collectionsLoading } = useAllUserCollections();
   const collections = useMemo(
     () =>
@@ -351,16 +196,6 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
       setSelectedCollectionId("");
       setRecipeParams({});
     }
-  }, [props.open, props.section]);
-
-  useEffect(() => {
-    if (!props.open) return;
-    const cfg = props.section
-      ? queryDefinitionFromSectionConfig(props.section.config)
-      : queryDefinitionFromSectionConfig();
-    const easyCompatible =
-      cfg.groups.length <= 1 && (cfg.match === "all" || cfg.groups.length === 0);
-    setFilterMode(easyCompatible ? "easy" : "advanced");
   }, [props.open, props.section]);
 
   useEffect(() => {
@@ -553,92 +388,17 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
             </div>
           ) : null}
 
+          {/* Rows resolve per viewer, so the server accepts personalized rules and sorts. */}
           {showLegacyFilter ? (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Media Scope</Label>
-                  <Select
-                    value={queryDefinition.media_scope ?? "all"}
-                    onValueChange={(value) =>
-                      setQueryDefinition({
-                        ...queryDefinition,
-                        media_scope:
-                          value === "all"
-                            ? undefined
-                            : (value as "movie" | "series" | "episode" | "audiobook" | "ebook"),
-                      })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Media</SelectItem>
-                      <SelectItem value="movie">Movies</SelectItem>
-                      <SelectItem value="series">Series</SelectItem>
-                      <SelectItem value="episode">Episodes</SelectItem>
-                      <SelectItem value="audiobook">Audiobooks</SelectItem>
-                      <SelectItem value="ebook">Ebooks</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Libraries</Label>
-                  <LibraryMultiSelect
-                    libraries={props.libraries}
-                    value={queryDefinition.library_ids}
-                    onChange={(libraryIds) =>
-                      setQueryDefinition({ ...queryDefinition, library_ids: libraryIds })
-                    }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Filter Rules</Label>
-                <div className="mb-3 flex items-center gap-1 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setFilterMode("easy")}
-                    className={`rounded px-2 py-0.5 ${filterMode === "easy" ? "bg-indigo-500 text-white" : "bg-white/5"}`}
-                    aria-pressed={filterMode === "easy"}
-                  >
-                    Easy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFilterMode("advanced")}
-                    className={`rounded px-2 py-0.5 ${filterMode === "advanced" ? "bg-indigo-500 text-white" : "bg-white/5"}`}
-                    aria-pressed={filterMode === "advanced"}
-                  >
-                    Advanced
-                  </button>
-                </div>
-                {filterMode === "easy" ? (
-                  <FilterEasyMode
-                    initialConfig={{
-                      match: queryDefinition.match,
-                      groups: queryDefinition.groups,
-                    }}
-                    onChange={(filter) =>
-                      setQueryDefinition({
-                        ...queryDefinition,
-                        match: filter.match,
-                        groups: filter.groups,
-                      })
-                    }
-                  />
-                ) : (
-                  <CollectionRulesEditor
-                    value={queryDefinition}
-                    onChange={setQueryDefinition}
-                    libraries={props.libraries}
-                    showMediaScopeSelector
-                    allowLibrarySelection
-                  />
-                )}
-              </div>
-            </div>
+            <CollectionRulesEditor
+              value={queryDefinition}
+              onChange={setQueryDefinition}
+              libraries={props.libraries}
+              showMediaScopeSelector
+              allowLibrarySelection
+              allowPersonalizedFilters
+              allowPersonalizedSorts
+            />
           ) : null}
 
           {showRecipeParams && recipeDef ? (
@@ -685,4 +445,8 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
   );
 }
 
-export { buildProfileSectionSaveEntry as buildSectionSaveEntry };
+export {
+  buildAdminSectionPayload,
+  buildProfileSectionSaveEntry,
+  buildProfileSectionSaveEntry as buildSectionSaveEntry,
+};

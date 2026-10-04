@@ -118,9 +118,11 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
 	}
 
+	scope.PreferencesDegraded = preferences.Degraded
+
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs
-	if len(disabled) > 0 {
+	if len(disabled) > 0 && !input.ContentAccessOnly {
 		if scope.AllowedLibraryIDs != nil {
 			// Restricted user: subtract disabled IDs from the allowed set.
 			scope.AllowedLibraryIDs = subtractInts(scope.AllowedLibraryIDs, disabled)

@@ -17,9 +17,10 @@ A collection without an assigned poster shows a collage of its members'
 posters. Each viewer sees the first four members it can access that have a poster, in
 collection order. Access uses the same predicates as the collection's member list
 (`itemAccessConditions`: library allow and deny lists, maturity limits, excluded media types),
-so a collage never shows a title the viewer's member list leaves out. A collection the catalog
-lists from a query (a smart collection, or any collection with a query definition) has no
-collage.
+so a collage never shows a title the viewer's member list leaves out. A smart collection lists
+its members from its query and has no collage. Only `collection_type` makes a collection live: a
+query definition on any other type is ignored, and its members are its stored items
+(`catalog.ResolveLibraryCollectionMembership`).
 
 Each distinct set of source posters is one stored collage, shared by every viewer that selects
 the same posters:

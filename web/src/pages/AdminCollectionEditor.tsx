@@ -12,6 +12,7 @@ import { ManualCollectionItemsEditor } from "@/components/collections/ManualColl
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminCollections, useAdminCollectionSnapshot } from "@/hooks/queries/admin/collections";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { isListBackedCollectionType } from "@/lib/collectionTypes";
 
 import {
   buildAdminCollectionsReturnPath,
@@ -29,10 +30,6 @@ function inferCollectionSourceType(collectionType?: string): CollectionSourceTyp
   if (collectionType === "tmdb") return "tmdb";
   if (collectionType === "trakt") return "trakt";
   return "manual";
-}
-
-function isImportedAdminCollectionType(collectionType?: string): boolean {
-  return collectionType === "mdblist" || collectionType === "tmdb" || collectionType === "trakt";
 }
 
 export default function AdminCollectionEditor() {
@@ -193,7 +190,7 @@ export default function AdminCollectionEditor() {
       {collection ? (
         // Smart admin collections route to the wizard above; here we only see
         // imported (mdblist/tmdb/trakt) or legacy manual collections.
-        isImportedAdminCollectionType(collection.collection_type) ? (
+        isListBackedCollectionType(collection.collection_type) ? (
           <CollectionEditForm
             libraries={libraries}
             collection={collection}

@@ -199,6 +199,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	if file == nil {
 		file = input.RequestedFile
 	}
+	// A file ffprobe already rejected has nothing for any route to validate.
+	// Answer before the bitrate-cap wrapper below, which would otherwise
+	// rename the refusal after a policy that has nothing to do with it.
+	if file.ProbeRejected() {
+		return terminalPlannerResultV3(TerminalSourceUnreadableV3, TerminalSourceUnreadableMessageV3, false)
+	}
 	if input.Now.IsZero() {
 		input.Now = time.Now()
 	}

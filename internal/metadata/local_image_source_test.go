@@ -279,6 +279,128 @@ func TestApplyBestImagesLogoLanguageFallbacks(t *testing.T) {
 	}
 }
 
+func TestApplyBestImagesUsesWordmarkLogoCandidates(t *testing.T) {
+	tests := []struct {
+		name     string
+		images   []RemoteImage
+		wantLogo string
+	}{
+		{
+			name: "TVDB clear art cannot beat a lower-priority TMDB wordmark",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: tvdbClearArtURL, Type: ImageLogo, Language: "en", Rating: 10},
+				{ProviderID: "tmdb", URL: "tmdb://wordmark.png", Type: ImageLogo, Language: "en", Rating: 6},
+			},
+			wantLogo: "tmdb://wordmark.png",
+		},
+		{
+			name: "TVDB clear art alone leaves the logo empty",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: tvdbClearArtURL, Type: ImageLogo, Language: "en", Rating: 10},
+			},
+		},
+		{
+			name: "clear art served over HTTPS is rejected",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: "https://artworks.thetvdb.com/banners/v4/series/81189/clearart/611b4e0dd75a6.png", Type: ImageLogo, Language: "en", Rating: 10},
+			},
+		},
+		{
+			name: "TVDB ClearLogo is a wordmark and keeps provider-chain priority",
+			images: []RemoteImage{
+				{ProviderID: "tvdb", URL: tvdbClearLogoURL, Type: ImageLogo, Language: "en", Rating: 10},
+				{ProviderID: "tmdb", URL: "tmdb://wordmark.png", Type: ImageLogo, Language: "en", Rating: 6},
+			},
+			wantLogo: tvdbClearLogoURL,
+		},
+		{
+			name: "local sidecar remains authoritative",
+			images: []RemoteImage{
+				{ProviderID: "nfo", URL: "file:///media/shows/Example/logo.png", Type: ImageLogo},
+				{ProviderID: "tmdb", URL: "tmdb://wordmark.png", Type: ImageLogo, Language: "en", Rating: 10},
+			},
+			wantLogo: "file:///media/shows/Example/logo.png",
+		},
+		{
+			name: "highest-rated TMDB wordmark wins within the language tier",
+			images: []RemoteImage{
+				{ProviderID: "tmdb", URL: "tmdb://lower-rated.png", Type: ImageLogo, Language: "en", Rating: 6},
+				{ProviderID: "tmdb", URL: "tmdb://top-rated.png", Type: ImageLogo, Language: "en", Rating: 9},
+			},
+			wantLogo: "tmdb://top-rated.png",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			item := &models.MediaItem{}
+			applyBestImages(item, tt.images, MergeFillEmpty, "en")
+			if item.LogoPath != tt.wantLogo {
+				t.Fatalf("LogoPath = %q, want %q", item.LogoPath, tt.wantLogo)
+			}
+		})
+	}
+}
+
+// TVDB serves series ClearArt and ClearLogo from these path shapes. TVDB
+// plugins before v1.4.0 reported the ClearArt as ImageLogo.
+const (
+	tvdbClearArtURL  = "tvdb://banners/v4/series/81189/clearart/611b4e0dd75a6.png"
+	tvdbClearLogoURL = "tvdb://banners/v4/series/81189/clearlogo/611b4df33bac5.png"
+)
+
+func TestApplyBestImagesClearsClearArtLogoOnManualRefresh(t *testing.T) {
+	existing := &models.MediaItem{
+		LogoPath:       "tvdb/series/123/logo/original.webp",
+		LogoSourcePath: tvdbClearArtURL,
+	}
+	item := *existing
+
+	applyBestImages(&item, []RemoteImage{
+		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Language: "en", Rating: 10},
+	}, MergeReplaceUnlocked, "en")
+	prepareItemImagesForQueue(&item, existing)
+
+	if item.LogoPath != "" || item.LogoSourcePath != "" {
+		t.Fatalf("clear-art logo survived manual refresh: path=%q source=%q", item.LogoPath, item.LogoSourcePath)
+	}
+}
+
+func TestApplyBestImagesReplacesClearArtLogoWithTVDBClearLogo(t *testing.T) {
+	for _, mode := range []MergeMode{MergeFillEmpty, MergeReplaceUnlocked} {
+		existing := &models.MediaItem{
+			LogoPath:       "tvdb/series/123/logo/original.webp",
+			LogoSourcePath: tvdbClearArtURL,
+		}
+		item := *existing
+
+		applyBestImages(&item, []RemoteImage{
+			{ProviderID: "tvdb", URL: tvdbClearLogoURL, Type: ImageLogo, Language: "en", Rating: 10},
+		}, mode, "en")
+		prepareItemImagesForQueue(&item, existing)
+
+		// The cached path stays served until the cache job publishes the new source.
+		if item.LogoPath != existing.LogoPath || item.LogoSourcePath != tvdbClearLogoURL {
+			t.Fatalf("mode %v: logo = path %q source %q, want TVDB ClearLogo queued", mode, item.LogoPath, item.LogoSourcePath)
+		}
+	}
+}
+
+func TestApplyBestImagesKeepsTVDBClearLogoWhenRefreshOffersNoLogo(t *testing.T) {
+	existing := &models.MediaItem{
+		LogoPath:       "tvdb/series/123/logo/original.webp",
+		LogoSourcePath: tvdbClearLogoURL,
+	}
+	item := *existing
+
+	applyBestImages(&item, nil, MergeReplaceUnlocked, "en")
+	prepareItemImagesForQueue(&item, existing)
+
+	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
+		t.Fatalf("logo = path %q source %q, want cached TVDB ClearLogo kept", item.LogoPath, item.LogoSourcePath)
+	}
+}
+
 func TestApplyBestImagesFallsBackToLanguageTaggedBackgrounds(t *testing.T) {
 	// Language-neutral backgrounds are preferred, but an item whose backdrops
 	// are all language-tagged must still get one rather than none.
@@ -395,5 +517,82 @@ func TestIsStableProviderImageFailureLocalClasses(t *testing.T) {
 	}
 	if isStableProviderImageFailure("local image read failed: io timeout") {
 		t.Error("transient local read errors must keep the normal backoff")
+	}
+}
+
+func TestMergeAndPersistLockedImagesKeepPendingArtworkSources(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	const posterSource = "file:///media/tv/Show/poster.jpg"
+
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID:               "series-locked-art",
+		Type:                    "series",
+		Title:                   "Example Show",
+		Year:                    2024,
+		Status:                  "matched",
+		DefaultMetadataLanguage: "en",
+		PosterSourcePath:        posterSource,
+		LogoPath:                "artwork/series-locked-art/logo.png",
+		LogoSourcePath:          "tmdb://logo.png",
+		LockedFields:            []int{int(FieldImages)},
+		Studios:                 []string{},
+		Networks:                []string{},
+		Countries:               []string{},
+		Genres:                  []string{},
+	}); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set("series-locked-art", &models.MediaItemProviderID{
+		ContentID:  "series-locked-art",
+		ItemType:   "series",
+		Provider:   "custom",
+		ProviderID: "series-123",
+	})
+	h.service.providerIDRepo = providerRepo
+
+	_, err := h.service.mergeAndPersist(ctx, ProcessRequest{
+		ContentID: "series-locked-art",
+		Mode:      ModeManualRefresh,
+		Language:  "en",
+	}, &MetadataResult{
+		HasMetadata: true,
+		Title:       "Example Show",
+		Year:        2024,
+		ProviderIDs: map[string]string{"custom": "series-123"},
+	}, []RemoteImage{
+		{URL: posterSource, Type: ImagePoster},
+		{URL: "https://images.example/other-poster.jpg", Type: ImagePoster, Rating: 9},
+	}, nil, nil, "series")
+	if err != nil {
+		t.Fatalf("mergeAndPersist: %v", err)
+	}
+
+	got, err := h.itemRepo.GetByID(ctx, "series-locked-art")
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.PosterPath != "" || got.PosterSourcePath != posterSource {
+		t.Fatalf("poster = path %q source %q, want pending local source preserved", got.PosterPath, got.PosterSourcePath)
+	}
+	if got.LogoPath != "artwork/series-locked-art/logo.png" || got.LogoSourcePath != "tmdb://logo.png" {
+		t.Fatalf("logo = path %q source %q, want cached logo unchanged", got.LogoPath, got.LogoSourcePath)
+	}
+}
+
+func TestApplyBestImagesKeepsLockedClearArtLogoOnManualRefresh(t *testing.T) {
+	item := &models.MediaItem{
+		LogoPath:       "tvdb/series/123/logo/admin-choice.webp",
+		LogoSourcePath: tvdbClearArtURL,
+		LockedFields:   []int{int(FieldImages)},
+	}
+	existing := *item
+	applyBestImages(item, []RemoteImage{
+		{ProviderID: "tvdb", URL: "tvdb://banners/v4/series/81189/clearart/611b4e1126ff1.png", Type: ImageLogo, Rating: 9},
+	}, MergeReplaceUnlocked, "en")
+	prepareItemImagesForQueue(item, &existing)
+	if item.LogoPath != existing.LogoPath || item.LogoSourcePath != existing.LogoSourcePath {
+		t.Fatalf("locked logo = path %q source %q, want admin selection kept", item.LogoPath, item.LogoSourcePath)
 	}
 }

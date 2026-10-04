@@ -31,7 +31,6 @@ import {
   SmartCollectionLimitField,
   type CollectionBuilderValue,
 } from "@/components/collections/CollectionBuilder";
-import { withSmartCollectionLimit } from "@/components/collections/smartCollectionLimits";
 import CollectionAccessEditor from "@/components/collections/CollectionAccessEditor";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import {
@@ -124,7 +123,7 @@ export default function SmartCollectionWizard(wizard: SmartCollectionWizardProps
   useDocumentTitle(isEdit ? `Edit ${draft.title || "Collection"}` : "New Collection");
 
   const handleQueryDefinitionChange = useCallback((next: QueryDefinition) => {
-    setDraft((current) => ({ ...current, query_definition: withSmartCollectionLimit(next) }));
+    setDraft((current) => ({ ...current, query_definition: next }));
   }, []);
 
   const headerTitle = isEdit ? draft.title || "Edit Collection" : "New Collection";
@@ -370,11 +369,7 @@ function Step1FiltersAndPreview({
               ? `${itemCountLabel} match these filters`
               : "Choose filters to preview matching titles"}
         </span>
-        <Button
-          type="button"
-          onClick={onContinue}
-          disabled={adminMissingLibrary || (!isLoading && totalItems === 0)}
-        >
+        <Button type="button" onClick={onContinue} disabled={adminMissingLibrary}>
           Next: Details
           <ArrowRight className="ml-2 h-4 w-4" />
         </Button>

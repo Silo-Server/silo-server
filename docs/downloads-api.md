@@ -641,6 +641,12 @@ Invalid refs return `422 validation_failed`. Current content access is checked
 before asset delivery, and downloaded-subtitle ownership must match the entry's
 media file.
 
+A `downloaded` subtitle is delivered with its stored timing correction applied,
+so its bytes change when an admin or an automatic sync adjusts the timing. Its
+response carries `Cache-Control: private, no-cache` and a strong `ETag` that
+changes with the subtitle's revision; send it back in `If-None-Match` to get
+`304 Not Modified` while the bytes are unchanged.
+
 ### 4.10 Direct download
 
 ```http
@@ -840,6 +846,11 @@ Notes:
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
   refresh the media file and manifest.
+- `subtitles[].revision` is present only on downloaded (`downloaded:{id}`)
+  subtitles. It is an opaque string that changes whenever that subtitle's
+  delivered bytes can change, such as a timing correction. When a refreshed
+  manifest shows a different value than the one stored with the cached file,
+  re-fetch that subtitle.
 - Optional fields are omitted when empty; clients should treat absent values as
   "not set."
 
@@ -1491,7 +1502,7 @@ operations use:
 | ---- | ------------------------ | ------------------------------------------------------------------------- |
 | 400  | `malformed_request`      | Malformed JSON body.                                                      |
 | 400  | `invalid_cursor`         | A `cursor` value the operation cannot continue from.                      |
-| 401  | `authentication_required` / `invalid_token` / `session_expired` | Missing, unreadable, or expired credential. |
+| 401  | `authentication_required` / `invalid_token` / `session_expired` / `token_refresh_required` | Missing, unreadable, or expired credential, or an access token to refresh after a role change. |
 | 403  | `permission_denied`      | Downloads disabled, the account may not download, or the requested quality is not permitted. |
 | 403  | `profile_verification_required` | A PIN-protected profile without `X-Profile-Token`.                 |
 | 404  | `not_found`              | Entry, content, or asset missing or outside profile access.               |
@@ -1550,6 +1561,27 @@ mid-encode cannot strand a download in `preparing` or double-encode. Ready
 artifacts are evicted LRU under a byte budget, but never while a managed row —
 including a completed one representing a device's local library — still
 references them.
+
+### Preparation progress (admin)
+
+The lease owner of a running prepare job records where it runs (`worker_kind`,
+`worker_node_id`, `worker_name`) and its FFmpeg progress on the `download_artifacts`
+row, so every API replica serves the same view. Local encodes read FFmpeg's
+`-progress` stream directly; node encodes are polled through the node's progress
+operation (see [the worker protocol](architecture/worker-http-protocol.md)) while the
+prepare request is open. Progress is written at most every five seconds and only
+while the writer still holds the lease; a claim resets it. A node that predates the
+progress operation marks the attempt `progress_unavailable`.
+
+Administrators read the queue at `GET /api/v2/admin/downloads/preparations`
+(running, queued, and retrying jobs plus failures from the last 24 hours, with
+totals that cover every listed job) and discover it at
+`GET /api/v2/admin/downloads/preparations/capabilities`. The admin-only realtime
+channel `download_preparations` carries `download_preparation.changed` (`{id}`;
+re-read the list) and `download_preparation.progress` (`{id, progress}`); its
+subscription snapshot is `null`. FFmpeg output for every attempt, on the API host
+or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
+`playback_session_id`. None of this changes the client-facing download contract.
 
 ### Progress sync ordering
 

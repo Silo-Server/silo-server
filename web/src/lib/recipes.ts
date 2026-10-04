@@ -1,4 +1,5 @@
 import { v2 } from "../api/v2/request";
+import type { components } from "../api/v2/schema";
 
 export type Category =
   | "library_staples"
@@ -77,7 +78,13 @@ export interface PreviewResponse {
 }
 
 export async function fetchRecipeCatalog(): Promise<RecipeCatalogResponse> {
-  const catalog = await v2("GET /api/v2/sections/recipes");
+  return recipeCatalogFromV2(await v2("GET /api/v2/sections/recipes"));
+}
+
+/** The GET /api/v2/sections/recipes body keyed by category, as the web reads it. */
+export function recipeCatalogFromV2(
+  catalog: components["schemas"]["RecipeCatalog"],
+): RecipeCatalogResponse {
   const categories: Partial<Record<Category, RecipeDefinition[]>> = {};
   for (const group of catalog.categories) {
     categories[group.category as Category] = group.recipes.map((def) => ({

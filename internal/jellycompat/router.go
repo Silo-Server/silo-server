@@ -109,9 +109,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		// Personal collections the owner opted into their server collections are
 		// exposed alongside the library ones, scoped to that owner's session.
 		itemsHandler.userCollections = usercollections.NewStore(deps.DB)
+		itemsHandler.collectionOwners = deps.CollectionOwners
 		if deps.BrowseRepo != nil && deps.ItemRepo != nil && deps.UserStoreProvider != nil {
 			itemsHandler.collectionResolver = catalog.NewCatalogResolver(deps.BrowseRepo, deps.ItemRepo).
 				WithUserStoreProvider(deps.UserStoreProvider).
+				WithPersonalCollectionAccess(deps.CollectionOwners).
 				WithEpisodeRepository(deps.EpisodeRepo).
 				WithSearchProvider(deps.CatalogSearchProvider)
 		}
@@ -193,6 +195,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
+	playbackHandler.Trickplay = deps.Trickplay
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
@@ -282,6 +285,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
+			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
+			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
 			r.Get("/UserItems/Resume", itemsHandler.HandleResume)
@@ -396,13 +401,14 @@ const (
 )
 
 // skipCompatActivityLog leaves out routes that a single page view or playback
-// fetches many times over: artwork, the bundled jellyfin-web assets, and HLS
-// variant playlists and segments. The PlaybackInfo and master playlist requests
+// fetches many times over: artwork, the bundled jellyfin-web assets, trickplay
+// sheets, and HLS variant playlists and segments. The PlaybackInfo and master playlist requests
 // that start playback are still recorded, as native stream starts are.
 func skipCompatActivityLog(pattern string) bool {
 	switch pattern {
 	case compatItemImageRoute, compatItemImageIndexRoute, compatUserImageRoute,
-		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute:
+		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute,
+		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
 	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
@@ -431,6 +437,8 @@ func skipCompatMediaCompression(r *http.Request) bool {
 		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
+		return true
+	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == "Trickplay" && strings.HasSuffix(p[4], ".jpg"):
 		return true
 	default:
 		return false

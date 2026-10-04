@@ -14,6 +14,7 @@ import {
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
+import { buildGalleryBulkCreateRequest, buildGalleryCreateRequest } from "@/lib/homeRows/payloads";
 import type { RecipeDefinition, GalleryPreset } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 import { useQuery } from "@tanstack/react-query";
@@ -584,16 +585,9 @@ export default function AdminSections() {
       return;
     }
 
-    const result = await bulkCreateMutation.mutateAsync({
-      scope: "library",
-      library_ids: libraryIDs,
-      section_type: payload.section_type,
-      title: payload.title,
-      item_limit: payload.item_limit,
-      featured: payload.featured,
-      enabled: payload.enabled,
-      config,
-    });
+    const result = await bulkCreateMutation.mutateAsync(
+      buildGalleryBulkCreateRequest(payload, libraryIDs),
+    );
     toast.success(`Created ${result.created} section${result.created === 1 ? "" : "s"}`);
   }
 
@@ -618,17 +612,9 @@ export default function AdminSections() {
       return;
     }
 
-    const data: Partial<PageSectionConfig> = {
-      scope,
-      ...(scope === "library" && activeLibraryId != null ? { library_id: activeLibraryId } : {}),
-      section_type: payload.section_type,
-      title: payload.title,
-      item_limit: payload.item_limit,
-      featured: payload.featured,
-      enabled: payload.enabled,
-      config,
-    };
-    await createFromGalleryMutation.mutateAsync(data);
+    await createFromGalleryMutation.mutateAsync(
+      buildGalleryCreateRequest(payload, scope, activeLibraryId),
+    );
   }
 
   if (isLoading) return <div className="p-4">Loading sections...</div>;
@@ -837,7 +823,11 @@ export default function AdminSections() {
       </Dialog>
       <div className="page-header gap-5">
         <div className="space-y-3">
-          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Sections</h1>
+          <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Home rows</h1>
+          <p className="page-subtitle text-sm sm:text-base">
+            The rows everyone sees on Home and on library pages. Profiles can still hide, rename or
+            reorder them.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -1156,6 +1146,7 @@ export default function AdminSections() {
           <RecipeConfigDrawer
             libraryCollectionsOnly
             libraryScoped={scope === "library"}
+            showBulkApply={scope === "library"}
             libraries={librariesList}
             def={pickedRecipe.def}
             preset={pickedRecipe.preset}

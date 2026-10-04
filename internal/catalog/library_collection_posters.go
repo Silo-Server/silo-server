@@ -78,11 +78,11 @@ type CollectionCollage struct {
 	LastUsedAt time.Time
 }
 
-// collectionUsesLiveQuery reports whether the catalog lists the collection's
-// members from its query rather than its stored items, as
-// resolveLibraryCollectionCursor decides. Such a collection has no collage.
+// collectionUsesLiveQuery reports whether the collection's members come from
+// its query rather than its stored items, as ResolveLibraryCollectionMembership
+// decides. Such a collection has no collage.
 func collectionUsesLiveQuery(c *models.LibraryCollection) bool {
-	return IsLiveQueryType(c.CollectionType) || catalogCollectionUsesLiveQuery(c.QueryDefinition)
+	return IsLiveQueryType(c.CollectionType)
 }
 
 // CollectionCollageKey returns the key of the collage composed from sources,

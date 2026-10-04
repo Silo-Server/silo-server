@@ -218,6 +218,15 @@ func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchPr
 	h.catalogResolver.WithSearchProvider(provider)
 }
 
+// SetPersonalCollectionAccess limits the catalog's reads of another
+// profile's shared personal collection to its owner's access.
+func (h *ItemsHandler) SetPersonalCollectionAccess(owners catalog.PersonalCollectionAccess) {
+	if h == nil || h.catalogResolver == nil || owners == nil {
+		return
+	}
+	h.catalogResolver.WithPersonalCollectionAccess(owners)
+}
+
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
 	h.localWatchDispatcher = dispatcher
 }
@@ -415,6 +424,9 @@ type episodeFileResponse struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	// Unreadable feeds the v2 episode file; /api/v1 is frozen, so it stays off
+	// that wire.
+	Unreadable bool `json:"-"`
 }
 
 // episodeResponse is the shape of an episode in API responses.
@@ -832,7 +844,7 @@ func (h *ItemsHandler) listPlayableTargets(ctx context.Context, v ItemViewer, it
 // playableTargetInputForItem builds the resolver input for one displayed card.
 // Response rows find their own target with playableTargetKeyForItem, which
 // keys off the same fields — including the anchor hint, so a series that
-// appears on two recently-added scan-run event cards resolves each card
+// appears on two recently-added arrival event cards resolves each card
 // separately instead of both taking the first card's answer.
 func playableTargetInputForItem(item *models.MediaItem) catalog.PlayableTargetInput {
 	return catalog.PlayableTargetInput{
@@ -1264,6 +1276,7 @@ func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter
 			AudioChannels: f.AudioChannels,
 			Container:     f.Container,
 			FileSize:      f.FileSize,
+			Unreadable:    f.ProbeRejected(),
 		})
 	}
 	return resp
@@ -1314,8 +1327,21 @@ func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*mo
 
 func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string]*models.OverlaySummary {
 	summaries := make(map[string]*models.OverlaySummary, len(items))
-	if h.fileRepo == nil || len(items) == 0 {
+	if len(items) == 0 {
 		return summaries
+	}
+	if h.itemRepo != nil {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			if item != nil && item.ContentID != "" {
+				ids = append(ids, item.ContentID)
+			}
+		}
+		summaries, err := h.itemRepo.ListOverlaySummaries(ctx, ids, filter)
+		if err == nil {
+			return summaries
+		}
+		slog.WarnContext(ctx, "listing poster overlay summaries", "component", "api", "error", err)
 	}
 
 	groupedFiles := h.listBrowseItemOverlayFiles(ctx, items, filter)

@@ -14,6 +14,7 @@ import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
 import { formatBitrate } from "@/lib/mediaFormat";
+import { formatOutOfTen, formatPercent } from "@/components/ratings/ratings";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
@@ -41,12 +42,22 @@ function formatRuntime(minutes?: number | null) {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`;
 }
 
-function formatRating(value?: number | null, max = 10) {
-  return value != null ? `${value.toFixed(1)} / ${max}` : null;
+// A rating reads the same as on the title page: its source's mark, then the
+// score on the source's own scale ("IMDb 8.1", "RT 93%").
+function ratingLabel(mark: string, score: string | null) {
+  return score != null ? (
+    <>
+      <span className="not-uppercase">{mark}</span> {score}
+    </>
+  ) : null;
 }
 
-function formatPercent(value?: number | null) {
-  return value != null ? `${value}%` : null;
+function outOfTen(value?: number | null) {
+  return value != null ? formatOutOfTen(value) : null;
+}
+
+function percent(value?: number | null) {
+  return value != null ? formatPercent(value) : null;
 }
 
 function formatProgress(ratio?: number | null) {
@@ -127,19 +138,13 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
         <>{formatRuntime(item.sort_metrics?.runtime_minutes ?? item.runtime) ?? defaultLabel}</>
       );
     case "rating_imdb":
-      return item.rating_imdb != null ? (
-        <>
-          <span className="not-uppercase">★</span> {item.rating_imdb.toFixed(1)} / 10
-        </>
-      ) : (
-        <>{defaultLabel}</>
-      );
+      return ratingLabel("IMDb", outOfTen(item.rating_imdb)) ?? <>{defaultLabel}</>;
     case "rating_tmdb":
-      return <>{formatRating(item.rating_tmdb) ?? defaultLabel}</>;
+      return ratingLabel("TMDB", outOfTen(item.rating_tmdb)) ?? <>{defaultLabel}</>;
     case "rating_rt_critic":
-      return <>{formatPercent(item.rating_rt_critic) ?? defaultLabel}</>;
+      return ratingLabel("RT", percent(item.rating_rt_critic)) ?? <>{defaultLabel}</>;
     case "rating_rt_audience":
-      return <>{formatPercent(item.rating_rt_audience) ?? defaultLabel}</>;
+      return ratingLabel("RT Audience", percent(item.rating_rt_audience)) ?? <>{defaultLabel}</>;
     case "release_date":
       return (
         <>{formatDate(item.sort_metrics?.release_date ?? item.release_date) ?? defaultLabel}</>
@@ -224,17 +229,17 @@ export default function ItemCard({
             scrim="background"
           >
             {item.status === "pending" && (
-              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+              <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                 Scanning
               </span>
             )}
             {item.status === "unmatched" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-red-300 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
                 Unmatched
               </span>
             )}
             {item.status === "ambiguous" && (
-              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] text-amber-200 uppercase">
+              <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
                 Ambiguous
               </span>
             )}
@@ -249,7 +254,7 @@ export default function ItemCard({
               <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
                 {mangaStatus ? (
                   <span
-                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
+                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
                   >
                     {mangaStatus.label}
                   </span>
@@ -257,7 +262,7 @@ export default function ItemCard({
                   <span />
                 )}
                 {mangaCountLabel && (
-                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                     <Layers className="size-3 shrink-0" />
                     <span className="truncate">{mangaCountLabel}</span>
                   </span>
@@ -319,7 +324,7 @@ export default function ItemCard({
           {showMetadata && episodeLabels?.episodeTitle ? (
             <ViewTransitionLink
               to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[12px] font-medium hover:underline"
+              className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
             >
               {episodeLabels.episodeTitle}
             </ViewTransitionLink>

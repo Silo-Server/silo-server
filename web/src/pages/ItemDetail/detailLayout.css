@@ -537,3 +537,46 @@
     }
   }
 }
+
+@layer utilities {
+  /* The season rail is a single row of posters and titles, so it always shows
+     whole instead of scrolling inside a clipped region. Episode grids keep the
+     bounded, scrolling navigation above. */
+  .series-detail-navigation.series-detail-rail {
+    height: auto;
+    overflow: visible;
+  }
+
+  /* On desktop the viewport fills the screen but grows past it when the hero
+     copy and the rail don't both fit, so the page scrolls instead of either
+     one. Short desktop viewports use the side-by-side landscape layout. */
+  @media (min-width: 1024px) and (min-height: 651px) {
+    .episode-detail-viewport:has(> .series-detail-rail) {
+      height: auto;
+      min-height: calc(100dvh - var(--detail-header-height, 0px) - var(--detail-player-height));
+      container-type: normal;
+      grid-template-rows: minmax(max-content, 1fr) max-content;
+    }
+    .episode-detail-viewport:has(> .series-detail-rail) > .item-detail-hero {
+      max-height: none;
+    }
+    /* A percentage height has nothing to resolve against in a content-sized
+       hero and would inflate it, so pin the poster to its full size. */
+    .episode-detail-viewport:has(> .series-detail-rail)
+      .item-detail-hero
+      .detail-hero-primary-content
+      > .media-card-image {
+      height: 330px;
+    }
+  }
+
+  /* The short desktop layout keeps the viewport bounded and pins the rail to
+     its bottom edge, so a rail taller than the window scrolls instead of
+     growing past the top of the page. */
+  @media (min-width: 1024px) and (max-height: 650px) {
+    .series-detail-navigation.series-detail-rail {
+      max-height: 100%;
+      overflow-y: auto;
+    }
+  }
+}

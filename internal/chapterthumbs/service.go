@@ -2,6 +2,8 @@ package chapterthumbs
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -27,6 +30,7 @@ const (
 	defaultBatchLimit          = 25
 	defaultPriorityBatchSize   = 3
 	defaultNormalBatchSize     = 8
+	chapterLockRetryDelay      = time.Second
 	hwExtractTimeoutSDR        = 8 * time.Second
 	hwExtractTimeoutHDR        = 20 * time.Second
 	cpuExtractTimeoutSDR       = 10 * time.Second
@@ -54,9 +58,21 @@ var chapterThumbnailRetrySchedule = []time.Duration{
 	24 * time.Hour,
 }
 
+var errChapterThumbnailLockBusy = errors.New("chapter thumbnail extraction is already running on another replica")
+
 type FileRepository interface {
+	// Take this guard before reading a file, and hold it until extraction
+	// results are saved, so replicas cannot process stale chapters together.
+	TryLockChapterThumbnails(context.Context, int) (lockCtx context.Context, release func(), acquired bool, err error)
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
-	ListMissingChapterThumbnails(ctx context.Context, limit int) ([]*models.MediaFile, error)
+	// ListMissingChapterThumbnails lists files with a chapter to make a
+	// thumbnail for: none yet, or one whose path does not end in
+	// currentSuffix, made at another width.
+	ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error)
+	ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error)
+	// ChapterThumbnailLibraryKey changes when the set of enabled libraries
+	// opted into chapter thumbnails changes, without reading media files.
+	ChapterThumbnailLibraryKey(context.Context) (string, error)
 	UpdateChapterThumbnailState(
 		ctx context.Context,
 		fileID int,
@@ -89,6 +105,16 @@ type SettingsReader interface {
 
 type ObjectStore = blobstore.Store
 
+// BlobQueue schedules the deletion of images a newer one replaced
+// (*blobgc.Queue).
+type BlobQueue interface {
+	Schedule(ctx context.Context, prefixes []string, delay time.Duration) error
+}
+
+// displacedImageGrace is the minimum time a replaced image stays stored.
+// The queue keeps any later expiry recorded by the chapter URL resolver.
+const displacedImageGrace = 48 * time.Hour
+
 type ThumbnailNotifier interface {
 	ChapterThumbnailReady(ctx context.Context, fileID int, chapterIndex int, thumbnailPath string, thumbnailThumbhash string)
 }
@@ -96,6 +122,8 @@ type ThumbnailNotifier interface {
 type ChapterThumbnailRequest struct {
 	FileID        int
 	TargetSeconds *float64
+	// Set by dequeue so an ordinary worker preserves playback priority.
+	priority bool
 }
 
 type Service struct {
@@ -105,6 +133,7 @@ type Service struct {
 	settings     SettingsReader
 	store        ObjectStore
 	notifier     ThumbnailNotifier
+	blobQueue    BlobQueue
 	ffmpegPath   string
 	// hwAccel and hwDevice hold the playback.hw_accel / playback.hw_device
 	// values captured when the service was built. They are only the fallback:
@@ -131,6 +160,7 @@ type Service struct {
 
 	notifyNormal        chan struct{}
 	notifyPriority      chan struct{}
+	widthQueueSpace     chan struct{}
 	workerCount         int
 	priorityWorkerCount int
 	priorityBatchSize   int
@@ -141,11 +171,11 @@ type Service struct {
 	normalQueue    []int
 	queuedPriority map[int]ChapterThumbnailRequest
 	queuedNormal   map[int]ChapterThumbnailRequest
+	priorityRetry  map[int]time.Time
 	inProgress     map[int]struct{}
 
 	transcodePool      *nodepool.TranscodePool
-	remoteMu           sync.Mutex
-	remoteReservations map[string]int
+	remoteReservations *nodepool.Reservations
 	remoteExtractor    remoteFrameExtractor
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
@@ -173,6 +203,15 @@ func (s *Service) SetNotifier(notifier ThumbnailNotifier) {
 		return
 	}
 	s.notifier = notifier
+}
+
+// SetBlobQueue lets the service retire the images a width change replaces.
+// Without one they stay stored until their file is deleted.
+func (s *Service) SetBlobQueue(queue BlobQueue) {
+	if s == nil {
+		return
+	}
+	s.blobQueue = queue
 }
 
 func NewService(
@@ -211,6 +250,7 @@ func NewService(
 		hwDevice:            hwDevice,
 		notifyNormal:        make(chan struct{}, defaultQueueSize),
 		notifyPriority:      make(chan struct{}, defaultQueueSize),
+		widthQueueSpace:     make(chan struct{}, 1),
 		workerCount:         workerCount,
 		priorityWorkerCount: defaultPriorityWorkerCount,
 		priorityBatchSize:   defaultPriorityBatchSize,
@@ -219,7 +259,7 @@ func NewService(
 		queuedNormal:        make(map[int]ChapterThumbnailRequest),
 		inProgress:          make(map[int]struct{}),
 		transcodePool:       transcodePool,
-		remoteReservations:  make(map[string]int),
+		remoteReservations:  &nodepool.Reservations{},
 		remoteExtractor:     &httpRemoteFrameExtractor{},
 		clock:               time.Now,
 	}
@@ -251,6 +291,7 @@ func (s *Service) Start(ctx context.Context) {
 	for i := 0; i < s.priorityWorkerCount; i++ {
 		go s.worker(ctx, true)
 	}
+	go s.followPreviewWidth(ctx)
 }
 
 func (s *Service) QueueFileIDs(_ context.Context, fileIDs []int) {
@@ -295,7 +336,11 @@ func (s *Service) BackfillMissing(ctx context.Context, limit int) (int, error) {
 		limit = defaultBatchLimit
 	}
 
-	files, err := s.fileRepo.ListMissingChapterThumbnails(ctx, limit)
+	width, err := s.previewImageWidth(ctx)
+	if err != nil {
+		return 0, err
+	}
+	files, err := s.fileRepo.ListMissingChapterThumbnails(ctx, limit, chapterThumbnailSuffix(width))
 	if err != nil {
 		return 0, err
 	}
@@ -323,8 +368,10 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 		if !ok {
 			return
 		}
-		requeueNormal, err := s.processRequest(ctx, req, priorityOnly)
-		if err != nil {
+		requeueNormal, err := s.processRequest(ctx, req, req.priority)
+		if errors.Is(err, errChapterThumbnailLockBusy) {
+			s.retryPriorityRequest(req)
+		} else if err != nil {
 			slog.WarnContext(ctx, "chapter thumbnail generation failed", "component", "chapterthumbs", "file_id", req.FileID, "error", err)
 		}
 		notifyPriority, notifyNormal := s.finishProcessing(req.FileID)
@@ -341,6 +388,18 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 }
 
 func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailRequest, priority bool) (bool, error) {
+	lockCtx, release, acquired, err := s.fileRepo.TryLockChapterThumbnails(ctx, req.FileID)
+	if err != nil {
+		return false, fmt.Errorf("lock chapter thumbnail extraction: %w", err)
+	}
+	if !acquired {
+		if priority {
+			return false, errChapterThumbnailLockBusy
+		}
+		return false, nil
+	}
+	defer release()
+	ctx = lockCtx
 	file, err := s.fileRepo.GetByID(ctx, req.FileID)
 	if err != nil || file == nil {
 		if err == nil {
@@ -387,6 +446,11 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, nil
 	}
 
+	width, err := s.previewImageWidth(ctx)
+	if err != nil {
+		return false, err
+	}
+
 	file, err = s.ensureChapters(ctx, file, now)
 	if err != nil || file == nil {
 		return false, err
@@ -410,7 +474,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, nil
 	}
 
-	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now)
+	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now, width)
 	if len(selected) == 0 {
 		slog.InfoContext(ctx,
 			"chapter thumbnail request skipped", "component", "chapterthumbs",
@@ -481,7 +545,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			continue
 		}
 
-		path, thumbhash, err := s.uploadChapterThumbnail(ctx, updated.ID, chapter.Index, frame)
+		path, thumbhash, err := s.uploadChapterThumbnail(ctx, updated.ID, chapter.Index, frame, width)
 		if err != nil {
 			slog.WarnContext(ctx,
 				"chapter thumbnail upload failed", "component", "chapterthumbs",
@@ -532,6 +596,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			updated = *persisted
 			updated.Chapters = append([]models.MediaChapter(nil), persisted.Chapters...)
 		}
+		s.retireDisplaced(ctx, file.Chapters, generated)
 		for _, ready := range generated {
 			if s.notifier == nil || ready.offset < 0 || ready.offset >= len(updated.Chapters) {
 				continue
@@ -547,7 +612,14 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		}
 	}
 
-	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now)
+	// A first image may have been absent when the width coordinator scanned
+	// during extraction. Check the live width after saving; the coordinator
+	// also keeps missing images pending if this settings read fails.
+	currentWidth, widthErr := s.previewImageWidth(ctx)
+	if widthErr != nil {
+		return false, widthErr
+	}
+	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now, currentWidth)
 	slog.InfoContext(ctx,
 		"chapter thumbnail processing finished", "component", "chapterthumbs",
 		"file_id",
@@ -801,60 +873,39 @@ func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func()
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
 
-	nodes := s.transcodePool.Nodes()
-	capacity := s.chapterThumbnailNodeCapacity(ctx)
-
-	s.remoteMu.Lock()
-	defer s.remoteMu.Unlock()
-
-	var best *nodepool.Node
-	bestLoad := 0
-	hadHealthyNode := false
-	for _, node := range nodes {
-		if node == nil || !node.Enabled || !node.Healthy {
-			continue
-		}
-		hadHealthyNode = true
-		reserved := s.remoteReservations[node.URL]
-		if reserved >= capacity {
-			continue
-		}
-		effectiveLoad := node.ActiveJobs + reserved
-		if best == nil || effectiveLoad < bestLoad {
-			best = node
-			bestLoad = effectiveLoad
-		}
+	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.Nodes(), s.chapterThumbnailNodeCapacity(ctx))
+	switch outcome {
+	case nodepool.Reserved:
+		return node, release, ""
+	case nodepool.CapacityExhausted:
+		return nil, release, chapterThumbnailNodeCapacityExhaustedReason
+	default:
+		return nil, release, chapterThumbnailNodeUnavailableReason
 	}
-	if best == nil {
-		if hadHealthyNode {
-			return nil, func() {}, chapterThumbnailNodeCapacityExhaustedReason
-		}
-		return nil, func() {}, chapterThumbnailNodeUnavailableReason
-	}
-
-	s.remoteReservations[best.URL]++
-	return best, func() {
-		s.remoteMu.Lock()
-		defer s.remoteMu.Unlock()
-		current := s.remoteReservations[best.URL]
-		if current <= 1 {
-			delete(s.remoteReservations, best.URL)
-			return
-		}
-		s.remoteReservations[best.URL] = current - 1
-	}, ""
 }
 
-func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error) {
+func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterIndex int, frame []byte, width int) (string, string, error) {
 	if s.uploadChapterThumbnailFunc != nil {
 		return s.uploadChapterThumbnailFunc(ctx, fileID, chapterIndex, frame)
 	}
 
-	data, err := imageutil.EncodeWebPWidth(frame, chapterThumbnailWidth)
+	data, err := imageutil.EncodeWebPWidth(frame, width)
 	if err != nil {
 		return "", "", fmt.Errorf("encode thumbnail: %w", err)
 	}
-	key := chapterThumbnailKey(fileID, chapterIndex)
+	// Immutable output keys also fence storage: a worker whose lock session
+	// dies may finish an outstanding upload, but different stale bytes cannot
+	// overwrite the image a replacement worker published.
+	digest := sha256.Sum256(data)
+	key := fmt.Sprintf("%s%d/%d-%x/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, digest, width)
+	// Defer queued deletion before reusing a width, waiting for a collector
+	// that already holds the row. Keep any longer issued URL expiry: removing
+	// that protection would let file deletion collect the image too early.
+	if s.blobQueue != nil {
+		if err := s.blobQueue.Schedule(ctx, []string{key}, displacedImageGrace); err != nil {
+			return "", "", err
+		}
+	}
 	if err := s.store.Put(ctx, key, data); err != nil {
 		return "", "", fmt.Errorf("upload %s: %w", key, err)
 	}
@@ -865,16 +916,55 @@ func (s *Service) uploadChapterThumbnail(ctx context.Context, fileID, chapterInd
 	return key, thumbhash, nil
 }
 
-// chapterThumbnailWidth is the width of the one image stored per chapter. It
-// is the size every client is served: the web seek-bar preview and chapters
-// menu, and the thumbnail_url the native apps decode. No full-size original is
-// kept; a client that needs larger previews needs the chapters regenerated.
-const chapterThumbnailWidth = 300
+// previewImageWidth is the width of the one image stored per chapter: the
+// preview image width setting, shared with seek previews. It is the size
+// every client is served: the web seek-bar preview and chapters menu, and
+// the thumbnail_url the native apps decode. No full-size original is kept, so
+// a new width makes every chapter's thumbnail again, and the old image serves
+// until its replacement exists. A setting that cannot be read is an error:
+// going on with the default would remake every thumbnail made to another.
+func (s *Service) previewImageWidth(ctx context.Context) (int, error) {
+	if s.settings == nil {
+		return config.DefaultPreviewImageWidth, nil
+	}
+	value, err := s.settings.Get(ctx, config.PreviewImageWidthSettingKey)
+	if err != nil {
+		return 0, fmt.Errorf("read the preview image width: %w", err)
+	}
+	return config.PreviewImageWidth(value), nil
+}
 
-// chapterThumbnailKey is the object key a chapter's thumbnail is stored under,
-// and the value its thumbnail_path holds.
-func chapterThumbnailKey(fileID, chapterIndex int) string {
-	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, chapterThumbnailWidth)
+// chapterThumbnailKey is the legacy numeric chapter-directory key. Existing
+// references remain supported alongside new immutable image keys.
+func chapterThumbnailKey(fileID, chapterIndex, width int) string {
+	return fmt.Sprintf("%s%d/%d/w%d.webp", chapterImagesPrefix, fileID, chapterIndex, width)
+}
+
+// chapterThumbnailSuffix ends the key of every thumbnail made at width.
+func chapterThumbnailSuffix(width int) string {
+	return fmt.Sprintf("/w%d.webp", width)
+}
+
+// retireDisplaced queues the images that generated replaced for deletion,
+// once the chapters naming their replacements are saved. A failure only
+// leaves the old images stored until their file is deleted.
+func (s *Service) retireDisplaced(ctx context.Context, before []models.MediaChapter, generated []generatedChapter) {
+	if s.blobQueue == nil {
+		return
+	}
+	var displaced []string
+	for _, ready := range generated {
+		if ready.offset < 0 || ready.offset >= len(before) {
+			continue
+		}
+		old := before[ready.offset].ThumbnailPath
+		if _, ok := imageKeyGroup(old); ok && old != ready.path {
+			displaced = append(displaced, old)
+		}
+	}
+	if err := s.blobQueue.Schedule(ctx, displaced, displacedImageGrace); err != nil {
+		slog.WarnContext(ctx, "chapter thumbnail cleanup not queued", "component", "chapterthumbs", "images", len(displaced), "error", err)
+	}
 }
 
 func (s *Service) enqueue(req ChapterThumbnailRequest, priority bool) bool {
@@ -949,6 +1039,40 @@ func mergeRequest(existing ChapterThumbnailRequest, incoming ChapterThumbnailReq
 	return existing
 }
 
+// retryPriorityRequest retains a contended playback request while workers can
+// serve other files. A newer queued target takes precedence over this attempt.
+func (s *Service) retryPriorityRequest(req ChapterThumbnailRequest) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.queuedPriority[req.FileID]; ok {
+		req = mergeRequest(req, existing)
+	} else {
+		delete(s.queuedNormal, req.FileID)
+		s.priorityQueue = append(s.priorityQueue, req.FileID)
+	}
+	s.queuedPriority[req.FileID] = req
+	if s.priorityRetry == nil {
+		s.priorityRetry = make(map[int]time.Time)
+	}
+	s.priorityRetry[req.FileID] = time.Now().Add(chapterLockRetryDelay)
+}
+
+func (s *Service) nextPriorityRetryLocked() <-chan time.Time {
+	var earliest time.Time
+	for fileID, retryAfter := range s.priorityRetry {
+		if _, busy := s.inProgress[fileID]; busy {
+			continue
+		}
+		if _, queued := s.queuedPriority[fileID]; queued && (earliest.IsZero() || retryAfter.Before(earliest)) {
+			earliest = retryAfter
+		}
+	}
+	if earliest.IsZero() {
+		return nil
+	}
+	return time.After(max(time.Until(earliest), 0))
+}
+
 func (s *Service) notifyNormalWorker() {
 	select {
 	case s.notifyNormal <- struct{}{}:
@@ -1016,6 +1140,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 				return req, true
 			}
 		}
+		retry := s.nextPriorityRetryLocked()
 		s.mu.Unlock()
 
 		if priorityOnly {
@@ -1023,6 +1148,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 			case <-ctx.Done():
 				return ChapterThumbnailRequest{}, false
 			case <-s.notifyPriority:
+			case <-retry:
 			}
 			continue
 		}
@@ -1032,6 +1158,7 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 			return ChapterThumbnailRequest{}, false
 		case <-s.notifyPriority:
 		case <-s.notifyNormal:
+		case <-retry:
 		}
 	}
 }
@@ -1061,9 +1188,18 @@ func (s *Service) popQueuedLocked(priority bool) (ChapterThumbnailRequest, bool)
 		if _, busy := s.inProgress[fileID]; busy {
 			continue
 		}
+		if priority && time.Now().Before(s.priorityRetry[fileID]) {
+			continue
+		}
+		req.priority = priority
+		delete(s.priorityRetry, fileID)
 		delete(queued, fileID)
 		s.inProgress[fileID] = struct{}{}
 		*queue = append((*queue)[:i], (*queue)[i+1:]...)
+		select {
+		case s.widthQueueSpace <- struct{}{}:
+		default:
+		}
 		return req, true
 	}
 
@@ -1137,9 +1273,9 @@ func (s *Service) chapterThumbnailSoftwareToneMapEnabled(ctx context.Context) bo
 	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
-func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time) bool {
+func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time, width int) bool {
 	for _, chapter := range chapters {
-		if isChapterEligible(chapter, now) {
+		if isChapterEligible(chapter, now, width) {
 			return true
 		}
 	}
@@ -1152,6 +1288,7 @@ func selectChapterCandidates(
 	priority bool,
 	limit int,
 	now time.Time,
+	width int,
 ) []chapterCandidate {
 	if limit <= 0 {
 		return nil
@@ -1159,7 +1296,7 @@ func selectChapterCandidates(
 
 	candidates := make([]chapterCandidate, 0, len(chapters))
 	for offset, chapter := range chapters {
-		if !isChapterEligible(chapter, now) {
+		if !isChapterEligible(chapter, now, width) {
 			continue
 		}
 		candidate := chapterCandidate{offset: offset, chapter: chapter}
@@ -1198,8 +1335,10 @@ func selectChapterCandidates(
 	return candidates
 }
 
-func isChapterEligible(chapter models.MediaChapter, now time.Time) bool {
-	if chapter.ThumbnailPath != "" {
+// isChapterEligible reports whether a chapter needs a thumbnail made: it has
+// none, or has one made at another width, and is not waiting out a failure.
+func isChapterEligible(chapter models.MediaChapter, now time.Time, width int) bool {
+	if chapter.ThumbnailPath != "" && strings.HasSuffix(chapter.ThumbnailPath, chapterThumbnailSuffix(width)) {
 		return false
 	}
 	if chapter.ThumbnailRetryAfter != nil && chapter.ThumbnailRetryAfter.After(now) {
@@ -1230,8 +1369,8 @@ func recordChapterFailure(chapter *models.MediaChapter, now time.Time, reason st
 	}
 	failedAt := now
 	retryAfter := now.Add(nextChapterRetryDuration(*chapter))
-	chapter.ThumbnailPath = ""
-	chapter.ThumbnailThumbhash = ""
+	// A thumbnail made at another width keeps serving until one at this
+	// width replaces it.
 	chapter.ThumbnailFailedAt = &failedAt
 	chapter.ThumbnailRetryAfter = &retryAfter
 	chapter.ThumbnailLastError = failureDetail(reason, err)

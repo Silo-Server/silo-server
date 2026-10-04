@@ -9,6 +9,8 @@ import type { SettingsCapabilities } from "@/hooks/queries/settingValues";
 const mocks = vi.hoisted(() => ({
   refetchCapabilities: vi.fn(),
   useEffectiveSettings: vi.fn(),
+  useStoredSettingValues: vi.fn(),
+  deviceSettingGroupsProps: vi.fn(),
   capabilities: {
     data: undefined as SettingsCapabilities | undefined,
     isLoading: false,
@@ -46,6 +48,7 @@ vi.mock("@/hooks/queries/settingValues", async (importOriginal) => {
       refetch: mocks.refetchCapabilities,
     }),
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
+    useStoredSettingValues: (...args: unknown[]) => mocks.useStoredSettingValues(...args),
     useSetSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
     useClearSettingValue: () => ({ mutate: vi.fn(), isPending: false }),
   };
@@ -65,7 +68,10 @@ vi.mock("@/components/settings/DeviceList", () => ({
 }));
 
 vi.mock("@/components/settings/DeviceSettingGroups", () => ({
-  DeviceSettingGroups: () => <div>Editable device defaults</div>,
+  DeviceSettingGroups: (props: unknown) => {
+    mocks.deviceSettingGroupsProps(props);
+    return <div>Editable device defaults</div>;
+  },
 }));
 
 vi.mock("@/components/settings/SubtitleAppearancePanelView", () => ({
@@ -87,6 +93,9 @@ describe("DeviceSettings capability discovery", () => {
     mocks.refetchCapabilities.mockReset();
     mocks.useEffectiveSettings.mockReset();
     mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
+    mocks.useStoredSettingValues.mockReset();
+    mocks.useStoredSettingValues.mockReturnValue({ data: undefined });
+    mocks.deviceSettingGroupsProps.mockReset();
     mocks.capabilities.data = undefined;
     mocks.capabilities.isLoading = false;
     mocks.capabilities.isError = true;
@@ -161,5 +170,37 @@ describe("DeviceSettings capability discovery", () => {
     );
     expect(screen.getByText("Editable device defaults")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("reads the device's own row for a key whose profile value is winning", () => {
+    mocks.capabilities.data = { ...compatibleCapabilities, manifest_revision: 16 };
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: {
+        "ui.title_art": { key: "ui.title_art", value: true, source: "profile", scope: "profile" },
+        "player.hdr_enabled": {
+          key: "player.hdr_enabled",
+          value: true,
+          source: "profile",
+          scope: "profile",
+        },
+      },
+      isLoading: false,
+    });
+    mocks.useStoredSettingValues.mockReturnValue({ data: { "ui.title_art": false } });
+
+    render(<DeviceSettings />);
+
+    // Only ui.title_art resolves its profile value ahead of the device's own;
+    // other keys' effective answers already name any device row.
+    expect(mocks.useStoredSettingValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keys: ["ui.title_art"],
+        identity: expect.objectContaining({ scope: "profile_device", deviceId: "living-room" }),
+        enabled: true,
+      }),
+    );
+    expect(mocks.deviceSettingGroupsProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ storedOnDevice: { "ui.title_art": false } }),
+    );
   });
 });

@@ -36,6 +36,11 @@ type Scope struct {
 	// socket tickets and progress snapshots hash as the access fingerprint:
 	// changing the row mid-session must not invalidate either.
 	NextUpMode string `json:"-"`
+	// PreferencesDegraded is set when the profile's viewer preferences could
+	// not be read and the scope carries their defaults (see
+	// ResolveViewerPreferences). It stays out of the access fingerprint, which
+	// therefore does not describe the profile's real scope while it is set.
+	PreferencesDegraded bool `json:"-"`
 }
 
 // MaturityLimits are the per-viewer maturity restrictions every catalog read
@@ -107,6 +112,11 @@ type ResolveInput struct {
 	ProfileID           string
 	ProfileToken        string
 	SkipPINVerification bool
+	// ContentAccessOnly resolves what the profile may access, leaving out
+	// the libraries it hides from its own browsing (ui.disabled_library_ids).
+	// Reading another profile's shared personal collection uses it: the
+	// owner's browsing preference does not limit what the collection shows.
+	ContentAccessOnly bool
 }
 
 // ProfileTokenClaims are the claims embedded in a verified profile token.

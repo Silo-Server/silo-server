@@ -2,17 +2,9 @@ import { useState } from "react";
 import BulkApplyDialog from "./BulkApplyDialog";
 import RecipeParamFields, { type RecipeParamFieldsProps } from "./RecipeParamFields";
 import type { RecipeDefinition, GalleryPreset } from "@/lib/recipes";
+import { buildGalleryAddPayload, type AddPayload } from "@/lib/homeRows/payloads";
 
-export interface AddPayload {
-  section_type: string;
-  title: string;
-  item_limit: number;
-  featured: boolean;
-  enabled: boolean;
-  config: Record<string, unknown>;
-  apply_to_all_libraries?: boolean;
-  library_ids?: number[];
-}
+export type { AddPayload };
 
 interface Props {
   libraryCollectionsOnly?: boolean;
@@ -53,6 +45,7 @@ export default function RecipeConfigDrawer({
   const [enabled, setEnabled] = useState(true);
   const [applyAll, setApplyAll] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const libraryCollectionID =
     typeof params.library_collection_id === "string" ? params.library_collection_id : "";
   const userCollectionID =
@@ -68,26 +61,29 @@ export default function RecipeConfigDrawer({
     def.type === "admin_curated_list" &&
     (!Array.isArray(params.item_ids) || params.item_ids.length === 0);
 
+  const fields = {
+    sectionType: def.type,
+    title,
+    itemLimit: limit,
+    featured,
+    enabled,
+    config: params,
+  };
+
   const handleAdd = () => {
-    if (collectionMissing || curatedListEmpty) {
+    if (submitting || collectionMissing || curatedListEmpty) {
       return;
     }
-    const payload = {
-      section_type: def.type,
-      title,
-      item_limit: limit,
-      featured,
-      enabled,
-      config: params,
-      apply_to_all_libraries: false,
-    };
     if (showBulkApply && applyAll) {
       setBulkOpen(true);
       return;
     }
-    void Promise.resolve(onAdd(payload)).catch(() => {
-      // The owner reports the failure and keeps the drawer mounted for retry.
-    });
+    setSubmitting(true);
+    void Promise.resolve(onAdd(buildGalleryAddPayload(fields)))
+      .catch(() => {
+        // The owner reports the failure and keeps the drawer mounted for retry.
+      })
+      .finally(() => setSubmitting(false));
   };
 
   return (
@@ -188,7 +184,7 @@ export default function RecipeConfigDrawer({
         <button
           type="button"
           onClick={handleAdd}
-          disabled={collectionMissing || curatedListEmpty}
+          disabled={submitting || collectionMissing || curatedListEmpty}
           className="rounded bg-indigo-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add section
@@ -199,18 +195,7 @@ export default function RecipeConfigDrawer({
         <BulkApplyDialog
           open={bulkOpen}
           onClose={() => setBulkOpen(false)}
-          onConfirm={(libraryIDs) =>
-            onAdd({
-              section_type: def.type,
-              title,
-              item_limit: limit,
-              featured,
-              enabled,
-              config: params,
-              apply_to_all_libraries: true,
-              library_ids: libraryIDs,
-            })
-          }
+          onConfirm={(libraryIDs) => onAdd(buildGalleryAddPayload(fields, libraryIDs))}
         />
       ) : null}
     </div>

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { GroupSortMode, LibraryCollectionGroup } from "@/api/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export interface GroupEditDialogProps {
   group: LibraryCollectionGroup | null; // null = create new
@@ -18,6 +19,7 @@ export function GroupEditDialog({
 }: GroupEditDialogProps) {
   const [name, setName] = useState(group?.name ?? "");
   const [sortMode, setSortMode] = useState<GroupSortMode>(group?.default_sort_mode ?? "manual");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const isUserKind = group?.kind === "user_collections";
 
   return (
@@ -54,13 +56,24 @@ export function GroupEditDialog({
 
         <div className="mt-6 flex items-center gap-2">
           {mode === "edit" && !isUserKind && onDelete && (
-            <button
-              onClick={onDelete}
-              className="text-destructive text-sm hover:underline"
-              type="button"
-            >
-              Delete group
-            </button>
+            <>
+              <button
+                onClick={() => setConfirmingDelete(true)}
+                className="text-destructive text-sm hover:underline"
+                type="button"
+              >
+                Delete group
+              </button>
+              <ConfirmDialog
+                open={confirmingDelete}
+                onOpenChange={setConfirmingDelete}
+                title="Delete group"
+                description={`Delete group "${group?.name}"? Its collections move to Ungrouped. No collections are deleted.`}
+                confirmLabel="Delete group"
+                variant="destructive"
+                onConfirm={onDelete}
+              />
+            </>
           )}
           <div className="flex-1" />
           <button onClick={onCancel} className="rounded border px-3 py-1.5 text-sm" type="button">

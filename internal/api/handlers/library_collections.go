@@ -59,6 +59,9 @@ type LibraryCollectionHandler struct {
 	JobRepo               *adminjob.Repository
 	EventsHub             *evt.Hub
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
+	// CollectionOwners resolves the owner's access for another profile's
+	// shared collection opted into the library tab.
+	CollectionOwners catalog.PersonalCollectionAccess
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse

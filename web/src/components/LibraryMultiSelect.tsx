@@ -68,6 +68,7 @@ export default function LibraryMultiSelect({
   hideAllOption = false,
   ineligibleReason,
   triggerClassName,
+  disabled,
 }: {
   libraries: LibraryOption[];
   value: number[];
@@ -77,6 +78,7 @@ export default function LibraryMultiSelect({
   hideAllOption?: boolean;
   ineligibleReason?: string;
   triggerClassName?: string;
+  disabled?: boolean;
 }) {
   const hasIneligible =
     Array.isArray(eligibleKinds) &&
@@ -90,6 +92,7 @@ export default function LibraryMultiSelect({
           type="button"
           variant="outline"
           className={triggerClassName ?? "w-full justify-between"}
+          disabled={disabled}
         >
           <span className="truncate">
             {formatLibraryFilterSummary(value, libraries, emptyLabel)}

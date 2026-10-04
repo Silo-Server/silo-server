@@ -104,7 +104,7 @@ type Service struct {
 	// installationCache memoizes plugin_installations rows keyed by ID so the
 	// hot plugin-RPC path (ensureClient -> loadInstallation) and the metadata
 	// chain enabled-check answer from memory instead of a per-call DB read. It
-	// is wiped wholesale by invalidateInstallationCache, registered as a
+	// is wiped wholesale by InvalidateInstallationCache, registered as a
 	// lifecycle hook, so a cached row is at most one lifecycle event stale.
 	//
 	// installationCacheGen guards the read-through against an invalidate that
@@ -192,7 +192,7 @@ func NewService(
 	// silently forgotten by a new caller: every OnLifecycleChange (install /
 	// enable / disable / update / uninstall) wipes the cache, keeping the
 	// memoized rows correct without any external wiring.
-	svc.AddLifecycleHook(func(context.Context) { svc.invalidateInstallationCache() })
+	svc.AddLifecycleHook(func(context.Context) { svc.InvalidateInstallationCache() })
 	// Resident plugins (network access providers) are reconciled after every
 	// lifecycle change; the supervisor stays inert until StartResidents arms
 	// it once the API listener is bound.
@@ -451,7 +451,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -593,7 +593,7 @@ func (s *Service) Stop(installationID int) error {
 // the stop and being reused with the new revision.
 func (s *Service) RefreshMarkerRuntime(installationID int) error {
 	s.runtimeRefreshMu.Lock()
-	s.invalidateInstallationCache()
+	s.InvalidateInstallationCache()
 	if err := s.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 		s.runtimeRefreshMu.Unlock()
 		return err
@@ -993,7 +993,7 @@ func (s *Service) loadInstallation(ctx context.Context, installationID int, requ
 // cachedInstallation returns the plugin_installations row for installationID
 // from the in-memory cache, loading it from the store on a miss. The returned
 // *Installation is shared and must be treated as read-only by callers; it is
-// evicted wholesale by invalidateInstallationCache on every lifecycle change.
+// evicted wholesale by InvalidateInstallationCache on every lifecycle change.
 func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*Installation, error) {
 	s.installationCacheMu.RLock()
 	cached, ok := s.installationCache[installationID]
@@ -1025,10 +1025,11 @@ func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*
 	return installation, nil
 }
 
-// invalidateInstallationCache clears the in-memory installation cache. It is
+// InvalidateInstallationCache clears the in-memory installation cache. It is
 // registered as a lifecycle hook (see NewService) so OnLifecycleChange evicts
 // stale rows after every install / enable / disable / update / uninstall.
-func (s *Service) invalidateInstallationCache() {
+// Periodic provider reloads call it before reading changes made on other API nodes.
+func (s *Service) InvalidateInstallationCache() {
 	if s == nil {
 		return
 	}

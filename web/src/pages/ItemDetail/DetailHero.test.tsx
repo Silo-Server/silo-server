@@ -1,11 +1,69 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DetailHero from "./DetailHero";
+
+const titleArt = vi.hoisted(() => ({ show: true as boolean | undefined }));
 
 vi.mock("@/lib/thumbhash", () => ({
   decodeThumbhash: (thumbhash: string) => `data:image/png;base64,${thumbhash}`,
 }));
+
+vi.mock("@/hooks/useTitleArt", () => ({
+  useShowTitleArt: () => titleArt.show,
+}));
+
+describe("DetailHero title", () => {
+  beforeEach(() => {
+    titleArt.show = true;
+  });
+
+  it("names the title with its logo while title art is on", () => {
+    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
+
+    expect(container.querySelector('img[src="/logo.webp"]')).not.toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
+  });
+
+  it("names the title in text when the profile turned title art off", () => {
+    titleArt.show = false;
+    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
+
+    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).not.toHaveClass(
+      "sr-only",
+    );
+  });
+
+  it("holds a logo title without fetching art until the profile's choice loads", () => {
+    titleArt.show = undefined;
+    const { container } = render(<DetailHero title="Blade Runner" logoUrl="/logo.webp" />);
+
+    expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
+    expect(screen.getByTestId("detail-hero-title-pending")).toHaveClass("h-20", "lg:h-28");
+    expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
+  });
+
+  it("puts the type and network on one eyebrow line", () => {
+    const { container } = render(
+      <DetailHero title="Game of Thrones" context="Series" studioLabel="HBO" />,
+    );
+
+    const eyebrows = container.querySelectorAll(".detail-hero-context");
+    expect(eyebrows).toHaveLength(1);
+    expect(eyebrows[0]).toHaveTextContent(/^SeriesHBO$/);
+  });
+
+  it("keeps a breadcrumb context on its own row", () => {
+    const { container } = render(
+      <DetailHero title="Pilot" context={<nav aria-label="Breadcrumb">Show / Season 1</nav>} />,
+    );
+
+    const context = container.querySelector(".detail-hero-context");
+    expect(context?.tagName).toBe("DIV");
+    expect(context).toContainElement(screen.getByRole("navigation", { name: "Breadcrumb" }));
+  });
+});
 
 describe("DetailHero artwork revisions", () => {
   it("keeps the above-fold primary content on one bounded reveal surface", () => {

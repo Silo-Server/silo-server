@@ -41,7 +41,6 @@ vi.mock("@/hooks/queries/useAllUserCollections", () => ({
 }));
 vi.mock("@/lib/recipes", () => ({ fetchRecipeCatalog: async () => ({ categories: {} }) }));
 vi.mock("@/components/collections/CollectionRulesEditor", () => ({ default: () => null }));
-vi.mock("@/components/FilterEasyMode/FilterEasyMode", () => ({ default: () => null }));
 vi.mock("@/components/LibraryMultiSelect", () => ({ default: () => null }));
 vi.mock("@/components/RecipeGallery/RecipeParamFields", () => ({ default: () => null }));
 vi.mock("@/components/RecipeGallery/RecipeGalleryModal", () => ({

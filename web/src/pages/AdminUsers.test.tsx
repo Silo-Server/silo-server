@@ -1,4 +1,4 @@
-import type { AccessGroup, AdminUser } from "@/api/types";
+import type { AccessGroup, AdminPolicyDefaults, AdminUser } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
@@ -9,11 +9,13 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminUsers from "./AdminUsers";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({ beginImpersonation: mocks.beginImpersonation, user: mocks.viewer }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: mocks.policyDefaults }),
   useViewerIsOwner: (id?: number) => mocks.users.some((u) => u.id === id && u.is_owner),
   useAdminUserCapabilities: () => ({ data: { available: mocks.available, default_profile: true } }),
   useImpersonateUser: () => ({ mutateAsync: mocks.impersonate, reset: vi.fn(), isPending: false }),
@@ -38,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   accessGroupsLoaded: false,
   accessGroupsFailed: false,
   refetchAccessGroups: vi.fn(),
+  /** The server's built-in policy defaults; undefined while they load. */
+  policyDefaults: undefined as AdminPolicyDefaults | undefined,
 }));
 
 vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
@@ -234,6 +238,7 @@ const adminUser: AdminUser = {
   password_login: true,
   password_change_required: false,
   is_owner: false,
+  break_glass: false,
   effective_policy: {
     library_ids: null,
     max_playback_quality: "",
@@ -503,6 +508,7 @@ describe("AdminUsers user dialog policy hints", () => {
     mocks.available = true;
     mocks.accessGroups = [];
     mocks.accessGroupsLoaded = false;
+    mocks.policyDefaults = POLICY_DEFAULTS;
     mocks.useAdminServerSettings.mockReturnValue({ data: {}, isLoading: false });
     vi.stubGlobal(
       "ResizeObserver",
@@ -578,6 +584,41 @@ describe("AdminUsers user dialog policy hints", () => {
     // The server then creates the account without a group.
     expect(within(dialog).getAllByText("Server default: Unlimited")).toHaveLength(4);
     expect(within(dialog).queryByText(/Inherit/)).not.toBeInTheDocument();
+  });
+
+  it("does not show an override as the default while the server defaults load", async () => {
+    mocks.policyDefaults = undefined;
+    mocks.users = [{ ...adminUser, download_transcode_allowed: true }, ownerViewer];
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, "Edit taylor");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    // A field without an override shows the account's resolved value.
+    expect(within(dialog).getByRole("combobox", { name: "Downloads" })).toHaveTextContent(
+      "Server default: Allowed",
+    );
+
+    // This one is overridden, so its resolved value is not what clearing the
+    // override falls back to: the hint waits for the defaults.
+    await user.click(within(dialog).getByRole("combobox", { name: "Download Transcodes" }));
+    expect(await screen.findByRole("option", { name: "Server default" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Server default: / })).toBeNull();
+  });
+
+  it("previews server-prepared downloads from the server's admin and no-group defaults", async () => {
+    mocks.users = [ownerViewer];
+    mocks.accessGroupsLoaded = true;
+    const user = userEvent.setup();
+    renderPage();
+    const dialog = await openLimits(user, /Add User/);
+    const transcodes = () => within(dialog).getByRole("combobox", { name: "Download Transcodes" });
+
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Server default: Not allowed");
+
+    await chooseRole(user, dialog, "Admin");
+    await user.click(within(dialog).getByRole("tab", { name: "Access" }));
+    expect(transcodes()).toHaveTextContent("Admin default: Allowed");
   });
 
   async function openAccess(user: ReturnType<typeof userEvent.setup>, button: string | RegExp) {

@@ -233,7 +233,7 @@ type CollectionImportBase struct {
 	SyncSchedule           *string         `json:"sync_schedule,omitempty" nullable:"false" doc:"Sync cadence name; the server default when omitted" example:"daily"`
 	IsShared               *bool           `json:"is_shared,omitempty" nullable:"false" example:"false"`
 	PosterURL              *string         `json:"poster_url,omitempty" nullable:"false" doc:"A bundled template poster path or an image URL" example:""`
-	LibraryIDs             *[]ID           `json:"library_ids,omitempty" nullable:"false" doc:"Libraries the sync matches against; every library when omitted" example:"[\"1\"]"`
+	LibraryIDs             *[]ID           `json:"library_ids,omitempty" nullable:"false" doc:"Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted" example:"[\"1\"]"`
 	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty" doc:"Display filter fragment"`
 	SortConfig             json.RawMessage `json:"sort_config,omitempty" doc:"Default sort document"`
 }

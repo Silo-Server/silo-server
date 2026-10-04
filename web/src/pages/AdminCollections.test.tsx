@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LibraryCollection } from "@/api/types";
+import type { LibraryCollection, QueryDefinition } from "@/api/types";
 
 import {
   buildAdminCollectionEditorPath,
@@ -74,6 +74,34 @@ describe("AdminCollections helpers", () => {
 
     expect(draft.query_definition.library_ids).toEqual([1, 2]);
     expect(draft.collection_type).toBe("smart");
+  });
+
+  it.each([
+    ["no limit", undefined, undefined],
+    ["the server's no-limit sentinel", 10_000_000, undefined],
+    ["an explicit limit", 250, 250],
+  ])("saves a smart collection with %s without changing it", (_label, stored, sent) => {
+    const queryDefinition: QueryDefinition = {
+      library_ids: [1],
+      match: "all",
+      groups: [],
+      sort: { field: "added_at", order: "desc" },
+      limit: stored,
+    };
+    const collection = {
+      id: "col-1",
+      library_id: 1,
+      library_ids: [1],
+      title: "Big Picks",
+      collection_type: "smart",
+      query_definition: queryDefinition,
+    } as LibraryCollection;
+
+    const draft = toAdminCollectionBuilderValue(collection, null);
+    const body = JSON.parse(JSON.stringify(toAdminCollectionRequest(draft)));
+
+    expect(draft.query_definition.limit).toBe(sent);
+    expect(body.query_definition.limit).toBe(sent);
   });
 
   it("serializes manual admin drafts into the richer request shape", () => {

@@ -28,7 +28,7 @@ func (m *mockSyncUserStore) UpdateCollectionSyncState(ctx context.Context, input
 func TestApplyResult_UnmatchedItemsReportsSuccessStatus(t *testing.T) {
 	t.Parallel()
 
-	svc := NewService(nil, nil, nil, nil, slog.New(slog.DiscardHandler))
+	svc := NewService(nil, nil, nil, nil, nil, slog.New(slog.DiscardHandler))
 	store := &mockSyncUserStore{}
 	collection := &userstore.Collection{
 		ID: "test-col-1",

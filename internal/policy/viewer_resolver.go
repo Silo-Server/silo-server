@@ -99,6 +99,10 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		}
 	}
 
+	hidden := preferences.DisabledLibraryIDs
+	if input.ContentAccessOnly {
+		hidden = nil
+	}
 	policyInput := ScopeInput{
 		SchemaVersion:        1,
 		UserID:               user.ID,
@@ -108,7 +112,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   preferences.DisabledLibraryIDs,
+		DisabledLibraryIDs:   hidden,
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that
@@ -186,6 +190,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		PreferredMetadataLanguage:  decision.PreferredMetadataLanguage,
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
 		NextUpMode:                 preferences.NextUpMode,
+		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
 		// custom override may revoke verification but never grant it. ANDing

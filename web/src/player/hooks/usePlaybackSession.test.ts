@@ -7,6 +7,7 @@ import {
   fixtureClientCapabilitiesV3,
   fixtureClientPlaybackContextV3,
   fixturePlanV3,
+  fixtureSubtitleInventoryItemV3,
 } from "../protocol-v3.fixtures";
 import {
   buildReplanRequestV3,
@@ -15,7 +16,13 @@ import {
   VIDEO_CLIENT_FEATURES_V3,
 } from "../playback-session-wire-v3";
 import { markPlaybackIntent } from "../first-frame";
-import { usePlaybackSession } from "./usePlaybackSession";
+import {
+  RECONNECT_BASE_DELAY_MS,
+  RECONNECT_MAX_ATTEMPTS,
+  RECONNECT_MAX_DELAY_MS,
+  reconnectDelayMs,
+  usePlaybackSession,
+} from "./usePlaybackSession";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
 import { resetSessionMutations } from "../session-mutations";
 
@@ -2378,6 +2385,508 @@ describe("usePlaybackSession first frame", () => {
       expect(routeEvents.filter((event) => event.event === "first_frame")).toHaveLength(1),
     );
     expect(routeEvents.find((event) => event.event === "first_frame")?.diagnostics).toEqual({});
+
+    unmount();
+  });
+});
+
+describe("usePlaybackSession mid-stream reconnect", () => {
+  type Body = Record<string, unknown>;
+
+  function playable(sessionId: string, plan = fixturePlanV3({ session_id: sessionId })) {
+    return {
+      protocol_version: 3,
+      server_features: ["playback_plan_v3"],
+      outcome: "playable",
+      session_id: sessionId,
+      playback_plan: plan,
+    };
+  }
+
+  /**
+   * Serves the first start, then hands every replan (and any later start) to
+   * the test. A reply that throws stands in for a server that cannot be
+   * reached: `fetch` rejects with a TypeError.
+   */
+  function reconnectHarness(options: {
+    replan: () => Response | Promise<Response>;
+    restart?: (body: Body) => Response | Promise<Response>;
+    initialPlan?: ReturnType<typeof fixturePlanV3>;
+  }) {
+    const startBodies: Body[] = [];
+    const replanBodies: Body[] = [];
+    const stopped: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          const body = JSON.parse(String(init?.body)) as Body;
+          startBodies.push(body);
+          if (startBodies.length > 1 && options.restart) return options.restart(body);
+          return jsonResponse(playable("session-1", options.initialPlan), { status: 201 });
+        }
+        if (url.endsWith("/replan")) {
+          replanBodies.push(JSON.parse(String(init?.body)) as Body);
+          return options.replan();
+        }
+        if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+        if (init?.method === "DELETE") {
+          stopped.push(url);
+          return jsonResponse({ outcome: "stopped" });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    return { startBodies, replanBodies, stopped };
+  }
+
+  const unreachable = (): Response => {
+    throw new TypeError("Failed to fetch");
+  };
+
+  async function startPlaying() {
+    const rendered = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(rendered.result.current.planRevision).toBe(1));
+    // The stream played: a network failure from here on is a lost connection.
+    act(() => rendered.result.current.updatePlaybackState(100, true));
+    // RTL's waitFor polls on real timers; from here the test drives time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    return rendered;
+  }
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("waits for the server and resumes the same route at the saved position", async () => {
+    let serverUp = false;
+    const harness = reconnectHarness({
+      replan: () =>
+        serverUp
+          ? jsonResponse(
+              playable(
+                "session-1",
+                fixturePlanV3({
+                  plan_id: "plan:1111111111111111",
+                  timeline: { ...fixturePlanV3().timeline, player_start_seconds: 120 },
+                }),
+              ),
+            )
+          : unreachable(),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(120, true));
+    expect(result.current.connectionStatus).toBe("reconnecting");
+    // The player pauses while the server is away; the adopted plan must not
+    // inherit that pause.
+    act(() => result.current.updatePlaybackState(120, false));
+
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(result.current.connectionStatus).toBe("reconnecting");
+    expect(result.current.error).toBeNull();
+    expect(result.current.planRevision).toBe(1);
+
+    serverUp = true;
+    await advance(reconnectDelayMs(1));
+    expect(harness.replanBodies).toHaveLength(2);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.planRevision).toBe(2);
+    expect(result.current.plan?.plan_id).toBe("plan:1111111111111111");
+    expect(result.current.initialPosition).toBe(120);
+    expect(result.current.shouldAutoPlay).toBe(true);
+    expect(result.current.sessionId).toBe("session-1");
+
+    // The connection failed, not the route: the request keeps it eligible.
+    const body = harness.replanBodies[1];
+    expect(body?.operation).toBe("track_change");
+    expect(body?.position_seconds).toBe(120);
+    expect(body?.attempted_plan_keys).toEqual([]);
+    expect(body?.failure).toBeUndefined();
+    expect(harness.startBodies).toHaveLength(1);
+    expect(harness.stopped).toEqual([]);
+
+    // Nothing else is scheduled once playback is back.
+    await advance(RECONNECT_MAX_DELAY_MS * 2);
+    expect(harness.replanBodies).toHaveLength(2);
+
+    unmount();
+  });
+
+  it("starts a new session at the saved position when the old one did not survive a restart", async () => {
+    const harness = reconnectHarness({
+      replan: () =>
+        jsonResponse(
+          { error: "playback_session_not_found", message: "Playback session not found" },
+          { status: 404 },
+        ),
+      restart: () => jsonResponse(playable("session-2"), { status: 201 }),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(240, false));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(harness.startBodies).toHaveLength(2);
+    const restart = harness.startBodies[1];
+    expect(restart?.start_position).toBe(240);
+    expect(restart?.file_id).toBe(7);
+    expect(restart?.audio_track_index).toBe(0);
+    expect(restart?.playback_attempt_id).not.toBe(harness.startBodies[0]?.playback_attempt_id);
+    expect(result.current.sessionId).toBe("session-2");
+    expect(result.current.connectionStatus).toBe("connected");
+    // The viewer had paused before the drop, so playback stays paused.
+    expect(result.current.shouldAutoPlay).toBe(false);
+    expect(harness.stopped).toEqual(["/api/v2/playback/session-1"]);
+
+    unmount();
+  });
+
+  it("starts a new session when the server's installation changed", async () => {
+    let restarts = 0;
+    const harness = reconnectHarness({
+      // A replan always carries the old session's installation, so the
+      // server refuses it every time.
+      replan: () =>
+        jsonResponse(
+          { error: "installation_changed", message: "Playback installation changed" },
+          { status: 409 },
+        ),
+      // The first start still used cached capabilities; the start helper
+      // drops them on this refusal, so the next start succeeds.
+      restart: () => {
+        restarts += 1;
+        return restarts === 1
+          ? jsonResponse(
+              { error: "installation_changed", message: "Playback installation changed" },
+              { status: 409 },
+            )
+          : jsonResponse(playable("session-2"), { status: 201 });
+      },
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(150, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(harness.replanBodies).toHaveLength(1);
+    expect(harness.startBodies).toHaveLength(2);
+    expect(result.current.connectionStatus).toBe("reconnecting");
+
+    await advance(reconnectDelayMs(1));
+    expect(harness.startBodies).toHaveLength(3);
+    expect(harness.startBodies[2]?.start_position).toBe(150);
+    expect(result.current.sessionId).toBe("session-2");
+    expect(result.current.connectionStatus).toBe("connected");
+
+    unmount();
+  });
+
+  it("restarts with subtitles off when the viewer had them off", async () => {
+    const harness = reconnectHarness({
+      // A sidecar track is on offer, but the lost plan had none selected.
+      initialPlan: fixturePlanV3({
+        subtitle: { mode: "off", inventory: [fixtureSubtitleInventoryItemV3()] },
+      }),
+      replan: () => jsonResponse({ error: "playback_session_not_found" }, { status: 404 }),
+      restart: () => jsonResponse(playable("session-2"), { status: 201 }),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(90, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    expect(result.current.sessionId).toBe("session-2");
+    const restart = harness.startBodies[1];
+    // A start that names no subtitle track plays without one; the protocol
+    // has no other spelling of "off" and rejects a negative index.
+    expect(restart).not.toHaveProperty("subtitle_track_index");
+    expect(restart).not.toHaveProperty("subtitle_track_id");
+    expect(restart?.audio_track_index).toBe(0);
+
+    unmount();
+  });
+
+  it("restarts with the subtitle the viewer had on", async () => {
+    const harness = reconnectHarness({
+      initialPlan: fixturePlanV3({
+        selected_tracks: {
+          audio: { id: "file:7:audio:1", index: 1 },
+          subtitle: { id: "file:7:subtitle:0", index: 0 },
+        },
+        subtitle: { mode: "render", inventory: [fixtureSubtitleInventoryItemV3()] },
+      }),
+      replan: () => jsonResponse({ error: "playback_session_not_found" }, { status: 404 }),
+      restart: () => jsonResponse(playable("session-2"), { status: 201 }),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(90, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    expect(result.current.sessionId).toBe("session-2");
+    expect(harness.startBodies[1]?.subtitle_track_index).toBe(0);
+    expect(harness.startBodies[1]?.audio_track_index).toBe(1);
+
+    unmount();
+  });
+
+  it("retries a refused burn-in subtitle restart without subtitles, like a normal start", async () => {
+    const harness = reconnectHarness({
+      initialPlan: fixturePlanV3({
+        selected_tracks: {
+          audio: { id: "file:7:audio:1", index: 1 },
+          subtitle: { id: "file:7:subtitle:3", index: 3 },
+        },
+        subtitle: {
+          mode: "burn_in",
+          inventory: [
+            fixtureSubtitleInventoryItemV3({
+              combined_index: 3,
+              codec: "hdmv_pgs_subtitle",
+              delivery: "burn_in_only",
+              url: undefined,
+            }),
+          ],
+        },
+      }),
+      replan: () => jsonResponse({ error: "playback_session_not_found" }, { status: 404 }),
+      restart: (body) =>
+        body.subtitle_track_index === 3
+          ? jsonResponse(
+              {
+                protocol_version: 3,
+                server_features: ["playback_plan_v3"],
+                outcome: "terminal",
+                session_id: "session-refused",
+                terminal: {
+                  reason: "subtitle_burn_in_source_unsupported",
+                  message: "The selected subtitle can't be burned into this source.",
+                  retryable: false,
+                },
+              },
+              { status: 201 },
+            )
+          : jsonResponse(playable("session-2"), { status: 201 }),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(500, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    expect(harness.startBodies).toHaveLength(3);
+    const [, refused, fallback] = harness.startBodies;
+    expect(refused?.subtitle_track_index).toBe(3);
+    expect(fallback).not.toHaveProperty("subtitle_track_index");
+    expect(fallback?.start_position).toBe(500);
+    expect(fallback?.audio_track_index).toBe(1);
+    expect(fallback?.playback_attempt_id).not.toBe(refused?.playback_attempt_id);
+
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.sessionId).toBe("session-2");
+    expect(result.current.shouldAutoPlay).toBe(true);
+    // The same notice a refused bitmap subtitle at the initial start raises.
+    expect(result.current.initialSubtitleErrorTitle).toBe("That subtitle track can't be used");
+    expect(result.current.initialSubtitleError).toBe(
+      "The selected subtitle can't be burned into this source.",
+    );
+    expect(harness.stopped).toEqual(["/api/v2/playback/session-1"]);
+
+    unmount();
+  });
+
+  it("backs off, gives up with a retry, and recovers when the viewer tries again", async () => {
+    let serverUp = false;
+    const harness = reconnectHarness({
+      replan: () => (serverUp ? jsonResponse(playable("session-1")) : unreachable()),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(300, true));
+    // Reporting again while a cycle runs does not start a second one.
+    act(() => result.current.recoverConnection(310, true));
+
+    let elapsed = 0;
+    for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS; attempt += 1) {
+      await advance(reconnectDelayMs(attempt) - 1);
+      expect(harness.replanBodies).toHaveLength(attempt);
+      await advance(1);
+      expect(harness.replanBodies).toHaveLength(attempt + 1);
+      elapsed += reconnectDelayMs(attempt);
+    }
+    expect(elapsed).toBeLessThanOrEqual(150_000);
+    expect(harness.replanBodies.every((body) => body.position_seconds === 300)).toBe(true);
+
+    expect(result.current.connectionStatus).toBe("lost");
+    expect(result.current.connectionErrorTitle).toBe("Connection lost");
+    expect(result.current.connectionError).toContain("try again");
+    expect(result.current.connectionError).not.toContain("start playback");
+    // The stream that played is kept so the viewer can retry from it.
+    expect(result.current.plan).not.toBeNull();
+    expect(result.current.error).toBeNull();
+
+    await advance(RECONNECT_MAX_DELAY_MS * 4);
+    expect(harness.replanBodies).toHaveLength(RECONNECT_MAX_ATTEMPTS);
+
+    serverUp = true;
+    act(() => result.current.retryConnection());
+    expect(result.current.connectionStatus).toBe("reconnecting");
+    await advance(0);
+    expect(harness.replanBodies).toHaveLength(RECONNECT_MAX_ATTEMPTS + 1);
+    expect(harness.replanBodies.at(-1)?.position_seconds).toBe(300);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(result.current.planRevision).toBe(2);
+
+    unmount();
+  });
+
+  it("shows the server's refusal when the restarted session is refused", async () => {
+    reconnectHarness({
+      replan: () => jsonResponse({ error: "not_found" }, { status: 404 }),
+      restart: () =>
+        jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "terminal",
+            terminal: { reason: "source_unavailable", retryable: false },
+          },
+          { status: 201 },
+        ),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(60, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+
+    expect(result.current.connectionStatus).toBe("lost");
+    expect(result.current.connectionErrorTitle).toBe("This video is no longer available");
+    expect(result.current.plan).not.toBeNull();
+
+    unmount();
+  });
+
+  it("stops retrying when the viewer leaves", async () => {
+    const harness = reconnectHarness({ replan: unreachable });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(30, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(harness.replanBodies).toHaveLength(1);
+
+    unmount();
+    await advance(RECONNECT_MAX_DELAY_MS * 4);
+    expect(harness.replanBodies).toHaveLength(1);
+  });
+
+  it("reconnects when recovering a broken stream cannot reach the server", async () => {
+    let serverUp = false;
+    const harness = reconnectHarness({
+      replan: () => (serverUp ? jsonResponse(playable("session-1")) : unreachable()),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 75));
+    await advance(0);
+    expect(harness.replanBodies[0]?.operation).toBe("failure_recovery");
+    expect(result.current.connectionStatus).toBe("reconnecting");
+    expect(result.current.error).toBeNull();
+
+    // Transport failures while reconnecting do not start route recovery.
+    act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 75));
+    await advance(0);
+    expect(harness.replanBodies).toHaveLength(1);
+
+    serverUp = true;
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(harness.replanBodies[1]?.operation).toBe("track_change");
+    expect(harness.replanBodies[1]?.position_seconds).toBe(75);
+    expect(result.current.connectionStatus).toBe("connected");
+
+    unmount();
+  });
+
+  it("keeps one budget when the reconnected transport fails before its first frame", async () => {
+    let serverUp = true;
+    const harness = reconnectHarness({
+      replan: () => (serverUp ? jsonResponse(playable("session-1")) : unreachable()),
+    });
+    const { result, unmount } = await startPlaying();
+
+    act(() => result.current.recoverConnection(40, true));
+    await advance(RECONNECT_BASE_DELAY_MS);
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(harness.replanBodies).toHaveLength(1);
+
+    // The new transport fails on the network before its first frame, so the
+    // player reports a route failure; the server is gone again.
+    serverUp = false;
+    act(() => result.current.recoverFromFailure({ classification: "decoder_error" }, 40));
+    await advance(0);
+    expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+    expect(result.current.connectionStatus).toBe("reconnecting");
+
+    // The cycle continues where the last one stopped instead of starting
+    // over, so a server that keeps dropping new streams still runs out.
+    await advance(reconnectDelayMs(1) - 1);
+    expect(harness.replanBodies).toHaveLength(2);
+    await advance(1);
+    expect(harness.replanBodies).toHaveLength(3);
+    for (let attempt = 2; attempt < RECONNECT_MAX_ATTEMPTS; attempt += 1) {
+      await advance(reconnectDelayMs(attempt));
+    }
+    expect(result.current.connectionStatus).toBe("lost");
+    expect(harness.replanBodies).toHaveLength(RECONNECT_MAX_ATTEMPTS + 1);
+
+    unmount();
+  });
+
+  it("keeps the error for a recovery that fails before the stream ever played", async () => {
+    const harness = reconnectHarness({ replan: unreachable });
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.planRevision).toBe(1));
+
+    act(() => result.current.recoverFromFailure({ classification: "startup_timeout" }, 0));
+    await waitFor(() => expect(result.current.error).toBe("Failed to fetch"));
+    expect(result.current.connectionStatus).toBe("connected");
+    expect(harness.replanBodies).toHaveLength(1);
+
+    unmount();
+  });
+
+  it("does not reconnect a session that never started", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/playback/start")) {
+          return jsonResponse({ error: "internal_error" }, { status: 500 });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.error).toContain("could not start playback"));
+
+    act(() => result.current.recoverConnection(10, true));
+    expect(result.current.connectionStatus).toBe("connected");
 
     unmount();
   });

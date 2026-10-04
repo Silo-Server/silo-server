@@ -1,5 +1,6 @@
+import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   COLLECTION_FIELD_OPTIONS,
@@ -10,6 +11,10 @@ import {
 
 import FilterRuleEditor from "./FilterRuleEditor";
 import { getFilterRuleFieldOptions } from "./FilterRuleEditor";
+
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
 
 describe("FilterRuleEditor", () => {
   it("renders rule-management controls as non-submit buttons", () => {
@@ -86,5 +91,71 @@ describe("FilterRuleEditor", () => {
       "In Progress",
     );
     expect(movieOptions.find((option) => option.value === "watched")?.label).toBe("Watched");
+  });
+
+  it("shows rules its controls cannot represent as read-only rules", () => {
+    render(
+      <FilterRuleEditor
+        value={{
+          match: "all",
+          groups: [
+            {
+              match: "all",
+              rules: [
+                { field: "genre", op: "is", value: "Drama" },
+                { field: "year", op: "contains", value: 1999 },
+                { field: "year", op: "between", value: "1990-1999" },
+                { field: "hdr", op: "is", value: "true" },
+                { field: "in_watchlist", op: "is", value: true },
+              ],
+            },
+          ],
+        }}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(
+      screen
+        .getAllByRole("group", { name: "Rule not editable here" })
+        .map((rule) => rule.textContent),
+    ).toEqual([
+      "Not editable here year contains 1999Remove",
+      'Not editable here year between "1990-1999"Remove',
+      'Not editable here hdr is "true"Remove',
+      "Not editable here in_watchlist is trueRemove",
+    ]);
+  });
+
+  // The guided editor writes fields the server accepts but these controls do
+  // not offer, so the read-only label must not call them broken.
+  it("does not call valid guided-editor rules unsupported", () => {
+    render(
+      <FilterRuleEditor
+        value={{
+          match: "all",
+          groups: [
+            {
+              match: "all",
+              rules: [
+                { field: "original_language", op: "is", value: "fr" },
+                { field: "author", op: "is", value: "Ursula K. Le Guin" },
+              ],
+            },
+          ],
+        }}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByText(/unsupported/i)).toBeNull();
+    expect(
+      screen
+        .getAllByRole("group", { name: "Rule not editable here" })
+        .map((rule) => rule.textContent),
+    ).toEqual([
+      'Not editable here original_language is "fr"Remove',
+      'Not editable here author is "Ursula K. Le Guin"Remove',
+    ]);
   });
 });

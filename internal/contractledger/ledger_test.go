@@ -883,6 +883,7 @@ var guardedWithoutLegacyRow = map[string]string{
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1212,6 +1213,19 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
+	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
+	"deleteAccountIdentity":                "V2-only external sign-in (OIDC/LDAP) identity disconnect: v1 had no linked identities to manage. It deletes one identity of the caller's account by id, so a replay after success finds nothing and answers 404, leaving the same state.",
+	"createAdminUserIdentity":              "V2-only administrator link of an account to an external sign-in identity: v1 had no identity management. The identity key and the one-identity-per-provider rule are unique, so a replay is refused with 409 and cannot link twice.",
+	"deleteAdminUserIdentity":              "V2-only administrator unlink of an external sign-in identity: v1 had no identity management. A replay after success finds nothing and answers 404, leaving the same state.",
+	"testAdminPluginAuthBinding":           "V2-only auth plugin connection test on staged settings: v1 had no auth provider checks. It stores nothing but reaches the identity provider or directory, so an uncertain result is not retried automatically.",
+	"createAccountIdentityLinkTicket":      "V2-only link ticket for starting an OAuth linking flow: v1 had no account linking. Each call checks the password and mints a new single-use ticket, so it is non-retryable; an unused ticket expires unredeemed.",
+	"startAccountIdentityLink":             "V2-only web linking start: v1 had no account linking. It consumes a single-use link ticket and opens one provider flow bound to this browser, so a replay finds the ticket spent and answers 404; it is non-retryable.",
+	"completeAccountIdentityLink":          "V2-only confirmation of a native app's linking flow: v1 had no account linking. It redeems a single-use code, so a replay finds the code gone and answers 401 without linking twice; it is non-retryable.",
+	"linkAccountIdentityWithCredentials":   "V2-only directory (LDAP) linking: v1 had no account linking. Each call checks the local password and asks the directory again, and a replay after success is refused with 409 (local_password_required once linking turned local sign-in off, already_linked for a break-glass account) instead of linking twice; it is non-retryable.",
+	"cancelDeviceLogin":                    "V2-only device sign-in withdrawal: v1 had no cancel. It moves only a pending or approved-but-uncollected request to canceled, so a replay converges on the same state and reports it.",
+	"signInWithNetworkIdentity":            "V2-only network identity sign-in: v1 had no overlay sign-in. Each call asks the provider about the request's overlay peer and opens a new login session, so a replay opens another session like a repeated login; it is non-retryable.",
+	"linkAccountIdentityWithNetwork":       "V2-only network identity linking: v1 had no account linking. Each call checks the local password and asks the provider about the request's overlay peer, and a replay after success is refused with 409 (local_password_required once linking turned local sign-in off, already_linked for a break-glass account) instead of linking twice; it is non-retryable.",
 	"redetectAdminItemMarkers":             "V2-only choice of marker kinds to re-detect: v1 re-detected episode intros only, which redetectAdminEpisodeIntro keeps porting. Work is coalesced per item within the process, so a replay while it runs reports already_running; a later replay analyzes again, so it is non-retryable like the intro action.",
 	"transferAdminUserOwnership":           "V2-only server ownership transfer (issue #1382): v1 had no Owner. Replaying a completed transfer is refused because the caller is no longer the Owner, so it cannot move ownership twice.",
 	"createRequestRoute":                   "V2-only request routing rule (routing replaced the router plugin's per-connection default switches). Creating a rule is non-retryable: a replay adds a second rule.",
@@ -1248,6 +1262,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"startWatchTogetherRoomPlayback":       "V2-only start of a staged lobby item: v1 has no lobby/start split. An already playing room answers with its current snapshot, so a duplicate press cannot restart playback.",
 	"stopWatchTogetherRoomPlayback":        "V2-only stop that keeps the room: v1 only ends a room. A room that is not playing answers with its current snapshot, so repeating the call cannot disturb the lobby it produced.",
 	"updateWatchTogetherRoomSelectionMode": "V2-only lobby mode switch: v1 fixes selection_mode at creation. Repeating the same mode is a no-op; the switch drops the staged item, which is the documented meaning of the value rather than a side effect of retrying.",
+	"regenerateAdminItemTrickplay":         "V2-only seek-bar preview regeneration: v1 had no trickplay. A replay while the files are queued or being made changes nothing, but a later replay makes the previews again, so it is non-retryable like redetectAdminItemMarkers.",
 	"queryWatchTogetherMemberState":        "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
 }
 

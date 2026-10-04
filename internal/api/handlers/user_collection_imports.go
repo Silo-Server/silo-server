@@ -308,7 +308,7 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 
-	syncResult, updated, syncErr := h.sync.RunSync(ctx, store, collection)
+	syncResult, updated, syncErr := h.sync.RunSync(ctx, userID, store, collection)
 	if syncErr != nil {
 		// Persist failure state inline so the UI shows the error and the user
 		// can retry; the row is intentionally kept around for that retry path.
@@ -517,7 +517,7 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		return nil, apiError(http.StatusConflict, "sync_in_flight", "A sync is already running for this collection")
 	}
 
-	result, _, err := h.sync.RunSync(ctx, store, collection)
+	result, _, err := h.sync.RunSync(ctx, userID, store, collection)
 	if err != nil {
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")

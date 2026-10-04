@@ -1,4 +1,5 @@
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +15,7 @@ import {
   COLLECTION_FIELD_OPTIONS,
   getCollectionSortOptions,
   getCollectionFieldOption,
+  type CollectionFieldOption,
 } from "@/components/collections/collectionBuilderFields";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
 import {
@@ -61,6 +63,24 @@ export function getFilterRuleFieldOptions(
   });
 }
 
+/**
+ * Whether the rule's field, operator and value fit the editor's controls.
+ * Any other rule is shown read-only and kept exactly as saved unless removed.
+ * Many such rules are valid, for example ones the guided editor writes for
+ * fields these controls do not offer, so the label must not call them broken.
+ */
+function canEditRule(
+  rule: FilterRule,
+  fieldDef: CollectionFieldOption | undefined,
+  allowPersonalizedFilters: boolean,
+): boolean {
+  if (!fieldDef || (fieldDef.personalized && !allowPersonalizedFilters)) return false;
+  if (!fieldDef.operators.some((op) => op.value === rule.op)) return false;
+  if (rule.op === "between") return Array.isArray(rule.value) && rule.value.length === 2;
+  if (fieldDef.inputType === "boolean") return typeof rule.value === "boolean";
+  return true;
+}
+
 export default function FilterRuleEditor({
   value,
   onChange,
@@ -70,10 +90,21 @@ export default function FilterRuleEditor({
   mediaScope = "all",
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+    config.sort,
+  );
   const selectedSort = normalizeQuerySortForScope(
     { field: config.sort, order: config.order },
-    { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
+    {
+      includePersonalized: allowPersonalizedSorts,
+      relevanceScope: sortRelevanceScope,
+      shownRatingSources,
+      keepSortField: config.sort,
+    },
   );
   const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
 
@@ -223,6 +254,33 @@ export default function FilterRuleEditor({
           {group.rules.map((rule, ruleIdx) => {
             const fieldDef = getCollectionFieldOption(rule.field);
             const operators = fieldDef?.operators ?? [];
+
+            if (!canEditRule(rule, fieldDef, allowPersonalizedFilters)) {
+              return (
+                <div
+                  key={ruleIdx}
+                  role="group"
+                  aria-label="Rule not editable here"
+                  className="border-border flex items-center gap-2 rounded-md border border-dashed px-2 py-1 text-xs"
+                >
+                  <span className="flex-1">
+                    <span className="font-medium">Not editable here</span>{" "}
+                    <code className="text-muted-foreground">
+                      {rule.field} {rule.op} {JSON.stringify(rule.value)}
+                    </code>
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => removeRule(groupIdx, ruleIdx)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              );
+            }
 
             return (
               <div key={ruleIdx} className="flex items-center gap-2">

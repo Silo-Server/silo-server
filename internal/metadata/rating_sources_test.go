@@ -32,7 +32,7 @@ func TestRatingSourcesFromStruct(t *testing.T) {
 		"Metacritic": sourceEntry(map[string]*structpb.Value{"score": number(87.5), "votes": number(21)}),
 		"rogerebert": sourceEntry(map[string]*structpb.Value{"score": number(100)}),
 		"mdblist":    sourceEntry(map[string]*structpb.Value{"score": number(0)}),
-		// Dropped sources.
+		// Dropped sources: netflix is not declared, the rest have bad scores.
 		"netflix":         sourceEntry(map[string]*structpb.Value{"score": number(50)}),
 		"tmdb":            sourceEntry(map[string]*structpb.Value{"score": number(101)}),
 		"rt_critic":       sourceEntry(map[string]*structpb.Value{"score": number(-1)}),
@@ -43,19 +43,26 @@ func TestRatingSourcesFromStruct(t *testing.T) {
 		"metacritic_user": number(75),
 	})
 
-	got := ratingSourcesFromStruct(ratings, "mdblist")
+	// Silo's own imdb and tmdb are always accepted; every other name only when
+	// the capability declared it (trakt and the rest are declared here too, so
+	// their bad scores are what drops them).
+	declared := map[string]struct{}{}
+	for _, id := range []string{"metacritic", "rogerebert", "mdblist", "rt_critic", "rt_audience", "trakt", "letterboxd", "myanimelist", "metacritic_user"} {
+		declared[id] = struct{}{}
+	}
+	got := ratingSourcesFromStruct(ratings, "mdblist", declared)
 	want := map[string]RatingSource{
-		models.RatingSourceIMDB:       {Score: 81, Votes: 673852, Provider: "mdblist"},
-		models.RatingSourceMetacritic: {Score: 87.5, Votes: 21, Provider: "mdblist"},
-		models.RatingSourceRogerEbert: {Score: 100, Provider: "mdblist"},
-		models.RatingSourceMDBList:    {Score: 0, Provider: "mdblist"},
+		models.RatingSourceIMDB: {Score: 81, Votes: 673852, Provider: "mdblist"},
+		"metacritic":            {Score: 87.5, Votes: 21, Provider: "mdblist"},
+		"rogerebert":            {Score: 100, Provider: "mdblist"},
+		"mdblist":               {Score: 0, Provider: "mdblist"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ratingSourcesFromStruct() = %+v, want %+v", got, want)
 	}
 
 	// The flat keys still map to the typed columns; "sources" is not one.
-	if flat := ratingsFromStruct(ratings); flat.IMDB != 8.1 || flat.TMDB != 0 {
+	if flat := ratingsFromStruct(ratings, declared); flat.IMDB != 8.1 || flat.TMDB != 0 {
 		t.Fatalf("ratingsFromStruct() = %+v, want only IMDB 8.1", flat)
 	}
 }
@@ -74,7 +81,7 @@ func TestRatingSourcesFromStructDropsMalformedVotesOnly(t *testing.T) {
 			ratings := ratingsStructWithSources(t, map[string]*structpb.Value{
 				"imdb": sourceEntry(map[string]*structpb.Value{"score": number(70), "votes": votes}),
 			})
-			got := ratingSourcesFromStruct(ratings, "mdblist")
+			got := ratingSourcesFromStruct(ratings, "mdblist", nil)
 			want := map[string]RatingSource{models.RatingSourceIMDB: {Score: 70, Provider: "mdblist"}}
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("ratingSourcesFromStruct() = %+v, want %+v", got, want)
@@ -96,7 +103,7 @@ func TestRatingSourcesFromStructWithoutSources(t *testing.T) {
 	}
 	for name, ratings := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := ratingSourcesFromStruct(ratings, "mdblist"); got != nil {
+			if got := ratingSourcesFromStruct(ratings, "mdblist", nil); got != nil {
 				t.Fatalf("ratingSourcesFromStruct() = %+v, want nil", got)
 			}
 		})
@@ -123,6 +130,8 @@ func TestPluginProviderGetMetadata_MapsRatingSources(t *testing.T) {
 		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
 	}
 	provider.lookupProviderIDs = []string{"imdb", "tmdb"}
+	// The capability declared letterboxd in its manifest (rating_sources).
+	provider.declaredRatingSources = map[string]struct{}{"letterboxd": {}}
 
 	result, err := provider.GetMetadata(context.Background(), MetadataRequest{
 		ProviderIDs: map[string]string{"tmdb": "578"},
@@ -131,7 +140,7 @@ func TestPluginProviderGetMetadata_MapsRatingSources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMetadata() error = %v", err)
 	}
-	want := map[string]RatingSource{models.RatingSourceLetterboxd: {Score: 80, Votes: 876082, Provider: "mdblist"}}
+	want := map[string]RatingSource{"letterboxd": {Score: 80, Votes: 876082, Provider: "mdblist"}}
 	if result == nil || !reflect.DeepEqual(result.RatingSources, want) {
 		t.Fatalf("RatingSources = %+v, want %+v", result, want)
 	}
@@ -143,22 +152,22 @@ func TestPluginProviderGetMetadata_MapsRatingSources(t *testing.T) {
 func TestMergeRatingSources(t *testing.T) {
 	stored := func() *MetadataResult {
 		return &MetadataResult{RatingSources: map[string]RatingSource{
-			models.RatingSourceIMDB:       {Score: 70, Votes: 100, Provider: "mdblist"},
-			models.RatingSourceMetacritic: {Score: 60, Provider: "mdblist"},
+			models.RatingSourceIMDB: {Score: 70, Votes: 100, Provider: "mdblist"},
+			"metacritic":            {Score: 60, Provider: "mdblist"},
 		}}
 	}
 	incoming := &MetadataResult{RatingSources: map[string]RatingSource{
-		models.RatingSourceIMDB:       {Score: 72, Votes: 150, Provider: "other"},
-		models.RatingSourceLetterboxd: {Score: 80, Provider: "other"},
+		models.RatingSourceIMDB: {Score: 72, Votes: 150, Provider: "other"},
+		"letterboxd":            {Score: 80, Provider: "other"},
 	}}
 
 	t.Run("fill empty keeps stored sources and adds new ones", func(t *testing.T) {
 		target := stored()
 		MergeMetadata(incoming, target, nil, MergeFillEmpty)
 		want := map[string]RatingSource{
-			models.RatingSourceIMDB:       {Score: 70, Votes: 100, Provider: "mdblist"},
-			models.RatingSourceMetacritic: {Score: 60, Provider: "mdblist"},
-			models.RatingSourceLetterboxd: {Score: 80, Provider: "other"},
+			models.RatingSourceIMDB: {Score: 70, Votes: 100, Provider: "mdblist"},
+			"metacritic":            {Score: 60, Provider: "mdblist"},
+			"letterboxd":            {Score: 80, Provider: "other"},
 		}
 		if !reflect.DeepEqual(target.RatingSources, want) {
 			t.Fatalf("RatingSources = %+v, want %+v", target.RatingSources, want)
@@ -169,9 +178,9 @@ func TestMergeRatingSources(t *testing.T) {
 		target := stored()
 		MergeMetadata(incoming, target, nil, MergeReplaceUnlocked)
 		want := map[string]RatingSource{
-			models.RatingSourceIMDB:       {Score: 72, Votes: 150, Provider: "other"},
-			models.RatingSourceMetacritic: {Score: 60, Provider: "mdblist"},
-			models.RatingSourceLetterboxd: {Score: 80, Provider: "other"},
+			models.RatingSourceIMDB: {Score: 72, Votes: 150, Provider: "other"},
+			"metacritic":            {Score: 60, Provider: "mdblist"},
+			"letterboxd":            {Score: 80, Provider: "other"},
 		}
 		if !reflect.DeepEqual(target.RatingSources, want) {
 			t.Fatalf("RatingSources = %+v, want %+v", target.RatingSources, want)
@@ -196,8 +205,8 @@ func TestMergeRatingSources(t *testing.T) {
 	t.Run("merging into an empty target does not alias the source map", func(t *testing.T) {
 		target := &MetadataResult{}
 		MergeMetadata(incoming, target, nil, MergeFillEmpty)
-		target.RatingSources[models.RatingSourceTrakt] = RatingSource{Score: 1}
-		if _, leaked := incoming.RatingSources[models.RatingSourceTrakt]; leaked {
+		target.RatingSources["trakt"] = RatingSource{Score: 1}
+		if _, leaked := incoming.RatingSources["trakt"]; leaked {
 			t.Fatal("merge aliased the incoming map")
 		}
 	})
@@ -246,15 +255,15 @@ func TestRefreshPersistsRatingSources(t *testing.T) {
 		metadata: &MetadataResult{
 			HasMetadata: true,
 			RatingSources: map[string]RatingSource{
-				models.RatingSourceTMDB:       {Score: 70, Provider: "mdblist"},
-				models.RatingSourceMetacritic: {Score: 87, Provider: "mdblist"},
+				models.RatingSourceTMDB: {Score: 70, Provider: "mdblist"},
+				"metacritic":            {Score: 87, Provider: "mdblist"},
 			},
 		},
 	}
 	// The first provider in the chain wins a source both report.
 	wantSources := []models.ItemRatingSource{
 		{ContentID: contentID, Source: models.RatingSourceTMDB, Score: 76, Votes: &votes, Provider: "tmdb"},
-		{ContentID: contentID, Source: models.RatingSourceMetacritic, Score: 87, Provider: "mdblist"},
+		{ContentID: contentID, Source: "metacritic", Score: 87, Provider: "mdblist"},
 	}
 
 	cases := []struct {
@@ -357,5 +366,25 @@ func TestIdentifyWithoutRatingSourcesClearsThem(t *testing.T) {
 	}
 	if got := repo.upserts[0]; !got.wholeSet || got.contentID != contentID || len(got.sources) != 0 {
 		t.Fatalf("write = %+v, want an empty Replace of %q", got, contentID)
+	}
+}
+
+// A plugin's flat Rotten Tomatoes scores fill the rating columns only when it
+// declared them; IMDb and TMDB are always kept.
+func TestRatingsFromStructGatesRottenTomatoesOnTheDeclaration(t *testing.T) {
+	ratings := &structpb.Struct{Fields: map[string]*structpb.Value{
+		"imdb":        structpb.NewNumberValue(8.1),
+		"tmdb":        structpb.NewNumberValue(7.6),
+		"rt_critic":   structpb.NewNumberValue(93),
+		"rt_audience": structpb.NewNumberValue(95),
+	}}
+
+	undeclared := ratingsFromStruct(ratings, nil)
+	if undeclared != (Ratings{IMDB: 8.1, TMDB: 7.6}) {
+		t.Fatalf("undeclared = %+v, want IMDb and TMDB only", undeclared)
+	}
+	declared := ratingsFromStruct(ratings, map[string]struct{}{models.RatingSourceRTCritic: {}})
+	if declared != (Ratings{IMDB: 8.1, TMDB: 7.6, RTCritic: 93}) {
+		t.Fatalf("with rt_critic declared = %+v, want the critic score kept and the audience score dropped", declared)
 	}
 }
