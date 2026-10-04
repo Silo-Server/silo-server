@@ -876,6 +876,28 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 	}
 	results := make([]*Download, len(items))
 	var newIdx []int
+	type replacement struct {
+		i          int
+		existing   *Download
+		expected   *int
+		expectedID string
+	}
+	// Replacing an entry with a prepared file can add an active download, so
+	// those replacements run under the quota lock with the new entries.
+	var prepared []replacement
+	replace := func(ctx context.Context, r replacement) error {
+		status, size, artifactID, err := s.managedRowSource(ctx, items[r.i], decisions[r.i])
+		if err != nil {
+			return err
+		}
+		d := buildManagedDownload(userID, req.ProfileID, req.DeviceID, items[r.i], decisions[r.i], batchID, status, size, artifactID)
+		row, err := s.reuseOrReplaceManaged(ctx, r.existing, d, r.expected, r.expectedID)
+		if err != nil {
+			return err
+		}
+		results[r.i] = row
+		return nil
+	}
 	for i, it := range items {
 		if ex, ok := existing[keys[i]]; ok {
 			expected := req.ExpectedRevision
@@ -889,16 +911,15 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				expected = new(entry.Revision)
 				expectedID = entry.ID
 			}
-			status, size, artifactID, err := s.managedRowSource(ctx, it, decisions[i])
-			if err != nil {
+			r := replacement{i: i, existing: ex, expected: expected, expectedID: expectedID}
+			if decisions[i].RequiresArtifact {
+				prepared = append(prepared, r)
+				continue
+			}
+			if err := replace(ctx, r); err != nil {
 				return nil, err
 			}
-			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, it, decisions[i], batchID, status, size, artifactID)
-			row, err := s.reuseOrReplaceManaged(ctx, ex, replacement, expected, expectedID)
-			if err != nil {
-				return nil, err
-			}
-			results[i] = s.confirmIfLinked(ctx, row)
+			results[i] = s.confirmIfLinked(ctx, results[i])
 			continue
 		}
 		expected := req.ExpectedRevision
@@ -912,13 +933,27 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 		}
 		newIdx = append(newIdx, i)
 	}
-	if len(newIdx) == 0 {
+	if len(newIdx) == 0 && len(prepared) == 0 {
 		return results, nil
 	}
 	var inserted []*Download
 	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, len(newIdx)); err != nil {
+		adding := len(newIdx)
+		for _, r := range prepared {
+			if replacementAddsActive(r.existing, decisions[r.i]) {
+				adding++
+			}
+		}
+		if err := s.limiter.Check(ctx, userID, adding); err != nil {
 			return err
+		}
+		for _, r := range prepared {
+			if err := replace(ctx, r); err != nil {
+				return err
+			}
+		}
+		if len(newIdx) == 0 {
+			return nil
 		}
 		toInsert := make([]*Download, 0, len(newIdx))
 		for _, i := range newIdx {
@@ -940,6 +975,9 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	for _, r := range prepared {
+		results[r.i] = s.confirmIfLinked(ctx, results[r.i])
 	}
 	byKey := make(map[ManagedEntryKey]*Download, len(inserted))
 	for _, d := range inserted {
@@ -1057,6 +1095,21 @@ func reusableManagedStatus(status string) bool {
 	default:
 		return true
 	}
+}
+
+// replacementAddsActive reports whether replacing existing with a prepared
+// entry for decision adds an active download: existing is not already active,
+// and its target changes, so it is replaced rather than reused.
+func replacementAddsActive(existing *Download, decision QualityDecision) bool {
+	switch existing.Status {
+	case StatusQueued, StatusDownloading, StatusPreparing:
+		return false
+	}
+	return existing.Format != decision.DeliveryFormat ||
+		existing.Quality != decision.RequestedQuality ||
+		existing.EffectiveQuality != decision.EffectiveQuality ||
+		existing.TargetBitrateKbps != decision.TargetBitrateKbps ||
+		!reusableManagedStatus(existing.Status)
 }
 
 func sameManagedTarget(a, b *Download) bool {

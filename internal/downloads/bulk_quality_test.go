@@ -135,10 +135,19 @@ func TestPaceToSlotsLimitsOnlyPreparedItems(t *testing.T) {
 		}
 		return out
 	}
+	notReady := func(managedItem) bool { return false }
 	for slots, want := range map[int]string{-1: "abcd", 0: "b", 1: "ab", 2: "abc", 5: "abcd"} {
-		if got := ids(paceToSlots(items, decisions, slots)); got != want {
+		if got := ids(paceToSlots(items, decisions, slots, notReady)); got != want {
 			t.Errorf("slots %d: kept %q, want %q", slots, got, want)
 		}
+	}
+	// A prepared file that is already ready takes no slot.
+	cReady := func(it managedItem) bool { return it.episodeID == "c" }
+	if got := ids(paceToSlots(items, decisions, 0, cReady)); got != "bc" {
+		t.Errorf("no slots, c ready: kept %q, want %q", got, "bc")
+	}
+	if got := ids(paceToSlots(items, decisions, 1, cReady)); got != "abc" {
+		t.Errorf("one slot, c ready: kept %q, want %q", got, "abc")
 	}
 }
 

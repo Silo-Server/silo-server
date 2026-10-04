@@ -293,6 +293,61 @@ func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, fo
 // were already frozen. Keeping discovery separate lets quota-serialized callers
 // avoid holding a database lock transaction across remote probes.
 func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
+	a, err := m.newArtifact(file, format, target)
+	if err != nil {
+		return nil, err
+	}
+	row, created, err := m.repo.EnsureQueued(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	if artifactReady(row) {
+		// Refreshing last_used_at keeps missing-output recovery from retiring
+		// the row while the caller links its download. If recovery retired or
+		// requeued it after EnsureQueued read it, re-ensure so the download
+		// links to a live job.
+		touched, err := m.repo.TouchReady(ctx, row.ID)
+		if err != nil {
+			return nil, err
+		}
+		if touched {
+			return row, nil
+		}
+		if row, created, err = m.repo.EnsureQueued(ctx, a); err != nil {
+			return nil, err
+		}
+	}
+	// A terminally-failed dedup row would otherwise strand every new download
+	// linked to it in 'preparing' forever (no drain is triggered for an existing
+	// row). Requeue it for a fresh attempt so the new download can resolve — or
+	// fail cleanly via reconciliation once the encode is exhausted again.
+	if row.Status == ArtifactFailed {
+		switch err := m.repo.Requeue(ctx, row.ID); {
+		case errors.Is(err, ErrNotFound):
+			// The failed row was swept between EnsureQueued and Requeue:
+			// create a fresh job instead of linking to a dead artifact id.
+			if row, _, err = m.repo.EnsureQueued(ctx, a); err != nil {
+				return nil, err
+			}
+		case err != nil:
+			return nil, err
+		default:
+			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion, row.TrackRecipeVersion)
+		}
+		m.notifyPreparationChanged(ctx, row.ID)
+		m.triggerDrain()
+		return row, nil
+	}
+	if created {
+		m.notifyPreparationChanged(ctx, row.ID)
+		m.triggerDrain()
+	}
+	return row, nil
+}
+
+// newArtifact builds the queue row a prepared file for target would use,
+// keyed so equal requests share one job.
+func (m *ArtifactManager) newArtifact(file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
 	if target.ToneMapPolicy == "" {
 		target.ToneMapPolicy = tonemap.PolicyNone
 	}
@@ -341,52 +396,18 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		a.ParamsHash = request.ExecutionFingerprint()
 		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash)
 	}
-	row, created, err := m.repo.EnsureQueued(ctx, a)
+	return a, nil
+}
+
+// readyArtifact reports whether the prepared file for target already exists,
+// without queueing a job when it does not.
+func (m *ArtifactManager) readyArtifact(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) bool {
+	a, err := m.newArtifact(file, format, target)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	if artifactReady(row) {
-		// Refreshing last_used_at keeps missing-output recovery from retiring
-		// the row while the caller links its download. If recovery retired or
-		// requeued it after EnsureQueued read it, re-ensure so the download
-		// links to a live job.
-		touched, err := m.repo.TouchReady(ctx, row.ID)
-		if err != nil {
-			return nil, err
-		}
-		if touched {
-			return row, nil
-		}
-		if row, created, err = m.repo.EnsureQueued(ctx, a); err != nil {
-			return nil, err
-		}
-	}
-	// A terminally-failed dedup row would otherwise strand every new download
-	// linked to it in 'preparing' forever (no drain is triggered for an existing
-	// row). Requeue it for a fresh attempt so the new download can resolve — or
-	// fail cleanly via reconciliation once the encode is exhausted again.
-	if row.Status == ArtifactFailed {
-		switch err := m.repo.Requeue(ctx, row.ID); {
-		case errors.Is(err, ErrNotFound):
-			// The failed row was swept between EnsureQueued and Requeue:
-			// create a fresh job instead of linking to a dead artifact id.
-			if row, _, err = m.repo.EnsureQueued(ctx, a); err != nil {
-				return nil, err
-			}
-		case err != nil:
-			return nil, err
-		default:
-			row.Status = queuedArtifactStatus(row.ToneMapMode, row.AudioRecipeVersion, row.TrackRecipeVersion)
-		}
-		m.notifyPreparationChanged(ctx, row.ID)
-		m.triggerDrain()
-		return row, nil
-	}
-	if created {
-		m.notifyPreparationChanged(ctx, row.ID)
-		m.triggerDrain()
-	}
-	return row, nil
+	row, err := m.repo.GetByKey(ctx, a.MediaFileID, a.Format, a.ParamsHash)
+	return err == nil && artifactReady(row)
 }
 
 // resolveToneMapTarget freezes a safe, enabled, and currently validated

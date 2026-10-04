@@ -379,11 +379,25 @@ func (s *Service) registerMonitorPlan(ctx context.Context, sub *Subscription, pl
 	var err error
 	if plan.prepared {
 		err = s.repo.WithUserQuotaLock(ctx, sub.UserID, func(ctx context.Context) error {
+			// A monitor edited or paused since planning registers nothing:
+			// check before queueing encodes no row would link to. The locked
+			// registration checks again.
+			current, err := s.subRepo.GetByID(ctx, sub.ID, sub.UserID, sub.ProfileID, sub.DeviceID)
+			if err != nil {
+				return err
+			}
+			if !current.Active || !current.UpdatedAt.Equal(sub.UpdatedAt) {
+				return register(ctx, nil)
+			}
 			slots, err := s.limiter.FreeConcurrentSlots(ctx, sub.UserID)
 			if err != nil {
 				return err
 			}
-			return register(ctx, paceToSlots(plan.items, plan.decisions, slots))
+			ready := func(it managedItem) bool {
+				d := plan.decisions[managedItemKey(it)]
+				return s.artifacts.readyArtifact(ctx, it.file, d.DeliveryFormat, d.PrepareTarget)
+			}
+			return register(ctx, paceToSlots(plan.items, plan.decisions, slots, ready))
 		})
 	} else {
 		err = register(ctx, plan.items)
@@ -395,12 +409,13 @@ func (s *Service) registerMonitorPlan(ctx context.Context, sub *Subscription, pl
 	return rows, nil
 }
 
-// paceToSlots keeps items in order, dropping each one that needs a prepared
-// file once slots of them are kept. slots < 0 means no cap.
-func paceToSlots(items []managedItem, decisions map[ManagedEntryKey]QualityDecision, slots int) []managedItem {
+// paceToSlots keeps items in order, dropping each one that needs a file still
+// to be prepared once slots of them are kept. An item whose prepared file is
+// already ready registers ready and takes no slot. slots < 0 means no cap.
+func paceToSlots(items []managedItem, decisions map[ManagedEntryKey]QualityDecision, slots int, ready func(managedItem) bool) []managedItem {
 	kept := make([]managedItem, 0, len(items))
 	for _, it := range items {
-		if decisions[managedItemKey(it)].RequiresArtifact {
+		if decisions[managedItemKey(it)].RequiresArtifact && !ready(it) {
 			if slots == 0 {
 				continue
 			}
