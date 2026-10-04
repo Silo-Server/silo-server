@@ -43,6 +43,14 @@ type ScanResult struct {
 	// Sidecars lists the local metadata sidecars (.nfo, artwork) in every
 	// directory a video scan read. It is nil for other library types.
 	Sidecars SidecarListing
+	// UnsupportedFiles lists the files the walk skipped because of their
+	// type (DVD VOBs, disc images, RealMedia, Blu-ray disc streams).
+	UnsupportedFiles []UnsupportedFile
+	// ProtectedPaths lists the paths whose contents this scan did not verify:
+	// unreachable and suspect-empty roots and the paths the walk could not
+	// read. The scan leaves the catalog under them alone, and the list of
+	// unsupported files keeps its rows there too.
+	ProtectedPaths []string
 }
 
 // FileHints contains the OSHash gathered during scanning.

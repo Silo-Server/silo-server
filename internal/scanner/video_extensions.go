@@ -35,24 +35,52 @@ func extensionSet(groups ...string) map[string]bool {
 	return set
 }
 
+// Reasons a file that looks like video is not cataloged. They are stored with
+// each skipped file and are part of the admin API, so they must not change.
+const (
+	UnsupportedReasonDVDVOB     = "dvd_vob"
+	UnsupportedReasonDiscImage  = "disc_image"
+	UnsupportedReasonRealMedia  = "realmedia"
+	UnsupportedReasonDiscStream = "disc_stream"
+)
+
 // unsupportedVideoExtensions names video formats the scanner recognizes but
-// deliberately does not catalog, with the reason a skipped file is logged
+// deliberately does not catalog, with the reason a skipped file is reported
 // under.
 var unsupportedVideoExtensions = map[string]string{
 	// A DVD's VIDEO_TS folder splits each title into 1 GB VOB parts next to
 	// menu VOBs. Cataloging VOBs one by one would turn every part and menu
 	// into its own item.
-	".vob": "DVD VOB files are not cataloged; remux the DVD title to a single file",
-	".iso": "disc images are not cataloged; remux the disc title to a single file",
+	".vob": UnsupportedReasonDVDVOB,
+	".iso": UnsupportedReasonDiscImage,
 	// RealMedia seeks poorly and its codecs need a full transcode for every
 	// client.
-	".rm":   "RealMedia files are not cataloged",
-	".rmvb": "RealMedia files are not cataloged",
+	".rm":   UnsupportedReasonRealMedia,
+	".rmvb": UnsupportedReasonRealMedia,
 }
 
-// discStructureSkipReason is logged for streams inside a Blu-ray or AVCHD
-// disc folder.
-const discStructureSkipReason = "Blu-ray and AVCHD disc folders (BDMV/STREAM) are not cataloged; remux the disc title to a single file"
+// unsupportedReasonMessages explains each reason to an admin.
+var unsupportedReasonMessages = map[string]string{
+	UnsupportedReasonDVDVOB:    "DVD VOB files are not cataloged; remux the DVD title to a single file",
+	UnsupportedReasonDiscImage: "Disc images are not cataloged; remux the disc title to a single file",
+	UnsupportedReasonRealMedia: "RealMedia files are not cataloged",
+	// Streams inside a Blu-ray or AVCHD disc folder.
+	UnsupportedReasonDiscStream: "Blu-ray and AVCHD disc folders (BDMV/STREAM) are not cataloged; remux the disc title to a single file",
+}
+
+// UnsupportedReasonMessage returns the admin-facing explanation of an
+// unsupported-file reason, or "" for an unknown one.
+func UnsupportedReasonMessage(reason string) string {
+	return unsupportedReasonMessages[reason]
+}
+
+// UnsupportedFile is a file that looks like video but that the scanner does
+// not catalog, such as a DVD VOB or a RealMedia file.
+type UnsupportedFile struct {
+	Path string
+	// Reason is one of the UnsupportedReason constants.
+	Reason string
+}
 
 // SupportsVideoFile reports whether the given path is a video file the
 // scanner catalogs: it uses a recognized video extension and is not a stream
@@ -61,14 +89,14 @@ func SupportsVideoFile(filePath string) bool {
 	return videoExtensions[strings.ToLower(filepath.Ext(filePath))] && !inDiscStreamDir(filePath)
 }
 
-// unsupportedVideoFileReason explains why a file that looks like video is not
-// cataloged. It returns "" for supported video files and for files that do
-// not look like video at all.
+// unsupportedVideoFileReason returns the reason a file that looks like video
+// is not cataloged, as one of the UnsupportedReason constants. It returns ""
+// for supported video files and for files that do not look like video at all.
 func unsupportedVideoFileReason(filePath string) string {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if videoExtensions[ext] {
 		if inDiscStreamDir(filePath) {
-			return discStructureSkipReason
+			return UnsupportedReasonDiscStream
 		}
 		return ""
 	}
