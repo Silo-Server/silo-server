@@ -15,6 +15,7 @@ type fakeSignalRepo struct {
 	canonical map[string]string
 
 	fallbackWatched         map[string]struct{}
+	watchedReads            int
 	fallbackFavorites       []string
 	fallbackProgress        []WatchProgressRow
 	ebookProgress           []WatchProgressRow
@@ -37,6 +38,7 @@ func (r *fakeSignalRepo) HasSignalRows(_ context.Context, _ int, _ string, inclu
 }
 
 func (r *fakeSignalRepo) GetWatchedItemIDSet(context.Context, int, string) (map[string]struct{}, error) {
+	r.watchedReads++
 	return r.fallbackWatched, nil
 }
 
@@ -647,5 +649,35 @@ func TestSignalReaderRecommendationExclusionSet(t *testing.T) {
 	}
 	if want := map[string]struct{}{"movie-watched": {}, "series-favorite": {}, "movie-favorite": {}}; !maps.Equal(excluded, want) {
 		t.Fatalf("repo exclusion set = %v, want %v", excluded, want)
+	}
+}
+
+// Under WithWatchedSetMemo a profile's watched set is read once however many
+// SignalReaders ask for it; another profile, or a context without the memo,
+// reads again.
+func TestWatchedSetMemoReadsEachProfileOnce(t *testing.T) {
+	repo := &fakeSignalRepo{fallbackWatched: map[string]struct{}{"watched": {}}}
+	rowsReader, blendReader := NewSignalReader(repo, nil), NewSignalReader(repo, nil)
+	read := func(ctx context.Context, reader *SignalReader, profileID string) {
+		t.Helper()
+		set, err := reader.WatchedItemIDSet(ctx, 7, profileID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := set["watched"]; !ok || len(set) != 1 {
+			t.Fatalf("watched set = %v", set)
+		}
+	}
+
+	ctx := WithWatchedSetMemo(t.Context())
+	read(ctx, rowsReader, "p1")
+	read(ctx, blendReader, "p1")
+	if repo.watchedReads != 1 {
+		t.Fatalf("reads under the memo = %d, want 1", repo.watchedReads)
+	}
+	read(ctx, blendReader, "p2")
+	read(t.Context(), rowsReader, "p1")
+	if repo.watchedReads != 3 {
+		t.Fatalf("reads = %d, want one more for another profile and one without the memo", repo.watchedReads)
 	}
 }

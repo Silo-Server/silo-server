@@ -249,6 +249,7 @@
 ./internal/recommendations TestGetItemQualityRatingsPostgres
 ./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
 ./internal/recommendations TestHighlyRatedRowPostgres
+./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
 ./internal/recommendations TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres
 ./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
 ./internal/recommendations TestPresentMediaTypesPostgres

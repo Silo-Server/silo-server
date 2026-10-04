@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -537,5 +538,98 @@ func TestDefaultRowsServeEachViewerLivePostgres(t *testing.T) {
 	}
 	if after := cacheRows(); after != before {
 		t.Fatalf("reads wrote %d cache rows", after-before)
+	}
+}
+
+// Each default row reads every media type from its own index, newest or best
+// rated first, rather than scanning and sorting the catalog; a read then
+// costs the same however many titles the server holds. Sequential scans and
+// sorts are disabled only in this transaction because the test catalog is too
+// small to favor an index naturally; only the type indexes supply the order
+// without a sort.
+func TestDefaultRowQueriesWalkTypeIndexesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, setting := range []string{"enable_seqscan", "enable_sort"} {
+		if _, err := tx.Exec(ctx, "SET LOCAL "+setting+" = off"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filter := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}}
+	exclude := []string{"watched-1", "watched-2"}
+	for kind, index := range map[string]string{
+		RecTypeRecentlyAdded: "idx_media_items_type_added_at",
+		RecTypeTopRated:      "idx_media_items_type_catalog_rating",
+	} {
+		query, args := defaultRowQuery(filter, kind, exclude, []int64{9, 3}, 60)
+		var plan []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+query, args...).Scan(&plan); err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal(plan, &nodes); err != nil {
+			t.Fatalf("%s: plan: %v", kind, err)
+		}
+		reads := mediaItemsReads(nodes[0]["Plan"].(map[string]any))
+		if len(reads) == 0 {
+			t.Fatalf("%s reads no media_items: %s", kind, plan)
+		}
+		for _, read := range reads {
+			if read != "Index Scan "+index {
+				t.Fatalf("%s reads media_items by %q, want an index scan of %s: %s", kind, read, index, plan)
+			}
+		}
+	}
+}
+
+// mediaItemsReads lists how a plan reads media_items: each scan's node type
+// and index.
+func mediaItemsReads(node map[string]any) []string {
+	var reads []string
+	if node["Relation Name"] == "media_items" {
+		index, _ := node["Index Name"].(string)
+		reads = append(reads, strings.TrimSpace(fmt.Sprintf("%v %s", node["Node Type"], index)))
+	}
+	children, _ := node["Plans"].([]any)
+	for _, child := range children {
+		reads = append(reads, mediaItemsReads(child.(map[string]any))...)
+	}
+	return reads
+}
+
+// Highly Rated reuses an access scope's title counts for a while instead of
+// counting the catalog on every read; another scope is counted on its own.
+func TestHighlyRatedReusesTitleCountsPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	const prefix = "tdefault-counts-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	repo := NewRepo(pool)
+	lib, other := newTestLibrary(t, pool, prefix+"lib"), newTestLibrary(t, pool, prefix+"other")
+	seedTitle(t, pool, prefix+"movie-1", "movie", lib, "")
+	seedTitle(t, pool, prefix+"series-1", "series", lib, "")
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{lib}}
+	counts := func(filter catalog.AccessFilter) []int64 {
+		t.Helper()
+		got, err := repo.titleCounts.get(t.Context(), repo, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := counts(scope); !slices.Equal(got, []int64{1, 1}) {
+		t.Fatalf("counts = %v, want one movie and one series", got)
+	}
+	seedTitle(t, pool, prefix+"movie-2", "movie", lib, "")
+	seedTitle(t, pool, prefix+"movie-3", "movie", other, "")
+	if got := counts(scope); !slices.Equal(got, []int64{1, 1}) {
+		t.Fatalf("counts = %v, want the scope's earlier counts", got)
+	}
+	if got := counts(catalog.AccessFilter{AllowedLibraryIDs: []int{lib, other}}); !slices.Equal(got, []int64{3, 1}) {
+		t.Fatalf("another scope's counts = %v, want 3 movies and 1 series", got)
 	}
 }
