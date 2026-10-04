@@ -308,9 +308,14 @@ describe("buildWatchPageProps", () => {
     });
   });
 
-  it.each(["pgs"])(
-    "passes a selected bitmap subtitle ordinal into the initial playback request",
-    (codec) => {
+  it.each([
+    ["dvd_subtitle", { 42: 0 }],
+    // Embedded PGS arrives as a sidecar the player draws, so a refused start
+    // is not the subtitle's doing.
+    ["pgs", {}],
+  ] as const)(
+    "passes a selected %s subtitle ordinal into the initial playback request",
+    (codec, bitmapIndexes) => {
       const props = buildWatchPageProps({
         request: createWatchRouteRequest({
           contentId: "movie-1",
@@ -364,7 +369,7 @@ describe("buildWatchPageProps", () => {
       // Bitmap burn-in rides the normal start request, while its separate marker
       // enables the subtitle-free fallback if that start is refused.
       expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
-      expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual({ 42: 0 });
+      expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual(bitmapIndexes);
     },
   );
 

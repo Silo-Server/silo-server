@@ -455,7 +455,7 @@ describe("bitmap (PGS) codec deprioritization", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("prefers an external text track over an embedded PGS track, which the web player burns in", () => {
+  it("prefers an external text track over an embedded PGS track of the same kind", () => {
     const tracks = [
       makeSub({ index: 0, source: "embedded", language: "en", codec: "hdmv_pgs_subtitle" }),
       makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
@@ -463,10 +463,38 @@ describe("bitmap (PGS) codec deprioritization", () => {
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });
 
-  it("ranks embedded PGS as burn-in even when the server offers it as a sidecar", () => {
+  it("prefers full-dialogue embedded PGS over a forced or SDH text track", () => {
+    const pgs = makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs" });
+    const forced = makeSub({
+      index: 1,
+      source: "external",
+      language: "en",
+      codec: "srt",
+      forced: true,
+    });
+    const sdh = makeSub({
+      index: 2,
+      source: "external",
+      language: "en",
+      codec: "srt",
+      hearing_impaired: true,
+    });
+    expect(findPreferredSubtitleIndex([pgs, forced], "en")).toBe(0);
+    expect(findPreferredSubtitleIndex([pgs, sdh], "en")).toBe(0);
+  });
+
+  it("still ranks PGS as burn-in when the server publishes it burn_in_only", () => {
     const tracks = [
-      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: false }),
-      makeSub({ index: 1, source: "external", language: "en", codec: "srt" }),
+      makeSub({ index: 0, source: "embedded", language: "en", codec: "pgs", burn_in_only: true }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt", forced: true }),
+    ];
+    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
+  });
+
+  it("ranks external PGS files as burn-in", () => {
+    const tracks = [
+      makeSub({ index: 0, source: "external", language: "en", codec: "hdmv_pgs_subtitle" }),
+      makeSub({ index: 1, source: "external", language: "en", codec: "srt", forced: true }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });

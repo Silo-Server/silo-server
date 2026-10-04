@@ -11,7 +11,7 @@ import type {
   WatchPageProps,
 } from "@/player";
 import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLanguage";
-import { isBitmapCodec } from "@/player/utils/subtitleCodecs";
+import { subtitleNeedsBurnIn } from "@/player/utils/subtitleCodecs";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 
 export interface WatchRouteRequest {
@@ -243,11 +243,12 @@ function buildInitialSubtitleTrackIndexes({
     }
     const selectedTrack = tracks.find((track) => track.index === selectedSubtitleTrackIndex);
     start[version.file_id] = selectedSubtitleTrackIndex;
-    // Bitmap tracks (PGS/DVD/DVB) have to be burned in on the web player. Keep
-    // their ordinals separately so a refused start can be retried without the
-    // subtitle. Successful starts stay a single request, and the server owns
-    // remapping the selection when it adapts to another file version.
-    if (selectedTrack && isBitmapCodec(selectedTrack.codec)) {
+    // Tracks the server must burn in (DVD/DVB bitmaps, external bitmap
+    // files) can be why a start is refused. Keep their ordinals separately so
+    // a refused start can be retried without the subtitle. Successful starts
+    // stay a single request, and the server owns remapping the selection when
+    // it adapts to another file version.
+    if (selectedTrack && subtitleNeedsBurnIn(selectedTrack)) {
       bitmap[version.file_id] = selectedSubtitleTrackIndex;
     }
   }
