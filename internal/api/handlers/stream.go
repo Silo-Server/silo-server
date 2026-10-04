@@ -408,7 +408,6 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded.Format), requestedFormat)))
 			return
 		}
-		h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: downloaded.ID})
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
 		return
 	}
@@ -528,6 +527,9 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 		return
 	}
+	// Both routes to a stored subtitle (the pinned ID and the ordinal) are
+	// plays; callers answer HEAD requests before this.
+	h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: subtitle.MediaFileID, StoredID: subtitle.ID})
 	// The stored timing correction can change behind the same URL; a player
 	// refetching after a sync or reset must not get a cached copy.
 	w.Header().Set("Cache-Control", "private, no-cache")

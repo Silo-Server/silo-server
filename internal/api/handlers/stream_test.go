@@ -510,6 +510,8 @@ func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.SubtitleRepo = repo
 	handler.SubtitleBlobs = subtitleContentBlobStore{objects: map[string][]byte{"timed-71.srt": []byte(stored)}}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
 
 	serve := func(prefix, track, query string, native bool) *httptest.ResponseRecorder {
 		t.Helper()
@@ -539,6 +541,11 @@ func TestHandleSubtitleAppliesDownloadedSubtitleTiming(t *testing.T) {
 	rr := serve("/api/v2/stream/", "0.srt", "file_id=42&original=1&downloaded_subtitle_id=71", true)
 	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {
 		t.Fatalf("original SRT = %d %q, want %q", rr.Code, rr.Body.String(), want)
+	}
+	// Both routes to the stored row, the pinned ID and the ordinal, are plays.
+	played := subtitles.SyncTarget{MediaFileID: 42, StoredID: 71}
+	if len(plays.targets) != 3 || plays.targets[0] != played || plays.targets[1] != played || plays.targets[2] != played {
+		t.Fatalf("played %+v", plays.targets)
 	}
 }
 
