@@ -648,7 +648,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			}
 			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
 			tryProgressive := func() (PlannerResultV3, bool) {
-				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, source, progressiveAudioChannels) {
+				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, file, progressiveAudioChannels) {
 					return PlannerResultV3{}, false
 				}
 				candidate := cloneRemuxPlanCandidateV3(progressivePlan)
@@ -666,7 +666,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					return result
 				}
 			}
-			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (!hlsTranscodeAudio && !hlsAudioQuirkOK || audioRemuxFitsServerCapV3(input, source, hlsAACChannels))
+			hlsRouteOK := deliveryAvailableV3(input.Request, DeliveryClassHLSV3) && hlsRemuxSubtitleOK && (!dvStrip || dvStripEligibleHLS) && (!hlsTranscodeAudio && !hlsAudioQuirkOK || audioRemuxFitsServerCapV3(input, file, hlsAACChannels))
 			if hlsRouteOK && (hlsTranscodeAudio || hlsAudioQuirkOK) && !input.hlsRemuxRegistry().Available(TransformationAudioToAACV3) {
 				// HLS needs an AAC conversion that no HLS executor offers. Skip
 				// only this route: a later recipe (the Dolby Vision HDR10 strip)
@@ -2113,18 +2113,23 @@ func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass string, 
 
 // audioRemuxFitsServerCapV3 reports whether a video-copy remux that converts
 // the selected audio to AAC stays inside the administrator's bitrate cap. The
-// source bitrate already counts the audio track the AAC output replaces, so
-// adding the full AAC rate is an upper bound. An unknown source bitrate cannot
+// file's total bitrate already counts the audio track the AAC output replaces,
+// so adding the full AAC rate is an upper bound. The source descriptor's rate
+// can be the video track's alone and would undercount. An unknown total cannot
 // be bounded and needs the budgeted transcode.
-func audioRemuxFitsServerCapV3(input PlannerInputV3, source SourceDescriptorV3, aacChannels int) bool {
+func audioRemuxFitsServerCapV3(input PlannerInputV3, file *models.MediaFile, aacChannels int) bool {
 	if input.ServerBitrateCapKbps <= 0 {
 		return true
 	}
-	if source.BitrateKbps <= 0 {
+	totalBitrateKbps := 0
+	if file != nil {
+		totalBitrateKbps = normalizeBitrateKbpsV3(file.Bitrate)
+	}
+	if totalBitrateKbps <= 0 {
 		return false
 	}
 	_, aacKbps := ResolveAACOutputV3(aacChannels, 0)
-	return source.BitrateKbps+aacKbps <= input.ServerBitrateCapKbps
+	return totalBitrateKbps+aacKbps <= input.ServerBitrateCapKbps
 }
 
 // deliverySupportsPlanV3 applies the capability limits scoped to the delivery

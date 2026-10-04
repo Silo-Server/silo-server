@@ -3409,11 +3409,13 @@ func TestPlanPlaybackV3ChannelCeilingAdaptsAudioAndCopiesVideo(t *testing.T) {
 func TestPlanPlaybackV3ChannelCeilingRemuxUnderServerBitrateCap(t *testing.T) {
 	tracks := []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}}
 	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "eac3"}, 2)
+	// The file total counts the E-AC-3 track the video track's rate omits.
+	file.VideoTracks[0].Bitrate = 11_000
 	selectAndroidAudioTrackV3(&request, file.ID, 0)
 	input := PlannerInputV3{
 		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: PlannerSettingsV3{TranscodeEnabled: false}, Registry: testTransformationRegistryV3(),
-		ServerBitrateCapKbps: 12_200, // 12,000 kbps source + 192 kbps stereo AAC
+		ServerBitrateCapKbps: 12_200, // 12,000 kbps file total + 192 kbps stereo AAC
 	}
 	result := PlanPlaybackV3(input)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != codecCopyV3 || result.TargetAudioChannels != 2 {
