@@ -1583,6 +1583,29 @@ subscription snapshot is `null`. FFmpeg output for every attempt, on the API hos
 or a node, is logged under the row's `log_session_id` (`download-prepare-<id>`) as
 `playback_session_id`. None of this changes the client-facing download contract.
 
+### Pausing and canceling preparation (admin)
+
+A paused job keeps its queued status and claim position; `paused_at` hides it
+from the claim query until an administrator resumes it. Pausing a running job
+returns it to its queued status, clears its lease and live state, and refunds
+the attempt. The lost lease fences the worker out: an encode on the replica that
+handled the request is canceled at once, and one on another replica stops at its
+next heartbeat (within about 40 seconds). The row keeps an unowned
+`lease_expires_at` one lease length (two minutes) ahead, and `ClaimNext` waits it
+out even if the job is resumed sooner, because a second attempt would share the
+first one's local output path.
+
+Canceling deletes the job row and fails its `preparing` downloads with
+`Canceled by an administrator` in one transaction, then publishes the usual
+`download` user-state event for each. A running attempt stops the same way as a
+pause; remote attempt bytes go through the orphan cleanup queue, which treats a
+locator whose row is gone as abandoned, and a local encode that finishes after
+its row was deleted removes its own file. Each job writes to a path that includes
+its id, so a job created after a cancel never shares a path with the canceled
+encode. A download linked to the job while the cancel committed fails the same
+way, when its link is confirmed or at the next queue reconciliation. Clients see
+an ordinary failed download and can request it again, which queues a new job.
+
 ### Progress sync ordering
 
 Progress rows carry two server-owned facets, deliberately split:

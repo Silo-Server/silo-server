@@ -105,7 +105,10 @@ DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
 GET /api/v2/admin/downloads/preparations	non-media
+POST /api/v2/admin/downloads/preparations/cancel	non-media
 GET /api/v2/admin/downloads/preparations/capabilities	non-media
+POST /api/v2/admin/downloads/preparations/pause	non-media
+POST /api/v2/admin/downloads/preparations/resume	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media
@@ -1327,7 +1330,10 @@ DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
 GET /api/v2/admin/downloads/preparations	non-media
+POST /api/v2/admin/downloads/preparations/cancel	non-media
 GET /api/v2/admin/downloads/preparations/capabilities	non-media
+POST /api/v2/admin/downloads/preparations/pause	non-media
+POST /api/v2/admin/downloads/preparations/resume	non-media
 POST /api/v2/admin/email/test	non-media
 POST /api/v2/admin/files/{fileId}/contribute	non-media
 GET /api/v2/admin/files/{fileId}/contributions	non-media

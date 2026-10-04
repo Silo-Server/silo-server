@@ -81,6 +81,7 @@ function formatPreparationSummary(counts: {
   running: number;
   queued: number;
   retrying: number;
+  paused: number;
 }): string {
   const parts = [];
   if (counts.running > 0) {
@@ -88,6 +89,7 @@ function formatPreparationSummary(counts: {
   }
   if (counts.queued > 0) parts.push(`${counts.queued} queued`);
   if (counts.retrying > 0) parts.push(`${counts.retrying} retrying`);
+  if (counts.paused > 0) parts.push(`${counts.paused} paused`);
   return parts.join(", ");
 }
 

@@ -553,6 +553,9 @@ export const v2Operations = {
   "POST /api/v2/admin/collections/template-bundles/{bundle_id}/apply-job":
     "startAdminCollectionTemplateBundleJob",
   "POST /api/v2/admin/collections/{id}/sync": "syncAdminCollection",
+  "POST /api/v2/admin/downloads/preparations/cancel": "cancelAdminDownloadPreparations",
+  "POST /api/v2/admin/downloads/preparations/pause": "pauseAdminDownloadPreparations",
+  "POST /api/v2/admin/downloads/preparations/resume": "resumeAdminDownloadPreparations",
   "POST /api/v2/admin/email/test": "sendAdminTestEmail",
   "POST /api/v2/admin/files/{fileId}/contribute": "contributeAdminFileMarkers",
   "POST /api/v2/admin/history-import-sources": "createAdminHistoryImportSource",

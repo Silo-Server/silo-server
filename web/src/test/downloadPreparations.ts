@@ -78,6 +78,7 @@ export function makePreparationList(
       running: count("running"),
       queued: count("queued"),
       retrying: count("retrying"),
+      paused: count("paused"),
       failed_recent: count("failed"),
       ...counts,
     },

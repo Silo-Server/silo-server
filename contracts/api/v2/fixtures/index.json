@@ -1090,7 +1090,7 @@
     {
       "name": "admin_download_preparations",
       "operation_id": "listAdminDownloadPreparations",
-      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, and a recent failure, with totals across every listed job.",
+      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, a paused transcode, and a recent failure, with totals across every listed job.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/downloads/preparations?limit=10",
@@ -3614,6 +3614,47 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "authentication_required.json"
+    },
+    {
+      "name": "cancel_admin_download_preparations",
+      "operation_id": "cancelAdminDownloadPreparations",
+      "scenario": "Canceling removes unfinished and failed jobs; a job that already finished preparing is not found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-queued\",\"art-failed\",\"art-ready\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "cancel_admin_download_preparations.json"
+    },
+    {
+      "name": "cancel_admin_download_preparations_invalid_id",
+      "operation_id": "cancelAdminDownloadPreparations",
+      "scenario": "A job id outside the artifact id alphabet is rejected before any job is touched.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"../etc\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "cancel_admin_download_preparations_invalid_id.json"
     },
     {
       "name": "cancel_device_login_not_found",
@@ -11359,6 +11400,26 @@
       "body_file": "password_reset_lookup.json"
     },
     {
+      "name": "pause_admin_download_preparations",
+      "operation_id": "pauseAdminDownloadPreparations",
+      "scenario": "Pausing reports one outcome per distinct job: a queued job pauses, a paused one is unchanged, a failed one cannot be paused, and an unknown one is not found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/pause",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-queued\",\"art-paused\",\"art-failed\",\"art-gone\",\"art-queued\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "pause_admin_download_preparations.json"
+    },
+    {
       "name": "payload_too_large",
       "operation_id": null,
       "scenario": "A JSON body over the operation's declared limit (256 bytes on this probe), refused before decoding.",
@@ -12532,6 +12593,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/EffectiveSettingContextCollection",
       "body_file": "resolve_effective_settings_ok.json"
+    },
+    {
+      "name": "resume_admin_download_preparations",
+      "operation_id": "resumeAdminDownloadPreparations",
+      "scenario": "Resuming a paused job applies; a job that was never paused is unchanged.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/resume",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-paused\",\"art-queued\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "resume_admin_download_preparations.json"
     },
     {
       "name": "retry_metadata_match_queue_ok",
