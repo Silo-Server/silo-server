@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -36,6 +39,10 @@ type (
 	subtitleContent interface {
 		GetSubtitleContent(ctx context.Context, id int) (*subtitles.DownloadedSubtitle, []byte, error)
 	}
+	externalRows interface {
+		ExternalTimingByID(ctx context.Context, id int64) (*subtitles.ExternalTiming, error)
+		EnsureExternalTiming(ctx context.Context, mediaFileID int, contentSHA256, path string, format subtitles.SubtitleFormat) (*subtitles.ExternalTiming, error)
+	}
 	mediaFiles interface {
 		GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 	}
@@ -47,18 +54,34 @@ type (
 	jobStore interface {
 		jobrunner.Store
 		Create(ctx context.Context, sub *subtitles.DownloadedSubtitle, trigger string, requestedBy *int) (*Job, bool, error)
+		CreateExternal(ctx context.Context, timing *subtitles.ExternalTiming, trigger string, requestedBy *int) (*Job, bool, error)
 		Latest(ctx context.Context, subtitleID int) (*Job, error)
+		LatestExternal(ctx context.Context, timingID int64) (*Job, error)
 		LatestForSubtitles(ctx context.Context, subtitleIDs []int) (map[int]*Job, error)
+		LatestForExternal(ctx context.Context, timingIDs []int64) (map[int64]*Job, error)
 		HasJob(ctx context.Context, subtitleID int) (bool, error)
 		MarkRunning(ctx context.Context, id int64) error
+		Progress(ctx context.Context, id int64, phase string, progress float64) error
 		Finish(ctx context.Context, id int64, o Outcome) error
 		Apply(ctx context.Context, job *Job, timing subtitles.Timing, o Outcome) (int64, error)
 	}
 )
 
-// Notifier tells players of a file that one of its subtitles was retimed.
+// Notifier tells players of a file how syncing one of its subtitles goes,
+// and when one was retimed.
 type Notifier interface {
-	SubtitleTimingChanged(ctx context.Context, mediaFileID, subtitleID int)
+	SubtitleTimingChanged(ctx context.Context, target subtitles.SyncTarget)
+	SubtitleSyncUpdated(ctx context.Context, update Update)
+}
+
+// Update is a sync job's state for the players of its subtitle's file: sent
+// when the job is queued, as it runs, and when it finishes.
+type Update struct {
+	Target subtitles.SyncTarget
+	// Timing is the subtitle's correction after this step: its current one
+	// while the job runs, the result once a synced job applied it.
+	Timing subtitles.Timing
+	Job    Job
 }
 
 // Deps wires a Service.
@@ -67,6 +90,8 @@ type Deps struct {
 	Jobs       *Store
 	Subtitles  *subtitles.Manager
 	Rows       subtitleRows
+	// External stores sidecar timing corrections.
+	External   externalRows
 	Files      mediaFiles
 	Artifacts  *mediaartifact.Store
 	Settings   SettingsReader
@@ -82,6 +107,8 @@ type Service struct {
 	jobs      jobStore
 	rows      subtitleRows
 	content   subtitleContent
+	external  externalRows
+	readFile  func(path string) ([]byte, error)
 	files     mediaFiles
 	artifacts artifactStore
 	settings  SettingsReader
@@ -95,7 +122,8 @@ type Service struct {
 // NewService builds a Service and starts its stale-job recovery.
 func NewService(d Deps) *Service {
 	s := &Service{
-		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, files: d.Files, artifacts: d.Artifacts,
+		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, external: d.External, readFile: os.ReadFile,
+		files: d.Files, artifacts: d.Artifacts,
 		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.FFmpegPath),
 		notifier: d.Notifier, node: d.Node, now: time.Now,
 	}
@@ -153,6 +181,38 @@ func (s *Service) Request(ctx context.Context, subtitleID int, trigger string, r
 		return nil, err
 	}
 	if created {
+		s.updated(ctx, subtitles.SyncTarget{MediaFileID: sub.MediaFileID, StoredID: sub.ID}, sub.Timing, *job)
+		s.dispatch(job)
+	}
+	return job, nil
+}
+
+// RequestExternal starts a sync of a sidecar subtitle of the file, or returns
+// its active job. Sidecars sync only on request: nothing syncs them
+// automatically. The sidecar's bytes get a correction row (with the original
+// timing) so the job has a revision to guard its result with.
+func (s *Service) RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, requestedBy *int) (*Job, error) {
+	format := subtitles.SubtitleFormat(strings.ToLower(sidecar.Format))
+	if !subtitles.SupportsRetime(format) {
+		return nil, ErrUnsupportedFormat
+	}
+	if s.external == nil {
+		return nil, errors.New("sidecar subtitle timing is not configured")
+	}
+	data, err := s.readFile(sidecar.Path)
+	if err != nil {
+		return nil, fmt.Errorf("read sidecar subtitle: %w", err)
+	}
+	row, err := s.external.EnsureExternalTiming(ctx, mediaFileID, subtitles.ContentSHA256(data), sidecar.Path, format)
+	if err != nil {
+		return nil, err
+	}
+	job, created, err := s.jobs.CreateExternal(ctx, row, TriggerManual, requestedBy)
+	if err != nil {
+		return nil, err
+	}
+	if created {
+		s.updated(ctx, subtitles.SyncTarget{MediaFileID: mediaFileID, ExternalPath: sidecar.Path}, row.Timing, *job)
 		s.dispatch(job)
 	}
 	return job, nil
@@ -163,16 +223,34 @@ func (s *Service) Latest(ctx context.Context, subtitleID int) (*Job, error) {
 	return s.jobs.Latest(ctx, subtitleID)
 }
 
+// LatestExternal returns the most recent job of a sidecar's correction row,
+// or nil.
+func (s *Service) LatestExternal(ctx context.Context, timingID int64) (*Job, error) {
+	return s.jobs.LatestExternal(ctx, timingID)
+}
+
 // LatestForSubtitles returns each subtitle's most recent job.
 func (s *Service) LatestForSubtitles(ctx context.Context, subtitleIDs []int) (map[int]*Job, error) {
 	return s.jobs.LatestForSubtitles(ctx, subtitleIDs)
 }
 
+// LatestForExternal returns each sidecar correction row's most recent job.
+func (s *Service) LatestForExternal(ctx context.Context, timingIDs []int64) (map[int64]*Job, error) {
+	return s.jobs.LatestForExternal(ctx, timingIDs)
+}
+
 // TimingChanged tells players a subtitle's timing changed outside a job,
 // such as a manual adjustment.
-func (s *Service) TimingChanged(ctx context.Context, mediaFileID, subtitleID int) {
+func (s *Service) TimingChanged(ctx context.Context, target subtitles.SyncTarget) {
 	if s.notifier != nil {
-		s.notifier.SubtitleTimingChanged(ctx, mediaFileID, subtitleID)
+		s.notifier.SubtitleTimingChanged(ctx, target)
+	}
+}
+
+// updated tells players of the file about a job's state; best effort.
+func (s *Service) updated(ctx context.Context, target subtitles.SyncTarget, timing subtitles.Timing, job Job) {
+	if s.notifier != nil && target.MediaFileID > 0 {
+		s.notifier.SubtitleSyncUpdated(context.WithoutCancel(ctx), Update{Target: target, Timing: timing, Job: job})
 	}
 }
 
@@ -180,8 +258,33 @@ func (s *Service) dispatch(job *Job) {
 	s.runner.Dispatch(job.ID, func(ctx context.Context) {
 		s.execute(ctx, job)
 	}, func(ctx context.Context) {
-		_ = s.jobs.Finish(ctx, job.ID, Outcome{Status: JobFailed, Error: "canceled"})
+		_ = s.jobs.Finish(ctx, job.ID, Outcome{Status: JobFailed, Error: "canceled", Failure: FailureUnavailable})
 	})
+}
+
+// run is one execution of a job: the subject it found and the state players
+// last heard about.
+type run struct {
+	s       *Service
+	job     Job
+	subject subject
+}
+
+// report records a running job's phase and progress, on the job row and for
+// players of its file.
+func (r *run) report(ctx context.Context, phase string, progress float64) {
+	r.job.Status, r.job.Phase, r.job.Progress = JobRunning, phase, &progress
+	_ = r.s.jobs.Progress(context.WithoutCancel(ctx), r.job.ID, phase, progress)
+	r.s.updated(ctx, r.subject.target, r.subject.timing, r.job)
+}
+
+// finished tells players of the file how the job ended; timing is the
+// subtitle's correction now.
+func (r *run) finished(ctx context.Context, o Outcome, timing subtitles.Timing) {
+	r.job.Status, r.job.Phase, r.job.Progress = o.Status, "", nil
+	r.job.Confidence, r.job.Result, r.job.Error, r.job.Failure = o.Confidence, o.Result, o.Error, o.Failure
+	r.job.FinishedAt = new(r.s.now())
+	r.s.updated(ctx, r.subject.target, timing, r.job)
 }
 
 func (s *Service) execute(ctx context.Context, job *Job) {
@@ -189,15 +292,22 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		return
 	}
 	started := s.now()
-	outcome, err := s.align(ctx, job)
+	r := &run{s: s, job: *job}
+	outcome, err := s.align(ctx, r)
 	log := slog.With("component", "subsync", "job_id", job.ID, "subtitle_id", job.SubtitleID,
-		"media_file_id", job.MediaFileID, "trigger", job.Trigger, "executed_on", outcome.ExecutedOn,
-		"duration_ms", s.now().Sub(started).Milliseconds())
+		"external_timing_id", job.ExternalTimingID, "media_file_id", job.MediaFileID, "trigger", job.Trigger,
+		"executed_on", outcome.ExecutedOn, "duration_ms", s.now().Sub(started).Milliseconds())
 	finishCtx := context.WithoutCancel(ctx)
+	// stage says where a failure happened: aligning, or applying its result.
+	fail := func(err error, stage string) {
+		outcome.Status, outcome.Error, outcome.Failure = JobFailed, err.Error(), failureOf(err)
+		log.WarnContext(ctx, "subtitle sync failed", "stage", stage, "error", err, "failure", outcome.Failure)
+		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
+			r.finished(finishCtx, outcome, r.subject.timing)
+		}
+	}
 	if err != nil {
-		outcome.Status, outcome.Error = JobFailed, err.Error()
-		log.WarnContext(ctx, "subtitle sync failed", "error", err)
-		_ = s.jobs.Finish(finishCtx, job.ID, outcome)
+		fail(err, "align")
 		return
 	}
 	var found subtitles.Timing
@@ -208,55 +318,145 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 		"offset_ms", found.OffsetMS, "scale", found.Normalized().Scale)
 	if outcome.Status != string(StatusSynced) {
 		log.InfoContext(ctx, "subtitle sync finished")
-		_ = s.jobs.Finish(finishCtx, job.ID, outcome)
+		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
+			r.finished(finishCtx, outcome, r.subject.timing)
+		}
 		return
 	}
 	if err := subtitles.ValidateTiming(found); err != nil {
-		outcome.Status, outcome.Error = JobFailed, err.Error()
-		log.WarnContext(ctx, "subtitle sync result out of range", "error", err)
-		_ = s.jobs.Finish(finishCtx, job.ID, outcome)
+		fail(err, "result out of range")
 		return
 	}
 	if _, err := s.jobs.Apply(finishCtx, job, found, outcome); err != nil {
-		// A job that is already terminal (reaped meanwhile) stays as it is;
-		// any other failure ends it so a new sync can start.
-		if !errors.Is(err, jobrunner.ErrJobTerminal) {
-			outcome.Status, outcome.Error = JobFailed, err.Error()
-			_ = s.jobs.Finish(finishCtx, job.ID, outcome)
+		// A job that is already terminal (reaped, or deleted with a replaced
+		// file) stays as it is; any other failure ends it so a new sync can
+		// start.
+		if errors.Is(err, jobrunner.ErrJobTerminal) {
+			log.WarnContext(ctx, "subtitle sync result not applied", "error", err)
+			return
 		}
-		log.WarnContext(ctx, "subtitle sync result not applied", "error", err)
+		fail(err, "apply")
 		return
 	}
 	log.InfoContext(ctx, "subtitle sync applied")
-	s.TimingChanged(finishCtx, job.MediaFileID, job.SubtitleID)
+	r.finished(finishCtx, outcome, found)
+	s.TimingChanged(finishCtx, r.subject.target)
 }
 
-// align computes the job's outcome. Its Result is the correction found, which
-// a synced outcome applies.
-func (s *Service) align(ctx context.Context, job *Job) (Outcome, error) {
-	sub, data, err := s.content.GetSubtitleContent(ctx, job.SubtitleID)
+// subject is what a job aligns: the subtitle's original bytes, as stored or
+// on disk, and its current correction.
+type subject struct {
+	target   subtitles.SyncTarget
+	format   subtitles.SubtitleFormat
+	language string
+	timing   subtitles.Timing
+	data     []byte
+}
+
+// loadSubject reads the job's subject. It is ErrSubtitleChanged when the
+// subject no longer has the job's base revision or belongs to another file,
+// or a sidecar's bytes or place in the file's catalog changed. The target is set as soon as it is
+// known, failure or not.
+func (s *Service) loadSubject(ctx context.Context, job *Job, file func() (*models.MediaFile, error)) (subject, error) {
+	if job.ExternalTimingID == 0 {
+		subj := subject{target: subtitles.SyncTarget{MediaFileID: job.MediaFileID, StoredID: job.SubtitleID}}
+		sub, data, err := s.content.GetSubtitleContent(ctx, job.SubtitleID)
+		if err != nil {
+			return subj, err
+		}
+		subj.timing = sub.Timing
+		if sub.Revision != job.BaseRevision || sub.MediaFileID != job.MediaFileID {
+			return subj, ErrSubtitleChanged
+		}
+		subj.format, subj.language, subj.data = sub.Format, sub.Language, data
+		return subj, nil
+	}
+	if s.external == nil {
+		return subject{}, errors.New("sidecar subtitle timing is not configured")
+	}
+	row, err := s.external.ExternalTimingByID(ctx, job.ExternalTimingID)
+	if err != nil {
+		return subject{}, err
+	}
+	if row == nil {
+		return subject{}, ErrSubtitleChanged
+	}
+	subj := subject{target: subtitles.SyncTarget{MediaFileID: job.MediaFileID, ExternalPath: row.Path}, timing: row.Timing}
+	if row.Revision != job.BaseRevision || row.MediaFileID != job.MediaFileID {
+		return subj, ErrSubtitleChanged
+	}
+	data, err := s.readFile(row.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return subj, ErrSubtitleChanged
+	}
+	if err != nil {
+		return subj, fmt.Errorf("read sidecar subtitle: %w", err)
+	}
+	if subtitles.ContentSHA256(data) != row.ContentSHA256 {
+		return subj, ErrSubtitleChanged
+	}
+	f, err := file()
+	if err != nil {
+		return subj, err
+	}
+	for _, sidecar := range f.ExternalSubtitles {
+		if sidecar.Path == row.Path {
+			subj.format, subj.language, subj.data = row.Format, sidecar.Language, data
+			return subj, nil
+		}
+	}
+	// The scanner no longer lists the sidecar under this file.
+	return subj, ErrSubtitleChanged
+}
+
+// Progress the phases report: decoding speech fills most of the bar, since
+// it takes almost all of a job's time; matching takes a fraction of a second.
+const (
+	analyzingShare = 0.9
+	matchingStart  = 0.95
+)
+
+// align computes the job's outcome, reporting progress as it goes. The
+// outcome's Result is the correction found, which a synced outcome applies.
+func (s *Service) align(ctx context.Context, r *run) (Outcome, error) {
+	job := &r.job
+	var file *models.MediaFile
+	loadFile := func() (*models.MediaFile, error) {
+		if file != nil {
+			return file, nil
+		}
+		f, err := s.files.GetByID(ctx, job.MediaFileID)
+		if err != nil {
+			return nil, fmt.Errorf("load media file: %w", err)
+		}
+		if f == nil {
+			return nil, errors.New("media file not found")
+		}
+		file = f
+		return file, nil
+	}
+	subj, err := s.loadSubject(ctx, job, loadFile)
+	r.subject = subj
 	if err != nil {
 		return Outcome{}, err
 	}
-	if sub.Revision != job.BaseRevision {
-		return Outcome{}, ErrSubtitleChanged
-	}
-	cues, err := subtitles.ParseCuesForFormat(sub.Format, data)
+	r.report(ctx, PhaseAnalyzing, 0)
+	cues, err := subtitles.ParseCuesForFormat(subj.format, subj.data)
 	if err != nil {
 		return Outcome{}, fmt.Errorf("read subtitle cues: %w", err)
 	}
-	file, err := s.files.GetByID(ctx, sub.MediaFileID)
-	if err != nil {
-		return Outcome{}, fmt.Errorf("load media file: %w", err)
+	if _, err := loadFile(); err != nil {
+		return Outcome{}, err
 	}
-	if file == nil {
-		return Outcome{}, errors.New("media file not found")
+	decoded := func(done, total int) {
+		r.report(ctx, PhaseAnalyzing, analyzingShare*float64(done)/float64(total))
 	}
-	windows, plan, executedOn, err := s.speech(ctx, file, sub.Language, job.Trigger == TriggerAuto)
+	windows, plan, executedOn, err := s.speech(ctx, file, subj.language, job.Trigger == TriggerAuto, decoded)
 	outcome := Outcome{ExecutedOn: executedOn}
 	if err != nil {
 		return outcome, err
 	}
+	r.report(ctx, PhaseMatching, matchingStart)
 	alignment, err := Align(windows, cues)
 	if errors.Is(err, ErrNoSpeech) {
 		outcome.Status = string(StatusNoMatch)
@@ -266,19 +466,50 @@ func (s *Service) align(ctx context.Context, job *Job) (Outcome, error) {
 	if err != nil {
 		return outcome, err
 	}
-	outcome.Status = string(Decide(alignment, sub.Timing, time.Duration(plan.Runtime*float64(time.Second))))
+	outcome.Status = string(Decide(alignment, subj.timing, time.Duration(plan.Runtime*float64(time.Second))))
 	outcome.Confidence = &alignment.Confidence
 	outcome.Result = &alignment.Timing
 	return outcome, nil
 }
 
+// Causes failureOf tells apart.
+var (
+	errNoUsableAudio   = errors.New("no usable audio")
+	errAnalysisBackoff = errors.New("speech analysis is backing off after a failure")
+)
+
+// failureOf names why a job failed, for clients.
+func failureOf(err error) string {
+	switch {
+	case errors.Is(err, ErrSubtitleChanged):
+		return FailureSubtitleChanged
+	case errors.Is(err, errNoUsableAudio):
+		return FailureNoAudio
+	case errors.Is(err, errNoNode), errors.Is(err, errAnalysisBackoff),
+		errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return FailureUnavailable
+	}
+	var sampleErr *mediasample.Error
+	var remoteErr *mediasample.RemoteError
+	if errors.As(err, &sampleErr) || errors.As(err, &remoteErr) {
+		// The file itself fails the decode, or the host, node, or ffmpeg
+		// does and a later attempt can pass.
+		if failureReason(err).Permanent() {
+			return FailureNoAudio
+		}
+		return FailureUnavailable
+	}
+	return FailureError
+}
+
 // speech returns the file's speech levels from the artifact cache or by
 // decoding them. A center-channel plan that the file cannot satisfy is
 // recorded unusable and the plan falls back to a downmix of every channel.
-func (s *Service) speech(ctx context.Context, file *models.MediaFile, language string, background bool) ([]mediasample.SpeechLevels, speechPlan, string, error) {
+// decoded, when set, hears how many of a plan's windows are done.
+func (s *Service) speech(ctx context.Context, file *models.MediaFile, language string, background bool, decoded func(done, total int)) ([]mediasample.SpeechLevels, speechPlan, string, error) {
 	plan, err := planSpeech(file, language)
 	if err != nil {
-		return nil, plan, "", err
+		return nil, plan, "", fmt.Errorf("%w: %w", errNoUsableAudio, err)
 	}
 	plans := []speechPlan{plan}
 	if plan.CenterChannel {
@@ -303,13 +534,22 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 		case mediaartifact.Skipped:
 			// Unusable, or failing on this server and backing off; a
 			// manual request retries a failure at once.
-			if cached.Status == mediaartifact.StatusUnusable || background {
-				lastErr = fmt.Errorf("speech analysis unavailable: %s%s", cached.Detail, cached.LastError)
+			if cached.Status == mediaartifact.StatusUnusable {
+				lastErr = fmt.Errorf("%w: %s", errNoUsableAudio, cached.Detail)
+				continue
+			}
+			if background {
+				lastErr = fmt.Errorf("%w: %s", errAnalysisBackoff, cached.LastError)
 				continue
 			}
 		}
 
-		results, executedOn, err := s.sampler.run(ctx, p.requests(file.FilePath, background))
+		reqs := p.requests(file.FilePath, background)
+		var done func(int)
+		if decoded != nil {
+			done = func(n int) { decoded(n, len(reqs)) }
+		}
+		results, executedOn, err := s.sampler.run(ctx, reqs, done)
 		if err == nil {
 			windows := make([]mediasample.SpeechLevels, 0, len(results))
 			for _, r := range results {

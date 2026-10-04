@@ -1188,8 +1188,11 @@ an ordinal by counting tracks, summing array lengths, or taking `max(index)+1`.
 
 Each entry carries `source` (`external` | `embedded` | `downloaded`), `delivery`
 (`sidecar` | `burn_in_only`), the `forced` / `default` / `hearing_impaired`
-flags, a `url` when deliverable, and a `font_bundle_url` for embedded ASS tracks
-with attachments. `default` reflects the source container's own default flag, so
+flags, a `url` when deliverable, a `font_bundle_url` for embedded ASS tracks
+with attachments, and a `sync_key` on external and downloaded SRT, WebVTT, ASS,
+and SSA tracks. The sync key names the track to the subtitle sync operations
+(see [subtitles-api.md](../subtitles-api.md#subtitle-sync)); it is stable across
+sessions and inventory order, and realtime sync events carry it. `default` reflects the source container's own default flag, so
 only embedded and external tracks can carry it — a downloaded subtitle is never
 `default`. `url` is present only on `sidecar` tracks, and only once a session
 exists to scope it to — but it does not depend on the current selection: a start
@@ -1251,7 +1254,10 @@ sliding window may explicitly supply `position` (nonnegative source seconds)
 and `duration` (positive seconds, at most 3600). They must request subsequent
 windows themselves; HTTP EOF ends only the requested window. ASS remains a
 complete script. PGS windows require `windowed=1` in addition to the window
-parameters. External and downloaded sidecars are always returned whole.
+parameters. External and downloaded sidecars are always returned whole, with
+their timing correction applied before any conversion (an `original=1` SRT
+included) and `Cache-Control: private, no-cache`, since a correction changes
+the bytes behind the same URL.
 
 Complete embedded text and PGS extracts are cached by source file identity,
 modification time, size, subtitle ordinal, and output format. Partial or failed

@@ -783,6 +783,10 @@ PUT /api/v2/subtitles/stored/{id}/timing	non-media
 GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
+GET /api/v2/subtitles/{media_file_id}/sync	non-media
+GET /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+POST /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing	non-media
 POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media
@@ -2005,6 +2009,10 @@ PUT /api/v2/subtitles/stored/{id}/timing	non-media
 GET /api/v2/subtitles/sync/status	non-media
 POST /api/v2/subtitles/upload	non-media
 GET /api/v2/subtitles/{media_file_id}	non-media
+GET /api/v2/subtitles/{media_file_id}/sync	non-media
+GET /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+POST /api/v2/subtitles/{media_file_id}/sync/{key}	non-media
+PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing	non-media
 POST /api/v2/sync/progress	non-media
 GET /api/v2/sync/progress/capabilities	non-media
 POST /api/v2/sync/progress/snapshots	non-media

@@ -79,6 +79,9 @@ type StreamHandler struct {
 	SubtitleCache *playback.SubtitleCache
 	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// ExternalTimings finds sidecar timing corrections; nil serves sidecars as
+	// they are on disk.
+	ExternalTimings subtitles.ExternalTimingLookup
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -411,29 +414,23 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Serve ASS/SSA external subtitles as raw data for client-side
-		// rendering, and SRT the same way when the URL asks for .srt.
-		if servesOriginalSubRip(r, sub.Format, requestedFormat) {
-			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
+		// A sidecar's timing correction can change behind the same URL.
+		w.Header().Set("Cache-Control", "private, no-cache")
+		if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
+			data, err := playback.LoadExternalSubtitle(r.Context(), h.ExternalTimings, file.ID, sub)
 			if err != nil {
+				slog.ErrorContext(r.Context(), "load sidecar subtitle failed", "component", "api",
+					"file_id", file.ID, "error", err)
 				writeError(w, http.StatusInternalServerError, "internal_error",
 					"Failed to load external subtitle")
 				return
 			}
-			serveOriginalSubRip(w, data)
-			return
-		}
-		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
-			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal_error",
-					"Failed to load external subtitle")
-				return
-			}
-			playback.ServeSubtitle(w, data, subtitleFormatASS)
+			h.serveSubtitleData(w, r, sub.Format, data, requestedFormat)
 			return
 		}
 
+		// Other formats (MicroDVD .sub) cannot be retimed; ffmpeg converts
+		// them from the file.
 		vttData, err := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.ffmpegPath())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error",
@@ -531,26 +528,30 @@ func (h *StreamHandler) serveDownloadedSubtitle(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to prepare subtitle")
 		return
 	}
+	h.serveSubtitleData(w, r, string(subtitle.Format), data, requestedFormat)
+}
 
-	// Serve ASS/SSA downloaded subtitles as raw data, and SRT the same way
-	// when the URL asks for .srt.
-	if servesOriginalSubRip(r, string(subtitle.Format), requestedFormat) {
+// serveSubtitleData answers a subtitle request from text subtitle bytes that
+// already carry their timing correction: ASS/SSA raw, and SRT as stored when
+// the URL asks for .srt; anything else as WebVTT.
+func (h *StreamHandler) serveSubtitleData(w http.ResponseWriter, r *http.Request, format string, data []byte, requestedFormat string) {
+	if servesOriginalSubRip(r, format, requestedFormat) {
 		serveOriginalSubRip(w, data)
 		return
 	}
-	if playback.IsASS(string(subtitle.Format)) && requestedFormat != "vtt" {
+	if playback.IsASS(format) && requestedFormat != subtitleFormatVTTV3 {
 		playback.ServeSubtitle(w, data, subtitleFormatASS)
 		return
 	}
 
 	// If the subtitle is already VTT, serve directly.
-	if subtitle.Format == subtitles.FormatVTT {
+	if subtitles.SubtitleFormat(strings.ToLower(format)) == subtitles.FormatVTT {
 		serveSubtitleVTT(w, data)
 		return
 	}
 
 	// Convert other text formats to VTT using the playback conversion pipeline.
-	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(subtitle.Format), h.ffmpegPath())
+	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, format, h.ffmpegPath())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
 		return

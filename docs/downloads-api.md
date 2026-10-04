@@ -641,11 +641,12 @@ Invalid refs return `422 validation_failed`. Current content access is checked
 before asset delivery, and downloaded-subtitle ownership must match the entry's
 media file.
 
-A `downloaded` subtitle is delivered with its stored timing correction applied,
-so its bytes change when an admin or an automatic sync adjusts the timing. Its
-response carries `Cache-Control: private, no-cache` and a strong `ETag` that
-changes with the subtitle's revision; send it back in `If-None-Match` to get
-`304 Not Modified` while the bytes are unchanged.
+A `downloaded` or `external` subtitle is delivered with its timing correction
+applied, so its bytes change when someone syncs or adjusts its timing (and an
+`external` one also when the file on disk changes). Its response carries
+`Cache-Control: private, no-cache` and a strong `ETag` that changes with the
+delivered bytes; send it back in `If-None-Match` to get `304 Not Modified`
+while they are unchanged.
 
 ### 4.10 Direct download
 
@@ -846,11 +847,13 @@ Notes:
 - `integrity.expected_bytes` should match the local media file size after download.
 - `revision` should match the download row revision. If a row revision increases,
   refresh the media file and manifest.
-- `subtitles[].revision` is present only on downloaded (`downloaded:{id}`)
-  subtitles. It is an opaque string that changes whenever that subtitle's
-  delivered bytes can change, such as a timing correction. When a refreshed
-  manifest shows a different value than the one stored with the cached file,
-  re-fetch that subtitle.
+- `subtitles[].revision` is present on downloaded (`downloaded:{id}`) and
+  external (`external:{index}`) subtitles; an external subtitle that cannot be
+  read has none. It is an opaque string that changes whenever that subtitle's
+  delivered bytes can change: a timing correction, or an external file edited
+  on disk. When a refreshed manifest shows a different value than the one
+  stored with the cached file, re-fetch that subtitle. An external subtitle's
+  `file_size` is the size of its delivered bytes.
 - Optional fields are omitted when empty; clients should treat absent values as
   "not set."
 

@@ -797,6 +797,7 @@ var guardedWithoutLegacyRow = map[string]string{
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
 	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1128,6 +1129,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 var mutationWithoutLegacyRow = map[string]string{
 	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
 	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
+	"startSubtitleSync":                    "V2-only sync of a stored subtitle or a sidecar (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that reaches the same timing.",
+	"setSubtitleTiming":                    "V2-only timing correction of a stored subtitle or a sidecar, guarded by If-Match; replaying the same timing after success answers 412 and changes nothing.",
 	"deleteAccountIdentity":                "V2-only external sign-in (OIDC/LDAP) identity disconnect: v1 had no linked identities to manage. It deletes one identity of the caller's account by id, so a replay after success finds nothing and answers 404, leaving the same state.",
 	"createAdminUserIdentity":              "V2-only administrator link of an account to an external sign-in identity: v1 had no identity management. The identity key and the one-identity-per-provider rule are unique, so a replay is refused with 409 and cannot link twice.",
 	"deleteAdminUserIdentity":              "V2-only administrator unlink of an external sign-in identity: v1 had no identity management. A replay after success finds nothing and answers 404, leaving the same state.",

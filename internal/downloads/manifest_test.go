@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -133,7 +135,8 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	if m.Subtitles[1].FetchURL != "/api/v2/downloads/dl1/subtitles/downloaded:7" || m.Subtitles[1].External {
 		t.Fatalf("downloaded subtitle = %+v", m.Subtitles[1])
 	}
-	// Only downloaded subtitles carry a revision; their bytes change with timing.
+	// A sidecar that cannot be read has no revision; a downloaded subtitle's
+	// is its row's, since its bytes change with timing.
 	if m.Subtitles[0].Revision != "" || m.Subtitles[1].Revision != "4" {
 		t.Fatalf("subtitle revisions = %q, %q", m.Subtitles[0].Revision, m.Subtitles[1].Revision)
 	}
@@ -377,5 +380,60 @@ func TestServeDownloadedSubtitleTimingAndRevalidation(t *testing.T) {
 	}
 	if rr.Code != http.StatusOK || rr.Body.String() != stored || rr.Header().Get("ETag") != `"downloaded-7-4"` {
 		t.Fatalf("stale validator = %d %q %q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
+	}
+}
+
+type sidecarTimings map[string]*subtitles.ExternalTiming
+
+func (s sidecarTimings) ExternalTiming(_ context.Context, _ int, sha string) (*subtitles.ExternalTiming, error) {
+	return s[sha], nil
+}
+
+// A sidecar is offered and served with its timing correction under a
+// revision that follows both the file on disk and the correction.
+func TestSidecarSubtitleTimingAndRevision(t *testing.T) {
+	const onDisk = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+	path := filepath.Join(t.TempDir(), "movie.en.srt")
+	if err := os.WriteFile(path, []byte(onDisk), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sha := subtitles.ContentSHA256([]byte(onDisk))
+	timings := sidecarTimings{sha: {Timing: subtitles.Timing{OffsetMS: 500, Scale: 1}, Revision: 2}}
+	file := &models.MediaFile{ID: 99, ExternalSubtitles: []models.ExternalSubtitle{{Path: path, Language: "en", Format: "srt"}}}
+	b := NewManifestBuilder(nil, nil, fakeFileResolver{file: file}, nil)
+	b.externalTimings = timings
+	got := b.buildSubtitles(context.Background(), &Download{ID: "dl1", MediaFileID: 99}, file, nil)
+	timed := "1\n00:00:01,500 --> 00:00:02,500\nHello\n"
+	if len(got) != 1 || got[0].Revision != sha[:16]+"-2" || got[0].FileSize != int64(len(timed)) {
+		t.Fatalf("manifest sidecar = %+v", got)
+	}
+
+	s := &Service{externalTimings: timings}
+	rr := httptest.NewRecorder()
+	if err := s.serveExternalSubtitle(context.Background(), rr, httptest.NewRequest(http.MethodGet, "/", nil), 99, "srt", []byte(onDisk)); err != nil {
+		t.Fatal(err)
+	}
+	etag := rr.Header().Get("ETag")
+	if rr.Code != http.StatusOK || rr.Body.String() != timed || etag != `"external-`+got[0].Revision+`"` || rr.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("GET = %d %q %v", rr.Code, rr.Body.String(), rr.Header())
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("If-None-Match", etag)
+	rr = httptest.NewRecorder()
+	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", []byte(onDisk)); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 {
+		t.Fatalf("revalidation = %d %q", rr.Code, rr.Body.String())
+	}
+
+	// A new correction changes the revision, so the old validator misses.
+	timings[sha] = &subtitles.ExternalTiming{Timing: subtitles.Timing{Scale: 1}, Revision: 3}
+	rr = httptest.NewRecorder()
+	if err := s.serveExternalSubtitle(context.Background(), rr, req, 99, "srt", []byte(onDisk)); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || rr.Body.String() != onDisk {
+		t.Fatalf("after reset = %d %q", rr.Code, rr.Body.String())
 	}
 }

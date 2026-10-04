@@ -2,31 +2,35 @@ import type { components } from "@/api/v2/schema";
 import type { PlayerSubtitleInfo } from "../types";
 
 export type StoredSubtitle = components["schemas"]["StoredSubtitle"];
-export type SubtitleSyncJob = components["schemas"]["SubtitleSyncJob"];
+export type SubtitleSyncState = components["schemas"]["SubtitleSyncState"];
+export type SubtitleSyncJob = components["schemas"]["SubtitleSyncJobState"];
 export type SubtitleTiming = components["schemas"]["SubtitleTiming"];
 export type SubtitleSyncStatus = SubtitleSyncJob["status"];
-
-/** The query parameter that pins a downloaded-track URL to its stored row. */
-const STORED_ID_PARAM = "downloaded_subtitle_id";
+export type SubtitleSyncFailure = NonNullable<SubtitleSyncJob["failure"]>;
 
 /**
- * The stored-subtitle ID behind a downloaded track, or null for embedded,
- * external, live, and unpinned tracks.
- *
- * The plan's inventory does not name stored rows; the server pins each
- * downloaded track's sidecar URL to its row with `downloaded_subtitle_id`
- * (playback protocol v3, subtitle artifact routes). That pin is the only
- * stored-ID carrier the player has, so it is read here and nowhere else.
+ * The sync key of a track whose timing the server can correct (a stored
+ * subtitle or a subtitle file next to the media), or null. The plan's
+ * inventory publishes it as `sync_key`; a live translation has none yet.
  */
-export function storedSubtitleIdOf(track: PlayerSubtitleInfo | null | undefined): string | null {
-  if (!track || track.source !== "downloaded" || track.live || !track.url) return null;
-  let raw: string | null;
-  try {
-    raw = new URL(track.url, "http://player.invalid").searchParams.get(STORED_ID_PARAM);
-  } catch {
-    return null;
-  }
-  return raw && /^[1-9][0-9]*$/.test(raw) ? raw : null;
+export function syncKeyOf(track: PlayerSubtitleInfo | null | undefined): string | null {
+  if (!track || track.live || !track.sync_key) return null;
+  return track.sync_key;
+}
+
+/** The sync state a stored subtitle returned by a download or upload carries. */
+export function storedSyncState(subtitle: StoredSubtitle): SubtitleSyncState {
+  return {
+    key: `stored-${subtitle.id}`,
+    media_file_id: subtitle.media_file_id,
+    source: "downloaded",
+    stored_subtitle_id: subtitle.id,
+    language: subtitle.language,
+    format: subtitle.format,
+    label: subtitle.release_name || subtitle.provider,
+    timing: subtitle.timing,
+    sync: subtitle.sync,
+  };
 }
 
 export function isIdentityTiming(timing: SubtitleTiming | undefined): boolean {
@@ -74,22 +78,60 @@ export function describeSyncScale(scale: number): string | null {
   return `×${Number(scale.toFixed(4))} speed`;
 }
 
-function describeTiming(timing: SubtitleTiming): string {
+/** "+2.3 s · 25→23.976 fps": a correction in a few characters. */
+export function describeTiming(timing: SubtitleTiming): string {
   const scale = describeSyncScale(timing.scale);
   const offset = timing.offset_ms !== 0 || !scale ? formatSyncOffset(timing.offset_ms) : null;
   return [offset, scale].filter(Boolean).join(" · ");
 }
 
+/** An active job's progress as a whole percentage, or null once it finished. */
+export function syncProgressPercent(job: SubtitleSyncJob | undefined): number | null {
+  if (!job || !isSyncInProgress(job.status)) return null;
+  return Math.round(Math.min(1, Math.max(0, job.progress ?? 0)) * 100);
+}
+
+/** What an active job is doing, in a few words. */
+export function syncPhaseLabel(job: SubtitleSyncJob | undefined): string | null {
+  if (!job || !isSyncInProgress(job.status)) return null;
+  switch (job.phase) {
+    case "matching":
+      return "Matching lines to speech…";
+    case "analyzing":
+      return "Listening to the audio…";
+    default:
+      return "Waiting to start…";
+  }
+}
+
+/** Why a failed job failed, in plain words. */
+export function syncFailureMessage(failure: SubtitleSyncFailure | undefined): string {
+  switch (failure) {
+    case "subtitle_changed":
+      return "The subtitle changed while it was syncing. Try again.";
+    case "no_audio":
+      return "This video has no audio Silo can read.";
+    case "unavailable":
+      return "The server is busy. Try again in a few minutes.";
+    default:
+      return "Sync failed. Try again.";
+  }
+}
+
 /**
- * One short line describing a stored subtitle's timing, or null when there
- * is nothing to say (never synced and never adjusted).
+ * One short line describing a subtitle's timing, or null when there is
+ * nothing to say (never synced and never adjusted).
  */
-export function syncStatusLabel(subtitle: Pick<StoredSubtitle, "timing" | "sync">): string | null {
+export function syncStatusLabel(
+  subtitle: Pick<SubtitleSyncState, "timing" | "sync">,
+): string | null {
   const { timing, sync } = subtitle;
   switch (sync?.status) {
     case "pending":
-    case "running":
-      return "Syncing…";
+    case "running": {
+      const percent = syncProgressPercent(sync);
+      return percent ? `Syncing… ${percent}%` : "Syncing…";
+    }
     case "no_match":
       return "Doesn't match this video";
     case "failed":

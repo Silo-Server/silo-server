@@ -67,6 +67,8 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
+./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
+./migrations TestSubtitleTimingFileReplacePostgres
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs

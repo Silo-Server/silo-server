@@ -3,6 +3,8 @@ package subsync
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"math"
 	"net/http"
 	"sync"
@@ -23,6 +25,7 @@ type fakeJobs struct {
 	applied  map[int64]subtitles.Timing
 	applyErr error
 	hasJob   bool
+	progress []string
 }
 
 func (f *fakeJobs) Heartbeat(context.Context, int64) error { return nil }
@@ -42,14 +45,37 @@ func (f *fakeJobs) Create(_ context.Context, sub *subtitles.DownloadedSubtitle, 
 	f.jobs = append(f.jobs, j)
 	return j, true, nil
 }
-func (f *fakeJobs) Latest(context.Context, int) (*Job, error) { return nil, nil }
+func (f *fakeJobs) CreateExternal(_ context.Context, timing *subtitles.ExternalTiming, trigger string, by *int) (*Job, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, j := range f.jobs {
+		if j.ExternalTimingID == timing.ID && j.Active() {
+			return j, false, nil
+		}
+	}
+	j := &Job{ID: int64(len(f.jobs) + 1), ExternalTimingID: timing.ID, MediaFileID: timing.MediaFileID, Trigger: trigger,
+		RequestedBy: by, BaseRevision: timing.Revision, Status: JobPending}
+	f.jobs = append(f.jobs, j)
+	return j, true, nil
+}
+func (f *fakeJobs) Latest(context.Context, int) (*Job, error)           { return nil, nil }
+func (f *fakeJobs) LatestExternal(context.Context, int64) (*Job, error) { return nil, nil }
 func (f *fakeJobs) LatestForSubtitles(context.Context, []int) (map[int]*Job, error) {
+	return nil, nil
+}
+func (f *fakeJobs) LatestForExternal(context.Context, []int64) (map[int64]*Job, error) {
 	return nil, nil
 }
 func (f *fakeJobs) HasJob(context.Context, int) (bool, error) {
 	return f.hasJob, nil
 }
 func (f *fakeJobs) MarkRunning(context.Context, int64) error { return nil }
+func (f *fakeJobs) Progress(_ context.Context, _ int64, phase string, progress float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.progress = append(f.progress, fmt.Sprintf("%s %.2f", phase, progress))
+	return nil
+}
 func (f *fakeJobs) Finish(_ context.Context, id int64, o Outcome) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -109,9 +135,20 @@ func (f *fakeArtifacts) RecordFailure(_ context.Context, failure mediaartifact.F
 		Status: mediaartifact.StatusFailed, LastError: failure.Error, RecordedBy: failure.RecordedBy})
 }
 
-type fakeNotifier struct{ calls int }
+type fakeNotifier struct {
+	calls   int
+	targets []subtitles.SyncTarget
+	updates []Update
+}
 
-func (f *fakeNotifier) SubtitleTimingChanged(context.Context, int, int) { f.calls++ }
+func (f *fakeNotifier) SubtitleSyncUpdated(_ context.Context, update Update) {
+	f.updates = append(f.updates, update)
+}
+
+func (f *fakeNotifier) SubtitleTimingChanged(_ context.Context, target subtitles.SyncTarget) {
+	f.calls++
+	f.targets = append(f.targets, target)
+}
 
 type settingsMap map[string]string
 
@@ -190,7 +227,7 @@ func TestExecuteAppliesSyncAndCachesSpeech(t *testing.T) {
 	}
 
 	// The next speech request reuses the artifact written by execute.
-	windows, _, executedOn, err := f.svc.speech(t.Context(), f.svc.files.(fakeFiles).file, "en", false)
+	windows, _, executedOn, err := f.svc.speech(t.Context(), f.svc.files.(fakeFiles).file, "en", false, nil)
 	if err != nil || len(windows) != sampledWindows || executedOn != "cache" {
 		t.Fatalf("cached speech: windows=%d executed_on=%q err=%v", len(windows), executedOn, err)
 	}
@@ -281,7 +318,7 @@ func TestSamplerExecution(t *testing.T) {
 	t.Run("node", func(t *testing.T) {
 		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) { return mediasample.Result{}, nil })}
-		if _, where, err := s.run(context.Background(), reqs); err != nil || where != "node:gpu-1" {
+		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != "node:gpu-1" {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -295,9 +332,14 @@ func TestSamplerExecution(t *testing.T) {
 				}
 				return mediasample.Result{}, nil
 			})}
-		results, where, err := s.run(context.Background(), reqs)
+		var done []int
+		results, where, err := s.run(context.Background(), reqs, func(n int) { done = append(done, n) })
 		if err != nil || where != ExecutionLocal || len(results) != 2 {
 			t.Fatalf("%q %d %v", where, len(results), err)
+		}
+		// Progress continues across the handoff to this server.
+		if fmt.Sprint(done) != "[1 2]" {
+			t.Fatalf("progress %v", done)
 		}
 	})
 	t.Run("node refusing the path falls back", func(t *testing.T) {
@@ -305,7 +347,7 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusBadRequest, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, where, err := s.run(context.Background(), reqs); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -314,7 +356,7 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusUnprocessableEntity, Reason: mediasample.ReasonInvalidData}
 			})}
-		if _, _, err := s.run(context.Background(), reqs); err == nil {
+		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
 			t.Fatal("invalid data fell back to local")
 		}
 	})
@@ -324,20 +366,20 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, _, err := s.run(context.Background(), reqs); err == nil {
+		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
 			t.Fatal("transcode_nodes_only ran locally")
 		}
 	})
 	t.Run("transcode only without node", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
 			nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
-		if _, _, err := s.run(context.Background(), reqs); !errors.Is(err, errNoNode) {
+		if _, _, err := s.run(context.Background(), reqs, nil); !errors.Is(err, errNoNode) {
 			t.Fatalf("err %v", err)
 		}
 	})
 	t.Run("prefer without node runs locally", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
-		if _, where, err := s.run(context.Background(), reqs); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -383,5 +425,206 @@ func TestSpeechCodecRoundTrip(t *testing.T) {
 	}
 	if _, err := decodeSpeech([]byte{1, 2}); err == nil {
 		t.Fatal("truncated payload decoded")
+	}
+}
+
+type fakeExternal struct {
+	row     *subtitles.ExternalTiming
+	ensured int
+}
+
+func (f *fakeExternal) ExternalTimingByID(context.Context, int64) (*subtitles.ExternalTiming, error) {
+	return f.row, nil
+}
+func (f *fakeExternal) EnsureExternalTiming(_ context.Context, fileID int, sha, path string, format subtitles.SubtitleFormat) (*subtitles.ExternalTiming, error) {
+	f.ensured++
+	if f.row == nil || f.row.ContentSHA256 != sha {
+		f.row = &subtitles.ExternalTiming{ID: 11, MediaFileID: fileID, ContentSHA256: sha, Format: format, Timing: subtitles.Timing{Scale: 1}, Revision: 1}
+	}
+	f.row.Path = path
+	return f.row, nil
+}
+
+// sidecarFixture turns a fixture's subtitle into a sidecar on disk.
+func sidecarFixture(t *testing.T, f *fixture) (*fakeExternal, *models.ExternalSubtitle) {
+	t.Helper()
+	data := f.svc.content.(*fakeSubtitles).data
+	sidecar := models.ExternalSubtitle{Path: "/media/film.en.srt", Language: "en", Format: "srt"}
+	f.svc.files.(fakeFiles).file.ExternalSubtitles = []models.ExternalSubtitle{sidecar}
+	disk := map[string][]byte{sidecar.Path: data}
+	f.svc.readFile = func(path string) ([]byte, error) {
+		if b, ok := disk[path]; ok {
+			return b, nil
+		}
+		return nil, fs.ErrNotExist
+	}
+	external := &fakeExternal{}
+	f.svc.external = external
+	if _, err := external.EnsureExternalTiming(context.Background(), 9, subtitles.ContentSHA256(data), sidecar.Path, subtitles.FormatSRT); err != nil {
+		t.Fatal(err)
+	}
+	return external, &f.svc.files.(fakeFiles).file.ExternalSubtitles[0]
+}
+
+func (f *fixture) runExternal(t *testing.T, row *subtitles.ExternalTiming) *Job {
+	t.Helper()
+	job, created, err := f.jobs.CreateExternal(context.Background(), row, TriggerManual, nil)
+	if err != nil || !created {
+		t.Fatalf("create: %v %v", created, err)
+	}
+	f.svc.execute(context.Background(), job)
+	job.Status = f.jobs.finished[job.ID].Status
+	return job
+}
+
+func TestExecuteSyncsSidecar(t *testing.T) {
+	truth := subtitles.Timing{Scale: 1, OffsetMS: -3200}
+	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	external, sidecar := sidecarFixture(t, f)
+	job := f.runExternal(t, external.row)
+	if job.Status != string(StatusSynced) {
+		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
+	}
+	assertTiming(t, f.jobs.applied[job.ID], truth, 7200)
+	if len(f.notifier.targets) != 1 || f.notifier.targets[0] != (subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path}) {
+		t.Fatalf("notified %+v", f.notifier.targets)
+	}
+}
+
+func TestExecuteSidecarChangedOrGone(t *testing.T) {
+	for name, change := range map[string]func(f *fixture, row *subtitles.ExternalTiming){
+		"edited on disk": func(f *fixture, _ *subtitles.ExternalTiming) {
+			f.svc.readFile = func(string) ([]byte, error) { return []byte("1\n00:00:01,000 --> 00:00:02,000\nEdited\n"), nil }
+		},
+		"deleted": func(f *fixture, _ *subtitles.ExternalTiming) {
+			f.svc.readFile = func(string) ([]byte, error) { return nil, fs.ErrNotExist }
+		},
+		"no longer scanned": func(f *fixture, _ *subtitles.ExternalTiming) {
+			f.svc.files.(fakeFiles).file.ExternalSubtitles = nil
+		},
+		"retimed meanwhile":       func(_ *fixture, row *subtitles.ExternalTiming) { row.Revision++ },
+		"belongs to another file": func(_ *fixture, row *subtitles.ExternalTiming) { row.MediaFileID++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+			external, _ := sidecarFixture(t, f)
+			job, _, err := f.jobs.CreateExternal(context.Background(), external.row, TriggerManual, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			change(f, external.row)
+			f.svc.execute(context.Background(), job)
+			outcome := f.jobs.finished[job.ID]
+			if outcome.Status != JobFailed || outcome.Error != ErrSubtitleChanged.Error() || len(f.jobs.applied) != 0 {
+				t.Fatalf("outcome %+v applied %v", outcome, f.jobs.applied)
+			}
+		})
+	}
+}
+
+func TestExecuteRefusesStoredSubtitleOfAnotherFile(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	sub := f.svc.rows.(*fakeSubtitles).sub
+	job, _, err := f.jobs.Create(context.Background(), sub, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.MediaFileID++
+	f.svc.execute(context.Background(), job)
+	outcome := f.jobs.finished[job.ID]
+	if outcome.Status != JobFailed || outcome.Error != ErrSubtitleChanged.Error() || len(f.jobs.applied) != 0 || f.decodes != 0 {
+		t.Fatalf("outcome %+v applied %v decodes %d", outcome, f.jobs.applied, f.decodes)
+	}
+}
+
+func TestRequestExternalRefusesFormatsItCannotRetime(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
+	external, _ := sidecarFixture(t, f)
+	external.ensured = 0
+	_, err := f.svc.RequestExternal(context.Background(), 9, models.ExternalSubtitle{Path: "/media/film.sub", Format: "sub"}, nil)
+	if !errors.Is(err, ErrUnsupportedFormat) || external.ensured != 0 || len(f.jobs.jobs) != 0 {
+		t.Fatalf("err %v ensured %d jobs %d", err, external.ensured, len(f.jobs.jobs))
+	}
+}
+
+func TestExecuteReportsProgressAndOutcome(t *testing.T) {
+	truth := subtitles.Timing{Scale: 1, OffsetMS: 1800}
+	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	job := f.run(t, TriggerManual)
+	updates := f.notifier.updates
+	if len(updates) != sampledWindows+3 {
+		t.Fatalf("%d updates: %+v", len(updates), updates)
+	}
+	if u := updates[0]; u.Job.Status != JobRunning || u.Job.PublicPhase() != PhaseAnalyzing || *u.Job.Progress != 0 ||
+		u.Target != (subtitles.SyncTarget{MediaFileID: 9, StoredID: 5}) {
+		t.Fatalf("first update %+v", u)
+	}
+	last := 0.0
+	for _, u := range updates[1 : sampledWindows+1] {
+		if u.Job.Phase != PhaseAnalyzing || *u.Job.Progress <= last {
+			t.Fatalf("decode update %+v after %v", u.Job, last)
+		}
+		last = *u.Job.Progress
+	}
+	if u := updates[sampledWindows+1]; u.Job.Phase != PhaseMatching || *u.Job.Progress <= last || *u.Job.Progress >= 1 {
+		t.Fatalf("matching update %+v", u.Job)
+	}
+	final := updates[len(updates)-1]
+	if final.Job.Status != string(StatusSynced) || final.Job.PublicPhase() != "" || final.Job.PublicProgress() != nil ||
+		final.Timing != f.jobs.applied[job.ID] || final.Job.FinishedAt == nil {
+		t.Fatalf("final update %+v", final)
+	}
+	if len(f.jobs.progress) != sampledWindows+2 {
+		t.Fatalf("progress rows %v", f.jobs.progress)
+	}
+
+	// Cached speech skips straight to matching.
+	f.notifier.updates = nil
+	f.run(t, TriggerManual)
+	if phases := len(f.notifier.updates); phases != 3 || f.notifier.updates[1].Job.Phase != PhaseMatching {
+		t.Fatalf("cached run updates %+v", f.notifier.updates)
+	}
+}
+
+func TestExecuteNamesFailures(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change func(f *fixture)
+		want   string
+	}{
+		"subtitle changed": {func(f *fixture) {
+			edited := *f.svc.content.(*fakeSubtitles).sub
+			edited.Revision++
+			f.svc.content = &fakeSubtitles{sub: &edited, data: f.svc.content.(*fakeSubtitles).data}
+		}, FailureSubtitleChanged},
+		"no audio": {func(f *fixture) { f.svc.files.(fakeFiles).file.Duration = 0 }, FailureNoAudio},
+		"no node":  {func(f *fixture) { f.svc.settings = settingsMap{SettingExecution: ExecutionTranscodeOnly} }, FailureUnavailable},
+		"unreadable audio": {func(f *fixture) {
+			f.svc.sampler.local = func(context.Context, mediasample.Request) (mediasample.Result, error) {
+				return mediasample.Result{}, &mediasample.Error{Reason: mediasample.ReasonExit,
+					Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonExit, Err: errors.New("exit status 1"),
+						StderrTail: "Stream map '0:a:0' matches no streams."}}}
+			}
+		}, FailureNoAudio},
+		"busy host": {func(f *fixture) {
+			f.svc.sampler.local = func(context.Context, mediasample.Request) (mediasample.Result, error) {
+				return mediasample.Result{}, &mediasample.Error{Reason: mediasample.ReasonTimeout,
+					Attempts: []mediasample.AttemptError{{Reason: mediasample.ReasonTimeout, Err: errors.New("timed out")}}}
+			}
+		}, FailureUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+			tc.change(f)
+			f.svc.sampler.settings = f.svc.settings
+			job := f.run(t, TriggerManual)
+			outcome := f.jobs.finished[job.ID]
+			if outcome.Status != JobFailed || outcome.Failure != tc.want {
+				t.Fatalf("outcome %+v, want failure %s", outcome, tc.want)
+			}
+			final := f.notifier.updates[len(f.notifier.updates)-1]
+			if final.Job.PublicFailure() != tc.want || final.Target.StoredID != 5 {
+				t.Fatalf("final update %+v", final)
+			}
+		})
 	}
 }
