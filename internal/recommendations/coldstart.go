@@ -177,8 +177,8 @@ func mergePersonalizedAndColdStart(personalRows, coldStartRows []ForYouRow, leve
 // applyRecencyBoost multiplies the score of recently added items by a boost
 // factor that decays linearly from RecencyBoostMultiplier to 1.0 over
 // RecencyBoostDays. Items not present in addedDates or older than the window
-// are left unchanged. The returned slice is a new copy sorted by descending
-// boosted score.
+// are left unchanged. The returned slice is a new copy in the order of items:
+// re-sorting by score would undo the order MMR chose.
 func applyRecencyBoost(items []ScoredItem, addedDates map[string]time.Time, now time.Time) []ScoredItem {
 	boostWindow := time.Duration(RecencyBoostDays) * 24 * time.Hour
 
@@ -206,10 +206,6 @@ func applyRecencyBoost(items []ScoredItem, addedDates map[string]time.Time, now 
 		multiplier := 1.0 + (RecencyBoostMultiplier-1.0)*fraction
 		boosted[i].Score *= multiplier
 	}
-
-	sort.Slice(boosted, func(i, j int) bool {
-		return boosted[i].Score > boosted[j].Score
-	})
 
 	return boosted
 }

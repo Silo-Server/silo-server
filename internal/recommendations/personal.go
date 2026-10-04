@@ -29,11 +29,36 @@ func clusterTitle(label string) string {
 	return clusterTitlePrefix + label
 }
 
-// buildClusterRows generates per-cluster recommendation rows. A cluster whose
+// rowStore is the part of *Repo that builds a profile's personal rows.
+type rowStore interface {
+	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
+	GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
+	FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, map[string][]string, error)
+	FindTasteProfileCandidatesByMediaType(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string][]string, error)
+	GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[string][]float32, error)
+	GetItemMediaTypes(ctx context.Context, itemIDs []string) (map[string]string, error)
+	GetItemAddedDates(ctx context.Context, itemIDs []string) (map[string]time.Time, error)
+	PresentMediaTypes(ctx context.Context, mediaTypes []string, filter catalog.AccessFilter) (map[string]struct{}, error)
+	GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error)
+}
+
+// rowBuilder builds a profile's main and cluster rows.
+type rowBuilder struct {
+	store  rowStore
+	lambda float64
+	now    time.Time
+}
+
+// rowBuilder returns the builder for the rows cached now.
+func (e *Engine) rowBuilder() rowBuilder {
+	return rowBuilder{store: e.repo, lambda: e.mmrLambda(), now: time.Now()}
+}
+
+// clusterRows generates per-cluster recommendation rows. A cluster whose
 // candidate query fails is logged and skipped; failed counts them. A cluster
 // with no candidates gets a row without items, so its cached row is dropped.
-func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
-	clusters, err := e.repo.GetTasteClusters(ctx, userID, profileID)
+func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
+	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("get taste clusters: %w", err)
 	}
@@ -61,10 +86,13 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		if clusterLimit < 3 {
 			clusterLimit = 3
 		}
+		// The cache takes the main row's served window out of the row (see
+		// withoutMainRowItems), so it gets that many places more.
+		clusterLimit = min(limit, clusterLimit+ServedRowSize)
 
 		// Fetch after access and genre constraints so filtered-out items do not
 		// consume the candidate headroom before MMR.
-		candidates, _, err := e.repo.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
+		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
 		if err != nil {
 			failed++
 			slog.WarnContext(ctx, "cluster recommendation candidates failed", "component", "recommendations",
@@ -75,6 +103,7 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
+		candidates = b.withQualityPrior(ctx, candidates, qualityMinSmallPool)
 
 		// Apply MMR re-ranking.
 		candidateIDs := make([]string, len(candidates))
@@ -82,12 +111,12 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 			candidateIDs[i] = item.MediaItemID
 		}
 
-		embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-		reranked := applyMMR(candidates, embMap, e.mmrLambda(), clusterLimit)
+		embMap, _ := b.store.GetBatchEmbeddings(ctx, candidateIDs)
+		reranked := applyMMR(candidates, embMap, b.lambda, clusterLimit)
 
 		// Apply recency boost.
-		addedDates, _ := e.repo.GetItemAddedDates(ctx, candidateIDs)
-		reranked = applyRecencyBoost(reranked, addedDates, time.Now())
+		addedDates, _ := b.store.GetItemAddedDates(ctx, candidateIDs)
+		reranked = applyRecencyBoost(reranked, addedDates, b.now)
 
 		// Every item carries the row title, so a reader can title the cached
 		// row from the build that produced it (see clusterRow).
@@ -107,153 +136,198 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 	return rows, failed, nil
 }
 
-// buildAggregatedRow builds a single "For You" row from the aggregated taste profile.
-func (e *Engine) buildAggregatedRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
-	embedding, err := e.repo.GetTasteProfile(ctx, userID, profileID)
+// minClusterRowItems is the fewest items a cluster row keeps once the main
+// row's served items are taken out of it; a thinner row is cached empty.
+const minClusterRowItems = 10
+
+// withoutMainRowItems takes the main row's served window out of each cluster
+// row, so the main row and a cluster row built from the same interest do not
+// open with the same titles. A row this leaves with fewer than
+// minClusterRowItems is emptied; a row it takes nothing from is kept whole.
+func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
+	served := make(map[string]struct{}, ServedRowSize)
+	for _, item := range main[:min(len(main), ServedRowSize)] {
+		served[item.MediaItemID] = struct{}{}
+	}
+	for i, row := range rows {
+		kept := make([]ScoredItem, 0, len(row.Items))
+		for _, item := range row.Items {
+			if _, ok := served[item.MediaItemID]; !ok {
+				kept = append(kept, item)
+			}
+		}
+		if len(kept) == len(row.Items) {
+			continue
+		}
+		if len(kept) < minClusterRowItems {
+			kept = []ScoredItem{}
+		}
+		rows[i].Items = kept
+	}
+	return rows
+}
+
+// mainRow builds the "For You" row of a profile with a taste profile. A
+// profile with several interests gets a row composed per interest (see
+// mainRowAnchors); any other, or one whose anchors find nothing, a row of the
+// candidates nearest its averaged taste vector, ranked by MMR. Either way the
+// genre pass then shapes the served window, and type supplements fill the
+// rest of the row.
+func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (*ForYouRow, error) {
+	embedding, err := b.store.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get taste profile: %w", err)
 	}
 	if embedding == nil {
 		return nil, nil
 	}
-
-	candidates, genreMap, err := e.repo.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
+	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("find similar for aggregated: %w", err)
+		return nil, fmt.Errorf("get taste clusters: %w", err)
 	}
-	if len(candidates) == 0 {
+
+	var row, pool []ScoredItem
+	var genreMap map[string][]string
+	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
+		row, pool, genreMap = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter)
+	}
+	if len(row) == 0 {
+		pool, genreMap, err = b.store.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
+		if err != nil {
+			return nil, fmt.Errorf("find similar for aggregated: %w", err)
+		}
+		pool = b.withQualityPrior(ctx, pool, 0)
+		embMap, _ := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
+		row = applyMMR(pool, embMap, b.lambda, limit)
+	}
+	if len(row) == 0 {
 		return nil, nil
 	}
+	row = applyGenreCap(row, genreMap)
+	row = b.addTypeSupplements(ctx, embedding, excludeIDs, filter, pool, row, limit)
 
-	candidates, genreMap, mediaTypes := e.addAggregateMediaTypeSupplements(ctx, embedding, excludeIDs, filter, candidates, genreMap, limit)
-	candidateIDs := make([]string, len(candidates))
-	for i, item := range candidates {
-		candidateIDs[i] = item.MediaItemID
-	}
-
-	embMap, _ := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	reranked := applyMMR(candidates, embMap, e.mmrLambda(), limit)
-
-	// Apply genre cap on the main For You row.
-	reranked = applyGenreCap(reranked, genreMap, GenreCapPercent)
-	reranked = applyMediaTypeFloor(reranked, candidates, mediaTypes)
-
-	for i := range reranked {
-		reranked[i].Reason = "Personalized for you"
+	for i := range row {
+		row[i].Reason = "Personalized for you"
 	}
 
 	return &ForYouRow{
 		Type:  clusterRowType,
 		Label: "For You",
-		Items: reranked,
+		Items: row,
 	}, nil
 }
 
-func (e *Engine) addAggregateMediaTypeSupplements(
+// addTypeSupplements gives row at least mediaTypeFloor(len(row)) items of
+// each media type the viewer can see, so a library section, which scopes the
+// whole cached row to its libraries, still fills. The extra items come from
+// pool, the candidates the row was ranked from, and from a per-type candidate
+// query for a type pool is short of; placeTypeSupplements puts them after the
+// served window. A type the viewer has no titles of is not queried.
+func (b rowBuilder) addTypeSupplements(
 	ctx context.Context,
 	embedding []float32,
 	excludeIDs []string,
 	filter catalog.AccessFilter,
-	candidates []ScoredItem,
-	genreMap map[string][]string,
+	pool []ScoredItem,
+	row []ScoredItem,
 	limit int,
-) ([]ScoredItem, map[string][]string, map[string]string) {
-	mediaTypes, err := e.repo.GetItemMediaTypes(ctx, scoredItemIDs(candidates))
+) []ScoredItem {
+	if len(row) <= ServedRowSize {
+		return row
+	}
+	mediaTypes, err := b.store.GetItemMediaTypes(ctx, scoredItemIDs(pool))
 	if err != nil {
-		return candidates, genreMap, map[string]string{}
+		slog.WarnContext(ctx, "main row media types failed; row left without type supplements", "component", "recommendations", "error", err)
+		return row
 	}
 
-	floor := mediaTypeFloor(limit)
-	changed := false
+	floor := mediaTypeFloor(len(row))
+	var short []string
 	for _, mediaType := range aggregateSupplementMediaTypes {
-		if countMediaType(candidates, mediaTypes, mediaType) >= floor {
-			continue
-		}
-
-		extra, extraGenres, err := e.repo.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
-		if err != nil || len(extra) == 0 {
-			continue
-		}
-		candidates = mergeScoredCandidates(candidates, extra)
-		for id, genres := range extraGenres {
-			genreMap[id] = genres
-		}
-		changed = true
-	}
-
-	if changed {
-		if refreshed, err := e.repo.GetItemMediaTypes(ctx, scoredItemIDs(candidates)); err == nil {
-			mediaTypes = refreshed
+		if countMediaType(pool, mediaTypes, mediaType) < floor {
+			short = append(short, mediaType)
 		}
 	}
-	return candidates, genreMap, mediaTypes
+	if len(short) > 0 {
+		present, err := b.store.PresentMediaTypes(ctx, short, filter)
+		if err != nil {
+			slog.WarnContext(ctx, "main row media type check failed; querying every short type", "component", "recommendations", "error", err)
+			present = make(map[string]struct{}, len(short))
+			for _, mediaType := range short {
+				present[mediaType] = struct{}{}
+			}
+		}
+		for _, mediaType := range short {
+			if _, ok := present[mediaType]; !ok {
+				continue
+			}
+			extra, _, err := b.store.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
+			if err != nil {
+				slog.WarnContext(ctx, "main row type supplement failed", "component", "recommendations", "media_type", mediaType, "error", err)
+				continue
+			}
+			pool = mergeScoredCandidates(pool, b.withQualityPrior(ctx, extra, 0))
+			for _, item := range extra {
+				mediaTypes[item.MediaItemID] = mediaType
+			}
+		}
+	}
+	return placeTypeSupplements(row, pool, mediaTypes)
 }
 
-func applyMediaTypeFloor(items []ScoredItem, candidates []ScoredItem, mediaTypes map[string]string) []ScoredItem {
-	if len(items) == 0 || len(candidates) == 0 || len(mediaTypes) == 0 {
-		return items
+// placeTypeSupplements raises each media type pool offers to at least
+// mediaTypeFloor(len(row)) items of row. The type's best candidates not yet in
+// the row join its end, and as many items leave the part after the served
+// window, last first, from types holding more than the floor. The served
+// window and the order of every item kept are unchanged.
+func placeTypeSupplements(row, pool []ScoredItem, mediaTypes map[string]string) []ScoredItem {
+	if len(row) <= ServedRowSize {
+		return row
+	}
+	floor := mediaTypeFloor(len(row))
+	counts := make(map[string]int)
+	inRow := make(map[string]struct{}, len(row))
+	for _, item := range row {
+		counts[mediaTypes[item.MediaItemID]]++
+		inRow[item.MediaItemID] = struct{}{}
 	}
 
-	floor := mediaTypeFloor(len(items))
+	var added []ScoredItem
 	for _, mediaType := range aggregateSupplementMediaTypes {
-		if countMediaType(candidates, mediaTypes, mediaType) == 0 {
-			continue
+		for _, candidate := range pool {
+			if counts[mediaType] >= floor {
+				break
+			}
+			if mediaTypes[candidate.MediaItemID] != mediaType {
+				continue
+			}
+			if _, ok := inRow[candidate.MediaItemID]; ok {
+				continue
+			}
+			added = append(added, candidate)
+			inRow[candidate.MediaItemID] = struct{}{}
+			counts[mediaType]++
 		}
-		items = ensureMediaTypeFloor(items, candidates, mediaTypes, mediaType, floor)
 	}
-	return items
-}
-
-func ensureMediaTypeFloor(items []ScoredItem, candidates []ScoredItem, mediaTypes map[string]string, mediaType string, floor int) []ScoredItem {
-	if floor <= 0 || countMediaType(items, mediaTypes, mediaType) >= floor {
-		return items
-	}
-
-	selected := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		selected[item.MediaItemID] = struct{}{}
-	}
-
-	needed := floor - countMediaType(items, mediaTypes, mediaType)
-	replacements := make([]ScoredItem, 0, needed)
-	for _, candidate := range candidates {
-		if len(replacements) >= needed {
-			break
-		}
-		if mediaTypes[candidate.MediaItemID] != mediaType {
-			continue
-		}
-		if _, ok := selected[candidate.MediaItemID]; ok {
-			continue
-		}
-		replacements = append(replacements, candidate)
-		selected[candidate.MediaItemID] = struct{}{}
-	}
-	if len(replacements) == 0 {
-		return items
+	if len(added) == 0 {
+		return row
 	}
 
-	remove := make(map[string]struct{}, len(replacements))
-	for i := len(items) - 1; i >= 0 && len(remove) < len(replacements); i-- {
-		if mediaTypes[items[i].MediaItemID] == mediaType {
-			continue
+	drop := make(map[int]struct{}, len(added))
+	for i := len(row) - 1; i >= ServedRowSize && len(drop) < len(added); i-- {
+		if mediaType := mediaTypes[row[i].MediaItemID]; counts[mediaType] > floor {
+			drop[i] = struct{}{}
+			counts[mediaType]--
 		}
-		remove[items[i].MediaItemID] = struct{}{}
-	}
-	if len(remove) < len(replacements) {
-		return items
 	}
 
-	mixed := make([]ScoredItem, 0, len(items))
-	for _, item := range items {
-		if _, ok := remove[item.MediaItemID]; ok {
-			continue
+	out := make([]ScoredItem, 0, len(row))
+	for i, item := range row {
+		if _, ok := drop[i]; !ok {
+			out = append(out, item)
 		}
-		mixed = append(mixed, item)
 	}
-	mixed = append(mixed, replacements...)
-	sortScoredItems(mixed)
-	return mixed
+	return append(out, added[:len(drop)]...)
 }
 
 func mediaTypeFloor(limit int) int {
@@ -365,6 +439,7 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 	// the row's places.
 	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
 	blended = excludeScoredItems(blended, excluded)
+	blended = e.rowBuilder().withQualityPrior(ctx, blended, qualityMinSmallPool)
 
 	// Apply MMR re-ranking.
 	candidateIDs := make([]string, len(blended))

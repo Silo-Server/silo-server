@@ -119,9 +119,6 @@ const (
 	ColdStartMinimal          = 1
 )
 
-// GenreCapPercent is the maximum fraction of a recommendation row any single genre can occupy.
-const GenreCapPercent = 0.4
-
 // RecencyBoostDays is the number of days a new item gets a relevance boost.
 const RecencyBoostDays = 7
 
@@ -131,3 +128,9 @@ const RecencyBoostMultiplier = 1.2
 // CacheCandidateLimit is the default number of candidates cached per row so
 // read paths have headroom for watched, low-rated, access, and dedup filters.
 const CacheCandidateLimit = 60
+
+// ServedRowSize is how many items of a row a public read serves by default:
+// the window ranking shapes for what a viewer sees first. The rest of a cached
+// row is headroom for read-time filters and for library sections, which scope
+// the whole row to their libraries.
+const ServedRowSize = 20
