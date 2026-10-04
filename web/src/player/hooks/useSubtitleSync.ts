@@ -15,6 +15,12 @@ export const SYNC_POLL_INTERVAL_MS = 3_000;
 export const SYNC_POLL_LIMIT_MS = 5 * 60_000;
 /** A realtime update this recent makes the next poll of that subtitle redundant. */
 export const SYNC_PUSH_FRESH_MS = 4_000;
+/**
+ * The server follows a sync result with subtitle_timing_changed; that event,
+ * arriving this soon after a result that already reloaded the track, reuses
+ * the reload.
+ */
+export const SYNC_TIMING_COALESCE_MS = 5_000;
 
 /**
  * Whether a realtime update about job is older than the known job: a job
@@ -113,6 +119,8 @@ export function useSubtitleSync({
   const knownTimingRef = useRef(new Map<string, string>());
   const pollStartedRef = useRef(new Map<string, number>());
   const pushedAtRef = useRef(new Map<string, number>());
+  // When a realtime result last reloaded each subtitle's track.
+  const pushReloadRef = useRef(new Map<string, number>());
   const pollingRef = useRef(new Set<string>());
   // Every observation takes the next number; a read remembers the number
   // current when it was sent, so its answer cannot undo a newer one.
@@ -133,6 +141,7 @@ export function useSubtitleSync({
     knownTimingRef.current = new Map();
     pollStartedRef.current = new Map();
     pushedAtRef.current = new Map();
+    pushReloadRef.current = new Map();
     pollingRef.current = new Set();
     observedRef.current = new Map();
     jobsRef.current = new Map();
@@ -167,8 +176,8 @@ export function useSubtitleSync({
    * `watch` marks a job this viewer started. `sentAt` is the observation
    * number a read was sent at: a realtime update that arrived while it was
    * in flight is newer than its answer, which is then dropped. `pushed`
-   * marks a realtime update, whose timing change is reported by the
-   * subtitle_timing_changed event that always follows it.
+   * marks a realtime update: when it reloads the track, the
+   * subtitle_timing_changed event that follows it does not reload it again.
    */
   const observe = useCallback(
     (state: SubtitleSyncState, { watch, sentAt, pushed }: ObserveOptions = {}) => {
@@ -198,7 +207,8 @@ export function useSubtitleSync({
           watchedJobId: watch ?? prev[key]?.watchedJobId,
         },
       }));
-      if (!pushed && previous !== undefined && previous !== TIMING_DIRTY && previous !== timing) {
+      if (previous !== undefined && previous !== TIMING_DIRTY && previous !== timing) {
+        if (pushed) pushReloadRef.current.set(key, Date.now());
         onTimingChangedRef.current?.(key);
       }
     },
@@ -343,8 +353,15 @@ export function useSubtitleSync({
 
   const timingChanged = useCallback(
     (key: string) => {
-      knownTimingRef.current.set(key, TIMING_DIRTY);
-      onTimingChangedRef.current?.(key);
+      const reloadedAt = pushReloadRef.current.get(key);
+      pushReloadRef.current.delete(key);
+      // Right after a realtime result reloaded the track, this event is
+      // usually about that same change. The read below still reloads it if
+      // the timing differs from the one just loaded.
+      if (reloadedAt === undefined || Date.now() - reloadedAt >= SYNC_TIMING_COALESCE_MS) {
+        knownTimingRef.current.set(key, TIMING_DIRTY);
+        onTimingChangedRef.current?.(key);
+      }
       void readOne(key);
     },
     [readOne],

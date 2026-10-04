@@ -120,10 +120,16 @@ func TestSubtitleSyncBySyncKey(t *testing.T) {
 	}
 	english := write("movie.en.srt", "1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	micro := write("movie.fr.sub", "{25}{50}Bonjour")
+	// A sidecar that exists but cannot be read: reading a directory fails.
+	unreadable := filepath.Join(dir, "movie.it.srt")
+	if err := os.Mkdir(unreadable, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	file := &models.MediaFile{ID: 42, ContentID: "movie", ExternalSubtitles: []models.ExternalSubtitle{
 		{Path: english, Language: "en", Format: "srt"},
 		{Path: micro, Language: "fr", Format: "sub"},
 		{Path: filepath.Join(dir, "movie.de.srt"), Language: "de", Format: "srt"},
+		{Path: unreadable, Language: "it", Format: "srt"},
 	}}
 	repo := newMockSubtitleRepoForHandler()
 	repo.subtitles[9] = &subtitles.DownloadedSubtitle{ID: 9, MediaFileID: 42, Format: subtitles.FormatSRT, Revision: 3}
@@ -145,6 +151,10 @@ func TestSubtitleSyncBySyncKey(t *testing.T) {
 		if _, err := h.SubtitleSync(ctx, access, 42, key); !errors.Is(err, subtitles.ErrSubtitleNotFound) {
 			t.Errorf("%s: %v", key, err)
 		}
+	}
+	// The list leaves the unreadable sidecar out; asking for it reports why.
+	if _, err := h.SubtitleSync(ctx, access, 42, subtitles.ExternalSyncKey(unreadable)); !errors.Is(err, errSidecarUnreadable) {
+		t.Errorf("unreadable sidecar: %v", err)
 	}
 
 	if _, err := h.StartSubtitleSync(ctx, access, 42, sidecarKey); err != nil || len(sync.external) != 1 || sync.external[0] != english {

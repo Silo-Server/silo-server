@@ -299,10 +299,9 @@ describe("useSubtitleSync", () => {
           }),
         ],
       }),
-      [READ]: () => ({
-        subtitle: stored({ key: SIDECAR, source: "external", sync: job("running") }),
-      }),
+      [READ]: () => ({ subtitle: onServer }),
     });
+    let onServer = stored({ key: SIDECAR, source: "external", sync: job("running") });
     const onTimingChanged = vi.fn();
     const { result } = renderSync({ onTimingChanged });
     await flush();
@@ -329,17 +328,27 @@ describe("useSubtitleSync", () => {
     await tick(SYNC_PUSH_FRESH_MS);
     expect(calls(READ)).toHaveLength(1);
 
-    act(() =>
-      result.current.syncUpdated(
-        update("synced", { result: { offset_ms: 900, scale: 1 } }, { offset_ms: 900, scale: 1 }),
-      ),
-    );
+    const corrected = { offset_ms: 900, scale: 1 };
+    const synced = update("synced", { result: corrected }, corrected);
+    onServer = stored({ key: SIDECAR, source: "external", sync: synced.job, timing: corrected });
+    act(() => result.current.syncUpdated(synced));
     expect(result.current.entries[SIDECAR]?.state.sync?.status).toBe("synced");
-    // The cues reload once, for the timing event that follows the result.
-    expect(onTimingChanged).not.toHaveBeenCalled();
+    // The result reloads the cues, even if the timing event never arrives;
+    // the timing event that follows it reuses that reload.
+    expect(onTimingChanged).toHaveBeenCalledExactlyOnceWith(SIDECAR);
     act(() => result.current.timingChanged(SIDECAR));
     await flush();
-    expect(onTimingChanged).toHaveBeenCalledExactlyOnceWith(SIDECAR);
+    expect(onTimingChanged).toHaveBeenCalledOnce();
+
+    // A timing event about a newer change than the result still reloads,
+    // once its read shows a timing other than the one just loaded.
+    const later = { offset_ms: 1100, scale: 1 };
+    onServer = { ...onServer, timing: { offset_ms: 1200, scale: 1 } };
+    act(() => result.current.syncUpdated(update("synced", { result: later }, later)));
+    expect(onTimingChanged).toHaveBeenCalledTimes(2);
+    act(() => result.current.timingChanged(SIDECAR));
+    await flush();
+    expect(onTimingChanged).toHaveBeenCalledTimes(3);
   });
 
   it("keeps a pushed result over the answer to a read sent before it", async () => {
@@ -377,8 +386,9 @@ describe("useSubtitleSync", () => {
 
     expect(result.current.entries[SIDECAR]?.state.sync?.status).toBe("synced");
     expect(result.current.entries[SIDECAR]?.state.timing).toEqual(timing);
-    // The stale answer's old timing did not read as a second change.
-    expect(onTimingChanged).not.toHaveBeenCalled();
+    // The result reloaded the cues once; the stale answer's old timing did
+    // not read as a second change.
+    expect(onTimingChanged).toHaveBeenCalledExactlyOnceWith(SIDECAR);
   });
 
   it("ignores a late realtime update about an older job", async () => {

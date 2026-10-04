@@ -37,6 +37,10 @@ type SubtitleSyncState struct {
 
 var errSubtitleSyncUnavailable = apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle sync is not configured")
 
+// errSidecarUnreadable reports a sidecar on disk that could not be read; a
+// list leaves it out, and a lookup by its key fails with it.
+var errSidecarUnreadable = apiError(http.StatusInternalServerError, "internal_error", "Unable to read subtitle file")
+
 func (h *SubtitleSearchHandler) syncReady() error {
 	if !h.SyncAvailable() || h.repo == nil {
 		return errSubtitleSyncUnavailable
@@ -249,6 +253,9 @@ func (h *SubtitleSearchHandler) externalSyncStates(ctx context.Context, file *mo
 	var out []SubtitleSyncState
 	for i := range file.ExternalSubtitles {
 		state, err := h.externalSyncState(ctx, file.ID, &file.ExternalSubtitles[i], timings)
+		if errors.Is(err, errSidecarUnreadable) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -271,7 +278,7 @@ func (h *SubtitleSearchHandler) externalSyncState(ctx context.Context, fileID in
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "read sidecar subtitle failed", "component", "api", "media_file_id", fileID, "error", err)
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Unable to read subtitle file")
+		return nil, errSidecarUnreadable
 	}
 	state := &SubtitleSyncState{Key: subtitles.ExternalSyncKey(sidecar.Path), MediaFileID: fileID, External: sidecar,
 		ContentSHA256: subtitles.ContentSHA256(data), Timing: subtitles.Timing{Scale: 1}}
