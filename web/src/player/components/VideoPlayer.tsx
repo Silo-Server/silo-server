@@ -20,6 +20,7 @@ import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
+import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import { useStoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
 import { storedSubtitleIdOf } from "../utils/storedSubtitleSync";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
@@ -2747,7 +2748,33 @@ export function VideoPlayer({
     coverCrop,
     activeSubtitleCueRevision,
   );
-  const subtitleLoadState = isASSActive ? assSubtitleState : textSubtitleState;
+
+  // -- PGS rendering (client-side Blu-ray bitmaps) --
+  // The server sends embedded PGS as a `.sup` sidecar because the web player
+  // declares `embedded_bitmap`. A plan that still burns the track in (an older
+  // selection, or a route that cannot carry the sidecar) is drawn by the
+  // server, so the overlay stays off to avoid doubling it.
+  const [pgsSubtitleState, setPGSSubtitleState] = useState("idle");
+  const pgsCanvasRef = useRef<HTMLCanvasElement>(null);
+  const { isActive: isPGSActive } = usePGSSubtitles({
+    videoRef,
+    canvasRef: pgsCanvasRef,
+    subtitleUrls,
+    activeSubtitleIndex,
+    enabled: !isDetached && plan.subtitle.mode !== "burn_in",
+    streamOriginSeconds: timelineOffsetSeconds,
+    subtitleDelayMs,
+    durationRef,
+    fetchAnchorRef: subtitleFetchAnchorRef,
+    videoFit,
+    bottomInsetPx: subtitleLiftPx,
+    onLoadState: setPGSSubtitleState,
+  });
+  const subtitleLoadState = isASSActive
+    ? assSubtitleState
+    : isPGSActive
+      ? pgsSubtitleState
+      : textSubtitleState;
 
   // -- Reconnect subtitle handover --
   // The session a lost connection left behind. When a reconnect has to start
@@ -3978,6 +4005,16 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
+      {/* PGS bitmap subtitles. The canvas spans the player rather than the
+          picture so a disc's subtitles can sit in the letterbox, where they
+          were authored. */}
+      <canvas
+        ref={pgsCanvasRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[5] h-full w-full"
+        style={isPGSActive ? undefined : { display: "none" }}
+      />
+
       {!isDetached &&
         activeSubtitleIndex !== null &&
         (subtitleLoadState === "loading" || subtitleLoadState === "error") && (
@@ -3994,7 +4031,7 @@ export function VideoPlayer({
         )}
 
       {/* Subtitle overlay — suppressed when JASSUB (ASS) is rendering; bitmap
-          tracks are burned into the video server-side and never reach here.
+          tracks are drawn by the PGS canvas above or burned in by the server.
           While the control bar is up, bottom-anchored cues rise just above it
           (subtitleLiftPx) so they never overlap the HUD; they settle back when
           it hides. z-[5] keeps cues below the controls layer (z-10) as a
