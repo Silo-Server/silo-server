@@ -83,10 +83,9 @@ const (
 	WeightRated5    = 1.0
 	WeightRewatch   = 0.9 // Completed 2+ times
 	WeightRated4    = 0.7
-	WeightFavorited = 0.8 // Strong deliberate action
-	WeightWatchHigh = 0.8 // Watch progress >= 90%
-	WeightWatchMed  = 0.3 // Watch progress 50-89%
-	WeightRated3    = 0.2
+	WeightFavorited = 0.8  // Strong deliberate action
+	WeightWatchHigh = 0.8  // Watch progress >= 90%
+	WeightWatchMed  = 0.3  // Watch progress 50-89%
 	WeightWatchlist = 0.15 // Intent signal
 	WeightWatchLow  = -0.2 // Abandoned (< 15%)
 	WeightRatedLow  = -0.5 // 1-2 star ratings
@@ -110,10 +109,13 @@ const GlobalCacheUserID = 0
 // GlobalCacheProfileID is the sentinel profile_id for global cache entries.
 const GlobalCacheProfileID = "__global__"
 
-// Cold-start thresholds for graduated warm-up.
+// Cold-start thresholds for graduated warm-up, in positive titles (see
+// coldStartLevelOf). Mixed matches the taste-seed picker's three-pick
+// minimum, so a seeded profile opens on its own row; ten titles is where its
+// taste first splits into two clusters.
 const (
-	ColdStartFullPersonalized = 15
-	ColdStartMixed            = 5
+	ColdStartFullPersonalized = 10
+	ColdStartMixed            = 3
 	ColdStartMinimal          = 1
 )
 

@@ -363,7 +363,7 @@ func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID
 }
 
 // getForYouPageRows merges the profile's cached personal rows with the global
-// rows by its cold-start level. A profile with no positive signal, or no taste
+// rows by its cold-start level. A profile with no positive title, or no taste
 // profile, is level 0 and gets only the global rows, even when personal rows
 // from an earlier taste profile are still cached.
 func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
@@ -393,7 +393,9 @@ func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	missingPersonalized := level > 0 && (len(mainItems) == 0 || missingClusters)
+	// Positive signals without personal rows ask for them even at level 0:
+	// titles that had no embedding at the last refresh may have one now.
+	missingPersonalized := positiveSignalCount(meta) > 0 && (len(mainItems) == 0 || missingClusters)
 	if len(mainItems) > 0 {
 		personalRows = append(personalRows, ForYouRow{
 			Type:  clusterRowType,

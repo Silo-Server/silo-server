@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -96,6 +97,74 @@ func TestCountWatchSignalsCountsEachTitleOnce(t *testing.T) {
 				t.Fatalf("counts = %v, want %v", counts, tc.want)
 			}
 		})
+	}
+}
+
+// The taste vector is built from positive titles only: a disliked or
+// abandoned title is left out rather than subtracted, while it still counts
+// as a signal. Rated, favorited and watched titles count toward the
+// cold-start level once each, however many signals they carry; a title only
+// on the watchlist shapes the vector but does not count.
+func TestPositiveTasteItemsKeepsPositiveTitlesOnly(t *testing.T) {
+	stars := func(n int) *int { return &n }
+	axis := func(i int) []float32 {
+		v := make([]float32, 8)
+		v[i] = 1
+		return v
+	}
+	signals := map[string]*canonicalWeightComponents{
+		"a-liked":         {ImplicitWeight: WeightWatchHigh},
+		"b-loved":         {Rating: stars(5), ExplicitWeight: WeightRated5, ImplicitWeight: WeightWatchHigh, IntentWeight: WeightFavorited, Favorited: true},
+		"c-seed-pick":     {IntentWeight: WeightFavorited, Favorited: true},
+		"d-watchlisted":   {IntentWeight: WeightWatchlist},
+		"e-disliked":      {Rating: stars(1), ExplicitWeight: WeightRatedLow, ImplicitWeight: WeightWatchHigh},
+		"f-abandoned":     {ImplicitWeight: WeightWatchLow},
+		"g-meh-unwatched": {Rating: stars(3)},
+		"h-no-embedding":  {ImplicitWeight: WeightWatchHigh},
+	}
+	embeddings := map[string][]float32{}
+	for i, id := range []string{"a-liked", "b-loved", "c-seed-pick", "d-watchlisted", "e-disliked", "f-abandoned", "g-meh-unwatched"} {
+		embeddings[id] = axis(i)
+	}
+
+	items, levelTitles := positiveTasteItems(signals, embeddings)
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.itemID
+	}
+	if want := []string{"a-liked", "b-loved", "c-seed-pick", "d-watchlisted"}; !slices.Equal(ids, want) {
+		t.Fatalf("taste items = %v, want %v", ids, want)
+	}
+	if levelTitles != 3 {
+		t.Fatalf("titles counting toward the level = %d, want 3 (the watchlist-only title does not)", levelTitles)
+	}
+	vec := tasteVector(items)
+	if vec[4] != 0 || vec[5] != 0 || vec[6] != 0 {
+		t.Fatalf("taste vector = %v, want nothing along the disliked, abandoned and 3-star titles", vec)
+	}
+	if !(vec[1] > vec[0] && vec[0] > vec[3] && vec[3] > 0) {
+		t.Fatalf("taste vector = %v, want loved > liked > watchlisted > 0", vec)
+	}
+
+	// With only dislikes left there is nothing to build a vector from.
+	items, levelTitles = positiveTasteItems(map[string]*canonicalWeightComponents{
+		"e-disliked":  signals["e-disliked"],
+		"f-abandoned": signals["f-abandoned"],
+	}, embeddings)
+	if len(items) != 0 || levelTitles != 0 || tasteVector(items) != nil {
+		t.Fatalf("negative-only profile: items = %v, level titles = %d; want none and no vector", items, levelTitles)
+	}
+}
+
+// The taste-profile summary reports signals of each kind; the count of
+// positive titles behind the cold-start level is not one.
+func TestSummarySignalCountsLeavesOutPositiveTitles(t *testing.T) {
+	got := summarySignalCounts(map[string]int{"favorited": 3, "watch_high": 2, signalCountPositiveTitles: 4})
+	if want := map[string]int{"favorited": 3, "watch_high": 2}; !maps.Equal(got, want) {
+		t.Fatalf("summary counts = %v, want %v", got, want)
+	}
+	if got := summarySignalCounts(nil); got == nil || len(got) != 0 {
+		t.Fatalf("summary counts of no row = %v, want an empty map", got)
 	}
 }
 
@@ -390,7 +459,7 @@ func TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres(t *testing.T) {
 	if err := repo.UpsertEmbedding(ctx, movie, axisVector(1700, nil), "test-model", movie); err != nil {
 		t.Fatal(err)
 	}
-	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+	engine := newTasteTestEngine(pool)
 	rate := func(stars int) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, `
@@ -417,7 +486,7 @@ func TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres(t *testing.T) {
 	}
 
 	rate(5)
-	refresh(true, map[string]int{"rated_5": 1})
+	refresh(true, map[string]int{"rated_5": 1, signalCountPositiveTitles: 1})
 	if n := countRows(t, pool, `SELECT COUNT(*) FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`, userID, profile); n != 1 {
 		t.Fatalf("clusters after a positive refresh = %d, want 1", n)
 	}
@@ -426,7 +495,7 @@ func TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres(t *testing.T) {
 	}
 
 	rate(1)
-	refresh(false, map[string]int{"rated_low": 1})
+	refresh(false, map[string]int{"rated_low": 1, signalCountPositiveTitles: 0})
 	if n := countRows(t, pool, `SELECT COUNT(*) FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`, userID, profile); n != 0 {
 		t.Fatalf("clusters after a negative-only refresh = %d, want none", n)
 	}
@@ -438,5 +507,185 @@ func TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, `DELETE FROM user_ratings WHERE user_id = $1 AND profile_id = $2`, userID, profile); err != nil {
 		t.Fatal(err)
 	}
-	refresh(false, map[string]int{})
+	refresh(false, map[string]int{signalCountPositiveTitles: 0})
+}
+
+// newTasteTestEngine is an engine over pool with the Postgres user store.
+func newTasteTestEngine(pool *pgxpool.Pool) *Engine {
+	return NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+}
+
+// A refresh records the profile's positive titles, each once however many
+// signals it has, and the cold-start level follows them: three taste-seed
+// picks are level 2, a single title rated, favorited and finished or a
+// single long series is level 1, and a profile of watchlist adds, or of
+// titles with no embedding yet, is level 0. The taste-profile summary leaves
+// the count out.
+func TestRefreshCountsPositiveTitlesForTheLevelPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "ttaste-level-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	repo := NewRepo(pool)
+	engine := newTasteTestEngine(pool)
+
+	movies := make([]string, 6)
+	for i := range movies {
+		movies[i] = fmt.Sprintf("%smovie-%d", prefix, i)
+		seedRecoMediaItem(t, pool, movies[i], "movie", "matched")
+		if err := repo.UpsertEmbedding(ctx, movies[i], axisVector(1800+i, nil), "test-model", movies[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unembedded := prefix + "movie-unembedded"
+	seedRecoMediaItem(t, pool, unembedded, "movie", "matched")
+	series := prefix + "series"
+	seedRecoMediaItem(t, pool, series, "series", "matched")
+	if err := repo.UpsertEmbedding(ctx, series, axisVector(1810, nil), "test-model", series); err != nil {
+		t.Fatal(err)
+	}
+	episodes := make([]string, 15)
+	for i := range episodes {
+		episodes[i] = fmt.Sprintf("%sepisode-%02d", prefix, i)
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes(content_id, series_id, season_number, episode_number, title) VALUES($1, $2, 1, $3, 'Episode')`, episodes[i], series, i+1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	favorite := func(userID int, profile string, ids ...string) {
+		for _, id := range ids {
+			exec(`INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, userID, profile, id)
+		}
+	}
+	watchlist := func(userID int, profile string, ids ...string) {
+		for _, id := range ids {
+			exec(`INSERT INTO user_watchlist(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, userID, profile, id)
+		}
+	}
+	finish := func(userID int, profile string, ids ...string) {
+		for _, id := range ids {
+			exec(`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW())`, userID, profile, id)
+		}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		seed       func(userID int, profile string)
+		wantVector bool
+		wantCounts map[string]int
+		wantLevel  int
+	}{
+		{
+			name:       "three taste-seed picks",
+			seed:       func(u int, p string) { favorite(u, p, movies[0], movies[1], movies[2]) },
+			wantVector: true,
+			wantCounts: map[string]int{"favorited": 3, signalCountPositiveTitles: 3},
+			wantLevel:  2,
+		},
+		{
+			name: "one title rated, favorited and finished",
+			seed: func(u int, p string) {
+				exec(`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, u, p, movies[3])
+				favorite(u, p, movies[3])
+				finish(u, p, movies[3])
+			},
+			wantVector: true,
+			wantCounts: map[string]int{"rated_5": 1, "favorited": 1, "watch_high": 1, signalCountPositiveTitles: 1},
+			wantLevel:  1,
+		},
+		{
+			name: "one long series with two favorited episodes",
+			seed: func(u int, p string) {
+				finish(u, p, episodes...)
+				favorite(u, p, episodes[0], episodes[1])
+			},
+			wantVector: true,
+			wantCounts: map[string]int{"watch_high": 1, "favorited": 1, signalCountPositiveTitles: 1},
+			wantLevel:  1,
+		},
+		{
+			name:       "watchlist only",
+			seed:       func(u int, p string) { watchlist(u, p, movies[3], movies[4], movies[5]) },
+			wantVector: true,
+			wantCounts: map[string]int{"watchlist": 3, signalCountPositiveTitles: 0},
+			wantLevel:  0,
+		},
+		{
+			name:       "a pick with no embedding yet",
+			seed:       func(u int, p string) { favorite(u, p, unembedded) },
+			wantVector: false,
+			wantCounts: map[string]int{"favorited": 1, signalCountPositiveTitles: 0},
+			wantLevel:  0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			userID, profile := newTasteTestAccount(t, pool, prefix)
+			tc.seed(userID, profile)
+			stored, err := engine.refreshTasteProfile(ctx, userID, profile)
+			if err != nil || stored != tc.wantVector {
+				t.Fatalf("refresh stored a vector = %v, %v; want %v", stored, err, tc.wantVector)
+			}
+			meta, err := repo.GetTasteProfileMeta(ctx, userID, profile)
+			if err != nil || meta == nil || !maps.Equal(meta.SignalCounts, tc.wantCounts) {
+				t.Fatalf("meta = %+v, %v; want counts %v", meta, err, tc.wantCounts)
+			}
+			if got := coldStartLevelOf(meta); got != tc.wantLevel {
+				t.Fatalf("level = %d, want %d", got, tc.wantLevel)
+			}
+			summary, err := engine.GetTasteProfileSummary(ctx, userID, profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantSummary := maps.Clone(tc.wantCounts)
+			delete(wantSummary, signalCountPositiveTitles)
+			if !maps.Equal(summary.SignalCounts, wantSummary) {
+				t.Fatalf("summary counts = %v, want %v", summary.SignalCounts, wantSummary)
+			}
+		})
+	}
+}
+
+// A 3-star completion pulls the taste vector less than an unrated
+// completion, where it used to pull more.
+func TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "ttaste-meh-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	repo := NewRepo(pool)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	meh, plain := prefix+"meh", prefix+"plain"
+	for i, id := range []string{meh, plain} {
+		seedRecoMediaItem(t, pool, id, "movie", "matched")
+		if err := repo.UpsertEmbedding(ctx, id, axisVector(1820+i, nil), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW())`, userID, profile, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 3)`, userID, profile, meh); err != nil {
+		t.Fatal(err)
+	}
+
+	if stored, err := newTasteTestEngine(pool).refreshTasteProfile(ctx, userID, profile); err != nil || !stored {
+		t.Fatalf("refresh stored a vector = %v, %v", stored, err)
+	}
+	vec, err := repo.GetTasteProfile(ctx, userID, profile)
+	if err != nil || vec == nil {
+		t.Fatalf("taste vector = %v, %v", vec, err)
+	}
+	if mehPull, plainPull := vec[1820], vec[1821]; !(mehPull > 0 && mehPull < plainPull) {
+		t.Fatalf("pull of the 3-star completion = %v, of the unrated one = %v; want 0 < 3-star < unrated", mehPull, plainPull)
+	}
+	meta, err := repo.GetTasteProfileMeta(ctx, userID, profile)
+	if err != nil || meta == nil || meta.SignalCounts["rated_3"] != 1 || meta.SignalCounts[signalCountPositiveTitles] != 2 {
+		t.Fatalf("meta = %+v, %v; want rated_3 counted and both titles positive", meta, err)
+	}
 }

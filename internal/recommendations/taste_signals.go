@@ -29,6 +29,18 @@ const lowProgressThreshold = 0.15
 // is more likely being watched than abandoned.
 const abandonedProgressAge = 14 * 24 * time.Hour
 
+// A series that has gone quiet for longer than seriesInactiveAge counts in
+// proportion to how many of its episodes were watched with a positive weight:
+// in full from seriesDepthEpisodes episodes, and at least seriesDepthFloor.
+// A pilot or a show dropped after an episode or two was sampled, not liked.
+// A series still being watched is not scaled, so a show started last night
+// counts like a movie watched last night.
+const (
+	seriesInactiveAge   = 30 * 24 * time.Hour
+	seriesDepthEpisodes = 5
+	seriesDepthFloor    = 0.25
+)
+
 type canonicalContentRef struct {
 	Kind         canonicalContentKind
 	CanonicalID  string
@@ -53,7 +65,17 @@ type canonicalWeightComponents struct {
 	ExplicitWeight float64
 	ImplicitWeight float64
 	IntentWeight   float64
+	Favorited      bool
 	Genres         []string
+}
+
+// countsTowardLevel reports whether a title counts toward the profile's
+// cold-start level: it was rated, favorited, or watched with a positive
+// weight. A title that is only on the watchlist does not. Its weight is a
+// small intent signal, and the watchlist stays recommendable, so a profile of
+// a few watchlist adds would otherwise open on a row of its own watchlist.
+func (s *canonicalWeightComponents) countsTowardLevel() bool {
+	return s.Rating != nil || s.Favorited || s.ImplicitWeight > 0
 }
 
 type rawImplicitSignal struct {
@@ -121,7 +143,9 @@ func combineCanonicalWeight(rating *int, explicitWeight, implicitWeight, intentW
 		}
 		return total
 	case *rating == 3:
-		return explicitWeight + implicitWeight + intentWeight
+		// "Meh" halves what watching and intent say, so a 3-star completion
+		// weighs less than an unrated one; the rating adds nothing itself.
+		return 0.5 * (implicitWeight + intentWeight)
 	default:
 		total := explicitWeight
 		if implicitWeight < 0 {
@@ -135,8 +159,10 @@ func combineCanonicalWeight(rating *int, explicitWeight, implicitWeight, intentW
 // implicit weight. Recent, well-sampled seasons get larger shares of the mean,
 // and the mean decays once by the series' most recent signal, as a movie
 // decays by its last watch. Decay inside the shares alone cancels out, since
-// the shares always sum to 1.
-func aggregateSeriesImplicitScore(seasons []seasonAggregate, now time.Time, halfLife float64) float64 {
+// the shares always sum to 1. A positive score of a series inactive for
+// longer than seriesInactiveAge is scaled by seriesDepth(positiveEpisodes);
+// a negative one is not, so a dislike keeps its weight.
+func aggregateSeriesImplicitScore(seasons []seasonAggregate, positiveEpisodes int, now time.Time, halfLife float64) float64 {
 	if len(seasons) == 0 {
 		return 0
 	}
@@ -169,7 +195,17 @@ func aggregateSeriesImplicitScore(seasons []seasonAggregate, now time.Time, half
 	for i, share := range shares {
 		score += share * seasons[i].Score
 	}
-	return score * timeDecay(latest, now, halfLife)
+	score *= timeDecay(latest, now, halfLife)
+	if score > 0 && now.Sub(latest) > seriesInactiveAge {
+		score *= seriesDepth(positiveEpisodes)
+	}
+	return score
+}
+
+// seriesDepth is the share of its weight an inactive series keeps for
+// positiveEpisodes episodes watched with a positive weight.
+func seriesDepth(positiveEpisodes int) float64 {
+	return min(1, max(seriesDepthFloor, float64(positiveEpisodes)/seriesDepthEpisodes))
 }
 
 func cappedNormalizedWeights(rawWeights []float64, cap float64) []float64 {
@@ -303,6 +339,7 @@ func buildCanonicalImplicitSignals(progress []WatchProgressRow, rewatches []Rewa
 	}
 
 	seriesBuilders := make(map[string]map[string]*seasonBuilder)
+	positiveEpisodes := make(map[string]int)
 
 	for _, signal := range rawSignals {
 		if signal.Weight == 0 || signal.Ref.CanonicalID == "" {
@@ -336,6 +373,9 @@ func buildCanonicalImplicitSignals(progress []WatchProgressRow, rewatches []Rewa
 			}
 			builder.sumWeight += signal.Weight
 			builder.sampleCount++
+			if signal.Ref.Kind == canonicalKindEpisode && signal.Weight > 0 {
+				positiveEpisodes[signal.Ref.CanonicalID]++
+			}
 			if timestamp.After(builder.lastSignalAt) {
 				builder.lastSignalAt = timestamp
 			}
@@ -363,7 +403,7 @@ func buildCanonicalImplicitSignals(progress []WatchProgressRow, rewatches []Rewa
 		if len(seasons) == 0 {
 			continue
 		}
-		signals[canonicalID] += aggregateSeriesImplicitScore(seasons, now, halfLife)
+		signals[canonicalID] += aggregateSeriesImplicitScore(seasons, positiveEpisodes[canonicalID], now, halfLife)
 	}
 
 	return signals, completedSet

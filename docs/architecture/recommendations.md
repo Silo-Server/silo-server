@@ -106,15 +106,35 @@ set during the refresh survives, and a failed refresh marks the profile stale
 again, so the stale sweep retries both.
 
 - Episodes roll up to their series. A series decays once by its most recent
-  signal, as a movie decays by its last watch.
+  signal, as a movie decays by its last watch. A series with no signal for
+  30 days counts in proportion to its episodes watched with a positive
+  weight: in full from 5, and at least a quarter. A series being watched now
+  is not scaled, and neither is a negative series score.
 - Progress below 15% counts as abandonment only after 14 days.
-- Watch and rewatch counts in `signal_counts` count each canonical title once,
-  in the bucket of its strongest watch, so one long series is one title.
-- A profile with no positive signal, or none whose titles have an embedding
-  yet, keeps its row with a `NULL` taste vector and loses its clusters and
-  cached personal rows. Vector reads treat it as having no taste profile. Its
-  cold-start level comes from `signal_counts`, so it is level 0 only when it
-  has no positive signal; level 0 is served global rows only.
+- The taste vector and clusters average the titles with a positive weight
+  only. Dislikes and abandoned titles still count in `signal_counts`, but do
+  not pull the vector away from themselves. A 3-star rating adds no weight of
+  its own and halves the title's watch and intent weight, so a 3-star
+  completion weighs less than an unrated one.
+- Watch, rewatch, favorite and watchlist counts in `signal_counts` count each
+  canonical title once (a watch in the bucket of its strongest watch), so one
+  long series is one title.
+- A refresh also stores `positive_titles` in `signal_counts`: the titles with
+  an embedding and a positive weight, each once, leaving out titles that are
+  only on the watchlist. The cold-start level counts them: 0 titles is
+  level 0, global rows only; 1-2 is level 1, global rows then one personal
+  row; 3-9 (three is the taste-seed picker's minimum) is level 2, personal and
+  global rows interleaved, personal first; 10 or more is level 3, personal
+  rows first. A row without the entry, stored before it existed, uses the sum
+  of its positive signal counts until its next refresh. The taste-profile
+  summary leaves `positive_titles` out, so its `signal_counts` holds only
+  kinds of signal.
+- A profile with no positively weighted title that has an embedding keeps
+  its row with a `NULL` taste vector and loses its clusters and cached
+  personal rows. Vector reads treat it as
+  having no taste profile. A read of a profile with positive signals but no
+  personal rows asks for a refresh even at level 0, since its titles may have
+  gained embeddings since.
 - Clusters are seeded from item IDs only, so decaying weights do not reshuffle
   them between rebuilds. A cached cluster row carries the title of the build
   that produced it.

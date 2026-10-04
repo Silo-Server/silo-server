@@ -226,9 +226,10 @@ func rowLabels(rows []ForYouRow) []string {
 	return labels
 }
 
-// A profile with no positive signal, or no taste profile, is served the
+// A profile with no positive title, or no taste profile, is served the
 // global rows only, even while personal rows from an earlier taste profile
-// are still cached; positive signals bring the personal rows in by level.
+// are still cached; positive titles bring the personal rows in by level. A
+// profile seeded with three picks is level 2 and opens on its own row.
 func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 	const (
 		forYou  = "For You"
@@ -236,16 +237,29 @@ func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 		popular = "Popular on This Server"
 		recent  = "Recently Added"
 	)
+	counts := func(kv ...any) *TasteProfileMeta {
+		m := map[string]int{}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1].(int)
+		}
+		return &TasteProfileMeta{SignalCounts: m}
+	}
 	for _, tc := range []struct {
 		name string
 		meta *TasteProfileMeta
 		want []string
 	}{
 		{"no taste profile", nil, []string{popular, recent}},
-		{"cleared taste vector", &TasteProfileMeta{SignalCounts: map[string]int{}}, []string{popular, recent}},
-		{"only negative signals", &TasteProfileMeta{SignalCounts: map[string]int{"watch_low": 1, "rated_low": 2}}, []string{popular, recent}},
-		{"one positive signal", &TasteProfileMeta{SignalCounts: map[string]int{"favorited": 1, "watch_low": 4}}, []string{popular, recent, forYou}},
-		{"fully personalized", &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}}, []string{forYou, drama, popular, recent}},
+		{"cleared taste vector", counts(signalCountPositiveTitles, 0), []string{popular, recent}},
+		{"only negative signals", counts("watch_low", 1, "rated_low", 2, signalCountPositiveTitles, 0), []string{popular, recent}},
+		{"watchlist only", counts("watchlist", 3, signalCountPositiveTitles, 0), []string{popular, recent}},
+		{"one positive title", counts("favorited", 1, "watch_low", 4, signalCountPositiveTitles, 1), []string{popular, recent, forYou}},
+		{"one title rated, favorited and finished", counts("rated_5", 1, "favorited", 1, "watch_high", 1, signalCountPositiveTitles, 1), []string{popular, recent, forYou}},
+		{"three taste-seed picks", counts("favorited", 3, signalCountPositiveTitles, 3), []string{forYou, popular, drama, recent}},
+		{"nine titles", counts("watch_high", 9, signalCountPositiveTitles, 9), []string{forYou, popular, drama, recent}},
+		{"fully personalized", counts("watch_high", 12, signalCountPositiveTitles, ColdStartFullPersonalized), []string{forYou, drama, popular, recent}},
+		{"legacy row with one positive signal", counts("favorited", 1, "watch_low", 4), []string{popular, recent, forYou}},
+		{"legacy row past the top threshold", counts("watch_high", ColdStartFullPersonalized), []string{forYou, drama, popular, recent}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeReaderRepo{
@@ -271,6 +285,43 @@ func TestForYouPageServesGlobalRowsOnlyWithoutPositiveSignals(t *testing.T) {
 			main, err := r.GetForYouMain(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
 			if err != nil || main == nil || main.Label != tc.want[0] {
 				t.Fatalf("main row = %+v, %v; want %q", main, err, tc.want[0])
+			}
+		})
+	}
+}
+
+// A profile with positive signals but no personal rows asks for them even at
+// level 0, since its titles may have gained embeddings since its last
+// refresh; a profile with nothing positive, or with its rows, does not.
+func TestForYouPageAsksForMissingRowsOnlyWithPositiveSignals(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		counts      map[string]int
+		rowsCached  bool
+		wantRefresh int
+	}{
+		{"picks awaiting embeddings", map[string]int{"favorited": 3, signalCountPositiveTitles: 0}, false, 1},
+		{"level 2 without rows", map[string]int{"favorited": 3, signalCountPositiveTitles: 3}, false, 1},
+		{"level 2 with rows", map[string]int{"favorited": 3, signalCountPositiveTitles: 3}, true, 0},
+		{"watchlist only with rows", map[string]int{"watchlist": 2, signalCountPositiveTitles: 0}, true, 0},
+		{"only negative signals", map[string]int{"rated_low": 1, "watch_low": 2, signalCountPositiveTitles: 0}, false, 0},
+		{"only 3-star ratings", map[string]int{"rated_3": 2, signalCountPositiveTitles: 0}, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeReaderRepo{
+				meta:   &TasteProfileMeta{SignalCounts: tc.counts},
+				global: map[string][]ScoredItem{RecTypePopular: {{MediaItemID: "popular"}}},
+			}
+			if tc.rowsCached {
+				repo.personal = map[string][]ScoredItem{RecTypeForYouMain + "|": {{MediaItemID: "personal-main"}}}
+			}
+			refresher := &countingReadRefresher{}
+			r := &Reader{repo: repo, refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+			if _, err := r.getForYouPageRows(t.Context(), 7, "p1", catalog.AccessFilter{}); err != nil {
+				t.Fatal(err)
+			}
+			if refresher.calls != tc.wantRefresh {
+				t.Fatalf("refresh requests = %d, want %d", refresher.calls, tc.wantRefresh)
 			}
 		})
 	}

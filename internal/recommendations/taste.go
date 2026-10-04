@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -251,21 +252,9 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		s.Rating = &rating
 		ratedSet[ref.CanonicalID] = struct{}{}
 
-		decay := timeDecay(r.RatedAt, now, halfLife)
-		switch {
-		case r.Rating == 5:
-			s.ExplicitWeight += WeightRated5 * decay
-			signalCounts["rated_5"]++
-		case r.Rating == 4:
-			s.ExplicitWeight += WeightRated4 * decay
-			signalCounts["rated_4"]++
-		case r.Rating == 3:
-			s.ExplicitWeight += WeightRated3 * decay
-			signalCounts["rated_3"]++
-		default:
-			s.ExplicitWeight += WeightRatedLow * decay
-			signalCounts[signalKindRatedLow]++
-		}
+		weight, kind := ratingSignal(r.Rating)
+		s.ExplicitWeight += weight * timeDecay(r.RatedAt, now, halfLife)
+		signalCounts[kind]++
 	}
 
 	countWatchSignals(signalCounts, watchProgress, rewatchCounts, refs, now)
@@ -275,6 +264,8 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		ensureSignal(canonicalID).ImplicitWeight += weight
 	}
 
+	// Favorites and watchlist entries count once per canonical title, as
+	// watches do, so favorited episodes of one series are one favorite.
 	favSet := make(map[string]struct{}, len(favorites))
 	for _, f := range favorites {
 		ref, ok := refs[f.MediaItemID]
@@ -284,17 +275,24 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		favSet[ref.CanonicalID] = struct{}{}
 		s := ensureSignal(ref.CanonicalID)
 		s.IntentWeight += WeightFavorited * timeDecay(parseSignalTime(f.AddedAt, now), now, halfLife)
-		signalCounts["favorited"]++
+		s.Favorited = true
+	}
+	if len(favSet) > 0 {
+		signalCounts["favorited"] = len(favSet)
 	}
 
+	watchlistSet := make(map[string]struct{}, len(watchlist))
 	for _, w := range watchlist {
 		ref, ok := refs[w.MediaItemID]
 		if !ok || ref.CanonicalID == "" {
 			continue
 		}
+		watchlistSet[ref.CanonicalID] = struct{}{}
 		s := ensureSignal(ref.CanonicalID)
 		s.IntentWeight += WeightWatchlist * timeDecay(parseSignalTime(w.AddedAt, now), now, halfLife)
-		signalCounts["watchlist"]++
+	}
+	if len(watchlistSet) > 0 {
+		signalCounts["watchlist"] = len(watchlistSet)
 	}
 
 	// A refresh queued before its profile was deleted must not bring back the
@@ -340,40 +338,6 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
 
-	vecs := make([][]float32, 0, len(signals))
-	embWeights := make([]float64, 0, len(signals))
-	var positiveItems []clusterItem
-
-	signalIDs := make([]string, 0, len(signals))
-	for id := range signals {
-		signalIDs = append(signalIDs, id)
-	}
-	sort.Strings(signalIDs)
-
-	for _, id := range signalIDs {
-		s := signals[id]
-		emb, ok := embMap[id]
-		if !ok || emb == nil {
-			continue
-		}
-		finalWeight := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight)
-		if finalWeight == 0 {
-			continue
-		}
-
-		vecs = append(vecs, emb)
-		embWeights = append(embWeights, finalWeight)
-
-		if finalWeight > 0 {
-			positiveItems = append(positiveItems, clusterItem{
-				itemID:    id,
-				embedding: emb,
-				weight:    finalWeight,
-				genres:    s.Genres,
-			})
-		}
-	}
-
 	maxContentRating := ""
 	if len(allIDs) > 0 && items != nil {
 		crMap := make(map[string]string, len(items))
@@ -383,12 +347,12 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
 	}
 
-	// Without a positive weight the average points away from the titles the
-	// profile disliked or abandoned, and would recommend their opposites.
-	profile := weightedAverage(vecs, embWeights)
-	if len(positiveItems) == 0 || profile == nil {
+	positiveItems, levelTitles := positiveTasteItems(signals, embMap)
+	profile := tasteVector(positiveItems)
+	if profile == nil {
 		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
 	}
+	signalCounts[signalCountPositiveTitles] = levelTitles
 
 	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
 		return false, fmt.Errorf("upsert taste profile: %w", err)
@@ -406,12 +370,70 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	return true, nil
 }
 
+// ratingSignal returns a star rating's explicit weight and its signal_counts
+// kind. A 3-star rating adds no weight of its own; combineCanonicalWeight
+// halves the title's watch and intent weight instead.
+func ratingSignal(rating int) (float64, string) {
+	switch rating {
+	case 5:
+		return WeightRated5, signalKindRated5
+	case 4:
+		return WeightRated4, signalKindRated4
+	case 3:
+		return 0, signalKindRated3
+	default:
+		return WeightRatedLow, signalKindRatedLow
+	}
+}
+
+// positiveTasteItems returns the titles that shape the taste vector and its
+// clusters, in ID order: those with an embedding and a positive combined
+// weight. Disliked and abandoned titles are left out rather than subtracted:
+// subtracting only nudges the vector off each disliked title's own direction,
+// and with nothing positive left it points at their opposites. It also
+// returns how many of the titles count toward the cold-start level
+// (countsTowardLevel).
+func positiveTasteItems(signals map[string]*canonicalWeightComponents, embeddings map[string][]float32) ([]clusterItem, int) {
+	var items []clusterItem
+	levelTitles := 0
+	for _, id := range slices.Sorted(maps.Keys(signals)) {
+		s := signals[id]
+		emb := embeddings[id]
+		if emb == nil {
+			continue
+		}
+		weight := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight)
+		if weight <= 0 {
+			continue
+		}
+		items = append(items, clusterItem{itemID: id, embedding: emb, weight: weight, genres: s.Genres})
+		if s.countsTowardLevel() {
+			levelTitles++
+		}
+	}
+	return items, levelTitles
+}
+
+// tasteVector is the weighted average of items' embeddings, or nil when
+// there are none.
+func tasteVector(items []clusterItem) []float32 {
+	vecs := make([][]float32, len(items))
+	weights := make([]float64, len(items))
+	for i, item := range items {
+		vecs[i] = item.embedding
+		weights[i] = item.weight
+	}
+	return weightedAverage(vecs, weights)
+}
+
 // clearTasteProfile stores a profile that has no positive signal, or none
 // whose title has an embedding: its signal counts without a taste vector, and
 // none of the clusters or cached personal rows an earlier vector produced.
-// Readers then treat it as having no taste profile. Without create a missing
-// row stays missing (see Repo.ClearTasteProfile).
+// Readers then treat it as having no taste profile. No title shaped a
+// vector, so it records no positive titles and the profile is level 0.
+// Without create a missing row stays missing (see Repo.ClearTasteProfile).
 func (e *Engine) clearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, started time.Time, create bool) error {
+	signalCounts[signalCountPositiveTitles] = 0
 	if err := e.repo.ClearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, create); err != nil {
 		return fmt.Errorf("clear taste profile: %w", err)
 	}
@@ -566,9 +588,23 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 	return &TasteProfileSummary{
 		TopGenres:         topGenres,
 		FavoriteDirectors: topDirectors,
-		SignalCounts:      meta.SignalCounts,
+		SignalCounts:      summarySignalCounts(meta.SignalCounts),
 		UpdatedAt:         meta.UpdatedAt,
 	}, nil
+}
+
+// summarySignalCounts returns the signal kinds of counts for the taste
+// profile summary, which reports how many signals of each kind fed the
+// profile. It leaves out signalCountPositiveTitles, a count of titles rather
+// than a kind of signal, so a client that totals the kinds is not misled.
+func summarySignalCounts(counts map[string]int) map[string]int {
+	out := make(map[string]int, len(counts))
+	for kind, count := range counts {
+		if kind != signalCountPositiveTitles {
+			out[kind] = count
+		}
+	}
+	return out
 }
 
 // topN returns up to n keys from counts, ordered by count descending.

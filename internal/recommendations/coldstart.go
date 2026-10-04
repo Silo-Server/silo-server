@@ -5,48 +5,77 @@ import (
 	"time"
 )
 
-// coldStartLevel returns the cold-start graduation level based on positive
-// signal count. Higher levels indicate more personalization is appropriate.
+// coldStartLevel returns the cold-start graduation level for a number of
+// positive titles. Higher levels indicate more personalization is
+// appropriate.
 //
-//	0 signals → level 0 (100% non-personalized)
-//	1-4       → level 1 (non-personalized + one personal row)
-//	5-14      → level 2 (50/50 mix)
-//	15+       → level 3 (fully personalized)
-func coldStartLevel(positiveSignalCount int) int {
+//	0 titles → level 0 (global rows only)
+//	1-2      → level 1 (global rows, then one personal row)
+//	3-9      → level 2 (personal and global rows interleaved, personal first)
+//	10+      → level 3 (personal rows first)
+func coldStartLevel(positiveTitles int) int {
 	switch {
-	case positiveSignalCount >= ColdStartFullPersonalized:
+	case positiveTitles >= ColdStartFullPersonalized:
 		return 3
-	case positiveSignalCount >= ColdStartMixed:
+	case positiveTitles >= ColdStartMixed:
 		return 2
-	case positiveSignalCount >= ColdStartMinimal:
+	case positiveTitles >= ColdStartMinimal:
 		return 1
 	default:
 		return 0
 	}
 }
 
-// The signal_counts kinds that record a dislike: a 1-2 star rating, and a
-// title abandoned below lowProgressThreshold.
+// signal_counts kinds. A 1-2 star rating (rated_low) and a title abandoned
+// below lowProgressThreshold (watch_low) record a dislike; a 3-star rating
+// carries no weight of its own (see ratingSignal).
 const (
+	signalKindRated5   = "rated_5"
+	signalKindRated4   = "rated_4"
+	signalKindRated3   = "rated_3"
 	signalKindRatedLow = "rated_low"
 	signalKindWatchLow = "watch_low"
 )
 
+// signalCountPositiveTitles is the signal_counts entry a taste refresh writes
+// with the number of titles behind the profile's taste vector that count
+// toward its level: canonical titles with an embedding and a positive weight,
+// each once however many signals it has, leaving out titles that are only on
+// the watchlist (see countsTowardLevel). It is not a kind of signal, so the
+// taste-profile summary leaves it out (summarySignalCounts).
+const signalCountPositiveTitles = "positive_titles"
+
 // coldStartLevelOf returns the cold-start level of a profile from its taste
-// profile metadata, counting only positive signals. A profile with no taste
-// profile is level 0.
+// profile metadata. A profile with no taste profile is level 0. The level
+// comes from the profile's positive titles; a row stored before refreshes
+// recorded them, which has no signalCountPositiveTitles entry, falls back to
+// its positive signal count until its next refresh.
 func coldStartLevelOf(meta *TasteProfileMeta) int {
+	if meta == nil {
+		return 0
+	}
+	if titles, ok := meta.SignalCounts[signalCountPositiveTitles]; ok {
+		return coldStartLevel(titles)
+	}
+	return coldStartLevel(positiveSignalCount(meta))
+}
+
+// positiveSignalCount sums a profile's positive signal counts: every kind
+// but the dislikes and 3-star ratings. A profile with none has nothing a
+// refresh could build a taste vector from.
+func positiveSignalCount(meta *TasteProfileMeta) int {
 	if meta == nil {
 		return 0
 	}
 	positive := 0
 	for kind, count := range meta.SignalCounts {
-		if kind == signalKindRatedLow || kind == signalKindWatchLow {
+		switch kind {
+		case signalKindRatedLow, signalKindWatchLow, signalKindRated3, signalCountPositiveTitles:
 			continue
 		}
 		positive += count
 	}
-	return coldStartLevel(positive)
+	return positive
 }
 
 // buildColdStartRows builds the set of non-personalized recommendation rows
