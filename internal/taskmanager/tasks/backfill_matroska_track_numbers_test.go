@@ -13,9 +13,9 @@ type fakeMatroskaTrackBackfiller struct {
 	result scanner.MatroskaTrackBackfillResult
 }
 
-func (f *fakeMatroskaTrackBackfiller) Run(_ context.Context, progress func(scanner.MatroskaTrackBackfillResult)) (scanner.MatroskaTrackBackfillResult, error) {
+func (f *fakeMatroskaTrackBackfiller) Run(_ context.Context, progress func(scanner.MatroskaTrackBackfillResult, float64)) (scanner.MatroskaTrackBackfillResult, error) {
 	f.runs++
-	progress(f.result)
+	progress(f.result, 40)
 	return f.result, nil
 }
 
@@ -37,6 +37,9 @@ func TestBackfillMatroskaTrackNumbersTaskRunsAtStartupUnderClusterLock(t *testin
 	}
 	if last := progress.messages[len(progress.messages)-1]; last != "Checked 3 MKV files, updated 2" {
 		t.Fatalf("final message = %q", last)
+	}
+	if progress.percents[1] != 40 {
+		t.Fatalf("batch progress = %v, want the backfiller's 40%%", progress.percents)
 	}
 
 	// Another server holds the lock: skip without reading any media.

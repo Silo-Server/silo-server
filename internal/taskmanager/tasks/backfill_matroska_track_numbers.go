@@ -17,7 +17,7 @@ const matroskaTrackBackfillAdvisoryLock int64 = 0x53494C4F4D4B5654
 // MatroskaTrackBackfiller records Matroska TrackNumbers on subtitle tracks
 // probed before the scanner read them.
 type MatroskaTrackBackfiller interface {
-	Run(ctx context.Context, progress func(scanner.MatroskaTrackBackfillResult)) (scanner.MatroskaTrackBackfillResult, error)
+	Run(ctx context.Context, progress func(result scanner.MatroskaTrackBackfillResult, percent float64)) (scanner.MatroskaTrackBackfillResult, error)
 }
 
 // BackfillMatroskaTrackNumbersTask gives embedded MKV subtitle tracks scanned
@@ -74,8 +74,8 @@ func (t *BackfillMatroskaTrackNumbersTask) Execute(ctx context.Context, progress
 	}
 
 	progress.Report(0, "Reading MKV track lists")
-	result, err := t.backfiller.Run(ctx, func(r scanner.MatroskaTrackBackfillResult) {
-		progress.Report(0, fmt.Sprintf("Checked %d MKV files, updated %d", r.Checked, r.Updated))
+	result, err := t.backfiller.Run(ctx, func(r scanner.MatroskaTrackBackfillResult, percent float64) {
+		progress.Report(percent, fmt.Sprintf("Checked %d MKV files, updated %d", r.Checked, r.Updated))
 	})
 	if data, marshalErr := json.Marshal(result); marshalErr == nil {
 		progress.SetResultData(data)

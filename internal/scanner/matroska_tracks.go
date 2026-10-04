@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 )
@@ -157,9 +158,45 @@ func matroskaSubtitleTrackIDs(tracks []mediaprobe.MatroskaTrack, videoStreams, a
 	return ids, nil
 }
 
+// matroskaTracksReadTimeout bounds one Tracks read. The read is a few small
+// reads near the start of the file, so only stalled storage takes this long.
+var matroskaTracksReadTimeout = 30 * time.Second
+
+var errMatroskaTracksReadTimeout = errors.New("reading Matroska tracks timed out")
+
 // readMatroskaSubtitleTrackIDs opens path and matches its Tracks element
 // against the probed layout. See matroskaSubtitleTrackIDs.
-func readMatroskaSubtitleTrackIDs(path string, videoStreams, audioStreams int, subtitles []matroskaSubtitleStream) ([]string, error) {
+//
+// A read on a stalled network mount cannot be interrupted, so it runs in its
+// own goroutine and is abandoned when ctx ends or the timeout passes, the same
+// way boundedProbeInputReadable treats storage checks. The abandoned goroutine
+// finishes whenever the read returns.
+func readMatroskaSubtitleTrackIDs(ctx context.Context, path string, videoStreams, audioStreams int, subtitles []matroskaSubtitleStream) ([]string, error) {
+	type readResult struct {
+		tracks []mediaprobe.MatroskaTrack
+		err    error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		tracks, err := readMatroskaTracksFile(path)
+		done <- readResult{tracks, err}
+	}()
+	timer := time.NewTimer(matroskaTracksReadTimeout)
+	defer timer.Stop()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, r.err
+		}
+		return matroskaSubtitleTrackIDs(r.tracks, videoStreams, audioStreams, subtitles)
+	case <-timer.C:
+		return nil, errMatroskaTracksReadTimeout
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func readMatroskaTracksFile(path string) ([]mediaprobe.MatroskaTrack, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -169,11 +206,7 @@ func readMatroskaSubtitleTrackIDs(path string, videoStreams, audioStreams int, s
 	if err != nil {
 		return nil, err
 	}
-	tracks, err := mediaprobe.ReadMatroskaTracks(f, info.Size())
-	if err != nil {
-		return nil, err
-	}
-	return matroskaSubtitleTrackIDs(tracks, videoStreams, audioStreams, subtitles)
+	return mediaprobe.ReadMatroskaTracks(f, info.Size())
 }
 
 // applyMatroskaSubtitleTrackIDs fills the container track ID of probed
@@ -187,7 +220,7 @@ func applyMatroskaSubtitleTrackIDs(ctx context.Context, filePath string, probe *
 	for i, track := range probe.SubtitleTracks {
 		subtitles[i] = matroskaSubtitleStream{Index: track.Index, Codec: track.Codec}
 	}
-	ids, err := readMatroskaSubtitleTrackIDs(filePath, len(probe.VideoTracks), len(probe.AudioTracks), subtitles)
+	ids, err := readMatroskaSubtitleTrackIDs(ctx, filePath, len(probe.VideoTracks), len(probe.AudioTracks), subtitles)
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: Matroska subtitle track numbers not recorded",
 			"component", "scanner", "path", filePath, "error", err)

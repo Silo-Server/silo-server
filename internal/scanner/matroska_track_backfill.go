@@ -83,22 +83,27 @@ const (
 )
 
 // Run makes one pass over every candidate file. progress, when non-nil, is
-// called after each batch with the running totals.
-func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(MatroskaTrackBackfillResult)) (MatroskaTrackBackfillResult, error) {
+// called after each batch with the running totals and the share of
+// media_files IDs the pass has covered, from 0 to 100.
+func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(MatroskaTrackBackfillResult, float64)) (MatroskaTrackBackfillResult, error) {
 	var result MatroskaTrackBackfillResult
 	if b == nil || b.pool == nil {
 		return result, nil
 	}
+	var maxID int
+	if err := b.pool.QueryRow(ctx, `SELECT COALESCE(MAX(id), 0) FROM media_files`).Scan(&maxID); err != nil {
+		return result, fmt.Errorf("reading media_files id range: %w", err)
+	}
 	afterID := 0
 	for {
-		candidates, err := b.loadCandidates(ctx, afterID)
+		candidates, lastID, rowCount, err := b.loadCandidates(ctx, afterID)
 		if err != nil {
 			return result, err
 		}
-		if len(candidates) == 0 {
+		if rowCount == 0 {
 			return result, nil
 		}
-		afterID = candidates[len(candidates)-1].id
+		afterID = lastID
 
 		var mu sync.Mutex
 		group, groupCtx := errgroup.WithContext(ctx)
@@ -128,16 +133,21 @@ func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(Matrosk
 		if err := group.Wait(); err != nil {
 			return result, err
 		}
-		if progress != nil {
-			progress(result)
+		if progress != nil && maxID > 0 {
+			progress(result, min(100, float64(afterID)*100/float64(maxID)))
 		}
-		if len(candidates) < b.batch {
+		// Count rows, not decoded candidates: a row skipped for unreadable
+		// JSON must not end the pass early.
+		if rowCount < b.batch {
 			return result, nil
 		}
 	}
 }
 
-func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID int) ([]matroskaTrackCandidate, error) {
+// loadCandidates returns the next batch after afterID, the last row ID it
+// read, and how many rows it read, which can exceed len(candidates) when a
+// row's tracks do not decode.
+func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID int) (candidates []matroskaTrackCandidate, lastID, rowCount int, err error) {
 	rows, err := b.pool.Query(ctx, `
 		SELECT id, file_path, file_size, file_modified_at, video_tracks, audio_tracks, subtitle_tracks
 		FROM media_files
@@ -152,10 +162,10 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 		ORDER BY id
 		LIMIT $2`, afterID, b.batch)
 	if err != nil {
-		return nil, fmt.Errorf("loading matroska track backfill candidates: %w", err)
+		return nil, afterID, 0, fmt.Errorf("loading matroska track backfill candidates: %w", err)
 	}
 	defer rows.Close()
-	var candidates []matroskaTrackCandidate
+	lastID = afterID
 	for rows.Next() {
 		var (
 			c                    matroskaTrackCandidate
@@ -164,8 +174,10 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 			audioTracks          []json.RawMessage
 		)
 		if err := rows.Scan(&c.id, &c.path, &c.size, &c.modifiedAt, &videoJSON, &audioJSON, &c.subtitleJSON); err != nil {
-			return nil, fmt.Errorf("scanning matroska track backfill candidate: %w", err)
+			return nil, afterID, 0, fmt.Errorf("scanning matroska track backfill candidate: %w", err)
 		}
+		lastID = c.id
+		rowCount++
 		// Only the counts matter for the match; a malformed column leaves the
 		// count at zero, which then fails the match instead of guessing.
 		_ = json.Unmarshal(videoJSON, &videoTracks)
@@ -179,9 +191,9 @@ func (b *MatroskaTrackBackfiller) loadCandidates(ctx context.Context, afterID in
 		candidates = append(candidates, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating matroska track backfill candidates: %w", err)
+		return nil, afterID, 0, fmt.Errorf("iterating matroska track backfill candidates: %w", err)
 	}
-	return candidates, nil
+	return candidates, lastID, rowCount, nil
 }
 
 // backfillFile returns an error only for a database failure, which ends the
@@ -198,7 +210,8 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	}
 	// The stored tracks describe the file as it was probed. A file that has
 	// changed since is matched by its next scan, not against stale streams.
-	if info.Size() != c.size || !sameFileModifiedAt(c.modifiedAt, info.ModTime()) {
+	// A row stored without an mtime can only be checked on size.
+	if info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime())) {
 		return matroskaTrackOutcomeChanged, nil
 	}
 
@@ -206,7 +219,7 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	for i, track := range c.subtitleTracks {
 		subtitles[i] = matroskaSubtitleStream{Index: track.Index, Codec: track.Codec}
 	}
-	ids, err := readMatroskaSubtitleTrackIDs(c.path, c.videoTracks, c.audioTracks, subtitles)
+	ids, err := readMatroskaSubtitleTrackIDs(ctx, c.path, c.videoTracks, c.audioTracks, subtitles)
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: Matroska subtitle track numbers not recorded",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
@@ -217,24 +230,21 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	}
 
 	changed := false
-	tracks := make([]models.SubtitleTrack, len(c.subtitleTracks))
-	copy(tracks, c.subtitleTracks)
-	for i := range tracks {
-		if tracks[i].ContainerTrackID == "" && ids[i] != "" {
-			tracks[i].ContainerTrackID = ids[i]
+	for i, track := range c.subtitleTracks {
+		if track.ContainerTrackID != "" {
+			ids[i] = ""
+		}
+		if ids[i] != "" {
 			changed = true
 		}
 	}
 	if !changed {
 		return matroskaTrackOutcomeUnmatched, nil
 	}
-	data, err := json.Marshal(tracks)
-	if err != nil {
-		return 0, fmt.Errorf("marshaling subtitle_tracks for file %d: %w", c.id, err)
-	}
-	// Write only over the exact row that was read: the same file revision and
-	// the same subtitle tracks. A scan that rewrote the row in the meantime
-	// already recorded its own IDs.
+	// Set only container_track_id on each element, so fields this binary does
+	// not know survive. Write only over the exact row that was read: the same
+	// file revision and the same subtitle tracks. A scan that rewrote the row
+	// in the meantime already recorded its own IDs.
 	var modifiedAt *time.Time
 	if c.modifiedAt != nil {
 		normalized := models.NormalizeFileModifiedAt(*c.modifiedAt)
@@ -242,13 +252,20 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	}
 	tag, err := b.pool.Exec(ctx, `
 		UPDATE media_files
-		SET subtitle_tracks = $2::jsonb,
+		SET subtitle_tracks = (
+			SELECT jsonb_agg(
+				CASE WHEN COALESCE(($2::text[])[e.ord::int], '') = '' THEN e.elem
+				     ELSE jsonb_set(e.elem, '{container_track_id}', to_jsonb(($2::text[])[e.ord::int]))
+				END ORDER BY e.ord)
+			FROM jsonb_array_elements(media_files.subtitle_tracks) WITH ORDINALITY AS e(elem, ord)
+		    ),
 		    updated_at = NOW()
 		WHERE id = $1
 		  AND file_size = $3
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $4::timestamptz
-		  AND subtitle_tracks = $5::jsonb`,
-		c.id, data, c.size, modifiedAt, c.subtitleJSON)
+		  AND subtitle_tracks = $5::jsonb
+		  AND jsonb_array_length(subtitle_tracks) = cardinality($2::text[])`,
+		c.id, ids, c.size, modifiedAt, c.subtitleJSON)
 	if err != nil {
 		return 0, fmt.Errorf("updating subtitle_tracks for file %d: %w", c.id, err)
 	}
