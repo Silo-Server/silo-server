@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"time"
 
@@ -21,7 +20,14 @@ const (
 	// Each candidate costs at least one remote read on a network mount, so a
 	// few at a time keeps the backfill from competing with playback.
 	matroskaTrackBackfillWorkers = 4
+	// matroskaTrackBackfillMaxTimeouts consecutive timed-out reads mean the
+	// storage is stalled, not that a few files are slow. The pass stops instead
+	// of waiting out every remaining file, and the next run resumes.
+	matroskaTrackBackfillMaxTimeouts = 8
 )
+
+// errMatroskaTrackStorageStalled ends a pass whose reads keep timing out.
+var errMatroskaTrackStorageStalled = errors.New("media storage is not responding")
 
 // MatroskaTrackBackfillResult counts what one backfill pass did.
 type MatroskaTrackBackfillResult struct {
@@ -37,6 +43,8 @@ type MatroskaTrackBackfillResult struct {
 	Changed int `json:"changed"`
 	// Failed files could not be read.
 	Failed int `json:"failed"`
+	// TimedOut files did not answer within the read timeout.
+	TimedOut int `json:"timed_out"`
 }
 
 // MatroskaTrackBackfiller records Matroska TrackNumbers on subtitle tracks
@@ -80,6 +88,7 @@ const (
 	matroskaTrackOutcomeUnmatched
 	matroskaTrackOutcomeChanged
 	matroskaTrackOutcomeFailed
+	matroskaTrackOutcomeTimedOut
 )
 
 // Run makes one pass over every candidate file. progress, when non-nil, is
@@ -95,6 +104,8 @@ func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(Matrosk
 		return result, fmt.Errorf("reading media_files id range: %w", err)
 	}
 	afterID := 0
+	// Timeouts in a row, in completion order across all workers.
+	consecutiveTimeouts := 0
 	for {
 		candidates, lastID, rowCount, err := b.loadCandidates(ctx, afterID)
 		if err != nil {
@@ -117,6 +128,11 @@ func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(Matrosk
 				mu.Lock()
 				defer mu.Unlock()
 				result.Checked++
+				if outcome == matroskaTrackOutcomeTimedOut {
+					consecutiveTimeouts++
+				} else {
+					consecutiveTimeouts = 0
+				}
 				switch outcome {
 				case matroskaTrackOutcomeUpdated:
 					result.Updated++
@@ -126,6 +142,12 @@ func (b *MatroskaTrackBackfiller) Run(ctx context.Context, progress func(Matrosk
 					result.Changed++
 				case matroskaTrackOutcomeFailed:
 					result.Failed++
+				case matroskaTrackOutcomeTimedOut:
+					result.TimedOut++
+				}
+				if consecutiveTimeouts >= matroskaTrackBackfillMaxTimeouts {
+					return fmt.Errorf("%w: %d Matroska track reads in a row timed out after %s",
+						errMatroskaTrackStorageStalled, consecutiveTimeouts, matroskaTracksReadTimeout)
 				}
 				return nil
 			})
@@ -202,31 +224,36 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	info, err := os.Stat(c.path)
-	if err != nil {
-		slog.DebugContext(ctx, "scanner: Matroska track backfill could not stat file",
-			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
-		return matroskaTrackOutcomeFailed, nil
+	tracks, info, err := readMatroskaTracks(ctx, c.path)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, ctxErr
+	}
+	if errors.Is(err, errMatroskaTracksReadTimeout) {
+		slog.WarnContext(ctx, "scanner: Matroska track read timed out",
+			"component", "scanner", "file_id", c.id, "path", c.path, "timeout", matroskaTracksReadTimeout)
+		return matroskaTrackOutcomeTimedOut, nil
 	}
 	// The stored tracks describe the file as it was probed. A file that has
 	// changed since is matched by its next scan, not against stale streams.
 	// A row stored without an mtime can only be checked on size.
-	if info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime())) {
+	if info != nil && (info.Size() != c.size || (c.modifiedAt != nil && !sameFileModifiedAt(c.modifiedAt, info.ModTime()))) {
 		return matroskaTrackOutcomeChanged, nil
+	}
+	if err != nil {
+		slog.DebugContext(ctx, "scanner: Matroska track backfill could not read file",
+			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
+		return matroskaTrackOutcomeFailed, nil
 	}
 
 	subtitles := make([]matroskaSubtitleStream, len(c.subtitleTracks))
 	for i, track := range c.subtitleTracks {
 		subtitles[i] = matroskaSubtitleStream{Index: track.Index, Codec: track.Codec}
 	}
-	ids, err := readMatroskaSubtitleTrackIDs(ctx, c.path, c.videoTracks, c.audioTracks, subtitles)
+	ids, err := matroskaSubtitleTrackIDs(tracks, c.videoTracks, c.audioTracks, subtitles)
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: Matroska subtitle track numbers not recorded",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
-		if errors.Is(err, errMatroskaLayoutMismatch) {
-			return matroskaTrackOutcomeUnmatched, nil
-		}
-		return matroskaTrackOutcomeFailed, nil
+		return matroskaTrackOutcomeUnmatched, nil
 	}
 
 	changed := false

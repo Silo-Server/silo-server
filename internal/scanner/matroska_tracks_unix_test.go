@@ -14,7 +14,7 @@ import (
 
 // Opening a FIFO with no writer blocks, the way a read on stalled network
 // storage does. The read is abandoned instead of holding the caller.
-func TestReadMatroskaSubtitleTrackIDsAbandonsStalledRead(t *testing.T) {
+func TestReadMatroskaTracksAbandonsStalledRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "stalled.mkv")
 	if err := syscall.Mkfifo(path, 0o600); err != nil {
 		t.Skipf("mkfifo: %v", err)
@@ -29,14 +29,14 @@ func TestReadMatroskaSubtitleTrackIDsAbandonsStalledRead(t *testing.T) {
 	saved := matroskaTracksReadTimeout
 	matroskaTracksReadTimeout = 50 * time.Millisecond
 	t.Cleanup(func() { matroskaTracksReadTimeout = saved })
-	if _, err := readMatroskaSubtitleTrackIDs(context.Background(), path, 1, 1, nil); !errors.Is(err, errMatroskaTracksReadTimeout) {
+	if _, _, err := readMatroskaTracks(context.Background(), path); !errors.Is(err, errMatroskaTracksReadTimeout) {
 		t.Fatalf("err = %v, want a read timeout", err)
 	}
 
 	matroskaTracksReadTimeout = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := readMatroskaSubtitleTrackIDs(ctx, path, 1, 1, nil); !errors.Is(err, context.Canceled) {
+	if _, _, err := readMatroskaTracks(ctx, path); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want the caller's cancellation", err)
 	}
 }

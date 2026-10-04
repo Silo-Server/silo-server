@@ -10,6 +10,7 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
+./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
