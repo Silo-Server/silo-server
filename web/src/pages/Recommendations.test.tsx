@@ -71,6 +71,67 @@ describe("Recommendations", () => {
     });
     mockUseDiscover.mockReturnValue({ data: undefined, isLoading: true, isError: false });
   });
+
+  it("renders a neutral empty state when discover returns no rows", () => {
+    mockUseDiscover.mockReturnValue({
+      data: { rows: [] },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderPage();
+
+    // Discover always carries the default rows, so no rows means nothing in
+    // the viewer's libraries, not too little history.
+    expect(markup).toContain("Nothing to show yet");
+    expect(markup).not.toContain("Watch and rate more");
+    expect(markup).not.toContain("Personalized picks");
+  });
+
+  it("renders the default rows for a profile with no history", () => {
+    mockUseTasteProfile.mockReturnValue({
+      data: { top_genres: [], favorite_directors: [], signal_counts: {} },
+      isLoading: false,
+    });
+    mockUseDiscover.mockReturnValue({
+      data: {
+        rows: [
+          {
+            type: "top_rated",
+            label: "Highly Rated in Your Library",
+            section_kind: "top-rated",
+            items: [
+              { content_id: "item-1", title: "Movie A", type: "movie", year: 2024, genres: [] },
+            ],
+          },
+          {
+            type: "recently_added",
+            label: "Recently Added",
+            section_kind: "recently-added",
+            items: [
+              { content_id: "item-2", title: "Series B", type: "series", year: 2023, genres: [] },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain('data-title="Highly Rated in Your Library"');
+    expect(markup).toContain('data-title="Recently Added"');
+    expect(markup).toContain("Movie A");
+    expect(markup).toContain("Series B");
+    expect(markup).toContain('data-href="/recommendations/section/top-rated"');
+    expect(markup).toContain('data-href="/recommendations/section/recently-added"');
+    expect(markup).not.toContain("Nothing to show yet");
+    // Not personal yet, so the page does not claim to come from its history.
+    expect(markup).not.toContain("based on your viewing history");
+    expect(markup).toContain("Watch and rate titles to personalize this page.");
+  });
+
   it("renders carousel rows with enriched items", () => {
     mockUseDiscover.mockReturnValue({
       data: {

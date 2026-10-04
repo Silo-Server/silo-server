@@ -81,7 +81,7 @@ func positiveSignalCount(meta *TasteProfileMeta) int {
 // buildColdStartRows builds the set of non-personalized recommendation rows
 // used during cold-start (and appended to warm profiles for discovery).
 // Rows with empty item slices are omitted.
-func buildColdStartRows(popular, recentlyAdded, topRated []ScoredItem, genreSamplers map[string][]ScoredItem) []ForYouRow {
+func buildColdStartRows(popular, recentlyAdded []ScoredItem, genreSamplers map[string][]ScoredItem) []ForYouRow {
 	var rows []ForYouRow
 
 	if len(popular) > 0 {
@@ -97,14 +97,6 @@ func buildColdStartRows(popular, recentlyAdded, topRated []ScoredItem, genreSamp
 			Type:  RecTypeRecentlyAdded,
 			Label: "Recently Added",
 			Items: recentlyAdded,
-		})
-	}
-
-	if len(topRated) > 0 {
-		rows = append(rows, ForYouRow{
-			Type:  RecTypeTopRated,
-			Label: "Top Rated",
-			Items: topRated,
 		})
 	}
 

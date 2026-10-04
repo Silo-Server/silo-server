@@ -16,8 +16,8 @@ const KIND_FALLBACK_LABEL: Record<string, (key?: string) => string> = {
   "similar-users": () => "Users Like You Also Enjoyed",
   popular: () => "Popular on This Server",
   "recently-added": () => "Recently Added",
-  "top-rated": () => "Top Rated",
-  genre: (key) => (key ? `Popular in ${key}` : "Genre picks"),
+  "top-rated": () => "Highly Rated in Your Library",
+  genre: (key) => (key ? `Top ${key}` : "Genre picks"),
 };
 
 function fallbackTitle(kind: string, key?: string) {

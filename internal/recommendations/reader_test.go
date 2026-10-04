@@ -179,6 +179,18 @@ type fakeReaderRepo struct {
 	global    map[string][]ScoredItem
 	hidden    map[string]struct{}
 	libraries map[string]int
+	// genres holds the cached genre samplers by genre.
+	genres map[string][]ScoredItem
+	// defaults holds the live default rows by kind, best first;
+	// defaultCalls records each read of one.
+	defaults     map[string][]ScoredItem
+	defaultCalls []defaultRowCall
+}
+
+type defaultRowCall struct {
+	kind    string
+	exclude []string
+	limit   int
 }
 
 func (f *fakeReaderRepo) GetTasteProfileMeta(context.Context, int, string) (*TasteProfileMeta, error) {
@@ -197,7 +209,7 @@ func (f *fakeReaderRepo) GetRecommendationCache(_ context.Context, userID int, _
 }
 
 func (f *fakeReaderRepo) ListCachedGenreSamplers(context.Context) (map[string][]ScoredItem, error) {
-	return nil, nil
+	return f.genres, nil
 }
 
 func (f *fakeReaderRepo) GetTopGenres(context.Context, int) ([]string, error) {
@@ -216,6 +228,24 @@ func (f *fakeReaderRepo) FilterAccessibleItemIDs(_ context.Context, itemIDs []st
 		accessible[id] = struct{}{}
 	}
 	return accessible, nil
+}
+
+// ListDefaultRowItems serves a default row as the query does: the accessible
+// items not in exclude, at most limit of them.
+func (f *fakeReaderRepo) ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error) {
+	f.defaultCalls = append(f.defaultCalls, defaultRowCall{kind: kind, exclude: slices.Sorted(slices.Values(exclude)), limit: limit})
+	var ids []string
+	for _, item := range f.defaults[kind] {
+		ids = append(ids, item.MediaItemID)
+	}
+	accessible, _ := f.FilterAccessibleItemIDs(ctx, ids, filter)
+	items := []ScoredItem{}
+	for _, item := range f.defaults[kind] {
+		if _, ok := accessible[item.MediaItemID]; ok && !slices.Contains(exclude, item.MediaItemID) && len(items) < limit {
+			items = append(items, item)
+		}
+	}
+	return items, nil
 }
 
 func rowLabels(rows []ForYouRow) []string {

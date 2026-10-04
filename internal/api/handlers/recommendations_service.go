@@ -104,10 +104,11 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 }
 
 // PopularItems answers up to limit of the server-wide popular items of the
-// last days that the viewer can see and the profile has not watched.
+// last days that the viewer can see and the profile has not watched. Unlike
+// the cached Popular row, a title one account watched counts.
 func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
-		return h.recsRepo.GetPopularItems(ctx, days, n)
+		return h.recsRepo.GetPopularItems(ctx, days, 1, n)
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "PopularItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
