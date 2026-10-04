@@ -407,15 +407,16 @@ func (m *ArtifactManager) resolveToneMapTarget(ctx context.Context, file *models
 	if err != nil {
 		return target, fmt.Errorf("load tone-map settings: %w", errors.Join(ErrCapabilityUnavailable, err))
 	}
-	if is4K && !strings.EqualFold(settings[config.Allow4KTranscodeSettingKey], "true") {
+	enabled := func(key string) bool { return config.AdminSettingEnabled(key, settings[key]) }
+	if is4K && !enabled(config.Allow4KTranscodeSettingKey) {
 		return target, fmt.Errorf("4K transcoding is disabled: %w", ErrQualityUnavailable)
 	}
 	if metadata.DynamicRange == "" || metadata.DynamicRange == playback.DynamicRangeSDRV3 {
 		return target, nil
 	}
 	policy := tonemap.NewPolicy(
-		strings.EqualFold(settings[config.PlaybackTranscodeHardwareToneMapSettingKey], "true"),
-		strings.EqualFold(settings[config.PlaybackTranscodeSoftwareToneMapSettingKey], "true"),
+		enabled(config.PlaybackTranscodeHardwareToneMapSettingKey),
+		enabled(config.PlaybackTranscodeSoftwareToneMapSettingKey),
 	)
 	if policy == tonemap.PolicyNone {
 		return target, fmt.Errorf("tone mapping is disabled: %w", ErrQualityUnavailable)

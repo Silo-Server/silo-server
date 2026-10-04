@@ -178,13 +178,16 @@ func TestHLSPlanningRegistryV3EnablesValidatedLocalToneMapWithoutRestart(t *test
 	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 		return capabilities, nil
 	}
-	settings := &mutablePlaybackSettingsV3{values: map[string]string{}}
+	settings := &mutablePlaybackSettingsV3{values: map[string]string{
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
+	}}
 	handler.SettingsRepo = settings
 
 	if handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
 		t.Fatal("disabled tone-map policy widened the local transformation registry")
 	}
-	settings.values["playback.transcode_software_tone_map_enabled"] = "true"
+	settings.values[config.PlaybackTranscodeSoftwareToneMapSettingKey] = "true"
 	if !handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
 		t.Fatal("enabled validated tone-map executor was not available without restart")
 	}

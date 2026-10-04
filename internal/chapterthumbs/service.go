@@ -36,11 +36,10 @@ const (
 	cpuExtractTimeoutSDR       = 10 * time.Second
 	cpuExtractTimeoutHDR       = 25 * time.Second
 
-	chapterThumbnailHDRPolicySetting       = "playback.chapter_thumbnail_hdr_policy"
-	chapterThumbnailHDRPolicyDefault       = "best_effort"
-	chapterThumbnailHDRPolicyDisabled      = "disabled"
-	chapterThumbnailHDRPolicyBestEffort    = "best_effort"
-	chapterThumbnailSoftwareToneMapSetting = "playback.chapter_thumbnail_software_tone_map_enabled"
+	chapterThumbnailHDRPolicySetting    = "playback.chapter_thumbnail_hdr_policy"
+	chapterThumbnailHDRPolicyDefault    = "best_effort"
+	chapterThumbnailHDRPolicyDisabled   = "disabled"
+	chapterThumbnailHDRPolicyBestEffort = "best_effort"
 
 	// Hardware acceleration is read per extraction from these keys, not frozen
 	// at startup, so an admin change applies to the next chapter thumbnail.
@@ -1269,8 +1268,8 @@ func (s *Service) chapterThumbnailSoftwareToneMapEnabled(ctx context.Context) bo
 	if s == nil || s.settings == nil {
 		return false
 	}
-	value, err := s.settings.Get(ctx, chapterThumbnailSoftwareToneMapSetting)
-	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+	value, err := s.settings.Get(ctx, config.ChapterThumbnailSoftwareToneMapSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.ChapterThumbnailSoftwareToneMapSettingKey, value)
 }
 
 func hasEligibleMissingChapter(chapters []models.MediaChapter, now time.Time, width int) bool {
