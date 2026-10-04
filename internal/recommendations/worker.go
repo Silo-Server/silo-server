@@ -90,10 +90,13 @@ type Worker struct {
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
-	refreshesNow          atomic.Int32 // RefreshProfileNow refreshes running
-	readRefreshes         refreshThrottle
-	cancelFunc            context.CancelFunc
-	embeddingsJobTimeout  time.Duration
+	// profileRefreshAgain holds pending profiles whose signals changed while
+	// their refresh ran; see runProfileRefresh.
+	profileRefreshAgain  map[string]struct{}
+	refreshesNow         atomic.Int32 // RefreshProfileNow refreshes running
+	readRefreshes        refreshThrottle
+	cancelFunc           context.CancelFunc
+	embeddingsJobTimeout time.Duration
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -305,6 +308,9 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
 	if !w.claimProfileRefresh(key) {
+		// A refresh queued here reads this change when it starts; one already
+		// running may have read the signals before it, so it runs again.
+		w.askProfileRefreshAgain(key)
 		return
 	}
 
@@ -347,7 +353,8 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 // running to completion, and it is not queued again. It holds the profile's
 // pending key, so the queue and the stale sweep on this server do not start a
 // duplicate; when a refresh is already queued or running here it returns at
-// once and leaves the work to that one. When maxRefreshesNow are already
+// once and leaves the work to that one, which runs again if it already
+// started. When maxRefreshesNow are already
 // running it queues the refresh instead.
 func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
@@ -359,7 +366,7 @@ func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID st
 
 // refreshNow runs refresh for the profile as RefreshProfileNow describes,
 // waiting up to wait.
-func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, wait time.Duration, refresh func(context.Context, clusterLock, int, string) error) bool {
+func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, wait time.Duration, refresh profileRefresh) bool {
 	if w.refreshesNow.Add(1) > maxRefreshesNow {
 		w.refreshesNow.Add(-1)
 		w.RequestProfileRefresh(ctx, userID, profileID)
@@ -368,6 +375,7 @@ func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, w
 	key := profileRefreshKey(userID, profileID)
 	if !w.claimProfileRefresh(key) {
 		w.refreshesNow.Add(-1)
+		w.askProfileRefreshAgain(key)
 		return false
 	}
 
@@ -376,10 +384,7 @@ func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, w
 	go func() {
 		defer close(done)
 		defer w.refreshesNow.Add(-1)
-		defer w.clearProfileRefreshPending(key)
-		if err := refresh(refreshCtx, nil, userID, profileID); err != nil {
-			slog.ErrorContext(refreshCtx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
-		}
+		_ = w.runProfileRefresh(refreshCtx, nil, userID, profileID, refresh)
 	}()
 
 	timer := time.NewTimer(wait)
@@ -1169,7 +1174,7 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (stal
 			res.Queued++ // already queued or refreshing on this server
 			continue
 		}
-		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID); {
+		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID, w.refreshProfile); {
 		case err == nil:
 			res.Refreshed++
 		case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
@@ -1187,26 +1192,45 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			_ = w.runProfileRefresh(ctx, nil, req.userID, req.profileID)
+			_ = w.runProfileRefresh(ctx, nil, req.userID, req.profileID, w.refreshProfile)
 		}
 	}
 }
 
-// runProfileRefresh refreshes a profile whose pending key the caller claimed,
-// then releases the key, and returns the refresh's error after logging it.
-// held is the caller's cluster lock, or nil.
-func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string) error {
-	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
-	err := w.refreshProfile(ctx, held, userID, profileID)
-	switch {
-	case errors.Is(err, errProfileRefreshElsewhere):
-		slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
-	case errors.Is(err, errPolicyNotLoaded):
-		slog.InfoContext(ctx, "this server has not loaded the latest access policy; profile left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
-	case err != nil:
-		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+// profileRefresh refreshes a profile; refreshProfile is the one the worker
+// runs. held is the caller's cluster lock, or nil.
+type profileRefresh func(ctx context.Context, held clusterLock, userID int, profileID string) error
+
+// runProfileRefresh runs refresh for a profile whose pending key the caller
+// claimed, then releases the key, and returns the last run's error after
+// logging it. held is the caller's cluster lock, or nil. A refresh request
+// made while it runs makes it run once more as soon as it ends, so a burst of
+// changes is fully applied in seconds rather than at the next stale sweep. A
+// failed run, one another server is already doing, or one this server cannot
+// run under the latest access policy stops: the profile stays marked stale,
+// and the sweep retries it.
+func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh) error {
+	key := profileRefreshKey(userID, profileID)
+	for {
+		// A request made before this run started is read by it.
+		w.dropProfileRefreshAgain(key)
+		err := refresh(ctx, held, userID, profileID)
+		switch {
+		case errors.Is(err, errProfileRefreshElsewhere):
+			slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+		case errors.Is(err, errPolicyNotLoaded):
+			slog.InfoContext(ctx, "this server has not loaded the latest access policy; profile left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+		case err != nil:
+			slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		}
+		if err != nil {
+			w.clearProfileRefreshPending(key)
+			return err
+		}
+		if !w.finishProfileRefresh(key) {
+			return nil
+		}
 	}
-	return err
 }
 
 // tryProfileLock takes the profile's cluster-wide refresh lock without
@@ -1346,6 +1370,38 @@ func (w *Worker) clearProfileRefreshPending(key string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.profileRefreshPending, key)
+	delete(w.profileRefreshAgain, key)
+}
+
+// askProfileRefreshAgain asks a pending profile refresh to run once more.
+func (w *Worker) askProfileRefreshAgain(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.profileRefreshAgain == nil {
+		w.profileRefreshAgain = make(map[string]struct{})
+	}
+	w.profileRefreshAgain[key] = struct{}{}
+}
+
+// dropProfileRefreshAgain forgets a request to run again.
+func (w *Worker) dropProfileRefreshAgain(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.profileRefreshAgain, key)
+}
+
+// finishProfileRefresh ends a refresh run. It reports true, keeping the
+// pending key, when a request to run again arrived; otherwise it releases the
+// key. Both happen under one lock, so a request is never caught between them.
+func (w *Worker) finishProfileRefresh(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, again := w.profileRefreshAgain[key]; again {
+		delete(w.profileRefreshAgain, key)
+		return true
+	}
+	delete(w.profileRefreshPending, key)
+	return false
 }
 
 func profileRefreshKey(userID int, profileID string) string {
