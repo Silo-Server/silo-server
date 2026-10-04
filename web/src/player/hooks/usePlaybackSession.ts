@@ -10,6 +10,9 @@ import {
 } from "../playback-errors";
 import { isTransientPlayerRequestError, PlayerFetchError } from "../player-fetch";
 import { useCodecDetection } from "./useCodecDetection";
+import { useBrowserEngineCapabilities } from "./useBrowserEngine";
+import type { EngineCapabilities } from "../engine/capabilities";
+import type { NativeOriginalSupport } from "../engine/routing";
 import {
   buildClientCapabilitiesV3,
   buildClientPlaybackContextV3,
@@ -157,6 +160,13 @@ interface PlaybackSessionErrorState {
 }
 
 export interface UsePlaybackSessionResult extends PlaybackSessionState {
+  /**
+   * The browser decode engine's capabilities, when browser decoding is on and
+   * this browser can run it. The player routes `original_http` plans with it.
+   */
+  browserEngine: EngineCapabilities | null;
+  /** What the media element itself plays from an untouched original. */
+  nativeOriginalSupport: NativeOriginalSupport;
   /** Starts a fresh session against another file (edition/version switch). */
   switchVersion: (fileId: number, currentPosition: number) => void;
   /** `track_change` replan selecting another audio track by combined index. */
@@ -373,9 +383,24 @@ export function usePlaybackSession(
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
-  const capabilitiesSettled = probe.settled;
-  const clientCapabilities = useMemo(() => buildClientCapabilitiesV3(probe), [probe]);
-  const clientPlaybackContext = useMemo(() => buildClientPlaybackContextV3(probe), [probe]);
+  const browserEngine = useBrowserEngineCapabilities();
+  const capabilitiesSettled = probe.settled && browserEngine.settled;
+  const clientCapabilities = useMemo(
+    () => buildClientCapabilitiesV3(probe, browserEngine.capabilities),
+    [probe, browserEngine.capabilities],
+  );
+  const clientPlaybackContext = useMemo(
+    () => buildClientPlaybackContextV3(probe, browserEngine.capabilities),
+    [probe, browserEngine.capabilities],
+  );
+  const nativeOriginalSupport = useMemo<NativeOriginalSupport>(
+    () => ({
+      containers: probe.containers,
+      videoCodecs: probe.codecsVideo,
+      audioCodecs: probe.codecsAudio,
+    }),
+    [probe.codecsAudio, probe.codecsVideo, probe.containers],
+  );
   const capabilityRequestKey = useMemo(
     () => JSON.stringify([clientCapabilities, clientPlaybackContext]),
     [clientCapabilities, clientPlaybackContext],
@@ -1756,6 +1781,8 @@ export function usePlaybackSession(
 
   return {
     ...state,
+    browserEngine: browserEngine.capabilities,
+    nativeOriginalSupport,
     switchVersion,
     switchAudioTrack,
     changeSubtitleTrack,

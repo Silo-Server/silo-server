@@ -29,6 +29,7 @@ import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
+import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
 import { toast } from "sonner";
 
 /**
@@ -752,6 +753,37 @@ export default function PlaybackSettings() {
       </SettingsGroup>
 
       <SeekControls />
+
+      <BrowserDecodingSetting />
     </div>
+  );
+}
+
+/**
+ * Stored in this browser only: whether it can decode a file depends on the
+ * browser and the GPU, not on the profile.
+ */
+function BrowserDecodingSetting() {
+  const [enabled, setEnabled] = useState(isBrowserDecodingEnabled);
+  return (
+    <SettingsGroup
+      title="This browser"
+      description="Saved in this browser only. Other browsers and apps keep their own choice."
+    >
+      <SettingRow
+        label="Decode in the browser (beta)"
+        description="Play files this browser cannot play natively, such as Dolby TrueHD or DTS audio and HDR video on SDR screens, by decoding them in the browser instead of converting them on the server. Applies from the next video you start."
+        control={(id) => (
+          <Switch
+            id={id}
+            checked={enabled}
+            onCheckedChange={(checked) => {
+              setBrowserDecodingEnabled(checked);
+              setEnabled(checked);
+            }}
+          />
+        )}
+      />
+    </SettingsGroup>
   );
 }

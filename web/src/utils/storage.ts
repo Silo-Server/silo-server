@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   DEVICE_ID: "silo-device-id",
   VOLUME: "player-volume",
   MUTED: "player-muted",
+  BROWSER_DECODING: "silo-player-browser-decoding",
   AUDIOBOOK_SKIP_BACK: "audiobook-skip-back",
   AUDIOBOOK_SKIP_FORWARD: "audiobook-skip-forward",
   AUDIOBOOK_SMART_REWIND: "audiobook-smart-rewind",

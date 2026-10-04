@@ -432,3 +432,17 @@ describe("lowerQualityOption", () => {
     expect(lowerQualityOption(options, "auto")?.id).toBe("2160p-medium");
   });
 });
+
+describe("buildPlaybackInfoSections player row", () => {
+  it("names the browser decoder while it plays the stream", () => {
+    const rows = (browserEngine: boolean) =>
+      buildPlaybackInfoSections({
+        streamUrl: "https://silo.example/stream",
+        plan: fixturePlanV3(),
+        runtimeStats: {},
+        browserEngine,
+      })[0]!.rows;
+    expect(rows(true)[0]).toEqual({ label: "Player", value: "Browser decoder" });
+    expect(rows(false)[0]).toEqual({ label: "Player", value: "HTML Video Player" });
+  });
+});
