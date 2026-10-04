@@ -453,6 +453,55 @@ describe("useSubtitleSync", () => {
     expect(result.current.entries[KEY]).toBeDefined();
   });
 
+  it("forgets a subtitle a later list no longer names", async () => {
+    let listed = [stored(), stored({ key: SIDECAR, source: "external", sync: job("running") })];
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({ subtitles: listed }),
+      [READ]: () => ({ subtitle: listed[1] }),
+    });
+    const { result } = renderSync();
+    await flush();
+    expect(result.current.entries[SIDECAR]).toBeDefined();
+    listed = [stored()];
+    act(() => result.current.reload());
+    await flush();
+    expect(result.current.entries[SIDECAR]).toBeUndefined();
+    expect(result.current.entries[KEY]).toBeDefined();
+  });
+
+  it("keeps a subtitle a realtime update named after a read that found it gone", async () => {
+    let fail: (err: unknown) => void = () => {};
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({
+        subtitles: [stored({ key: SIDECAR, source: "external", sync: job("running") })],
+      }),
+      [READ]: () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    });
+    const { result } = renderSync();
+    await flush();
+    await tick();
+    expect(calls(READ)).toHaveLength(1);
+    act(() =>
+      result.current.syncUpdated({
+        session_id: "session-1",
+        file_id: 42,
+        sync_key: SIDECAR,
+        timing: { offset_ms: 0, scale: 1 },
+        job: job("running", undefined, { phase: "matching", progress: 0.95 }),
+      }),
+    );
+    await act(async () => {
+      fail(new PlayerFetchError(404, "Not Found", "not_found"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.entries[SIDECAR]?.state.sync?.phase).toBe("matching");
+  });
+
   it("reads all subtitles again for an update about one it has not loaded", async () => {
     serve({
       [STATUS]: () => ({ state: "available" }),

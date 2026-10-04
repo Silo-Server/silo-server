@@ -164,6 +164,9 @@ export function useSubtitleSync({
       pin === playerConfig?.getProfileToken?.();
   }, [playerConfig]);
 
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
   const patch = useCallback((key: string, update: Partial<SubtitleSyncEntry>) => {
     setEntries((prev) => {
       const entry = prev[key];
@@ -215,6 +218,25 @@ export function useSubtitleSync({
     [],
   );
 
+  /**
+   * Forgets a subtitle the server no longer has, so no progress of a job
+   * that will never finish stays on screen. An observation since `sentAt`
+   * is newer than the read that found it gone and keeps it. Forgetting
+   * counts as an observation: an older answer cannot bring it back.
+   */
+  const forget = useCallback((key: string, sentAt: number) => {
+    if ((observedRef.current.get(key) ?? 0) > sentAt) return;
+    observedRef.current.set(key, ++observationRef.current);
+    knownTimingRef.current.delete(key);
+    jobsRef.current.delete(key);
+    pollStartedRef.current.delete(key);
+    setEntries((prev) => {
+      if (!(key in prev)) return prev;
+      const { [key]: _gone, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+
   // Sync is a server-wide capability; read it once per host config.
   useEffect(() => {
     if (!playerConfig) return;
@@ -247,13 +269,19 @@ export function useSubtitleSync({
           signal: controller.signal,
         });
         if (!current() || controller.signal.aborted) return;
-        for (const state of res?.subtitles ?? []) observe(state, { sentAt });
+        const states = res?.subtitles ?? [];
+        for (const state of states) observe(state, { sentAt });
+        // The list names every subtitle of the file that can be synced.
+        const listed = new Set(states.map((state) => state.key));
+        for (const key of Object.keys(entriesRef.current)) {
+          if (!listed.has(key)) forget(key, sentAt);
+        }
       } catch {
         /* Sync status is decoration; the tracks still play without it. */
       }
     })();
     return () => controller.abort();
-  }, [playerConfig, mediaFileId, sessionId, syncKeysKey, reloadToken, capture, observe]);
+  }, [playerConfig, mediaFileId, sessionId, syncKeysKey, reloadToken, capture, observe, forget]);
 
   const readOne = useCallback(
     async (key: string) => {
@@ -276,15 +304,8 @@ export function useSubtitleSync({
       } catch (err) {
         if (!current()) return;
         if (err instanceof PlayerFetchError && err.status === 404) {
-          // The subtitle is gone, and its jobs with it: forget it, so no
-          // progress of a job that will never finish stays on screen.
-          knownTimingRef.current.delete(key);
-          jobsRef.current.delete(key);
-          pollStartedRef.current.delete(key);
-          setEntries((prev) => {
-            const { [key]: _gone, ...rest } = prev;
-            return rest;
-          });
+          // The subtitle is gone, and its jobs with it.
+          forget(key, sentAt);
         } else {
           // Any other failure stops polling; a later reload re-arms it.
           patch(key, { pollExpired: true });
@@ -293,7 +314,7 @@ export function useSubtitleSync({
         locks.delete(key);
       }
     },
-    [playerConfig, mediaFileId, capture, observe, patch],
+    [playerConfig, mediaFileId, capture, observe, patch, forget],
   );
 
   // Poll every running job until it ends, the limit passes, or the context
@@ -367,8 +388,6 @@ export function useSubtitleSync({
     [readOne],
   );
 
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
   const syncUpdated = useCallback(
     (update: PlaybackSubtitleSyncUpdatedPayload) => {
       const entry = entriesRef.current[update.sync_key];
