@@ -886,6 +886,10 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 	// those replacements run under the quota lock with the new entries.
 	var prepared []replacement
 	replace := func(ctx context.Context, r replacement) error {
+		// A stale guard is refused before an encode is queued for it.
+		if err := checkManagedCreateRevision(r.existing, r.expected, r.expectedID); err != nil {
+			return err
+		}
 		status, size, artifactID, err := s.managedRowSource(ctx, items[r.i], decisions[r.i])
 		if err != nil {
 			return err
@@ -940,7 +944,7 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
 		adding := len(newIdx)
 		for _, r := range prepared {
-			if replacementAddsActive(r.existing, decisions[r.i]) {
+			if replacementAddsActive(r.existing, items[r.i].file.ID, decisions[r.i]) {
 				adding++
 			}
 		}
@@ -1098,14 +1102,16 @@ func reusableManagedStatus(status string) bool {
 }
 
 // replacementAddsActive reports whether replacing existing with a prepared
-// entry for decision adds an active download: existing is not already active,
-// and its target changes, so it is replaced rather than reused.
-func replacementAddsActive(existing *Download, decision QualityDecision) bool {
+// entry for mediaFileID and decision adds an active download: existing is not
+// already active, and its file or target changes, so it is replaced rather
+// than reused.
+func replacementAddsActive(existing *Download, mediaFileID int, decision QualityDecision) bool {
 	switch existing.Status {
 	case StatusQueued, StatusDownloading, StatusPreparing:
 		return false
 	}
-	return existing.Format != decision.DeliveryFormat ||
+	return existing.MediaFileID != mediaFileID ||
+		existing.Format != decision.DeliveryFormat ||
 		existing.Quality != decision.RequestedQuality ||
 		existing.EffectiveQuality != decision.EffectiveQuality ||
 		existing.TargetBitrateKbps != decision.TargetBitrateKbps ||

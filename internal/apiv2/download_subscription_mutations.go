@@ -34,7 +34,7 @@ type DownloadSubscriptionPatchBody struct {
 	SeasonNumbers   Patch[[]int]  `json:"season_numbers,omitzero"`
 	DeleteWatched   Patch[bool]   `json:"delete_watched,omitzero"`
 	MaxStorageBytes Patch[int64]  `json:"max_storage_bytes,omitzero"`
-	Quality         Patch[string] `json:"quality,omitzero" doc:"Quality preset for episodes registered from now on; already-registered downloads keep theirs."`
+	Quality         Patch[string] `json:"quality,omitzero" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps" doc:"Quality preset for episodes registered from now on; already-registered downloads keep theirs."`
 	Active          Patch[bool]   `json:"active,omitzero"`
 }
 type DownloadSubscriptionPatchInput struct {

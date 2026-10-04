@@ -25757,6 +25757,14 @@
           },
           "quality": {
             "description": "Quality preset for episodes registered from now on; already-registered downloads keep theirs.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
+            ],
             "type": [
               "string",
               "null"
