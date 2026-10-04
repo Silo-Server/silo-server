@@ -24,6 +24,7 @@ type Scanner interface {
 	ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*scanner.ScanResult, error)
 	ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error
 	FinalizeVariantsByPathPrefix(ctx context.Context, folder *models.MediaFolder, pathPrefix string) error
+	ObserveFileRoot(ctx context.Context, folderID int, filePath, libraryType string, libraryRoots ...string) (scanner.RootObservation, bool, error)
 }
 
 // Matcher drains unmatched files and retries linked unmatched items.
@@ -527,7 +528,10 @@ func (e *Executor) reconcileSkippedRoots(
 	case scanResult != nil:
 		observations = append(observations, scanResult.RootObservations...)
 	case mode == scopeModeFile:
-		observation, ok := scanner.ObserveRoot(scopePath, folderType, libraryRoots...)
+		observation, ok, err := e.scanner.ObserveFileRoot(ctx, folderID, scopePath, folderType, libraryRoots...)
+		if err != nil {
+			return fmt.Errorf("observe root of %q: %w", scopePath, err)
+		}
 		if ok {
 			observations = append(observations, observation)
 		}
@@ -540,7 +544,7 @@ func (e *Executor) reconcileSkippedRoots(
 	seenSkippedRoots := make([]string, 0, len(observations))
 
 	for _, observation := range observations {
-		if observation.HasFolderIDs {
+		if observation.HasProviderIDs {
 			if err := e.skippedRootRepo.Delete(ctx, folderID, observation.RootPath); err != nil {
 				return fmt.Errorf("clear skipped root %q: %w", observation.RootPath, err)
 			}

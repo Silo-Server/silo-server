@@ -141,3 +141,43 @@ func TestDownloadRegistryCursorBoundary(t *testing.T) {
 		t.Fatalf("auth: %d", rec.Code)
 	}
 }
+
+func TestDownloadRegistryListsPreparationProgress(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	progress, remaining := 0.35, 360
+	service := &fakeDownloadRegistry{rows: []*downloads.Download{
+		{ID: "running", ContentID: "series", EpisodeID: "e1", MediaFileID: 1, Status: downloads.StatusPreparing, CreatedAt: at,
+			Preparation: &downloads.PreparationStatus{State: downloads.PreparationRunning, Progress: &progress, RemainingSeconds: &remaining}},
+		{ID: "queued", ContentID: "series", EpisodeID: "e2", MediaFileID: 2, Status: downloads.StatusPreparing, CreatedAt: at,
+			Preparation: &downloads.PreparationStatus{State: downloads.PreparationQueued, QueuePosition: 3}},
+		{ID: "ready", ContentID: "series", EpisodeID: "e3", MediaFileID: 3, Status: downloads.StatusReady, CreatedAt: at},
+	}}
+	deps := pilotDeps(nil, nil)
+	deps.Downloads = service
+	h := newTestHandler(t, deps)
+	device := with(with(bearer(memberToken), "X-Profile-Id", "p-owner"), "X-Silo-Device-Id", "device-one")
+	rec := do(t, h, "GET", Prefix+"/downloads", "", device)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	var page struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil || len(page.Items) != 3 {
+		t.Fatalf("%v %s", err, rec.Body.String())
+	}
+	for i, want := range []string{
+		`{"state":"running","progress":0.35,"remaining_seconds":360}`,
+		`{"state":"queued","queue_position":3}`,
+		``,
+	} {
+		if got := string(page.Items[i]["preparation"]); got != want {
+			t.Fatalf("item %d preparation = %s, want %s", i, got, want)
+		}
+	}
+	rec = do(t, h, "GET", Prefix+"/capabilities/downloads", "", device)
+	var capability DownloadCapability
+	if err := json.Unmarshal(rec.Body.Bytes(), &capability); err != nil || !capability.PreparationProgress {
+		t.Fatalf("%+v %v", capability, err)
+	}
+}

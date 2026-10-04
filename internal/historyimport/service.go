@@ -710,16 +710,6 @@ func IsNotFoundError(err error) bool {
 		errors.Is(err, ErrPlexSessionNotFound)
 }
 
-func shouldWriteImportedProgress(record Record, localProgress *localProgressRow) bool {
-	if localProgress == nil {
-		return true
-	}
-	if record.UpdatedAt.IsZero() {
-		return false
-	}
-	return record.UpdatedAt.After(localProgress.UpdatedAt)
-}
-
 func toConnectServerResponses(servers []ConnectServer) []ConnectServerResponse {
 	resp := make([]ConnectServerResponse, 0, len(servers))
 	for _, server := range servers {

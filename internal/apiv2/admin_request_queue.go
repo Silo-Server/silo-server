@@ -14,8 +14,6 @@ const (
 	opListAdminRequestEvents = "listAdminRequestEvents"
 )
 
-var adminRequestQueueOperationIDs = []string{opGetAdminRequestCounts, opListAdminRequestEvents}
-
 // adminRequestQueue is the queue slice of the request service: view counts
 // and request history.
 type adminRequestQueue interface {

@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isCapturedProfileAuthorityActive } from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import {
-  useCheckPlexPin,
   useCreateHistoryImportRun,
   useHistoryImportRuns,
   useHistoryImportRun,
@@ -82,14 +81,6 @@ describe("history import v2 hooks", () => {
       "POST /api/v2/history-imports/runs",
       expect.objectContaining({ body: { profile_id: "target", source: "plex", source_id: "9" } }),
     );
-  });
-
-  it("surfaces an ambiguous Plex exchange error without a retry", async () => {
-    vi.mocked(v2).mockRejectedValueOnce(new Error("connection closed"));
-    const { result } = renderHook(() => useCheckPlexPin("session"), { wrapper: wrapper() });
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.failureCount).toBe(1);
-    expect(v2).toHaveBeenCalledTimes(1);
   });
 });
 

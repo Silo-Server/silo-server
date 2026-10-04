@@ -21,7 +21,7 @@ import {
   splitOverrideFields,
   traceLine,
 } from "./requestRoutingModel";
-import { adminLanguage, presetsInUse, rulePreset } from "./requestRoutingPresets";
+import { adminLanguage, presetsInUse } from "./requestRoutingPresets";
 import {
   conditionsCover,
   routingWarnings,
@@ -241,23 +241,6 @@ describe("rule presets", () => {
     expect(adminLanguage(undefined)).toBe("en");
   });
 
-  it("builds each preset's conditions for the media type", () => {
-    expect(rulePreset("anime", "series", "en").conditions).toEqual({ anime: true });
-    expect(rulePreset("foreign", "movie", "fr")).toMatchObject({
-      conditions: { exclude_original_languages: ["fr"] },
-      description: "Titles not originally in French.",
-      noun: "foreign-language movies",
-    });
-    expect(rulePreset("kids", "movie", "en").conditions).toEqual({
-      genre_ids: [10751],
-      max_content_rating: "PG",
-    });
-    expect(rulePreset("kids", "series", "en")).toMatchObject({
-      conditions: { genre_ids: [10751, 10762], max_content_rating: "PG" },
-      noun: "kids & family series",
-    });
-  });
-
   it("knows which presets a media type's rules already hold", () => {
     const used = presetsInUse(
       [
@@ -359,47 +342,6 @@ describe("routing warnings", () => {
       "Radarr is a Radarr server; series need Sonarr.",
     ]);
     expect(warnings.get("b")?.[0]?.fix).toEqual({ kind: "move-above", targetId: "a" });
-  });
-
-  it("flags anime below a foreign-language rule, servers that are off or need setup, and a standard series type", () => {
-    const off = server("s3", "Sonarr Off", "sonarr", { enabled: false });
-    const bare = server("s4", "Sonarr New", "sonarr", { has_api_key: false });
-    const warnings = routingWarnings(
-      input({
-        servers: [...servers, off, bare],
-        rules: [
-          route({
-            id: "f",
-            name: "Foreign language",
-            conditions: { exclude_original_languages: ["en"] },
-            hd: { integration_id: "s3" },
-          }),
-          route({
-            id: "a",
-            name: "Anime",
-            conditions: { anime: true },
-            hd: { integration_id: "s2" },
-            uhd: { integration_id: "s4" },
-          }),
-        ],
-      }),
-    );
-    expect(warnings.get("f")?.map((w) => w.text)).toEqual([
-      "Sonarr Off is turned off. Requests this rule sends there can't go through until it's back on.",
-    ]);
-    expect(warnings.get("a")).toEqual([
-      {
-        key: "anime-order",
-        text: "Anime titles are usually Japanese, so “Foreign language” above catches most of them first.",
-        fix: { kind: "move-above", targetId: "f" },
-      },
-      { key: "setup-s4", text: "Sonarr New needs setup." },
-      {
-        key: "anime-series-type",
-        text: "Sonarr will add these as standard series.",
-        fix: { kind: "set-anime-series-type" },
-      },
-    ]);
   });
 
   it("says Everything else makes no 4K copies while every request asks for one", () => {

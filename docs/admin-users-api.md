@@ -79,21 +79,43 @@ requires starting a new listing. Account capabilities advertise
 An identity lookup does not reserve an identity or authorize a change. Conditional
 account updates and database uniqueness remain authoritative at write time.
 
+## Policy defaults
+
+An account's unset policy field takes its access group's value. Admin accounts
+never belong to a group: their unset fields resolve to full access, the access
+the Owner has, and an override on an admin account still restricts it. A
+regular account with no group uses the built-in no-group values, which match
+full access except that server-prepared downloads
+(`download_transcode_allowed`) are off.
+
+`GET /api/v2/admin/users/policy-defaults` returns both layers, `admin` and
+`ungrouped`, in the shape of `effective_policy` without `permissions`, so
+clients show where a default comes from without keeping their own copy. The
+values come from the server build. Account capabilities advertise
+`policy_defaults`. Existing `admin:users` keys may use this read.
+
 ## Passwords
 
 Account editor and list rows carry `password_login` and `password_change_required`.
-`password_login` is false when an external authentication provider manages the
-account's sign-in. Password actions do not apply to such an account, and clients
-hide them. `password_change_required` is true while the account holds a temporary
-password.
+`password_login` is true while the account can sign in with a local password: local
+password sign-in is on for it and it has a password. Linking an external sign-in
+identity turns it off unless the account is break-glass. Setting a password on
+update turns local password sign-in back on, so `password_login` is true afterwards;
+this is how an administrator recovers an account whose provider is gone, and
+clients keep the set-password action for accounts where it is false. Only the server
+Owner may set the password of its own account while `password_login` is false for it
+(403 `permission_denied`; v1 answers `owner_protected`), so an admin cannot turn its own password sign-in back on and
+keep its role through provider demotion. A password
+reset link needs `password_login` (see below). `password_change_required` is true
+while the account holds a temporary password.
 
 Create and update accept `require_password_change` to make the password in the same
 request temporary. At its next sign-in the account must choose a new password before
 its session can do anything else (see
 [temporary passwords](auth-api.md#temporary-passwords)). The flag is only valid
 alongside `password`; sending it alone returns `422 validation_failed` at
-`body.require_password_change`. An account without local password sign-in cannot
-hold a temporary password; updating one with the flag returns `409 conflict`. A
+`body.require_password_change`. Because the password write turns local password
+sign-in on, the flag also works for an account that had it off. A
 password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
 sessions.
 
@@ -120,7 +142,7 @@ is described in [password reset links](auth-api.md#password-reset-links).
 | Condition | Result |
 |-----------|--------|
 | No such account | `404 not_found` |
-| External provider manages sign-in, account disabled, or no email address for `email` | `409 conflict` |
+| Account without local password sign-in (`password_login` false), account disabled, or no email address for `email` | `409 conflict` |
 | Email not configured for `email` | `409 capability_not_configured` |
 | No server public URL (`server.public_url`) | `409 capability_not_configured` |
 
@@ -150,6 +172,10 @@ they:
 - create an administrator, promote an account to administrator, or invite one;
 - update, delete, or issue a password reset for another administrator or the
   Owner;
+- change an access-policy override on their own account (libraries, playback
+  quality, stream, transcode and bitrate limits, the transcode, download and
+  request switches). An update that re-sends the stored values is not a change;
+  other fields of their own account stay editable;
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 

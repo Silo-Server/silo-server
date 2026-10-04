@@ -25,6 +25,13 @@ func (e *APIError) Unwrap() error { return e.cause }
 
 func (e *APIError) Error() string { return e.Code + ": " + e.Message }
 
+// WithCause records err as the error's cause, so a caller can branch on it
+// with errors.Is while the status, code and message stay as they are.
+func (e *APIError) WithCause(err error) *APIError {
+	e.cause = err
+	return e
+}
+
 func apiError(status int, code, message string) *APIError {
 	return &APIError{Status: status, Code: code, Message: message}
 }

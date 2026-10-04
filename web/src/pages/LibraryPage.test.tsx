@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { v2Problem } from "@/api/v2/problems.test-support";
 
 const mocks = vi.hoisted(() => ({
   ownerKey: "profile-1",
@@ -19,24 +20,8 @@ vi.mock("@/hooks/queries/libraries", () => ({
   }),
 }));
 
-vi.mock("@/hooks/queries/libraryPageState", () => ({
-  libraryPageStateWriteRetryDelay: (error: unknown, fallbackDelayMs: number) => {
-    const status =
-      typeof error === "object" && error !== null && "status" in error
-        ? (error as { status?: unknown }).status
-        : undefined;
-    if (
-      typeof status === "number" &&
-      status >= 400 &&
-      status < 500 &&
-      status !== 408 &&
-      status !== 425 &&
-      status !== 429
-    ) {
-      return null;
-    }
-    return fallbackDelayMs;
-  },
+vi.mock("@/hooks/queries/libraryPageState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/libraryPageState")>()),
   useLibraryPageStatePreference: () => ({
     ownerKey: mocks.ownerKey,
     isLoading: false,
@@ -266,7 +251,7 @@ describe("LibraryPage saved state", () => {
 
   it("retries a transient rate-limit rejection without looping", async () => {
     vi.useFakeTimers();
-    const rateLimited = Object.assign(new Error("rate limited"), { status: 429 });
+    const rateLimited = v2Problem(429, "rate_limited", "rate limited");
     mocks.saveLibrarySearch.mockRejectedValueOnce(rateLimited);
     try {
       renderPage();
@@ -292,18 +277,33 @@ describe("LibraryPage saved state", () => {
   });
 
   it("does not carry a terminal retry marker into a different profile", async () => {
-    const rejected = Object.assign(new Error("invalid setting"), { status: 422 });
-    mocks.saveLibrarySearch.mockRejectedValueOnce(rejected);
-    const view = renderPage();
+    vi.useFakeTimers();
+    mocks.saveLibrarySearch.mockRejectedValueOnce(
+      v2Problem(422, "validation_failed", "invalid setting"),
+    );
+    try {
+      const view = renderPage();
 
-    expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
-    await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
+      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await mocks.saveLibrarySearch.mock.results[0]?.value.catch(() => undefined);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+        await Promise.resolve();
+      });
+      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(1);
 
-    mocks.ownerKey = "profile-2";
-    view.rerender(page());
-
-    await waitFor(() => expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2));
-    await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
+      mocks.ownerKey = "profile-2";
+      view.rerender(page());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mocks.saveLibrarySearch).toHaveBeenCalledTimes(2);
+      await expect(mocks.saveLibrarySearch.mock.results[1]?.value).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not carry an in-flight submission marker into a different profile", async () => {

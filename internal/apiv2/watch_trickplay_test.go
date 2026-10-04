@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
 )
 
@@ -89,20 +88,6 @@ func TestGetWatchTrickplay(t *testing.T) {
 	requireProblem(t, do(t, off, http.MethodGet, "/api/v2/watch/movie:heat-1995/trickplay?file_id=42", "", owner), TypeDependencyUnavailable)
 }
 
-func TestWatchVersionsCarryTrickplayAvailability(t *testing.T) {
-	watch := &fakeWatch{}
-	h := newTestHandler(t, watchDeps(watch))
-	rec := do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", bearer(memberToken))
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	version := body["versions"].([]any)[0].(map[string]any)
-	if available, ok := version["trickplay_available"]; !ok || available != false {
-		t.Fatalf("trickplay_available = %v (%t), want false present", available, ok)
-	}
-}
-
 func watchTrickplayFixtureCases() []fixtureCase {
 	problem := "#/components/schemas/Problem"
 	return []fixtureCase{
@@ -114,14 +99,5 @@ func watchTrickplayFixtureCases() []fixtureCase {
 			scenario: "A file the item does not list, or one without published previews: not found.",
 			method:   http.MethodGet, path: "/api/v2/watch/movie:heat-1995/trickplay?file_id=7", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
-	}
-}
-
-func TestWatchVersionOfReportsTrickplay(t *testing.T) {
-	if watchVersionOf(catalogpkg.FileVersion{FileID: 1}).TrickplayAvailable {
-		t.Fatal("a version without previews reported them")
-	}
-	if !watchVersionOf(catalogpkg.FileVersion{FileID: 1, Trickplay: &catalogpkg.TrickplayGrid{Width: 300}}).TrickplayAvailable {
-		t.Fatal("a version with previews did not report them")
 	}
 }

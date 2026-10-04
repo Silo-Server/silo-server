@@ -1282,6 +1282,8 @@ export interface EpisodeFile {
   audio_channels: number;
   container: string;
   file_size: number;
+  /** True when the server could not read the file (empty, corrupt, or truncated). */
+  unreadable?: boolean;
 }
 
 export interface EpisodeListItem {
@@ -2515,6 +2517,14 @@ export interface AdminUserEffectivePolicy {
   permissions: string[];
 }
 
+// The built-in layer an ungrouped account resolves its unset policy fields to
+// (GET /api/v2/admin/users/policy-defaults).
+export type AdminPolicyDefaultLayer = Omit<AdminUserEffectivePolicy, "permissions">;
+export interface AdminPolicyDefaults {
+  admin: AdminPolicyDefaultLayer;
+  ungrouped: AdminPolicyDefaultLayer;
+}
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -2541,6 +2551,11 @@ export interface AdminUser {
   password_change_required: boolean;
   /** The server Owner: only the Owner may change this account. */
   is_owner: boolean;
+  /**
+   * A break-glass admin keeps local password sign-in while the server turns
+   * it off (auth.local_password_login).
+   */
+  break_glass: boolean;
   effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;
@@ -2583,6 +2598,8 @@ export interface UpdateUserRequest {
   password?: string;
   /** Only with password: make it temporary, replaced at the next sign-in. */
   require_password_change?: boolean;
+  /** Admin accounts only; only the server Owner may set or clear it. */
+  break_glass?: boolean;
   role?: string;
   permissions?: string[];
   enabled?: boolean;
@@ -2924,7 +2941,9 @@ export type EventChannel =
   // useSettingValuesRealtime.
   | "user_settings"
   | "settings"
-  | "notifications";
+  | "notifications"
+  // Admin-only changes to the offline-download preparation queue.
+  | "download_preparations";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -3793,6 +3812,12 @@ export interface PluginCapability {
   subscriptions?: string[];
   config_schema?: PluginConfigSchema[];
   metadata?: Record<string, unknown>;
+  /** How an auth_provider.v1 capability signs people in; absent for other types. */
+  sign_in_mode?: "oauth" | "credentials" | "network";
+  /** An installation's OAuth sign-in capability: the redirect URI to register at the provider. */
+  callback_url?: string;
+  /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
+  post_logout_redirect_url?: string;
 }
 
 export interface PluginRoute {
@@ -3825,6 +3850,10 @@ export interface PluginAuthBinding {
   display_order: number;
   auto_provision: boolean;
   default_login: boolean;
+  /** Redirect URI to register at an OAuth (OIDC) provider; empty for LDAP or without a public URL. */
+  callback_url?: string;
+  /** Post-logout redirect URI to register for provider logout; empty like callback_url. */
+  post_logout_redirect_url?: string;
   created_at: string;
   updated_at: string;
 }

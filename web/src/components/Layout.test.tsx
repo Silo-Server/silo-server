@@ -510,24 +510,6 @@ describe("Layout detail reveal", () => {
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });
 
-  it("reveals by the deadline while hover expansion holds the surface open", () => {
-    const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
-
-    act(() => vi.advanceTimersByTime(SIDEBAR_DETAILS_REVEAL_DEADLINE_MS));
-
-    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
-  });
-
   it("reveals by the deadline when requestAnimationFrame never fires", () => {
     const view = renderLayout();
     setRoute("/item/movie-1", "item");

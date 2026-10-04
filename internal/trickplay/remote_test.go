@@ -105,12 +105,11 @@ func TestNodeExtractorModes(t *testing.T) {
 	t.Run("a failure on a node is final", func(t *testing.T) {
 		broken, _ := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "invalid_data", Permanent: true, Message: "moov atom not found"})
 		other, otherCalls := fakeNode(t, http.StatusOK, ok)
-		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
 		failure, isNode := errors.AsType[*ExtractError](err)
 		if !isNode || !failure.Permanent || failure.Reason != "invalid_data" || otherCalls.Load() != 0 {
 			t.Fatalf("err %v", err)
 		}
-		_ = other
 		if outcome, _ := (&Service{}).classify(t.Context(), err); outcome != Unusable {
 			t.Fatalf("a permanent node failure classifies as %v", outcome)
 		}

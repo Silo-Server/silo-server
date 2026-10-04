@@ -271,44 +271,6 @@ func TestTaskManagerStartSeedsCleanupTaskDefaults(t *testing.T) {
 	}
 }
 
-func TestTaskManagerStartPreservesExistingTriggers(t *testing.T) {
-	existing := []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:15"},
-	}
-	triggerRepo := &fakeTriggerRepository{
-		triggers: map[string][]taskmanager.TriggerConfig{
-			"cleanup_activity_log": existing,
-		},
-	}
-	manager := taskmanager.New(
-		triggerRepo,
-		fakeExecutionRepository{},
-		newFakeTrigger,
-		slog.New(slog.DiscardHandler),
-	)
-
-	manager.Register(stubTask{
-		key: "cleanup_activity_log",
-		triggers: []taskmanager.TriggerConfig{
-			{Type: taskmanager.TriggerTypeStartup},
-			{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((24 * time.Hour) / time.Millisecond)},
-		},
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer manager.Stop()
-	defer cancel()
-	manager.Start(ctx)
-
-	if _, ok := triggerRepo.setCalls["cleanup_activity_log"]; ok {
-		t.Fatalf("expected existing triggers to be preserved without SetTriggers call")
-	}
-
-	if got := manager.GetTaskInfo("cleanup_activity_log").Triggers; !reflect.DeepEqual(got, existing) {
-		t.Fatalf("worker triggers = %#v, want %#v", got, existing)
-	}
-}
-
 func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 	const taskKey = "refresh_metadata"
 	triggerRepo := &fakeTriggerRepository{

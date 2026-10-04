@@ -32,7 +32,7 @@ func TestAllow4KVideoTranscode(t *testing.T) {
 		want bool
 	}{
 		{name: "nil repo defaults to deny", repo: nil, want: false},
-		{name: "unset defaults to deny", repo: stubSettingsReader{}, want: false},
+		{name: "unset uses the server default", repo: stubSettingsReader{}, want: true},
 		{name: "read error defaults to deny", repo: stubSettingsReader{err: errors.New("read failed")}, want: false},
 		{name: "explicit false denies", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "false"}}, want: false},
 		{name: "explicit true allows", repo: stubSettingsReader{values: map[string]string{"allow_4k_transcode": "true"}}, want: true},

@@ -14,6 +14,9 @@ vi.mock("@/hooks/queries/account", () => ({
   useChangeAccountPassword: () => mocks.useChangePassword(),
 }));
 
+// The Sign-in section has its own tests (AccountSignInSection.test.tsx).
+vi.mock("./AccountSignInSection", () => ({ AccountSignInSection: () => null }));
+
 vi.mock("sonner", () => ({
   toast: { success: (...args: unknown[]) => mocks.toastSuccess(...args) },
 }));

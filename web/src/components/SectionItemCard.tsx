@@ -64,7 +64,7 @@ export default function SectionItemCard({
             lazy
           >
             {item.status === "ambiguous" && (
-              <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
+              <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
                 Ambiguous
               </span>
             )}
@@ -76,7 +76,7 @@ export default function SectionItemCard({
                 {upcomingEvent.badges.map((badge) => (
                   <span
                     key={badge}
-                    className={`rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                    className={`rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
                       badge,
                     )}`}
                   >
@@ -114,11 +114,11 @@ export default function SectionItemCard({
           {showMetadata && upcomingEvent ? (
             <ViewTransitionLink to={itemHref} className="block hover:underline">
               {subtitle && (
-                <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+                <div className="text-muted-foreground mt-1 truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
                   {subtitle}
                 </div>
               )}
-              <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] font-medium">
+              <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[0.6875rem] font-medium">
                 <span className="text-foreground shrink-0">{airDateLabel}</span>
                 {airTimeLabel && (
                   <span className="text-muted-foreground min-w-0 truncate">{airTimeLabel}</span>
@@ -128,11 +128,11 @@ export default function SectionItemCard({
           ) : showMetadata && episodeLabels ? (
             <ViewTransitionLink to={itemHref} className="block hover:underline">
               {episodeLabels.episodeTitle ? (
-                <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+                <div className="text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
                   {episodeLabels.episodeTitle}
                 </div>
               ) : null}
-              <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+              <div className="text-muted-foreground mt-1 text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
                 {episodeLabels.episodeCode}
               </div>
             </ViewTransitionLink>

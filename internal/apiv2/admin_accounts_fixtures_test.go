@@ -67,6 +67,7 @@ func (f *fakeAdminAPIKeys) ListAdminUserAPIKeysPage(ctx context.Context, user in
 func adminAccountFixtureCases() []fixtureCase {
 	cases := []fixtureCase{
 		{name: "admin_account_capabilities", operationID: "getAdminAccountCapabilities", method: "GET", path: "/api/v2/admin/users/capabilities", status: 200, schema: "AdminAccountCapabilitiesOutputBody"},
+		{name: "admin_user_policy_defaults", operationID: "getAdminUserPolicyDefaults", method: "GET", path: "/api/v2/admin/users/policy-defaults", status: 200, schema: "AdminUserPolicyDefaults"},
 		{name: "admin_account_get", operationID: "getAdminUser", method: "GET", path: "/api/v2/admin/users/7", status: 200, schema: "AdminUser"},
 		{name: "admin_account_create", operationID: "createAdminUser", method: "POST", path: "/api/v2/admin/users", body: `{"username":"sample","email":"sample@example.test","password":"synthetic-password","role":"user","create_default_profile":false}`, status: 201, schema: "AdminAccountCreatedBody"},
 		{name: "admin_account_update", operationID: "updateAdminUser", method: "PUT", path: "/api/v2/admin/users/7", body: `{"enabled":false}`, status: 204},

@@ -114,7 +114,7 @@ export default function WatchlistTitleCard({
             it is the only place the card says where the title stands. */}
         <p
           className={cn(
-            "mt-1.5 truncate text-[12px]",
+            "mt-1.5 truncate text-[0.75rem]",
             status.attention ? "text-amber-300" : "text-muted-foreground",
           )}
           data-testid="watchlist-title-caption"

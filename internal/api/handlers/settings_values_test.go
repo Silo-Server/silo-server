@@ -186,24 +186,6 @@ func TestNavigationShortcutMutationLifecycle(t *testing.T) {
 	}
 }
 
-func TestNavigationShortcutCollectionIdentityIncludesOptionalLibrary(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
-	withinLibrary := `{"item":{"type":"collection","library_id":42,"collection_id":"favorites","label":"Movie Favorites"},"present":true}`
-	for _, body := range []string{global, withinLibrary} {
-		if rec := routeNavigationShortcutMutation(t, handler, body, ""); rec.Code != http.StatusOK {
-			t.Fatalf("add collection = %d: %s", rec.Code, rec.Body.String())
-		}
-	}
-
-	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
-	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
-	response, document := decodeShortcutResponse(t, rec)
-	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
-		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
-	}
-}
-
 func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTargets(t *testing.T) {
 	handler, store := newValuesTestHandler(t)
 	global := `{"item":{"type":"collection","collection_id":"favorites","label":"All Favorites"},"present":true}`
@@ -260,10 +242,18 @@ func TestNavigationShortcutCollectionLibraryIDValidationCannotMutateExistingTarg
 			}
 		})
 	}
+
+	removeGlobal := `{"item":{"type":"collection","collection_id":"favorites","label":"Ignored"},"present":false}`
+	rec := routeNavigationShortcutMutation(t, handler, removeGlobal, "")
+	response, document := decodeShortcutResponse(t, rec)
+	if response.Revision != 3 || len(document.Items) != 1 || document.Items[0].LibraryID == nil || *document.Items[0].LibraryID != 42 {
+		t.Fatalf("global removal = revision %d document %+v, want scoped collection preserved", response.Revision, document)
+	}
 }
 
 func TestNavigationShortcutMutationIdempotency(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
+	handler, store := newValuesTestHandler(t)
+	handler.storeProvider = notifications.WrapUserStoreProvider(testUserStoreProvider{store: store}, &notifications.System{})
 	const mutationID = "d615e91d-988f-4928-bb32-8956a26c7608"
 	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
 	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
@@ -295,30 +285,6 @@ func TestNavigationShortcutMutationIdempotency(t *testing.T) {
 		removeID)
 	if removed.Code != http.StatusOK || removeReplay.Code != http.StatusOK || removeReplay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
 		t.Fatalf("semantic remove replay = %d/%d header %q", removed.Code, removeReplay.Code, removeReplay.Header().Get("X-Silo-Idempotent-Replay"))
-	}
-}
-
-func TestNavigationShortcutMutationThroughNotificationWrappedProvider(t *testing.T) {
-	baseHandler, store := newValuesTestHandler(t)
-	provider := notifications.WrapUserStoreProvider(
-		testUserStoreProvider{store: store},
-		&notifications.System{},
-	)
-	handler := NewSettingValuesHandler(provider, baseHandler.contract)
-	const mutationID = "wrapped-provider-mutation"
-	body := `{"item":{"type":"collection","collection_id":"watchlist","label":"Watchlist"},"present":true}`
-
-	first := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if first.Code != http.StatusOK {
-		t.Fatalf("wrapped first mutation = %d: %s", first.Code, first.Body.String())
-	}
-	replay := routeNavigationShortcutMutation(t, handler, body, mutationID)
-	if replay.Code != http.StatusOK || replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
-		t.Fatalf("wrapped replay = %d header %q: %s",
-			replay.Code, replay.Header().Get("X-Silo-Idempotent-Replay"), replay.Body.String())
-	}
-	if !bytes.Equal(bytes.TrimSpace(first.Body.Bytes()), bytes.TrimSpace(replay.Body.Bytes())) {
-		t.Fatalf("wrapped replay body = %s, want %s", replay.Body.String(), first.Body.String())
 	}
 }
 
@@ -1271,8 +1237,9 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 		return rec
 	}
 
-	if rec := send("mut-1", `"always"`); rec.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", rec.Code, rec.Body.String())
+	first := send("mut-1", `"always"`)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
 	}
 
 	// The same id and body replays the receipt rather than writing again.
@@ -1282,6 +1249,20 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 	}
 	if replay.Header().Get("X-Silo-Idempotent-Replay") != "true" {
 		t.Error("a repeated mutation id was not reported as a replay")
+	}
+
+	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
+		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
+			first.Body.String(), replay.Body.String())
+	}
+	var original settingValueResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
+		t.Fatalf("decoding original response: %v", err)
+	}
+	if original.Revision == 0 || original.UpdatedAt == "" {
+		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
+			"receipt must carry the stored row, not the request",
+			original.Revision, original.UpdatedAt)
 	}
 
 	// The same id with different content is a conflict, not a silent overwrite.
@@ -1301,48 +1282,6 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 	}
 	if string(value.Value) != `"always"` {
 		t.Errorf("stored value = %s, want the first write preserved", value.Value)
-	}
-}
-
-// TestMutationReceiptReplaysTheStoredResponse: the receipt is the response the
-// original write returned, so a replay carries the real revision and
-// updated_at rather than a reconstruction of the request.
-func TestMutationReceiptReplaysTheStoredResponse(t *testing.T) {
-	handler, _ := newValuesTestHandler(t)
-
-	send := func() *httptest.ResponseRecorder {
-		req := valuesRequest(http.MethodPut,
-			"/settings/values/playback.subtitle_mode?scope=profile",
-			[]byte(`{"value":"always"}`))
-		req.Header.Set(mutationIDHeader, "mut-replay")
-		routeCtx := chi.NewRouteContext()
-		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-		rec := httptest.NewRecorder()
-		handler.HandleSetValue(rec, req)
-		return rec
-	}
-
-	first := send()
-	if first.Code != http.StatusOK {
-		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
-	}
-	replay := send()
-	if replay.Code != http.StatusOK {
-		t.Fatalf("replay = %d: %s", replay.Code, replay.Body.String())
-	}
-	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
-		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
-			first.Body.String(), replay.Body.String())
-	}
-	var original settingValueResponse
-	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
-		t.Fatalf("decoding original response: %v", err)
-	}
-	if original.Revision == 0 || original.UpdatedAt == "" {
-		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
-			"receipt must carry the stored row, not the request",
-			original.Revision, original.UpdatedAt)
 	}
 }
 
@@ -2027,9 +1966,14 @@ func TestGetEffective_NonPrimaryCannotResolveSiblingProfile(t *testing.T) {
 // difference is the account's role, not the profile's.
 func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
 	handler, store := newHouseholdValuesHandler(t, "")
+	if err := store.(userstore.DeviceRegistry).RegisterDevice(t.Context(), userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "parent-tv",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	target := "/settings/values/player.hdr_enabled" +
-		"?scope=profile_device&profile_id=profile-2&device_id=robin-ipad"
+		"?scope=profile_device&profile_id=profile-1&device_id=parent-tv"
 	req := valuesRequest(http.MethodPut, target, []byte(`{"value":false}`))
 	// Acting as the *non-primary* profile, but on an admin account.
 	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 1, Role: "admin"})
@@ -2044,8 +1988,12 @@ func TestSetValue_ServerAdminMayNameAnyProfile(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin naming a profile = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	if got := storedDeviceIDFor(t, store, "player.hdr_enabled"); got != "robin-ipad" {
-		t.Errorf("stored on device %q, want robin-ipad", got)
+	value, err := store.GetSettingValue(t.Context(), userstore.SettingIdentity{
+		Key: "player.hdr_enabled", Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "parent-tv",
+	})
+	if err != nil || value == nil || string(value.Value) != "false" {
+		t.Fatalf("admin sibling value = %+v, %v", value, err)
 	}
 }
 

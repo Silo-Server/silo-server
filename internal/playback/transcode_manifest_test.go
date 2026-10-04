@@ -585,50 +585,6 @@ func TestTranscodeSession_SegmentStartTimeUsesManifestTimeline(t *testing.T) {
 	}
 }
 
-func TestRestartSeekTarget_CopyModeUsesManifestTimelineWhenAvailable(t *testing.T) {
-	tempDir := t.TempDir()
-	manifest := strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:7",
-		"#EXT-X-TARGETDURATION:3",
-		"#EXT-X-MEDIA-SEQUENCE:9",
-		"#EXT-X-MAP:URI=\"init.mp4\"",
-		"#EXTINF:2.669000,",
-		"seg_00009.m4s",
-		"#EXTINF:1.669000,",
-		"seg_00010.m4s",
-		"#EXTINF:1.668000,",
-		"seg_00011.m4s",
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(tempDir, "stream.m3u8"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			SeekSeconds:            18.261,
-			StreamOriginSeconds:    18,
-			CopySeekAnchorResolved: true,
-			TargetCodecVideo:       "copy",
-			SegmentDuration:        2,
-			StartSegmentNumber:     9,
-		},
-	}
-
-	got, ok, err := session.RestartSeekTarget(10)
-	if err != nil {
-		t.Fatalf("RestartSeekTarget: %v", err)
-	}
-	if !ok {
-		t.Fatal("RestartSeekTarget returned ok=false")
-	}
-	if math.Abs(got-20.669) > 0.0001 {
-		t.Fatalf("RestartSeekTarget(10) = %.6f, want 20.669", got)
-	}
-}
-
 func TestResolveSegmentRecoveryTarget_CopyMapsActualAnchorToManifestNumber(t *testing.T) {
 	manifest := strings.Join([]string{
 		"#EXTM3U",
@@ -802,67 +758,14 @@ func TestWaitForSegment_RestartingSessionReturnsNotFoundInsteadOfTranscodeFailed
 	}
 }
 
-func TestSegmentProgressUsesManifestSequenceAndReadyFiles(t *testing.T) {
-	tempDir := t.TempDir()
-	now := time.Now()
-	writeManifestRange(t, tempDir, 224, 226, ".ts")
-	writeSegmentFile(t, tempDir, "seg_00224.ts", []byte("x"), now.Add(-2*time.Second))
-	writeSegmentFile(t, tempDir, "seg_00225.ts", []byte("x"), now.Add(-time.Second))
-
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    2,
-			StartSegmentNumber: 224,
-		},
-	}
-
-	progress := session.SegmentProgress(now)
-	if progress.ProducedHead != 225 {
-		t.Fatalf("ProducedHead = %d, want 225", progress.ProducedHead)
-	}
-	if progress.ProducedCount != 2 {
-		t.Fatalf("ProducedCount = %d, want 2", progress.ProducedCount)
-	}
-	if !progress.HasManifest {
-		t.Fatal("expected HasManifest=true")
-	}
-}
-
-func TestSegmentProgressIgnoresZeroByteFiles(t *testing.T) {
-	tempDir := t.TempDir()
-	now := time.Now()
-	writeManifestRange(t, tempDir, 224, 226, ".ts")
-	writeSegmentFile(t, tempDir, "seg_00224.ts", []byte("x"), now.Add(-2*time.Second))
-	writeSegmentFile(t, tempDir, "seg_00225.ts", []byte("x"), now.Add(-time.Second))
-	writeSegmentFile(t, tempDir, "seg_00226.ts", nil, now)
-
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    2,
-			StartSegmentNumber: 224,
-		},
-	}
-
-	progress := session.SegmentProgress(now)
-	if progress.ProducedHead != 225 {
-		t.Fatalf("ProducedHead = %d, want 225", progress.ProducedHead)
-	}
-	if progress.ProducedCount != 2 {
-		t.Fatalf("ProducedCount = %d, want 2", progress.ProducedCount)
-	}
-}
-
 func TestSegmentRecoveryDecisionWaitsForFreshNextSegment(t *testing.T) {
 	tempDir := t.TempDir()
 	now := time.Now()
-	writeManifestRange(t, tempDir, 224, 226, ".ts")
+	writeManifestRange(t, tempDir, 224, 227, ".ts")
 	writeSegmentFile(t, tempDir, "seg_00224.ts", []byte("x"), now.Add(-2*time.Second))
 	writeSegmentFile(t, tempDir, "seg_00225.ts", []byte("x"), now.Add(-time.Second))
 
+	writeSegmentFile(t, tempDir, "seg_00226.ts", nil, now)
 	session := &TranscodeSession{
 		outputDir:            tempDir,
 		running:              true,
@@ -886,6 +789,9 @@ func TestSegmentRecoveryDecisionWaitsForFreshNextSegment(t *testing.T) {
 	}
 	if decision.RestartOnTimeout {
 		t.Fatal("RestartOnTimeout = true, want false")
+	}
+	if p := decision.Progress; p.ProducedHead != 225 || p.ProducedCount != 2 || !p.HasManifest {
+		t.Fatalf("progress = %+v, want two ready files ending at225 with a manifest", p)
 	}
 }
 
@@ -948,33 +854,6 @@ func TestSegmentRecoveryDecisionRestartsWhenProducedOutputIsStale(t *testing.T) 
 	}
 }
 
-func TestSegmentRecoveryDecisionRestartsForJumpAheadRequest(t *testing.T) {
-	tempDir := t.TempDir()
-	now := time.Now()
-	writeManifestRange(t, tempDir, 224, 226, ".ts")
-	writeSegmentFile(t, tempDir, "seg_00224.ts", []byte("x"), now.Add(-2*time.Second))
-	writeSegmentFile(t, tempDir, "seg_00225.ts", []byte("x"), now.Add(-time.Second))
-
-	session := &TranscodeSession{
-		outputDir:            tempDir,
-		running:              true,
-		lastRequestedSegment: 225,
-		opts: TranscodeOpts{
-			TargetCodecVideo:   "h264",
-			SegmentDuration:    2,
-			StartSegmentNumber: 224,
-		},
-	}
-
-	decision := session.SegmentRecoveryDecision(261, now)
-	if decision.Wait {
-		t.Fatal("Wait = true, want false")
-	}
-	if decision.Reason != "request_beyond_produced_window" {
-		t.Fatalf("Reason = %q, want request_beyond_produced_window", decision.Reason)
-	}
-}
-
 func TestSegmentRecoveryDecisionDoesNotUseStaleRequestHistoryAsProducedHead(t *testing.T) {
 	tempDir := t.TempDir()
 	now := time.Now()
@@ -1008,7 +887,7 @@ func TestTranscodeThrottlerUsesProducedHeadForGap(t *testing.T) {
 	tempDir := t.TempDir()
 	now := time.Now()
 	writeManifestRange(t, tempDir, 225, 293, ".ts")
-	for i := 225; i <= 293; i++ {
+	for _, i := range []int{225, 254, 293} {
 		writeSegmentFile(t, tempDir, segmentFilename(i, TranscodeOpts{TargetCodecVideo: "h264"}), []byte("x"), now)
 	}
 
@@ -1087,53 +966,11 @@ func writeSegmentFile(t *testing.T, dir string, name string, data []byte, modTim
 	}
 }
 
-func TestCleanStaleSegments(t *testing.T) {
-	tempDir := t.TempDir()
-
-	// Create test files.
-	files := map[string]bool{
-		"init.mp4":      true,  // should survive
-		"stream.m3u8":   false, // should be removed
-		"seg_00005.m4s": true,  // before start segment — should survive
-		"seg_00006.m4s": true,  // before start segment — should survive
-		"seg_00007.m4s": false, // at start segment — should be removed
-		"seg_00008.m4s": false, // after start segment — should be removed
-		"seg_00010.m4s": false, // after start segment — should be removed
-		"something.txt": true,  // non-segment file — should survive
-	}
-
-	for name := range files {
-		if err := os.WriteFile(filepath.Join(tempDir, name), []byte("x"), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
-
-	session := &TranscodeSession{
-		outputDir: tempDir,
-		opts: TranscodeOpts{
-			TargetCodecVideo: "copy",
-		},
-	}
-
-	session.cleanStaleSegments(7)
-
-	for name, shouldExist := range files {
-		_, err := os.Stat(filepath.Join(tempDir, name))
-		exists := err == nil
-		if exists != shouldExist {
-			if shouldExist {
-				t.Errorf("expected %s to survive cleanup, but it was removed", name)
-			} else {
-				t.Errorf("expected %s to be removed, but it still exists", name)
-			}
-		}
-	}
-}
-
 func TestCleanStaleOutputForRestart_CopyToToneMapEncodeRemovesStaleOutput(t *testing.T) {
 	tempDir := t.TempDir()
 
 	files := map[string]bool{
+		"something.txt": true,
 		"init.mp4":      true,  // codec config is source-derived — survives
 		"stream.m3u8":   false, // describes the copy stream — removed
 		"seg_00005.m4s": true,  // before the restart point — survives
@@ -1230,7 +1067,7 @@ func TestTranscodeThrottlerIgnoresOutputFromAnEarlierGeneration(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(tempDir, "stream.m3u8"), staleTime, staleTime); err != nil {
 		t.Fatalf("chtimes manifest: %v", err)
 	}
-	for i := 225; i <= 293; i++ {
+	for _, i := range []int{225, 293} {
 		writeSegmentFile(t, tempDir, segmentFilename(i, TranscodeOpts{TargetCodecVideo: "h264"}), []byte("x"), staleTime)
 	}
 

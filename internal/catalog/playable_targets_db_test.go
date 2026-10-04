@@ -158,15 +158,16 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	}
 	progressStore := &recordingProgressStore{delegate: postgresProgressStore}
 	// Exercise the backend-neutral reader and the SQL winner path against
-	// the same committed rows for every PostgreSQL fixture and access case.
-	resolve := func(ctx context.Context, query PlayableTargetQuery) (map[string]string, error) {
-		got, err := resolver.Resolve(ctx, query)
+	// the same committed rows for every PostgreSQL fixture and access case,
+	// seasons included.
+	resolveTargets := func(ctx context.Context, query PlayableTargetQuery) (map[string]PlayableTarget, error) {
+		got, err := resolver.ResolveTargets(ctx, query)
 		if err != nil {
 			return got, err
 		}
 		if store, ok := query.ProgressStore.(*recordingProgressStore); ok && store.delegate == postgresProgressStore {
 			query.ProgressStore = postgresProgressStore
-			fast, err := resolver.Resolve(ctx, query)
+			fast, err := resolver.ResolveTargets(ctx, query)
 			if err != nil {
 				return nil, err
 			}
@@ -175,6 +176,13 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 			}
 		}
 		return got, nil
+	}
+	resolve := func(ctx context.Context, query PlayableTargetQuery) (map[string]string, error) {
+		got, err := resolveTargets(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return PlayableTargetIDs(got), nil
 	}
 	targetsA, err := resolve(ctx, PlayableTargetQuery{
 		UserID: userID, ProfileID: profileA, Items: inputs,
@@ -194,6 +202,35 @@ func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {
 	}
 	if !reflect.DeepEqual(targetsA, wantA) {
 		t.Fatalf("profile A targets = %#v, want %#v", targetsA, wantA)
+	}
+	// An episode target carries its season; a movie target has none.
+	seasonsA, err := resolveTargets(ctx, PlayableTargetQuery{
+		UserID: userID, ProfileID: profileA, Items: inputs,
+		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
+	})
+	if err != nil {
+		t.Fatalf("resolve profile A seasons: %v", err)
+	}
+	for _, input := range inputs {
+		target, ok := seasonsA[input.Key()]
+		if !ok {
+			continue
+		}
+		var want *int
+		if input.Type != "movie" {
+			want = intPtr(1)
+		}
+		if !reflect.DeepEqual(target.SeasonNumber, want) {
+			t.Fatalf("%s %s season = %v, want %v", input.Type, input.ContentID, target.SeasonNumber, want)
+		}
+	}
+	specialInput := PlayableTargetInput{ContentID: series, Type: "series", PreferredContentID: special}
+	specialTarget, err := resolveTargets(ctx, PlayableTargetQuery{
+		UserID: userID, ProfileID: profileA, Items: []PlayableTargetInput{specialInput},
+		Access: AccessFilter{AllowedLibraryIDs: []int{allowedFolderID}}, ProgressStore: progressStore,
+	})
+	if got := specialTarget[specialInput.Key()]; err != nil || got.ContentID != special || got.SeasonNumber == nil || *got.SeasonNumber != 0 {
+		t.Fatalf("special target = %+v, err %v; want %s in season 0", got, err, special)
 	}
 	if slices.Contains(progressStore.ids, movie) || !slices.Contains(progressStore.ids, episode1) {
 		t.Fatalf("progress lookup should omit leaf-only movies but retain episodes shared with series: %v", progressStore.ids)

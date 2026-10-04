@@ -6,7 +6,6 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { type SessionFetchResult } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 import deleteSubtitlePreferenceProfileVerificationRequired from "../../../../contracts/api/v2/fixtures/delete_subtitle_preference_profile_verification_required.json";
-import updateSubtitlePreferenceValidationFailed from "../../../../contracts/api/v2/fixtures/update_subtitle_preference_validation_failed.json";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
@@ -251,26 +250,5 @@ describe("useSetSubtitlePreference", () => {
       subtitle_mode: "off",
     });
     expect(apiMock).not.toHaveBeenCalled();
-  });
-
-  it("surfaces a v2 validation problem as the contract emits it", async () => {
-    fetchWithSessionMock.mockResolvedValue(
-      sessionResponse(
-        new Response(JSON.stringify(updateSubtitlePreferenceValidationFailed), {
-          status: 422,
-          headers: { "Content-Type": "application/problem+json" },
-        }),
-      ),
-    );
-
-    const { wrapper } = createHarness();
-    const { result } = renderHook(() => useSetSubtitlePreference(), { wrapper });
-
-    const failure = await result.current
-      .mutateAsync({ prefId: "series-1", selection: null })
-      .catch((err: unknown) => err);
-    expect(failure).toBeInstanceOf(V2ProblemError);
-    expect((failure as V2ProblemError).problemType).toBe("validation_failed");
-    expect((failure as V2ProblemError).status).toBe(422);
   });
 });

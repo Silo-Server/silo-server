@@ -68,25 +68,6 @@ describe("ItemGrid row pitch", () => {
     });
   }
 
-  it("sizes rows from the tallest rendered card, not the caption estimate (#1613)", () => {
-    // Cards 328px tall (captions taller than the estimate) need a 341px pitch:
-    // the card, a pixel for offsetHeight's rounding, and the gap.
-    mockCardHeights(() => 328);
-
-    render(<ItemGrid items={items} />);
-
-    expect(mocks.estimateSizes[0]).toBe(ESTIMATED_ROW_HEIGHT);
-    expect(mocks.estimateSizes.at(-1)).toBe(328 + 1 + GAP);
-  });
-
-  it("pins every CSS row to the reserved pitch, so rows can't drift", () => {
-    mockCardHeights(() => 328);
-
-    const { getByRole } = render(<ItemGrid items={items} />);
-
-    expect(getByRole("list").style.gridAutoRows).toBe("329px");
-  });
-
   it("reserves the rendered CSS gap when larger text scales rem spacing", () => {
     mockCardHeights(() => 328);
     const getStyle = window.getComputedStyle;
@@ -106,8 +87,10 @@ describe("ItemGrid row pitch", () => {
     let height = 328;
     mockCardHeights(() => height);
 
-    const { rerender } = render(<ItemGrid items={items} />);
-    expect(mocks.estimateSizes.at(-1)).toBe(341);
+    const { rerender, getByRole } = render(<ItemGrid items={items} />);
+    expect(mocks.estimateSizes[0]).toBe(ESTIMATED_ROW_HEIGHT);
+    expect(mocks.estimateSizes.at(-1)).toBe(328 + 1 + GAP);
+    expect(getByRole("list").style.gridAutoRows).toBe("329px");
 
     // Shorter cards in a later range must not shrink the reserved height.
     height = 308;

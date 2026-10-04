@@ -103,6 +103,9 @@ func TestWritingTheEnumMirrorsTheDeprecatedBoolean(t *testing.T) {
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			handler, store := newValuesTestHandler(t)
+			if err := store.UpdateProfile(t.Context(), "profile-1", userstore.UpdateProfileInput{AutoSkipIntro: boolPtr(tc.wantBool != "true")}); err != nil {
+				t.Fatal(err)
+			}
 
 			rec := routeValues(t, handler, http.MethodPut,
 				settingskeys.PlaybackIntroSkipMode, "scope=profile",
@@ -114,6 +117,7 @@ func TestWritingTheEnumMirrorsTheDeprecatedBoolean(t *testing.T) {
 			requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode),
 				`"`+tc.mode+`"`)
 			requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), tc.wantBool)
+			requireColumn(t, store, tc.wantBool == "true", "after the enum write")
 		})
 	}
 }
@@ -133,6 +137,7 @@ func TestTheMirrorFollowsTheIdentity(t *testing.T) {
 	if value := storedValueAt(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro)); value != nil {
 		t.Errorf("a device write left a profile-scope mirror row: %s", value.Value)
 	}
+	requireColumn(t, store, false, "after a device-scope write")
 }
 
 // TestDeletingEitherHalfClearsBoth. A row left behind would go on resolving as
@@ -151,6 +156,8 @@ func TestDeletingEitherHalfClearsBoth(t *testing.T) {
 				t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
 			}
 
+			requireColumn(t, store, true, "after the seeding write")
+
 			rec := routeValues(t, handler, http.MethodDelete, deleted, "scope=profile", nil)
 			if rec.Code != http.StatusNoContent {
 				t.Fatalf("DELETE %s = %d: %s", deleted, rec.Code, rec.Body.String())
@@ -164,6 +171,7 @@ func TestDeletingEitherHalfClearsBoth(t *testing.T) {
 					t.Errorf("%s survived a DELETE of %s: %s", key, deleted, value.Value)
 				}
 			}
+			requireColumn(t, store, false, "after the profile-scope value was cleared")
 		})
 	}
 }
@@ -237,47 +245,6 @@ func TestMirroredWritesReplayInsteadOfDoubleApplying(t *testing.T) {
 	}
 }
 
-// TestProfileScopeEnumWriteUpdatesTheLegacyColumn. GET /profiles still serves
-// auto_skip_intro from user_profiles, so a household that switches intros off
-// through the new key must not keep seeing the old answer in the profile DTO.
-func TestProfileScopeEnumWriteUpdatesTheLegacyColumn(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	if err := store.UpdateProfile(context.Background(), "profile-1",
-		userstore.UpdateProfileInput{AutoSkipIntro: boolPtr(true)}); err != nil {
-		t.Fatalf("seeding the column: %v", err)
-	}
-
-	rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile", []byte(`{"value":"never"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-1")
-	if err != nil || profile == nil {
-		t.Fatalf("reading profile: %v", err)
-	}
-	if profile.AutoSkipIntro {
-		t.Error("user_profiles.auto_skip_intro still true after intro_skip_mode was set to never")
-	}
-
-	// And back the other way, so the column tracks the mode rather than only
-	// ever being cleared.
-	if rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile",
-		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("second PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	profile, err = store.GetProfile(context.Background(), "profile-1")
-	if err != nil || profile == nil {
-		t.Fatalf("re-reading profile: %v", err)
-	}
-	if !profile.AutoSkipIntro {
-		t.Error("user_profiles.auto_skip_intro still false after intro_skip_mode was set to always")
-	}
-}
-
 // requireColumn asserts what user_profiles.auto_skip_intro holds, which is
 // still what GET /profiles serves and what the web player reads.
 func requireColumn(t *testing.T, store userstore.UserStore, want bool, when string) {
@@ -316,36 +283,6 @@ func TestABooleanWriteCorrectsAColumnTheEnumMoved(t *testing.T) {
 	requireColumn(t, store, false, "after the switch was turned off")
 }
 
-// TestClearingTheProfileScopePairResetsTheLegacyColumn. A cleared row means
-// "inherit again", so the column has to fall back with it — otherwise the
-// profile DTO, and the web player that reads it, go on acting on the choice
-// this request removed.
-func TestClearingTheProfileScopePairResetsTheLegacyColumn(t *testing.T) {
-	for _, cleared := range []string{
-		settingskeys.PlaybackIntroSkipMode,
-		settingskeys.PlaybackAutoSkipIntro,
-	} {
-		t.Run(cleared, func(t *testing.T) {
-			handler, store := newValuesTestHandler(t)
-
-			if rec := routeValues(t, handler, http.MethodPut,
-				settingskeys.PlaybackIntroSkipMode, "scope=profile",
-				[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-				t.Fatalf("seed PUT = %d: %s", rec.Code, rec.Body.String())
-			}
-			requireColumn(t, store, true, "after the seeding write")
-
-			if rec := routeValues(t, handler, http.MethodDelete,
-				cleared, "scope=profile", nil); rec.Code != http.StatusNoContent {
-				t.Fatalf("DELETE %s = %d: %s", cleared, rec.Code, rec.Body.String())
-			}
-			// Nothing is stored at any scope now, so the pair resolves to the
-			// contract default — "ask", which the boolean spells false.
-			requireColumn(t, store, false, "after the profile-scope value was cleared")
-		})
-	}
-}
-
 // TestClearingADeviceOverrideLeavesTheProfileColumnAlone: the column follows the
 // profile-wide choice, and giving up one television's override does not revoke
 // it.
@@ -367,26 +304,6 @@ func TestClearingADeviceOverrideLeavesTheProfileColumnAlone(t *testing.T) {
 	}
 	requireColumn(t, store, true, "after a device override was cleared")
 	requireStored(t, store, profileIdentity(settingskeys.PlaybackIntroSkipMode), `"always"`)
-}
-
-// TestDeviceScopeEnumWriteLeavesTheProfileColumnAlone: the column is
-// profile-wide, and one television's override is not the household's choice.
-func TestDeviceScopeEnumWriteLeavesTheProfileColumnAlone(t *testing.T) {
-	handler, store := newValuesTestHandler(t)
-
-	rec := routeValues(t, handler, http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile_device", []byte(`{"value":"always"}`))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-
-	profile, err := store.GetProfile(context.Background(), "profile-1")
-	if err != nil || profile == nil {
-		t.Fatalf("reading profile: %v", err)
-	}
-	if profile.AutoSkipIntro {
-		t.Error("a device-scope write moved the profile-wide column")
-	}
 }
 
 // --- Atomicity ---
@@ -507,15 +424,19 @@ func TestAFailedHalfRollsBackAnIdempotentMirroredWrite(t *testing.T) {
 		UserStore: store, failUpsertKey: settingskeys.PlaybackIntroSkipMode,
 	})
 
-	req := valuesRequest(http.MethodPut,
-		"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
-		[]byte(`{"value":"always"}`))
-	req.Header.Set(mutationIDHeader, "mut-partial")
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rec := httptest.NewRecorder()
-	handler.HandleSetValue(rec, req)
+	send := func(h *SettingValuesHandler) *httptest.ResponseRecorder {
+		req := valuesRequest(http.MethodPut,
+			"/settings/values/"+settingskeys.PlaybackIntroSkipMode+"?scope=profile",
+			[]byte(`{"value":"always"}`))
+		req.Header.Set(mutationIDHeader, "mut-partial")
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("key", settingskeys.PlaybackIntroSkipMode)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+		rec := httptest.NewRecorder()
+		h.HandleSetValue(rec, req)
+		return rec
+	}
+	rec := send(handler)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("PUT = %d, want 500: %s", rec.Code, rec.Body.String())
 	}
@@ -529,12 +450,15 @@ func TestAFailedHalfRollsBackAnIdempotentMirroredWrite(t *testing.T) {
 	}
 
 	// The same mutation id must now apply for real rather than replay.
-	if rec := routeValues(t, handlerOverStore(t, store), http.MethodPut,
-		settingskeys.PlaybackIntroSkipMode, "scope=profile",
-		[]byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
-		t.Fatalf("retry = %d: %s", rec.Code, rec.Body.String())
+	rec = send(handlerOverStore(t, store))
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Silo-Idempotent-Replay") != "" {
+		t.Fatalf("retry = %d replay %q: %s", rec.Code, rec.Header().Get("X-Silo-Idempotent-Replay"), rec.Body.String())
 	}
 	requireStored(t, store, profileIdentity(settingskeys.PlaybackAutoSkipIntro), `true`)
+	receipt, err = store.GetSettingMutation(t.Context(), "mut-partial")
+	if err != nil || receipt == nil {
+		t.Fatalf("successful retry receipt = %+v, %v", receipt, err)
+	}
 }
 
 // TestClearingSweepsUpAStrayCompanion. A companion with no addressed row beside

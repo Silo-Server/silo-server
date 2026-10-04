@@ -46,9 +46,17 @@ func (f *fakeAdminAccounts) UpdateAdminAccount(_ context.Context, _ int, rev, gr
 	f.snapshot.Revision++
 	return f.snapshot.Revision, nil
 }
-func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, _ int, rev, group int64) error {
+
+// fixtureLastBreakGlassID is the account the fakes treat as the last
+// usable break-glass admin while local password sign-in is off.
+const fixtureLastBreakGlassID = 8
+
+func (f *fakeAdminAccounts) DeleteAdminAccount(_ context.Context, id int, rev, group int64) error {
 	if f.race || (rev != -1 && rev != f.snapshot.Revision) || group != f.snapshot.GroupRevision {
 		return auth.ErrAdminUserRevision
+	}
+	if id == fixtureLastBreakGlassID {
+		return &handlers.APIError{Status: http.StatusConflict, Code: "break_glass_required", Message: "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password"}
 	}
 	f.writes++
 	return nil
@@ -69,6 +77,12 @@ func (*fakeAdminAccounts) ListAdminAccountProfiles(context.Context, int) ([]hand
 }
 
 func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
+	f := fixtureAdminAccounts()
+	users := new(fakeAdminUsers)
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccounts = f
+	deps.AdminUsers = users
+	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name string
 		ids  []int
@@ -79,12 +93,9 @@ func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
 		{name: "restricted", ids: []int{3, 7}, want: `["3","7"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := fixtureAdminAccounts()
+			*f = *fixtureAdminAccounts()
 			f.snapshot.User.EffectivePolicy.LibraryIDs = tc.ids
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAccounts = f
-			deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
-			h := NewHandler(deps)
+			*users = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
 			for _, path := range []string{Prefix + "/admin/users/7", Prefix + "/admin/users"} {
 				reply := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
 				if reply.Code != http.StatusOK {

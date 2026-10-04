@@ -385,27 +385,6 @@ describe("useOverlayPrefs", () => {
     });
   });
 
-  it("prefers a stored profile document over the admin defaults", async () => {
-    mocks.profileId = "profile-1";
-    mocks.v2.mockResolvedValue({
-      enabled: true,
-      defaults: JSON.stringify({ version: 2, preset: "vibrant", order: [], items: {} }),
-    });
-    mocks.effective = effectiveOverlayValue({
-      version: 2,
-      preset: "minimal",
-      order: [],
-      items: {},
-    }).data as Record<string, { value: unknown }>;
-
-    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    expect(result.current.hasOverride).toBe(true);
-    expect(result.current.prefs?.preset).toBe("minimal");
-  });
-
   // A snapshot of today's server values would pin the profile to them; only
   // deleting the stored document keeps it tracking later admin changes.
   it("deletes the profile document so the profile follows the server defaults again", async () => {
@@ -424,6 +403,8 @@ describe("useOverlayPrefs", () => {
 
     const { result, rerender } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasOverride).toBe(true);
+    expect(result.current.prefs?.preset).toBe("minimal");
 
     await act(async () => {
       await result.current.resetPrefs();

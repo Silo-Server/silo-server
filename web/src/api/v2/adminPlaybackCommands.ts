@@ -56,7 +56,7 @@ const lastSequenceBySession = new Map<string, number>();
 export const MAX_ADMIN_PLAYBACK_SEQUENCE = Number.MAX_SAFE_INTEGER;
 
 /** The response header a stale refusal carries with the session's latest applied sequence. */
-export const LATEST_SEQUENCE_HEADER = "X-Silo-Latest-Sequence";
+const LATEST_SEQUENCE_HEADER = "X-Silo-Latest-Sequence";
 
 /** Allocate one ordered command identity for a session. Call once per intended command. */
 export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCommandIdentity {
@@ -73,7 +73,7 @@ export function allocateAdminPlaybackCommand(sessionId: string): AdminPlaybackCo
  * Raise the session's allocation floor to a sequence the server reported as
  * already applied, so the next `allocateAdminPlaybackCommand` is above it.
  */
-export function observeAdminPlaybackSequence(sessionId: string, latest: number): void {
+function observeAdminPlaybackSequence(sessionId: string, latest: number): void {
   if (!Number.isSafeInteger(latest) || latest < 1 || latest > MAX_ADMIN_PLAYBACK_SEQUENCE) return;
   const previous = lastSequenceBySession.get(sessionId) ?? 0;
   if (latest > previous) lastSequenceBySession.set(sessionId, latest);

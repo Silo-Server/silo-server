@@ -54,6 +54,9 @@ describe("RequestSeasonsDialog", () => {
 
   it("leaves an untouched pick to the server", () => {
     const dialog = open(series({ seasons: [season(1), season(2, { availability: "available" })] }));
+    const available = within(dialog).getByRole("switch", { name: "Season 2" });
+    expect(available).toBeDisabled();
+    expect(available).toHaveAccessibleDescription(/In library/);
     fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 1" }));
     expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("seasons");
   });
@@ -112,13 +115,6 @@ describe("RequestSeasonsDialog", () => {
     );
     expect(within(dialog).queryByRole("button", { name: "Latest season" })).toBeNull();
     expect(within(dialog).queryByRole("button", { name: "Upcoming seasons" })).toBeNull();
-  });
-
-  it("describes why a season can't be picked", () => {
-    const dialog = open(series({ seasons: [season(1, { availability: "available" })] }));
-    const toggle = within(dialog).getByRole("switch", { name: "Season 1" });
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAccessibleDescription(/In library/);
   });
 
   it("waits for a refetch before sending from loaded detail", () => {

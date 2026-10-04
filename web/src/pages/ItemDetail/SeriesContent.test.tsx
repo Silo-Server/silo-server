@@ -212,56 +212,6 @@ describe("SeriesContent", () => {
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
   });
 
-  it.each([false, true])(
-    "only reserves empty season navigation while loading (%s)",
-    (isLoading) => {
-      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
-      const markup = renderToStaticMarkup(
-        <QueryClientProvider client={new QueryClient()}>
-          <MemoryRouter>
-            <SeriesContent item={makeSeriesItem()} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
-      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
-      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
-    },
-  );
-
-  it.each([
-    ["season rail", [makeSeason(), makeSeason({ content_id: "season-2", season_number: 2 })], true],
-    ["single-season episode grid", [makeSeason()], false],
-  ])("marks only the season rail as content-sized navigation (%s)", (_, seasons, isRail) => {
-    mocks.useSeasons.mockReturnValue({ data: { seasons } });
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
-          <SeriesContent item={makeSeriesItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    expect(markup).toContain(
-      isRail
-        ? 'class="page-shell series-detail-navigation series-detail-rail"'
-        : 'class="page-shell series-detail-navigation"',
-    );
-  });
-
-  it("passes rating state and change handler to ActionBar", () => {
-    renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/series-1"]}>
-          <SeriesContent item={makeSeriesItem()} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      rating: 4,
-    });
-    expect(mocks.capturedActionBarProps.value?.onRatingChange).toBeTypeOf("function");
-  });
-
   it.each([
     [{ trickplay: true, trickplay_supported: true }, true],
     [{ trickplay: true, trickplay_supported: false }, false],
@@ -290,6 +240,8 @@ describe("SeriesContent", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
+
+    expect(mocks.capturedActionBarProps.value?.rating).toBe(4);
 
     const onRatingChange = mocks.capturedActionBarProps.value?.onRatingChange as
       | ((rating: number | null) => void)

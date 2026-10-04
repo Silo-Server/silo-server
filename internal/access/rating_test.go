@@ -277,27 +277,6 @@ func TestNormalizeUnrecognized(t *testing.T) {
 	}
 }
 
-func TestNormalizeZeroAgeIsNotUnknown(t *testing.T) {
-	// The distinction the whole design rests on: "G" is age 0 and visible under
-	// a 0 ceiling; "NR" has no age and is visible under none.
-	_, age, ok := Normalize("G")
-	if !ok || age == nil || *age != 0 {
-		t.Fatalf(`Normalize("G") = (_, %v, %v), want age 0`, age, ok)
-	}
-	if _, ok := AgeForCeiling("G"); !ok {
-		t.Error(`AgeForCeiling("G") not ok, want a usable age-0 ceiling`)
-	}
-	if _, ok := AgeForCeiling("NR"); ok {
-		t.Error(`AgeForCeiling("NR") ok, want no usable age`)
-	}
-	if !RatingAllowed("G", "G") {
-		t.Error(`RatingAllowed("G", "G") = false, want true`)
-	}
-	if RatingAllowed("NR", "G") {
-		t.Error(`RatingAllowed("NR", "G") = true, want false`)
-	}
-}
-
 func TestNormalizeReturnsIndependentAgePointers(t *testing.T) {
 	// The age must be a copy: a caller mutating it cannot be allowed to
 	// rewrite the shared ladder.

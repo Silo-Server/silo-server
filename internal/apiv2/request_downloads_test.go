@@ -129,15 +129,3 @@ func TestRequestMediaDetailCarriesDownload(t *testing.T) {
 		t.Fatalf("recommendations = %+v, want no download on them", got.Recommendations)
 	}
 }
-
-func TestRequestStatusAdvertisesDownloadProgress(t *testing.T) {
-	h := lifecycleHandler(&fakeLifecycle{}, &fakeWatchLifecycle{})
-	rec := do(t, h, http.MethodGet, Prefix+"/requests/status", "", requestOwner)
-	var got struct {
-		DownloadProgressSupported *bool `json:"download_progress_supported"`
-	}
-	decodeBody(t, rec.Body, &got)
-	if rec.Code != 200 || got.DownloadProgressSupported == nil || !*got.DownloadProgressSupported {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}

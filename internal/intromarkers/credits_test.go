@@ -103,8 +103,9 @@ func placeAudioCredits(inputs []fingerprintInput) (map[int]Segment, int) {
 	profile := creditsProfile()
 	segments := map[int]Segment{}
 	rejected := 0
+	matches := matchSeason(inputs, profile)
 	for _, input := range inputs {
-		match, ok := matchSeason(inputs, profile)[input.Candidate.FileID]
+		match, ok := matches[input.Candidate.FileID]
 		if !ok {
 			continue
 		}
