@@ -147,6 +147,7 @@
 # order, taste levels, per-interest anchors, quality prior, rubric leakage,
 # media types of personal rows.
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
 ./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
 ./internal/recommendations TestGenreSamplerIsRatingLedPostgres
 ./internal/recommendations TestGetItemQualityRatingsPostgres

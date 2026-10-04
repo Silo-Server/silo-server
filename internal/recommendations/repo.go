@@ -118,21 +118,32 @@ const matchedTitleSQL = "mi.status = 'matched'"
 const crowdMinAccounts = 2
 
 // Catalog-rating SQL over media_items aliased mi, shared by every row that
-// ranks titles by their own rating. A TMDB rating of 9.5 or more is nearly
-// always a handful of votes, so it is not trusted, and an IMDb rating leads
-// a TMDB one.
+// ranks titles by their own rating. The catalog records no vote counts for
+// most titles, and an obscure title's rating rests on a handful of votes, so
+// a large catalog's best-rated titles are mostly ones nobody has heard of.
+// An IMDb rating of 9.6 or more and a TMDB rating of 9.5 or more are nearly
+// always such ratings (metadata files also copy a TMDB score into the IMDb
+// field), so neither is trusted; an IMDb rating leads a TMDB one; and
+// notable titles lead the rest.
 const (
-	// ratingTierSQL is a title's rating reliability: 2 with an IMDb rating,
-	// 1 with only a trusted TMDB rating, else 0.
-	ratingTierSQL = `CASE WHEN mi.rating_imdb IS NOT NULL THEN 2 WHEN mi.rating_tmdb IS NOT NULL AND mi.rating_tmdb < 9.5 THEN 1 ELSE 0 END`
+	// notableSQL marks a title whose metadata shows it is widely known: a
+	// logo and at least five keywords. Of the titles whose IMDb vote count is
+	// known, 98% of those with 10,000 votes or more are notable and 9% of
+	// those with fewer than 100.
+	notableSQL = `(mi.logo_path IS NOT NULL AND mi.logo_path <> '' AND COALESCE(cardinality(mi.keywords), 0) >= 5)`
+	// guardedIMDbRatingSQL is the IMDb rating when it is trusted.
+	guardedIMDbRatingSQL = `CASE WHEN mi.rating_imdb < 9.6 THEN mi.rating_imdb END`
 	// guardedTMDBRatingSQL is the TMDB rating when it is trusted.
 	guardedTMDBRatingSQL = `CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END`
-	// catalogRatingSQL is a title's rating: IMDb first, else trusted TMDB.
-	catalogRatingSQL = `COALESCE(mi.rating_imdb, ` + guardedTMDBRatingSQL + `)`
-	// catalogRatingOrderSQL ranks by reliability tier, then catalogRatingSQL.
-	// idx_media_items_type_catalog_rating indexes this order per media type;
-	// keep the two identical.
-	catalogRatingOrderSQL = ratingTierSQL + ` DESC, mi.rating_imdb DESC NULLS LAST, ` + guardedTMDBRatingSQL + ` DESC NULLS LAST`
+	// ratingTierSQL is a title's rating reliability: 2 with a trusted IMDb
+	// rating, 1 with only a trusted TMDB rating, else 0.
+	ratingTierSQL = `CASE WHEN mi.rating_imdb < 9.6 THEN 2 WHEN mi.rating_tmdb < 9.5 THEN 1 ELSE 0 END`
+	// catalogRatingSQL is a title's rating: trusted IMDb, else trusted TMDB.
+	catalogRatingSQL = `COALESCE(` + guardedIMDbRatingSQL + `, ` + guardedTMDBRatingSQL + `)`
+	// catalogRatingOrderSQL ranks notable titles first, then by reliability
+	// tier and catalogRatingSQL. idx_media_items_type_catalog_rank indexes
+	// this order per media type; keep the two identical.
+	catalogRatingOrderSQL = notableSQL + ` DESC, ` + ratingTierSQL + ` DESC, ` + guardedIMDbRatingSQL + ` DESC NULLS LAST, ` + guardedTMDBRatingSQL + ` DESC NULLS LAST`
 )
 
 // tasteSeedGenreRoundRobinBase is how many of the picker's best candidates
@@ -1887,7 +1898,7 @@ const highlyRatedMinRating = 7.0
 // series its latest episode, was added. Both break ties by content ID.
 //
 // Each type is read from its own index (see recentlyAddedQuery and
-// idx_media_items_type_catalog_rating) only as deep as the row needs, and
+// idx_media_items_type_catalog_rank) only as deep as the row needs, and
 // each read is planned for its own exclusions and access, so the cost does
 // not grow with the catalog.
 func (r *Repo) ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error) {
@@ -1937,26 +1948,21 @@ func defaultRowQuery(filter catalog.AccessFilter, kind string, exclude []string,
 	// The row shows at most limit titles of a type, so each type is ranked
 	// only that deep.
 	return fmt.Sprintf(`
-		WITH rated AS (
-			SELECT c.content_id, c.rating, tc.titles,
-			       ROW_NUMBER() OVER (PARTITION BY tc.type ORDER BY c.tier DESC, c.rating_imdb DESC NULLS LAST, c.tmdb DESC NULLS LAST, c.content_id) AS type_rank
-			FROM   unnest($1::text[], $%[6]d::bigint[]) AS tc(type, titles)
-			CROSS  JOIN LATERAL (
-				SELECT mi.content_id, %[2]s AS tier, mi.rating_imdb, %[3]s AS tmdb, %[4]s AS rating
-				FROM   media_items mi
-				WHERE  %[1]s
-				  AND  %[4]s >= %[5]v
-				ORDER  BY %[7]s, mi.content_id
-				LIMIT  $%[8]d
-			) c
-		)
-		SELECT content_id, rating::float8
-		FROM   rated
-		ORDER  BY type_rank::float8 / titles, rating DESC, content_id
-		LIMIT  $%[8]d`,
+		SELECT c.content_id, c.rating::float8
+		FROM   unnest($1::text[], $%[4]d::bigint[]) AS tc(type, titles)
+		CROSS  JOIN LATERAL (
+			SELECT mi.content_id, %[2]s AS rating,
+			       ROW_NUMBER() OVER (ORDER BY %[5]s, mi.content_id) AS type_rank
+			FROM   media_items mi
+			WHERE  %[1]s
+			  AND  %[2]s >= %[3]v
+			ORDER  BY %[5]s, mi.content_id
+			LIMIT  $%[6]d
+		) c
+		ORDER  BY c.type_rank::float8 / tc.titles, c.rating DESC, c.content_id
+		LIMIT  $%[6]d`,
 		strings.Join(append(perTypeItemConditions("tc.type"), conditions...), " AND "),
-		ratingTierSQL, guardedTMDBRatingSQL, catalogRatingSQL, highlyRatedMinRating,
-		argIdx, catalogRatingOrderSQL, argIdx+1), args
+		catalogRatingSQL, highlyRatedMinRating, argIdx, catalogRatingOrderSQL, argIdx+1), args
 }
 
 // appendAccessConditions adds the predicates limiting media_items aliased mi
@@ -2320,16 +2326,14 @@ func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filte
 	return present, rows.Err()
 }
 
-// itemQualityRatingsQuery reads the rating the quality prior uses: IMDb's,
-// else TMDB's below 9.5 (higher TMDB scores come from a handful of votes), as
-// the taste-seed picker orders by.
+// itemQualityRatingsQuery reads the rating the quality prior uses,
+// catalogRatingSQL, as the taste-seed picker orders by.
 const itemQualityRatingsQuery = `
 		SELECT content_id, quality
 		FROM   (
-			SELECT content_id,
-			       COALESCE(rating_imdb, CASE WHEN rating_tmdb < 9.5 THEN rating_tmdb END) AS quality
-			FROM   media_items
-			WHERE  content_id = ANY($1)
+			SELECT mi.content_id, ` + catalogRatingSQL + ` AS quality
+			FROM   media_items mi
+			WHERE  mi.content_id = ANY($1)
 		) rated
 		WHERE  quality IS NOT NULL`
 

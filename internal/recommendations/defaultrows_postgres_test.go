@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -564,7 +565,7 @@ func TestDefaultRowQueriesWalkTypeIndexesPostgres(t *testing.T) {
 	exclude := []string{"watched-1", "watched-2"}
 	for kind, index := range map[string]string{
 		RecTypeRecentlyAdded: "idx_media_items_type_added_at",
-		RecTypeTopRated:      "idx_media_items_type_catalog_rating",
+		RecTypeTopRated:      "idx_media_items_type_catalog_rank",
 	} {
 		query, args := defaultRowQuery(filter, kind, exclude, []int64{9, 3}, 60)
 		var plan []byte
@@ -588,16 +589,31 @@ func TestDefaultRowQueriesWalkTypeIndexesPostgres(t *testing.T) {
 }
 
 // mediaItemsReads lists how a plan reads media_items: each scan's node type
-// and index.
+// and index, prefixed "Sort > " when a sort sits between the scan and the
+// limit above it, which means the index did not supply the order.
 func mediaItemsReads(node map[string]any) []string {
+	return mediaItemsReadsUnder(node, false)
+}
+
+func mediaItemsReadsUnder(node map[string]any, sorted bool) []string {
+	switch node["Node Type"] {
+	case "Limit":
+		sorted = false
+	case "Sort", "Incremental Sort":
+		sorted = true
+	}
 	var reads []string
 	if node["Relation Name"] == "media_items" {
 		index, _ := node["Index Name"].(string)
-		reads = append(reads, strings.TrimSpace(fmt.Sprintf("%v %s", node["Node Type"], index)))
+		read := strings.TrimSpace(fmt.Sprintf("%v %s", node["Node Type"], index))
+		if sorted {
+			read = "Sort > " + read
+		}
+		reads = append(reads, read)
 	}
 	children, _ := node["Plans"].([]any)
 	for _, child := range children {
-		reads = append(reads, mediaItemsReads(child.(map[string]any))...)
+		reads = append(reads, mediaItemsReadsUnder(child.(map[string]any), sorted)...)
 	}
 	return reads
 }
@@ -631,5 +647,49 @@ func TestHighlyRatedReusesTitleCountsPostgres(t *testing.T) {
 	}
 	if got := counts(catalog.AccessFilter{AllowedLibraryIDs: []int{lib, other}}); !slices.Equal(got, []int64{3, 1}) {
 		t.Fatalf("another scope's counts = %v, want 3 movies and 1 series", got)
+	}
+}
+
+// Rating-led rows put notable titles (a logo and at least five keywords)
+// first and do not trust an IMDb rating of 9.6 or more or a TMDB rating of
+// 9.5 or more: in a large catalog those are an obscure title's handful of
+// votes or a TMDB score copied into the IMDb field. Highly Rated, the genre
+// rows and the quality prior read the same ratings.
+func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	const prefix = "tdefault-rank-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	repo := NewRepo(pool)
+	lib := newTestLibrary(t, pool, prefix+"lib")
+	genre := prefix + "Genre"
+	in := fmt.Sprintf("genres = ARRAY['%s'], ", genre)
+	const notable = "logo_path = '/logo.png', keywords = ARRAY['a', 'b', 'c', 'd', 'e'], "
+
+	copied := seedTitle(t, pool, prefix+"copied-10", "movie", lib, in+"rating_imdb = 10, rating_tmdb = 10")
+	inflated := seedTitle(t, pool, prefix+"imdb-98", "movie", lib, in+"rating_imdb = 9.8, rating_tmdb = 8.0")
+	obscure := seedTitle(t, pool, prefix+"obscure-92", "movie", lib, in+"rating_imdb = 9.2")
+	classic := seedTitle(t, pool, prefix+"classic-93", "movie", lib, in+notable+"rating_imdb = 9.3")
+	known := seedTitle(t, pool, prefix+"known-80", "movie", lib, in+notable+"rating_imdb = 8.0")
+	fewKeywords := seedTitle(t, pool, prefix+"four-keywords-90", "movie", lib, in+"logo_path = '/logo.png', keywords = ARRAY['a', 'b', 'c', 'd'], rating_imdb = 9.0")
+
+	// Notable first, then a trusted IMDb rating, then a trusted TMDB one;
+	// the copied 10 has no trusted rating at all.
+	want := []string{classic, known, obscure, fewKeywords, inflated}
+	if got := listDefault(t, repo, catalog.AccessFilter{AllowedLibraryIDs: []int{lib}}, RecTypeTopRated, nil, 60); !slices.Equal(got, want) {
+		t.Fatalf("highly rated = %v, want %v", got, want)
+	}
+	items, err := repo.GetGenreSamplerItems(t.Context(), genre, 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := itemIDs(items); !slices.Equal(got, append(slices.Clone(want), copied)) {
+		t.Fatalf("genre row = %v, want %v then the untrusted title", got, want)
+	}
+	quality, err := repo.GetItemQualityRatings(t.Context(), []string{copied, inflated, obscure})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantQuality := map[string]float64{inflated: 8.0, obscure: 9.2}; !maps.Equal(quality, wantQuality) {
+		t.Fatalf("quality ratings = %v, want %v", quality, wantQuality)
 	}
 }

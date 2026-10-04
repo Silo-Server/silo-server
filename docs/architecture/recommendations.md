@@ -169,9 +169,14 @@ and series only, the types in `recommendableMediaTypes` (see Media types
 under Ranking). Popular counts login accounts, not profiles: a title needs
 at least 2 accounts that watched it in the last 90 days, so a
 single-account server has no Popular row, and the cached row keeps 200 titles
-for reads to filter. Genre rows rank a genre's titles by rating reliability
-(IMDb, then a TMDB rating below 9.5) and rating, with watching accounts only
-as a tie-break. The 16 cached genres are those most accounts watched, once at
+for reads to filter. Genre rows rank a genre's titles by catalog rank, with
+watching accounts only as a tie-break. Catalog rank (`catalogRatingOrderSQL`)
+puts notable titles first (a logo and at least five keywords, since most
+titles have no recorded vote count and an obscure title's rating rests on a
+handful of votes), then rating reliability (an IMDb rating below 9.6, then a
+TMDB rating below 9.5; higher scores are nearly always a few votes or a
+copied score), then that rating. Highly Rated, the picker and the quality
+prior use the same ratings. The 16 cached genres are those most accounts watched, once at
 least 2 share one, then the largest. The picker interleaves its best 600
 candidates by first genre, then continues in rank order.
 
@@ -187,7 +192,7 @@ has no window, so on a server with no Popular row a new profile's cached
 reads still get a row.
 
 Both queries read each media type from its own index
-(`idx_media_items_type_added_at`, `idx_media_items_type_catalog_rating`)
+(`idx_media_items_type_added_at`, `idx_media_items_type_catalog_rank`)
 only as deep as the row needs, so a read's cost does not grow with the
 catalog. The index expressions repeat `addedAtSQL` and
 `catalogRatingOrderSQL` and must change with them. Each read is planned for
@@ -255,7 +260,7 @@ library sections, which scope the whole row to their libraries.
   empty counts as built: reads do not ask for a rebuild of it.
 - **Quality prior.** Before MMR a candidate's score becomes
   `score + 0.5 × sd(pool scores) × clamp(z, −1, 1)`, where `z` standardizes
-  its rating (IMDb, else a TMDB rating below 9.5) among the pool's rated
+  its catalog rating (trusted IMDb, else trusted TMDB) among the pool's rated
   candidates of the same media type. A type with fewer than 10 rated
   candidates or no spread in ratings is left alone, and cluster and Because
   You Watched pools under 30 candidates get no prior.
