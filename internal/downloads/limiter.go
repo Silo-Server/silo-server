@@ -42,6 +42,13 @@ func (l *QuantityLimiter) Reload(maxConcurrent, maxPerPeriod int, periodDuration
 // The batchSize parameter accounts for series batch downloads where
 // multiple records will be created at once.
 func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) error {
+	return l.CheckCounts(ctx, userID, batchSize, batchSize)
+}
+
+// CheckCounts is Check with separate counts: activating is how many downloads
+// become active, created how many new downloads are created. Replacing an
+// entry in place can make it active without creating one.
+func (l *QuantityLimiter) CheckCounts(ctx context.Context, userID int, activating, created int) error {
 	if l == nil {
 		return nil
 	}
@@ -57,7 +64,7 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 		if err != nil {
 			return err
 		}
-		if active+batchSize > maxConc {
+		if active+activating > maxConc {
 			return ErrConcurrentLimitReached
 		}
 	}
@@ -68,7 +75,7 @@ func (l *QuantityLimiter) Check(ctx context.Context, userID int, batchSize int) 
 		if err != nil {
 			return err
 		}
-		if count+batchSize > maxPer {
+		if count+created > maxPer {
 			return ErrPeriodLimitReached
 		}
 	}
