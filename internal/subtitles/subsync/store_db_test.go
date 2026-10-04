@@ -134,6 +134,13 @@ func TestExternalTimingAndJobsPostgres(t *testing.T) {
 	if err != nil || created2.Revision != 1 || created2.Timing.OffsetMS != 400 {
 		t.Fatalf("first write: %+v %v", created2, err)
 	}
+	// Automatic sync skips bytes that had a job; these have none yet.
+	if has, err := store.HasExternalJob(ctx, row.ID); err != nil || !has {
+		t.Fatalf("jobs of synced bytes: %t %v", has, err)
+	}
+	if has, err := store.HasExternalJob(ctx, created2.ID); err != nil || has {
+		t.Fatalf("jobs of bytes never synced: %t %v", has, err)
+	}
 	if _, err := repo.SetExternalTiming(ctx, fileID, other, "/media/movie.fr.srt", subtitles.FormatSRT, subtitles.Timing{Scale: 1}, 0); !errors.Is(err, subtitles.ErrExternalTimingChanged) {
 		t.Fatalf("racing first write: %v", err)
 	}

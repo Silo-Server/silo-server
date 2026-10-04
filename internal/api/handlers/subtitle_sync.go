@@ -16,7 +16,7 @@ import (
 // audio.
 type SubtitleSyncService interface {
 	Request(ctx context.Context, subtitleID int, trigger string, requestedBy *int) (*subsync.Job, error)
-	RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, requestedBy *int) (*subsync.Job, error)
+	RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, trigger string, requestedBy *int) (*subsync.Job, error)
 	Latest(ctx context.Context, subtitleID int) (*subsync.Job, error)
 	LatestExternal(ctx context.Context, timingID int64) (*subsync.Job, error)
 	LatestForSubtitles(ctx context.Context, subtitleIDs []int) (map[int]*subsync.Job, error)

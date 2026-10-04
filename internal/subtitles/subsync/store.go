@@ -283,6 +283,17 @@ func (s *Store) HasJob(ctx context.Context, subtitleID int) (bool, error) {
 	return exists, nil
 }
 
+// HasExternalJob reports whether a sidecar's bytes ever had a sync job.
+func (s *Store) HasExternalJob(ctx context.Context, timingID int64) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM subtitle_sync_jobs
+		WHERE external_timing_id = $1)`, timingID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check sidecar subtitle sync jobs: %w", err)
+	}
+	return exists, nil
+}
+
 // MarkRunning moves a pending job to running, analyzing from 0. It returns
 // jobrunner.ErrJobTerminal when the job is gone or already finished.
 func (s *Store) MarkRunning(ctx context.Context, id int64) error {

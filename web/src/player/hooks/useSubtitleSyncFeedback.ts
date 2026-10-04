@@ -4,6 +4,7 @@ import { getLanguageName } from "../utils/languageNames";
 import {
   describeTiming,
   isSyncInProgress,
+  sameTiming,
   syncFailureMessage,
   syncKeyOf,
   syncPhaseLabel,
@@ -188,7 +189,7 @@ export function stepFeedback(prev: FeedbackState, input: FeedbackInput): Feedbac
   if (
     input.activeKey &&
     before?.activeKey === input.activeKey &&
-    before.loadState === "loading" &&
+    (before.loadState === "loading" || before.loadState === "refreshing") &&
     input.loadState === "ready"
   ) {
     next.loadedRevision = new Map(next.loadedRevision).set(input.activeKey, input.activeRevision);
@@ -249,7 +250,14 @@ export function stepFeedback(prev: FeedbackState, input: FeedbackInput): Feedbac
       input.active?.watchedJobId !== undefined &&
       job?.id === input.active.watchedJobId &&
       (isSyncInProgress(job.status) || (job.status === "synced" && !next.applied.has(job.id)));
-    if (!own) next.foreign = { key: input.activeKey, revision: before.activeRevision };
+    // A subtitle synced automatically, the first time anyone played it,
+    // changes without a word: the viewer only sees it line up.
+    const automatic =
+      job?.trigger === "auto" &&
+      job.status === "synced" &&
+      sameTiming(input.active?.state.timing, job.result ?? undefined);
+    if (!own && !automatic)
+      next.foreign = { key: input.activeKey, revision: before.activeRevision };
   }
   if (next.foreign) {
     if (next.foreign.key !== input.activeKey) {

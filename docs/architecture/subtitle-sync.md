@@ -52,10 +52,11 @@ sidecar's bytes.
 - **Delivery.** `playback.LoadExternalSubtitle` reads the file, hashes it, and
   applies the matching correction. Only SRT, WebVTT, ASS, and SSA sidecars can
   be corrected; other formats are served as before.
-- **On request only.** Nothing syncs sidecars automatically: not a scan, not a
-  scheduled task. A tool that rewrites subtitle files (Bazarr) covers that.
-  A sync request creates the row with the original timing, so the job has a
-  revision to guard its result with.
+- **On first play.** Nothing syncs sidecars in bulk: not a scan, not a
+  scheduled task; a tool that rewrites subtitle files (Bazarr) covers that.
+  A sidecar is synced when someone asks, or automatically the first time a
+  player is served it (see Triggers). A sync request creates the row with the
+  original timing, so the job has a revision to guard its result with.
 - **Jobs.** A job reads the sidecar from the row's path when it runs. It ends
   `failed` with `subtitle_changed` when the bytes no longer match the row, the
   file is gone, or the scanner no longer lists it under the media file.
@@ -118,12 +119,17 @@ one job per subtitle is active (`pending` or `running`). Jobs run on the shared 
 (`internal/ai/jobrunner`) with their own concurrency bound, heartbeats, and
 stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
 
-- **Triggers.** A provider download or a user upload starts an automatic job
-  when `subtitles.auto_sync` is on (the default). It runs only for a subtitle
-  that has never been synced and still has its original timing: adding
-  identical content again returns the existing row, and must not replace a
-  timing someone set or reset. It skips formats that cannot be retimed. A
-  manual job is started through the API. Sidecars have no automatic trigger.
+- **Triggers.** With `subtitles.auto_sync` on (the default), an automatic job
+  starts when a provider download or a user upload adds a subtitle, and when
+  a player is first served a subtitle (stored or sidecar) through the playback
+  or Jellyfin subtitle routes. Delivery hands the subtitle to the service and
+  never waits for it (`subtitles.PlaySyncer`; HEAD requests do not count).
+  Each server considers a played subtitle once every 30 minutes, since players
+  fetch subtitles in windows. An automatic job runs only for a subtitle (or a
+  sidecar's bytes) that has never been synced and still has its original
+  timing: adding identical content again returns the existing row, and must
+  not replace a timing someone set or reset. It skips formats that cannot be
+  retimed. A manual job is started through the API.
 - **Bounds.** Cues past the audio's reach or longer than a minute are left out
   of alignment, so a corrupt timestamp cannot size the cue map. A node request
   is bounded by the node's slot wait, its decode timeout, and a minute. A node
@@ -185,7 +191,11 @@ top-right corner, which stays visible in fullscreen: the phase and progress
 while it runs, then the outcome. A synced result for the track on screen reads
 "Applying new timing" until the track's cues reload with the new timing, then
 "Subtitles synced" with the correction. A timing change someone else made to
-the track on screen shows a short note once the new cues load. The subtitle
+the track on screen shows a short note once the new cues load; the automatic
+sync of a subtitle the first time it is played shows nothing. A timing reload
+of the track on screen swaps its cues in place: the current cues stay up until
+the corrected ones load (text tracks), or the corrected script is loaded into
+the running renderer (ASS), with no loading notice in between. The subtitle
 menu shows each track's status and the selected track's progress, last result,
 and actions. Clients use the same states, from the API and the realtime events
 (see [subtitles-api.md](../subtitles-api.md#subtitle-sync)).

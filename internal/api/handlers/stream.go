@@ -82,6 +82,16 @@ type StreamHandler struct {
 	// ExternalTimings finds sidecar timing corrections; nil serves sidecars as
 	// they are on disk.
 	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a player is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync subtitles.PlaySyncer
+}
+
+// subtitlePlayed hands a subtitle a player is being served to PlaySync.
+func (h *StreamHandler) subtitlePlayed(r *http.Request, target subtitles.SyncTarget) {
+	if h.PlaySync != nil {
+		h.PlaySync.SubtitlePlayed(r.Context(), target)
+	}
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -398,6 +408,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 			writeSubtitleRepresentationHead(w, subtitleRepresentationFormat(requestedFormat, servesOriginalSubRip(r, string(downloaded.Format), requestedFormat)))
 			return
 		}
+		h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: downloaded.ID})
 		h.serveDownloadedSubtitle(w, r, *downloaded, requestedFormat)
 		return
 	}
@@ -425,6 +436,7 @@ func (h *StreamHandler) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 					"Failed to load external subtitle")
 				return
 			}
+			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
 			h.serveSubtitleData(w, r, sub.Format, data, requestedFormat)
 			return
 		}

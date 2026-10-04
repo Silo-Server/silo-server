@@ -455,10 +455,15 @@ stored subtitle, `external-{hash}` for a sidecar. Treat it as opaque. The
 operations below take the media file and the key.
 
 `GET /api/v2/subtitles/sync/status` (`getSubtitleSyncStatus`) is the capability
-probe: `state` says whether sync is available, `auto_sync` whether new
-downloads and uploads are synced automatically (server setting
-`subtitles.auto_sync`, on by default), and `external` whether sidecars can be
-synced. Sidecars are synced only on request.
+probe: `state` says whether sync is available, `auto_sync` whether subtitles
+are synced automatically (server setting `subtitles.auto_sync`, on by
+default), and `external` whether sidecars can be synced.
+
+With `auto_sync` on, nobody has to ask. A downloaded or uploaded subtitle is
+synced when it is added. Any other subtitle that was never synced, a sidecar or
+a stored one, is synced the first time a player is served it, through any
+playback or Jellyfin subtitle route. Its job has `trigger: auto` and no
+requester. A subtitle someone already synced or retimed is left as it is.
 
 ### Operations
 
@@ -532,6 +537,11 @@ flow:
    synced, with the correction. On `already_synced`, `no_match`, or `failed`,
    say so; the timing did not change.
 4. On `subtitle_timing_changed` for the track on screen, fetch it again.
+
+An automatic sync of the track on screen should go unnoticed: show no progress
+for an `auto` job the viewer did not start, keep the current cues on screen
+until the refetched ones are loaded, and say nothing when they swap in. The
+subtitle menu can still show the result and offer a reset.
 
 Corrected bytes reach every delivery path: playback subtitle routes, the
 Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),

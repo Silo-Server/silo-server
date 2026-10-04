@@ -1253,7 +1253,11 @@ func main() {
 	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
 		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
 
+	// The API routes connect the subtitle sync service to this hook; the
+	// Jellyfin routes share it, so a first play from either side syncs.
+	subtitlePlaySync := &subtitles.PlaySyncHook{}
 	deps := api.Dependencies{
+		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,
@@ -3434,8 +3438,9 @@ func main() {
 			FrontendFS:           deps.FrontendFS,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
-			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
-			SessionSyncer:   deps.SessionSyncer,
+			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:    deps.SessionSyncer,
+			SubtitlePlaySync: subtitlePlaySync,
 		}
 
 		// Wire direct dependencies when DB is available.

@@ -471,6 +471,13 @@ func (f fakeSidecarTimings) ExternalTiming(_ context.Context, _ int, sha string)
 	return f[sha], nil
 }
 
+// recordedPlays stands in for the sync service and records played subtitles.
+type recordedPlays struct{ targets []subtitles.SyncTarget }
+
+func (p *recordedPlays) SubtitlePlayed(_ context.Context, target subtitles.SyncTarget) {
+	p.targets = append(p.targets, target)
+}
+
 func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
 	const onDisk = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
 	path := filepath.Join(t.TempDir(), "movie.en.srt")
@@ -494,6 +501,8 @@ func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
 		fileResolver:    testCompatFileResolver{file: file},
 		ExternalTimings: fakeSidecarTimings{subtitles.ContentSHA256([]byte(onDisk)): {Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1}, Revision: 2}},
 	}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
 	index := strconv.Itoa(externalSubtitleRouteIndex(file, 0))
 	for format, want := range map[string]string{"srt": "00:00:03,500 --> 00:00:04,500", "vtt": "00:00:03.500 --> 00:00:04.500"} {
 		request := httptest.NewRequest(http.MethodGet,
@@ -510,5 +519,10 @@ func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
 		if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), want) || rr.Header().Get("Cache-Control") != "private, no-cache" {
 			t.Fatalf("%s = %d %q %v", format, rr.Code, rr.Body.String(), rr.Header())
 		}
+	}
+	// Each delivery tells the sync service the sidecar is being played.
+	played := subtitles.SyncTarget{MediaFileID: 42, ExternalPath: path}
+	if len(plays.targets) != 2 || plays.targets[0] != played || plays.targets[1] != played {
+		t.Fatalf("played %+v", plays.targets)
 	}
 }

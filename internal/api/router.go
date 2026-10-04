@@ -114,6 +114,10 @@ type ArtworkDelivery struct {
 
 type Dependencies struct {
 	Config *config.Config
+	// SubtitlePlaySync receives subtitles a player is served, so one never
+	// synced is aligned the first time it is played. The routes here connect
+	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
+	SubtitlePlaySync *subtitles.PlaySyncHook
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
@@ -1472,6 +1476,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if streamHandler != nil && subtitleRepo != nil {
 		streamHandler.ExternalTimings = subtitleRepo
 	}
+	if streamHandler != nil && deps.SubtitlePlaySync != nil {
+		streamHandler.PlaySync = deps.SubtitlePlaySync
+	}
 	if streamHandler != nil && deps.Config != nil {
 		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
 			return deps.CurrentConfig().Playback
@@ -1703,7 +1710,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
 		if deps.FileRepo != nil && settingsRepo != nil {
-			subtitleSearchHandler.SetSyncService(newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier), subtitleRepo)
+			syncService := newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier)
+			subtitleSearchHandler.SetSyncService(syncService, subtitleRepo)
+			if deps.SubtitlePlaySync != nil {
+				deps.SubtitlePlaySync.Set(syncService)
+			}
 		}
 	}
 

@@ -74,6 +74,9 @@ func (f *fakeJobs) LatestForExternal(context.Context, []int64) (map[int64]*Job, 
 func (f *fakeJobs) HasJob(context.Context, int) (bool, error) {
 	return f.hasJob, nil
 }
+func (f *fakeJobs) HasExternalJob(context.Context, int64) (bool, error) {
+	return f.hasJob, nil
+}
 func (f *fakeJobs) MarkRunning(context.Context, int64) error { return nil }
 func (f *fakeJobs) Progress(_ context.Context, _ int64, phase string, progress float64) error {
 	f.mu.Lock()
@@ -204,7 +207,7 @@ func newFixture(t *testing.T, truth subtitles.Timing, settings settingsMap, layo
 	f.svc = &Service{
 		jobs: f.jobs, rows: &fakeSubtitles{sub: sub}, content: &fakeSubtitles{sub: sub, data: subtitles.SerializeSRT(cues)},
 		files: fakeFiles{file}, artifacts: f.artifacts, settings: settings, notifier: f.notifier, node: "test", now: time.Now,
-		inlineUpdates: true,
+		inline: true,
 	}
 	f.svc.sampler = newSampler(settings, nil, func() string { return "ffmpeg" })
 	f.svc.sampler.local = func(_ context.Context, req mediasample.Request) (mediasample.Result, error) {
@@ -336,7 +339,7 @@ func (n stalledNotifier) SubtitleTimingChanged(context.Context, subtitles.SyncTa
 
 func TestRequestDoesNotWaitForPlayers(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1500}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	f.svc.inlineUpdates = false
+	f.svc.inline = false
 	ctx, cancel := context.WithCancel(context.Background())
 	release := make(chan struct{})
 	t.Cleanup(func() {
@@ -350,6 +353,70 @@ func TestRequestDoesNotWaitForPlayers(t *testing.T) {
 	job, err := f.svc.Request(context.Background(), 5, TriggerManual, nil)
 	if err != nil || job == nil {
 		t.Fatalf("request: %v %v", job, err)
+	}
+}
+
+// idleRunner accepts jobs without running them: its context is already
+// done, so each job is aborted instead of executed.
+func idleRunner(store jobrunner.Store) *jobrunner.Runner {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return jobrunner.New(ctx, jobrunner.NewSemaphore(1), store, "test", nil)
+}
+
+func TestSubtitlePlayedSyncsAStoredSubtitleNeverSynced(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
+	f.svc.runner = idleRunner(f.jobs)
+	f.svc.SubtitlePlayed(context.Background(), subtitles.SyncTarget{MediaFileID: 9, StoredID: 5})
+	if len(f.jobs.jobs) != 1 || f.jobs.jobs[0].Trigger != TriggerAuto || f.jobs.jobs[0].RequestedBy != nil {
+		t.Fatalf("jobs %+v", f.jobs.jobs)
+	}
+}
+
+func TestSubtitlePlayedSyncsASidecarNeverSynced(t *testing.T) {
+	for name, tc := range map[string]struct {
+		prepare func(f *fixture, external *fakeExternal)
+		want    int
+	}{
+		"never synced":    {func(*fixture, *fakeExternal) {}, 1},
+		"synced before":   {func(f *fixture, _ *fakeExternal) { f.jobs.hasJob = true }, 0},
+		"retimed by hand": {func(_ *fixture, e *fakeExternal) { e.row.Timing = subtitles.Timing{Scale: 1, OffsetMS: 400} }, 0},
+		"auto sync off":   {func(f *fixture, _ *fakeExternal) { f.svc.settings = settingsMap{SettingAutoSync: "false"} }, 0},
+		"cannot be retimed": {func(f *fixture, _ *fakeExternal) {
+			f.svc.files.(fakeFiles).file.ExternalSubtitles[0].Format = "sub"
+		}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
+			f.svc.runner = idleRunner(f.jobs)
+			external, sidecar := sidecarFixture(t, f)
+			tc.prepare(f, external)
+			f.svc.SubtitlePlayed(context.Background(), subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path})
+			if len(f.jobs.jobs) != tc.want {
+				t.Fatalf("jobs %+v", f.jobs.jobs)
+			}
+			if tc.want == 1 && (f.jobs.jobs[0].Trigger != TriggerAuto || f.jobs.jobs[0].ExternalTimingID != external.row.ID) {
+				t.Fatalf("job %+v", f.jobs.jobs[0])
+			}
+		})
+	}
+}
+
+// Players fetch a subtitle in windows, many times a session: each played
+// subtitle is considered once per playedTTL on a server.
+func TestFirstPlayRemembersForATime(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	s := &Service{now: func() time.Time { return now }}
+	target := subtitles.SyncTarget{MediaFileID: 9, StoredID: 5}
+	if !s.firstPlay(target) || s.firstPlay(target) {
+		t.Fatal("a second play within the window was considered again")
+	}
+	if !s.firstPlay(subtitles.SyncTarget{MediaFileID: 9, ExternalPath: "/media/film.en.srt"}) {
+		t.Fatal("another subtitle was not considered")
+	}
+	now = now.Add(playedTTL)
+	if !s.firstPlay(target) {
+		t.Fatal("a play after the window was not considered")
 	}
 }
 
@@ -480,6 +547,12 @@ type fakeExternal struct {
 }
 
 func (f *fakeExternal) ExternalTimingByID(context.Context, int64) (*subtitles.ExternalTiming, error) {
+	return f.row, nil
+}
+func (f *fakeExternal) ExternalTiming(_ context.Context, _ int, sha string) (*subtitles.ExternalTiming, error) {
+	if f.row == nil || f.row.ContentSHA256 != sha {
+		return nil, nil
+	}
 	return f.row, nil
 }
 func (f *fakeExternal) EnsureExternalTiming(_ context.Context, fileID int, sha, path string, format subtitles.SubtitleFormat) (*subtitles.ExternalTiming, error) {
@@ -681,7 +754,7 @@ func TestExecuteSidecarChangedDuringAnalysis(t *testing.T) {
 // Progress travels off the worker; the outcome still reaches players last.
 func TestExecuteSendsProgressOffTheWorker(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1800}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
-	f.svc.inlineUpdates = false
+	f.svc.inline = false
 	job, _, err := f.jobs.Create(context.Background(), f.svc.rows.(*fakeSubtitles).sub, TriggerManual, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -731,7 +804,7 @@ func TestRequestExternalRefusesFormatsItCannotRetime(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
 	external, _ := sidecarFixture(t, f)
 	external.ensured = 0
-	_, err := f.svc.RequestExternal(context.Background(), 9, models.ExternalSubtitle{Path: "/media/film.sub", Format: "sub"}, nil)
+	_, err := f.svc.RequestExternal(context.Background(), 9, models.ExternalSubtitle{Path: "/media/film.sub", Format: "sub"}, TriggerManual, nil)
 	if !errors.Is(err, ErrUnsupportedFormat) || external.ensured != 0 || len(f.jobs.jobs) != 0 {
 		t.Fatalf("err %v ensured %d jobs %d", err, external.ensured, len(f.jobs.jobs))
 	}

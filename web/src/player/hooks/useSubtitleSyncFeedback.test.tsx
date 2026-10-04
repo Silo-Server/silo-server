@@ -177,6 +177,32 @@ describe("useSubtitleSyncFeedback", () => {
     expect(result.current.notice).toMatchObject({ tone: "info", title: "Subtitle timing updated" });
   });
 
+  it("says nothing when a subtitle on screen is synced automatically", () => {
+    const unsynced = entry(KEY, job("running", { trigger: "auto", progress: 0.4 }), false);
+    const { result, rerender } = renderFeedback({
+      entries: { [KEY]: unsynced },
+      activeKey: KEY,
+      revision: 0,
+      loadState: "ready",
+    });
+    const corrected = { offset_ms: 900, scale: 1 };
+    const synced = entry(
+      KEY,
+      job("synced", { trigger: "auto", result: corrected }),
+      false,
+      corrected,
+    );
+    rerender({ entries: { [KEY]: synced }, activeKey: KEY, revision: 1, loadState: "refreshing" });
+    rerender({ entries: { [KEY]: synced }, activeKey: KEY, revision: 1, loadState: "ready" });
+    expect(result.current.notice).toBeNull();
+
+    // A change someone makes afterwards is still mentioned.
+    const reset = entry(KEY, job("synced", { trigger: "auto", result: corrected }), false);
+    rerender({ entries: { [KEY]: reset }, activeKey: KEY, revision: 2, loadState: "refreshing" });
+    rerender({ entries: { [KEY]: reset }, activeKey: KEY, revision: 2, loadState: "ready" });
+    expect(result.current.notice).toMatchObject({ tone: "info", title: "Subtitle timing updated" });
+  });
+
   it("drops the notice of a sync whose file or session went away", () => {
     const running = entry(KEY, job("running", { progress: 0.3 }));
     const { result, rerender } = renderFeedback({

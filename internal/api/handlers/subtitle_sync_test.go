@@ -25,7 +25,7 @@ func (f *fakeSyncService) Request(_ context.Context, subtitleID int, trigger str
 	f.requests = append(f.requests, subtitleID)
 	return &subsync.Job{ID: 1, SubtitleID: subtitleID, Trigger: trigger, Status: subsync.JobPending}, nil
 }
-func (f *fakeSyncService) RequestExternal(_ context.Context, fileID int, sidecar models.ExternalSubtitle, _ *int) (*subsync.Job, error) {
+func (f *fakeSyncService) RequestExternal(_ context.Context, fileID int, sidecar models.ExternalSubtitle, _ string, _ *int) (*subsync.Job, error) {
 	f.external = append(f.external, sidecar.Path)
 	return &subsync.Job{ID: 2, ExternalTimingID: 1, MediaFileID: fileID, Trigger: subsync.TriggerManual, Status: subsync.JobPending}, nil
 }

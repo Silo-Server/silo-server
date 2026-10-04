@@ -131,7 +131,7 @@ func (h *SubtitleSearchHandler) StartSubtitleSync(ctx context.Context, access ca
 	if state.Stored != nil {
 		job, err = h.sync.Request(ctx, state.Stored.ID, subsync.TriggerManual, new(access.UserID))
 	} else {
-		job, err = h.sync.RequestExternal(ctx, fileID, *state.External, new(access.UserID))
+		job, err = h.sync.RequestExternal(ctx, fileID, *state.External, subsync.TriggerManual, new(access.UserID))
 	}
 	switch {
 	case errors.Is(err, subsync.ErrUnsupportedFormat):

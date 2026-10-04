@@ -1579,6 +1579,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
 				}
+				h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
 				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat)
 				return
 			}
@@ -1633,6 +1634,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			}
 			// The correction can change behind the same URL.
 			w.Header().Set("Cache-Control", "private, no-cache")
+			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
 			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat)
 			return
 		}

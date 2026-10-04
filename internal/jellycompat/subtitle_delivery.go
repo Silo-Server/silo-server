@@ -217,3 +217,11 @@ func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimesta
 	}
 	return []byte(out.String()), nil
 }
+
+// subtitlePlayed hands a subtitle a client is being served to PlaySync. A
+// HEAD request only asks about the subtitle and is not a play.
+func (h *PlaybackHandler) subtitlePlayed(r *http.Request, target subtitles.SyncTarget) {
+	if h.PlaySync != nil && r.Method != http.MethodHead {
+		h.PlaySync.SubtitlePlayed(r.Context(), target)
+	}
+}

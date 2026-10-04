@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
@@ -40,6 +41,7 @@ type (
 		GetSubtitleContent(ctx context.Context, id int) (*subtitles.DownloadedSubtitle, []byte, error)
 	}
 	externalRows interface {
+		ExternalTiming(ctx context.Context, mediaFileID int, contentSHA256 string) (*subtitles.ExternalTiming, error)
 		ExternalTimingByID(ctx context.Context, id int64) (*subtitles.ExternalTiming, error)
 		EnsureExternalTiming(ctx context.Context, mediaFileID int, contentSHA256, path string, format subtitles.SubtitleFormat) (*subtitles.ExternalTiming, error)
 	}
@@ -60,6 +62,7 @@ type (
 		LatestForSubtitles(ctx context.Context, subtitleIDs []int) (map[int]*Job, error)
 		LatestForExternal(ctx context.Context, timingIDs []int64) (map[int64]*Job, error)
 		HasJob(ctx context.Context, subtitleID int) (bool, error)
+		HasExternalJob(ctx context.Context, timingID int64) (bool, error)
 		MarkRunning(ctx context.Context, id int64) error
 		Progress(ctx context.Context, id int64, phase string, progress float64) error
 		Finish(ctx context.Context, id int64, o Outcome) error
@@ -110,17 +113,21 @@ type Service struct {
 	content  subtitleContent
 	external externalRows
 	readFile func(path string) ([]byte, error)
-	// inlineUpdates sends progress on the worker itself, so tests see every
-	// step in order.
-	inlineUpdates bool
-	files         mediaFiles
-	artifacts     artifactStore
-	settings      SettingsReader
-	sampler       *sampler
-	runner        *jobrunner.Runner
-	notifier      Notifier
-	node          string
-	now           func() time.Time
+	// inline runs background work (player updates, syncs of played
+	// subtitles) on the caller, so tests see it in order.
+	inline bool
+	// played remembers when this server last considered each played
+	// subtitle for an automatic sync.
+	playedMu  sync.Mutex
+	played    map[subtitles.SyncTarget]time.Time
+	files     mediaFiles
+	artifacts artifactStore
+	settings  SettingsReader
+	sampler   *sampler
+	runner    *jobrunner.Runner
+	notifier  Notifier
+	node      string
+	now       func() time.Time
 }
 
 // NewService builds a Service and starts its stale-job recovery.
@@ -191,13 +198,21 @@ func (s *Service) Request(ctx context.Context, subtitleID int, trigger string, r
 }
 
 // RequestExternal starts a sync of a sidecar subtitle of the file, or returns
-// its active job. Sidecars sync only on request: nothing syncs them
-// automatically. The sidecar's bytes get a correction row (with the original
-// timing) so the job has a revision to guard its result with.
-func (s *Service) RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, requestedBy *int) (*Job, error) {
+// its active job. The sidecar's bytes get a correction row (with the original
+// timing) so the job has a revision to guard its result with. An automatic
+// request, made when a player is first served the sidecar, follows the rules
+// of an automatic Request: it does nothing (nil job) when auto sync is off,
+// the format cannot be retimed, or these bytes were synced or retimed before.
+func (s *Service) RequestExternal(ctx context.Context, mediaFileID int, sidecar models.ExternalSubtitle, trigger string, requestedBy *int) (*Job, error) {
 	format := subtitles.SubtitleFormat(strings.ToLower(sidecar.Format))
 	if !subtitles.SupportsRetime(format) {
+		if trigger == TriggerAuto {
+			return nil, nil
+		}
 		return nil, ErrUnsupportedFormat
+	}
+	if trigger == TriggerAuto && !s.AutoSyncEnabled(ctx) {
+		return nil, nil
 	}
 	if s.external == nil {
 		return nil, errors.New("sidecar subtitle timing is not configured")
@@ -206,11 +221,27 @@ func (s *Service) RequestExternal(ctx context.Context, mediaFileID int, sidecar 
 	if err != nil {
 		return nil, fmt.Errorf("read sidecar subtitle: %w", err)
 	}
-	row, err := s.external.EnsureExternalTiming(ctx, mediaFileID, subtitles.ContentSHA256(data), sidecar.Path, format)
+	sha := subtitles.ContentSHA256(data)
+	if trigger == TriggerAuto {
+		existing, err := s.external.ExternalTiming(ctx, mediaFileID, sha)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			if !existing.Timing.IsIdentity() {
+				return nil, nil
+			}
+			done, err := s.jobs.HasExternalJob(ctx, existing.ID)
+			if err != nil || done {
+				return nil, err
+			}
+		}
+	}
+	row, err := s.external.EnsureExternalTiming(ctx, mediaFileID, sha, sidecar.Path, format)
 	if err != nil {
 		return nil, err
 	}
-	job, created, err := s.jobs.CreateExternal(ctx, row, TriggerManual, requestedBy)
+	job, created, err := s.jobs.CreateExternal(ctx, row, trigger, requestedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +272,85 @@ func (s *Service) LatestForExternal(ctx context.Context, timingIDs []int64) (map
 	return s.jobs.LatestForExternal(ctx, timingIDs)
 }
 
+// playedTTL is how long this server remembers it considered a played
+// subtitle: players fetch a subtitle in windows, many times a session.
+// playedRequestTimeout bounds the checks and the request for one of them.
+const (
+	playedTTL            = 30 * time.Minute
+	playedRemembered     = 4096
+	playedRequestTimeout = 30 * time.Second
+)
+
+// SubtitlePlayed starts the automatic sync of a subtitle a player was just
+// served, under the rules of an automatic request. Nobody has to ask: a
+// subtitle is aligned the first time anyone plays it, and every player of
+// the file picks the correction up. It returns at once.
+func (s *Service) SubtitlePlayed(ctx context.Context, target subtitles.SyncTarget) {
+	if target.MediaFileID <= 0 || (target.StoredID == 0 && target.ExternalPath == "") || !s.firstPlay(target) {
+		return
+	}
+	if s.inline {
+		s.syncPlayed(ctx, target)
+		return
+	}
+	go s.syncPlayed(context.WithoutCancel(ctx), target)
+}
+
+// firstPlay reports whether target was not considered within playedTTL, and
+// records that it is now.
+func (s *Service) firstPlay(target subtitles.SyncTarget) bool {
+	now := s.now()
+	s.playedMu.Lock()
+	defer s.playedMu.Unlock()
+	if at, ok := s.played[target]; ok && now.Sub(at) < playedTTL {
+		return false
+	}
+	if s.played == nil {
+		s.played = map[subtitles.SyncTarget]time.Time{}
+	}
+	if len(s.played) >= playedRemembered {
+		for key, at := range s.played {
+			if now.Sub(at) >= playedTTL {
+				delete(s.played, key)
+			}
+		}
+	}
+	s.played[target] = now
+	return true
+}
+
+func (s *Service) syncPlayed(ctx context.Context, target subtitles.SyncTarget) {
+	ctx, cancel := context.WithTimeout(ctx, playedRequestTimeout)
+	defer cancel()
+	var err error
+	if target.StoredID != 0 {
+		_, err = s.Request(ctx, target.StoredID, TriggerAuto, nil)
+	} else {
+		err = s.syncPlayedSidecar(ctx, target)
+	}
+	if err != nil && !errors.Is(err, ErrSubtitleNotFound) {
+		slog.WarnContext(ctx, "automatic subtitle sync not started", "component", "subsync",
+			"media_file_id", target.MediaFileID, "subtitle_id", target.StoredID, "error", err)
+	}
+}
+
+func (s *Service) syncPlayedSidecar(ctx context.Context, target subtitles.SyncTarget) error {
+	file, err := s.files.GetByID(ctx, target.MediaFileID)
+	if err != nil {
+		return fmt.Errorf("load media file: %w", err)
+	}
+	if file == nil {
+		return nil
+	}
+	for _, sidecar := range file.ExternalSubtitles {
+		if sidecar.Path == target.ExternalPath {
+			_, err := s.RequestExternal(ctx, file.ID, sidecar, TriggerAuto, nil)
+			return err
+		}
+	}
+	return nil
+}
+
 // TimingChanged tells players a subtitle's timing changed outside a job,
 // such as a manual adjustment.
 func (s *Service) TimingChanged(ctx context.Context, target subtitles.SyncTarget) {
@@ -263,7 +373,7 @@ func (s *Service) updated(ctx context.Context, target subtitles.SyncTarget, timi
 func (s *Service) start(ctx context.Context, job *Job, target subtitles.SyncTarget, timing subtitles.Timing) {
 	queued := *job
 	s.dispatch(job)
-	if s.inlineUpdates {
+	if s.inline {
 		s.updated(ctx, target, timing, queued)
 		return
 	}
@@ -352,7 +462,7 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	ctx, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	r := &run{s: s, job: *job, stop: stop}
-	if !s.inlineUpdates {
+	if !s.inline {
 		r.progress = newUpdateQueue(func(job Job) { r.send(ctx, job) })
 		defer r.progress.close()
 	}

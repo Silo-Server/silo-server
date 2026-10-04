@@ -334,7 +334,10 @@ type PlaybackHandler struct {
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
 	// as they are on disk.
-	ExternalTimings        subtitles.ExternalTimingLookup
+	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a client is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync               subtitles.PlaySyncer
 	Trickplay              TrickplaySheets       // optional; serves seek-bar preview sheets
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view

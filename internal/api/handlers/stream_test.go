@@ -550,6 +550,13 @@ func (s sidecarTimings) ExternalTiming(_ context.Context, _ int, sha string) (*s
 
 // A sidecar on disk is served with the correction stored for its bytes, on
 // every representation, and revalidated because the correction can change.
+// recordedPlays stands in for the sync service and records played subtitles.
+type recordedPlays struct{ targets []subtitles.SyncTarget }
+
+func (p *recordedPlays) SubtitlePlayed(_ context.Context, target subtitles.SyncTarget) {
+	p.targets = append(p.targets, target)
+}
+
 func TestHandleSubtitleAppliesSidecarTiming(t *testing.T) {
 	const onDisk = "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
 	path := filepath.Join(t.TempDir(), "movie.en.srt")
@@ -565,10 +572,13 @@ func TestHandleSubtitleAppliesSidecarTiming(t *testing.T) {
 	}
 	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
 	handler.ExternalTimings = sidecarTimings{subtitles.ContentSHA256([]byte(onDisk)): {Timing: subtitles.Timing{OffsetMS: 2500, Scale: 1}, Revision: 2}}
+	plays := &recordedPlays{}
+	handler.PlaySync = plays
+	method := http.MethodGet
 
 	serve := func(prefix, track, query string, native bool) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, prefix+session.ID+"/subtitles/"+track+"?"+query, nil)
+		req := httptest.NewRequest(method, prefix+session.ID+"/subtitles/"+track+"?"+query, nil)
 		ctx := newAuthorizedPlaybackContext()
 		if native {
 			ctx = WithNativeAPIV2(ctx)
@@ -591,6 +601,15 @@ func TestHandleSubtitleAppliesSidecarTiming(t *testing.T) {
 	rr = serve("/api/v2/stream/", "0.srt", "file_id=42&original=1", true)
 	if want := "1\n00:00:03,500 --> 00:00:04,500\nHello\n"; rr.Code != http.StatusOK || rr.Body.String() != want {
 		t.Fatalf("original SRT = %d %q, want %q", rr.Code, rr.Body.String(), want)
+	}
+	// Each delivery tells the sync service the sidecar is being played; a
+	// HEAD request only asks about it.
+	method = http.MethodHead
+	serve("/api/v2/stream/", "0.srt", "file_id=42&original=1", true)
+	method = http.MethodGet
+	played := subtitles.SyncTarget{MediaFileID: 42, ExternalPath: path}
+	if len(plays.targets) != 2 || plays.targets[0] != played || plays.targets[1] != played {
+		t.Fatalf("played %+v", plays.targets)
 	}
 
 	// Edited on disk, the sidecar no longer matches its old correction.
