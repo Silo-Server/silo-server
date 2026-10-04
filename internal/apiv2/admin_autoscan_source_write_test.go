@@ -27,12 +27,15 @@ func (f *fakeSourceWrites) UpdateAdminAutoscanSource(_ context.Context, id strin
 	return f.CreateAdminAutoscanSource(context.Background(), in)
 }
 func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
+	f := new(fakeSourceWrites)
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	deps.AdminAutoscanSourceWrites = nil
+	missing := NewHandler(deps)
 	for _, method := range []string{"POST", "PUT"} {
 		t.Run(method, func(t *testing.T) {
-			f := new(fakeSourceWrites)
-			deps := pilotDeps(nil, nil)
-			deps.AdminAutoscanSourceWrites = f
-			h := NewHandler(deps)
+			*f = fakeSourceWrites{}
 			path := Prefix + "/admin/autoscan/sources"
 			status := 201
 			body := `{"plugin_id":"plugin","capability_id":"cap","enabled":true,"path_rewrites":[{"from":"a","to":"b"}]}`
@@ -67,8 +70,7 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			deps.AdminAutoscanSourceWrites = nil
-			requireProblem(t, do(t, NewHandler(deps), method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }
