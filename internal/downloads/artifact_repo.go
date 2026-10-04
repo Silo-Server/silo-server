@@ -168,7 +168,7 @@ func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease 
 		     SELECT id FROM download_artifacts
 		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND (next_retry_at IS NULL OR next_retry_at <= now()))
 		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now())
-		     ORDER BY created_at
+		     ORDER BY created_at, id
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )
