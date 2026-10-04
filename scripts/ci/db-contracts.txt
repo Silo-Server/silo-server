@@ -85,6 +85,7 @@
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
 ./internal/downloads TestSubscriptionQualityPostgres
 ./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
+./internal/downloads TestAttachPreparationsPostgres
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

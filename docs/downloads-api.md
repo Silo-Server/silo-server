@@ -250,7 +250,8 @@ Response:
   "subscription_mutations": true,
   "bounded_subscription_sync": true,
   "bulk_quality": true,
-  "monitor_quality": true
+  "monitor_quality": true,
+  "preparation_progress": true
 }
 ```
 
@@ -269,6 +270,7 @@ Response:
 | `ordered_status`         | Revision-bound status reporting (§4.3) is available.                              |
 | `file_delivery`          | The native byte routes (§4.5) are available.                                      |
 | `bounded_creation`       | The full native creation flow (§4.1) is available.                                |
+| `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
 | `bulk_quality`           | Series and season batches (§4.1) accept any of `quality_presets`. Without it, send `original`. |
 | `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
 | `bounded_manifests`      | Bounded manifest and batch-manifest operations (§4.6, §4.7) are available.         |
@@ -731,6 +733,22 @@ server version.
 | `created_at`          | string | RFC3339.                                                               |
 | `completed_at`        | string | Present once completed.                                                |
 | `status_event_at`     | string | Latest accepted client status event for the current revision.          |
+| `preparation`         | object | Listed `preparing` entries only, when the capability reports `preparation_progress`. See below. |
+
+`preparation` says where a preparing entry's file is in the server's preparation
+queue:
+
+| Field               | Type   | Notes                                                                                  |
+| ------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `state`             | string | `queued`, `running`, or `retrying` (an attempt failed; the job waits out its backoff). |
+| `queue_position`    | int    | While `queued`: 1-based place among every queued preparation on the server, in claim order. |
+| `progress`          | number | While `running`, once the encode reports it: encoded fraction, 0 to 1.                 |
+| `remaining_seconds` | int    | While `running`: estimated seconds left at the encode's reported speed.               |
+
+`GET /api/v2/downloads` attaches it; other answers that return an entry do not.
+It is absent when the job has already finished or failed but the entry's status
+has not caught up, and when progress cannot be read; a client then shows a plain
+preparing state.
 
 Managed lifecycle:
 
@@ -1089,6 +1107,7 @@ files or existing download rows.
 1. Call `GET /api/v2/capabilities/downloads` and offer only `quality_presets`.
 2. User picks Download: `POST /api/v2/downloads` with `quality`, `caps`, profile, and device headers.
 3. If the row is `preparing`, poll `GET /api/v2/downloads` or listen on events (see 9.4) until `ready`.
+   Show its `preparation` while waiting: the queue position, or the encode's progress and time left.
 4. Fetch and store `GET /api/v2/downloads/{id}/manifest`.
 5. Fetch and store all `artwork_urls` and `subtitles[].fetch_url` assets.
 6. Download `GET /api/v2/downloads/{id}/file` with Range/background support.
