@@ -1183,6 +1183,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"updateWatchTogetherRoomSelectionMode": "V2-only lobby mode switch: v1 fixes selection_mode at creation. Repeating the same mode is a no-op; the switch drops the staged item, which is the documented meaning of the value rather than a side effect of retrying.",
 	"regenerateAdminItemTrickplay":         "V2-only seek-bar preview regeneration: v1 had no trickplay. A replay while the files are queued or being made changes nothing, but a later replay makes the previews again, so it is non-retryable like redetectAdminItemMarkers.",
 	"queryWatchTogetherMemberState":        "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
+	"resetAdminRecommendationEmbeddings":   "V2-only embeddings reset: v1 had no way to clear the embedding lock. A replay right after success deletes nothing more, but a later replay also deletes what the embedding job built since, so it is non-retryable like the recommendation job triggers.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

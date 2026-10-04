@@ -647,10 +647,11 @@ func (r *Repo) TotalMediaItemCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// TasteProfileCount returns the total number of stored taste profiles.
+// TasteProfileCount returns the number of profiles with a taste vector. Rows
+// cleared for having no positive signal (see ClearTasteProfile) do not count.
 func (r *Repo) TasteProfileCount(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_taste_profiles`).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_taste_profiles WHERE embedding IS NOT NULL`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("taste profile count: %w", err)
 	}

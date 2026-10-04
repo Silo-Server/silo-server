@@ -263,6 +263,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media
@@ -1492,6 +1493,7 @@ PATCH /api/v2/admin/rate-limits/config	non-media
 GET /api/v2/admin/rate-limits/status	non-media
 GET /api/v2/admin/rating-sources	non-media
 GET /api/v2/admin/rating-sources/capabilities	non-media
+POST /api/v2/admin/recommendations/embeddings/reset	non-media
 GET /api/v2/admin/recommendations/status	non-media
 POST /api/v2/admin/recommendations/trigger/cowatch	non-media
 POST /api/v2/admin/recommendations/trigger/embeddings	non-media

@@ -11,6 +11,7 @@ import {
   useTriggerTasteProfiles,
   useTriggerCowatch,
   useTriggerRecommendations,
+  useResetEmbeddings,
 } from "./recommendations";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -77,16 +78,63 @@ it.each(triggers)("starts %s using the generated v2 operation", async (suffix, h
     { path: `/api/v2/admin/recommendations/trigger/${suffix}`, method: "POST" },
   ]);
 });
-it("reads typed counts and running flags from v2", async () => {
+it("reads typed counts, last runs and running flags from v2", async () => {
   const status = {
-    embeddings: { running: true, count: 3, total: 10 },
+    embeddings: {
+      running: true,
+      count: 3,
+      total: 10,
+      last_run: {
+        status: "failed",
+        started_at: "2026-10-03T03:00:00.000Z",
+        completed_at: "2026-10-03T03:01:30.000Z",
+        error: "embedding provider unavailable",
+        result: { embedded: 0 },
+      },
+    },
     taste_profiles: { running: false, count: 4 },
     cowatch: { running: false, count: 6 },
     recommendations: { running: false, count: 5 },
+    lock_conflict: "",
+    cache_refreshed_at: "2026-10-03T05:01:00.000Z",
   };
   const { calls, wrapper } = setup(() => jsonResponse(status));
   const { result, unmount } = renderHook(useRecommendationsStatus, { wrapper });
   await waitFor(() => expect(result.current.data).toEqual(status));
   expect(calls[0]?.path).toBe("/api/v2/admin/recommendations/status");
   unmount();
+});
+
+it("resets embeddings once, without refresh or replay after 401", async () => {
+  const { calls, wrapper } = setup(
+    () =>
+      new Response(
+        JSON.stringify({
+          type: "https://siloserver.org/docs/api/v2/problems/invalid_token",
+          title: "Invalid token",
+          status: 401,
+          detail: "Expired",
+          instance: "urn:silo:request:test",
+        }),
+        { status: 401, headers: { "Content-Type": "application/problem+json" } },
+      ),
+  );
+  const { result } = renderHook(useResetEmbeddings, { wrapper });
+  await act(async () => {
+    await expect(result.current.mutateAsync()).rejects.toThrow();
+  });
+  expect(calls).toEqual([
+    { path: "/api/v2/admin/recommendations/embeddings/reset", method: "POST" },
+  ]);
+});
+it("resets embeddings using the generated v2 operation", async () => {
+  const deleted = { embeddings: 120, taste_profiles: 3, taste_clusters: 9, cached_rows: 41 };
+  const { calls, wrapper } = setup(() => jsonResponse(deleted));
+  const { result } = renderHook(useResetEmbeddings, { wrapper });
+  await act(async () => {
+    await expect(result.current.mutateAsync()).resolves.toEqual(deleted);
+  });
+  expect(calls).toEqual([
+    { path: "/api/v2/admin/recommendations/embeddings/reset", method: "POST" },
+  ]);
 });
