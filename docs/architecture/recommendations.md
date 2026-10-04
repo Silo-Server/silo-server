@@ -38,7 +38,10 @@ under `recommendations.embeddings`, `recommendations.taste_profiles`,
 | Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first |
 
 At startup the worker also builds the global rows when none are cached, so
-cold-start rows exist before the first nightly cache run.
+cold-start rows exist before the first nightly cache run. Each global row
+needs activity to fill (watches, ratings, or titles added in the last 14
+days), so on an idle server the build can write none, and it is not retried
+until the next cache run.
 
 ## Embeddings
 
@@ -144,7 +147,9 @@ on both user-store backends.
 ## Reads
 
 The Reader serves cached rows; the one live query is the server's top genre,
-for a taste-match section with no genre and no matching cluster. A read that
+for a taste-match section with no genre and no matching cluster. The
+standalone popular and recently-added list endpoints query the catalog live
+rather than reading the cache. A read that
 finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
