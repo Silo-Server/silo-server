@@ -382,6 +382,12 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	}
 	log = log.With("status", outcome.Status, "confidence", deref(outcome.Confidence),
 		"offset_ms", found.OffsetMS, "scale", found.Normalized().Scale)
+	// The outcome speaks for the subject as the job read it; a subject that
+	// changed meanwhile ends the job as changed instead.
+	if err := s.subjectStillCurrent(finishCtx, r); err != nil {
+		fail(err, "finish")
+		return
+	}
 	if outcome.Status != string(StatusSynced) {
 		log.InfoContext(ctx, "subtitle sync finished")
 		if err := s.jobs.Finish(finishCtx, job.ID, outcome); err == nil {
@@ -392,12 +398,6 @@ func (s *Service) execute(ctx context.Context, job *Job) {
 	if err := subtitles.ValidateTiming(found); err != nil {
 		fail(err, "result out of range")
 		return
-	}
-	if job.ExternalTimingID != 0 {
-		if err := s.sidecarStillCurrent(finishCtx, r); err != nil {
-			fail(err, "apply")
-			return
-		}
 	}
 	if _, err := s.jobs.Apply(finishCtx, job, found, outcome); err != nil {
 		// A job that is already terminal (reaped, or deleted with a replaced
@@ -491,10 +491,32 @@ func (s *Service) currentSidecar(path, contentSHA256 string, file *models.MediaF
 	return nil, nil, ErrSubtitleChanged
 }
 
-// sidecarStillCurrent checks, before a sidecar job applies its result, that
-// the sidecar was not edited, removed, or dropped from the catalog while its
-// audio was analyzed: the result would apply to bytes no longer served.
-func (s *Service) sidecarStillCurrent(ctx context.Context, r *run) error {
+// subjectStillCurrent checks, before a job records its outcome, that its
+// subject did not change while the audio was analyzed: a new revision (another
+// viewer's timing, an edit), or a sidecar edited, removed, or dropped from the
+// catalog. The outcome would describe, or correct, a subtitle no longer
+// served.
+func (s *Service) subjectStillCurrent(ctx context.Context, r *run) error {
+	if r.job.ExternalTimingID == 0 {
+		row, err := s.rows.GetDownloadedSubtitle(ctx, r.job.SubtitleID)
+		if err != nil {
+			return fmt.Errorf("read stored subtitle: %w", err)
+		}
+		if row == nil || row.Revision != r.job.BaseRevision || row.MediaFileID != r.job.MediaFileID {
+			return ErrSubtitleChanged
+		}
+		return nil
+	}
+	if s.external == nil {
+		return errors.New("sidecar subtitle timing is not configured")
+	}
+	row, err := s.external.ExternalTimingByID(ctx, r.job.ExternalTimingID)
+	if err != nil {
+		return fmt.Errorf("read sidecar subtitle timing: %w", err)
+	}
+	if row == nil || row.Revision != r.job.BaseRevision {
+		return ErrSubtitleChanged
+	}
 	file, err := s.files.GetByID(ctx, r.job.MediaFileID)
 	if err != nil {
 		return fmt.Errorf("load media file: %w", err)

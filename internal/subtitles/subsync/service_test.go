@@ -696,6 +696,34 @@ func TestExecuteSendsProgressOffTheWorker(t *testing.T) {
 	}
 }
 
+// A verdict reached about a subtitle another viewer retimed meanwhile is not
+// recorded as if it described the new timing.
+func TestExecuteUnchangedOutcomeAfterRetimeMeanwhile(t *testing.T) {
+	for name, truth := range map[string]subtitles.Timing{
+		"already synced": {Scale: 1},
+		"synced":         {Scale: 1, OffsetMS: 1800},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+			sub := f.svc.rows.(*fakeSubtitles).sub
+			job, _, err := f.jobs.Create(context.Background(), sub, TriggerManual, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decode := f.svc.sampler.local
+			f.svc.sampler.local = func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
+				sub.Revision = job.BaseRevision + 1 // another viewer sets the timing
+				return decode(ctx, req)
+			}
+			f.svc.execute(context.Background(), job)
+			outcome := f.jobs.finished[job.ID]
+			if outcome.Status != JobFailed || outcome.Failure != FailureSubtitleChanged || len(f.jobs.applied) != 0 {
+				t.Fatalf("outcome %+v applied %v", outcome, f.jobs.applied)
+			}
+		})
+	}
+}
+
 func TestRequestExternalRefusesFormatsItCannotRetime(t *testing.T) {
 	f := newFixture(t, subtitles.Timing{}, settingsMap{}, "stereo")
 	external, _ := sidecarFixture(t, f)
