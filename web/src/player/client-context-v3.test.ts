@@ -158,3 +158,59 @@ describe("structured HDR capabilities", () => {
     expect(deliveries.hls?.audio_decode_codecs).toEqual(["aac", "vorbis"]);
   });
 });
+
+describe("browser decode engine capabilities", () => {
+  const probe: WebCapabilityProbe = {
+    containers: ["mp4", "webm"],
+    codecsVideo: ["h264", "av1"],
+    progressiveCodecsVideo: ["h264", "av1"],
+    codecsAudio: ["aac", "opus"],
+    progressiveCodecsAudio: ["aac", "opus"],
+    maxResolution: "2160p",
+    hdr: false,
+    hdrDetails: {
+      hdr10: false,
+      hdr10_plus: false,
+      hlg: false,
+      dolby_vision_profiles: [],
+      dolby_vision_profile_levels: [],
+    },
+    hls: true,
+    nativeHLS: false,
+  };
+  const engine = {
+    containers: ["mkv", "mp4"],
+    videoCodecs: ["h264", "hevc", "av1"],
+    audioCodecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+    hdr: true,
+  };
+
+  it("widens only original_http and claims track selection and managed range", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", engine);
+    expect(deliveries.original_http).toMatchObject({
+      containers: ["mp4", "webm", "mkv"],
+      video_codecs: ["h264", "av1", "hevc"],
+      audio_decode_codecs: ["aac", "opus", "ac3", "eac3", "dts", "truehd"],
+      validated_claims: ["client_selected_audio_track_v1", "client_managed_dynamic_range_v1"],
+    });
+    expect(deliveries.progressive?.audio_decode_codecs).toEqual(["aac", "opus"]);
+    expect(deliveries.progressive?.validated_claims).toEqual([]);
+    expect(deliveries.hls?.video_codecs).toEqual(["h264", "av1"]);
+  });
+
+  it("claims managed range only when WebGPU can tone-map", () => {
+    const deliveries = buildDeliveriesV3(probe, "test", { ...engine, hdr: false });
+    expect(deliveries.original_http?.validated_claims).toEqual(["client_selected_audio_track_v1"]);
+  });
+
+  it("carries the engine codecs in the device-level lists the planner reads first", () => {
+    const capabilities = buildClientCapabilitiesV3(probe, engine);
+    expect(capabilities.codecs_audio).toContain("truehd");
+    expect(capabilities.codecs_video).toContain("hevc");
+    expect(capabilities.containers).toContain("mkv");
+    expect(buildClientCapabilitiesV3(probe).codecs_audio).toEqual(["aac", "opus"]);
+    expect(
+      buildClientPlaybackContextV3(probe, engine).deliveries.original_http?.validated_claims,
+    ).toHaveLength(2);
+  });
+});
