@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -49,6 +50,14 @@ const (
 	// from one that came out empty, so without it every page load of such a
 	// profile would queue another rebuild.
 	readRefreshInterval = 15 * time.Minute
+
+	// refreshNowWait bounds how long RefreshProfileNow waits for the refresh
+	// it started; the refresh itself keeps profileRefreshTimeout.
+	refreshNowWait = 5 * time.Second
+	// maxRefreshesNow bounds the refreshes RefreshProfileNow runs at once on
+	// one server, beside the queue's one at a time. Past it, requests go to
+	// the queue.
+	maxRefreshesNow = 4
 )
 
 // profileStaleMarker marks a profile's taste profile stale. *Repo implements
@@ -75,6 +84,7 @@ type Worker struct {
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
+	refreshesNow          atomic.Int32 // RefreshProfileNow refreshes running
 	readRefreshes         refreshThrottle
 	cancelFunc            context.CancelFunc
 	embeddingsJobTimeout  time.Duration
@@ -312,6 +322,64 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 	}
 	w.markProfileStale(ctx, userID, profileID)
 	w.RequestProfileRefresh(ctx, userID, profileID)
+}
+
+// RefreshProfileNow is NotifySignalsChanged for a caller whose next read
+// depends on the change, such as a taste-seed submission. It marks the profile
+// stale, then refreshes it on this server at once instead of queueing it, and
+// waits up to refreshNowWait. It reports whether the refresh finished in that
+// time.
+//
+// The refresh runs detached from ctx under the usual profileRefreshTimeout:
+// a caller that gives up or disconnects, or a wait that runs out, leaves it
+// running to completion, and it is not queued again. It holds the profile's
+// pending key, so the queue and the stale sweep on this server do not start a
+// duplicate; when a refresh is already queued or running here it returns at
+// once and leaves the work to that one. When maxRefreshesNow are already
+// running it queues the refresh instead.
+func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
+	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
+		return false
+	}
+	w.markProfileStale(ctx, userID, profileID)
+	return w.refreshNow(ctx, userID, profileID, refreshNowWait, w.refreshProfile)
+}
+
+// refreshNow runs refresh for the profile as RefreshProfileNow describes,
+// waiting up to wait.
+func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, wait time.Duration, refresh func(context.Context, int, string) error) bool {
+	if w.refreshesNow.Add(1) > maxRefreshesNow {
+		w.refreshesNow.Add(-1)
+		w.RequestProfileRefresh(ctx, userID, profileID)
+		return false
+	}
+	key := profileRefreshKey(userID, profileID)
+	if !w.claimProfileRefresh(key) {
+		w.refreshesNow.Add(-1)
+		return false
+	}
+
+	done := make(chan struct{})
+	refreshCtx := context.WithoutCancel(ctx)
+	go func() {
+		defer close(done)
+		defer w.refreshesNow.Add(-1)
+		defer w.clearProfileRefreshPending(key)
+		if err := refresh(refreshCtx, userID, profileID); err != nil {
+			slog.ErrorContext(refreshCtx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		}
+	}()
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	slog.InfoContext(ctx, "profile refresh still running; answering without it", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+	return false
 }
 
 // NotifyAccountsScopeChanged records that the access scope of every profile

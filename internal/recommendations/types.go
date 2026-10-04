@@ -21,6 +21,12 @@ type ForYouRow struct {
 	Label        string       `json:"label"`
 	ClusterIndex int          `json:"cluster_index,omitempty"`
 	Items        []ScoredItem `json:"items"`
+	// Subject is what a taste-cluster row is about, its genre label without
+	// the title's wording, for clients that word the reason themselves. It is
+	// empty on every other row and on a cluster whose label names no genre.
+	Subject string `json:"-"`
+	// AnchorItemID is the title a Because You Watched row was built from.
+	AnchorItemID string `json:"-"`
 }
 
 // ForYouResponse is the grouped response of the For You rows endpoint.

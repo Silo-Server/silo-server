@@ -3561,6 +3561,11 @@ func main() {
 			}
 			compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
 				WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+			// /Items/{id}/Similar ranks by embeddings when recommendations
+			// are enabled, and by genre otherwise.
+			if recEngine != nil {
+				compatDeps.Recommender = recEngine
+			}
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)

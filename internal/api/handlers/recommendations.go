@@ -57,10 +57,17 @@ type RecommendationsHandler struct {
 	WatchTonightFetcher watchTonightSectionFetcher
 	CastFetcher         cardsCastFetcher
 	EbookProgress       EbookReaderProgressLister
-	// RecWorker is told when taste seeding adds favorites. Optional: when
-	// nil, nothing is rebuilt until the next scheduled job.
-	RecWorker SignalsChangedNotifier
+	// RecWorker refreshes the profile when taste seeding adds favorites.
+	// Optional: when nil, nothing is rebuilt until the next scheduled job.
+	RecWorker TasteSeedRefresher
 	nowFn     func() time.Time
+}
+
+// TasteSeedRefresher rebuilds a profile's taste profile and cached rows right
+// after its taste-seed picks are stored, waiting a few seconds for the result
+// so the client's next read shows it. *recommendations.Worker implements it.
+type TasteSeedRefresher interface {
+	RefreshProfileNow(ctx context.Context, userID int, profileID string) bool
 }
 
 type discoverFetcher interface {

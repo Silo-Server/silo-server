@@ -211,43 +211,75 @@ func (r *Reader) SectionSimilarUsersLiked(ctx context.Context, userID int, profi
 // those libraries, so a section picks an anchor with recommendations in its
 // own scope. A caller must access-check the anchor before displaying it.
 func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
+	rows, err := r.becauseYouWatchedRows(ctx, userID, profileID, sourceItemID, 1, scopeToLibraries(filter, libraryIDs))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(rows) == 0 {
+		return []ScoredItem{}, "", nil
+	}
+	row := trimRows(rows, CacheCandidateLimit)[0]
+	return row.Items, row.AnchorItemID, nil
+}
+
+// GetBecauseYouWatchedRows returns up to maxRows cached Because You Watched
+// rows filtered for the viewer, one per anchor, the most recent anchor first,
+// each holding at most limit items. A row names its anchor in AnchorItemID; a
+// caller must access-check the anchor before displaying it.
+func (r *Reader) GetBecauseYouWatchedRows(ctx context.Context, userID int, profileID string, maxRows, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	rows, err := r.becauseYouWatchedRows(ctx, userID, profileID, "", maxRows, filter)
+	if err != nil {
+		return nil, err
+	}
+	return trimRows(rows, normalizeRecommendationLimit(limit)), nil
+}
+
+// becauseYouWatchedRows reads the cached Because You Watched rows of up to
+// maxRows anchors, filtered with filter. It uses sourceItemID as the anchor
+// when given, else the profile's most recent completed titles in turn,
+// passing over an anchor whose row filters empty.
+func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileID, sourceItemID string, maxRows int, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	if maxRows <= 0 {
+		return nil, nil
+	}
 	sourceIDs := []string{}
 	if sourceItemID != "" {
 		sourceIDs = append(sourceIDs, sourceItemID)
 	} else {
 		recentCompleted, err := r.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		sourceIDs = append(sourceIDs, recentCompleted...)
 	}
 
-	read := r.newRowRead(userID, profileID, scopeToLibraries(filter, libraryIDs))
+	read := r.newRowRead(userID, profileID, filter)
 	cached := false
+	var rows []ForYouRow
 	for _, sourceID := range sourceIDs {
+		if len(rows) >= maxRows {
+			break
+		}
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		if len(items) == 0 {
 			continue
 		}
 		cached = true
-		rows, err := read.filter(ctx, []ForYouRow{{
-			Type:  RecTypeBecauseWatched,
-			Label: "Because You Watched",
-			Items: items,
+		filtered, err := read.filter(ctx, []ForYouRow{{
+			Type:         RecTypeBecauseWatched,
+			Label:        "Because You Watched",
+			Items:        items,
+			AnchorItemID: sourceID,
 		}})
 		if err != nil {
-			return nil, "", err
+			return nil, err
 		}
-		if len(rows) == 0 {
-			// Everything this anchor recommends is filtered out or out of
-			// scope; the next anchor may still fill the row.
-			continue
-		}
-		rows = trimRows(rows, CacheCandidateLimit)
-		return rows[0].Items, sourceID, nil
+		// A row filtered empty, everything it recommends out of reach or out
+		// of scope, gives way to the next anchor.
+		rows = append(rows, filtered...)
 	}
 
 	// Rows are built only for completed titles, so a profile with none has
@@ -256,7 +288,7 @@ func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profi
 	if len(sourceIDs) > 0 && !cached {
 		r.requestRefresh(ctx, userID, profileID)
 	}
-	return []ScoredItem{}, "", nil
+	return rows, nil
 }
 
 // scopeToLibraries narrows filter so an item must also be in one of
@@ -483,7 +515,19 @@ func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 		Label:        title,
 		ClusterIndex: cluster.ClusterIdx,
 		Items:        items,
+		Subject:      clusterSubject(title),
 	}
+}
+
+// clusterSubject is the genre label a cluster row titled title is about: the
+// title without its prefix. It is "" for a cluster whose label names no genre,
+// an unlabeled one or one whose history carried no genres.
+func clusterSubject(title string) string {
+	label, ok := strings.CutPrefix(title, clusterTitlePrefix)
+	if !ok || label == "" || label == unlabeledClusterLabel || label == buildClusterLabel(nil) {
+		return ""
+	}
+	return label
 }
 
 // filterRows drops from rows the items the profile cannot access, those in its

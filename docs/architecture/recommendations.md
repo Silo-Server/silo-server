@@ -16,7 +16,9 @@ go through `internal/api/handlers/recommendations*.go` and
 `internal/apiv2/recommendations.go`; home and library sections through
 `internal/sections`; Jellyfin's `/Movies/Recommendations` through
 `internal/jellycompat`. Admin operations are in
-[admin-recommendations-api.md](../admin-recommendations-api.md).
+[admin-recommendations-api.md](../admin-recommendations-api.md); the
+measurements used to judge the output are in
+[recommendations-evaluation.md](recommendations-evaluation.md).
 
 ## Jobs
 
@@ -99,6 +101,14 @@ only mark the affected profiles stale, for the stale sweep. Changes to a
 profile's access scope also notify (see Access). Ebook and Audiobookshelf
 progress (beta) do not notify; those profiles refresh at the next nightly taste
 run or stale sweep.
+
+A taste-seed submission calls `Worker.RefreshProfileNow` instead: it marks the
+profile stale, refreshes it on that server at once and waits up to 5 seconds,
+so the client's next read shows the picks' effect. The refresh holds the
+profile's pending key, so the queue and the sweep do not start a duplicate on
+that server, and it runs detached from the request with the usual 2-minute
+budget: a slower refresh finishes in the background and is not queued again.
+At most 4 run at once per server; past that the refresh is queued.
 
 A refresh records the database time it started, stores the taste profile with
 that time as `updated_at`, and clears only stale marks set before it. A mark
@@ -192,6 +202,10 @@ cached row.
 List reads return at most 50 items per row (default 20); the v1 for-you and
 similar-users reads keep 20, and section "see all" reads return up to 60, a
 whole cached row. Home and library sections read the whole cached pool,
-scope it to the section's libraries, then trim to the section's size. A
+scope it to the section's libraries, then trim to the section's size.
+Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
+truthfully: up to two Because You Watched rows under their anchor's title,
+dropped when the viewer cannot see the anchor, and the taste-cluster rows
+under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
 per-section items request that fails to load answers `500`; the aggregate
 sections endpoints still degrade to empty rows.

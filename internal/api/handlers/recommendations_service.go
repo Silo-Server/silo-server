@@ -481,13 +481,15 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 }
 
 // SubmitTasteSeed favorites every picked item for the profile and, when
-// any was added, queues a taste-profile refresh. All picks must first be visible
+// any was added, refreshes its taste profile and cached rows, waiting a few
+// seconds for the refresh so the client's next read shows the picks' effect;
+// a slower refresh finishes in the background. All picks must first be visible
 // in the acting profile's access-filtered catalog. It answers how many picks
 // were newly recorded; an item that fails to record is skipped, not fatal.
 // Favouriting is set membership, so a duplicate pick, an item the profile
 // already favorited, or a retried submission adds nothing: the store's
 // insert is a no-op that the count leaves out, and a submission that added
-// nothing queues no refresh.
+// nothing refreshes nothing.
 func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string, filter catalog.AccessFilter) (int, error) {
 	if h.storeProvider == nil {
 		return 0, apiError(http.StatusServiceUnavailable, "unavailable", "User store unavailable")
@@ -531,8 +533,8 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 			added++
 		}
 	}
-	if added > 0 {
-		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
+	if added > 0 && h.RecWorker != nil {
+		h.RecWorker.RefreshProfileNow(ctx, userID, profileID)
 	}
 	return added, nil
 }

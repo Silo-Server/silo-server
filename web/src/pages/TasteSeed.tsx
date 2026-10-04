@@ -19,6 +19,10 @@ export default function TasteSeed() {
   useDocumentTitle("Pick what you love");
 
   const isReturning = searchParams.get("from") === "settings";
+  // Finishing the picker opens the recommendations it just shaped; skipping
+  // it, or returning from settings, goes back where the user came from.
+  const exitPath = isReturning ? "/settings/playback" : "/";
+  const donePath = isReturning ? "/settings/playback" : "/recommendations";
 
   // Track only the user's explicit toggles. Final `selected` set is derived
   // from items + toggles each render, so already-favorited items are
@@ -98,8 +102,8 @@ export default function TasteSeed() {
     if (profile) {
       setTasteSeedDismissed(profile.id);
     }
-    navigate(isReturning ? "/settings/playback" : "/", { replace: true });
-  }, [navigate, profile, isReturning]);
+    navigate(exitPath, { replace: true });
+  }, [navigate, profile, exitPath]);
 
   const handleSubmit = useCallback(async () => {
     if (selected.size < MIN_PICKS) {
@@ -119,7 +123,7 @@ export default function TasteSeed() {
       if (profile) {
         setTasteSeedDismissed(profile.id);
       }
-      navigate(isReturning ? "/settings/playback" : "/", { replace: true });
+      navigate(donePath, { replace: true });
       return;
     }
 
@@ -130,14 +134,14 @@ export default function TasteSeed() {
       }
       toast.success(
         result.added === 1
-          ? "Added 1 favorite — personalizing your home"
-          : `Added ${result.added} favorites — personalizing your home`,
+          ? "Added 1 favorite — personalizing your recommendations"
+          : `Added ${result.added} favorites — personalizing your recommendations`,
       );
-      navigate(isReturning ? "/settings/playback" : "/", { replace: true });
+      navigate(donePath, { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save your picks");
     }
-  }, [selected, items, submit, navigate, profile, isReturning]);
+  }, [selected, items, submit, navigate, profile, donePath]);
 
   const submitDisabled = selected.size < MIN_PICKS || submit.isPending;
 
