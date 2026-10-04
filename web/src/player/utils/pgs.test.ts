@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   decodePGSObject,
   mergePGSCompositions,
+  pgsCompositionAt,
   pgsCompositionIndexAt,
   pgsPaletteEntryToRGBA,
+  prunePGSTimeline,
   PGSStreamParser,
   type PGSComposition,
 } from "./pgs";
@@ -152,7 +154,8 @@ describe("PGSStreamParser", () => {
         ...end(2),
       ]),
     );
-    expect(compositions[1]!.objects).toEqual([]);
+    // The new epoch never defined object 0, so its screen cannot be drawn.
+    expect(compositions.map((c) => c.start)).toEqual([1]);
   });
 
   it("keeps an earlier screen's colors after a palette-only update", () => {
@@ -196,6 +199,47 @@ describe("PGSStreamParser", () => {
       ]),
     );
     expect(Array.from(composition!.objects[0]!.rle)).toEqual(rle);
+  });
+
+  it("drops a display set that places objects defined before the stream began", () => {
+    // A window that starts mid-epoch: the screen's objects were defined in an
+    // earlier window, so this parser cannot draw it and must not clear it.
+    const parser = new PGSStreamParser();
+    const compositions = parser.push(
+      new Uint8Array([
+        ...pcs(2, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
+        ...end(2),
+        ...pcs(3, { state: 0 }),
+        ...end(3),
+      ]),
+    );
+    expect(compositions.map((c) => [c.start, c.objects.length])).toEqual([[3, 0]]);
+  });
+
+  it("drops a display set whose palette was defined before the stream began", () => {
+    const parser = new PGSStreamParser();
+    const compositions = parser.push(
+      new Uint8Array([
+        ...pcs(2, { state: 0, objects: [{ id: 0, x: 0, y: 0 }] }),
+        ...ods(2, 0, 4, 2, RLE_4X2),
+        ...end(2),
+      ]),
+    );
+    expect(compositions).toEqual([]);
+  });
+
+  it("keeps the epoch across windows when only the byte buffer is reset", () => {
+    const parser = new PGSStreamParser();
+    parser.push(new Uint8Array(displaySetWithObject(1)));
+    // The first window ends partway through a segment header.
+    parser.push(new Uint8Array([0x50, 0x47, 0, 0]));
+    parser.resetBuffer();
+    const [next] = parser.push(
+      new Uint8Array([...pcs(5, { state: 0, objects: [{ id: 0, x: 10, y: 20 }] }), ...end(5)]),
+    );
+    expect(next).toMatchObject({ start: 5 });
+    expect(next!.objects[0]).toMatchObject({ x: 10, y: 20, width: 4, height: 2 });
+    expect(next!.objects[0]!.palette[1]! >>> 24).toBe(255);
   });
 
   it("skips garbage before the next segment", () => {
@@ -248,6 +292,26 @@ describe("PGS timeline helpers", () => {
     expect(pgsCompositionIndexAt(timeline, 1)).toBe(0);
     expect(pgsCompositionIndexAt(timeline, 4.9)).toBe(1);
     expect(pgsCompositionIndexAt(timeline, 9)).toBe(2);
+  });
+
+  it("keeps the copy an earlier window resolved when a window repeats a screen", () => {
+    const earlier = at(1);
+    const merged = mergePGSCompositions([earlier], [at(1, 2), at(3)]);
+    expect(merged[0]).toBe(earlier);
+    expect(merged.map((c) => c.start)).toEqual([1, 3]);
+  });
+
+  it("shows nothing past the loaded part of the timeline", () => {
+    const timeline = [at(1), at(5)];
+    expect(pgsCompositionAt(timeline, 9, 10)).toBe(timeline[1]);
+    expect(pgsCompositionAt(timeline, 12, 10)).toBeNull();
+    expect(pgsCompositionAt(timeline, 0.5, 10)).toBeNull();
+  });
+
+  it("prunes screens behind a point but keeps the one showing there", () => {
+    const timeline = [at(1), at(2, 0), at(5), at(9)];
+    expect(prunePGSTimeline(timeline, 6).map((c) => c.start)).toEqual([5, 9]);
+    expect(prunePGSTimeline(timeline, 0.5)).toBe(timeline);
   });
 
   it("merges overlapping windows without letting an unresolved copy erase a screen", () => {

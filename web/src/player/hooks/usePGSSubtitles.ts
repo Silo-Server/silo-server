@@ -6,8 +6,9 @@ import { toMediaTime } from "../utils/mediaTimeline";
 import {
   decodePGSObject,
   mergePGSCompositions,
-  pgsCompositionIndexAt,
+  pgsCompositionAt,
   PGSStreamParser,
+  prunePGSTimeline,
   type PGSComposition,
   type PGSPlacedObject,
 } from "../utils/pgs";
@@ -25,7 +26,7 @@ const SEEK_BACKOFF = 10;
 // Larger than any real Blu-ray plane; a bigger object is damaged data.
 const MAX_OBJECT_PIXELS = 4096 * 4096;
 // Keeps a subtitle that would land past the player's edge (a Fill crop, or a
-// plane taller than the letterboxed video) this far inside it.
+// plane larger than the cropped video) this far inside it.
 const EDGE_MARGIN_RATIO = 0.02;
 
 export type PGSLoadState = "idle" | "loading" | "ready" | "error";
@@ -48,28 +49,84 @@ export interface UsePGSSubtitlesOptions {
   fetchAnchorRef: RefObject<number>;
   videoFit: VideoFitMode;
   /**
-   * Pixels at the bottom of the player covered by the control bar. Subtitles
-   * placed in the lower half rise above it, like the text overlay does.
+   * Pixels at the bottom of the player that subtitles placed in the lower
+   * half must stay above: the control bar and its gap while the bar is up.
    */
   bottomInsetPx?: number;
   onLoadState?: (state: PGSLoadState) => void;
 }
 
 /**
- * Maps the composition plane onto the screen. HD planes keep their aspect,
- * scaled to the picture's width and centered on it: a 1920x1080 plane over a
- * 1920x800 scope encode puts subtitles into the letterbox, where the disc
- * placed them. SD planes are anamorphic, so they stretch to the picture.
+ * Maps the composition plane onto the screen. An HD plane is the disc's full
+ * frame and the picture is that frame, maybe cropped, so the plane keeps its
+ * aspect, matches the picture along the uncropped side, and is centered on
+ * it: a 1920x1080 plane over a 1920x800 scope encode reaches into the
+ * letterbox, and over a 1440x1080 pillarbox crop into the side bars, where
+ * the disc placed the subtitles. SD planes are anamorphic, so they stretch to
+ * the picture.
  */
 export function pgsPlaneRect(video: FitRect, planeWidth: number, planeHeight: number): FitRect {
   if (planeWidth <= 0 || planeHeight <= 0) return video;
   if (planeHeight <= 576) return video;
-  const scale = video.width / planeWidth;
+  const scale = Math.max(video.width / planeWidth, video.height / planeHeight);
+  const width = planeWidth * scale;
   const height = planeHeight * scale;
   return {
-    x: video.x,
+    x: video.x + (video.width - width) / 2,
     y: video.y + (video.height - height) / 2,
-    width: video.width,
+    width,
+    height,
+  };
+}
+
+/** Moves a span inside [min, max], centered there when it is too long to fit. */
+function clampSpan(start: number, size: number, min: number, max: number): number {
+  if (size > max - min) return min + (max - min - size) / 2;
+  return Math.min(Math.max(start, min), max - size);
+}
+
+/**
+ * Where one object lands in the player box. It keeps its place on the plane,
+ * then stays inside the box with a small margin, shrinking when it is wider
+ * than the box (a Fill crop on a narrow screen); lower-half objects also stay
+ * above `bottomInsetPx`.
+ */
+export function placePGSObject({
+  object,
+  source,
+  plane,
+  planeWidth,
+  planeHeight,
+  boxWidth,
+  boxHeight,
+  bottomInsetPx,
+}: {
+  object: { x: number; y: number };
+  source: FitRect;
+  plane: FitRect;
+  planeWidth: number;
+  planeHeight: number;
+  boxWidth: number;
+  boxHeight: number;
+  bottomInsetPx: number;
+}): FitRect {
+  const scaleX = plane.width / planeWidth;
+  const scaleY = plane.height / planeHeight;
+  const marginX = boxWidth * EDGE_MARGIN_RATIO;
+  const marginY = boxHeight * EDGE_MARGIN_RATIO;
+  let width = source.width * scaleX;
+  let height = source.height * scaleY;
+  const shrink = Math.max(0, Math.min(1, (boxWidth - 2 * marginX) / width));
+  const centerX = plane.x + object.x * scaleX + width / 2;
+  const centerY = plane.y + object.y * scaleY + height / 2;
+  width *= shrink;
+  height *= shrink;
+  const lowerHalf = centerY > boxHeight / 2;
+  const bottom = boxHeight - Math.max(marginY, lowerHalf ? bottomInsetPx : 0);
+  return {
+    x: clampSpan(centerX - width / 2, width, marginX, boxWidth - marginX),
+    y: clampSpan(centerY - height / 2, height, marginY, bottom),
+    width,
     height,
   };
 }
@@ -149,6 +206,9 @@ export function usePGSSubtitles({
 
     let cancelled = false;
     let timeline: PGSComposition[] = [];
+    // Carried across contiguous windows so an epoch that began in one window
+    // still resolves in the next; a fresh window starts a new one.
+    let parser: PGSStreamParser | null = null;
     let coverageStart = 0;
     let windowEnd = 0;
     let atEOF = false;
@@ -231,32 +291,31 @@ export function usePGSSubtitles({
         videoFitRef.current,
       );
       const plane = pgsPlaneRect(picture, composition.width, composition.height);
-      const scaleX = plane.width / composition.width;
-      const scaleY = plane.height / composition.height;
-      const margin = boxHeight * EDGE_MARGIN_RATIO;
       for (const object of composition.objects) {
         const source = objectSourceRect(object);
         if (source.width === 0 || source.height === 0) continue;
         const bitmap = bitmapFor(object);
         if (!bitmap) continue;
-        const width = source.width * scaleX;
-        const height = source.height * scaleY;
-        const x = plane.x + object.x * scaleX;
-        let y = plane.y + object.y * scaleY;
-        const lowerHalf = y + height / 2 > boxHeight / 2;
-        const floor = boxHeight - margin - (lowerHalf ? bottomInsetRef.current : 0);
-        if (y + height > floor) y = floor - height;
-        if (y < margin) y = Math.min(margin, boxHeight - height);
+        const target = placePGSObject({
+          object,
+          source,
+          plane,
+          planeWidth: composition.width,
+          planeHeight: composition.height,
+          boxWidth,
+          boxHeight,
+          bottomInsetPx: bottomInsetRef.current,
+        });
         context.drawImage(
           bitmap,
           source.x,
           source.y,
           source.width,
           source.height,
-          x,
-          y,
-          width,
-          height,
+          target.x,
+          target.y,
+          target.width,
+          target.height,
         );
       }
     }
@@ -264,10 +323,11 @@ export function usePGSSubtitles({
     function renderFrame() {
       frameRequest = 0;
       if (cancelled) return;
-      const time = sourceTime();
-      const index = pgsCompositionIndexAt(timeline, time);
-      const composition = index >= 0 ? timeline[index]! : null;
-      const key = `${canvasEl.clientWidth}x${canvasEl.clientHeight}:${videoEl.videoWidth}x${videoEl.videoHeight}:${layoutRevisionRef.current}`;
+      // A window on the wire may still bring the clear for the last screen;
+      // with none, the timeline ends at the last window that loaded.
+      const loadedUntil = inflight ? Infinity : windowEnd + 1;
+      const composition = pgsCompositionAt(timeline, sourceTime(), loadedUntil);
+      const key = `${canvasEl.clientWidth}x${canvasEl.clientHeight}@${window.devicePixelRatio}:${videoEl.videoWidth}x${videoEl.videoHeight}:${layoutRevisionRef.current}`;
       if (composition !== painted.composition || key !== painted.key) {
         painted = { composition, key };
         try {
@@ -299,10 +359,13 @@ export function usePGSSubtitles({
         if (stallTimer !== null) clearTimeout(stallTimer);
         stallTimer = setTimeout(() => controller.abort(), SUBTITLE_FETCH_STALL_TIMEOUT_MS);
       };
-      // Each window is its own epoch history: display sets near its start may
-      // reference objects defined before it, and the merge keeps the copy the
+      // A fresh window starts a new epoch history. An extend continues the
+      // last one, so display sets past the join can still place objects the
+      // previous window defined; the repeats in the overlap keep the copy the
       // earlier window resolved.
-      const parser = new PGSStreamParser();
+      if (resetExisting || !parser) parser = new PGSStreamParser();
+      else parser.resetBuffer();
+      const windowParser = parser;
       let succeeded = false;
       try {
         armStallTimer();
@@ -317,7 +380,7 @@ export function usePGSSubtitles({
           const { value, done } = await reader.read();
           if (cancelled || controller.signal.aborted || inflight !== controller) return;
           if (done) break;
-          const parsed = parser.push(value);
+          const parsed = windowParser.push(value);
           if (parsed.length > 0) {
             timeline = mergePGSCompositions(timeline, parsed);
             onLoadStateRef.current?.("ready");
@@ -340,6 +403,13 @@ export function usePGSSubtitles({
           windowEnd = Math.max(windowEnd, requestedEnd);
           const duration = durationRef.current ?? 0;
           if (duration > 0 && requestedEnd >= duration) atEOF = true;
+          // Keep about one window behind the playhead, so a straight run
+          // through a long film holds a bounded number of screens.
+          const keepFrom = sourceTime() - SUBTITLE_WINDOW_SECONDS;
+          if (!resetExisting && keepFrom > coverageStart) {
+            timeline = prunePGSTimeline(timeline, keepFrom);
+            coverageStart = keepFrom;
+          }
         } else if (!succeeded && !superseded && !cancelled) {
           lastFetchFailureAt = Date.now();
           onLoadStateRef.current?.("error");

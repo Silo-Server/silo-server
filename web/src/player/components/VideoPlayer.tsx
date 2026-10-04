@@ -2718,14 +2718,17 @@ export function VideoPlayer({
     }
     return 0;
   })();
-  const subtitlesLifted =
-    displayMode === "foreground" &&
-    controlsVisible &&
-    subtitleSettings.position !== "top" &&
-    controlBarHeight > 0;
-  const subtitleLiftPx = subtitlesLifted
-    ? Math.max(0, controlBarHeight + SUBTITLE_HUD_GAP - baseSubtitleBottomPx)
-    : 0;
+  // Height the bar and its gap cover at the bottom of the player. PGS
+  // bitmaps carry their own position, so they clear this whatever the text
+  // position setting says.
+  const subtitleHudInsetPx =
+    displayMode === "foreground" && controlsVisible && controlBarHeight > 0
+      ? controlBarHeight + SUBTITLE_HUD_GAP
+      : 0;
+  const subtitleLiftPx =
+    subtitleSettings.position !== "top"
+      ? Math.max(0, subtitleHudInsetPx - baseSubtitleBottomPx)
+      : 0;
 
   // -- Subtitle cue matching --
   // Returns active cue texts for custom rendering instead of native TextTrack
@@ -2779,7 +2782,7 @@ export function VideoPlayer({
     durationRef,
     fetchAnchorRef: subtitleFetchAnchorRef,
     videoFit,
-    bottomInsetPx: subtitleLiftPx,
+    bottomInsetPx: subtitleHudInsetPx,
     onLoadState: setPGSSubtitleState,
   });
   const subtitleLoadState = isASSActive

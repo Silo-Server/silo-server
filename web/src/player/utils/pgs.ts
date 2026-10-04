@@ -8,6 +8,9 @@
  * later display set may place an object defined earlier. Each display set
  * resolves here to a {@link PGSComposition}: everything needed to draw that
  * screen without consulting earlier state, or an empty object list to clear.
+ * A display set that places an object or palette this parser never saw (its
+ * epoch began before the stream did) is dropped rather than turned into a
+ * clear, so it cannot erase a screen that is still showing.
  *
  * Bitmaps stay run-length encoded until drawn ({@link decodePGSObject}); a
  * feature-length track holds thousands of display sets and only the one on
@@ -162,7 +165,9 @@ export function decodePGSObject(object: PGSPlacedObject): Uint32Array<ArrayBuffe
 }
 
 function concat(chunks: Uint8Array[], total: number): Uint8Array {
-  if (chunks.length === 1 && chunks[0]!.byteLength === total) return chunks[0]!;
+  // Always a copy: a view into the network chunk would keep the whole chunk
+  // alive for as long as the timeline holds this object.
+  if (chunks.length === 1 && chunks[0]!.byteLength === total) return chunks[0]!.slice();
   const out = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -187,6 +192,17 @@ export class PGSStreamParser {
   private objects = new Map<number, ObjectDefinition>();
   private pendingObject: PendingObject | null = null;
   private presentation: PresentationSegment | null = null;
+
+  /**
+   * Discards partial input before the stream continues from another window.
+   * Palettes and objects stay, so a window that resumes an epoch can still
+   * draw screens that place objects defined in the window before it.
+   */
+  resetBuffer(): void {
+    this.buffer = new Uint8Array(0);
+    this.pendingObject = null;
+    this.presentation = null;
+  }
 
   push(chunk: Uint8Array): PGSComposition[] {
     if (chunk.byteLength > 0) {
@@ -341,11 +357,13 @@ export class PGSStreamParser {
     const presentation = this.presentation;
     this.presentation = null;
     if (!presentation) return null;
-    const palette = this.palettes.get(presentation.paletteId) ?? new Uint32Array(256);
+    const palette = this.palettes.get(presentation.paletteId);
+    if (!palette && presentation.objects.length > 0) return null;
     const objects: PGSPlacedObject[] = [];
     for (const reference of presentation.objects) {
       const definition = this.objects.get(reference.objectId);
-      if (!definition || definition.width === 0 || definition.height === 0) continue;
+      if (!definition) return null;
+      if (definition.width === 0 || definition.height === 0) continue;
       objects.push({
         x: reference.x,
         y: reference.y,
@@ -354,8 +372,9 @@ export class PGSStreamParser {
         width: definition.width,
         height: definition.height,
         rle: definition.rle,
-        // Snapshot: a later palette-only update must not recolor this screen.
-        palette: new Uint32Array(palette),
+        // readPalette copies on write, so a later palette-only update cannot
+        // recolor this screen.
+        palette: palette!,
       });
     }
     return {
@@ -391,10 +410,34 @@ export function pgsCompositionIndexAt(
 }
 
 /**
+ * The composition on screen at `time`, or null before the first one and past
+ * `loadedUntil`: the clear that ends the last loaded screen may sit in a
+ * window that has not arrived, so that screen must not stay up indefinitely.
+ */
+export function pgsCompositionAt(
+  compositions: readonly PGSComposition[],
+  time: number,
+  loadedUntil: number,
+): PGSComposition | null {
+  if (time > loadedUntil) return null;
+  const index = pgsCompositionIndexAt(compositions, time);
+  return index >= 0 ? compositions[index]! : null;
+}
+
+/**
+ * Drops compositions that ended before `keepFrom`, keeping the one still on
+ * screen there, so a long track does not hold every screen it has shown.
+ */
+export function prunePGSTimeline(timeline: PGSComposition[], keepFrom: number): PGSComposition[] {
+  const index = pgsCompositionIndexAt(timeline, keepFrom);
+  return index > 0 ? timeline.slice(index) : timeline;
+}
+
+/**
  * Merges newly parsed compositions into a start-ordered timeline, dropping
  * repeats. Overlapping fetch windows deliver the same display sets twice; a
- * repeat starts at the same instant and is replaced by the newer copy, which
- * was resolved with the fuller epoch state.
+ * repeat starts at the same instant, and the copy already in the timeline
+ * wins because its window parsed the epoch in order.
  */
 export function mergePGSCompositions(
   timeline: PGSComposition[],
@@ -404,11 +447,7 @@ export function mergePGSCompositions(
   const byStart = new Map<number, PGSComposition>();
   for (const composition of timeline) byStart.set(composition.start, composition);
   for (const composition of incoming) {
-    const existing = byStart.get(composition.start);
-    // A window that starts mid-epoch cannot resolve objects defined before it
-    // and yields an emptier copy; never let that erase a resolved screen.
-    if (existing && existing.objects.length > composition.objects.length) continue;
-    byStart.set(composition.start, composition);
+    if (!byStart.has(composition.start)) byStart.set(composition.start, composition);
   }
   return Array.from(byStart.values()).sort((a, b) => a.start - b.start);
 }
