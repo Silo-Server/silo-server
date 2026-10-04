@@ -184,6 +184,16 @@ func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
 	if _, err := f.pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, busyID); err != nil {
 		t.Fatal(err)
 	}
+	// A stale guard is refused before any encode is queued for it.
+	stale := req
+	stale.ExpectedEntries = map[string]ManagedCreateExpectation{"ep-1": {ID: existingID, Revision: 7}}
+	if _, err := svc.ensureManagedDecisions(ctx, f.userID, stale, []managedItem{item}, []QualityDecision{decision}, "season"); !errors.Is(err, ErrStatusConflict) {
+		t.Fatalf("stale guard: err = %v, want ErrStatusConflict", err)
+	}
+	var jobs int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, f.fileID).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("stale guard queued %d encode jobs (%v)", jobs, err)
+	}
 	rows, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
 	if err != nil || len(rows) != 1 || rows[0].Status != StatusPreparing || rows[0].Format != FormatTranscode {
 		t.Fatalf("replacement with a free slot: %+v %v", rows, err)
