@@ -23692,6 +23692,8 @@ export interface components {
       /** Format: int64 */
       embeddings_imported: number;
       /** Format: int64 */
+      embeddings_skipped: number;
+      /** Format: int64 */
       episodes_created: number;
       /** Format: int64 */
       episodes_updated: number;

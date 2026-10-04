@@ -64,7 +64,7 @@ type Recommender interface {
 	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int) ([]ScoredItem, error)
 	RefreshTasteProfile(ctx context.Context, userID int, profileID string) error
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*TasteProfileSummary, error)
-	EmbedAll(ctx context.Context) (embedded int, err error)
+	EmbedAll(ctx context.Context) (EmbedCounts, error)
 }
 
 // TasteProfileSummary is the user-facing taste profile response.

@@ -2,11 +2,13 @@ package recommendations
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
@@ -31,6 +33,10 @@ const (
 
 	staleSweepInterval = 5 * time.Minute
 	staleSweepBatch    = 50
+
+	// embedMissingInterval spaces the catch-up passes that embed newly
+	// matched items between nightly embedding runs.
+	embedMissingInterval = 15 * time.Minute
 
 	// profileRefreshTimeout bounds one profile's refresh.
 	profileRefreshTimeout = 2 * time.Minute
@@ -121,6 +127,7 @@ func (w *Worker) Start() {
 	w.cancelFunc = cancel
 	go w.profileRefreshLoop(ctx)
 	go w.stalenessLoop(ctx)
+	go w.embedMissingLoop(ctx)
 	go w.ensureGlobalRows(ctx, w.engine.repo)
 
 	slog.Info("recommendation worker started")
@@ -198,10 +205,51 @@ func (w *Worker) TriggerRecommendations() error {
 	return w.runJob(w.jobFor(JobRecommendations), true)
 }
 
-// RunEmbeddingsNow triggers an immediate embedding run (for first-run setup).
-func (w *Worker) RunEmbeddingsNow() {
-	if err := w.TriggerEmbeddings(); err != nil {
-		slog.Info("initial embedding run not started", "component", "recommendations", "reason", err)
+// embedMissingJob is the catch-up pass: Pass 1 of the embeddings job only. It
+// takes the embeddings job's claim, so it never overlaps an embedding run on
+// any server, and a run that found nothing to do is not recorded.
+func (w *Worker) embedMissingJob() job {
+	return job{
+		name:          JobEmbeddings,
+		timeout:       w.embeddingsJobTimeout,
+		quietWhenIdle: true,
+		run:           func(ctx context.Context) (jobResult, error) { return w.doEmbedMissing(ctx) },
+	}
+}
+
+// EmbedMissingNow starts the catch-up pass in the background unless an
+// embedding run holds the job here or on another server. Startup calls it
+// when items need embeddings, so an interrupted backfill resumes at once.
+func (w *Worker) EmbedMissingNow() {
+	if err := w.runJob(w.embedMissingJob(), true); err != nil {
+		slog.Info("embedding catch-up not started", "component", "recommendations", "reason", err)
+	}
+}
+
+// embedMissingLoop runs the catch-up pass every embedMissingInterval.
+func (w *Worker) embedMissingLoop(ctx context.Context) {
+	ticker := time.NewTicker(embedMissingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.runEmbedMissing()
+		}
+	}
+}
+
+// runEmbedMissing runs the catch-up pass in the caller's goroutine, skipping
+// it while an embedding run holds the job here or on another server.
+func (w *Worker) runEmbedMissing() {
+	err := w.runJob(w.embedMissingJob(), false)
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrJobRunning), errors.Is(err, ErrJobRunningElsewhere):
+		slog.Debug("embedding job is running; skipping the catch-up pass", "component", "recommendations", "reason", err)
+	default:
+		slog.Warn("embedding catch-up pass could not start", "component", "recommendations", "error", err)
 	}
 }
 
@@ -294,14 +342,39 @@ func (w *Worker) StatusCounts(ctx context.Context) (embedded, totalItems, tasteP
 }
 
 type embeddingsResult struct {
-	Embedded int `json:"embedded"`
+	// MissingOnly marks a catch-up pass, which skips the text-staleness
+	// pass.
+	MissingOnly bool `json:"missing_only,omitempty"`
+	EmbedCounts
+	// QuotaLimited marks a run a provider limit stopped; RetryDeferred
+	// marks one stopped because the provider asked to wait longer than a
+	// run waits.
+	QuotaLimited  bool `json:"quota_limited"`
+	RetryDeferred bool `json:"retry_deferred"`
 }
 
-func (embeddingsResult) failures() int { return 0 }
+func (r embeddingsResult) failures() int { return r.Failed + r.Skipped }
+
+func (r embeddingsResult) idle() bool { return r.Embedded == 0 && r.failures() == 0 }
+
+func newEmbeddingsResult(counts EmbedCounts, err error, missingOnly bool) embeddingsResult {
+	res := embeddingsResult{MissingOnly: missingOnly, EmbedCounts: counts}
+	if err != nil && isQuotaError(err) {
+		res.QuotaLimited = true
+		var limitErr *embeddings.RateLimitError
+		res.RetryDeferred = errors.As(err, &limitErr) && limitErr.RetryDeferred
+	}
+	return res
+}
 
 func (w *Worker) doEmbeddings(ctx context.Context) (embeddingsResult, error) {
-	count, err := w.engine.EmbedAll(ctx)
-	return embeddingsResult{Embedded: count}, err
+	counts, err := w.engine.EmbedAll(ctx)
+	return newEmbeddingsResult(counts, err, false), err
+}
+
+func (w *Worker) doEmbedMissing(ctx context.Context) (embeddingsResult, error) {
+	counts, err := w.engine.EmbedMissing(ctx)
+	return newEmbeddingsResult(counts, err, true), err
 }
 
 type tasteProfilesResult struct {

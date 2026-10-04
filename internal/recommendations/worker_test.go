@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
@@ -678,5 +680,96 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	}
 	if marker.calls != 2 || marker.ctxErrs[0] != nil || marker.ctxErrs[1] != nil {
 		t.Fatalf("marks = %d with context errors %v; want two marks with live contexts", marker.calls, marker.ctxErrs)
+	}
+}
+
+// The catch-up pass runs under the embeddings job's claim: it skips while an
+// embedding run holds the job on this server or another.
+func TestEmbedMissingSkipsWhileTheEmbeddingsJobIsClaimed(t *testing.T) {
+	// The worker has no engine, so a pass that ran would panic.
+	history := newFakeHistory()
+	here := newJobTestWorker(&fakeLocker{}, history)
+	if !here.tryStart(JobEmbeddings) {
+		t.Fatal("could not claim the embeddings job")
+	}
+	here.runEmbedMissing()
+	if !here.IsRunning(JobEmbeddings) {
+		t.Fatal("the skipped pass released the running job's claim")
+	}
+
+	locker := &fakeLocker{held: true}
+	elsewhere := newJobTestWorker(locker, history)
+	elsewhere.runEmbedMissing()
+	if keys, _ := locker.snapshot(); len(keys) != 1 || keys[0] != embeddingsJobLock {
+		t.Fatalf("catch-up locks = %#x, want the embeddings job's lock", keys)
+	}
+	if elsewhere.IsRunning(JobEmbeddings) || history.count() != 0 {
+		t.Fatalf("skipped pass: running=%v recorded=%d", elsewhere.IsRunning(JobEmbeddings), history.count())
+	}
+}
+
+func TestQuietJobRecordsOnlyRunsThatDidSomething(t *testing.T) {
+	history := newFakeHistory()
+	w := newJobTestWorker(&fakeLocker{}, history)
+	quiet := func(res embeddingsResult, err error) job {
+		return job{name: JobEmbeddings, timeout: time.Minute, quietWhenIdle: true, run: func(context.Context) (jobResult, error) {
+			return res, err
+		}}
+	}
+
+	if err := w.runJob(quiet(embeddingsResult{MissingOnly: true}, nil), false); err != nil {
+		t.Fatal(err)
+	}
+	if history.count() != 0 {
+		t.Fatal("an idle catch-up pass was recorded")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		res    embeddingsResult
+		err    error
+		status string
+	}{
+		{"embedded", embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Embedded: 2}}, nil, runStatusCompleted},
+		{"item failures", embeddingsResult{MissingOnly: true, EmbedCounts: EmbedCounts{Failed: 1}}, nil, runStatusCompleted},
+		{"failed run", embeddingsResult{MissingOnly: true}, errors.New("embedding provider unavailable: refused"), runStatusFailed},
+	} {
+		if err := w.runJob(quiet(tc.res, tc.err), false); err != nil {
+			t.Fatal(err)
+		}
+		run := waitRun(t, history)
+		if run.TaskKey != embeddingsTaskKey || run.Status != tc.status || !strings.Contains(string(run.ResultData), `"missing_only":true`) {
+			t.Fatalf("%s: recorded %+v %s", tc.name, run, run.ResultData)
+		}
+	}
+}
+
+func TestEmbeddingsResultReportsOutcome(t *testing.T) {
+	counts := EmbedCounts{Embedded: 4, Truncated: 1, Failed: 2, Skipped: 1}
+	res := newEmbeddingsResult(counts, nil, false)
+	if res.failures() != 3 || res.idle() || res.QuotaLimited {
+		t.Fatalf("result = %+v failures %d", res, res.failures())
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"embedded":4,"truncated":1,"failed":2,"skipped":1,"quota_limited":false,"retry_deferred":false}`; string(data) != want {
+		t.Fatalf("result data = %s, want %s", data, want)
+	}
+
+	for name, tc := range map[string]struct {
+		err             error
+		quota, deferred bool
+	}{
+		"deferred":        {fmt.Errorf("embedding batch stopped: %w", &embeddings.RateLimitError{RetryDeferred: true}), true, true},
+		"daily quota":     {fmt.Errorf("embedding batch stopped: %w", &embeddings.RateLimitError{DailyQuota: true}), true, false},
+		"provider down":   {errors.New("embedding provider unavailable: connection refused"), false, false},
+		"deadline passed": {context.DeadlineExceeded, false, false},
+	} {
+		res := newEmbeddingsResult(EmbedCounts{}, tc.err, true)
+		if res.QuotaLimited != tc.quota || res.RetryDeferred != tc.deferred || !res.MissingOnly {
+			t.Fatalf("%s: result = %+v", name, res)
+		}
 	}
 }
