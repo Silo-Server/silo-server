@@ -12,7 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestGetBecauseYouWatchedWithSourceReturnsAnchorThatHasCache(t *testing.T) {
+func TestSectionBecauseYouWatchedReturnsAnchorThatHasCache(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()
 	const prefix = "tbcw-source-"
@@ -42,7 +42,7 @@ func TestGetBecauseYouWatchedWithSourceReturnsAnchorThatHasCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	items, sourceID, err := NewReader(repo, nil, nil, nil).GetBecauseYouWatchedWithSource(ctx, userID, profile, "", 10, catalog.AccessFilter{})
+	items, sourceID, err := NewReader(repo, nil, nil, nil).SectionBecauseYouWatched(ctx, userID, profile, "", nil, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestReaderRefreshesAProfileWithoutTasteOnlyWhenItHasSignals(t *testing.T) {
 func TestBecauseYouWatchedWithoutCompletionsRequestsNoRefresh(t *testing.T) {
 	refresher := &countingReadRefresher{}
 	r := &Reader{refresh: refresher, signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: &fakeSignalStore{}})}
-	items, source, err := r.GetBecauseYouWatchedWithSource(t.Context(), 7, "p1", "", 10, catalog.AccessFilter{})
+	items, source, err := r.SectionBecauseYouWatched(t.Context(), 7, "p1", "", nil, catalog.AccessFilter{})
 	if err != nil || len(items) != 0 || source != "" {
 		t.Fatalf("items=%v source=%q err=%v, want an empty row", items, source, err)
 	}
@@ -166,22 +166,24 @@ func TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres(t *testing.T) {
 }
 
 // fakeReaderRepo serves the Reader's reads from memory. Every item is
-// accessible unless listed in hidden.
+// accessible unless listed in hidden or, when the filter names allowed
+// libraries, its library in libraries is not one of them.
 type fakeReaderRepo struct {
 	meta     *TasteProfileMeta
 	clusters []TasteCluster
 	// personal holds the profile's cached rows by rec type and source item,
 	// global the global rows by rec type.
-	personal map[string][]ScoredItem
-	global   map[string][]ScoredItem
-	hidden   map[string]struct{}
+	personal  map[string][]ScoredItem
+	global    map[string][]ScoredItem
+	hidden    map[string]struct{}
+	libraries map[string]int
 }
 
 func (f *fakeReaderRepo) GetTasteProfileMeta(context.Context, int, string) (*TasteProfileMeta, error) {
 	return f.meta, nil
 }
 
-func (f *fakeReaderRepo) GetTasteClusters(context.Context, int, string) ([]TasteCluster, error) {
+func (f *fakeReaderRepo) GetTasteClusterMeta(context.Context, int, string) ([]TasteCluster, error) {
 	return f.clusters, nil
 }
 
@@ -200,12 +202,16 @@ func (f *fakeReaderRepo) GetTopGenres(context.Context, int) ([]string, error) {
 	return nil, nil
 }
 
-func (f *fakeReaderRepo) FilterAccessibleItemIDs(_ context.Context, itemIDs []string, _ catalog.AccessFilter) (map[string]struct{}, error) {
+func (f *fakeReaderRepo) FilterAccessibleItemIDs(_ context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	accessible := make(map[string]struct{}, len(itemIDs))
 	for _, id := range itemIDs {
-		if _, hidden := f.hidden[id]; !hidden {
-			accessible[id] = struct{}{}
+		if _, hidden := f.hidden[id]; hidden {
+			continue
 		}
+		if filter.AllowedLibraryIDs != nil && !slices.Contains(filter.AllowedLibraryIDs, f.libraries[id]) {
+			continue
+		}
+		accessible[id] = struct{}{}
 	}
 	return accessible, nil
 }

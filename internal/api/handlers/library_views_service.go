@@ -183,6 +183,11 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
 			sections.LogFetchError(ctx, "api", s, fetchErr)
+			// As on Home, a failed single section answers an error rather
+			// than an empty row; a deleted collection keeps its empty row.
+			if !sections.IsMissingCollection(fetchErr) {
+				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
+			}
 			withItems = sections.SectionWithItems{
 				ResolvedSection: s,
 				Items:           []*models.MediaItem{},

@@ -21,6 +21,10 @@ type fakeSignalRepo struct {
 	fallbackRecentCompleted []string
 	fallbackRewatches       []RewatchCount
 
+	// missing lists canonical IDs ExistingItemIDs reports as deleted from
+	// the catalog; every other ID exists.
+	missing map[string]struct{}
+
 	// signalRows answers HasSignalRows, which records each call's
 	// includeStoreTables argument.
 	signalRows      bool
@@ -78,6 +82,16 @@ func (r *fakeSignalRepo) ResolveCanonicalItemIDSet(ctx context.Context, contentI
 		set[id] = struct{}{}
 	}
 	return set, nil
+}
+
+func (r *fakeSignalRepo) ExistingItemIDs(_ context.Context, itemIDs []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{}, len(itemIDs))
+	for _, id := range itemIDs {
+		if _, gone := r.missing[id]; !gone {
+			existing[id] = struct{}{}
+		}
+	}
+	return existing, nil
 }
 
 type fakeSignalProvider struct {

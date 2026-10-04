@@ -221,7 +221,10 @@ func TestCowatchMatrixTreatsProfilesAsDistinctWatchers(t *testing.T) {
 		"b": {"1:p1", "1:p2"},
 	}
 
-	pairs := computeCowatchMatrix(watchers, 2, 2, 10)
+	pairs, err := computeCowatchMatrix(t.Context(), watchers, 2, 2, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(pairs) != 2 {
 		t.Fatalf("got %d co-watch pairs, want 2: %#v", len(pairs), pairs)
 	}

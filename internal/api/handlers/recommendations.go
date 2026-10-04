@@ -41,6 +41,7 @@ type RecommendationsHandler struct {
 	storeProvider       userstore.UserStoreProvider
 	ratingsRepo         *catalog.RatingsRepo
 	recsRepo            *recommendations.Repo
+	signals             *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
 	enabled             bool
 	Fetcher             discoverFetcher
 	DetailSvc           discoverPresigner
@@ -67,7 +68,7 @@ type discoverPresigner interface {
 
 // NewRecommendationsHandler creates a new RecommendationsHandler.
 func NewRecommendationsHandler(engine recommendationsEngine, reader recommendationsReader, storeProvider userstore.UserStoreProvider, ratingsRepo *catalog.RatingsRepo, recsRepo *recommendations.Repo, enabled bool) *RecommendationsHandler {
-	return &RecommendationsHandler{
+	h := &RecommendationsHandler{
 		engine:        engine,
 		reader:        reader,
 		storeProvider: storeProvider,
@@ -76,6 +77,10 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 		enabled:       enabled,
 		nowFn:         time.Now,
 	}
+	if recsRepo != nil {
+		h.signals = recommendations.NewSignalReader(recsRepo, storeProvider)
+	}
+	return h
 }
 
 // --- Response types ---
@@ -127,9 +132,16 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
+// v1RecommendationRowLimit keeps a frozen v1 row read at the 20 items a row
+// has always answered there; the reader serves up to 50 for v2.
+func v1RecommendationRowLimit(r *http.Request) int {
+	limit, _ := parsePagination(r)
+	return min(limit, recommendationsDefaultLimit)
+}
+
 // HandleForYouMain handles GET /recommendations/for-you/main.
 func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	row, err := h.ForYouMain(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -140,7 +152,7 @@ func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http
 
 // HandleForYouRows handles GET /recommendations/for-you/rows.
 func (h *RecommendationsHandler) HandleForYouRows(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	rows, err := h.ForYouRows(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -173,7 +185,7 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 
 // HandleSimilarUsers handles GET /recommendations/similar-users.
 func (h *RecommendationsHandler) HandleSimilarUsers(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	items, err := h.SimilarUsersLiked(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -247,7 +259,11 @@ func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Conte
 		return items
 	}
 	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil || len(watchedSet) == 0 {
+	if err != nil {
+		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return items
+	}
+	if len(watchedSet) == 0 {
 		return items
 	}
 
@@ -261,22 +277,13 @@ func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Conte
 	return filtered
 }
 
+// watchedItemIDSet is SignalReader.WatchedItemIDSet, or an empty set when the
+// handler has no recommendations repo.
 func (h *RecommendationsHandler) watchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
-	if h.recsRepo == nil {
+	if h.signals == nil {
 		return map[string]struct{}{}, nil
 	}
-
-	if h.storeProvider != nil {
-		store, err := h.storeProvider.ForUser(ctx, userID)
-		if err == nil && store != nil {
-			set, err := h.recsRepo.GetWatchedItemIDSetFromStore(ctx, store, profileID)
-			if err == nil {
-				return set, nil
-			}
-		}
-	}
-
-	return h.recsRepo.GetWatchedItemIDSet(ctx, userID, profileID)
+	return h.signals.WatchedItemIDSet(ctx, userID, profileID)
 }
 
 func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {
