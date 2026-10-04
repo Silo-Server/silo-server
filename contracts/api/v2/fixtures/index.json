@@ -5172,7 +5172,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\""
+        "ETag": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5195,7 +5195,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\""
+        "ETag": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5210,7 +5210,7 @@
         "path": "/api/v2/downloads/subscriptions/monitor",
         "headers": {
           "Authorization": "Bearer tok-member",
-          "If-Match": "\"7b39536ecc52eb9d09f0198d1fea5167e3267c15597aa4b6c62c138d5642a715\"",
+          "If-Match": "\"e899bde3b1d16fb7c1fe4d68f04a4295e6dd444b403289d4168dd6cddfa2fef0\"",
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         }
@@ -5230,7 +5230,7 @@
         "path": "/api/v2/downloads/subscriptions/monitor",
         "headers": {
           "Authorization": "Bearer tok-member",
-          "If-Match": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\"",
+          "If-Match": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\"",
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         },
@@ -5239,7 +5239,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"7b39536ecc52eb9d09f0198d1fea5167e3267c15597aa4b6c62c138d5642a715\""
+        "ETag": "\"e899bde3b1d16fb7c1fe4d68f04a4295e6dd444b403289d4168dd6cddfa2fef0\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5257,7 +5257,7 @@
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         },
-        "body": "{\"etag\":\"\\\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\\\"\",\"subscription_id\":\"monitor\"}"
+        "body": "{\"etag\":\"\\\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\\\"\",\"subscription_id\":\"monitor\"}"
       },
       "expected_status": 200,
       "response_headers": {

@@ -20535,9 +20535,11 @@ export interface components {
       bounded_creation: boolean;
       bounded_manifests: boolean;
       bounded_subscription_sync: boolean;
+      bulk_quality: boolean;
       download_allowed: boolean;
       enabled: boolean;
       file_delivery: boolean;
+      monitor_quality: boolean;
       monitoring_modes: string[];
       ordered_status: boolean;
       proxy_delivery: boolean;
@@ -20781,6 +20783,11 @@ export interface components {
       /** Format: int64 */
       max_storage_bytes: number;
       mode: string;
+      /**
+       * @description Quality the monitor registers episodes in.
+       * @enum {string}
+       */
+      quality: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
       season_numbers: number[];
       series_id: string;
       /** Format: int64 */
@@ -20797,6 +20804,11 @@ export interface components {
       max_storage_bytes: number;
       /** @enum {string} */
       mode: "all" | "future" | "latest_season" | "specific_seasons";
+      /**
+       * @description Quality to register episodes in. Defaults to original. A new monitor needs the monitor_quality capability for any other preset; an existing monitor keeps its quality.
+       * @enum {string}
+       */
+      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
       season_numbers?: number[];
       series_id: string;
     };
@@ -20806,6 +20818,8 @@ export interface components {
       /** Format: int64 */
       max_storage_bytes?: number | null;
       mode?: string | null;
+      /** @description Quality preset for episodes registered from now on; already-registered downloads keep theirs. */
+      quality?: string | null;
       season_numbers?: number[] | null;
     };
     DownloadSubscriptionSync: {

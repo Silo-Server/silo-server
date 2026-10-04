@@ -83,6 +83,8 @@
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestSubscriptionQualityPostgres
+./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage

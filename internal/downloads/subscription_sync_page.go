@@ -60,7 +60,14 @@ func (s *Service) SyncSubscriptionPage(ctx context.Context, userID int, profileI
 	if err != nil {
 		return SubscriptionSyncPage{}, err
 	}
+	// The lock below rejects the page if the monitor (and so its quality)
+	// changed since these entries were prepared.
+	entries, err := s.prepareMonitorEntries(ctx, sub, items)
+	if err != nil {
+		return SubscriptionSyncPage{}, err
+	}
 	out := SubscriptionSyncPage{Examined: len(episodes)}
+	var registered []*Download
 	if more && len(episodes) > 0 {
 		last := episodes[len(episodes)-1]
 		out.Next = &catalog.EpisodePagePosition{SeasonNumber: last.SeasonNumber, EpisodeNumber: last.EpisodeNumber, ContentID: last.ContentID}
@@ -72,8 +79,14 @@ func (s *Service) SyncSubscriptionPage(ctx context.Context, userID int, profileI
 		if !locked.Active || !locked.UpdatedAt.Equal(sub.UpdatedAt) {
 			return ErrStatusConflict
 		}
-		out.Registered, err = s.registerSubscriptionItems(ctx, locked, items, managedRegistryStore{tx})
+		rows, err := s.registerSubscriptionItems(ctx, locked, items, entries, managedRegistryStore{tx})
+		out.Registered = len(rows)
+		registered = rows
 		return err
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	s.confirmRegistered(ctx, registered)
+	return out, nil
 }

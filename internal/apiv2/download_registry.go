@@ -78,6 +78,11 @@ type DownloadCapability struct {
 	SeasonDownload       bool                    `json:"season_download"`
 	SeriesMonitoring     bool                    `json:"series_monitoring"`
 	MonitoringModes      []string                `json:"monitoring_modes"`
+	// BulkQuality: season and series creation accepts any of quality_presets,
+	// skipping episodes the preset cannot be prepared for. MonitorQuality:
+	// monitors store a quality and register episodes in it.
+	BulkQuality    bool `json:"bulk_quality"`
+	MonitorQuality bool `json:"monitor_quality"`
 }
 
 // DownloadQualityOption describes one quality preset. bitrate_kbps and
@@ -224,6 +229,8 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.SubscriptionMutations = reg.deps.DownloadSubscriptionMutations != nil
 		out.BoundedCreation = reg.deps.DownloadCreation != nil
 		out.BoundedSubscriptionSync = reg.deps.DownloadSubscriptionSync != nil
+		out.BulkQuality = out.BoundedCreation
+		out.MonitorQuality = out.SubscriptionMutations
 		if reg.deps.DownloadProxyDelivery != nil {
 			out.ProxyDelivery = reg.deps.DownloadProxyDelivery()
 		}

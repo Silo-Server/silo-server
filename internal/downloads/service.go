@@ -396,6 +396,10 @@ type CreateRequest struct {
 	// Caps describes the requesting device's decode capability; used to decide
 	// whether original can be delivered directly or needs a compatibility artifact.
 	Caps playback.ClientCapabilities
+	// BulkQuality lets a managed season/series batch request a bitrate preset,
+	// resolved per episode. Native requests set it; the frozen v1 bridge keeps
+	// batches original-only.
+	BulkQuality bool
 }
 
 // Create creates a download for a single item (movie or episode). When the
@@ -677,10 +681,11 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	if err != nil {
 		return nil, "", nil, err
 	}
-	decision, err := s.resolveBulkQuality(req.Quality, user, cfg)
+	quality, err := bulkQuality(req)
 	if err != nil {
 		return nil, "", nil, err
 	}
+	decision := originalDecision()
 
 	item, err := s.itemRepo.GetByID(ctx, req.ContentID)
 	if err != nil {
@@ -702,6 +707,15 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	if err != nil {
 		return nil, "", nil, err
 	}
+	decisions := uniformDecisions(decision, len(items))
+	if quality != QualityOriginal {
+		var unavailable []SkippedDownload
+		items, decisions, unavailable, err = s.resolveItemDecisions(ctx, quality, user, cfg, req.Caps, req.DeviceID, items, false)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		skipped = append(skipped, unavailable...)
+	}
 	if len(items) == 0 {
 		if req.BatchID != "" {
 			return []*Download{}, req.BatchID, skipped, nil
@@ -718,7 +732,7 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	}
 
 	if req.DeviceID != "" {
-		rows, err := s.ensureManaged(ctx, userID, req, items, decision, batchID)
+		rows, err := s.ensureManagedDecisions(ctx, userID, req, items, decisions, batchID)
 		if err != nil {
 			return nil, "", nil, err
 		}
@@ -836,6 +850,15 @@ func (s *Service) forgetMonitorDeletes(ctx context.Context, userID int, req Crea
 // or quality target changed. The device is upserted into user_devices so the
 // composite FK holds. Original entries are created ready-to-serve.
 func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateRequest, items []managedItem, decision QualityDecision, batchID string) ([]*Download, error) {
+	return s.ensureManagedDecisions(ctx, userID, req, items, uniformDecisions(decision, len(items)), batchID)
+}
+
+// ensureManagedDecisions is ensureManaged with one resolved decision per item.
+// An item whose decision needs a prepared file links to its artifact and
+// starts preparing until the artifact is ready. New items' artifacts are
+// ensured inside the quota lock, after the limiter check, so a batch the
+// limiter refuses queues no encode job.
+func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req CreateRequest, items []managedItem, decisions []QualityDecision, batchID string) ([]*Download, error) {
 	if req.ProfileID == "" {
 		return nil, ErrProfileRequired
 	}
@@ -866,12 +889,16 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 				expected = new(entry.Revision)
 				expectedID = entry.ID
 			}
-			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, it, decision, batchID, StatusReady, it.file.FileSize, "")
+			status, size, artifactID, err := s.managedRowSource(ctx, it, decisions[i])
+			if err != nil {
+				return nil, err
+			}
+			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, it, decisions[i], batchID, status, size, artifactID)
 			row, err := s.reuseOrReplaceManaged(ctx, ex, replacement, expected, expectedID)
 			if err != nil {
 				return nil, err
 			}
-			results[i] = row
+			results[i] = s.confirmIfLinked(ctx, row)
 			continue
 		}
 		expected := req.ExpectedRevision
@@ -895,7 +922,11 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 		}
 		toInsert := make([]*Download, 0, len(newIdx))
 		for _, i := range newIdx {
-			d, err := buildManagedOriginal(userID, req.ProfileID, req.DeviceID, items[i], decision, batchID)
+			status, size, artifactID, err := s.managedRowSource(ctx, items[i], decisions[i])
+			if err != nil {
+				return err
+			}
+			d, err := buildManagedEntry(userID, req.ProfileID, req.DeviceID, items[i], decisions[i], batchID, status, size, artifactID)
 			if err != nil {
 				return err
 			}
@@ -916,7 +947,7 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 	}
 	for _, i := range newIdx {
 		if row, ok := byKey[keys[i]]; ok {
-			results[i] = row
+			results[i] = s.confirmIfLinked(ctx, row)
 			continue
 		}
 		// A concurrent create won this identity between the fetch and the
@@ -938,11 +969,17 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 // with a fresh ID. Shared by the interactive series flow and subscription
 // backfill so every original row is built the same.
 func buildManagedOriginal(userID int, profileID, deviceID string, it managedItem, decision QualityDecision, batchID string) (*Download, error) {
+	return buildManagedEntry(userID, profileID, deviceID, it, decision, batchID, StatusReady, it.file.FileSize, "")
+}
+
+// buildManagedEntry constructs a new managed entry with a fresh ID, linked to
+// artifactID when the decision prepared one.
+func buildManagedEntry(userID int, profileID, deviceID string, it managedItem, decision QualityDecision, batchID, status string, fileSize int64, artifactID string) (*Download, error) {
 	id, err := idgen.NextID()
 	if err != nil {
 		return nil, fmt.Errorf("generating download ID: %w", err)
 	}
-	d := buildManagedDownload(userID, profileID, deviceID, it, decision, batchID, StatusReady, it.file.FileSize, "")
+	d := buildManagedDownload(userID, profileID, deviceID, it, decision, batchID, status, fileSize, artifactID)
 	d.ID = id
 	d.CreatedAt = time.Now()
 	d.UpdatedAt = d.CreatedAt
@@ -1224,15 +1261,18 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	return err
 }
 
-func (s *Service) resolveBulkQuality(requested string, _ *PolicyUser, _ config.DownloadConfig) (QualityDecision, error) {
-	quality := normalizeQuality(requested)
+// bulkQuality validates a season/series request's quality. Only a native
+// managed batch may ask for a bitrate preset; ephemeral and v1 batches stay
+// original-only.
+func bulkQuality(req CreateRequest) (string, error) {
+	quality := normalizeQuality(req.Quality)
 	if !ValidQuality(quality) {
-		return QualityDecision{}, ErrInvalidQuality
+		return "", ErrInvalidQuality
 	}
-	if quality != QualityOriginal {
-		return QualityDecision{}, ErrBulkQualityUnavailable
+	if quality != QualityOriginal && (!req.BulkQuality || req.DeviceID == "") {
+		return "", ErrBulkQualityUnavailable
 	}
-	return originalDecision(), nil
+	return quality, nil
 }
 
 func originalDecision() QualityDecision {

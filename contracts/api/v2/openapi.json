@@ -24895,6 +24895,9 @@
           "bounded_subscription_sync": {
             "type": "boolean"
           },
+          "bulk_quality": {
+            "type": "boolean"
+          },
           "download_allowed": {
             "type": "boolean"
           },
@@ -24902,6 +24905,9 @@
             "type": "boolean"
           },
           "file_delivery": {
+            "type": "boolean"
+          },
+          "monitor_quality": {
             "type": "boolean"
           },
           "monitoring_modes": {
@@ -24979,6 +24985,8 @@
           "season_download",
           "series_monitoring",
           "monitoring_modes",
+          "bulk_quality",
+          "monitor_quality",
           "revision",
           "state",
           "allowed"
@@ -25571,6 +25579,18 @@
           "mode": {
             "type": "string"
           },
+          "quality": {
+            "description": "Quality the monitor registers episodes in.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
+            ],
+            "type": "string"
+          },
           "season_numbers": {
             "items": {
               "format": "int64",
@@ -25600,6 +25620,7 @@
           "season_numbers",
           "delete_watched",
           "max_storage_bytes",
+          "quality",
           "active",
           "created_at",
           "updated_at",
@@ -25624,6 +25645,18 @@
               "future",
               "latest_season",
               "specific_seasons"
+            ],
+            "type": "string"
+          },
+          "quality": {
+            "description": "Quality to register episodes in. Defaults to original. A new monitor needs the monitor_quality capability for any other preset; an existing monitor keeps its quality.",
+            "enum": [
+              "original",
+              "20mbps",
+              "10mbps",
+              "5mbps",
+              "2mbps",
+              "1mbps"
             ],
             "type": "string"
           },
@@ -25672,6 +25705,13 @@
             ]
           },
           "mode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quality": {
+            "description": "Quality preset for episodes registered from now on; already-registered downloads keep theirs.",
             "type": [
               "string",
               "null"
