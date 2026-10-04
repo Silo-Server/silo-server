@@ -2,7 +2,16 @@
   "embeddings": {
     "running": true,
     "count": 3,
-    "total": 10
+    "total": 10,
+    "last_run": {
+      "status": "failed",
+      "started_at": "2026-10-03T03:00:00.000Z",
+      "completed_at": "2026-10-03T03:01:30.000Z",
+      "error": "embed batch: POST https://[REDACTED]@embed.example/v1/embeddings: api_key=[REDACTED] rejected",
+      "result": {
+        "embedded": 0
+      }
+    }
   },
   "taste_profiles": {
     "running": false,
@@ -14,6 +23,19 @@
   },
   "recommendations": {
     "running": false,
-    "count": 5
-  }
+    "count": 5,
+    "last_run": {
+      "status": "completed",
+      "started_at": "2026-10-03T05:00:00.000Z",
+      "completed_at": "2026-10-03T05:01:00.000Z",
+      "result": {
+        "build_errors": 0,
+        "cached_rows": 14,
+        "processed": 2,
+        "profiles": 2
+      }
+    }
+  },
+  "lock_conflict": "",
+  "cache_refreshed_at": "2026-10-03T05:01:00.000Z"
 }
