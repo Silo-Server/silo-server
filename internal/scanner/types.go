@@ -40,6 +40,14 @@ type ScanResult struct {
 	// the operator confirms cleanup or the files return.
 	SuspectEmptyRoots []string
 	RootObservations  []RootObservation
+	// UnsupportedFiles lists the files the walk skipped because of their
+	// type (DVD VOBs, disc images, RealMedia, Blu-ray disc streams).
+	UnsupportedFiles []UnsupportedFile
+	// ProtectedPaths lists the paths whose contents this scan did not verify:
+	// unreachable and suspect-empty roots and the paths the walk could not
+	// read. The scan leaves the catalog under them alone, and the list of
+	// unsupported files keeps its rows there too.
+	ProtectedPaths []string
 }
 
 // FileHints contains the OSHash gathered during scanning.

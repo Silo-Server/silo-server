@@ -374,6 +374,7 @@ export const v2Operations = {
   "GET /api/v2/libraries/skipped-roots": "listSkippedRoots",
   "GET /api/v2/libraries/stale-ids": "listStaleIds",
   "GET /api/v2/libraries/unmatched-items": "listUnmatchedItems",
+  "GET /api/v2/libraries/unsupported-files": "listUnsupportedFiles",
   "GET /api/v2/libraries/{id}/metadata-match-queue": "getMetadataMatchQueue",
   "GET /api/v2/libraries/{id}/providers": "getLibraryProviders",
   "GET /api/v2/library-jobs/{job_id}": "getLibraryJob",

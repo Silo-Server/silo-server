@@ -9,6 +9,7 @@ import type {
   LibraryRealtimeMonitoring,
   LibraryRoot,
   LibrarySkippedRoot,
+  LibraryUnsupportedFileGroup,
   StaleMediaID,
   UnmatchedLibraryItem,
 } from "@/api/types";
@@ -25,6 +26,7 @@ import type { components } from "@/api/v2/schema";
 type LibraryV2 = components["schemas"]["Library"];
 type LibraryRootV2 = components["schemas"]["LibraryRoot"];
 type SkippedRootV2 = components["schemas"]["SkippedRoot"];
+type UnsupportedFileGroupV2 = components["schemas"]["UnsupportedFileGroup"];
 type StaleMediaIDV2 = components["schemas"]["StaleMediaID"];
 type UnmatchedItemV2 = components["schemas"]["UnmatchedItem"];
 type LibraryMountCheckV2 = components["schemas"]["LibraryMountCheck"];
@@ -127,6 +129,12 @@ export function libraryRootFromV2(root: LibraryRootV2): LibraryRoot {
 
 export function skippedRootFromV2(root: SkippedRootV2): LibrarySkippedRoot {
   return { ...root, library_id: Number(root.library_id) };
+}
+
+export function unsupportedFileGroupFromV2(
+  group: UnsupportedFileGroupV2,
+): LibraryUnsupportedFileGroup {
+  return { ...group, library_id: Number(group.library_id) };
 }
 
 export function staleMediaIDFromV2(row: StaleMediaIDV2): StaleMediaID {

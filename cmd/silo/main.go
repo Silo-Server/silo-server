@@ -2216,6 +2216,9 @@ func main() {
 			deps.EventBus,
 			deps.RealtimeHub,
 		)
+		if deps.DB != nil {
+			libraryIngestExecutor.SetUnsupportedFileRepository(scanner.NewUnsupportedFileRepository(deps.DB))
+		}
 		deps.LibraryIngester = libraryIngestExecutor
 		if deps.DB != nil {
 			libraryScanQueue = scanqueue.NewService(

@@ -455,9 +455,9 @@ func (m walkMode) acceptsPath(path string) bool {
 }
 
 // collectWalkFile appends path to filePaths when the walk mode accepts it.
-// Video walks log, at debug level, a video file they deliberately skip, so a
-// title missing from the catalog can be traced to the file.
-func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[]string) {
+// Video walks record a video file they deliberately skip in unsupported, when
+// it is non-nil, so a title missing from the catalog can be traced to the file.
+func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[]string, unsupported *[]UnsupportedFile) {
 	if m.acceptsPath(path) {
 		*filePaths = append(*filePaths, path)
 		return
@@ -466,7 +466,10 @@ func (m walkMode) collectWalkFile(ctx context.Context, path string, filePaths *[
 		return
 	}
 	if reason := unsupportedVideoFileReason(path); reason != "" {
-		slog.DebugContext(ctx, "scanner: skipped unsupported video file", "component", "scanner", "path", path, "reason", reason)
+		slog.DebugContext(ctx, "scanner: skipped unsupported video file", "component", "scanner", "path", path, "reason", UnsupportedReasonMessage(reason))
+		if unsupported != nil {
+			*unsupported = append(*unsupported, UnsupportedFile{Path: path, Reason: reason})
+		}
 	}
 }
 
@@ -542,6 +545,7 @@ func walkLogicalTree(
 	ignoreRulesStack []ignoreRules,
 	filePaths *[]string,
 	walkFailures *[]string,
+	unsupported *[]UnsupportedFile,
 	readDir func(string) ([]os.DirEntry, error),
 ) error {
 	if ctx != nil {
@@ -571,12 +575,12 @@ func walkLogicalTree(
 			return nil
 		}
 		if targetInfo.IsDir() {
-			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, readDir)
+			return walkLogicalTree(ctx, logicalPath, resolved, mode, visitedPhysicalDirs, ignoreRulesStack, filePaths, walkFailures, unsupported, readDir)
 		}
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		mode.collectWalkFile(ctx, logicalPath, filePaths)
+		mode.collectWalkFile(ctx, logicalPath, filePaths, unsupported)
 		return nil
 	}
 
@@ -584,7 +588,7 @@ func walkLogicalTree(
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalPath) {
 			return nil
 		}
-		mode.collectWalkFile(ctx, logicalPath, filePaths)
+		mode.collectWalkFile(ctx, logicalPath, filePaths, unsupported)
 		return nil
 	}
 
@@ -651,7 +655,7 @@ func walkLogicalTree(
 				if ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
-				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, unsupported, readDir); err != nil {
 					return err
 				}
 				continue
@@ -659,12 +663,12 @@ func walkLogicalTree(
 			if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 				continue
 			}
-			mode.collectWalkFile(ctx, logicalChild, filePaths)
+			mode.collectWalkFile(ctx, logicalChild, filePaths, unsupported)
 			continue
 		}
 
 		if entry.IsDir() {
-			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, readDir); err != nil {
+			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, unsupported, readDir); err != nil {
 				return err
 			}
 			continue
@@ -673,14 +677,15 @@ func walkLogicalTree(
 		if mode == walkModeMovie && shouldSkipMovieSupplementalFile(logicalChild) {
 			continue
 		}
-		mode.collectWalkFile(ctx, logicalChild, filePaths)
+		mode.collectWalkFile(ctx, logicalChild, filePaths, unsupported)
 	}
 
 	return nil
 }
 
 // collectLogicalFilePaths walks the given roots and returns the media files
-// found, plus how many entries the walk could not read or resolve.
+// found, the entries the walk could not read or resolve, and the video files
+// it skipped because of their type.
 //
 // walkLogicalTree deliberately swallows per-entry Lstat/ReadDir failures so one
 // bad file cannot abort a scan of a million. That makes the returned list
@@ -694,16 +699,17 @@ func walkLogicalTree(
 // seen. Scoping the protection to those paths rather than to the whole root
 // matters: a dangling symlink is permanent, and protecting its entire library
 // root would suppress missing-file reconciliation there on every future scan.
-func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, error) {
+func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string, libraryRoots []string) ([]string, []string, []UnsupportedFile, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
 	walkFailures := make([]string, 0)
+	unsupported := make([]UnsupportedFile, 0)
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
@@ -719,12 +725,12 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 		if ignored {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, os.ReadDir); err != nil {
-			return nil, nil, err
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, rules, &filePaths, &walkFailures, &unsupported, os.ReadDir); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
-	return filePaths, walkFailures, nil
+	return filePaths, walkFailures, unsupported, nil
 }
 
 func (s *Scanner) scanPaths(
@@ -766,7 +772,7 @@ func (s *Scanner) scanPaths(
 		Message:      "Discovering media files",
 		CurrentScope: firstScope(reconcileRoots),
 	})
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, unsupported, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
@@ -774,7 +780,9 @@ func (s *Scanner) scanPaths(
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
+		"unsupported_files", len(unsupported),
 	)
+	result.UnsupportedFiles = unsupported
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 		if err := s.setPartialWalkWarning(ctx, folder.ID, len(walkFailures), true); err != nil {
@@ -833,6 +841,7 @@ func (s *Scanner) scanPaths(
 	if len(walkFailures) > 0 {
 		protectedRoots = append(append([]string(nil), protectedRoots...), walkFailures...)
 	}
+	result.ProtectedPaths = protectedRoots
 	pruneUnseen := len(walkFailures) == 0 && !anyPathWithinRoots(protectedRoots, reconcileRoots)
 
 	if err := s.reconcileScannedRoots(
@@ -1385,6 +1394,7 @@ func (s *Scanner) scanFolderByRoots(
 	for _, unreadable := range unreadablePaths {
 		protectedScanRoots = appendUniquePath(protectedScanRoots, unreadable)
 	}
+	result.ProtectedPaths = protectedScanRoots
 	for _, pending := range pendingEmptyScopes {
 		beforeErrors := pending.result.Errors
 		// forceDeleteAll only ever fires for confirmed cleanup, and even then
@@ -1682,7 +1692,7 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
-	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
+	filePaths, walkFailures, unsupported, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type, folder.Paths)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
@@ -1690,7 +1700,9 @@ func (s *Scanner) scanScope(
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
+		"unsupported_files", len(unsupported),
 	)
+	result.UnsupportedFiles = unsupported
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
@@ -1939,6 +1951,7 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.Errors += src.Errors
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
+	dst.UnsupportedFiles = append(dst.UnsupportedFiles, src.UnsupportedFiles...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
 }
 
@@ -2676,7 +2689,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	}
 	if !SupportsVideoFile(cleanFile) {
 		if reason := unsupportedVideoFileReason(cleanFile); reason != "" {
-			return fmt.Errorf("unsupported video file %s: %s", cleanFile, reason)
+			return fmt.Errorf("unsupported video file %s: %s", cleanFile, UnsupportedReasonMessage(reason))
 		}
 		return fmt.Errorf("unrecognized video extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 	}
