@@ -24919,6 +24919,9 @@
           "ordered_status": {
             "type": "boolean"
           },
+          "preparation_progress": {
+            "type": "boolean"
+          },
           "proxy_delivery": {
             "type": "boolean"
           },
@@ -24987,6 +24990,7 @@
           "monitoring_modes",
           "bulk_quality",
           "monitor_quality",
+          "preparation_progress",
           "revision",
           "state",
           "allowed"
@@ -25176,6 +25180,10 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "preparation": {
+            "$ref": "#/components/schemas/DownloadPreparation",
+            "description": "How far the server has got preparing the file. Present on listed preparing entries when the capability reports preparation_progress."
           },
           "quality": {
             "type": "string"
@@ -25490,6 +25498,43 @@
         "required": [
           "start",
           "end"
+        ],
+        "type": "object"
+      },
+      "DownloadPreparation": {
+        "additionalProperties": false,
+        "properties": {
+          "progress": {
+            "description": "Encoded fraction, once a running encode reports it.",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "queue_position": {
+            "description": "1-based place among every queued preparation on this server; present only while queued.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "remaining_seconds": {
+            "description": "Estimated seconds left at the encode's reported speed.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "state": {
+            "description": "retrying: an attempt failed and the job waits out its backoff.",
+            "enum": [
+              "queued",
+              "running",
+              "retrying"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
         ],
         "type": "object"
       },

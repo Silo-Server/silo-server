@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,12 @@ const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, devic
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
 	pool *pgxpool.Pool
+
+	// preparations is the latest preparation queue snapshot (see
+	// attachPreparations); prepMu also makes concurrent readers share one
+	// refresh.
+	prepMu       sync.Mutex
+	preparations *preparationSnapshot
 }
 
 // NewRepository creates a new Repository backed by the given pool.
