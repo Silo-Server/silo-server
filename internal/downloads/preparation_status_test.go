@@ -29,28 +29,36 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 	if _, err := repo.pool.Exec(t.Context(), `CREATE TABLE download_artifacts(
  id text PRIMARY KEY, status text NOT NULL, created_at timestamptz NOT NULL, completed_at timestamptz, next_retry_at timestamptz,
  lease_expires_at timestamptz,
- progress_encoded_seconds double precision, progress_duration_seconds double precision, progress_speed double precision)`); err != nil {
+ progress_encoded_seconds double precision, progress_duration_seconds double precision, progress_speed double precision,
+ progress_updated_at timestamptz, progress_unavailable boolean NOT NULL DEFAULT false)`); err != nil {
 		t.Fatal(err)
 	}
 	base := time.Now().Add(-time.Hour)
 	leased := time.Now().Add(time.Minute)
 	expired := time.Now().Add(-time.Minute)
+	fresh := time.Now()
+	stale := time.Now().Add(-time.Hour)
 	for i, a := range []struct {
-		id, status string
-		retry      *time.Time
-		lease      *time.Time
-		encoded    *float64
+		id, status  string
+		retry       *time.Time
+		lease       *time.Time
+		encoded     *float64
+		reported    *time.Time
+		unavailable bool
 	}{
-		{id: "running", status: "tracks_v1_running", lease: &leased, encoded: new(300.0)},
+		{id: "running", status: "tracks_v1_running", lease: &leased, encoded: new(300.0), reported: &fresh},
 		{id: "other-user-first", status: "tracks_v1_queued"},
 		{id: "backing-off", status: "tracks_v1_queued", retry: new(time.Now().Add(time.Hour))},
 		{id: "mine-second", status: "queued"},
 		{id: "done", status: "tracks_v1_ready"},
 		// Its worker died: claimable again, so queued, and its last report is stale.
-		{id: "stalled", status: "tracks_v1_running", lease: &expired, encoded: new(600.0)},
+		{id: "stalled", status: "tracks_v1_running", lease: &expired, encoded: new(600.0), reported: &stale},
+		// Still running, but progress stopped arriving, or the worker can't report it.
+		{id: "silent", status: "tracks_v1_running", lease: &leased, encoded: new(300.0), reported: &stale},
+		{id: "unreported", status: "tracks_v1_running", lease: &leased, encoded: new(300.0), reported: &fresh, unavailable: true},
 	} {
-		if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at,next_retry_at,lease_expires_at,progress_encoded_seconds,progress_duration_seconds,progress_speed) VALUES($1,$2,$3,$4,$5,$6,1200,6)`,
-			a.id, a.status, base.Add(time.Duration(i)*time.Minute), a.retry, a.lease, a.encoded); err != nil {
+		if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at,next_retry_at,lease_expires_at,progress_encoded_seconds,progress_duration_seconds,progress_speed,progress_updated_at,progress_unavailable) VALUES($1,$2,$3,$4,$5,$6,1200,6,$7,$8)`,
+			a.id, a.status, base.Add(time.Duration(i)*time.Minute), a.retry, a.lease, a.encoded, a.reported, a.unavailable); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,6 +70,8 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 		{ID: "e", Status: StatusReady, ArtifactID: "running"},
 		{ID: "f", Status: StatusPreparing},
 		{ID: "g", Status: StatusPreparing, ArtifactID: "stalled"},
+		{ID: "i", Status: StatusPreparing, ArtifactID: "silent"},
+		{ID: "j", Status: StatusPreparing, ArtifactID: "unreported"},
 	}
 	if err := repo.attachPreparations(t.Context(), rows); err != nil {
 		t.Fatal(err)
@@ -79,6 +89,11 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 	}
 	if p := rows[6].Preparation; p == nil || p.State != PreparationQueued || p.QueuePosition != 3 || p.Progress != nil {
 		t.Fatalf("expired lease %+v", p)
+	}
+	for _, row := range rows[7:9] {
+		if p := row.Preparation; p == nil || p.State != PreparationRunning || p.Progress != nil || p.RemainingSeconds != nil {
+			t.Fatalf("%s: running without fresh progress %+v", row.ID, p)
+		}
 	}
 	for _, row := range rows[3:6] {
 		if row.Preparation != nil {

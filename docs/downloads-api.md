@@ -742,7 +742,7 @@ queue:
 | ------------------- | ------ | -------------------------------------------------------------------------------------- |
 | `state`             | string | `queued`, `running`, or `retrying` (an attempt failed; the job waits out its backoff). |
 | `queue_position`    | int    | While `queued`: 1-based place among every queued preparation on the server, in claim order. |
-| `progress`          | number | While `running`, once the encode reports it: encoded fraction, 0 to 1.                 |
+| `progress`          | number | While `running` and the encode keeps reporting it: encoded fraction, 0 to 1. Omitted once reports stop for 30 seconds. |
 | `remaining_seconds` | int    | While `running`: estimated seconds left at the encode's reported speed.               |
 
 `GET /api/v2/downloads` attaches it; other answers that return an entry do not.

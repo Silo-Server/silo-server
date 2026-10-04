@@ -25,6 +25,12 @@ type PreparationStatus struct {
 // keeps that polling from ranking the server's whole queue per request.
 const preparationSnapshotTTL = 5 * time.Second
 
+// preparationProgressFreshFor is how long a running encode's last progress
+// sample is reported. Workers record one every progressFlushInterval; a
+// sample older than several flushes means progress stopped arriving, and a
+// frozen percentage and estimate would mislead.
+const preparationProgressFreshFor = 6 * progressFlushInterval
+
 // preparationSnapshot is every unfinished preparation's status at one moment.
 type preparationSnapshot struct {
 	at      time.Time
@@ -69,13 +75,15 @@ func (r *Repository) preparationStatuses(ctx context.Context) (map[string]Prepar
 	result, err := r.pool.Query(ctx, preparationStatesCTE+`,
 	ranked AS (
 		SELECT l.id, l.state, l.progress_encoded_seconds, l.progress_duration_seconds, l.progress_speed,
+		       NOT l.progress_unavailable AND l.progress_updated_at >= now() - make_interval(secs => $2) AS progress_fresh,
 		       CASE WHEN l.state = 'queued'
 		            THEN row_number() OVER (PARTITION BY l.state = 'queued' ORDER BY l.created_at, l.id)
 		       END AS queue_position
 		FROM listed l
 	)
-	SELECT id, state, COALESCE(queue_position, 0), progress_encoded_seconds, progress_duration_seconds, progress_speed
-	FROM ranked WHERE state <> 'failed'`, PreparationFailedWindow.Seconds())
+	SELECT id, state, COALESCE(queue_position, 0), progress_encoded_seconds, progress_duration_seconds, progress_speed,
+	       COALESCE(progress_fresh, false)
+	FROM ranked WHERE state <> 'failed'`, PreparationFailedWindow.Seconds(), preparationProgressFreshFor.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("reading download preparations: %w", err)
 	}
@@ -85,10 +93,11 @@ func (r *Repository) preparationStatuses(ctx context.Context) (map[string]Prepar
 		var id string
 		var status PreparationStatus
 		var encoded, duration, speed *float64
-		if err := result.Scan(&id, &status.State, &status.QueuePosition, &encoded, &duration, &speed); err != nil {
+		var fresh bool
+		if err := result.Scan(&id, &status.State, &status.QueuePosition, &encoded, &duration, &speed, &fresh); err != nil {
 			return nil, fmt.Errorf("scanning download preparation: %w", err)
 		}
-		if status.State == PreparationRunning {
+		if status.State == PreparationRunning && fresh {
 			status.Progress, status.RemainingSeconds = preparationProgress(encoded, duration, speed)
 		}
 		byJobID[id] = status
