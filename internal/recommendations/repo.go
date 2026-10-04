@@ -2201,7 +2201,8 @@ func (r *Repo) FilterRecommendableItemIDs(ctx context.Context, itemIDs []string,
 	return r.filterItemIDs(ctx, itemIDs, filter, recommendableMediaTypes)
 }
 
-// filterItemIDs returns the IDs in itemIDs that filter admits and, when
+// filterItemIDs returns the IDs in itemIDs that filter admits (libraries,
+// maturity limits and the surface's excluded media types) and, when
 // mediaTypes is not nil, whose media type is one of mediaTypes.
 func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter, mediaTypes []string) (map[string]struct{}, error) {
 	if len(itemIDs) == 0 {
@@ -2232,7 +2233,10 @@ func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catal
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
-	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	// The maturity limits and ExcludedMediaTypes, which a surface such as
+	// Jellyfin compatibility sets to keep types it does not serve out of
+	// the rows it reads.
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id

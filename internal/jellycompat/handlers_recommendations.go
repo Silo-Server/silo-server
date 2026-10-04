@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -45,6 +46,12 @@ const (
 // response carries at most.
 const compatBecauseWatchedRows = 2
 
+// compatRecommendationExcludedTypes are the recommendable media types
+// /Movies/Recommendations leaves out. Jellyfin answers it with movies only,
+// each category built from a movie the user played or liked, and clients
+// show it on a movie library's Suggestions tab.
+var compatRecommendationExcludedTypes = []string{compatSeriesType}
+
 // recommendationItemLoader loads catalog items with the viewer's access
 // applied. *catalog.ItemRepository implements it.
 type recommendationItemLoader interface {
@@ -52,12 +59,13 @@ type recommendationItemLoader interface {
 }
 
 // RecommendationsHandler serves the Jellyfin Movies/Recommendations endpoint
-// from the same cached rows the native API reads. Only rows a Jellyfin heading
-// describes truthfully are sent: Because You Watched rows as
-// SimilarToRecentlyPlayed with the anchor's title, then taste-cluster rows as
-// SimilarToLikedItem with the cluster's genre label. The main For You row,
-// Similar Users and the server-wide rows have no item or genre behind them
-// and are left out.
+// from the same cached rows the native API reads, keeping only their movies
+// and, for a library ParentId, only that library's. Only rows a Jellyfin
+// heading describes truthfully are sent: Because You Watched rows anchored on
+// a movie as SimilarToRecentlyPlayed with the anchor's title, then
+// taste-cluster rows as SimilarToLikedItem with the cluster's genre label.
+// The main For You row, Similar Users and the server-wide rows have no item
+// or genre behind them and are left out.
 type RecommendationsHandler struct {
 	reader       RecommendationRowReader
 	items        recommendationItemLoader
@@ -123,14 +131,27 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		}
 	}
 
-	// The rows are read already filtered for the viewer, so a restricted
-	// profile still gets full rows of titles it can see. They are read with
-	// headroom for the compat media-type exclusions applied below.
+	// The rows are read already filtered for the viewer and kept to movies,
+	// so a restricted profile still gets full rows of movies it can see, and
+	// a Because You Watched row anchored on a series finds no anchor and is
+	// left out. They are read with headroom for the titles an earlier
+	// category already shows.
 	filter := catalog.AccessFilter{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}
 	if h.accessFilter != nil {
 		filter = h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID)
 	}
-	rows, err := h.categoryRows(r.Context(), session, 2*itemLimit, filter)
+	filter.ExcludedMediaTypes = append(slices.Clone(filter.ExcludedMediaTypes), compatRecommendationExcludedTypes...)
+	// Clients pass the library they show suggestions for as ParentId. A
+	// parent that is not a library the viewer can browse has nothing to
+	// recommend.
+	if raw := strings.TrimSpace(q.Get("ParentId")); raw != "" {
+		libraryID, err := h.codec.DecodeIntID(EncodedIDLibrary, raw)
+		if err != nil || libraryID <= 0 || !narrowAccessToLibrary(&filter, int(libraryID)) {
+			writeJSON(w, http.StatusOK, []recommendationDTO{})
+			return
+		}
+	}
+	rows, err := h.categoryRows(r.Context(), session, categoryLimit, 2*itemLimit, filter)
 	if err != nil {
 		slog.WarnContext(r.Context(), "jellycompat: recommendation rows failed", "component", "jellycompat",
 			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)
@@ -197,9 +218,13 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	// category that has it.
 	result := make([]recommendationDTO, 0, categoryLimit)
 	shown := make(map[string]struct{})
+	watchedCategories := 0
 	for _, row := range rows {
 		if len(result) >= categoryLimit {
 			break
+		}
+		if row.AnchorItemID != "" && watchedCategories >= compatBecauseWatchedRows {
+			continue
 		}
 		category, ok := recommendationCategory(row, itemsByID)
 		if !ok {
@@ -224,6 +249,9 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		if len(items) == 0 {
 			continue
 		}
+		if row.AnchorItemID != "" {
+			watchedCategories++
+		}
 		category.Items = items
 		result = append(result, category)
 	}
@@ -233,9 +261,12 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 
 // categoryRows returns the rows a Jellyfin category can describe truthfully,
 // in Jellyfin's order: Because You Watched rows first, each naming its
-// anchor, then the taste-cluster rows that carry a genre subject.
-func (h *RecommendationsHandler) categoryRows(ctx context.Context, session *Session, limit int, filter catalog.AccessFilter) ([]recommendations.ForYouRow, error) {
-	watched, err := h.reader.GetBecauseYouWatchedRows(ctx, session.StreamAppUserID, session.ProfileID, compatBecauseWatchedRows, limit, filter)
+// anchor, then the taste-cluster rows that carry a genre subject. It reads a
+// Because You Watched row for every anchor, up to maxRows, since an anchor
+// the response cannot show (a series, or a title outside ParentId) gives
+// way to the next.
+func (h *RecommendationsHandler) categoryRows(ctx context.Context, session *Session, maxRows, limit int, filter catalog.AccessFilter) ([]recommendations.ForYouRow, error) {
+	watched, err := h.reader.GetBecauseYouWatchedRows(ctx, session.StreamAppUserID, session.ProfileID, maxRows, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +291,9 @@ func (h *RecommendationsHandler) categoryRows(ctx context.Context, session *Sess
 // recommendationCategory is the heading of the category row becomes: a
 // Because You Watched row is SimilarToRecentlyPlayed with its anchor's title,
 // a taste-cluster row SimilarToLikedItem with its genre label. It reports
-// false for an anchor the viewer cannot see, so the row is left out rather
-// than shown under a title the viewer may not know of.
+// false for an anchor that was not loaded, one the viewer cannot see or the
+// response does not show, so the row is left out rather than shown under a
+// title the viewer may not know of or that is not a movie.
 func recommendationCategory(row recommendations.ForYouRow, itemsByID map[string]upstreamListItem) (recommendationDTO, bool) {
 	if row.AnchorItemID == "" {
 		return recommendationDTO{

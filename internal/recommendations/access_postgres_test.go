@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -328,5 +329,47 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 	}
 	if n := rowsOf(kept); n != len(tables) {
 		t.Fatalf("remaining profile has %d rows, want one in each of %d tables", n, len(tables))
+	}
+}
+
+// The Reader filters cached rows with the viewer's access filter, which
+// carries the media types its surface never serves: Jellyfin compatibility
+// reads its movie-only recommendations with series excluded, and the rows
+// must fill with movies rather than lose their series after the read.
+func TestFilterItemIDsHonoursExcludedMediaTypesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tfilter-excluded-types-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	movie, series, book := prefix+"movie", prefix+"series", prefix+"audiobook"
+	seedRecoMediaItem(t, pool, movie, "movie", "matched")
+	seedRecoMediaItem(t, pool, series, "series", "matched")
+	seedRecoMediaItem(t, pool, book, "audiobook", "matched")
+	repo := NewRepo(pool)
+	ids := []string{movie, series, book}
+
+	for _, tc := range []struct {
+		name          string
+		recommendable bool
+		excluded      []string
+		want          []string
+	}{
+		{name: "recommendable", recommendable: true, want: []string{movie, series}},
+		{name: "recommendable without series", recommendable: true, excluded: []string{"audiobook", "series"}, want: []string{movie}},
+		{name: "accessible", want: []string{book, movie, series}},
+		{name: "accessible without series", excluded: []string{"series"}, want: []string{book, movie}},
+	} {
+		filter := catalog.AccessFilter{ExcludedMediaTypes: tc.excluded}
+		read := repo.FilterAccessibleItemIDs
+		if tc.recommendable {
+			read = repo.FilterRecommendableItemIDs
+		}
+		got, err := read(ctx, ids, filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, tc.want) {
+			t.Fatalf("%s: %v, want %v", tc.name, ids, tc.want)
+		}
 	}
 }

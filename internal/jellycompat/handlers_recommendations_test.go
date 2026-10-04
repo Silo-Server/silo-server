@@ -42,19 +42,25 @@ func (f *fakeRowReader) GetBecauseYouWatchedRows(_ context.Context, _ int, _ str
 	return f.watched, f.watchedErr
 }
 
-// fakeItemLoader loads every requested item except the hidden ones.
+// fakeItemLoader loads every requested item except the hidden ones and
+// those of a type the filter excludes. An item missing from types is a movie.
 type fakeItemLoader struct {
 	gotFilter catalog.AccessFilter
 	gotIDs    []string
 	hidden    map[string]bool
+	types     map[string]string
 }
 
 func (f *fakeItemLoader) GetByIDsWithAccess(_ context.Context, ids []string, filter catalog.AccessFilter) ([]*models.MediaItem, error) {
 	f.gotFilter, f.gotIDs = filter, ids
 	items := make([]*models.MediaItem, 0, len(ids))
 	for _, id := range ids {
-		if !f.hidden[id] {
-			items = append(items, &models.MediaItem{ContentID: id, Type: "movie", Title: "Title " + id})
+		mediaType := f.types[id]
+		if mediaType == "" {
+			mediaType = "movie"
+		}
+		if !f.hidden[id] && !slices.Contains(filter.ExcludedMediaTypes, mediaType) {
+			items = append(items, &models.MediaItem{ContentID: id, Type: mediaType, Title: "Title " + id})
 		}
 	}
 	return items, nil
@@ -126,8 +132,8 @@ func TestCompatRecommendationsReadTheCachedRowsForTheViewer(t *testing.T) {
 	if reader.gotLimit != 12 || reader.gotProfile != "kid" || !slices.Equal(reader.gotFilter.AllowedLibraryIDs, []int{4}) {
 		t.Fatalf("read limit=%d profile=%q filter=%+v, want twice itemLimit, kid and the session filter", reader.gotLimit, reader.gotProfile, reader.gotFilter)
 	}
-	if reader.gotWatched.maxRows != compatBecauseWatchedRows || reader.gotWatched.limit != 12 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
-		t.Fatalf("because-watched read = %+v, want %d rows of twice itemLimit under the session filter", reader.gotWatched, compatBecauseWatchedRows)
+	if reader.gotWatched.maxRows != 5 || reader.gotWatched.limit != 12 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
+		t.Fatalf("because-watched read = %+v, want categoryLimit rows of twice itemLimit under the session filter", reader.gotWatched)
 	}
 	if !slices.Equal(items.gotFilter.AllowedLibraryIDs, []int{4}) || !slices.Contains(items.gotIDs, "kids-anchor") {
 		t.Fatalf("hydration ids=%v filter=%+v, want the anchor fetched under the session filter", items.gotIDs, items.gotFilter)
@@ -204,6 +210,80 @@ func TestCompatRecommendationsSendOnlyTruthfulHeadings(t *testing.T) {
 	wantTitles := []string{"Title watched-1", "Title shared", "Title scifi-1", "Title comedy-1"}
 	if !slices.Equal(titles, wantTitles) {
 		t.Fatalf("titles = %v, want %v", titles, wantTitles)
+	}
+}
+
+// Jellyfin answers /Movies/Recommendations with movies only, and clients ask
+// for it on a movie library's Suggestions tab with the library as ParentId.
+// The rows are read and hydrated with series excluded, so a category holds
+// only movies and a Because You Watched row anchored on a series gives way to
+// the next anchor, two such categories at most. A library ParentId narrows
+// every read to that library; any other parent, or a library the viewer
+// cannot browse, has nothing to recommend.
+func TestCompatRecommendationsServeMoviesOnly(t *testing.T) {
+	reader := &fakeRowReader{
+		rows: []recommendations.ForYouRow{clusterRow(0, "Drama", "series-1", "movie-1")},
+		watched: []recommendations.ForYouRow{
+			watchedRow("anchor-series", "movie-2"),
+			watchedRow("anchor-movie-a", "movie-3"),
+			watchedRow("anchor-movie-b", "movie-4"),
+			watchedRow("anchor-movie-c", "movie-5"),
+		},
+	}
+	items := &fakeItemLoader{types: map[string]string{"series-1": "series", "anchor-series": "series"}}
+	h := newTestRecommendationsHandler(reader, items, catalog.AccessFilter{UserID: 7, ProfileID: "kid", AllowedLibraryIDs: []int{1, 4}})
+
+	rec := httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?categoryLimit=10&itemLimit=20"))
+	categories := decodeCategories(t, rec)
+	for name, filter := range map[string]catalog.AccessFilter{"page": reader.gotFilter, "because watched": reader.gotWatched.filter, "hydration": items.gotFilter} {
+		if !slices.Contains(filter.ExcludedMediaTypes, "series") {
+			t.Fatalf("%s filter = %+v, want series excluded", name, filter)
+		}
+	}
+	if reader.gotWatched.maxRows != 10 {
+		t.Fatalf("because-watched rows read = %d, want every anchor up to categoryLimit", reader.gotWatched.maxRows)
+	}
+	var got []string
+	for _, c := range categories {
+		entry := c.RecommendationType + ":" + c.BaselineItemName
+		for _, item := range c.Items {
+			entry += " " + item.Name + "/" + item.Type
+		}
+		got = append(got, entry)
+	}
+	want := []string{
+		"SimilarToRecentlyPlayed:Title anchor-movie-a Title movie-3/Movie",
+		"SimilarToRecentlyPlayed:Title anchor-movie-b Title movie-4/Movie",
+		"SimilarToLikedItem:Drama Title movie-1/Movie",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("categories = %q, want %q", got, want)
+	}
+
+	// A library ParentId narrows the rows and the hydration to the library.
+	rec = httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?ParentId="+h.codec.EncodeIntID(EncodedIDLibrary, 4)))
+	decodeCategories(t, rec)
+	for name, filter := range map[string]catalog.AccessFilter{"page": reader.gotFilter, "because watched": reader.gotWatched.filter, "hydration": items.gotFilter} {
+		if !slices.Equal(filter.AllowedLibraryIDs, []int{4}) || !slices.Contains(filter.ExcludedMediaTypes, "series") {
+			t.Fatalf("%s filter with ParentId = %+v, want library 4 and series excluded", name, filter)
+		}
+	}
+
+	// A library the viewer cannot browse, or a parent that is not a library,
+	// answers an empty list without reading any row.
+	for name, parent := range map[string]string{
+		"library out of reach": h.codec.EncodeIntID(EncodedIDLibrary, 9),
+		"an item":              h.codec.EncodeStringID(EncodedIDItem, "movie-1"),
+		"garbage":              "not-an-id",
+	} {
+		reader.gotProfile = ""
+		rec = httptest.NewRecorder()
+		h.HandleRecommendations(rec, recommendationsRequest(t, "?parentId="+parent))
+		if rec.Code != http.StatusOK || rec.Body.String() != "[]\n" || reader.gotProfile != "" {
+			t.Fatalf("ParentId %s: %d %q (read rows: %v), want 200 [] without a read", name, rec.Code, rec.Body.String(), reader.gotProfile != "")
+		}
 	}
 }
 
