@@ -317,6 +317,14 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 			return nil, err
 		}
 	}
+	// A stored configuration that does not load has no base URL its
+	// embedding token may go to.
+	storedEmbeddingBaseURL := ""
+	if kind == "recommendations_embedding" {
+		if stored, loadErr := config.LoadFromDB(merged); loadErr == nil {
+			storedEmbeddingBaseURL = stored.Recommendations.EmbeddingBaseURL
+		}
+	}
 	for _, key := range req.DirtyKeys {
 		if key == recommendations.EmbeddingLockSettingKey {
 			// The lock is server state the embedding check compares a draft
@@ -332,8 +340,32 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 		}
 		protectAIConnectionCheckSecrets(kind, req, storedAIConfig, draftAIConfig, merged)
 	}
+	if kind == "recommendations_embedding" {
+		protectEmbeddingConnectionCheckSecret(req, storedEmbeddingBaseURL, merged)
+	}
 
 	return merged, nil
+}
+
+// embeddingTokenSettingKeys hold the embedding provider's token: the token,
+// then the legacy OpenAI key it falls back to.
+var embeddingTokenSettingKeys = []string{"recommendations.embedding_auth_token", "recommendations.openai_api_key"}
+
+// protectEmbeddingConnectionCheckSecret sends the stored embedding token only
+// to the base URL it was saved for (same scheme, host and port). A draft that
+// points the check elsewhere, by its base URL or a legacy provider setting,
+// is checked with the token it carries itself, or none, so a check cannot
+// hand the saved token to another server.
+func protectEmbeddingConnectionCheckSecret(req adminSettingsConnectionCheckRequest, storedBaseURL string, settings map[string]string) {
+	draft, err := config.LoadFromDB(settings)
+	if err == nil && storedBaseURL != "" && endpointAuthority(draft.Recommendations.EmbeddingBaseURL) == endpointAuthority(storedBaseURL) {
+		return
+	}
+	for _, key := range embeddingTokenSettingKeys {
+		if !hasExplicitDraftSecret(req, key) {
+			settings[key] = ""
+		}
+	}
 }
 
 func protectAIConnectionCheckSecrets(
