@@ -746,6 +746,8 @@ queue:
 | `remaining_seconds` | int    | While `running`: estimated seconds left at the encode's reported speed.               |
 
 `GET /api/v2/downloads` attaches it; other answers that return an entry do not.
+Each server node refreshes these values at most every 5 seconds, so polling more
+often than that returns the same numbers.
 It is absent when the job has already finished or failed but the entry's status
 has not caught up, and when progress cannot be read; a client then shows a plain
 preparing state.

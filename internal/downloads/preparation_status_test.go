@@ -85,4 +85,18 @@ func TestAttachPreparationsPostgres(t *testing.T) {
 			t.Fatalf("%s: %+v", row.ID, row.Preparation)
 		}
 	}
+
+	// Within the TTL a read reuses the snapshot: a job queued meanwhile is not
+	// ranked yet. Once it expires, the next read ranks it.
+	if _, err := repo.pool.Exec(t.Context(), `INSERT INTO download_artifacts(id,status,created_at) VALUES('late','queued',$1)`, base.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	late := []*Download{{ID: "h", Status: StatusPreparing, ArtifactID: "late"}}
+	if err := repo.attachPreparations(t.Context(), late); err != nil || late[0].Preparation != nil {
+		t.Fatalf("within TTL: %+v %v", late[0].Preparation, err)
+	}
+	repo.preparations.at = time.Now().Add(-preparationSnapshotTTL)
+	if err := repo.attachPreparations(t.Context(), late); err != nil || late[0].Preparation == nil || late[0].Preparation.QueuePosition != 4 {
+		t.Fatalf("after TTL: %+v %v", late[0].Preparation, err)
+	}
 }

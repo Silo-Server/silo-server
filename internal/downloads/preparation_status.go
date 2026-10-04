@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 )
 
 // PreparationStatus is how far the server has got preparing one download's
@@ -19,25 +20,52 @@ type PreparationStatus struct {
 	RemainingSeconds *int
 }
 
+// preparationSnapshotTTL bounds how stale a reported queue position or
+// progress can be. Clients poll every few seconds at most, and the snapshot
+// keeps that polling from ranking the server's whole queue per request.
+const preparationSnapshotTTL = 5 * time.Second
+
+// preparationSnapshot is every unfinished preparation's status at one moment.
+type preparationSnapshot struct {
+	at      time.Time
+	byJobID map[string]PreparationStatus
+}
+
 // attachPreparations sets Preparation on each preparing row linked to an
 // artifact. A row whose artifact finished or failed since it was read keeps
 // none; its status catches up on the next read.
 func (r *Repository) attachPreparations(ctx context.Context, rows []*Download) error {
-	byArtifact := map[string][]*Download{}
+	var linked []*Download
 	for _, row := range rows {
 		if row.Status == StatusPreparing && row.ArtifactID != "" {
-			byArtifact[row.ArtifactID] = append(byArtifact[row.ArtifactID], row)
+			linked = append(linked, row)
 		}
 	}
-	if len(byArtifact) == 0 {
+	if len(linked) == 0 {
 		return nil
 	}
-	ids := make([]string, 0, len(byArtifact))
-	for id := range byArtifact {
-		ids = append(ids, id)
+	statuses, err := r.preparationStatuses(ctx)
+	if err != nil {
+		return err
 	}
-	// The queue is ranked over every unready artifact, the same order the
-	// admin view and the claim query use.
+	for _, row := range linked {
+		if status, ok := statuses[row.ArtifactID]; ok {
+			row.Preparation = &status
+		}
+	}
+	return nil
+}
+
+// preparationStatuses returns every unfinished preparation's status, ranked
+// the same way as the admin view and the claim query. The ranking covers the
+// whole server queue, so one snapshot serves every reader on this node for
+// preparationSnapshotTTL; concurrent readers wait for a single refresh.
+func (r *Repository) preparationStatuses(ctx context.Context) (map[string]PreparationStatus, error) {
+	r.prepMu.Lock()
+	defer r.prepMu.Unlock()
+	if snap := r.preparations; snap != nil && time.Since(snap.at) < preparationSnapshotTTL {
+		return snap.byJobID, nil
+	}
 	result, err := r.pool.Query(ctx, preparationStatesCTE+`,
 	ranked AS (
 		SELECT l.id, l.state, l.progress_encoded_seconds, l.progress_duration_seconds, l.progress_speed,
@@ -47,26 +75,29 @@ func (r *Repository) attachPreparations(ctx context.Context, rows []*Download) e
 		FROM listed l
 	)
 	SELECT id, state, COALESCE(queue_position, 0), progress_encoded_seconds, progress_duration_seconds, progress_speed
-	FROM ranked WHERE id = ANY($2) AND state <> 'failed'`, PreparationFailedWindow.Seconds(), ids)
+	FROM ranked WHERE state <> 'failed'`, PreparationFailedWindow.Seconds())
 	if err != nil {
-		return fmt.Errorf("reading download preparations: %w", err)
+		return nil, fmt.Errorf("reading download preparations: %w", err)
 	}
 	defer result.Close()
+	byJobID := map[string]PreparationStatus{}
 	for result.Next() {
 		var id string
 		var status PreparationStatus
 		var encoded, duration, speed *float64
 		if err := result.Scan(&id, &status.State, &status.QueuePosition, &encoded, &duration, &speed); err != nil {
-			return fmt.Errorf("scanning download preparation: %w", err)
+			return nil, fmt.Errorf("scanning download preparation: %w", err)
 		}
 		if status.State == PreparationRunning {
 			status.Progress, status.RemainingSeconds = preparationProgress(encoded, duration, speed)
 		}
-		for _, row := range byArtifact[id] {
-			row.Preparation = &status
-		}
+		byJobID[id] = status
 	}
-	return result.Err()
+	if err := result.Err(); err != nil {
+		return nil, fmt.Errorf("reading download preparations: %w", err)
+	}
+	r.preparations = &preparationSnapshot{at: time.Now(), byJobID: byJobID}
+	return byJobID, nil
 }
 
 // preparationProgress turns an encode's reported position into a fraction
