@@ -1,11 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "listAdminDownloadPreparations",
-      "change_id": "response-property-enum-value-added",
-      "fingerprint": "d08729ffdc93ed62d8257a6aa0d3bfdde773128775497f29cb440c35185bf562",
-      "reason": "Pre-lock addition for pausing download preparation jobs: a paused job is listed with state paused. Only the web admin reads this endpoint, and this change teaches it the new value; silo-apple and silo-android do not read it.",
-      "approved_in": "#1925"
-    }
-  ]
+  "approvals": []
 }
