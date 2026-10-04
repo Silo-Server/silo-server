@@ -251,6 +251,7 @@ function mapSubtitleInventory(
     source: subtitleSourceOf(item.source),
     forced: item.forced,
     hearing_impaired: item.hearing_impaired,
+    sync_key: item.sync_key,
     url: item.url ? buildPlayerStreamUrl(config.apiBaseUrl, item.url, token) : "",
     font_bundle_url: item.font_bundle_url
       ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)

@@ -10,18 +10,24 @@ import {
   FileText,
   HardDriveDownload,
   Loader,
+  Pause,
+  Play,
   RotateCw,
   Search,
   Terminal,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
 import type {
   AdminDownloadPreparation,
+  AdminDownloadPreparationAction,
   AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 import type { OperationalLogEntry } from "@/api/types";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAdminDownloadPreparationAction } from "@/hooks/queries/admin/downloadPreparations";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { formatTime } from "@/lib/datetime";
 import { formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
@@ -29,6 +35,9 @@ import { cn } from "@/lib/utils";
 import { activityMethodMeta } from "@/pages/adminActivityPresentation";
 import {
   PREPARATION_STATES,
+  canPausePreparation,
+  canResumePreparation,
+  cancelPreparationsPrompt,
   formatAgo,
   formatClock,
   formatPreparationAudioOutput,
@@ -52,11 +61,42 @@ import {
   requesterDevice,
   requesterName,
   secondsSince,
+  summarizePreparationAction,
   type PreparationState,
 } from "@/pages/adminDownloadPreparationPresentation";
 
 const GRID =
-  "grid-cols-[minmax(180px,1.6fr)_minmax(190px,1.5fr)_minmax(100px,0.8fr)_minmax(200px,1.5fr)_minmax(150px,1fr)_70px]";
+  "grid-cols-[16px_minmax(180px,1.6fr)_minmax(190px,1.5fr)_minmax(100px,0.8fr)_minmax(200px,1.5fr)_minmax(150px,1fr)_112px]";
+
+const CHECKBOX = "accent-primary size-3.5 cursor-pointer disabled:cursor-default";
+
+/** Runs one administrator action and reports its outcome in a toast. */
+function usePreparationActions() {
+  const mutation = useAdminDownloadPreparationAction();
+  const run = (
+    action: AdminDownloadPreparationAction,
+    targets: readonly AdminDownloadPreparation[],
+    onDone?: () => void,
+  ) => {
+    if (targets.length === 0) return;
+    mutation.mutate(
+      { action, ids: targets.map((t) => t.id) },
+      {
+        onSuccess: (results) => {
+          const summary = summarizePreparationAction(action, results);
+          if (results.some((r) => r.outcome === "applied")) toast.success(summary);
+          else toast.info(summary);
+          onDone?.();
+        },
+        onError: () => {
+          toast.error(`Couldn't ${action}. Check the list before trying again.`);
+        },
+      },
+    );
+  };
+  const pendingIds = mutation.isPending ? new Set(mutation.variables?.ids) : null;
+  return { run, isPending: mutation.isPending, pendingIds };
+}
 
 export default function AdminDownloadPreparationsPanel({
   list,
@@ -70,6 +110,9 @@ export default function AdminDownloadPreparationsPanel({
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<PreparationState | null>(null);
   const [workerFilter, setWorkerFilter] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [cancelTargets, setCancelTargets] = useState<AdminDownloadPreparation[] | null>(null);
+  const actions = usePreparationActions();
   const items = useMemo(() => list?.items ?? [], [list]);
 
   const workers = useMemo(() => {
@@ -111,10 +154,35 @@ export default function AdminDownloadPreparationsPanel({
     running: list.counts.running,
     queued: list.counts.queued,
     retrying: list.counts.retrying,
+    paused: list.counts.paused,
     failed: list.counts.failed_recent,
   };
-  const total = counts.running + counts.queued + counts.retrying + counts.failed;
+  const total = PREPARATION_STATES.reduce((sum, state) => sum + counts[state], 0);
   const activeFilters = [stateFilter, workerFilter].filter(Boolean).length;
+  // Actions apply only to selected jobs the filters show; jobs that left the
+  // list drop out of the selection on their own.
+  const selectedItems = filtered.filter((item) => selected.has(item.id));
+  const allVisibleSelected = filtered.length > 0 && selectedItems.length === filtered.length;
+  const toggleSelected = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const selectVisible = (checked: boolean) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const item of filtered) {
+        if (checked) next.add(item.id);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  const clearSelection = () => setSelected(new Set());
+  const pausable = selectedItems.filter(canPausePreparation);
+  const resumable = selectedItems.filter(canResumePreparation);
+  const cancelPrompt = cancelTargets ? cancelPreparationsPrompt(cancelTargets) : null;
 
   return (
     <div className="space-y-5">
@@ -226,6 +294,59 @@ export default function AdminDownloadPreparationsPanel({
         )}
       </div>
 
+      {selectedItems.length > 0 && (
+        <div
+          role="toolbar"
+          aria-label="Selected preparation jobs"
+          className="bg-surface/60 border-border flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
+        >
+          <span className="text-[12px] font-medium tabular-nums">
+            {selectedItems.length.toLocaleString()} selected
+          </span>
+          <div className="ml-auto flex flex-wrap gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 px-2 text-[11px]"
+              disabled={actions.isPending || pausable.length === 0}
+              onClick={() => actions.run("pause", pausable)}
+            >
+              <Pause className="h-3.5 w-3.5" />
+              Pause{pausable.length > 0 && ` ${pausable.length.toLocaleString()}`}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1.5 px-2 text-[11px]"
+              disabled={actions.isPending || resumable.length === 0}
+              onClick={() => actions.run("resume", resumable)}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Resume{resumable.length > 0 && ` ${resumable.length.toLocaleString()}`}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive h-7 gap-1.5 px-2 text-[11px]"
+              disabled={actions.isPending}
+              onClick={() => setCancelTargets(selectedItems)}
+            >
+              <X className="h-3.5 w-3.5" />
+              Cancel {selectedItems.length.toLocaleString()}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px]"
+              disabled={actions.isPending}
+              onClick={clearSelection}
+            >
+              Clear selection
+            </Button>
+          </div>
+        </div>
+      )}
+
       {(search || activeFilters > 0) && (
         <div className="text-muted-foreground text-[11px]">
           Showing {filtered.length} of {items.length} jobs
@@ -253,6 +374,18 @@ export default function AdminDownloadPreparationsPanel({
           <div
             className={`border-border bg-surface/50 hidden ${GRID} items-center gap-3 border-b px-3 py-2.5 sm:grid`}
           >
+            <input
+              type="checkbox"
+              className={CHECKBOX}
+              aria-label={allVisibleSelected ? "Clear selection" : "Select all shown jobs"}
+              checked={allVisibleSelected}
+              ref={(element) => {
+                if (element)
+                  element.indeterminate = selectedItems.length > 0 && !allVisibleSelected;
+              }}
+              disabled={actions.isPending}
+              onChange={(event) => selectVisible(event.target.checked)}
+            />
             {["Title", "Output", "Worker", "Progress", "Requested by"].map((heading) => (
               <div
                 key={heading}
@@ -265,16 +398,70 @@ export default function AdminDownloadPreparationsPanel({
           </div>
           <div className="max-h-[calc(100vh-420px)] min-h-[12rem] overflow-y-auto">
             {filtered.map((prep, i) => (
-              <PreparationRow key={prep.id} prep={prep} even={i % 2 === 0} />
+              <PreparationRow
+                key={prep.id}
+                prep={prep}
+                even={i % 2 === 0}
+                selected={selected.has(prep.id)}
+                onToggleSelected={() => toggleSelected(prep.id)}
+                actionsDisabled={actions.isPending}
+                actionPending={actions.pendingIds?.has(prep.id) ?? false}
+                onPause={() => actions.run("pause", [prep])}
+                onResume={() => actions.run("resume", [prep])}
+                onCancel={() => setCancelTargets([prep])}
+              />
             ))}
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={cancelPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open && !actions.isPending) setCancelTargets(null);
+        }}
+        title={cancelPrompt?.title ?? ""}
+        description={cancelPrompt?.description ?? ""}
+        confirmLabel={cancelPrompt?.confirmLabel}
+        cancelLabel="Keep"
+        variant="destructive"
+        isPending={actions.isPending}
+        onConfirm={() => {
+          if (!cancelTargets) return;
+          const ids = new Set(cancelTargets.map((t) => t.id));
+          actions.run("cancel", cancelTargets, () => {
+            setCancelTargets(null);
+            setSelected((current) => new Set([...current].filter((id) => !ids.has(id))));
+          });
+        }}
+      />
     </div>
   );
 }
 
-function PreparationRow({ prep, even }: { prep: AdminDownloadPreparation; even: boolean }) {
+interface PreparationRowProps {
+  prep: AdminDownloadPreparation;
+  even: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
+  actionsDisabled: boolean;
+  actionPending: boolean;
+  onPause: () => void;
+  onResume: () => void;
+  onCancel: () => void;
+}
+
+function PreparationRow({
+  prep,
+  even,
+  selected,
+  onToggleSelected,
+  actionsDisabled,
+  actionPending,
+  onPause,
+  onResume,
+  onCancel,
+}: PreparationRowProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const title = preparationTitle(prep);
@@ -309,15 +496,39 @@ function PreparationRow({ prep, even }: { prep: AdminDownloadPreparation; even: 
     </button>
   );
 
+  const checkbox = (
+    <input
+      type="checkbox"
+      className={CHECKBOX}
+      aria-label={`Select ${title}`}
+      checked={selected}
+      disabled={actionsDisabled}
+      onChange={onToggleSelected}
+    />
+  );
+  const rowActions = (
+    <RowActions
+      prep={prep}
+      title={title}
+      disabled={actionsDisabled}
+      pending={actionPending}
+      onPause={onPause}
+      onResume={onResume}
+      onCancel={onCancel}
+    />
+  );
+
   return (
     <div
       className={cn(
         "border-border/30 hover:bg-surface/60 border-b transition-colors duration-100",
         !even && "bg-surface/20",
+        selected && "bg-primary/5",
       )}
     >
       {/* Desktop row */}
       <div className={`hidden ${GRID} items-center gap-3 px-3 py-2.5 sm:grid`}>
+        {checkbox}
         <div className="min-w-0">
           {itemHref ? (
             <Link to={itemHref} className="hover:text-primary block min-w-0 transition-colors">
@@ -338,13 +549,17 @@ function PreparationRow({ prep, even }: { prep: AdminDownloadPreparation; even: 
         </div>
         <ProgressCell prep={prep} />
         <Requesters prep={prep} />
-        <div className="flex justify-end">{detailsButton}</div>
+        <div className="flex items-center justify-end gap-1">
+          {rowActions}
+          {detailsButton}
+        </div>
       </div>
 
       {/* Mobile card */}
       <div className="space-y-2 px-4 py-3 sm:hidden">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+          <div className="mt-0.5 shrink-0">{checkbox}</div>
+          <div className="min-w-0 flex-1">
             <div className="truncate text-[13px] font-semibold">{title}</div>
             <div className="text-muted-foreground truncate text-[11px]">{subtitle}</div>
           </div>
@@ -357,7 +572,10 @@ function PreparationRow({ prep, even }: { prep: AdminDownloadPreparation; even: 
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[10px]">
           <span className="truncate">{requesterSummary(prep)}</span>
-          {detailsButton}
+          <div className="flex shrink-0 items-center gap-1">
+            {rowActions}
+            {detailsButton}
+          </div>
         </div>
       </div>
 
@@ -369,6 +587,74 @@ function PreparationRow({ prep, even }: { prep: AdminDownloadPreparation; even: 
         />
       )}
     </div>
+  );
+}
+
+function RowActions({
+  prep,
+  title,
+  disabled,
+  pending,
+  onPause,
+  onResume,
+  onCancel,
+}: {
+  prep: AdminDownloadPreparation;
+  title: string;
+  disabled: boolean;
+  pending: boolean;
+  onPause: () => void;
+  onResume: () => void;
+  onCancel: () => void;
+}) {
+  const iconButton =
+    "text-muted-foreground inline-flex h-6 w-6 items-center justify-center rounded transition-colors disabled:pointer-events-none disabled:opacity-40";
+  if (pending) {
+    return (
+      <Loader className="text-muted-foreground h-3.5 w-3.5 animate-spin" aria-label="Working" />
+    );
+  }
+  return (
+    <>
+      {canPausePreparation(prep) && (
+        <button
+          type="button"
+          className={cn(iconButton, "hover:bg-surface hover:text-foreground")}
+          aria-label={`Pause ${title}`}
+          title={
+            prep.state === "running"
+              ? "Pause: stops the encode, which starts over when resumed"
+              : "Pause: keeps its place in the queue without starting"
+          }
+          disabled={disabled}
+          onClick={onPause}
+        >
+          <Pause className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {canResumePreparation(prep) && (
+        <button
+          type="button"
+          className={cn(iconButton, "hover:bg-surface hover:text-foreground")}
+          aria-label={`Resume ${title}`}
+          title="Resume"
+          disabled={disabled}
+          onClick={onResume}
+        >
+          <Play className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <button
+        type="button"
+        className={cn(iconButton, "hover:bg-destructive/10 hover:text-destructive")}
+        aria-label={prep.state === "failed" ? `Remove ${title}` : `Cancel ${title}`}
+        title={prep.state === "failed" ? "Remove this failed job" : "Cancel"}
+        disabled={disabled}
+        onClick={onCancel}
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </>
   );
 }
 
@@ -472,6 +758,18 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
             ]
               .filter(Boolean)
               .join(" · ")}
+          </div>
+        </div>
+      );
+    case "paused":
+      return (
+        <div className="min-w-0 space-y-0.5">
+          <div className="text-muted-foreground flex items-center gap-1.5 text-[11px] font-semibold">
+            <Pause className="h-3 w-3" aria-hidden="true" />
+            Paused
+          </div>
+          <div className="text-muted-foreground text-[10px]">
+            {[formatAgo(prep.paused_at), "Won't start until resumed"].filter(Boolean).join(" · ")}
           </div>
         </div>
       );
@@ -708,6 +1006,8 @@ function jobStatus(prep: AdminDownloadPreparation): string {
       return prep.queue_position ? `Queued · #${prep.queue_position} in line` : "Queued";
     case "retrying":
       return `Retrying ${formatRetryIn(prep.next_retry_at)} · attempt ${prep.attempts + 1} of ${prep.max_attempts}`;
+    case "paused":
+      return `Paused ${formatAgo(prep.paused_at)}`.trim();
     case "failed":
       return `Failed ${formatAgo(prep.failed_at)}`.trim();
   }

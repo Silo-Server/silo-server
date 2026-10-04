@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -132,6 +133,7 @@ type Service struct {
 	artworkSigner    *artworkurl.Signer
 	artworkRepair    ArtworkRepairer
 	subtitleCache    *playback.SubtitleCache
+	externalTimings  subtitles.ExternalTimingLookup
 
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
 	artifacts *ArtifactManager
@@ -152,6 +154,16 @@ type Service struct {
 // sidecars. Nil disables caching.
 func (s *Service) SetSubtitleCache(cache *playback.SubtitleCache) { s.subtitleCache = cache }
 
+// SetExternalTimings applies sidecar timing corrections to offline sidecar
+// subtitles and their manifest revisions. Nil serves sidecars as they are on
+// disk.
+func (s *Service) SetExternalTimings(timings subtitles.ExternalTimingLookup) {
+	s.externalTimings = timings
+	if s.manifest != nil {
+		s.manifest.externalTimings = timings
+	}
+}
+
 // SetOfflineDeps wires the offline-manifest dependencies (catalog detail for
 // manifest + artwork, subtitle assets, and an HTTP client for streaming
 // artwork bytes). When unset, the manifest/artwork/subtitle endpoints report
@@ -168,6 +180,7 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 		return s.artifacts.repo.GetByID(ctx, id)
 	})
 	s.manifest.MarkerPopulation = s.markerPopulation
+	s.manifest.externalTimings = s.externalTimings
 	// A nil client leaves artwork fetches on artworkClient and its timeout.
 	s.httpClient = client
 }

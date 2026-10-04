@@ -36,7 +36,7 @@ import type { PlayerTrickplay } from "../trickplay";
 import type { VersionInfo } from "./QualityMenu";
 import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
-import type { StoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
+import type { SubtitleSync } from "../hooks/useSubtitleSync";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -84,7 +84,7 @@ interface PlayerControlsProps {
   onSubtitleJobAccepted?: (jobId: string) => void;
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
-  storedSubtitleSync?: StoredSubtitleSync;
+  subtitleSync?: SubtitleSync;
   canUploadSubtitles?: boolean;
   // Audio
   audioTracks: PlayerAudioTrack[];
@@ -160,7 +160,7 @@ export function PlayerControls({
   onSubtitleJobAccepted,
   sessionId,
   getSubtitleStartPosition,
-  storedSubtitleSync,
+  subtitleSync,
   canUploadSubtitles,
   audioTracks,
   activeAudioIndex,
@@ -355,7 +355,7 @@ export function PlayerControls({
               onSubtitleJobAccepted={onSubtitleJobAccepted}
               sessionId={sessionId}
               getSubtitleStartPosition={getSubtitleStartPosition}
-              storedSubtitleSync={storedSubtitleSync}
+              subtitleSync={subtitleSync}
               uploadEnabled={canUploadSubtitles}
               audioTracks={audioTracks}
             />
@@ -533,7 +533,7 @@ export function PlayerControls({
                 onSubtitleJobAccepted={onSubtitleJobAccepted}
                 sessionId={sessionId}
                 getSubtitleStartPosition={getSubtitleStartPosition}
-                storedSubtitleSync={storedSubtitleSync}
+                subtitleSync={subtitleSync}
                 uploadEnabled={canUploadSubtitles}
                 audioTracks={audioTracks}
               />

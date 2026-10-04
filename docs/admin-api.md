@@ -1884,10 +1884,11 @@ The bridge writer and profile section enforcement remain unchanged.
 `GET /api/v2/admin/downloads/preparations` lists the server-side remux and
 transcode jobs that turn library files into offline downloads. Items come in
 this order: running jobs, jobs waiting to retry, the queue in claim order (with
-a 1-based `queue_position`), and jobs that failed in the last 24 hours, newest
-first. `limit` (1–500, default 200) caps the items; `counts` (`running`,
-`queued`, `retrying`, `failed_recent`) always covers every listed job, so a
-client can tell when items were cut. Each item carries its source and output
+a 1-based `queue_position`), paused jobs in claim order (with `paused_at`), and
+jobs that failed in the last 24 hours, newest first. `limit` (1–500, default
+200) caps the items; `counts` (`running`, `queued`, `retrying`, `paused`,
+`failed_recent`) always covers every listed job, so a client can tell when items
+were cut. Each item carries its source and output
 recipe, the worker of the current or last attempt (`server` with the API node
 id, or `node` with the transcode node id and name), attempt counts, the last
 error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
@@ -1895,11 +1896,26 @@ error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
 cannot report progress, the `log_session_id` its FFmpeg output is logged under,
 and the download rows waiting on it with their account, profile, and device.
 
+`POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
+take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
+distinct id in request order. `outcome` is `applied`, `unchanged` (already in
+the requested state), `not_found` (no such job is being prepared: it finished,
+was canceled, or never existed), or `not_applicable` (pausing or resuming a
+failed job). Pause keeps a job's queue position but no worker claims it until
+it is resumed; a running encode stops and restarts from the beginning on resume,
+and the stopped attempt does not count against the job. Its waiting downloads
+stay `preparing`. Resume returns the job to the queue, or to a retry backoff
+that has not elapsed. Cancel removes running, queued, retrying, paused, and
+failed jobs; every download still waiting on a canceled job becomes `failed`
+with `error_message` `Canceled by an administrator`. A job that finished
+preparing is never touched. The three operations are idempotent.
+
 `GET /api/v2/admin/downloads/preparations/capabilities` reports availability,
-the realtime channel (`download_preparations`), and the failure window in
-seconds. The admin-only channel publishes `download_preparation.changed`
-(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, or is
-requeued, and when a user adds or removes a download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+the realtime channel (`download_preparations`), the failure window in seconds,
+and `controls` when pause, resume, and cancel are available. The admin-only channel publishes `download_preparation.changed`
+(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, is
+requeued, paused, resumed, or canceled, and when a user adds or removes a
+download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
 five seconds per running job. The subscription snapshot is `null`; re-read the
 list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the

@@ -367,8 +367,7 @@ func (s *Service) ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *h
 		if err != nil {
 			return fmt.Errorf("reading external subtitle: %w", ErrAssetNotFound)
 		}
-		writeSubtitle(w, ext.Format, data)
-		return nil
+		return s.serveExternalSubtitle(ctx, w, r, file.ID, ext.Format, data)
 	case subtitleRefEmbedded:
 		return s.serveEmbeddedSubtitle(w, r.WithContext(ctx), dl, value)
 	case "downloaded":
@@ -491,6 +490,27 @@ func parseSubtitleRef(ref string) (kind string, value int, err error) {
 	default:
 		return "", 0, ErrInvalidSubtitleRef
 	}
+}
+
+// serveExternalSubtitle writes a sidecar with its timing correction. Like a
+// stored subtitle it is revalidated on every use: the correction, or the file
+// on disk, can change behind the same ref.
+func (s *Service) serveExternalSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, fileID int, format string, data []byte) error {
+	subFormat := subtitles.SubtitleFormat(strings.ToLower(format))
+	timed, revision, err := subtitles.ExternalDelivery(ctx, s.externalTimings, fileID, subFormat, data)
+	if err != nil {
+		return fmt.Errorf("applying external subtitle timing: %w", err)
+	}
+	etag := `"external-` + revision + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if ifNoneMatchMatches(r.Header.Get("If-None-Match"), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return nil
+	}
+	w.Header().Set("Content-Type", subtitles.SubtitleContentType(subFormat))
+	_, _ = w.Write(timed)
+	return nil
 }
 
 // writeSubtitle writes subtitle bytes with a format-appropriate content type

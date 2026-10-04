@@ -149,11 +149,14 @@ func artifactUsesExecutionFingerprint(a *Artifact) bool {
 }
 
 // artifactOutputPath derives a deterministic output path from
-// (media_file_id, format, params_hash) so a reclaimed job targets the same file.
-func artifactOutputPath(dir string, mediaFileID int, format, hash string) string {
+// (media_file_id, format, params_hash) and the artifact id, so a reclaimed
+// job targets the same file. The id keeps a job created after a cancel off
+// the path of the canceled job, whose encode can still be running on another
+// replica until its next heartbeat.
+func artifactOutputPath(dir string, mediaFileID int, format, hash, id string) string {
 	short := hash
 	if len(short) > 16 {
 		short = short[:16]
 	}
-	return filepath.Join(dir, fmt.Sprintf("%d_%s_%s.mp4", mediaFileID, format, short))
+	return filepath.Join(dir, fmt.Sprintf("%d_%s_%s_%s.mp4", mediaFileID, format, short, id))
 }

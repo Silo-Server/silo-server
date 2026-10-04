@@ -6,7 +6,7 @@ import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { LANGUAGES } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
-import type { StoredSubtitle } from "../utils/storedSubtitleSync";
+import type { StoredSubtitle } from "../utils/subtitleSync";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;

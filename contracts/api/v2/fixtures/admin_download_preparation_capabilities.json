@@ -1,9 +1,10 @@
 {
-  "revision": "1d3d9a2130e32149175279f0bd508e0abe76dbec46bb5e168a2ea6f80c5306ab",
+  "revision": "54fbce846f4ceecdcf8c8bacf8171f613f92474ef90cb168de58ff5a526d1b68",
   "state": "available",
   "allowed": true,
   "available": true,
   "realtime_channel": "download_preparations",
   "failed_window_seconds": 86400,
-  "live_progress": true
+  "live_progress": true,
+  "controls": true
 }

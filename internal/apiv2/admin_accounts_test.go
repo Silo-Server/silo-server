@@ -77,6 +77,12 @@ func (*fakeAdminAccounts) ListAdminAccountProfiles(context.Context, int) ([]hand
 }
 
 func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
+	f := fixtureAdminAccounts()
+	users := new(fakeAdminUsers)
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccounts = f
+	deps.AdminUsers = users
+	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name string
 		ids  []int
@@ -87,12 +93,9 @@ func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
 		{name: "restricted", ids: []int{3, 7}, want: `["3","7"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := fixtureAdminAccounts()
+			*f = *fixtureAdminAccounts()
 			f.snapshot.User.EffectivePolicy.LibraryIDs = tc.ids
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAccounts = f
-			deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
-			h := NewHandler(deps)
+			*users = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
 			for _, path := range []string{Prefix + "/admin/users/7", Prefix + "/admin/users"} {
 				reply := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
 				if reply.Code != http.StatusOK {

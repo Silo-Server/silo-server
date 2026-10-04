@@ -1,7 +1,7 @@
 # Subtitle sync
 
-Subtitle sync aligns a stored subtitle (`downloaded_subtitles`) to its media
-file's audio. Most "out of sync" provider subtitles were cut for another
+Subtitle sync aligns a subtitle to its media file's audio: a stored subtitle
+(`downloaded_subtitles`) or a subtitle file next to the media (a sidecar). Most "out of sync" provider subtitles were cut for another
 release of the title: a 25 fps PAL speed-up of a 23.976 fps film, an extra
 studio logo or recap, or a different container start. Sync finds the timing
 correction that fixes those cases, and reports `no_match` when the subtitle
@@ -14,14 +14,18 @@ The code lives in `internal/subtitles/subsync`; the API is described in
 ## Timing correction
 
 A correction is `Timing{Scale, OffsetMS}` (`internal/subtitles/timing.go`):
-original time `t` plays at `t * scale + offset_ms`. It is stored on the
-subtitle row (`timing_scale`, `timing_offset_ms`); the bytes never change.
+original time `t` plays at `t * scale + offset_ms`. A stored subtitle keeps it
+on its row (`timing_scale`, `timing_offset_ms`); a sidecar's lives in
+`external_subtitle_timings` (see [sidecar subtitles](#sidecar-subtitles)). The
+bytes never change.
 
-- Every client delivery path applies the row's timing to the stored bytes
-  before any conversion: the playback sidecar, the Jellyfin subtitle stream,
+- Every client delivery path applies the timing to the original bytes before
+  any conversion: the playback subtitle route, the Jellyfin subtitle stream,
   offline downloads, and the source of an AI translation
-  (`subtitles.DeliveryBytes`). The administrator download returns the stored
-  bytes unchanged, and content identity and deduplication use them too.
+  (`subtitles.DeliveryBytes` for stored subtitles, `playback.LoadExternalSubtitle`
+  for sidecars). Those responses are `Cache-Control: private, no-cache`, since
+  the bytes change behind the same URL. The administrator download returns the
+  stored bytes unchanged, and content identity and deduplication use them too.
 - `Retime` rewrites SRT, WebVTT, and ASS/SSA timestamps and leaves every other
   byte as stored. Under a scale it also scales the event-relative times in ASS
   override tags (karaoke `\k` syllables, `\t`, `\move`, `\fad`, `\fade`),
@@ -30,6 +34,32 @@ subtitle row (`timing_scale`, `timing_offset_ms`); the bytes never change.
   validators captured before it go stale.
 - Players already apply a per-device delay (`player.subtitle_sync_ms`); it
   stacks on top of the stored correction.
+
+## Sidecar subtitles
+
+Silo is a media server, not a media manager: it never writes a sidecar file.
+A sidecar's correction is a row keyed by the media file and the SHA-256 of the
+sidecar's bytes.
+
+- **Identity.** Clients name a sidecar by its sync key,
+  `external-{sha256 of its path}`, the same path key playback URLs pin it with
+  (`external_subtitle_key`). The server resolves the key against the file's
+  scanned sidecars and reads the bytes to find the row.
+- **Edits and renames.** A sidecar edited or replaced on disk has other bytes,
+  so its old correction no longer applies; a renamed one still matches. The
+  row records the last path a sync saw (`path`); recording a new path does not
+  change the row's revision.
+- **Delivery.** `playback.LoadExternalSubtitle` reads the file, hashes it, and
+  applies the matching correction. Only SRT, WebVTT, ASS, and SSA sidecars can
+  be corrected; other formats are served as before.
+- **On first play.** Nothing syncs sidecars in bulk: not a scan, not a
+  scheduled task; a tool that rewrites subtitle files (Bazarr) covers that.
+  A sidecar is synced when someone asks, or automatically the first time a
+  player is served it (see Triggers). A sync request creates the row with the
+  original timing, so the job has a revision to guard its result with.
+- **Jobs.** A job reads the sidecar from the row's path when it runs. It ends
+  `failed` with `subtitle_changed` when the bytes no longer match the row, the
+  file is gone, or the scanner no longer lists it under the media file.
 
 ## Alignment
 
@@ -83,17 +113,23 @@ file; the cached levels take about 150 KB. Each alignment then takes about
 
 ## Jobs
 
-`subtitle_sync_jobs` holds one row per attempt. At most one job per subtitle
-is active (`pending` or `running`). Jobs run on the shared AI job runner
+`subtitle_sync_jobs` holds one row per attempt, for a stored subtitle
+(`subtitle_id`) or a sidecar correction row (`external_timing_id`). At most
+one job per subtitle is active (`pending` or `running`). Jobs run on the shared AI job runner
 (`internal/ai/jobrunner`) with their own concurrency bound, heartbeats, and
 stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
 
-- **Triggers.** A provider download or a user upload starts an automatic job
-  when `subtitles.auto_sync` is on (the default). It runs only for a subtitle
-  that has never been synced and still has its original timing: adding
-  identical content again returns the existing row, and must not replace a
-  timing someone set or reset. It skips formats that cannot be retimed. A
-  manual job is started through the API.
+- **Triggers.** With `subtitles.auto_sync` on (the default), an automatic job
+  starts when a provider download or a user upload adds a subtitle, and when
+  a player is first served a subtitle (stored or sidecar) through the playback
+  or Jellyfin subtitle routes. Delivery hands the subtitle to the service and
+  never waits for it (`subtitles.PlaySyncer`; HEAD requests do not count).
+  Each server considers a played subtitle once every 30 minutes, since players
+  fetch subtitles in windows. An automatic job runs only for a subtitle (or a
+  sidecar's bytes) that has never been synced and still has its original
+  timing: adding identical content again returns the existing row, and must
+  not replace a timing someone set or reset. It skips formats that cannot be
+  retimed. A manual job is started through the API.
 - **Bounds.** Cues past the audio's reach or longer than a minute are left out
   of alignment, so a corrupt timestamp cannot size the cue map. A node request
   is bounded by the node's slot wait, its decode timeout, and a minute. A node
@@ -103,10 +139,28 @@ stale-job reaping. A job reaped after a crash ends `failed`; it is not resumed.
   applies its result and finishes in one transaction only while the row still
   has that revision. If the subtitle changed meanwhile (a manual timing edit,
   a language change), the newer edit wins and the job ends `failed`.
-- **Notification.** An applied result or a manual timing change sends
-  `subtitle_timing_changed` to the file's playback sessions, on every API
-  server through the event bus (`silo:playback`). It is best effort; clients
-  also see the job state in the stored subtitle list.
+- **Who may sync.** Anyone with access to the file may start a sync or set
+  the timing. The bytes never change and the timing can always be reset, so
+  no owner check applies; demo mode refuses both.
+- **Replaced files.** When a media file's hash or size changes (both values
+  known), a trigger on `media_files` resets its subtitles' timing and deletes
+  their sync jobs. Deleting a running job stops it from applying: `Apply`
+  finishes the job in the same transaction and rolls back when the row is gone.
+- **Progress.** A running job records its `phase` (`analyzing` while it reads
+  the file's speech, `matching` while it aligns cues) and `progress` (0..1) on
+  the job row, which never touches the subtitle's revision. Decoding speech
+  takes almost all of a job's time, so each decoded window advances progress;
+  speech already cached skips straight to matching.
+- **Failures.** A failed job names why in `failure`: `subtitle_changed`,
+  `no_audio` (the file has no audio the decoder can read), `unavailable`
+  (no node or server could decode it now, it backed off, or it was
+  interrupted; a later attempt can pass), or `error`.
+- **Notification.** Each step of a job (queued, every progress update, the
+  outcome) sends `subtitle_sync_updated` to the file's playback sessions; an
+  applied result or a manual timing change also sends
+  `subtitle_timing_changed`. Both reach sessions on every API server through
+  the event bus (`silo:playback`). They are best effort; clients also read the
+  job state through the API.
 
 ## Where the audio is decoded
 
@@ -128,6 +182,23 @@ The node runs each window through `POST /media-samples/run` (see
 [media sampling](media-sampling.md#remote-runs)). The input path must be one
 the node is allowed to read, which requires the same media paths on the node
 as on the API server.
+
+## Client feedback
+
+The web player shows a sync the viewer started (a sync they asked for, or the
+automatic sync of a subtitle they downloaded or uploaded) in a card in its
+top-right corner, which stays visible in fullscreen: the phase and progress
+while it runs, then the outcome. A synced result for the track on screen reads
+"Applying new timing" until the track's cues reload with the new timing, then
+"Subtitles synced" with the correction. A timing change someone else made to
+the track on screen shows a short note once the new cues load; the automatic
+sync of a subtitle the first time it is played shows nothing. A timing reload
+of the track on screen swaps its cues in place: the current cues stay up until
+the corrected ones load (text tracks), or the corrected script is loaded into
+the running renderer (ASS), with no loading notice in between. The subtitle
+menu shows each track's status and the selected track's progress, last result,
+and actions. Clients use the same states, from the API and the realtime events
+(see [subtitles-api.md](../subtitles-api.md#subtitle-sync)).
 
 ## Speech level cache
 

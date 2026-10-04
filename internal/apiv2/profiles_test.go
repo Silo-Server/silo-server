@@ -361,8 +361,7 @@ func TestDeleteProfile(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-missing", "", auth), TypeNotFound)
 	// A PIN-locked primary profile manages the household only once the
 	// gate verified it by X-Profile-Token.
-	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h = newTestHandler(t, pilotDeps(nil, locked))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	if rec := do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 204 {
 		t.Fatalf("verified: %d %s", rec.Code, rec.Body.String())
@@ -374,7 +373,7 @@ func TestDeleteProfile(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
 		{errors.New("boom"), TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", auth), tc.want)
 	}
 }
@@ -430,8 +429,7 @@ func TestListHouseholdSessions(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions?offset=1", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", nil), TypeAuthenticationRequired)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h = newTestHandler(t, pilotDeps(nil, locked))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	for _, tc := range []struct {
 		err  error
@@ -440,7 +438,7 @@ func TestListHouseholdSessions(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
 		{&handlers.APIError{Status: http.StatusInternalServerError, Code: TypeInternalError.ID, Message: "Playback sessions are not configured"}, TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)), tc.want)
 	}
 	unwired := pilotDeps(nil, nil)
