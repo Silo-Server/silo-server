@@ -299,12 +299,16 @@ func (s *Store) MarkRunning(ctx context.Context, id int64) error {
 }
 
 // Progress records what a running job is doing and how far it got; it also
-// counts as a heartbeat. A job no longer running is left as it is.
+// counts as a heartbeat. A job no longer running is left as it is and
+// returns jobrunner.ErrJobTerminal.
 func (s *Store) Progress(ctx context.Context, id int64, phase string, progress float64) error {
-	_, err := s.pool.Exec(ctx, `UPDATE subtitle_sync_jobs SET phase = $2, progress = $3, heartbeat_at = now()
+	tag, err := s.pool.Exec(ctx, `UPDATE subtitle_sync_jobs SET phase = $2, progress = $3, heartbeat_at = now()
 		WHERE id = $1 AND status = 'running'`, id, phase, progress)
 	if err != nil {
 		return fmt.Errorf("record subtitle sync progress: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return jobrunner.ErrJobTerminal
 	}
 	return nil
 }

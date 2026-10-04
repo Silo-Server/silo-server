@@ -25,10 +25,12 @@ type fakeJobs struct {
 	finished map[int64]Outcome
 	applied  map[int64]subtitles.Timing
 	applyErr error
-	// finishErr is what Finish answers, as for a job reaped meanwhile.
-	finishErr error
-	hasJob    bool
-	progress  []string
+	// finishErr and progressErr are what Finish and Progress answer, as for
+	// a job reaped meanwhile.
+	finishErr   error
+	progressErr error
+	hasJob      bool
+	progress    []string
 }
 
 func (f *fakeJobs) Heartbeat(context.Context, int64) error { return nil }
@@ -76,6 +78,9 @@ func (f *fakeJobs) MarkRunning(context.Context, int64) error { return nil }
 func (f *fakeJobs) Progress(_ context.Context, _ int64, phase string, progress float64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.progressErr != nil {
+		return f.progressErr
+	}
 	f.progress = append(f.progress, fmt.Sprintf("%s %.2f", phase, progress))
 	return nil
 }
@@ -553,6 +558,21 @@ func TestExecuteDoesNotAnnounceAJobThatEndedMeanwhile(t *testing.T) {
 	f.notifier.updates = nil
 	sub.Revision++ // the job fails as changed
 	f.jobs.finishErr = jobrunner.ErrJobTerminal
+	f.svc.execute(context.Background(), job)
+	if len(f.notifier.updates) != 0 {
+		t.Fatalf("announced %+v", f.notifier.updates)
+	}
+}
+
+func TestExecuteDoesNotAnnounceProgressOfAJobThatEndedMeanwhile(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 2000}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	job, _, err := f.jobs.Create(context.Background(), f.svc.rows.(*fakeSubtitles).sub, TriggerManual, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.notifier.updates = nil
+	f.jobs.progressErr = jobrunner.ErrJobTerminal
+	f.jobs.applyErr = jobrunner.ErrJobTerminal
 	f.svc.execute(context.Background(), job)
 	if len(f.notifier.updates) != 0 {
 		t.Fatalf("announced %+v", f.notifier.updates)

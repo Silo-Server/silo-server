@@ -274,7 +274,10 @@ type run struct {
 // players of its file.
 func (r *run) report(ctx context.Context, phase string, progress float64) {
 	r.job.Status, r.job.Phase, r.job.Progress = JobRunning, phase, &progress
-	_ = r.s.jobs.Progress(context.WithoutCancel(ctx), r.job.ID, phase, progress)
+	// A job reaped or deleted with a replaced file is no longer running.
+	if err := r.s.jobs.Progress(context.WithoutCancel(ctx), r.job.ID, phase, progress); errors.Is(err, jobrunner.ErrJobTerminal) {
+		return
+	}
 	r.s.updated(ctx, r.subject.target, r.timingNow(ctx), r.job)
 }
 

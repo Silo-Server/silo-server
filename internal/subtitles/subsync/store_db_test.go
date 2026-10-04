@@ -124,6 +124,9 @@ func TestExternalTimingAndJobsPostgres(t *testing.T) {
 	if err := store.Finish(ctx, stale.ID, Outcome{Status: JobFailed}); !errors.Is(err, jobrunner.ErrJobTerminal) {
 		t.Fatalf("finish a finished job: %v", err)
 	}
+	if err := store.Progress(ctx, stale.ID, PhaseAnalyzing, 0.5); !errors.Is(err, jobrunner.ErrJobTerminal) {
+		t.Fatalf("progress of a finished job: %v", err)
+	}
 
 	// A first manual write for other bytes creates their row.
 	other := strings.Repeat("cd", 32)
