@@ -478,14 +478,15 @@ describe("Sign-in & role", () => {
     expect(within(signIn).getByRole("spinbutton", { name: "Profiles allowed" })).toHaveValue(5);
   });
 
-  it("says Default without a value for a demoted admin when no group is the default", async () => {
+  it("shows the no-group limit for a demoted admin when no group is the default", async () => {
     const ui = userEvent.setup();
     mocks.viewerIsOwner = true;
     mount({ ...USER, role: "admin" });
     const signIn = await edit(ui, "Sign-in & role");
     await pick(ui, signIn, "Role", "User");
+    // With no default group the account is left ungrouped.
     expect(
-      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default" }),
+      within(segment(signIn, "Profiles allowed")).getByRole("button", { name: "Default · 5" }),
     ).toBeInTheDocument();
   });
 
