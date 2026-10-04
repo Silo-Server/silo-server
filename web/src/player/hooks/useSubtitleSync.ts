@@ -22,14 +22,21 @@ export const SYNC_PUSH_FRESH_MS = 4_000;
  */
 export const SYNC_TIMING_COALESCE_MS = 5_000;
 
+/** How far a job has come: queued, running, then finished. */
+function jobStage(status: SubtitleSyncJob["status"]): number {
+  if (status === "pending") return 0;
+  return status === "running" ? 1 : 2;
+}
+
 /**
  * Whether a realtime update about job is older than the known job: a job
- * created before it, or the same job running again after it finished.
- * Updates from different API servers can arrive out of order.
+ * created before it, or the same job at an earlier stage (queued after it
+ * ran, or running after it finished). Updates from different API servers,
+ * or sent off the sync worker, can arrive out of order.
  */
 function isOutdatedJob(job: SubtitleSyncJob, known: SubtitleSyncJob): boolean {
   if (job.id !== known.id) return job.created_at < known.created_at;
-  return isSyncInProgress(job.status) && !isSyncInProgress(known.status);
+  return jobStage(job.status) < jobStage(known.status);
 }
 
 interface ObserveOptions {
@@ -476,13 +483,14 @@ export function useSubtitleSync({
         });
         if (!current()) return;
         if (!etag) throw new Error("Couldn't read the subtitle's current version.");
+        const sentAt = observationRef.current;
         const res = await playerV2(
           playerConfig,
           "PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing",
           { path, headers: { "If-Match": etag }, body: { offset_ms: 0, scale: 1 } },
         );
         if (!current()) return;
-        if (res?.subtitle) observe(res.subtitle);
+        if (res?.subtitle) observe(res.subtitle, { sentAt });
         patch(key, { busy: false });
       } catch (err) {
         if (current()) handleActionError(key, err, "Couldn't reset timing");

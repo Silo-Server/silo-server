@@ -184,8 +184,7 @@ func (s *Service) Request(ctx context.Context, subtitleID int, trigger string, r
 		return nil, err
 	}
 	if created {
-		s.updated(ctx, subtitles.SyncTarget{MediaFileID: sub.MediaFileID, StoredID: sub.ID}, sub.Timing, *job)
-		s.dispatch(job)
+		s.start(ctx, job, subtitles.SyncTarget{MediaFileID: sub.MediaFileID, StoredID: sub.ID}, sub.Timing)
 	}
 	return job, nil
 }
@@ -215,8 +214,7 @@ func (s *Service) RequestExternal(ctx context.Context, mediaFileID int, sidecar 
 		return nil, err
 	}
 	if created {
-		s.updated(ctx, subtitles.SyncTarget{MediaFileID: mediaFileID, ExternalPath: sidecar.Path}, row.Timing, *job)
-		s.dispatch(job)
+		s.start(ctx, job, subtitles.SyncTarget{MediaFileID: mediaFileID, ExternalPath: sidecar.Path}, row.Timing)
 	}
 	return job, nil
 }
@@ -255,6 +253,20 @@ func (s *Service) updated(ctx context.Context, target subtitles.SyncTarget, timi
 	if s.notifier != nil && target.MediaFileID > 0 {
 		s.notifier.SubtitleSyncUpdated(context.WithoutCancel(ctx), Update{Target: target, Timing: timing, Job: job})
 	}
+}
+
+// start runs a new job and tells players of the file it is queued. The job
+// starts first, and the update goes out on its own: a slow player connection
+// must not delay the request, or the job past its stale-job cutoff. Players
+// treat a queued update that arrives after the job's progress as old.
+func (s *Service) start(ctx context.Context, job *Job, target subtitles.SyncTarget, timing subtitles.Timing) {
+	queued := *job
+	s.dispatch(job)
+	if s.inlineUpdates {
+		s.updated(ctx, target, timing, queued)
+		return
+	}
+	go s.updated(context.WithoutCancel(ctx), target, timing, queued)
 }
 
 func (s *Service) dispatch(job *Job) {

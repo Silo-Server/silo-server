@@ -552,6 +552,81 @@ describe("useSubtitleSync", () => {
     expect(onTimingChanged).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a timing set after a reset it was waiting on", async () => {
+    let answerReset: (value: unknown) => void = () => {};
+    const synced = stored({
+      key: SIDECAR,
+      source: "external",
+      sync: job("synced"),
+      timing: { offset_ms: 900, scale: 1 },
+    });
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({ subtitles: [synced] }),
+      [READ]: (options) => {
+        (options.onResponse as (r: Response) => void)?.(
+          new Response(null, { headers: { ETag: '"v1"' } }),
+        );
+        return { subtitle: synced };
+      },
+      [TIMING]: () =>
+        new Promise((resolve) => {
+          answerReset = resolve;
+        }),
+    });
+    const { result } = renderSync();
+    await flush();
+    let reset: Promise<void> = Promise.resolve();
+    act(() => {
+      reset = result.current.resetTiming(SIDECAR);
+    });
+    await flush();
+    expect(calls(TIMING)).toHaveLength(1);
+
+    // Another viewer sets a timing after the reset; its update arrives first.
+    const later = { offset_ms: 300, scale: 1 };
+    act(() =>
+      result.current.syncUpdated({
+        session_id: "session-1",
+        file_id: 42,
+        sync_key: SIDECAR,
+        timing: later,
+        job: job("synced"),
+      }),
+    );
+    await act(async () => {
+      answerReset({ subtitle: { ...synced, timing: { offset_ms: 0, scale: 1 } } });
+      await reset;
+    });
+    expect(result.current.entries[SIDECAR]?.state.timing).toEqual(later);
+    expect(result.current.entries[SIDECAR]?.busy).toBe(false);
+  });
+
+  it("ignores a queued update that arrives after the job ran", async () => {
+    serve({
+      [STATUS]: () => ({ state: "available" }),
+      [LIST]: () => ({ subtitles: [stored({ key: SIDECAR, source: "external" })] }),
+    });
+    const { result } = renderSync();
+    await flush();
+    const push = (status: SubtitleSyncJob["status"], extra: Partial<SubtitleSyncJob>) =>
+      act(() =>
+        result.current.syncUpdated({
+          session_id: "session-1",
+          file_id: 42,
+          sync_key: SIDECAR,
+          timing: { offset_ms: 0, scale: 1 },
+          job: job(status, undefined, extra),
+        }),
+      );
+    push("running", { phase: "analyzing", progress: 0.2 });
+    push("pending", { phase: "queued", progress: 0 });
+    expect(result.current.entries[SIDECAR]?.state.sync).toMatchObject({
+      status: "running",
+      progress: 0.2,
+    });
+  });
+
   it("reads all subtitles again for an update about one it has not loaded", async () => {
     serve({
       [STATUS]: () => ({ state: "available" }),

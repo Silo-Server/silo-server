@@ -324,6 +324,32 @@ func TestRequestAutoSkips(t *testing.T) {
 	}
 }
 
+// stalledNotifier stands for a player connection that does not take writes
+// until released.
+type stalledNotifier struct{ release chan struct{} }
+
+func (n stalledNotifier) SubtitleSyncUpdated(context.Context, Update)                 { <-n.release }
+func (n stalledNotifier) SubtitleTimingChanged(context.Context, subtitles.SyncTarget) {}
+
+func TestRequestDoesNotWaitForPlayers(t *testing.T) {
+	f := newFixture(t, subtitles.Timing{Scale: 1, OffsetMS: 1500}, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	f.svc.inlineUpdates = false
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		cancel()
+	})
+	f.svc.runner = jobrunner.New(ctx, jobrunner.NewSemaphore(1), f.jobs, "test", nil)
+	f.svc.notifier = stalledNotifier{release: release}
+	// The request returns, with its job started, while the update that says
+	// it is queued is stuck on the player connection.
+	job, err := f.svc.Request(context.Background(), 5, TriggerManual, nil)
+	if err != nil || job == nil {
+		t.Fatalf("request: %v %v", job, err)
+	}
+}
+
 func TestSamplerExecution(t *testing.T) {
 	reqs := []mediasample.Request{{Input: "/m.mkv"}, {Input: "/m.mkv"}}
 	ok := func(context.Context, mediasample.Request) (mediasample.Result, error) {
