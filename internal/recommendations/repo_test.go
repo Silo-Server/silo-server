@@ -11,7 +11,7 @@ import (
 )
 
 func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
-	query := strings.Join(strings.Fields(tasteSeedCandidateQuery), " ")
+	query := strings.Join(strings.Fields(tasteSeedCandidateQuery(nil, 1)), " ")
 
 	assertQueryTermsInOrder(t, query,
 		"ORDER BY COALESCE(wc.watch_count, 0) DESC",
@@ -30,7 +30,7 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 }
 
 func TestTasteSeedCandidateQueryIncludesEbooks(t *testing.T) {
-	query := strings.Join(strings.Fields(tasteSeedCandidateQuery), " ")
+	query := strings.Join(strings.Fields(tasteSeedCandidateQuery(nil, 1)), " ")
 
 	for _, term := range []string{
 		"(mi.status = 'matched' OR mi.type = 'audiobook' OR mi.type = 'ebook')",

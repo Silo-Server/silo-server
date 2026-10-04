@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -58,7 +59,15 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 	if err := normalizeAdminGroupInput(&in); err != nil {
 		return nil, err
 	}
-	return s.UpdateConditional(ctx, id, in, guard)
+	librariesChange := h.groupLibrariesChange(ctx, id, in)
+	group, err := s.UpdateConditional(ctx, id, in, guard)
+	if err != nil {
+		return nil, err
+	}
+	if librariesChange {
+		notifyAccountsScopeChanged(ctx, h.RecWorker, h.groupMembers(ctx, id)...)
+	}
+	return group, nil
 }
 
 // DeleteAdminAccessGroup deletes a group. Its members move into the default
@@ -70,12 +79,54 @@ func (h *AccessGroupHandler) DeleteAdminAccessGroup(ctx context.Context, id int6
 	if !ok {
 		return ErrAccessGroupUnavailable
 	}
-	mover, ok := h.store.(memberMovingGroupStore)
-	if !ok {
-		return s.DeleteConditional(ctx, id, guard)
+	// The members are listed first: the delete moves them out of the group.
+	members := h.groupMembers(ctx, id)
+	var err error
+	if mover, ok := h.store.(memberMovingGroupStore); ok {
+		// Set-based, so the group-writer lock is not held for per-member statements.
+		err = mover.DeleteMovingMembers(ctx, id, guard)
+	} else {
+		err = s.DeleteConditional(ctx, id, guard)
 	}
-	// Set-based, so the group-writer lock is not held for per-member statements.
-	return mover.DeleteMovingMembers(ctx, id, guard)
+	if err != nil {
+		return err
+	}
+	notifyAccountsScopeChanged(ctx, h.RecWorker, members...)
+	return nil
+}
+
+// accessGroupMemberLister lists the accounts in an access group.
+// *access.GroupStore implements it.
+type accessGroupMemberLister interface {
+	MemberIDs(ctx context.Context, id int64) ([]int, error)
+}
+
+// groupMembers lists group id's member accounts for a recommendations
+// rebuild; without a worker, or when the list fails, it is empty.
+func (h *AccessGroupHandler) groupMembers(ctx context.Context, id int64) []int {
+	lister, ok := h.store.(accessGroupMemberLister)
+	if h.RecWorker == nil || !ok {
+		return nil
+	}
+	members, err := lister.MemberIDs(ctx, id)
+	if err != nil {
+		slog.WarnContext(ctx, "listing access group members for a recommendations rebuild failed", "component", "api", "access_group_id", id, "error", err)
+		return nil
+	}
+	return members
+}
+
+// groupLibrariesChange reports whether in changes group id's libraries. When
+// the current group cannot be read it assumes they change.
+func (h *AccessGroupHandler) groupLibrariesChange(ctx context.Context, id int64, in access.UpdateGroupInput) bool {
+	if in.LibraryIDs == nil || h.RecWorker == nil {
+		return false
+	}
+	current, err := h.store.Get(ctx, id)
+	if err != nil || current == nil {
+		return true
+	}
+	return (current.LibraryIDs == nil) != (*in.LibraryIDs == nil) || !sameIntSet(current.LibraryIDs, *in.LibraryIDs)
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {

@@ -26,6 +26,9 @@ type AccessGroupStore interface {
 
 type AccessGroupHandler struct {
 	store AccessGroupStore
+	// RecWorker is told when a group's libraries change or the group is
+	// deleted, so its members' recommendations are rebuilt. Optional.
+	RecWorker AccountsScopeNotifier
 }
 
 func NewAccessGroupHandler(store AccessGroupStore) *AccessGroupHandler {
@@ -202,10 +205,14 @@ func (h *AccessGroupHandler) HandleUpdate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	librariesChange := h.groupLibrariesChange(r.Context(), id, input)
 	group, err := h.store.Update(r.Context(), id, input)
 	if err != nil {
 		writeAccessGroupError(w, err, "Failed to update access group")
 		return
+	}
+	if librariesChange {
+		notifyAccountsScopeChanged(r.Context(), h.RecWorker, h.groupMembers(r.Context(), id)...)
 	}
 	writeJSON(w, http.StatusOK, toAccessGroupResponse(*group))
 }
@@ -222,10 +229,12 @@ func (h *AccessGroupHandler) HandleDelete(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	members := h.groupMembers(r.Context(), id)
 	if err := h.store.Delete(r.Context(), id); err != nil {
 		writeAccessGroupError(w, err, "Failed to delete access group")
 		return
 	}
+	notifyAccountsScopeChanged(r.Context(), h.RecWorker, members...)
 	w.WriteHeader(http.StatusNoContent)
 }
 

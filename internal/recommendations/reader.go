@@ -136,6 +136,17 @@ func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string
 	return rows[1:], nil
 }
 
+// GetForYouPage returns every recommendations-page row, the main row first.
+// It is GetForYouMain and GetForYouRows in one read.
+func (r *Reader) GetForYouPage(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	limit = normalizeRecommendationLimit(limit)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return trimRows(rows, limit), nil
+}
+
 // GetSimilarUsersLiked returns the cached collaborative row for the profile.
 func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	return r.similarUsersLiked(ctx, userID, profileID, normalizeRecommendationLimit(limit), filter)
@@ -146,8 +157,13 @@ func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID st
 	if err != nil {
 		return nil, err
 	}
-	if len(items) == 0 {
+	if items == nil {
+		// No row is cached. A built row may be empty (too few peer accounts),
+		// and rebuilding it would not change that.
 		r.requestRefresh(ctx, userID, profileID)
+		return []ScoredItem{}, nil
+	}
+	if len(items) == 0 {
 		return []ScoredItem{}, nil
 	}
 

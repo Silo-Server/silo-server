@@ -14,62 +14,6 @@ const aggregateMediaTypeFloorDivisor = 5
 
 var aggregateSupplementMediaTypes = []string{"movie", "series", "audiobook", "ebook"}
 
-// ForYou returns personalised recommendations grouped by taste clusters.
-// For cold-start users, non-personalized rows are returned.
-func (e *Engine) ForYou(ctx context.Context, userID int, profileID string, limit int) (*ForYouResponse, error) {
-	// Check signal count to determine cold-start level.
-	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get taste profile meta: %w", err)
-	}
-	level := coldStartLevelOf(meta)
-
-	// Build cold-start rows (always available).
-	coldStartRows, err := e.buildColdStartRows(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("build cold start rows: %w", err)
-	}
-
-	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
-	}
-	excludeIDs := scoredItemIDsFromSet(excluded)
-	coldStartRows = excludeRowItems(coldStartRows, excluded)
-
-	// If no taste profile at all, return cold-start only.
-	if meta == nil || level == 0 {
-		return &ForYouResponse{Rows: coldStartRows}, nil
-	}
-
-	// Build personalized rows from taste clusters.
-	liveFilter := catalog.AccessFilter{UserID: userID, ProfileID: profileID}
-	personalRows, _, err := e.buildClusterRows(ctx, userID, profileID, limit, excludeIDs, liveFilter)
-	if err != nil {
-		return nil, fmt.Errorf("build cluster rows: %w", err)
-	}
-
-	aggregatedRow, err := e.buildAggregatedRow(ctx, userID, profileID, limit, excludeIDs, liveFilter)
-	if err != nil {
-		return nil, fmt.Errorf("build aggregated row: %w", err)
-	}
-	personalRows = combinePersonalRows(aggregatedRow, personalRows)
-
-	merged := mergePersonalizedAndColdStart(personalRows, coldStartRows, level)
-	return &ForYouResponse{Rows: merged}, nil
-}
-
-func combinePersonalRows(aggregated *ForYouRow, clusterRows []ForYouRow) []ForYouRow {
-	if aggregated == nil {
-		return clusterRows
-	}
-
-	rows := make([]ForYouRow, 0, len(clusterRows)+1)
-	rows = append(rows, *aggregated)
-	rows = append(rows, clusterRows...)
-	return rows
-}
-
 // clusterTitlePrefix starts every cluster row title and the Reason of every
 // item in a cluster row.
 const clusterTitlePrefix = "Because you enjoy "
@@ -369,37 +313,20 @@ func sortScoredItems(items []ScoredItem) {
 	})
 }
 
-// buildColdStartRows generates non-personalized rows.
-func (e *Engine) buildColdStartRows(ctx context.Context) ([]ForYouRow, error) {
-	popular, _ := e.repo.GetPopularItems(ctx, 30, 20)
-	recentlyAdded, _ := e.repo.GetRecentlyAddedItems(ctx, 14, 20)
-	topRated, _ := e.repo.GetTopRatedItems(ctx, 5, 20)
-
-	genreSamplers := make(map[string][]ScoredItem)
-	topGenres, _ := e.repo.GetTopGenres(ctx, 5)
-	for _, genre := range topGenres {
-		items, _ := e.repo.GetGenreSamplerItems(ctx, genre, 20)
-		if len(items) > 0 {
-			genreSamplers[genre] = items
-		}
-	}
-
-	return buildColdStartRows(popular, recentlyAdded, topRated, genreSamplers), nil
-}
-
 // BecauseYouWatched returns items similar to a specific item the user has
 // watched. Blends embedding similarity (70%) with co-watch data (30%). Titles
-// in the profile's recommendation exclusion set are left out.
-func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]ScoredItem, error) {
+// in the profile's recommendation exclusion set, and those filter does not
+// admit, are left out before ranking.
+func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get recommendation exclusions: %w", err)
 	}
-	return e.becauseYouWatched(ctx, sourceItemID, limit, excluded)
+	return e.becauseYouWatched(ctx, sourceItemID, limit, excluded, filter)
 }
 
 // becauseYouWatched is BecauseYouWatched with the exclusion set given.
-func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, limit int, excluded map[string]struct{}) ([]ScoredItem, error) {
+func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
 	if err != nil {
 		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
@@ -416,17 +343,20 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 		sourceType = sourceMeta.Type
 	}
 
-	// Get embedding-based candidates (3x for MMR).
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{sourceItemID}, sourceType, limit*3)
+	// Get embedding-based candidates (3x for MMR). Excluded titles and those
+	// the viewer cannot see are left out in the query, so they do not take
+	// the candidates' places.
+	excludeIDs := append([]string{sourceItemID}, scoredItemIDsFromSet(excluded)...)
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
 	}
 
-	// Get co-watch neighbors.
+	// Get co-watch neighbors the viewer can see.
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
-	cowatchMap := make(map[string]float64, len(cowatchPairs))
-	for _, p := range cowatchPairs {
-		cowatchMap[p.SimilarItemID] = p.JaccardScore
+	cowatchMap, err := e.accessibleCowatchScores(ctx, cowatchPairs, filter)
+	if err != nil {
+		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
 
 	// Blend scores, then drop excluded titles before MMR so they do not take
@@ -451,20 +381,26 @@ func (e *Engine) becauseYouWatched(ctx context.Context, sourceItemID string, lim
 	return result, nil
 }
 
-// excludeRowItems removes the excluded items from every row and drops the
-// rows left empty.
-func excludeRowItems(rows []ForYouRow, excluded map[string]struct{}) []ForYouRow {
-	if len(rows) == 0 || len(excluded) == 0 {
-		return rows
+// accessibleCowatchScores maps each co-watch neighbor filter admits to its
+// Jaccard score. Co-watch neighbors bypass the access predicates of the
+// embedding query, so they are checked here.
+func (e *Engine) accessibleCowatchScores(ctx context.Context, pairs []CowatchPair, filter catalog.AccessFilter) (map[string]float64, error) {
+	scores := make(map[string]float64, len(pairs))
+	if len(pairs) == 0 {
+		return scores, nil
 	}
-
-	filteredRows := make([]ForYouRow, 0, len(rows))
-	for _, row := range rows {
-		row.Items = excludeScoredItems(row.Items, excluded)
-		if len(row.Items) == 0 {
-			continue
+	ids := make([]string, len(pairs))
+	for i, p := range pairs {
+		ids[i] = p.SimilarItemID
+	}
+	accessible, err := e.repo.FilterAccessibleItemIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range pairs {
+		if _, ok := accessible[p.SimilarItemID]; ok {
+			scores[p.SimilarItemID] = p.JaccardScore
 		}
-		filteredRows = append(filteredRows, row)
 	}
-	return filteredRows
+	return scores, nil
 }

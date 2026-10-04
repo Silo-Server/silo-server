@@ -507,7 +507,10 @@ func (reg *Registry) listWatchTonightCards(ctx context.Context, in *WatchTonight
 			excludeIDs[id] = struct{}{}
 		}
 	}
-	view := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	view, err := svc.WatchTonightCards(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), in.Mode, genres, excludeIDs, in.Limit)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
 	remaining := max(0, watchTonightExclusionLimit-len(excludeIDs))
 	if len(view.Cards) > remaining {
 		view.Cards = view.Cards[:remaining]

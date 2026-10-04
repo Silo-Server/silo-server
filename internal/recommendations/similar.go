@@ -6,6 +6,7 @@ import (
 
 	"log/slog"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -34,8 +35,9 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 
 	// 3. Embedding search (3x limit for filtering headroom). Constrain to the
 	// source item's media type so an audiobook never appears in a movie's
-	// Similar rail (and vice versa) once audiobook embeddings exist.
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3)
+	// Similar rail (and vice versa) once audiobook embeddings exist. The list
+	// is not viewer-scoped; callers filter it for their viewer.
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, catalog.AccessFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}

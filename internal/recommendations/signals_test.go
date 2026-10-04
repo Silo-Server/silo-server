@@ -515,7 +515,10 @@ func TestProfileAccessFilterUsesStoredStableProfileRestrictions(t *testing.T) {
 	}}
 	engine := &Engine{storeProvider: fakeSignalProvider{store: store}}
 
-	filter := engine.profileAccessFilter(context.Background(), 7, "p1")
+	filter, err := engine.profileAccessFilter(context.Background(), 7, "p1")
+	if err != nil {
+		t.Fatalf("profileAccessFilter: %v", err)
+	}
 	if filter.UserID != 7 || filter.ProfileID != "p1" {
 		t.Fatalf("unexpected filter identity: %#v", filter)
 	}
