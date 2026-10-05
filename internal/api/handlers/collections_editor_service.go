@@ -64,8 +64,9 @@ func (h *CollectionHandler) PersonalCollectionEditor(ctx context.Context, userID
 		return out, collectionPageError(userstore.ErrCollectionChanged)
 	}
 	// This is the canonical editor representation. Presigned URLs are displayed
-	// from the collection listing and never participate in a strong validator.
-	view.PosterURL = ""
+	// from the collection listing and never participate in a strong validator,
+	// so the editor carries no poster of any kind.
+	view.PosterURL, view.PosterIsCollage = "", false
 	out.Collection = view
 	out.Revision = rev
 	return out, nil

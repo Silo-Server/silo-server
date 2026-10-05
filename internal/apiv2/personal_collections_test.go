@@ -526,3 +526,14 @@ func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
 		}
 	}
 }
+
+// poster_is_collage is false whenever poster_url is empty, as on the
+// editor state getCollection answers.
+func TestPersonalCollectionMarksCollageOnlyWithPosterURL(t *testing.T) {
+	if got := personalCollectionOf(handlers.PersonalCollectionView{ID: "c1", PosterIsCollage: true}); got.PosterIsCollage {
+		t.Fatalf("collection without poster_url = %+v, want no poster_is_collage", got)
+	}
+	if got := personalCollectionOf(handlers.PersonalCollectionView{ID: "c1", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}); !got.PosterIsCollage {
+		t.Fatalf("collection with a collage = %+v, want poster_is_collage", got)
+	}
+}

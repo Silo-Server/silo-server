@@ -62,8 +62,11 @@ does not narrow the collage.
 
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.
-  `getCollection` and `updateCollection` carry no `poster_url`; clients take the poster from
-  the list.
+- `getCollection` and `updateCollection` carry no `poster_url` for any poster, uploaded,
+  imported or collage, and `poster_is_collage` is false there: their body is the editor state
+  behind a strong `ETag`, and a presigned URL expires. Clients take the poster from the list.
+  `createCollection`, the imports and `uploadCollectionPoster` return an uploaded or imported
+  poster only; a new collection's collage is built after they answer.
 - The server builds collages in the background, after a collection is created, edited or
   synced, or its poster removed, and when a read finds one missing. Until then, and when no
   title the viewer sees has a poster, `poster_url` is empty and clients show their

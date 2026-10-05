@@ -201,6 +201,18 @@ func TestPersonalCollectionCollagesDB(t *testing.T) {
 		}
 	})
 
+	// getCollection and updateCollection answer the editor state behind a
+	// strong ETag, which carries no presigned poster of any kind.
+	t.Run("the editor state carries no poster", func(t *testing.T) {
+		got, err := h.PersonalCollectionEditor(WithNativeAPIV2(ownerCtx), f.account, "owner", created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Collection.PosterURL != "" || got.Collection.PosterIsCollage {
+			t.Fatalf("editor poster = %q (collage %v), want none", got.Collection.PosterURL, got.Collection.PosterIsCollage)
+		}
+	})
+
 	t.Run("an /api/v2 library tab marks the owner's collage", func(t *testing.T) {
 		lh := &LibraryCollectionHandler{Executor: h.Executor, CollectionOwners: h.CollectionOwners, PersonalCollages: h.Collages}
 		got := lh.withVisibleItemCounts(WithNativeAPIV2(ownerCtx), f.account, "owner", []usercollections.ServerVisibleCollection{{ID: created.ID, CreatorProfileID: "owner", CollectionType: "manual"}})

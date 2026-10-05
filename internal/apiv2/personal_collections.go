@@ -47,7 +47,7 @@ type PersonalCollection struct {
 	IncludeInServerCollections bool            `json:"include_in_server_collections" example:"false"`
 	PosterURL                  string          `json:"poster_url" doc:"Presigned, short-lived; empty when there is no poster" example:""`
 	PosterThumbhash            string          `json:"poster_thumbhash" example:""`
-	PosterIsCollage            bool            `json:"poster_is_collage" doc:"poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url. See getCollectionCapabilities poster_collages" example:"false"`
+	PosterIsCollage            bool            `json:"poster_is_collage" doc:"poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt                  Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
 	Contains                   *bool           `json:"contains,omitempty" doc:"Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access" example:"true"`
@@ -528,7 +528,7 @@ func personalCollectionOf(v handlers.PersonalCollectionView) PersonalCollection 
 		NextSyncAt: instantOfStamp(v.NextSyncAt), LastSyncAt: instantOfStamp(v.LastSyncAt),
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage,
 		ItemCount: v.ItemCount, IncludeInServerCollections: v.IncludeInServerCollections,
-		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, PosterIsCollage: v.PosterIsCollage,
+		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 	if v.GroupID != nil {
 		out.GroupID = new(ID(*v.GroupID))
