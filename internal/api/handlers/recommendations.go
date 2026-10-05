@@ -20,7 +20,7 @@ import (
 )
 
 type recommendationsEngine interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
 }

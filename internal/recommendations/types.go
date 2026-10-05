@@ -62,7 +62,7 @@ type WatchSignal struct {
 // take the viewer's access filter and leave out what it cannot see before
 // ranking, so a restricted viewer still gets a full list.
 type Recommender interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
 	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
 	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
 	RefreshTasteProfile(ctx context.Context, userID int, profileID string) error

@@ -13,7 +13,7 @@ import (
 // SimilarItems returns items most similar to the given item. Blends embedding
 // similarity (70%) with co-watch Jaccard score (30%), applies a validation
 // pipeline, MMR re-ranking, and assigns connection reasons.
-func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]ScoredItem, error) {
+func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	// 1. Fetch source embedding.
 	embedding, err := e.repo.GetEmbedding(ctx, itemID)
 	if err != nil {
@@ -35,9 +35,10 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 
 	// 3. Embedding search (3x limit for filtering headroom). Constrain to the
 	// source item's media type so an audiobook never appears in a movie's
-	// Similar rail (and vice versa) once audiobook embeddings exist. The list
-	// is not viewer-scoped; callers filter it for their viewer.
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, catalog.AccessFilter{})
+	// Similar rail (and vice versa) once audiobook embeddings exist. Titles
+	// the viewer cannot see are left out before ranking, so they do not take
+	// the list's places; callers still filter the co-watch additions.
+	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
