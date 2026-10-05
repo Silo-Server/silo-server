@@ -163,6 +163,27 @@ func TestRefreshProfileNowMarksStaleFirst(t *testing.T) {
 	}
 }
 
+// A taste-seed request canceled after its picks were committed still leaves
+// the stale mark, written with a live context, and still queues the refresh
+// when the server is too busy to start it, so the picks are applied.
+func TestRefreshProfileNowMarksAndQueuesAfterTheCallerGaveUp(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	marker.w = nil
+	w.refreshesNow.Store(maxRefreshesNow)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if w.RefreshProfileNow(ctx, 7, "p") {
+		t.Fatal("call reported a refresh it did not run")
+	}
+	if marker.calls != 1 || marker.ctxErrs[0] != nil {
+		t.Fatalf("stale marks = %d with context errors %v; want one with a live context", marker.calls, marker.ctxErrs)
+	}
+	if req := takeQueued(t, w); req.userID != 7 || req.profileID != "p" {
+		t.Fatalf("queued %+v", req)
+	}
+}
+
 // A refresh request made while a profile's refresh runs makes it run once
 // more as soon as it ends, instead of leaving the change to the stale sweep;
 // a request made while the refresh is only queued is read by it, so it adds
