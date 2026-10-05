@@ -310,6 +310,14 @@ func TestRecommendationSection(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeRequired {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
+	// A key that cannot name a section is a validation failure, not a
+	// server error.
+	for _, path := range []string{"/section/cluster?key=abc", "/section/cluster?key=-1", "/section/cluster?key=%FF%FE", "/section/genre?key=%FF", "/section/genre?key=Drama%00"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations"+path, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.key" || p.Errors[0].Code != codeInvalid {
+			t.Fatalf("%s: errors = %+v", path, p.Errors)
+		}
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/nope", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular?limit=61", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/recommendations/section/popular", "", bearer(memberToken)), TypeValidationFailed)

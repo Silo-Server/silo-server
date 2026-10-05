@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -20,7 +21,7 @@ type signalRepo interface {
 	GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error)
 	ResolveCanonicalItemIDs(ctx context.Context, contentIDs []string) (map[string]string, error)
 	ResolveCanonicalItemIDSet(ctx context.Context, contentIDs []string) (map[string]struct{}, error)
-	ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error)
+	RecommendableItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error)
 	HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error)
 }
 
@@ -98,10 +99,54 @@ func (s *SignalReader) HasSignals(ctx context.Context, userID int, profileID str
 	return len(progress) > 0, nil
 }
 
+// watchedSetMemoKey keys the context value WithWatchedSetMemo installs.
+type watchedSetMemoKey struct{}
+
+// watchedSetMemo holds the watched sets read under one context, by account
+// and profile.
+type watchedSetMemo struct {
+	mu   sync.Mutex
+	sets map[watchedSetMemoProfile]map[string]struct{}
+}
+
+type watchedSetMemoProfile struct {
+	userID    int
+	profileID string
+}
+
+// WithWatchedSetMemo returns ctx carrying a memo for WatchedItemIDSet: under
+// it, a profile's watched set is read once however many SignalReaders ask,
+// so one request that filters rows and then blends airings walks the
+// profile's history once. A set read through the memo is shared and must not
+// be modified.
+func WithWatchedSetMemo(ctx context.Context) context.Context {
+	return context.WithValue(ctx, watchedSetMemoKey{}, &watchedSetMemo{sets: map[watchedSetMemoProfile]map[string]struct{}{}})
+}
+
 // WatchedItemIDSet returns the canonical IDs of the titles the profile has
 // watched: progress completed or at least half way, episodes counting for
-// their series, plus finished ebooks.
+// their series, plus finished ebooks. Under WithWatchedSetMemo it reuses the
+// set read earlier for the profile.
 func (s *SignalReader) WatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
+	memo, _ := ctx.Value(watchedSetMemoKey{}).(*watchedSetMemo)
+	if memo == nil {
+		return s.readWatchedItemIDSet(ctx, userID, profileID)
+	}
+	key := watchedSetMemoProfile{userID, profileID}
+	memo.mu.Lock()
+	defer memo.mu.Unlock()
+	if set, ok := memo.sets[key]; ok {
+		return set, nil
+	}
+	set, err := s.readWatchedItemIDSet(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	memo.sets[key] = set
+	return set, nil
+}
+
+func (s *SignalReader) readWatchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -223,8 +268,10 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 }
 
 // RecentCompletedItemIDs returns the canonical IDs of the profile's most
-// recently completed titles that are still in the catalog, newest first.
-// Completions of deleted items are skipped, so they never become anchors.
+// recently completed titles that are still in the catalog and of
+// recommendableMediaTypes, newest first. Completions of deleted items and of
+// other types, such as a finished audiobook, are skipped, so they never
+// become anchors.
 func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
@@ -303,6 +350,55 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 	return ids, nil
 }
 
+// Because You Watched anchors on the profile's latest completions.
+const (
+	// BecauseYouWatchedAnchors is how many anchors a profile's Because You
+	// Watched rows are built and read for.
+	BecauseYouWatchedAnchors = 3
+	// anchorCandidateLimit is how many of the latest completions the anchors
+	// are chosen from, so disliked ones can be passed over.
+	anchorCandidateLimit = 10
+)
+
+// itemRatingReader reads a profile's star ratings of the given items, keyed
+// by item. *catalog.RatingsRepo implements it.
+type itemRatingReader interface {
+	ListForItems(ctx context.Context, userID int, profileID string, itemIDs []string) (map[string]int, error)
+}
+
+// anchorItemIDs returns up to n Because You Watched anchors for the profile:
+// its most recently completed titles of recommendableMediaTypes still in the
+// catalog, newest first, of the latest anchorCandidateLimit, leaving out
+// those it rated DislikedRatingMax or lower. A row headed "Because You
+// Watched" a title the profile disliked contradicts its taste. With no
+// ratings reader nothing is left out. The worker, the Reader and Watch
+// Tonight all choose anchors here, since a read can only use an anchor whose
+// row the worker cached.
+func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
+	if n <= 0 {
+		return []string{}, nil
+	}
+	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, max(n, anchorCandidateLimit))
+	if err != nil {
+		return nil, err
+	}
+	if ratings != nil && len(recent) > 0 {
+		rated, err := ratings.ListForItems(ctx, userID, profileID, recent)
+		if err != nil {
+			return nil, fmt.Errorf("read ratings of recent completions: %w", err)
+		}
+		liked := make([]string, 0, len(recent))
+		for _, id := range recent {
+			if rating, ok := rated[id]; ok && rating <= DislikedRatingMax {
+				continue
+			}
+			liked = append(liked, id)
+		}
+		recent = liked
+	}
+	return recent[:min(n, len(recent))], nil
+}
+
 func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) error {
 	ids := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -321,8 +417,9 @@ func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []Watc
 }
 
 // liveCompletedRows canonicalizes rows and drops those whose canonical ID is
-// no longer in the catalog: a deleted movie, or an episode whose series was
-// deleted and so no longer resolves to it.
+// no longer in the catalog (a deleted movie, or an episode whose series was
+// deleted and so no longer resolves to it) or is not of
+// recommendableMediaTypes.
 func liveCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) ([]WatchProgressRow, error) {
 	if len(rows) == 0 {
 		return rows, nil
@@ -334,7 +431,7 @@ func liveCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgres
 	for i, row := range rows {
 		ids[i] = row.MediaItemID
 	}
-	existing, err := repo.ExistingItemIDs(ctx, ids)
+	existing, err := repo.RecommendableItemIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}

@@ -337,7 +337,8 @@ func (deps Dependencies) recommendationReader(repo *recommendations.Repo, rating
 		refresh = deps.RecWorker
 	}
 	return recommendations.NewReader(repo, ratingsRepo, refresh, deps.UserStoreProvider).
-		WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite")
+		WithUserStoreOutsidePostgres(deps.Config != nil && deps.Config.UserDB.Backend == "sqlite").
+		WithPersonalRows(deps.Config == nil || deps.Config.Recommendations.Enabled)
 }
 
 // invalidateNodeCapabilities drops every cached view of one node's hardware.

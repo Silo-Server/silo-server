@@ -30,12 +30,14 @@ func TestDiscoverRowSectionKey(t *testing.T) {
 		{"for-you main", "cluster", "For You", 0, recommendations.SectionKindForYouMain, ""},
 		{"cluster row", "cluster", "Because you enjoy Drama", 2, recommendations.SectionKindCluster, "2"},
 		{"cluster zero", "cluster", "Because you enjoy Action", 0, recommendations.SectionKindCluster, "0"},
-		{"similar users", "similar_users_liked", "Users Like You Also Enjoyed", 0, recommendations.SectionKindSimilarUsers, ""},
+		{"similar users", "similar_users_liked", "Profiles Like You Enjoyed", 0, recommendations.SectionKindSimilarUsers, ""},
 		{"popular", "popular", "Popular on This Server", 0, recommendations.SectionKindPopular, ""},
 		{"recently added", "recently_added", "Recently Added", 0, recommendations.SectionKindRecentlyAdded, ""},
 		{"top rated", "top_rated", "Top Rated", 0, recommendations.SectionKindTopRated, ""},
-		{"genre warm", "genre_sampler", "Popular in Drama", 0, recommendations.SectionKindGenre, "Drama"},
-		{"genre cold", "genre_sampler", "Top Sci-Fi", 0, recommendations.SectionKindGenre, "Sci-Fi"},
+		{"highly rated", "top_rated", "Highly Rated in Your Library", 0, recommendations.SectionKindTopRated, ""},
+		{"genre", "genre_sampler", "Top Drama", 0, recommendations.SectionKindGenre, "Drama"},
+		{"genre with an ampersand", "genre_sampler", "Top Sci-Fi & Fantasy", 0, recommendations.SectionKindGenre, "Sci-Fi & Fantasy"},
+		{"genre without a name", "genre_sampler", "Top ", 0, "", ""},
 		{"unknown row", "watch_tonight", "Watch Tonight", 0, "", ""},
 	}
 
@@ -78,7 +80,7 @@ func TestRecommendationsHandleSection_ReturnsEnrichedRow(t *testing.T) {
 	handler := NewRecommendationsHandler(nil, stubSectionReader{
 		row: &recommendations.ForYouRow{
 			Type:  "genre_sampler",
-			Label: "Popular in Drama",
+			Label: "Top Drama",
 			Items: []recommendations.ScoredItem{{MediaItemID: "movie-1"}},
 		},
 	}, nil, nil, nil, false)
@@ -115,8 +117,8 @@ func TestRecommendationsHandleSection_ReturnsEnrichedRow(t *testing.T) {
 	if resp.Kind != "genre" || resp.Key != "Drama" {
 		t.Fatalf("kind/key = %q/%q, want genre/Drama", resp.Kind, resp.Key)
 	}
-	if resp.Label != "Popular in Drama" {
-		t.Fatalf("label = %q, want Popular in Drama", resp.Label)
+	if resp.Label != "Top Drama" {
+		t.Fatalf("label = %q, want Top Drama", resp.Label)
 	}
 	if len(resp.Items) != 1 || resp.Items[0].ContentID != "movie-1" {
 		t.Fatalf("items = %+v, want [movie-1]", resp.Items)

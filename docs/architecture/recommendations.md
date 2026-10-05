@@ -16,7 +16,9 @@ go through `internal/api/handlers/recommendations*.go` and
 `internal/apiv2/recommendations.go`; home and library sections through
 `internal/sections`; Jellyfin's `/Movies/Recommendations` through
 `internal/jellycompat`. Admin operations are in
-[admin-recommendations-api.md](../admin-recommendations-api.md).
+[admin-recommendations-api.md](../admin-recommendations-api.md); the
+measurements used to judge the output are in
+[recommendations-evaluation.md](recommendations-evaluation.md).
 
 ## Jobs
 
@@ -38,10 +40,9 @@ under `recommendations.embeddings`, `recommendations.taste_profiles`,
 | Stale sweep | every 5 minutes, own lock | Refresh up to 50 stale profiles, oldest mark first |
 
 At startup the worker also builds the global rows when none are cached, so
-cold-start rows exist before the first nightly cache run. Each global row
-needs activity to fill (watches, ratings, or titles added in the last 14
-days), so on an idle server the build can write none, and it is not retried
-until the next cache run.
+cold-start rows exist before the first nightly cache run. Recently Added
+fills from any matched movie or series; Popular needs viewing by at least two
+accounts and stays empty on smaller servers.
 
 ## Embeddings
 
@@ -109,35 +110,81 @@ profile's access scope also notify (see Access). Ebook and Audiobookshelf
 progress (beta) do not notify; those profiles refresh at the next nightly taste
 run or stale sweep.
 
+A taste-seed submission calls `Worker.RefreshProfileNow` instead: it marks the
+profile stale, refreshes it on that server at once and waits up to 5 seconds,
+so the client's next read shows the picks' effect. The refresh holds the
+profile's pending key, so the queue and the sweep do not start a duplicate on
+that server, and it runs detached from the request with the usual 2-minute
+budget: a slower refresh finishes in the background and is not queued again.
+At most 4 run at once per server; past that the refresh is queued.
+
 A refresh takes a cluster-wide advisory lock for the profile, then records the
 database time it started, stores the taste profile with that time as
-`updated_at`, and clears only stale marks set before it. A mark set during the
-refresh survives, and a failed refresh marks the profile stale again, so the
-stale sweep retries both. The scheduled taste and cache jobs take the same
-lock per profile and skip a profile another server is refreshing. Storing
-embeddings marks stale the profiles with signals on those titles (every profile
-when the user store is outside Postgres, where that query cannot see
-favorites, watchlist or progress), so a profile
-refreshed before its titles had vectors, or cleared by a reset, is rebuilt by
-the sweep. Marking a profile with no taste row yet creates a
-vectorless row updated at the epoch, so a change during its first build is
+`updated_at`, and clears only stale marks set before it. A refresh request
+made on the same server while the refresh runs makes it run once more as soon
+as it ends, so a burst of changes is applied within seconds. A mark set during
+the refresh from another server survives, and a failed refresh marks the
+profile stale again, so the stale sweep retries both. The scheduled taste and
+cache jobs take the same lock per profile and skip a profile another server is
+refreshing. Storing embeddings marks stale the profiles with signals on those
+titles (every profile when the user store is outside Postgres, where that query
+cannot see favorites, watchlist or progress), so a profile refreshed before its
+titles had vectors, or cleared by a reset, is rebuilt by the sweep. Marking a
+profile with no taste row yet creates a vectorless row updated at the epoch, so
+a change during its first build is
 not lost. A refresh that finds the profile's lock held by
 another server marks the profile stale and stops, so two refreshes never
 finish out of order.
 
 - Episodes roll up to their series. A series decays once by its most recent
-  signal, as a movie decays by its last watch.
+  signal, as a movie decays by its last watch. A series with no signal for
+  30 days counts in proportion to its episodes watched with a positive
+  weight: in full from 5, and at least a quarter. A series being watched now
+  is not scaled, and neither is a negative series score.
 - Progress below 15% counts as abandonment only after 14 days.
-- Watch and rewatch counts in `signal_counts` count each canonical title once,
-  in the bucket of its strongest watch, so one long series is one title.
-- A profile with no positive signal, or none whose titles have an embedding
-  yet, keeps its row with a `NULL` taste vector and loses its clusters and
-  cached personal rows. Vector reads treat it as having no taste profile. Its
-  cold-start level comes from `signal_counts`, so it is level 0 only when it
-  has no positive signal; level 0 is served global rows only.
+- The taste vector and clusters average the titles with a positive weight
+  only. Dislikes and abandoned titles still count in `signal_counts`, but do
+  not pull the vector away from themselves. A 3-star rating adds no weight of
+  its own and halves the title's watch and intent weight, so a 3-star
+  completion weighs less than an unrated one.
+- Clusters split the same titles into interests. A profile under 10 titles
+  has one cluster. A larger one gets 2 (10-19 titles), 3 (20-59), 4
+  (60-199) or 5 (200 or more), or more, up to 5, when a partition into
+  more has a higher silhouette (cosine distance) and one of at least 0.1;
+  every cluster holds at least 3 titles. A partition is the best of up to 8
+  deterministic k-means++ seedings (fewer above 100 titles, one from 800),
+  by inertia, among those leaving no cluster under 3 titles. One seeding
+  can put two seeds in one interest and leave a sliver that merging folds
+  away together with every other interest. Real distinct
+  interests scored 0.13-0.22 and one interest cut in two under 0.08
+  (gemini-embedding-001 on a real catalog).
+- Watch, rewatch, favorite and watchlist counts in `signal_counts` count each
+  canonical title once (a watch in the bucket of its strongest watch), so one
+  long series is one title.
+- A refresh also stores `positive_titles` in `signal_counts`: the titles with
+  an embedding and a positive weight, each once, leaving out titles that are
+  only on the watchlist. The cold-start level counts them: 0 titles is
+  level 0, global rows only; 1-2 is level 1, global rows then one personal
+  row; 3-9 (three is the taste-seed picker's minimum) is level 2, personal and
+  global rows interleaved, personal first; 10 or more is level 3, personal
+  rows first. A row without the entry, stored before it existed, uses the sum
+  of its positive signal counts until its next refresh. The taste-profile
+  summary leaves `positive_titles` out, so its `signal_counts` holds only
+  kinds of signal.
+- A profile with no positively weighted title that has an embedding keeps
+  its row with a `NULL` taste vector and loses its clusters and cached
+  personal rows. Vector reads treat it as
+  having no taste profile. A read of a profile with positive signals but no
+  personal rows asks for a refresh even at level 0, since its titles may have
+  gained embeddings since.
 - Clusters are seeded from item IDs only, so decaying weights do not reshuffle
   them between rebuilds. A cached cluster row carries the title of the build
   that produced it.
+- The taste-profile summary's genres come from the clusters: the first
+  dominant genre of each cluster, heaviest first, then the second of each,
+  without repeats, at most five, so a second interest shows next to the
+  heaviest. A profile without clusters has none. Favorite directors still
+  come from titles rated 4 stars or more and favorites.
 
 ## Rows
 
@@ -150,12 +197,51 @@ Similar Users needs at least 3 peer accounts and at least 2 supporting
 accounts per title, counted by account, so no single household's ratings are
 shown on their own. Below the floor the row is cached empty.
 
+Every row, personal or not, and the taste-seed picker offer matched movies
+and series only, the types in `recommendableMediaTypes` (see Media types
+under Ranking). Popular counts login accounts, not profiles: a title needs
+at least 2 accounts that watched it in the last 90 days, so a
+single-account server has no Popular row, and the cached row keeps 200 titles
+for reads to filter. Genre rows rank a genre's titles by catalog rank, with
+watching accounts only as a tie-break. Catalog rank (`catalogRatingOrderSQL`)
+puts notable titles first (a logo and at least five keywords, since most
+titles have no recorded vote count and an obscure title's rating rests on a
+handful of votes), then rating reliability (an IMDb rating below 9.6, then a
+TMDB rating below 9.5; higher scores are nearly always a few votes or a
+copied score), then that rating. Highly Rated, the picker and the quality
+prior use the same ratings. The 16 cached genres are those most accounts watched, once at
+least 2 share one, then the largest. The picker interleaves its best 600
+candidates by first genre, then continues in rank order.
+
+Discover and its section pages serve two default rows live: Highly Rated in
+Your Library (a catalog rating of at least 7.0, movies and series
+interleaved in proportion to how many of each the viewer can see) and
+Recently Added (by the title's or its latest episode's addition, with no
+window). Reads query them under the viewer's access filter and exclusion
+set, so they show on a fresh server, with recommendations disabled, and for
+a restricted profile. Highly Rated is never cached. The cached global
+Recently Added row uses the same query without the access filter and also
+has no window, so on a server with no Popular row a new profile's cached
+reads still get a row.
+
+Both queries read each media type from its own index
+(`idx_media_items_type_added_at`, `idx_media_items_type_catalog_rank`)
+only as deep as the row needs, so a read's cost does not grow with the
+catalog. The index expressions repeat `addedAtSQL` and
+`catalogRatingOrderSQL` and must change with them. Each read is planned for
+its own exclusion set rather than reusing a generic plan. The per-type
+title counts Highly Rated interleaves by are the one part that reads every
+title, so each server reuses an access scope's counts for 10 minutes.
+Discover reads the profile's watched set once per request and shares it
+between its rows and the airings it blends in.
+
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
 the new run's expiry; a global row whose rebuild finds nothing, and a genre row
 whose genre left the menu, is deleted. A personal row whose build fails keeps
-its cached version and the refresh is retried; a main, cluster or Because You
-Watched row whose rebuild finds nothing is deleted.
+its cached version and the refresh is retried; a main or Because You Watched
+row whose rebuild finds nothing is deleted, and a cluster row that rebuilds
+empty is cached empty (see Cluster rows).
 
 ## Access
 
@@ -179,22 +265,154 @@ on both user-store backends. A refresh that runs afterwards writes no taste row
 for a profile the user store no longer lists, and on the Postgres store the
 nightly taste job skips such profiles, as the purge migration does.
 
+## Ranking
+
+A cached personal row holds `CacheCandidateLimit` (60) titles; a public read
+serves the first `ServedRowSize` (20) by default. Ranking shapes those 20
+for the viewer, and the rest is headroom for read-time filters and for
+library sections, which scope the whole row to their libraries.
+
+- **Main row.** A profile with at least 10 positive titles and at least two
+  clusters gets a row composed per cluster, each cluster an anchor. Anchors
+  are not merged by centroid cosine: a centroid averages away its titles'
+  differences, so centroids of large clusters of different genres sit
+  above 0.9 (most pairs with 50 or more titles on a real catalog), while
+  centroids of 3-title halves of one genre sit near 0.82. The clustering
+  decides what is one interest. Anchors get slots in proportion to
+  their weight by largest remainder, each at least `min(3, limit/anchors)`.
+  Each anchor fetches 3 candidates per slot around its centroid and ranks
+  them by MMR, and a smooth weighted round-robin interleaves the anchors'
+  rankings without repeats, so every prefix of the row holds each interest's
+  share. Any other profile, or one whose anchors find nothing, gets the
+  candidates nearest its averaged taste vector, ranked by MMR.
+- **Genre pass.** In a row from the averaged taste vector, a stable reorder
+  of the MMR order keeps each genre to half of the served window while the
+  row has other titles to offer. It is greedy in rank order and never
+  revisits a title it let in, so with multi-genre titles a genre can exceed
+  half when only a different set of titles would meet the cap. It deletes
+  nothing and moves nothing past the window. A composed row skips it: its slots already
+  spread the window over the interests by weight, and the cap would cut an
+  interest heavier than half the profile below its share.
+- **Type supplements.** The main row holds at least a fifth of its length of
+  each of `recommendableMediaTypes` the viewer can see, so a library section
+  fills. The extra titles go after the served window, replacing tail titles
+  of types above that floor; a type the viewer has no titles of is not
+  queried.
+- **Cluster rows.** A cluster row is built `max(3, 60 × weight share) + 20`
+  long (at most 60) from candidates sharing one of its dominant genres, then
+  loses the main row's first 30, every title its daily rotation can serve,
+  so the page does not repeat the main row.
+  A row left with fewer than 10 titles is cached empty, and a row cached
+  empty counts as built: reads do not ask for a rebuild of it.
+- **Quality prior.** Before MMR a candidate's score becomes
+  `score + 0.5 × sd(pool scores) × clamp(z, −1, 1)`, where `z` standardizes
+  its catalog rating (trusted IMDb, else trusted TMDB) among the pool's rated
+  candidates of the same media type. A type with fewer than 10 rated
+  candidates or no spread in ratings is left alone, and cluster and Because
+  You Watched pools under 30 candidates get no prior.
+- **Freshness.** Before MMR, on the main row's pools and the cluster pools,
+  the positive score of a title added in the last 14 days is multiplied by up
+  to 1.05, less the older it is. A pool with more than a quarter of its
+  candidates inside the window, such as a freshly imported library, gets no
+  boost, so it never ranks by scan order. The date is the title's own, so a
+  new episode of an older series does not count, and the boost cannot reach
+  a title its candidate query did not retrieve.
+- **Labels.** A cluster's label names the genres that set it apart: those
+  that at least 40% of its titles carry, and carry at least 1.5 times as
+  often as the profile's positive titles do, most distinctive first, with
+  its most common genre (a tie goes to the genre of the heavier titles)
+  always among them, at most two in all. Genres are joined with ", ", since
+  TMDB genres such as "Sci-Fi & Fantasy" contain "&". A cluster with no such
+  genre, such as a profile's only cluster, is labeled by its most common
+  genre, and one whose titles carry no genres has an empty label, titled
+  "Picked from your history". The dominant genres that drive retrieval, the
+  Discover genre exclusion and the taste-match section stay the top three
+  by count. The thresholds were tuned on synthetic profiles.
+- **Repeated titles.** A read never shows two cluster rows under one title
+  it can tell apart. Visiting the heaviest cluster first, a row titled like
+  a heavier one is hidden when their first served items overlap by more
+  than half (Jaccard index), and otherwise takes the first of its dominant
+  genres its title does not name yet. A row whose cached title its cluster
+  no longer has keeps it. A hidden row was built, so it does not count as
+  missing. A main or cluster row's "see all" page reads the profile's page
+  rows the same way, for a 20-item window and the day's rotation, and takes
+  the title and order they give its row, so it opens with the titles of the
+  row it was opened from; a row they hide keeps its cached title and order.
+- **Rotation.** Reads rotate the main row and the cluster rows daily, after
+  filtering and before trimming; Because You Watched, Similar Users, Watch
+  Tonight and the global and default rows stay in rank order. For a window of `limit` items, when the row is longer and `limit`
+  is above 10, the first `min(10, limit/2)` stay, and the other
+  `take = limit − pin` are drawn from the next `2 × take`, the title at tail
+  index `i` with weight `1/(i+5)`: the draw keeps the `take` largest
+  `ln(u)·(i+5)`, with `u` from `sha256(userID|profileID|rowKey|date|itemID)`.
+  The draws keep rank order and the titles not drawn follow them, so
+  nothing is lost. `rowKey` is the row's cache key, so a title two rows
+  share is drawn independently in each, and `date` is the UTC
+  `YYYY-MM-DD`, so rows change once a day at 00:00 UTC. The draw needs no
+  shared state: every node serves the same rotation, whatever its time
+  zone. Home and library sections rotate the main and taste-match rows
+  like a 20-item page.
+- **Titles.** Row titles come from one vocabulary in
+  `internal/recommendations/titles.go`: For You, `Because you enjoy
+  <label>`, Because You Watched, Profiles Like You Enjoyed, Popular on This
+  Server, Recently Added, Highly Rated in Your Library and `Top <genre>`. A
+  For You or taste-match section whose heading is still a default
+  ("Recommended for You", "Top Picks Today" or empty) takes the title of the
+  row it serves when that row is one every profile is offered, so a new
+  profile's section reads "Popular on This Server". A heading an admin chose
+  is never replaced.
+- **Media types.** Every row offers only `recommendableMediaTypes`, movies
+  and series: Popular, the genre rows, the live default rows (Highly Rated
+  in Your Library, Recently Added), the taste-seed picker, and the personal
+  rows. For personal rows the list gates the taste candidates (the main
+  row, cluster rows, type supplements and Watch Tonight's discover
+  candidates), Because You Watched anchors (a finished audiobook is passed
+  over for the next movie or series), co-watch neighbors and Similar Users
+  candidates. Reads drop other types from cached rows in the access check
+  they already run, so rows cached before a type left the list stop
+  showing it at once. Books still shape the taste vector. An item's own
+  "More like this" list keeps to the item's type, co-watch neighbors
+  included, so an audiobook's page can still list audiobooks. See Rows for
+  how each row ranks.
+
 ## Reads
 
-The Reader serves cached rows; the one live query is the server's top genre,
-for a taste-match section with no genre and no matching cluster. The
-standalone popular and recently-added list endpoints query the catalog live
-rather than reading the cache. A read that
+With recommendations disabled the Reader serves no personal rows (the main
+For You row, cluster rows, Because You Watched, Similar Users), even ones
+still cached from before, and reads fall back to the global and default rows.
+
+The Reader serves cached rows, except the default rows on Discover and their
+section pages; home and library sections keep the cached Recently Added row
+instead, since a library has its own shelves. The other live query
+is the server's top genre, for a taste-match section with no genre and no
+matching cluster. The standalone popular and recently-added list endpoints
+query the catalog live rather than reading the cache. Discover leaves out of
+each row the items earlier rows show, but not those they cut at the row limit.
+A read that
 finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
-profile's three most recent completed titles that still exist in the catalog,
-and a read asks for a refresh only when there are anchors and none has a
-cached row.
+profile's three most recent completed titles of `recommendableMediaTypes` that
+still exist in the catalog, taken from its latest ten such completions and
+passing over those it rated 2 stars or lower; the worker, the reads and
+Watch Tonight choose them the same way. A read asks for a refresh only when
+there are anchors and none has a cached row.
 
 List reads return at most 50 items per row (default 20); the v1 for-you and
 similar-users reads keep 20, and section "see all" reads return up to 60, a
 whole cached row. Home and library sections read the whole cached pool,
-scope it to the section's libraries, then trim to the section's size. A
+scope it to the section's libraries, then trim to the section's size. The
+main row is ranked for every title the profile can see, so a library with a
+small share of the catalog can hold few of its titles. A library's For You
+section that the main row leaves short continues with the library's titles
+from the profile's other personal rows: the cluster rows, heaviest cluster
+first, then the Because You Watched rows, most recent anchor first, then
+Similar Users, each title once. The fill is read only when the section is
+short, and a new profile's global row is never filled: the section is titled
+after it.
+Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
+truthfully: up to two Because You Watched rows under their anchor's title,
+dropped when the viewer cannot see the anchor, and the taste-cluster rows
+under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
 per-section items request that fails to load answers `500`; the aggregate
 sections endpoints still degrade to empty rows.

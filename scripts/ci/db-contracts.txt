@@ -122,6 +122,7 @@
 ./internal/recommendations TestExtendGlobalRecommendationCachePostgres
 ./internal/recommendations TestFailedRefreshLeavesTheProfilePendingPostgres
 ./internal/recommendations TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres
+./internal/recommendations TestFilterItemIDsHonoursExcludedMediaTypesPostgres
 ./internal/recommendations TestFindSimilarAppliesAccessLimitsInSQLPostgres
 ./internal/recommendations TestForYouReadRefreshesNewProfilesWithSignalsOncePostgres
 ./internal/recommendations TestGetTasteClusterMetaOmitsOnlyEmbeddingsPostgres
@@ -147,3 +148,30 @@
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
+
+# Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
+# order, taste levels, per-interest anchors, quality prior, rubric leakage,
+# media types of personal rows.
+./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
+./internal/recommendations TestGenreSamplerIsRatingLedPostgres
+./internal/recommendations TestGetItemQualityRatingsPostgres
+./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
+./internal/recommendations TestHighlyRatedRowPostgres
+./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
+./internal/recommendations TestHighlyRatedReadsPastAStaleZeroCountPostgres
+./internal/recommendations TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres
+./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
+./internal/recommendations TestPresentMediaTypesPostgres
+./internal/recommendations TestRecentlyAddedRowPostgres
+./internal/recommendations TestRefreshCountsPositiveTitlesForTheLevelPostgres
+./internal/recommendations TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres
+./internal/recommendations TestRelevanceRubricLeakagePostgres
+./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
+./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
+./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
+./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
+./internal/recommendations TestTVLibrarySectionFillsFromTheMainRowTailPostgres
+./internal/sections TestRecommendationSectionsTakeTheServedRowTitlePostgres

@@ -331,7 +331,12 @@ type fakeGlobalRows struct {
 	extended  []string // "type" or "type*" for a prefix, with its expiry
 	extendErr error
 	deleted   []string // "type" or "type*" for a prefix, with the kept types
-	deleteErr error
+	// popularArgs, recentArgs and genreLimit record what the build asked
+	// for.
+	popularArgs [3]int // days, minAccounts, limit
+	recentArgs  [2]int // days, limit
+	genreLimit  int
+	deleteErr   error
 }
 
 func (f *fakeGlobalRows) result(name string, items []ScoredItem) ([]ScoredItem, error) {
@@ -341,19 +346,18 @@ func (f *fakeGlobalRows) result(name string, items []ScoredItem) ([]ScoredItem, 
 	return items, nil
 }
 
-func (f *fakeGlobalRows) GetPopularItems(context.Context, int, int) ([]ScoredItem, error) {
+func (f *fakeGlobalRows) GetPopularItems(_ context.Context, days, minAccounts, limit int) ([]ScoredItem, error) {
+	f.popularArgs = [3]int{days, minAccounts, limit}
 	return f.result("popular", []ScoredItem{{MediaItemID: "p"}})
 }
 
-func (f *fakeGlobalRows) GetRecentlyAddedItems(context.Context, int, int) ([]ScoredItem, error) {
+func (f *fakeGlobalRows) GetRecentlyAddedItems(_ context.Context, days, limit int) ([]ScoredItem, error) {
+	f.recentArgs = [2]int{days, limit}
 	return f.result("recent", []ScoredItem{{MediaItemID: "r"}})
 }
 
-func (f *fakeGlobalRows) GetTopRatedItems(context.Context, int, int) ([]ScoredItem, error) {
-	return f.result("top", nil) // no title has enough ratings
-}
-
-func (f *fakeGlobalRows) GetTopGenres(context.Context, int) ([]string, error) {
+func (f *fakeGlobalRows) GetTopGenres(_ context.Context, limit int) ([]string, error) {
+	f.genreLimit = limit
 	if f.fail["genres"] {
 		return nil, errors.New("genres query failed")
 	}
@@ -415,8 +419,8 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	store := &fakeGlobalRows{fail: map[string]bool{"popular": true, "Comedy": true, "write:" + RecTypeGenreSamplerPrefix + "Drama": true}}
 	written, failed := w.cacheGlobalRows(t.Context(), store, "expiry")
 	// Popular's query, Comedy's query, and Drama's write fail, so their cached
-	// rows are kept until the new expiry. Top rated is empty, which is not a
-	// failure: its row is deleted, as is every genre row off the menu.
+	// rows are kept until the new expiry. Top rated is served live, so it is
+	// neither written nor kept; every genre row off the menu is deleted.
 	if written != 1 || failed != 3 || writtenTypes(store) != RecTypeRecentlyAdded {
 		t.Fatalf("written=%d failed=%d rows=%s", written, failed, writtenTypes(store))
 	}
@@ -424,7 +428,7 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	if strings.Join(store.extended, ",") != strings.Join(wantKept, ",") {
 		t.Fatalf("kept rows = %v, want %v", store.extended, wantKept)
 	}
-	wantDeleted := []string{RecTypeTopRated + "-", RecTypeGenreSamplerPrefix + "*-" + RecTypeGenreSamplerPrefix + "Drama+" + RecTypeGenreSamplerPrefix + "Comedy"}
+	wantDeleted := []string{RecTypeGenreSamplerPrefix + "*-" + RecTypeGenreSamplerPrefix + "Drama+" + RecTypeGenreSamplerPrefix + "Comedy"}
 	if strings.Join(store.deleted, ",") != strings.Join(wantDeleted, ",") {
 		t.Fatalf("deleted rows = %v, want %v", store.deleted, wantDeleted)
 	}
@@ -438,8 +442,8 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	if strings.Join(store.extended, ",") != RecTypeGenreSamplerPrefix+"*@expiry" {
 		t.Fatalf("genre failure kept %v, want every genre sampler", store.extended)
 	}
-	if strings.Join(store.deleted, ",") != RecTypeTopRated+"-" {
-		t.Fatalf("genre failure deleted %v, want only the empty top rated row", store.deleted)
+	if len(store.deleted) != 0 {
+		t.Fatalf("genre failure deleted %v, want nothing", store.deleted)
 	}
 
 	// A failed extend is only logged; the run goes on.
@@ -447,6 +451,28 @@ func TestCacheGlobalRowsCountsFailuresAndKeepsFailedRows(t *testing.T) {
 	written, failed = w.cacheGlobalRows(t.Context(), store, "expiry")
 	if written != 2 || failed != 2 || len(store.extended) != 2 {
 		t.Fatalf("failed extend: written=%d failed=%d extended=%v", written, failed, store.extended)
+	}
+}
+
+// The cached Popular row needs a crowd of accounts over 90 days and keeps a
+// 200-title pool for reads to filter; Recently Added has no window; the genre
+// menu holds 16 genres; and the global build no longer writes a top_rated
+// row.
+func TestCacheGlobalRowsAsksForACrowdAndAWideGenreMenu(t *testing.T) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	store := &fakeGlobalRows{}
+	w.cacheGlobalRows(t.Context(), store, "expiry")
+	if store.popularArgs != [3]int{90, 2, 200} {
+		t.Fatalf("popular asked for days, accounts, limit = %v, want [90 2 200]", store.popularArgs)
+	}
+	if store.recentArgs != [2]int{0, CacheCandidateLimit} {
+		t.Fatalf("recently added asked for days, limit = %v, want no window and a full row", store.recentArgs)
+	}
+	if store.genreLimit != 16 {
+		t.Fatalf("genre menu = %d genres, want 16", store.genreLimit)
+	}
+	if _, ok := store.written[RecTypeTopRated]; ok {
+		t.Fatal("the global build wrote a top_rated row")
 	}
 }
 
@@ -732,7 +758,7 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("claim failed")
 	}
-	w.runProfileRefresh(t.Context(), 7, "p")
+	w.runProfileRefresh(t.Context(), 7, "p", w.refreshProfile)
 	if !w.claimProfileRefresh(key) {
 		t.Fatal("a deferred refresh kept its pending key")
 	}
@@ -837,10 +863,10 @@ func TestEmbeddingsResultReportsOutcome(t *testing.T) {
 func TestCacheGlobalRowsCountsFailedDeletes(t *testing.T) {
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	store := &fakeGlobalRows{deleteErr: errors.New("db down")}
-	// Every build succeeds; the deletes of the empty top-rated row and of the
-	// genres that left the menu fail.
-	if written, failed := w.cacheGlobalRows(t.Context(), store, cacheExpiry(time.Now())); written != 4 || failed != 2 {
-		t.Fatalf("written = %d, failed = %d; want 4 and the two failed deletes", written, failed)
+	// Every build succeeds; the delete of the genres that left the menu
+	// fails.
+	if written, failed := w.cacheGlobalRows(t.Context(), store, cacheExpiry(time.Now())); written != 4 || failed != 1 {
+		t.Fatalf("written = %d, failed = %d; want 4 and the failed delete", written, failed)
 	}
 }
 

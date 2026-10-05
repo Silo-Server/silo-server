@@ -104,10 +104,11 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 }
 
 // PopularItems answers up to limit of the server-wide popular items of the
-// last days that the viewer can see and the profile has not watched.
+// last days that the viewer can see and the profile has not watched. Unlike
+// the cached Popular row, a title one account watched counts.
 func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
-		return h.recsRepo.GetPopularItems(ctx, days, n)
+		return h.recsRepo.GetPopularItems(ctx, days, 1, n)
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "PopularItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
@@ -170,6 +171,9 @@ func (h *RecommendationsHandler) Discover(ctx context.Context, userID int, profi
 	if h.reader == nil || h.Fetcher == nil {
 		return discoverResponse{Rows: []discoverRowResponse{}}, nil
 	}
+	// The rows and the airings blend both leave out what the profile watched;
+	// read that once.
+	ctx = recommendations.WithWatchedSetMemo(ctx)
 	rows, err := h.reader.GetDiscoverRows(ctx, userID, profileID, recommendationsDefaultLimit, filter)
 	if err != nil {
 		slog.ErrorContext(ctx, "Discover failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
@@ -513,13 +517,15 @@ func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int,
 }
 
 // SubmitTasteSeed favorites every picked item for the profile and, when
-// any was added, queues a taste-profile refresh. All picks must first be visible
+// any was added, refreshes its taste profile and cached rows, waiting a few
+// seconds for the refresh so the client's next read shows the picks' effect;
+// a slower refresh finishes in the background. All picks must first be visible
 // in the acting profile's access-filtered catalog. It answers how many picks
 // were newly recorded; an item that fails to record is skipped, not fatal.
 // Favouriting is set membership, so a duplicate pick, an item the profile
 // already favorited, or a retried submission adds nothing: the store's
 // insert is a no-op that the count leaves out, and a submission that added
-// nothing queues no refresh.
+// nothing refreshes nothing.
 func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int, profileID string, itemIDs []string, filter catalog.AccessFilter) (int, error) {
 	if h.storeProvider == nil {
 		return 0, apiError(http.StatusServiceUnavailable, "unavailable", "User store unavailable")
@@ -563,8 +569,8 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 			added++
 		}
 	}
-	if added > 0 {
-		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
+	if added > 0 && h.RecWorker != nil {
+		h.RecWorker.RefreshProfileNow(ctx, userID, profileID)
 	}
 	return added, nil
 }

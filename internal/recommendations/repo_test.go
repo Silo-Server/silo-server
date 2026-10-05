@@ -15,10 +15,11 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 
 	assertQueryTermsInOrder(t, query,
 		"ORDER BY COALESCE(wc.watch_count, 0) DESC",
-		"WHEN mi.rating_imdb IS NOT NULL THEN 2",
-		"WHEN mi.rating_tmdb IS NOT NULL AND mi.rating_tmdb < 9.5 THEN 1",
+		"COALESCE(cardinality(mi.keywords), 0) >= 5) DESC",
+		"WHEN mi.rating_imdb < 9.6 THEN 2",
+		"WHEN mi.rating_tmdb < 9.5 THEN 1",
 		"ELSE 0 END DESC",
-		"mi.rating_imdb DESC NULLS LAST",
+		"CASE WHEN mi.rating_imdb < 9.6 THEN mi.rating_imdb END DESC NULLS LAST",
 		"CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST",
 		"mi.year DESC NULLS LAST",
 		"mi.content_id ASC",
@@ -29,16 +30,17 @@ func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
 	}
 }
 
-func TestTasteSeedCandidateQueryIncludesEbooks(t *testing.T) {
-	query := strings.Join(strings.Fields(tasteSeedCandidateQuery(nil, 1)), " ")
-
-	for _, term := range []string{
-		"(mi.status = 'matched' OR mi.type = 'audiobook' OR mi.type = 'ebook')",
-		"mi.type IN ('movie', 'series', 'audiobook', 'ebook')",
-	} {
-		if !strings.Contains(query, term) {
-			t.Fatalf("taste seed candidate query missing %q: %s", term, query)
-		}
+// The picker's first page leads with every genre's best candidate, then each
+// genre's second, each round in rank order, rather than the top genre's run.
+func TestInterleaveByGenreTakesEachGenresBestFirst(t *testing.T) {
+	ranked := []tasteSeedCandidate{
+		{"drama-1", "Drama"}, {"drama-2", "Drama"}, {"drama-3", "Drama"},
+		{"horror-1", "Horror"}, {"drama-4", "Drama"}, {"untagged-1", ""}, {"horror-2", "Horror"},
+	}
+	got := interleaveByGenre(ranked)
+	want := []string{"drama-1", "horror-1", "untagged-1", "drama-2", "horror-2", "drama-3", "drama-4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("interleaved = %v, want %v", got, want)
 	}
 }
 

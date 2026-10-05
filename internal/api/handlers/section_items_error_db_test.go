@@ -28,6 +28,10 @@ func (r sectionRowReader) SectionForYouMain(context.Context, int, string, catalo
 	return nil, r.err
 }
 
+func (r sectionRowReader) SectionForYouFill(context.Context, int, string, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	return nil, r.err
+}
+
 func (r sectionRowReader) SectionBecauseYouWatched(context.Context, int, string, string, []int, catalog.AccessFilter) ([]recommendations.ScoredItem, string, error) {
 	return nil, "", r.err
 }

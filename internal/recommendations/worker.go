@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -50,6 +51,14 @@ const (
 	// from one that came out empty, so without it every page load of such a
 	// profile would queue another rebuild.
 	readRefreshInterval = 15 * time.Minute
+
+	// refreshNowWait bounds how long RefreshProfileNow waits for the refresh
+	// it started; the refresh itself keeps profileRefreshTimeout.
+	refreshNowWait = 5 * time.Second
+	// maxRefreshesNow bounds the refreshes RefreshProfileNow runs at once on
+	// one server, beside the queue's one at a time. Past it, requests go to
+	// the queue.
+	maxRefreshesNow = 4
 )
 
 // profileStaleMarker marks a profile's taste profile stale. *Repo implements
@@ -78,9 +87,13 @@ type Worker struct {
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
-	readRefreshes         refreshThrottle
-	cancelFunc            context.CancelFunc
-	embeddingsJobTimeout  time.Duration
+	// profileRefreshAgain holds pending profiles whose signals changed while
+	// their refresh ran; see runProfileRefresh.
+	profileRefreshAgain  map[string]struct{}
+	refreshesNow         atomic.Int32 // RefreshProfileNow refreshes running
+	readRefreshes        refreshThrottle
+	cancelFunc           context.CancelFunc
+	embeddingsJobTimeout time.Duration
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -289,7 +302,7 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
-	if !w.claimProfileRefresh(key) {
+	if !w.claimProfileRefreshOrAskAgain(key) {
 		return
 	}
 
@@ -319,6 +332,66 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 	defer cancel()
 	w.markProfileStale(ctx, userID, profileID)
 	w.RequestProfileRefresh(ctx, userID, profileID)
+}
+
+// RefreshProfileNow is NotifySignalsChanged for a caller whose next read
+// depends on the change, such as a taste-seed submission. It marks the profile
+// stale, then refreshes it on this server at once instead of queueing it, and
+// waits up to refreshNowWait. It reports whether the refresh finished in that
+// time.
+//
+// The refresh runs detached from ctx under the usual profileRefreshTimeout:
+// a caller that gives up or disconnects, or a wait that runs out, leaves it
+// running to completion, and it is not queued again. It holds the profile's
+// pending key, so the queue and the stale sweep on this server do not start a
+// duplicate; when a refresh is already queued or running here it returns at
+// once and leaves the work to that one, which runs again if it already
+// started. When maxRefreshesNow are already running it queues the refresh
+// instead.
+func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID string) bool {
+	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
+		return false
+	}
+	// The picks are already committed, so neither the stale mark nor a queued
+	// refresh may depend on the caller still waiting; see NotifySignalsChanged.
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	w.markProfileStale(markCtx, userID, profileID)
+	cancel()
+	return w.refreshNow(ctx, userID, profileID, refreshNowWait, w.refreshProfile)
+}
+
+// refreshNow runs refresh for the profile as RefreshProfileNow describes,
+// waiting up to wait.
+func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, wait time.Duration, refresh func(context.Context, int, string) error) bool {
+	if w.refreshesNow.Add(1) > maxRefreshesNow {
+		w.refreshesNow.Add(-1)
+		w.RequestProfileRefresh(context.WithoutCancel(ctx), userID, profileID)
+		return false
+	}
+	key := profileRefreshKey(userID, profileID)
+	if !w.claimProfileRefreshOrAskAgain(key) {
+		w.refreshesNow.Add(-1)
+		return false
+	}
+
+	done := make(chan struct{})
+	refreshCtx := context.WithoutCancel(ctx)
+	go func() {
+		defer close(done)
+		defer w.refreshesNow.Add(-1)
+		w.runProfileRefresh(refreshCtx, userID, profileID, refresh)
+	}()
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	slog.InfoContext(ctx, "profile refresh still running; answering without it", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+	return false
 }
 
 // NotifyAccountsScopeChanged records that the access scope of every profile
@@ -717,9 +790,8 @@ func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
 
 // globalRowStore is the part of Repo that builds and caches the global rows.
 type globalRowStore interface {
-	GetPopularItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
+	GetPopularItems(ctx context.Context, days, minAccounts, limit int) ([]ScoredItem, error)
 	GetRecentlyAddedItems(ctx context.Context, days, limit int) ([]ScoredItem, error)
-	GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]ScoredItem, error)
 	GetTopGenres(ctx context.Context, limit int) ([]string, error)
 	GetGenreSamplerItems(ctx context.Context, genre string, limit int) ([]ScoredItem, error)
 	UpsertRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string, items []ScoredItem, expiresAt string) error
@@ -727,10 +799,21 @@ type globalRowStore interface {
 	DeleteGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, keep []string) (int64, error)
 }
 
+// Global row sizes. Popular keeps a deeper pool than other rows because
+// reads filter it for each viewer's access and watch history afterwards.
+const (
+	popularWindowDays = 90
+	popularPoolSize   = 200
+	// genreMenuSize is how many genre rows are cached; Discover draws
+	// four of them a day for each profile.
+	genreMenuSize = 16
+)
+
 // cacheGlobalRows generates and caches non-personalized rows. A row whose
 // query or write fails keeps its previously cached version until the new
 // rows' expiry, so one failed run does not empty it. A row whose query finds
-// nothing, and a genre row whose genre left the menu, is deleted.
+// nothing, and a genre row whose genre left the menu, is deleted. Highly Rated
+// in Your Library is not cached: reads query it live for each viewer.
 func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expires string) (written, failed int) {
 	// keep extends the cached rows of recType (every type starting with it
 	// when prefix is set) after their rebuild failed with cause.
@@ -765,14 +848,14 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 		}
 	}
 
-	popular, err := store.GetPopularItems(ctx, 30, CacheCandidateLimit)
+	popular, err := store.GetPopularItems(ctx, popularWindowDays, crowdMinAccounts, popularPoolSize)
 	put(RecTypePopular, popular, err)
-	recentlyAdded, err := store.GetRecentlyAddedItems(ctx, 14, CacheCandidateLimit)
+	// No window: a quiet library's newest titles still make a row for a new
+	// profile when no Popular row is cached.
+	recentlyAdded, err := store.GetRecentlyAddedItems(ctx, 0, CacheCandidateLimit)
 	put(RecTypeRecentlyAdded, recentlyAdded, err)
-	topRated, err := store.GetTopRatedItems(ctx, 5, CacheCandidateLimit)
-	put(RecTypeTopRated, topRated, err)
 
-	topGenres, err := store.GetTopGenres(ctx, 8)
+	topGenres, err := store.GetTopGenres(ctx, genreMenuSize)
 	if err != nil {
 		keep(RecTypeGenreSamplerPrefix, true, err)
 		return written, failed
@@ -880,27 +963,33 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	}
 	excludeIDs := scoredItemIDsFromSet(excluded)
 
-	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	builder := w.engine.rowBuilder()
+	var mainItems []ScoredItem
+	aggregatedRow, err := builder.mainRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		fail("main_row", err)
 	} else {
-		var items []ScoredItem
 		if aggregatedRow != nil {
-			items = aggregatedRow.Items
+			mainItems = aggregatedRow.Items
 		}
-		putOrDrop(RecTypeForYouMain, "", items)
+		putOrDrop(RecTypeForYouMain, "", mainItems)
 	}
 
-	// Cache per-cluster ForYou rows. buildClusterRows logs each cluster whose
+	// Cache per-cluster ForYou rows. clusterRows logs each cluster whose
 	// candidate query failed and returns no row for it, so its cached row
-	// stays.
-	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
+	// stays. A row that rebuilds empty, or that the main row's titles empty,
+	// is cached empty: it replaces the old row, and reads know it was built.
+	clusterRows, failedClusters, err := builder.clusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	res.failed += failedClusters
 	if err != nil {
 		fail("cluster_rows", err)
 	}
-	for _, row := range clusterRows {
-		putOrDrop(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
+	for _, row := range withoutMainRowItems(clusterRows, mainItems) {
+		items := row.Items
+		if items == nil {
+			items = []ScoredItem{}
+		}
+		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", items)
 	}
 
 	// An empty Similar Users row is cached too: it records that the row was
@@ -916,12 +1005,12 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
-	recentCompleted, err := w.engine.signalReader().RecentCompletedItemIDs(ctx, userID, profileID, 3)
+	anchors, err := anchorItemIDs(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, BecauseYouWatchedAnchors)
 	if err != nil {
 		fail("recent_completed", err)
 		return res
 	}
-	for _, sourceItemID := range recentCompleted {
+	for _, sourceItemID := range anchors {
 		items, err := w.engine.becauseYouWatched(ctx, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
 		if err != nil {
 			fail("because_you_watched", err, "source_item_id", sourceItemID)
@@ -983,7 +1072,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 		if !w.claimProfileRefresh(key) {
 			continue // already queued or refreshing on this server
 		}
-		w.runProfileRefresh(ctx, p.UserID, p.ProfileID)
+		w.runProfileRefresh(ctx, p.UserID, p.ProfileID, w.refreshProfile)
 	}
 }
 
@@ -993,21 +1082,34 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case req := <-w.profileRefreshCh:
-			w.runProfileRefresh(ctx, req.userID, req.profileID)
+			w.runProfileRefresh(ctx, req.userID, req.profileID, w.refreshProfile)
 		}
 	}
 }
 
-// runProfileRefresh refreshes a profile whose pending key the caller claimed,
-// then releases the key.
-func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string) {
-	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
-	err := w.refreshProfile(ctx, userID, profileID)
-	switch {
-	case errors.Is(err, errProfileRefreshElsewhere):
-		slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
-	case err != nil:
-		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+// runProfileRefresh runs refresh for a profile whose pending key the caller
+// claimed, then releases the key. A refresh request made while it runs makes
+// it run once more as soon as it ends, so a burst of changes is fully applied
+// in seconds rather than at the next stale sweep. A failed run, or one another
+// server is already doing, stops: it marks the profile stale, and the sweep
+// retries it.
+func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string, refresh func(context.Context, int, string) error) {
+	key := profileRefreshKey(userID, profileID)
+	for {
+		// A request made before this run started is read by it.
+		w.dropProfileRefreshAgain(key)
+		if err := refresh(ctx, userID, profileID); err != nil {
+			if errors.Is(err, errProfileRefreshElsewhere) {
+				slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+			} else {
+				slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+			}
+			w.clearProfileRefreshPending(key)
+			return
+		}
+		if !w.finishProfileRefresh(key) {
+			return
+		}
 	}
 }
 
@@ -1120,6 +1222,48 @@ func (w *Worker) clearProfileRefreshPending(key string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	delete(w.profileRefreshPending, key)
+	delete(w.profileRefreshAgain, key)
+}
+
+// claimProfileRefreshOrAskAgain claims a profile's refresh, as
+// claimProfileRefresh does, or, when one is already queued or running on this
+// server, asks it to run once more and reports false. A refresh queued here
+// reads the change when it starts; one already running may have read the
+// signals before it. Both happen under one lock, so the request cannot fall
+// between a run that is finishing and its release of the key.
+func (w *Worker) claimProfileRefreshOrAskAgain(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, exists := w.profileRefreshPending[key]; !exists {
+		w.profileRefreshPending[key] = struct{}{}
+		return true
+	}
+	if w.profileRefreshAgain == nil {
+		w.profileRefreshAgain = make(map[string]struct{})
+	}
+	w.profileRefreshAgain[key] = struct{}{}
+	return false
+}
+
+// dropProfileRefreshAgain forgets a request to run again.
+func (w *Worker) dropProfileRefreshAgain(key string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	delete(w.profileRefreshAgain, key)
+}
+
+// finishProfileRefresh ends a refresh run. It reports true, keeping the
+// pending key, when a request to run again arrived; otherwise it releases the
+// key. Both happen under one lock, so a request is never caught between them.
+func (w *Worker) finishProfileRefresh(key string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, again := w.profileRefreshAgain[key]; again {
+		delete(w.profileRefreshAgain, key)
+		return true
+	}
+	delete(w.profileRefreshPending, key)
+	return false
 }
 
 func profileRefreshKey(userID int, profileID string) string {

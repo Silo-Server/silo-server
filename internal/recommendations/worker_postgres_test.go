@@ -512,13 +512,21 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		mustHave        string
 	}{
 		{RecTypeForYouMain, "", watchlist},
-		{RecTypeForYouClusterPrefix + "0", "", watchlist},
+		// The main row's served window takes every title this small catalog
+		// has, so the cluster row is cached empty: built, not missing.
+		{RecTypeForYouClusterPrefix + "0", "", ""},
 		{RecTypeSimilarUsersLiked, "", plain[0]},
 		{RecTypeBecauseWatched, watched, plain[1]},
 	} {
 		items, err := repo.GetRecommendationCache(ctx, userID, profile, row.recType, row.source)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if row.mustHave == "" {
+			if items == nil || len(items) != 0 {
+				t.Fatalf("%s row = %v, want it cached empty", row.recType, items)
+			}
+			continue
 		}
 		ids := make([]string, len(items))
 		for i, item := range items {
@@ -598,12 +606,13 @@ func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
 		}
 	}
 
-	build(1)
-	if cached(mainKey) || cached(becauseKey) {
-		t.Fatal("a main or Because You Watched row survived an empty rebuild")
+	// The main row is composed from the clusters, so it fails with them.
+	build(2)
+	if cached(becauseKey) {
+		t.Fatal("the Because You Watched row survived an empty rebuild")
 	}
-	if !cached(clusterKey) {
-		t.Fatal("the cluster row was dropped although its build failed")
+	if !cached(mainKey) || !cached(clusterKey) {
+		t.Fatal("the main or cluster row was dropped although its build failed")
 	}
 	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeSimilarUsersLiked, ""); err != nil || items == nil || len(items) != 0 {
 		t.Fatalf("similar users row = %v, %v; want it cached empty", items, err)
@@ -612,13 +621,17 @@ func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
 		t.Fatal("another profile's row was dropped")
 	}
 
-	// Once the cluster can be read and comes out empty, its row goes too.
 	if err := repo.UpsertTasteClusters(ctx, userID, profile, []TasteCluster{{ClusterIdx: 0, Embedding: taste, Label: "Test", MemberCount: 1, TotalWeight: 1}}); err != nil {
 		t.Fatal(err)
 	}
+	// Once the clusters can be read, the empty main row goes, and the
+	// cluster row is cached empty, so reads know it was built.
 	build(0)
-	if cached(clusterKey) {
-		t.Fatal("the cluster row survived an empty rebuild")
+	if cached(mainKey) {
+		t.Fatal("the main row survived an empty rebuild")
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeForYouClusterPrefix+"0", ""); err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("cluster row = %v, %v; want it cached empty", items, err)
 	}
 }
 
@@ -682,5 +695,56 @@ func TestDeleteGlobalRecommendationCachePostgres(t *testing.T) {
 	}
 	if got := remaining(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("remaining rows = %v, want %v", got, want)
+	}
+}
+
+// A completion the profile rated one star gets no Because You Watched row,
+// and the next completion anchors the row the home section shows.
+func TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcache-disliked-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	repo := NewRepo(pool)
+
+	const axis = 2200
+	disliked, liked := prefix+"disliked", prefix+"liked"
+	neighbors := []string{prefix + "neighbor-1", prefix + "neighbor-2"}
+	for i, id := range append([]string{disliked, liked}, neighbors...) {
+		seedRecoMediaItem(t, pool, id, "movie", "matched")
+		if err := repo.UpsertEmbedding(ctx, id, axisVector(axis, map[int]float32{axis + 1 + i: 0.05}), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stmt := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW()), ($1, $2, $4, true, NOW() - INTERVAL '1 day')`, []any{userID, profile, disliked, liked}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 1)`, []any{userID, profile, disliked}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
+			t.Fatalf("seed %q: %v", stmt.query, err)
+		}
+	}
+
+	ratings := catalog.NewRatingsRepo(pool)
+	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{DiversityLambda: 0.7})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(time.Now())); built.failed != 0 {
+		t.Fatalf("cache build = %+v, want no failures", built)
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeBecauseWatched, disliked); err != nil || items != nil {
+		t.Fatalf("disliked anchor row = %v, %v; want none built", items, err)
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeBecauseWatched, liked); err != nil || len(items) == 0 {
+		t.Fatalf("liked anchor row = %v, %v; want it built", items, err)
+	}
+
+	_, source, err := NewReader(repo, ratings, nil, pgstore.NewPostgresProvider(pool)).SectionBecauseYouWatched(ctx, userID, profile, "", nil, catalog.AccessFilter{})
+	if err != nil || source != liked {
+		t.Fatalf("section anchor = %q, %v; want %q", source, err, liked)
 	}
 }

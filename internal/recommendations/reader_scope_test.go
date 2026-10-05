@@ -68,8 +68,10 @@ func TestPublicReadsServeUpToFiftyAndSectionReadsTheWholePool(t *testing.T) {
 		}
 	}
 
+	// The section row is rotated like a default-size page, but keeps every
+	// cached item.
 	main, err := r.SectionForYouMain(ctx, 7, "p1", catalog.AccessFilter{})
-	if err != nil || main == nil || !slices.Equal(scoredIDs(main.Items), scoredIDs(pool)) {
+	if err != nil || main == nil || !slices.Equal(slices.Sorted(slices.Values(scoredIDs(main.Items))), scoredIDs(pool)) {
 		t.Fatalf("SectionForYouMain = %v, %v; want the whole cached pool", main, err)
 	}
 	similar, err := r.SectionSimilarUsersLiked(ctx, 7, "p1", catalog.AccessFilter{})
@@ -79,6 +81,55 @@ func TestPublicReadsServeUpToFiftyAndSectionReadsTheWholePool(t *testing.T) {
 	taste, err := r.SectionTasteMatchRow(ctx, 7, "p1", "", catalog.AccessFilter{})
 	if err != nil || taste == nil || len(taste.Items) != CacheCandidateLimit {
 		t.Fatalf("SectionTasteMatchRow = %v, %v; want %d items", taste, err, CacheCandidateLimit)
+	}
+}
+
+// A library's For You fill is the profile's other personal rows in a fixed
+// order: the cluster rows heaviest first, then Because You Watched by
+// anchor, most recent first, then Similar Users. Each item appears once at
+// its first place, the fill is filtered like every row, it leaves the main
+// row out, and a missing row asks for no refresh.
+func TestSectionForYouFillOrdersTheOtherPersonalRows(t *testing.T) {
+	refresher := &countingReadRefresher{}
+	repo := &fakeReaderRepo{
+		meta: &TasteProfileMeta{SignalCounts: map[string]int{"watch_high": ColdStartFullPersonalized}},
+		clusters: []TasteCluster{
+			{ClusterIdx: 0, Label: "Drama", TotalWeight: 1},
+			{ClusterIdx: 1, Label: "Comedy", TotalWeight: 3},
+			{ClusterIdx: 2, Label: "War", TotalWeight: 2}, // no cached row
+		},
+		personal: map[string][]ScoredItem{
+			RecTypeForYouMain + "|":                {{MediaItemID: "main"}},
+			RecTypeForYouClusterPrefix + "0" + "|": {{MediaItemID: "drama-00"}, {MediaItemID: "drama-01"}, {MediaItemID: "shared"}},
+			RecTypeForYouClusterPrefix + "1" + "|": {{MediaItemID: "comedy-00"}, {MediaItemID: "shared"}, {MediaItemID: "comedy-01"}},
+			// The second anchor is watched, so the first anchor's row drops it.
+			RecTypeBecauseWatched + "|first": {{MediaItemID: "byw-00"}, {MediaItemID: "comedy-00"}, {MediaItemID: "second"}},
+			RecTypeSimilarUsersLiked + "|":   {{MediaItemID: "similar-00"}, {MediaItemID: "hidden"}, {MediaItemID: "byw-00"}},
+		},
+		hidden: map[string]struct{}{"hidden": {}},
+	}
+	r := &Reader{
+		repo:    repo,
+		refresh: refresher,
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("first", "second")}),
+	}
+
+	fill, err := r.SectionForYouFill(t.Context(), 7, "p1", catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"comedy-00", "shared", "comedy-01", "drama-00", "drama-01", "byw-00", "similar-00"}
+	if got := scoredIDs(fill); !slices.Equal(got, want) {
+		t.Fatalf("fill = %v, want %v", got, want)
+	}
+	if refresher.calls != 0 {
+		t.Fatalf("refreshes = %d, want none", refresher.calls)
+	}
+
+	// With recommendations off there is nothing personal to fill with.
+	fill, err = r.WithPersonalRows(false).SectionForYouFill(t.Context(), 7, "p1", catalog.AccessFilter{})
+	if err != nil || len(fill) != 0 {
+		t.Fatalf("fill with personal rows off = %v, %v; want none", scoredIDs(fill), err)
 	}
 }
 
@@ -240,6 +291,13 @@ func TestReadLoadsTheExclusionSetOncePerRequest(t *testing.T) {
 			row, err := r.SectionTasteMatchRow(ctx, 7, "p1", "", catalog.AccessFilter{})
 			if err == nil && (row == nil || row.ClusterIndex != 1) {
 				return fmt.Errorf("row = %+v, want cluster 1", row)
+			}
+			return err
+		},
+		"for you fill": func() error {
+			fill, err := r.SectionForYouFill(ctx, 7, "p1", catalog.AccessFilter{})
+			if err == nil && !slices.Equal(scoredIDs(fill), []string{"comedy", "fresh", "similar"}) {
+				return fmt.Errorf("fill = %v, want comedy, fresh, similar", scoredIDs(fill))
 			}
 			return err
 		},

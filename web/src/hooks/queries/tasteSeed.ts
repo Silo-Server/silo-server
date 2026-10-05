@@ -37,6 +37,16 @@ export function useTasteSeedItems(enabled = true) {
 }
 
 /**
+ * When the recommendation surfaces are refetched again after a taste-seed
+ * submission. The server answers once the profile's refresh is done or after
+ * a few seconds; a slower refresh lands later, and these refetches pick it up.
+ * A submission that arrives while a refresh is reading makes that refresh run
+ * once more when it ends, each run within the server's two-minute timeout, so
+ * the last refetch comes after two timeouts, when neither can be running.
+ */
+const TASTE_SEED_REFETCH_DELAYS_MS = [3_000, 15_000, 45_000, 125_000, 245_000] as const;
+
+/**
  * Submits a batch of selected content IDs as favorites and triggers a single
  * taste-profile refresh. Uses the dedicated POST /api/v2/recommendations/taste-seed
  * endpoint so the server can debounce the refresh into one request rather than
@@ -48,13 +58,20 @@ export function useSubmitTasteSeed() {
     mutationFn: (itemIds: string[]) =>
       v2("POST /api/v2/recommendations/taste-seed", { body: { item_ids: itemIds } }),
     onSuccess: async () => {
-      // Invalidate favorites and recommendation surfaces — the new favorites
-      // should appear immediately; the For You / Discover rows will warm up
-      // on next render once the worker re-runs the taste profile.
+      // Invalidate favorites and recommendation surfaces. The server waits
+      // for the profile's refresh before answering, so the rows usually
+      // already reflect the picks; the delayed refetches cover a refresh that
+      // took longer than that wait.
       await queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       await queryClient.invalidateQueries({ queryKey: recKeys.all });
       await invalidateMediaSurfaceQueries(queryClient);
       bumpHomeRefreshSignal(queryClient);
+      for (const delay of TASTE_SEED_REFETCH_DELAYS_MS) {
+        setTimeout(() => {
+          void queryClient.invalidateQueries({ queryKey: recKeys.all });
+          bumpHomeRefreshSignal(queryClient);
+        }, delay);
+      }
     },
   });
 }

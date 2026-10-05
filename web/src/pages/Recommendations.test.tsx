@@ -71,6 +71,78 @@ describe("Recommendations", () => {
     });
     mockUseDiscover.mockReturnValue({ data: undefined, isLoading: true, isError: false });
   });
+
+  it("shows the taste genres without a signal count", () => {
+    mockUseDiscover.mockReturnValue({ data: { rows: [] }, isLoading: false, isError: false });
+
+    const markup = renderPage();
+
+    // The count summed raw signal rows, so a series binger read "300+ signals".
+    expect(markup).toContain("Your Taste Profile");
+    expect(markup).toContain("Drama");
+    expect(markup).not.toMatch(/\d+ signals?/);
+  });
+
+  it("renders a neutral empty state when discover returns no rows", () => {
+    mockUseDiscover.mockReturnValue({
+      data: { rows: [] },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderPage();
+
+    // Discover always carries the default rows, so no rows means nothing in
+    // the viewer's libraries, not too little history.
+    expect(markup).toContain("Nothing to show yet");
+    expect(markup).not.toContain("Watch and rate more");
+    expect(markup).not.toContain("Personalized picks");
+  });
+
+  it("renders the default rows for a profile with no history", () => {
+    mockUseTasteProfile.mockReturnValue({
+      data: { top_genres: [], favorite_directors: [], signal_counts: {} },
+      isLoading: false,
+    });
+    mockUseDiscover.mockReturnValue({
+      data: {
+        rows: [
+          {
+            type: "top_rated",
+            label: "Highly Rated in Your Library",
+            section_kind: "top-rated",
+            items: [
+              { content_id: "item-1", title: "Movie A", type: "movie", year: 2024, genres: [] },
+            ],
+          },
+          {
+            type: "recently_added",
+            label: "Recently Added",
+            section_kind: "recently-added",
+            items: [
+              { content_id: "item-2", title: "Series B", type: "series", year: 2023, genres: [] },
+            ],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain('data-title="Highly Rated in Your Library"');
+    expect(markup).toContain('data-title="Recently Added"');
+    expect(markup).toContain("Movie A");
+    expect(markup).toContain("Series B");
+    expect(markup).toContain('data-href="/recommendations/section/top-rated"');
+    expect(markup).toContain('data-href="/recommendations/section/recently-added"');
+    expect(markup).not.toContain("Nothing to show yet");
+    // Not personal yet, so the page does not claim to come from its history.
+    expect(markup).not.toContain("based on your viewing history");
+    expect(markup).toContain("Watch and rate titles to personalize this page.");
+  });
+
   it("renders carousel rows with enriched items", () => {
     mockUseDiscover.mockReturnValue({
       data: {
@@ -85,7 +157,7 @@ describe("Recommendations", () => {
           },
           {
             type: "genre_sampler",
-            label: "Popular in Action",
+            label: "Top Action",
             section_kind: "genre",
             section_key: "Sci Fi & Action",
             items: [
@@ -108,7 +180,7 @@ describe("Recommendations", () => {
     const markup = renderPage();
 
     expect(markup).toContain("For You");
-    expect(markup).toContain("Popular in Action");
+    expect(markup).toContain("Top Action");
     expect(markup).toContain("Movie A");
     expect(markup).toContain("Movie B");
     expect(markup).toContain('data-title="Custom row" data-href=""');

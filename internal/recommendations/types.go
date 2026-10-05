@@ -21,6 +21,16 @@ type ForYouRow struct {
 	Label        string       `json:"label"`
 	ClusterIndex int          `json:"cluster_index,omitempty"`
 	Items        []ScoredItem `json:"items"`
+	// Subject is what a taste-cluster row is about, its genre label without
+	// the title's wording, for clients that word the reason themselves. It is
+	// empty on every other row and on a cluster whose label names no genre.
+	Subject string `json:"-"`
+	// AnchorItemID is the title a Because You Watched row was built from.
+	AnchorItemID string `json:"-"`
+	// personalKey is the cache key of a personal taste row, the main row
+	// (RecTypeForYouMain) or a cluster row, and empty on every other row.
+	// Reads rotate these rows daily (see rotateTail).
+	personalKey string
 }
 
 // ForYouResponse is the grouped response of the For You rows endpoint.
@@ -83,14 +93,18 @@ const (
 	WeightRated5    = 1.0
 	WeightRewatch   = 0.9 // Completed 2+ times
 	WeightRated4    = 0.7
-	WeightFavorited = 0.8 // Strong deliberate action
-	WeightWatchHigh = 0.8 // Watch progress >= 90%
-	WeightWatchMed  = 0.3 // Watch progress 50-89%
-	WeightRated3    = 0.2
+	WeightFavorited = 0.8  // Strong deliberate action
+	WeightWatchHigh = 0.8  // Watch progress >= 90%
+	WeightWatchMed  = 0.3  // Watch progress 50-89%
 	WeightWatchlist = 0.15 // Intent signal
 	WeightWatchLow  = -0.2 // Abandoned (< 15%)
 	WeightRatedLow  = -0.5 // 1-2 star ratings
 )
+
+// DislikedRatingMax is the highest star rating that marks a title the profile
+// disliked: reads leave such titles out of every row, and they never anchor a
+// Because You Watched row.
+const DislikedRatingMax = 2
 
 // RecType constants for recommendation cache.
 const (
@@ -110,22 +124,31 @@ const GlobalCacheUserID = 0
 // GlobalCacheProfileID is the sentinel profile_id for global cache entries.
 const GlobalCacheProfileID = "__global__"
 
-// Cold-start thresholds for graduated warm-up.
+// Cold-start thresholds for graduated warm-up, in positive titles (see
+// coldStartLevelOf). Mixed matches the taste-seed picker's three-pick
+// minimum, so a seeded profile opens on its own row; ten titles is where its
+// taste first splits into two clusters.
 const (
-	ColdStartFullPersonalized = 15
-	ColdStartMixed            = 5
+	ColdStartFullPersonalized = 10
+	ColdStartMixed            = 3
 	ColdStartMinimal          = 1
 )
 
-// GenreCapPercent is the maximum fraction of a recommendation row any single genre can occupy.
-const GenreCapPercent = 0.4
-
 // RecencyBoostDays is the number of days a new item gets a relevance boost.
-const RecencyBoostDays = 7
+const RecencyBoostDays = 14
 
-// RecencyBoostMultiplier is the max multiplier for newly added items.
-const RecencyBoostMultiplier = 1.2
+// RecencyBoostMultiplier is the max multiplier for newly added items. The
+// boost applies before selection, where a candidate pool's scores spread by
+// about a tenth, so a small multiplier already lifts a new title several
+// places.
+const RecencyBoostMultiplier = 1.05
 
 // CacheCandidateLimit is the default number of candidates cached per row so
 // read paths have headroom for watched, low-rated, access, and dedup filters.
 const CacheCandidateLimit = 60
+
+// ServedRowSize is how many items of a row a public read serves by default:
+// the window ranking shapes for what a viewer sees first. The rest of a cached
+// row is headroom for read-time filters and for library sections, which scope
+// the whole row to their libraries.
+const ServedRowSize = 20
