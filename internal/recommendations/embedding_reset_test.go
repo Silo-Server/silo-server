@@ -140,6 +140,7 @@ func TestDescribeEmbeddingLockConflict(t *testing.T) {
 		{"unstorable lock", EmbeddingLock{BaseURL: "http://ollama", Model: "qwen3-embedding:latest", SourceDimensions: 4096}, "http://ollama", "qwen3-embedding:latest", 0, "records 4096-dimension vectors; Silo stores 1 to 3072"},
 		{"zero-dimension lock", EmbeddingLock{BaseURL: "http://ollama", Model: "m"}, "http://ollama", "m", 0, "records 0-dimension vectors"},
 		{"other storage", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 768, "stored at 1536 dimensions"},
+		{"other storage, dimensions unknown", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 0, "stored at 1536 dimensions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := DescribeEmbeddingLockConflict(tc.lock, tc.baseURL, tc.model, tc.dims)
