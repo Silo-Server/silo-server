@@ -751,6 +751,16 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 	return candidates, nil
 }
 
+// HasEmbeddingsFromModel reports whether any item has an embedding from model,
+// such as one a catalog import stored.
+func (r *Repo) HasEmbeddingsFromModel(ctx context.Context, model string) (bool, error) {
+	var has bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_item_embeddings WHERE model = $1)`, model).Scan(&has); err != nil {
+		return false, fmt.Errorf("check embeddings from model: %w", err)
+	}
+	return has, nil
+}
+
 // EmbeddingCount returns the total number of stored embeddings.
 func (r *Repo) EmbeddingCount(ctx context.Context) (int, error) {
 	var count int

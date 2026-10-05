@@ -20,7 +20,34 @@ const (
 	// minSimilarUsersItemAccounts is how many of those accounts must have
 	// liked a title before the row may recommend it.
 	minSimilarUsersItemAccounts = 2
+
+	// similarUsersPeerProfiles is how many similar profiles the row reads
+	// likes from, and similarUsersPeersPerAccount how many of them one
+	// account may hold. similarUsersCandidateProfiles nearest profiles are
+	// read so that a household of near-identical profiles cannot fill the
+	// peers and leave the row under its account floor.
+	similarUsersPeerProfiles      = 10
+	similarUsersPeersPerAccount   = 2
+	similarUsersCandidateProfiles = 40
 )
+
+// peersAcrossAccounts keeps, in similarity order, up to limit profiles with
+// at most perAccount from any one account.
+func peersAcrossAccounts(candidates []UserSimilarity, limit, perAccount int) []UserSimilarity {
+	taken := make(map[int]int, len(candidates))
+	peers := make([]UserSimilarity, 0, min(limit, len(candidates)))
+	for _, c := range candidates {
+		if len(peers) == limit {
+			break
+		}
+		if taken[c.UserID] >= perAccount {
+			continue
+		}
+		taken[c.UserID]++
+		peers = append(peers, c)
+	}
+	return peers
+}
 
 type collaborativeCandidate struct {
 	score float64
@@ -95,10 +122,11 @@ func (e *Engine) similarUsersLiked(ctx context.Context, userID int, profileID st
 		maxContentRating = meta.MaxContentRating
 	}
 
-	similarUsers, err := e.repo.FindSimilarUsers(ctx, userID, profileID, maxContentRating, 10)
+	nearest, err := e.repo.FindSimilarUsers(ctx, userID, profileID, maxContentRating, similarUsersCandidateProfiles)
 	if err != nil {
 		return nil, fmt.Errorf("find similar users for user %d profile %s: %w", userID, profileID, err)
 	}
+	similarUsers := peersAcrossAccounts(nearest, similarUsersPeerProfiles, similarUsersPeersPerAccount)
 	if distinctAccounts(similarUsers) < minSimilarUsersPeerAccounts {
 		return []ScoredItem{}, nil
 	}
