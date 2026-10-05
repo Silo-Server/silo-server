@@ -55,7 +55,7 @@ var (
 
 	reportTypes       = []string{"crash", "anr", "native_crash", "hang", "abnormal_exit", "manual"}
 	platforms         = []string{"android", "android-tv", "ios", "tvos"}
-	crashSources      = []string{"ueh", "exit_info", "metrickit", "exit_sentinel"}
+	crashSources      = []string{"ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"}
 	crashProvenances  = []string{"pre_failure", "post_restart", "metric_reporting_period"}
 	consentModes      = []string{"prompt", "always", "manual"}
 	logLevels         = []string{"V", "D", "I", "W", "E"}
@@ -270,6 +270,19 @@ var attrRegistry = map[string]map[string]attrValueType{
 		"play_method":     attrString,
 		"reason":          attrString,
 		"position_ms":     attrInteger,
+		// Playback session summary. Android already emits the
+		// first_frame_ms, rebuffer_* and failure_code names.
+		"first_frame_ms":       attrInteger,
+		"stall_count":          attrInteger,
+		"stall_total_ms":       attrInteger,
+		"rebuffer_count":       attrInteger,
+		"rebuffer_total_ms":    attrInteger,
+		"rebuffer_max_ms":      attrInteger,
+		"bitrate_change_count": attrInteger,
+		"plan_change_count":    attrInteger,
+		"error_count":          attrInteger,
+		"failure_code":         attrString,
+		"session_ms":           attrInteger,
 	},
 	"focus": {
 		"target": attrString,
@@ -291,6 +304,7 @@ var attrRegistry = map[string]map[string]attrValueType{
 		"outcome":     attrString,
 		"reason":      attrString,
 		"launch_type": attrString,
+		"resident_mb": attrInteger,
 	},
 	"crash": {
 		"fingerprint": attrString,
@@ -501,6 +515,12 @@ func ValidateLogLine(data []byte) (LogLine, error) {
 		Message:   msg,
 		Attrs:     attrs,
 	}, nil
+}
+
+// CrashSources lists the crash.source values this contract accepts, so a
+// client can tell whether a server predates a source before sending it.
+func CrashSources() []string {
+	return slices.Clone(crashSources)
 }
 
 func ArchiveEntryAllowed(name string) bool {

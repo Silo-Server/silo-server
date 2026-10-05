@@ -251,7 +251,7 @@ additive fields.
     "stack_excerpt": "…truncated ≤ 8 KiB; full artifact in archive…",
     "thread": "main",
     "foreground": true,
-    "source": "ueh",              // ueh | exit_info | metrickit | exit_sentinel
+    "source": "ueh",              // ueh | exit_info | metrickit | exit_sentinel | watchdog
     "provenance": "pre_failure",  // pre_failure | post_restart | metric_reporting_period
     "occurred_at": "2026-07-19T18:22:31Z"   // best known; MetricKit reports carry period bounds
   },
@@ -392,9 +392,14 @@ optional profile attribution.
   "max_bundle_bytes": 10485760,
   "max_manifest_bytes": 65536,
   "retention_days": 30,
-  "consent_notice_version": 1
+  "consent_notice_version": 1,
+  "accepted_crash_sources": ["ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"]
 }
 ```
+
+`accepted_crash_sources` is absent on servers that predate it; those accept
+only `ueh`, `exit_info`, `metrickit` and `exit_sentinel`. Clients do not send
+a report whose `crash.source` the server has not listed.
 
 Clients cache this alongside existing server-driven config refresh.
 

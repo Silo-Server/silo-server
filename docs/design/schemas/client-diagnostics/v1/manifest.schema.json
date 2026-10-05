@@ -162,7 +162,8 @@
             "ueh",
             "exit_info",
             "metrickit",
-            "exit_sentinel"
+            "exit_sentinel",
+            "watchdog"
           ],
           "maxLength": 32
         },

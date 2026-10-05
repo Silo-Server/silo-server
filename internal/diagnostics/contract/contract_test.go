@@ -380,3 +380,33 @@ func mapsEqual(got, want map[string]map[string]string) bool {
 	}
 	return true
 }
+
+func TestValidateLogLineKeepsPlaybackSummaryAndHangAttrs(t *testing.T) {
+	summary := []byte(`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"playback session summary","attrs":{"first_frame_ms":1840,"stall_count":3,"stall_total_ms":5200,"rebuffer_count":1,"rebuffer_total_ms":2100,"rebuffer_max_ms":2100,"bitrate_change_count":1,"plan_change_count":1,"error_count":1,"failure_code":"network_timeout","session_ms":1260000}}`)
+	got, err := ValidateLogLine(summary)
+	if err != nil {
+		t.Fatalf("ValidateLogLine(summary) error = %v", err)
+	}
+	if len(got.Attrs) != 11 {
+		t.Fatalf("summary attrs = %#v, want all 11 kept", got.Attrs)
+	}
+
+	hang := []byte(`{"ts":"2026-07-19T21:41:10Z","run":"run_1","lvl":"W","cat":"lifecycle","tag":"MainThreadHang","msg":"main thread did not respond","attrs":{"duration_ms":3500,"resident_mb":412}}`)
+	got, err = ValidateLogLine(hang)
+	if err != nil {
+		t.Fatalf("ValidateLogLine(hang) error = %v", err)
+	}
+	if _, ok := got.Attrs["resident_mb"]; !ok {
+		t.Fatalf("resident_mb dropped: %#v", got.Attrs)
+	}
+
+	for _, line := range []string{
+		`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"summary","attrs":{"stall_count":"3"}}`,
+		`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"summary","attrs":{"failure_code":7}}`,
+		`{"ts":"2026-07-19T21:41:10Z","run":"run_1","lvl":"W","cat":"lifecycle","tag":"MainThreadHang","msg":"hang","attrs":{"resident_mb":"412"}}`,
+	} {
+		if _, err := ValidateLogLine([]byte(line)); err == nil {
+			t.Fatalf("ValidateLogLine(%s) error = nil, want type mismatch", line)
+		}
+	}
+}
