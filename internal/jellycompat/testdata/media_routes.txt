@@ -151,7 +151,6 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
-QUERY /web/*	non-media
 TRACE /web/*	non-media
 # fixture 2
 GET /	non-media
@@ -306,5 +305,4 @@ OPTIONS /web/*	non-media
 PATCH /web/*	non-media
 POST /web/*	non-media
 PUT /web/*	non-media
-QUERY /web/*	non-media
 TRACE /web/*	non-media
