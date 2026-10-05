@@ -60,8 +60,8 @@ does this viewer see". Never build a viewer-facing response from `poster_url` al
 
 - The v1 and v2 handlers build responses from `withViewerPosters` copies
   (`internal/api/handlers/library_collections.go`). That covers the library Collections tab,
-  server collections, and admin responses. `/api/v2` admin collections mark a collage with
-  `poster_is_collage`, so an editor can tell it from an uploaded poster.
+  server collections, and admin responses. `/api/v2` collections and collection cards mark a
+  collage with `poster_is_collage`, so a client can tell it from an uploaded poster.
 - Jellyfin BoxSets resolve posters for the session's viewer. A collage's image tag carries its
   key and a signature (32 hex digits), so the image route can serve the tagged collage to a
   request without a session. Collage URLs are never seeded into the shared compat image cache.

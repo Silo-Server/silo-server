@@ -260,7 +260,7 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 			c.ItemCount = n
 		}
 		if collage, ok := reads.posters[c.ID]; ok {
-			c.PosterPath, c.PosterThumbhash = collage.Path, collage.Thumbhash
+			c.PosterPath, c.PosterThumbhash, c.PosterIsCollage = collage.Path, collage.Thumbhash, true
 		}
 		out = append(out, c)
 	}
@@ -321,20 +321,14 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 					PosterThumbhash:  sorted[i].PosterThumbhash,
 					ItemCount:        sorted[i].ItemCount,
 					CreatorProfileID: &creatorProfileID,
+					PosterIsCollage:  sorted[i].PosterIsCollage,
 				})
 			}
 		default:
 			collections := adminCollectionsByGroup[g.ID]
 			collections = applyCollectionSort(collections, g.DefaultSortMode)
 			for _, c := range collections {
-				colls = append(colls, libraryTabCollection{
-					ID:              c.ID,
-					Title:           c.Title,
-					PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
-					PosterThumbhash: c.PosterThumbhash,
-					ItemCount:       c.ItemCount,
-					Featured:        c.Featured,
-				})
+				colls = append(colls, h.libraryTabCardOf(ctx, c))
 			}
 		}
 		if len(colls) == 0 {
@@ -354,14 +348,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if len(ungrouped) > 0 {
 		uColls := make([]libraryTabCollection, 0, len(ungrouped))
 		for _, c := range ungrouped {
-			uColls = append(uColls, libraryTabCollection{
-				ID:              c.ID,
-				Title:           c.Title,
-				PosterURL:       h.presignGPURLCtx(ctx, c.PosterURL),
-				PosterThumbhash: c.PosterThumbhash,
-				ItemCount:       c.ItemCount,
-				Featured:        c.Featured,
-			})
+			uColls = append(uColls, h.libraryTabCardOf(ctx, c))
 		}
 		sortOrder, err := h.GroupRepo.GetUngroupedSortOrder(ctx, libraryID)
 		if err != nil {

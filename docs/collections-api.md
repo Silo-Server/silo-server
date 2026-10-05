@@ -61,7 +61,7 @@ stored order; a smart collection uses its first matches in its query order. The 
 does not narrow the collage.
 
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
-  collage in `poster_url`, and `listCollections` marks it with `poster_is_collage: true`.
+  collage in `poster_url` and mark it with `poster_is_collage: true`.
   `getCollection` and `updateCollection` carry no `poster_url`; clients take the poster from
   the list.
 - The server builds collages in the background, after a collection is created, edited or

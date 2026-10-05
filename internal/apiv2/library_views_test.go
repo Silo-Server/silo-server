@@ -476,3 +476,24 @@ func TestLibraryCollectionItemsUnavailable(t *testing.T) {
 		t.Fatalf("unconfigured route status = %d, want 503", rec.Code)
 	}
 }
+
+// Library collection cards and listLibraryUserCollections entries mark a
+// collage poster, as getCollectionCapabilities poster_collages promises.
+func TestLibraryCollectionCardsMarkCollages(t *testing.T) {
+	cards := collectionCardsOf([]handlers.LibraryCollectionTabEntryView{
+		{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true},
+		{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"},
+		{ID: "unsigned", PosterIsCollage: true},
+	})
+	for i, want := range []bool{true, false, false} {
+		if cards[i].PosterIsCollage != want {
+			t.Fatalf("card %s poster_is_collage = %v, want %v", cards[i].ID, cards[i].PosterIsCollage, want)
+		}
+	}
+	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}); !got.PosterIsCollage {
+		t.Fatalf("user collection = %+v, want poster_is_collage", got)
+	}
+	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "unsigned", PosterIsCollage: true}); got.PosterIsCollage {
+		t.Fatalf("user collection without poster_url = %+v, want no poster_is_collage", got)
+	}
+}

@@ -412,11 +412,7 @@ func (reg *Registry) listServerCollections(ctx context.Context, _ *struct{}) (*S
 	out := &ServerCollectionsOutput{}
 	out.Body.Libraries = make([]ServerCollectionLibrary, 0, len(v.Libraries))
 	for _, l := range v.Libraries {
-		cards := make([]LibraryCollectionCard, 0, len(l.Collections))
-		for _, c := range l.Collections {
-			cards = append(cards, LibraryCollectionCard{ID: c.ID, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash, ItemCount: c.ItemCount, Featured: c.Featured})
-		}
-		out.Body.Libraries = append(out.Body.Libraries, ServerCollectionLibrary{LibraryID: IDFromInt(int64(l.LibraryID)), LibraryName: l.LibraryName, TotalCount: l.TotalCount, Collections: cards})
+		out.Body.Libraries = append(out.Body.Libraries, ServerCollectionLibrary{LibraryID: IDFromInt(int64(l.LibraryID)), LibraryName: l.LibraryName, TotalCount: l.TotalCount, Collections: collectionCardsOf(l.Collections)})
 	}
 	return out, nil
 }

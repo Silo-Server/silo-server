@@ -13,6 +13,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -197,6 +198,14 @@ func TestPersonalCollectionCollagesDB(t *testing.T) {
 		want := "https://cdn.test/" + cardThumbnailPath(gen.CollectionCollagePath(created.ID, ownerKey))
 		if !got.PosterIsCollage || got.PosterURL != want || got.PosterThumbhash != "th-"+ownerKey {
 			t.Fatalf("owner view poster = %q (collage %v, thumbhash %q), want %q", got.PosterURL, got.PosterIsCollage, got.PosterThumbhash, want)
+		}
+	})
+
+	t.Run("an /api/v2 library tab marks the owner's collage", func(t *testing.T) {
+		lh := &LibraryCollectionHandler{Executor: h.Executor, CollectionOwners: h.CollectionOwners, PersonalCollages: h.Collages}
+		got := lh.withVisibleItemCounts(WithNativeAPIV2(ownerCtx), f.account, "owner", []usercollections.ServerVisibleCollection{{ID: created.ID, CreatorProfileID: "owner", CollectionType: "manual"}})
+		if len(got) != 1 || !got[0].PosterIsCollage || got[0].PosterPath != gen.CollectionCollagePath(created.ID, ownerKey) {
+			t.Fatalf("library tab entries = %+v, want the owner's collage %s", got, ownerKey)
 		}
 	})
 

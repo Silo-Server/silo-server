@@ -24,8 +24,11 @@ type ServerVisibleCollection struct {
 	PosterPath             string `json:"-"`
 	PosterURL              string `json:"poster_url,omitempty"`
 	PosterThumbhash        string `json:"poster_thumbhash,omitempty"`
-	CreatedAt              string `json:"created_at"`
-	UpdatedAt              string `json:"updated_at"`
+	// PosterIsCollage reports that PosterPath is the viewer's collage. The
+	// frozen /api/v1 shape does not carry it.
+	PosterIsCollage bool   `json:"-"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // serverVisibleListLimit caps how many opt-in collections a single library tab
