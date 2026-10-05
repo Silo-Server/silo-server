@@ -52,13 +52,15 @@ func (c *titleCountCache) get(ctx context.Context, repo *Repo, filter catalog.Ac
 		return repo.countTitlesByType(ctx, filter)
 	}
 	key := titleCountKey(filter)
-	c.mu.Lock()
-	entry, ok := c.entries[key]
-	c.mu.Unlock()
-	if ok && time.Now().Before(entry.expires) {
-		return entry.counts, nil
+	if counts, ok := c.fresh(key); ok {
+		return counts, nil
 	}
 	counted, err, _ := c.counting.Do(string(key[:]), func() (any, error) {
+		// A count that finished between the check above and this call
+		// already stored its result.
+		if counts, ok := c.fresh(key); ok {
+			return counts, nil
+		}
 		countCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), titleCountTimeout)
 		defer cancel()
 		counts, err := repo.countTitlesByType(countCtx, filter)
@@ -81,6 +83,17 @@ func (c *titleCountCache) get(ctx context.Context, repo *Repo, filter catalog.Ac
 		return nil, fmt.Errorf("title counts: unexpected %T", counted)
 	}
 	return counts, nil
+}
+
+// fresh returns key's counts while they have not expired.
+func (c *titleCountCache) fresh(key [sha256.Size]byte) ([]int64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok || !time.Now().Before(entry.expires) {
+		return nil, false
+	}
+	return entry.counts, true
 }
 
 // titleCountKey identifies the titles filter admits: the fields

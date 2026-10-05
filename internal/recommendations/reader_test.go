@@ -390,6 +390,26 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 	}
 }
 
+// Watch Tonight filters a profile's cached candidates before it chooses the
+// cold-start fallback: a cache holding only titles that can no longer be
+// served, such as books cached before they left personal rows, falls back to
+// Popular and Recently Added rather than answering an empty, warm list.
+func TestWatchTonightFallsBackWhenFilteringEmptiesThePersonalRows(t *testing.T) {
+	repo := &fakeReaderRepo{
+		personal: map[string][]ScoredItem{RecTypeForYouMain + "|": {{MediaItemID: "cached-book", Score: 1}}},
+		global: map[string][]ScoredItem{
+			RecTypePopular:       {{MediaItemID: "popular", Score: 1}},
+			RecTypeRecentlyAdded: {{MediaItemID: "recent", Score: 1}},
+		},
+		types: map[string]string{"cached-book": "audiobook"},
+	}
+	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}
+	tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
+	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"popular", "recent"}) {
+		t.Fatalf("watch tonight = %+v, %v; want the cold-start rows", tonight, err)
+	}
+}
+
 // A profile with positive signals but no personal rows asks for them even at
 // level 0, since its titles may have gained embeddings since its last
 // refresh; a profile with nothing positive, or with its rows, does not.
