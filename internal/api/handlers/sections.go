@@ -469,7 +469,9 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	section, err := h.HomeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r))
+	// The frozen v1 endpoint answers a section whose items cannot be fetched
+	// with no items; v2 answers the error.
+	section, err := h.homeSectionItems(r.Context(), sectionID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -515,7 +517,8 @@ func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *htt
 		return
 	}
 
-	section, err := h.LibrarySectionItems(r.Context(), libraryID, sectionID, sectionViewerFromRequest(r))
+	// As on Home, v1 answers a failed fetch with no items.
+	section, err := h.librarySectionItems(r.Context(), libraryID, sectionID, sectionViewerFromRequest(r), true)
 	if err != nil {
 		writeAPIError(w, err)
 		return
