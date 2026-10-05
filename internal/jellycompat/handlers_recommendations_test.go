@@ -456,3 +456,15 @@ func TestCompatSimilarServesTheRecommenderAccessFiltered(t *testing.T) {
 		}
 	}
 }
+
+// Oversized limits are capped before they size anything: a category holds
+// at most a cached row's titles.
+func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
+	reader := &fakeRowReader{rows: []recommendations.ForYouRow{clusterRow(0, "Drama", "movie-1")}}
+	h := newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{UserID: 7, ProfileID: "kid"})
+	rec := httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
+	if rec.Code != http.StatusOK || reader.gotLimit != recommendations.CacheCandidateLimit {
+		t.Fatalf("status %d, read limit %d; want 200 and a cached row's length", rec.Code, reader.gotLimit)
+	}
+}

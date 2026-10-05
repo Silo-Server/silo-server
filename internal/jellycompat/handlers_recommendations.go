@@ -46,6 +46,10 @@ const (
 // response carries at most.
 const compatBecauseWatchedRows = 2
 
+// compatMaxCategories caps categoryLimit: the categories a response can hold
+// are a profile's Because You Watched rows and taste clusters.
+const compatMaxCategories = 20
+
 // compatRecommendationExcludedTypes are the recommendable media types
 // /Movies/Recommendations leaves out. Jellyfin answers it with movies only,
 // each category built from a movie the user played or liked, and clients
@@ -120,17 +124,20 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 
+	// Both limits size allocations, so they are capped: a category cannot
+	// hold more than a cached row's titles, and a profile has few rows a
+	// category can describe.
 	categoryLimit := 5
 	if v := q.Get("categoryLimit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			categoryLimit = n
+			categoryLimit = min(n, compatMaxCategories)
 		}
 	}
 
 	itemLimit := 8
 	if v := q.Get("itemLimit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			itemLimit = n
+			itemLimit = min(n, recommendations.CacheCandidateLimit)
 		}
 	}
 
