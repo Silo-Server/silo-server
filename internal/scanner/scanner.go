@@ -472,9 +472,19 @@ func (m walkMode) acceptsPath(path string) bool {
 type walkReport struct {
 	// unsupported lists the video files skipped because of their type.
 	unsupported []UnsupportedFile
+	// unreadableEntries lists the walk failures that may be single files: an
+	// entry the walk could not stat, or a symlink it could not resolve. The
+	// other walk failures are directories it could not read.
+	unreadableEntries []string
 	// sidecars lists the local metadata sidecars (.nfo, artwork) in every
 	// directory a video walk read. It is nil for other library types.
 	sidecars SidecarListing
+}
+
+func (r *walkReport) noteUnreadableEntry(path string) {
+	if r != nil {
+		r.unreadableEntries = append(r.unreadableEntries, path)
+	}
 }
 
 // collectWalkFile appends path to filePaths when the walk mode accepts it.
@@ -585,6 +595,7 @@ func walkLogicalTree(
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures, logicalPath)
+		report.noteUnreadableEntry(logicalPath)
 		return nil
 	}
 
@@ -593,12 +604,14 @@ func walkLogicalTree(
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
+			report.noteUnreadableEntry(logicalPath)
 			return nil
 		}
 		targetInfo, err := fspath.Stat(resolved)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
 			recordWalkFailure(walkFailures, logicalPath)
+			report.noteUnreadableEntry(logicalPath)
 			return nil
 		}
 		if targetInfo.IsDir() {
@@ -669,12 +682,14 @@ func walkLogicalTree(
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
+				report.noteUnreadableEntry(logicalChild)
 				continue
 			}
 			targetInfo, err := fspath.Stat(resolved)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
 				recordWalkFailure(walkFailures, logicalChild)
+				report.noteUnreadableEntry(logicalChild)
 				continue
 			}
 			if targetInfo.IsDir() {
@@ -843,6 +858,7 @@ func (s *Scanner) scanPaths(
 		"unsupported_files", len(walk.unsupported),
 	)
 	result.UnsupportedFiles = walk.unsupported
+	result.UnreadableEntries = walk.unreadableEntries
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 		if err := s.setPartialWalkWarning(ctx, folder.ID, len(walkFailures), true); err != nil {
@@ -1761,6 +1777,7 @@ func (s *Scanner) scanScope(
 		"unsupported_files", len(walk.unsupported),
 	)
 	result.UnsupportedFiles = walk.unsupported
+	result.UnreadableEntries = walk.unreadableEntries
 	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
@@ -2010,6 +2027,7 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.UnsupportedFiles = append(dst.UnsupportedFiles, src.UnsupportedFiles...)
+	dst.UnreadableEntries = append(dst.UnreadableEntries, src.UnreadableEntries...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
 	if src.Sidecars != nil {
 		if dst.Sidecars == nil {
