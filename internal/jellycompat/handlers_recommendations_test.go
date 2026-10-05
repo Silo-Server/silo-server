@@ -139,7 +139,7 @@ type countingRecommender struct {
 	calls int
 }
 
-func (c *countingRecommender) SimilarItems(context.Context, string, int) ([]recommendations.ScoredItem, error) {
+func (c *countingRecommender) SimilarItems(context.Context, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	c.calls++
 	return []recommendations.ScoredItem{{MediaItemID: "movie-neighbor"}}, nil
 }
