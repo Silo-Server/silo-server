@@ -38,6 +38,7 @@ import {
   PICK_A_LIBRARY,
   PICK_A_LIST_FIRST,
   PICK_LIBRARIES_FIRST,
+  PREVIEW_EVERY_LIBRARY,
   PREVIEW_SHOWS_UNSAVED,
   SAVE_AFTER_CONFLICTS,
   SAVE_FAILED,
@@ -167,19 +168,18 @@ function useUntickWarning(
 function SmartContents<Raw extends WireCollection>({
   scope,
   draft,
-  offMessage,
   onChange,
   libraries,
 }: {
   scope: CollectionScope<Raw>;
   draft: CollectionDraft;
-  /** Why there is no preview while no library is picked. */
-  offMessage: string;
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
   libraries: Array<{ id: number; name: string }>;
 }) {
+  // A server collection with no library yet still previews, across every library, so
+  // the rules can be tried before picking where it shows.
   const needsLibraries = scope.requireLibraries && draft.libraryIds.length === 0;
-  const preview = useScopePreview(scope, draftRules(draft), !needsLibraries);
+  const preview = useScopePreview(scope, draftRules(draft));
   return (
     <div className="grid gap-6">
       <SmartRulesPanel
@@ -188,7 +188,10 @@ function SmartContents<Raw extends WireCollection>({
         onChange={onChange}
         libraries={libraries}
       />
-      <CollectionPreviewPane preview={preview} offMessage={offMessage} />
+      <CollectionPreviewPane
+        preview={preview}
+        note={needsLibraries ? PREVIEW_EVERY_LIBRARY : undefined}
+      />
     </div>
   );
 }
@@ -630,7 +633,6 @@ export function CollectionEditor<Raw extends WireCollection>({
   if (smart) metaExtra = SMART_UPDATES_ITSELF;
   else if (view?.source) metaExtra = SYNCED_SOURCE_LABEL[view.source];
 
-  const previewOffMessage = created ? PICK_A_LIBRARY : PICK_LIBRARIES_FIRST;
   let contents: ReactNode;
   let panel: WithoutLibraries<SyncedListPanelProps> | null = null;
   const common = { scopeKind: scope.kind, onChange: editor.setDraft, capabilities };
@@ -661,20 +663,12 @@ export function CollectionEditor<Raw extends WireCollection>({
       <SmartContents
         scope={scope}
         draft={draft}
-        offMessage={previewOffMessage}
         onChange={editor.setDraft}
         libraries={libraryOptions}
       />
     );
   } else if (smart) {
-    contents = (
-      <PersonalSmartContents
-        scope={scope}
-        draft={draft}
-        offMessage={previewOffMessage}
-        onChange={editor.setDraft}
-      />
-    );
+    contents = <PersonalSmartContents scope={scope} draft={draft} onChange={editor.setDraft} />;
   } else {
     contents = (
       <ManualContentsPanel

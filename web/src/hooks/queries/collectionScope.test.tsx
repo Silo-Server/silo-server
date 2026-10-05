@@ -190,7 +190,7 @@ describe("useScopePreview", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     return renderHook(
-      ({ current }) => useScopePreview(PERSONAL_SCOPE as CollectionScope, current, true),
+      ({ current }) => useScopePreview(PERSONAL_SCOPE as CollectionScope, current),
       { wrapper, initialProps: { current: initial } },
     );
   }

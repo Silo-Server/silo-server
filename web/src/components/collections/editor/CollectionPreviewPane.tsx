@@ -22,11 +22,11 @@ const GHOSTS = 8;
  */
 export function CollectionPreviewPane({
   preview,
-  offMessage,
+  note,
 }: {
   preview: ScopePreview;
-  /** Why there is no preview yet, for example no library picked. */
-  offMessage: string;
+  /** A muted line beside the count, such as where the matches come from. */
+  note?: string;
 }) {
   const id = useId();
   const ready = preview.status === "ready" ? preview : null;
@@ -68,15 +68,23 @@ export function CollectionPreviewPane({
             </>
           ) : null}
         </p>
+        {note ? (
+          <>
+            <span aria-hidden className="text-muted-foreground">
+              ·
+            </span>
+            <span className="text-muted-foreground">{note}</span>
+          </>
+        ) : null}
       </div>
 
-      <PreviewBody preview={preview} offMessage={offMessage} />
+      <PreviewBody preview={preview} />
     </section>
   );
 }
 
 /** Posters, loading skeletons, or ghost posters with the reason there are none. */
-function PreviewBody({ preview, offMessage }: { preview: ScopePreview; offMessage: string }) {
+function PreviewBody({ preview }: { preview: ScopePreview }) {
   if (preview.status === "loading") {
     return (
       <div className={GRID}>
@@ -100,11 +108,7 @@ function PreviewBody({ preview, offMessage }: { preview: ScopePreview; offMessag
       </ul>
     );
   }
-  let message = (
-    <p className="text-muted-foreground text-[13px]">
-      {preview.status === "error" ? PREVIEW_FAILED : offMessage}
-    </p>
-  );
+  let message = <p className="text-muted-foreground text-[13px]">{PREVIEW_FAILED}</p>;
   if (preview.status === "ready") {
     message = (
       <>

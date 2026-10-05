@@ -396,6 +396,8 @@ export const SMART_UPDATES_ITSELF = "Updates itself as titles are added";
 export const PREVIEW_SHOWS_UNSAVED = "The preview already shows them.";
 
 export const PREVIEW_LIVE = "Live preview";
+/** Beside the preview count while a server collection has no library picked yet. */
+export const PREVIEW_EVERY_LIBRARY = "From every library until you pick some";
 export const PREVIEW_EMPTY = "No titles match yet";
 export const PREVIEW_EMPTY_HELP = "You can still save. Titles that match later join on their own.";
 export const PREVIEW_FAILED = "The preview didn't load. You can still save.";

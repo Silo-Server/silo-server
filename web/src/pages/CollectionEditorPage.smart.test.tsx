@@ -293,8 +293,7 @@ describe("the rules", () => {
     expect(within(bar()).getByRole("button", { name: "Save" })).toBeDisabled();
     expect(bar()).toHaveTextContent("Pick at least one library.");
     const pane = screen.getByText(/Live preview/).closest("section")!;
-    expect(pane).toHaveTextContent("Pick at least one library.");
-    expect(pane).not.toHaveTextContent("then create it");
+    expect(pane).toHaveTextContent("From every library until you pick some");
     fireEvent.click(within(bar()).getByRole("button", { name: "Save" }));
     expect(writes()).toEqual([]);
   });
@@ -425,12 +424,22 @@ describe("creating a Smart collection", () => {
     });
   });
 
-  it("server: waits for a library before it can be created", async () => {
+  it("server: waits for a library before it can be created, but previews every library meanwhile", async () => {
+    v2Recorder.answer(
+      "POST /api/v2/admin/collections/preview",
+      previewOf(3, ["Alien", "Avatar", "Titanic"]),
+    );
     showPage("/admin/collections/new?type=smart");
     await rename("Staff picks");
     expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
     expect(screen.getAllByText("Pick its libraries, then create it.").length).toBeGreaterThan(0);
-    expect(previews("server")).toHaveLength(0);
+    const pane = screen.getByText(/Live preview/).closest("section")!;
+    expect(await within(pane).findByText("Avatar")).toBeInTheDocument();
+    expect(pane).toHaveTextContent("From every library until you pick some");
+    const request = previews("server").at(-1)!.body as {
+      query_definition: { library_ids: number[] };
+    };
+    expect(request.query_definition.library_ids).toEqual([]);
   });
 });
 

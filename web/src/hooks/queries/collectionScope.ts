@@ -100,7 +100,6 @@ export const PREVIEW_LIMIT = 24;
 const PREVIEW_DEBOUNCE_MS = 300;
 
 export type ScopePreview =
-  | { status: "off" }
   | { status: "loading" }
   | { status: "error" }
   | {
@@ -112,15 +111,14 @@ export type ScopePreview =
     };
 
 /**
- * A live preview of smart rules across every library they name, from the
- * scope's preview route. The rules are debounced so editing doesn't send a
+ * A live preview of smart rules across every library they name (every library
+ * the scope can see when they name none), from the scope's preview route. The rules are debounced so editing doesn't send a
  * request per keystroke, and the last result stays on screen while the next
  * one loads.
  */
 export function useScopePreview<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   rules: QueryDefinition,
-  enabled: boolean,
 ): ScopePreview {
   // A string, so a re-render with equal rules does not restart the wait.
   const current = JSON.stringify(normalizeQueryDefinition(rules));
@@ -129,12 +127,11 @@ export function useScopePreview<Raw extends WireCollection>(
     queryKey: scope.keys.preview(`${PREVIEW_LIMIT}:${settled}`),
     queryFn: () => scope.preview(JSON.parse(settled) as QueryDefinition, PREVIEW_LIMIT),
     // Only once the rules have stopped changing; the last result stays meanwhile.
-    enabled: enabled && settled === current,
+    enabled: settled === current,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     retry: false,
   });
-  if (!enabled) return { status: "off" };
   if (query.data) {
     return {
       status: "ready",
