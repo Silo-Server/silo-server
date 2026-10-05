@@ -506,15 +506,9 @@ func (h *AdminImageHandler) cacheLocalItemImage(ctx context.Context, contentID s
 		slog.ErrorContext(ctx, "admin images: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Could not determine library for item")
 	}
-	language := item.DefaultMetadataLanguage
-	if language == "" {
-		language = "en"
-	}
 	result, err := h.imageSvc.ApplyLocalItemImage(ctx, metadata.ApplyLocalItemImageRequest{
 		ContentID:   item.ContentID,
 		ContentType: item.Type,
-		ProviderIDs: buildProviderIDs(item),
-		Language:    language,
 		FolderID:    folderID,
 		ImageType:   imageType,
 		SourceURL:   sourceURL,

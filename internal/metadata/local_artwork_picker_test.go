@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,24 +21,43 @@ import (
 
 // recordingImageProvider returns fixed images and records each request.
 type recordingImageProvider struct {
+	slug     string
 	images   []RemoteImage
 	requests []ImageRequest
 }
 
-func (p *recordingImageProvider) Slug() string       { return "nfo" }
-func (p *recordingImageProvider) Name() string       { return "nfo" }
+func (p *recordingImageProvider) Slug() string       { return cmp.Or(p.slug, "nfo") }
+func (p *recordingImageProvider) Name() string       { return p.Slug() }
 func (p *recordingImageProvider) ForTypes() []string { return []string{"series"} }
 func (p *recordingImageProvider) GetImages(_ context.Context, req ImageRequest) ([]RemoteImage, error) {
 	p.requests = append(p.requests, req)
 	return p.images, nil
 }
 
-func newLocalPickerServiceForTest(provider Provider, roots []string) (*MetadataService, *fakeByteImageCacher) {
+const (
+	localSeriesEpisodePath = "/media/Other/Show/Season 1/Show S01E01.mkv"
+	localMoviePath         = "/media/Movies/Film/Film.mkv"
+)
+
+// newLocalPickerServiceForTest wires local as the sidecar discovery and remote
+// as the library's whole provider chain, with one media file for each of
+// "local-series-1" and "movie-1".
+func newLocalPickerServiceForTest(local ImageProvider, remote Provider, roots []string) (*MetadataService, *fakeByteImageCacher) {
+	if remote == nil {
+		remote = &recordingImageProvider{slug: "tmdb"}
+	}
 	cacher := &fakeByteImageCacher{thumbhash: "th-local"}
 	service := &MetadataService{chainCache: map[string]chainCacheEntry{
-		"7:series": {providers: []Provider{provider}, expiresAt: time.Now().Add(time.Hour)},
-		"7:movie":  {providers: []Provider{provider}, expiresAt: time.Now().Add(time.Hour)},
+		"7:series": {providers: []Provider{remote}, expiresAt: time.Now().Add(time.Hour)},
+		"7:movie":  {providers: []Provider{remote}, expiresAt: time.Now().Add(time.Hour)},
 	}}
+	service.localImageProvider = local
+	files := newFakeFileRepo()
+	files.contentIDs[1] = "local-series-1"
+	files.contentIDs[2] = "movie-1"
+	files.groupFiles["series"] = []*models.MediaFile{{ID: 1, FilePath: localSeriesEpisodePath, MediaFolderID: 7}}
+	files.groupFiles["movie"] = []*models.MediaFile{{ID: 2, FilePath: localMoviePath, MediaFolderID: 7}}
+	service.fileRepo = files
 	service.SetImageCacher(cacher)
 	service.SetLibraryRootResolver(&fakeLibraryRootResolver{roots: roots})
 	return service, cacher
@@ -46,7 +67,6 @@ func localApplyRequest(sourceURL string, imageType ImageType) ApplyLocalItemImag
 	return ApplyLocalItemImageRequest{
 		ContentID:   "local-series-1",
 		ContentType: "series",
-		Language:    "en",
 		FolderID:    7,
 		ImageType:   imageType,
 		SourceURL:   sourceURL,
@@ -59,7 +79,7 @@ func TestApplyLocalItemImageCachesOfferedFile(t *testing.T) {
 	root := t.TempDir()
 	source := "file://" + writeLocalPoster(t, root)
 	provider := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: source, Type: ImagePoster}}}
-	service, cacher := newLocalPickerServiceForTest(provider, []string{root})
+	service, cacher := newLocalPickerServiceForTest(provider, nil, []string{root})
 
 	result, err := service.ApplyLocalItemImage(context.Background(), localApplyRequest(source, ImagePoster))
 	if err != nil {
@@ -88,7 +108,7 @@ func TestApplyLocalItemImageRejectsFilesNotOffered(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: offered, Type: ImagePoster}}}
-	service, cacher := newLocalPickerServiceForTest(provider, []string{root})
+	service, cacher := newLocalPickerServiceForTest(provider, nil, []string{root})
 
 	for name, req := range map[string]ApplyLocalItemImageRequest{
 		"file not offered":     localApplyRequest("file://"+other, ImagePoster),
@@ -110,7 +130,7 @@ func TestApplyLocalItemImageRejectsOfferedFileOutsideRoots(t *testing.T) {
 	root := t.TempDir()
 	outside := "file://" + writeLocalPoster(t, t.TempDir())
 	provider := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: outside, Type: ImagePoster}}}
-	service, cacher := newLocalPickerServiceForTest(provider, []string{root})
+	service, cacher := newLocalPickerServiceForTest(provider, nil, []string{root})
 
 	_, err := service.ApplyLocalItemImage(context.Background(), localApplyRequest(outside, ImagePoster))
 	if err == nil || !strings.Contains(err.Error(), "outside library roots") {
@@ -137,7 +157,7 @@ func TestLocalImagePreviewReturnsWebPDataURI(t *testing.T) {
 	if err := os.WriteFile(poster, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	service, _ := newLocalPickerServiceForTest(&recordingImageProvider{}, []string{root})
+	service, _ := newLocalPickerServiceForTest(&recordingImageProvider{}, nil, []string{root})
 
 	preview, err := service.LocalImagePreview(context.Background(), "local-series-1", "file://"+poster)
 	if err != nil {
@@ -157,32 +177,44 @@ func TestLocalImagePreviewReturnsWebPDataURI(t *testing.T) {
 	}
 }
 
-// The local listing passes the item's file context to providers; the plain
-// provider listing keeps sending none.
-func TestFetchItemImagesWithLocalPassesItemContext(t *testing.T) {
-	provider := &recordingImageProvider{}
-	service, _ := newLocalPickerServiceForTest(provider, nil)
-	files := newFakeFileRepo()
-	files.contentIDs[1] = "local-series-1"
-	files.groupFiles["show"] = []*models.MediaFile{
-		{ID: 1, FilePath: "/media/Other/Show/Season 1/Show S01E01.mkv", MediaFolderID: 7},
+// Local choices come only from sidecar discovery, which gets the item's file
+// context even when the library's chain does not use the NFO provider. A
+// file:// URL from a chain provider is neither listed nor applyable.
+func TestFetchItemImagesWithLocalTrustsOnlySidecarDiscovery(t *testing.T) {
+	root := t.TempDir()
+	poster := "file://" + writeLocalPoster(t, root)
+	elsewhere := filepath.Join(root, "elsewhere.jpg")
+	if err := os.WriteFile(elsewhere, []byte("elsewhere-bytes"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	service.fileRepo = files
+	local := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: poster, Type: ImagePoster}}}
+	remote := &recordingImageProvider{slug: "tmdb", images: []RemoteImage{
+		{ProviderID: "tmdb", URL: "https://image.example/poster.jpg", Type: ImagePoster, Rating: 7},
+		{ProviderID: "tmdb", URL: "file://" + elsewhere, Type: ImagePoster, Rating: 9},
+	}}
+	service, cacher := newLocalPickerServiceForTest(local, remote, []string{root})
 
-	if _, _, err := service.FetchItemImages(context.Background(), nil, "series", "en", 7); err != nil {
+	images, _, err := service.FetchItemImagesWithLocal(context.Background(), map[string]string{"tmdb": "1"}, "series", "en", 7, "local-series-1")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := service.FetchItemImagesWithLocal(context.Background(), nil, "series", "en", 7, "local-series-1"); err != nil {
-		t.Fatal(err)
+	var urls []string
+	for _, image := range images {
+		urls = append(urls, image.URL)
 	}
-	if len(provider.requests) != 2 {
-		t.Fatalf("provider requests = %d, want 2", len(provider.requests))
+	if want := []string{"https://image.example/poster.jpg", poster}; !slices.Equal(urls, want) {
+		t.Fatalf("images = %v, want %v", urls, want)
 	}
-	if plain := provider.requests[0]; plain.RepresentativeFilePath != "" || len(plain.AllGroupFilePaths) != 0 {
-		t.Fatalf("FetchItemImages sent local context: %+v", plain)
+	if len(local.requests) != 1 || local.requests[0].RepresentativeFilePath != localSeriesEpisodePath {
+		t.Fatalf("sidecar discovery requests = %+v, want the item's media file", local.requests)
 	}
-	if local := provider.requests[1]; local.RepresentativeFilePath != "/media/Other/Show/Season 1/Show S01E01.mkv" {
-		t.Fatalf("FetchItemImagesWithLocal request = %+v, want the item's media file", local)
+	if len(remote.requests) != 1 || remote.requests[0].RepresentativeFilePath != "" || len(remote.requests[0].PrimarySidecarSearchPaths) != 0 {
+		t.Fatalf("chain requests = %+v, want no local context", remote.requests)
+	}
+
+	_, err = service.ApplyLocalItemImage(context.Background(), localApplyRequest("file://"+elsewhere, ImagePoster))
+	if !errors.Is(err, ErrLocalImageNotOffered) || len(cacher.bytesReq) != 0 {
+		t.Fatalf("apply of a chain provider's file = %v (cached %d), want ErrLocalImageNotOffered", err, len(cacher.bytesReq))
 	}
 }
 
@@ -192,13 +224,16 @@ func TestApplyLocalItemImageUsesTheRefreshKeyForMovies(t *testing.T) {
 	root := t.TempDir()
 	source := "file://" + writeLocalPoster(t, root)
 	provider := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: source, Type: ImagePoster}}}
-	service, cacher := newLocalPickerServiceForTest(provider, []string{root})
+	service, cacher := newLocalPickerServiceForTest(provider, nil, []string{root})
 	req := localApplyRequest(source, ImagePoster)
 	req.ContentID, req.ContentType = "movie-1", "movie"
 
 	result, err := service.ApplyLocalItemImage(context.Background(), req)
 	if err != nil {
 		t.Fatalf("ApplyLocalItemImage: %v", err)
+	}
+	if len(provider.requests) != 1 || provider.requests[0].RepresentativeFilePath != localMoviePath {
+		t.Fatalf("sidecar discovery requests = %+v, want the movie's file", provider.requests)
 	}
 	cacheReq := cacher.bytesReq[0]
 	want := "local/movies/movie-1/" + cacheReq.KeyDiscriminator + "/poster/original.webp"
@@ -218,7 +253,7 @@ func TestApplyLocalItemImageRejectsSymlinkedDirectoryEscape(t *testing.T) {
 	}
 	source := "file://" + filepath.Join(root, "linked", "poster.jpg")
 	provider := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: source, Type: ImagePoster}}}
-	service, cacher := newLocalPickerServiceForTest(provider, []string{root})
+	service, cacher := newLocalPickerServiceForTest(provider, nil, []string{root})
 
 	_, err := service.ApplyLocalItemImage(context.Background(), localApplyRequest(source, ImagePoster))
 	if err == nil || !strings.Contains(err.Error(), "outside library roots") {

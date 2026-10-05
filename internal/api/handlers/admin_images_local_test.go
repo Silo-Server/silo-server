@@ -134,7 +134,7 @@ func TestAdminApplyLocalImageValidatesTheTarget(t *testing.T) {
 			t.Fatalf("provider calls %d, local calls %d", svc.providerCalls, len(svc.applyLocal))
 		}
 		req := svc.applyLocal[0]
-		if req.ContentID != "local-series" || req.ContentType != "series" || req.ImageType != metadata.ImagePoster || req.SourceURL != localPosterURL || req.Language != "fr" {
+		if req.ContentID != "local-series" || req.ContentType != "series" || req.ImageType != metadata.ImagePoster || req.SourceURL != localPosterURL {
 			t.Fatalf("local apply request = %+v", req)
 		}
 	})

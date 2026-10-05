@@ -480,9 +480,10 @@ memory, and stores no server-side snapshot. Provider failures expose generic
 messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
-For a movie or series in a library with the NFO provider enabled, the list also
-offers its local sidecar artwork (the `poster.jpg`, `fanart.jpg` and similar
-files a refresh would use). These
+For a movie or series the list also offers its local sidecar artwork (the
+`poster.jpg`, `fanart.jpg` and similar files a refresh would use), found by
+Silo's own sidecar discovery whether or not the library's metadata chain uses
+the NFO provider. A `file://` URL from any other provider is not offered. These
 choices have `provider_id` `local`, a `file://` `original_url`, and a small
 WebP preview as a `data:` URI in `url`. A file that cannot be read under the
 library-root, symlink and size checks is left out. Frozen v1 lists provider
@@ -494,8 +495,8 @@ optional `provider_id`. An HTTP(S) `original_url` may name a public or
 local-network address; link-local, cloud metadata and other blocked addresses
 are refused (see
 [Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)). A `file://`
-`original_url` is accepted for a movie or series only when the item's own
-listing offers that file for that image type; anything else returns a `422`
+`original_url` is accepted for a movie or series only when the item's sidecar
+discovery offers that file for that image type; anything else returns a `422`
 validation problem. A failure to read or cache an offered file returns `500`.
 Frozen v1 does not accept local files.
 It preserves target validation before remote work,

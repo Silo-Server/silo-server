@@ -99,25 +99,26 @@ worker, otherwise local artwork jobs fail until the mount is present.
 
 ### Admin image picker
 
-When the NFO provider is enabled for the library,
 `GET /api/v2/admin/items/{id}/images` also offers a movie's or series' local
-sidecar artwork. The provider request carries the item's media files and
-sidecar directories, so the NFO provider returns the same files a refresh
-would. Libraries without the NFO provider get no local choices, matching
-refresh. Each local choice has the provider ID `local`, keeps its `file://` path
-as `original_url`, and shows a 300-pixel-wide WebP preview as an inline `data:`
-URI (the web client authenticates with a bearer token, so an `<img>` cannot
-fetch an authenticated preview route). The preview is read under the same
-root confinement, symlink and size checks as the processor; a file that fails
-them is left out of the list.
+sidecar artwork. The built-in sidecar discovery runs with the item's media files
+and sidecar directories, so it finds the same files a refresh would, and it runs
+whether or not the library's metadata chain uses the NFO provider: choosing an
+image is an explicit admin action. Local choices come only from that discovery;
+a `file://` URL returned by any provider in the chain is dropped, so a provider
+cannot get another library file offered as this item's artwork. Each local
+choice has the provider ID `local`, keeps its `file://` path as `original_url`,
+and shows a 300-pixel-wide WebP preview as an inline `data:` URI (the web client
+authenticates with a bearer token, so an `<img>` cannot fetch an authenticated
+preview route). The preview is read under the same root confinement, symlink and
+size checks as the processor; a file that fails them is left out of the list.
 
 `POST .../images/apply` with a `file://` `original_url` caches the file only
-when the item's discovery offers it for that image type, reads it under the
-same checks, stores it under the same `local/...` key the processor would use,
-and publishes it with the images lock like any other choice. Seasons, episodes
-and frozen v1 keep provider-only choices. The node serving the admin API reads
-the file, so it needs the same library mounts as the processor; without them
-local choices are simply not offered.
+when the item's sidecar discovery offers it for that image type, reads it under
+the same checks, stores it under the same `local/...` key the processor would
+use, and publishes it with the images lock like any other choice. Seasons,
+episodes and frozen v1 keep provider-only choices. The node serving the admin
+API reads the file, so it needs the same library mounts as the processor;
+without them local choices are simply not offered.
 
 ## Series depth and mixed libraries
 

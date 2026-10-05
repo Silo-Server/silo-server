@@ -456,9 +456,11 @@ type MetadataService struct {
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
 	libraryRoots    LibraryRootResolver
-	imageCacheJobs  ImageCacheJobEnqueuer
-	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
-	imageResolver   interface {
+	// localImageProvider overrides the built-in sidecar discovery in tests.
+	localImageProvider ImageProvider
+	imageCacheJobs     ImageCacheJobEnqueuer
+	autoCacheImages    atomic.Bool // hot-reloaded from metadata.cache_images
+	imageResolver      interface {
 		ResolveImageURL(ctx context.Context, path string, variant string) string
 	}
 

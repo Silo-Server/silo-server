@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -14,6 +15,10 @@ import (
 // localArtworkPreviewWidth matches the "card" width the admin picker shows
 // provider choices at.
 const localArtworkPreviewWidth = 300
+
+// localArtworkCapabilityID is the built-in provider that discovers sidecar
+// artwork next to an item's files.
+const localArtworkCapabilityID = "nfo"
 
 // ErrLocalImageNotOffered rejects a local image the item's own discovery did
 // not return, so the apply endpoint cannot be used to read arbitrary files.
@@ -25,19 +30,58 @@ func IsLocalImageSource(url string) bool {
 }
 
 // FetchItemImagesWithLocal is FetchItemImages plus the item's local sidecar
-// artwork. The provider request also carries the item's media files and
-// sidecar directories, so the NFO provider returns the same poster, fanart and
-// logo files a refresh would use. Remote providers ignore that context.
+// artwork. Local choices come only from Silo's own sidecar discovery, run
+// whether or not the library's metadata chain uses the NFO provider: a
+// file:// URL from any provider in the chain is dropped, so a provider cannot
+// get an arbitrary library file offered as this item's artwork.
 func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int, contentID string) ([]RemoteImage, map[string]string, error) {
+	images, providerErrors, err := s.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	images = slices.DeleteFunc(images, func(image RemoteImage) bool {
+		return isLocalImageSourcePath(image.URL)
+	})
+	local, err := s.localItemImages(ctx, contentType, folderID, contentID)
+	if err != nil {
+		if providerErrors == nil {
+			providerErrors = map[string]string{}
+		}
+		providerErrors[localArtworkCapabilityID] = err.Error()
+	}
+	return append(images, local...), providerErrors, nil
+}
+
+// localItemImages runs sidecar discovery for an item with its media files and
+// sidecar directories, finding the same poster, fanart and logo files a
+// refresh would use.
+func (s *MetadataService) localItemImages(ctx context.Context, contentType string, folderID int, contentID string) ([]RemoteImage, error) {
+	discovery := s.localImageProvider
+	if discovery == nil {
+		provider, ok := builtinProvider(localArtworkCapabilityID)
+		if !ok {
+			return nil, nil
+		}
+		if discovery, ok = provider.(ImageProvider); !ok {
+			return nil, nil
+		}
+	}
 	localCtx := s.localProviderContextForContent(ctx, contentID, folderID)
-	return s.fetchItemImages(ctx, ImageRequest{
-		ProviderIDs:               providerIDs,
+	if localCtx.representativeFilePath == "" && len(localCtx.primarySidecarSearchPaths) == 0 {
+		return nil, nil
+	}
+	images, err := discovery.GetImages(ctx, ImageRequest{
 		ContentType:               contentType,
-		Language:                  language,
 		RepresentativeFilePath:    localCtx.representativeFilePath,
 		AllGroupFilePaths:         localCtx.allGroupFilePaths,
 		PrimarySidecarSearchPaths: localCtx.primarySidecarSearchPaths,
-	}, folderID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(images, func(image RemoteImage) bool {
+		return !isLocalImageSourcePath(image.URL)
+	}), nil
 }
 
 // LocalImagePreview returns a small WebP data URI of a local sidecar image for
@@ -60,8 +104,6 @@ func (s *MetadataService) LocalImagePreview(ctx context.Context, contentID strin
 type ApplyLocalItemImageRequest struct {
 	ContentID   string
 	ContentType string // "movie" or "series"
-	ProviderIDs map[string]string
-	Language    string
 	FolderID    int
 	ImageType   ImageType
 	SourceURL   string // a file:// choice returned by FetchItemImagesWithLocal
@@ -78,7 +120,7 @@ func (s *MetadataService) ApplyLocalItemImage(ctx context.Context, req ApplyLoca
 	if !isLocalImageSourcePath(req.SourceURL) {
 		return nil, ErrLocalImageNotOffered
 	}
-	images, _, err := s.FetchItemImagesWithLocal(ctx, req.ProviderIDs, req.ContentType, req.Language, req.FolderID, req.ContentID)
+	images, err := s.localItemImages(ctx, req.ContentType, req.FolderID, req.ContentID)
 	if err != nil {
 		return nil, err
 	}
