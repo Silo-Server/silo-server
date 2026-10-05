@@ -103,33 +103,65 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 	return rows, nil
 }
 
-// PopularItems answers the server-wide popular items of the last days,
-// minus what the profile has watched. It is not viewer-filtered: v1 filters
-// it with keepAccessible and v2 as it renders the cards.
-func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetPopularItems(ctx, days, limit)
+// PopularItems answers up to limit of the server-wide popular items of the
+// last days that the viewer can see and the profile has not watched.
+func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
+		return h.recsRepo.GetPopularItems(ctx, days, n)
+	})
 	if err != nil {
 		slog.WarnContext(ctx, "PopularItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch popular items")
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+	return items, nil
 }
 
-// RecentlyAddedItems answers the items added in the last days, minus what
-// the profile has watched. Like PopularItems it is not viewer-filtered.
-func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetRecentlyAddedItems(ctx, days, limit)
+// liveListMaxRead bounds how deep a live list reads to fill its limit with
+// titles the viewer can see.
+const liveListMaxRead = 1000
+
+// visibleListItems reads a server-wide list with read(n), n rows at a time,
+// and keeps the titles the viewer can see and the profile has not watched.
+// The list is filtered after its LIMIT, so it reads deeper until limit
+// titles are kept, the list runs out, or liveListMaxRead rows were read.
+func (h *RecommendationsHandler) visibleListItems(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter, read func(n int) ([]recommendations.ScoredItem, error)) ([]recommendations.ScoredItem, error) {
+	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		watchedSet = nil
+	}
+	for n := min(limit*3, liveListMaxRead); ; n = min(n*4, liveListMaxRead) {
+		items, err := read(n)
+		if err != nil {
+			return nil, err
+		}
+		unwatched := make([]recommendations.ScoredItem, 0, len(items))
+		for _, item := range items {
+			if _, watched := watchedSet[item.MediaItemID]; !watched {
+				unwatched = append(unwatched, item)
+			}
+		}
+		kept, err := h.keepAccessible(ctx, unwatched, filter)
+		if err != nil {
+			return nil, err
+		}
+		if len(kept) >= limit || len(items) < n || n >= liveListMaxRead {
+			return kept[:min(len(kept), limit)], nil
+		}
+	}
+}
+
+// RecentlyAddedItems answers up to limit of the items added in the last
+// days that the viewer can see and the profile has not watched.
+func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
+		return h.recsRepo.GetRecentlyAddedItems(ctx, days, n)
+	})
 	if err != nil {
 		slog.WarnContext(ctx, "RecentlyAddedItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch recently added items")
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+	return items, nil
 }
 
 // Discover answers the discover page: the cached rows blended with upcoming
@@ -259,7 +291,7 @@ func (h *RecommendationsHandler) BecauseWatchedCards(ctx context.Context, userID
 
 // PopularCards is PopularItems rendered as cards.
 func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.PopularItems(ctx, userID, profileID, days, limit)
+	items, err := h.PopularItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +300,7 @@ func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, p
 
 // RecentlyAddedCards is RecentlyAddedItems rendered as cards.
 func (h *RecommendationsHandler) RecentlyAddedCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit)
+	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}

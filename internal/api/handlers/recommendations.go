@@ -232,10 +232,7 @@ func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
-	if err == nil {
-		items, err = h.keepAccessible(r.Context(), items, requestAccessFilter(r))
-	}
+	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -259,10 +256,7 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 		}
 	}
 
-	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
-	if err == nil {
-		items, err = h.keepAccessible(r.Context(), items, requestAccessFilter(r))
-	}
+	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
