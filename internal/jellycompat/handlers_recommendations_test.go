@@ -129,11 +129,11 @@ func TestCompatRecommendationsReadTheCachedRowsForTheViewer(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=6&categoryLimit=5"))
 	categories := decodeCategories(t, rec)
-	if reader.gotLimit != 12 || reader.gotProfile != "kid" || !slices.Equal(reader.gotFilter.AllowedLibraryIDs, []int{4}) {
-		t.Fatalf("read limit=%d profile=%q filter=%+v, want twice itemLimit, kid and the session filter", reader.gotLimit, reader.gotProfile, reader.gotFilter)
+	if reader.gotLimit != 30 || reader.gotProfile != "kid" || !slices.Equal(reader.gotFilter.AllowedLibraryIDs, []int{4}) {
+		t.Fatalf("read limit=%d profile=%q filter=%+v, want categoryLimit × itemLimit, kid and the session filter", reader.gotLimit, reader.gotProfile, reader.gotFilter)
 	}
-	if reader.gotWatched.maxRows != recommendations.BecauseYouWatchedAnchors || reader.gotWatched.limit != 12 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
-		t.Fatalf("because-watched read = %+v, want every anchor's row of twice itemLimit under the session filter", reader.gotWatched)
+	if reader.gotWatched.maxRows != recommendations.BecauseYouWatchedAnchors || reader.gotWatched.limit != 30 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
+		t.Fatalf("because-watched read = %+v, want every anchor's row of categoryLimit × itemLimit under the session filter", reader.gotWatched)
 	}
 	if !slices.Equal(items.gotFilter.AllowedLibraryIDs, []int{4}) || !slices.Contains(items.gotIDs, "kids-anchor") {
 		t.Fatalf("hydration ids=%v filter=%+v, want the anchor fetched under the session filter", items.gotIDs, items.gotFilter)

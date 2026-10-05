@@ -1888,6 +1888,29 @@ func (r *Repo) scoredItems(ctx context.Context, query string, args []any, reason
 // Library" admits.
 const highlyRatedMinRating = 7.0
 
+// ListDislikedItemIDs returns the titles the profile rated DislikedRatingMax
+// or lower, which no recommendation row shows it.
+func (r *Repo) ListDislikedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT media_item_id
+		FROM   user_ratings
+		WHERE  user_id = $1 AND profile_id = $2 AND rating <= $3`,
+		userID, profileID, DislikedRatingMax)
+	if err != nil {
+		return nil, fmt.Errorf("list disliked items: %w", err)
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan disliked item: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListDefaultRowItems returns up to limit items of a default row, kind
 // RecTypeTopRated ("Highly Rated in Your Library") or RecTypeRecentlyAdded,
 // among the matched recommendableMediaTypes titles filter admits, leaving out

@@ -47,6 +47,7 @@ type readerRepo interface {
 	GetTopGenres(ctx context.Context, limit int) ([]string, error)
 	FilterRecommendableItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 	ListDefaultRowItems(ctx context.Context, filter catalog.AccessFilter, kind string, exclude []string, limit int) ([]ScoredItem, error)
+	ListDislikedItemIDs(ctx context.Context, userID int, profileID string) ([]string, error)
 }
 
 // Reader assembles recommendation rows from cache-backed data sources.
@@ -624,18 +625,24 @@ func (rr *rowRead) defaultRows(ctx context.Context, limit int) ([]ForYouRow, err
 }
 
 // defaultRow reads one live default row, RecTypeTopRated or
-// RecTypeRecentlyAdded, leaving out the profile's exclusion set in the query
-// so the row fills past it.
+// RecTypeRecentlyAdded, leaving out the profile's exclusion set and the
+// titles it rated DislikedRatingMax or lower in the query, so the row fills
+// past them rather than losing them to the filter afterwards.
 func (rr *rowRead) defaultRow(ctx context.Context, kind string, limit int) (ForYouRow, error) {
 	excluded, err := rr.exclusionSet(ctx)
 	if err != nil {
 		return ForYouRow{}, err
 	}
 	if rr.excludedIDs == nil {
-		rr.excludedIDs = make([]string, 0, len(excluded))
+		disliked, err := rr.reader.repo.ListDislikedItemIDs(ctx, rr.userID, rr.profileID)
+		if err != nil {
+			return ForYouRow{}, err
+		}
+		rr.excludedIDs = make([]string, 0, len(excluded)+len(disliked))
 		for id := range excluded {
 			rr.excludedIDs = append(rr.excludedIDs, id)
 		}
+		rr.excludedIDs = append(rr.excludedIDs, disliked...)
 	}
 	items, err := rr.reader.repo.ListDefaultRowItems(ctx, rr.access, kind, rr.excludedIDs, limit)
 	if err != nil {
