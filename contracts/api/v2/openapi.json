@@ -95349,7 +95349,7 @@
     },
     "/api/v2/admin/recommendations/embeddings/reset": {
       "post": {
-        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server. Run the embedding job afterwards to build the new embedding space.",
+        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.",
         "operationId": "resetAdminRecommendationEmbeddings",
         "parameters": [
           {
