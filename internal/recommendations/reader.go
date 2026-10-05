@@ -896,6 +896,10 @@ const (
 	maxRecommendationLimit     = 50
 )
 
+// MaxRowReadLimit is the most items a row read returns per row, whatever
+// limit it was asked for.
+const MaxRowReadLimit = maxRecommendationLimit
+
 func normalizeRecommendationLimit(limit int) int {
 	if limit <= 0 {
 		return defaultRecommendationLimit

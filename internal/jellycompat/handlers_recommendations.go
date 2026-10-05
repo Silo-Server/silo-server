@@ -93,7 +93,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 
 	// Both limits size allocations, so they are capped: a category cannot
-	// hold more than a cached row's titles, and a profile has few rows a
+	// hold more titles than a row read returns, and a profile has few rows a
 	// category can describe.
 	categoryLimit := 5
 	if v := q.Get("categoryLimit"); v != "" {
@@ -105,7 +105,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	itemLimit := 8
 	if v := q.Get("itemLimit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			itemLimit = min(n, recommendations.CacheCandidateLimit)
+			itemLimit = min(n, recommendations.MaxRowReadLimit)
 		}
 	}
 
@@ -117,7 +117,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	if h.accessFilter != nil {
 		filter = h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID)
 	}
-	rows, err := h.reader.GetForYouPage(r.Context(), session.StreamAppUserID, session.ProfileID, 2*itemLimit, filter)
+	rows, err := h.reader.GetForYouPage(r.Context(), session.StreamAppUserID, session.ProfileID, min(2*itemLimit, recommendations.MaxRowReadLimit), filter)
 	if err != nil {
 		slog.WarnContext(r.Context(), "jellycompat: recommendation rows failed", "component", "jellycompat",
 			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)
