@@ -254,12 +254,33 @@ func TestMarkProfilesStaleForItemsPostgres(t *testing.T) {
 		profiles[name] = &profile
 	}
 
+	// A live profile with no taste row yet gets a stale vectorless one, so its
+	// first build cannot consume the change; a deleted profile whose history
+	// outlived it gets none.
+	fresh, deleted := uuid.NewString(), uuid.NewString()
+	if _, err := p.pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES($1, $2, 'fresh')`, fresh, p.userID); err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range []string{fresh, deleted} {
+		if _, err := p.pool.Exec(ctx, `INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, p.userID, profile, movie); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	marked, err := p.repo.MarkProfilesStaleForItems(ctx, []string{series, movie})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if marked != int64(len(signals)-1) {
-		t.Fatalf("marked %d profiles, want %d", marked, len(signals)-1)
+	if marked != int64(len(signals)) {
+		t.Fatalf("marked %d profiles, want %d", marked, len(signals))
+	}
+	freshProfile := *p
+	freshProfile.profile = fresh
+	if !freshProfile.pending() {
+		t.Fatal("a live profile with no taste row was not marked")
+	}
+	if n := countRows(t, p.pool, `SELECT COUNT(*) FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, p.userID, deleted); n != 0 {
+		t.Fatalf("a deleted profile got %d taste rows", n)
 	}
 	for name, profile := range profiles {
 		if want := name != "unrelated"; profile.pending() != want {
