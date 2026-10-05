@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -188,8 +189,10 @@ func TestEmbedAllSkipsAlreadyCurrentItems(t *testing.T) {
 	if counts.Embedded != 0 {
 		t.Fatalf("EmbedAll re-embedded %d up-to-date items, want 0", counts.Embedded)
 	}
-	if len(fake.calls) != 0 {
-		t.Fatalf("embedder was called %d times for an up-to-date item, want 0: %v", len(fake.calls), fake.texts)
+	// With no lock, the run embeds only the probe text, to write the lock for
+	// the stored vector (see lockImportedEmbeddings); the item is not resent.
+	if !slices.Equal(fake.texts, []string{embedProbeText}) {
+		t.Fatalf("embedder got %v for an up-to-date item, want only the probe text", fake.texts)
 	}
 }
 
