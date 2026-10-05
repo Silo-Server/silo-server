@@ -78,16 +78,18 @@ const unsupportedFileColumns = `media_folder_id, directory_path, reason, file_co
 // one started: a subtree scan can run alongside a library scan. A nil scopes
 // covers the whole library.
 //
-// A protected path can be a single file the walk could not read, which leaves
-// the groups of the directory holding it only partly seen. That directory's
-// rows are kept too, though not the rest of its tree, and a group the scan
-// found in a protected place is only inserted when new, so a partial count
-// does not overwrite the stored one.
+// unreadableEntries are the protected paths that may be single files the walk
+// could not read, which leaves the groups of the directory holding each one
+// only partly seen. That directory's rows are kept too, though not the rest
+// of its tree. A directory the walk could not read protects only its own
+// tree. A group the scan found in a protected place is only inserted when
+// new, so a partial count does not overwrite the stored one.
 func (r *UnsupportedFileRepository) Replace(
 	ctx context.Context,
 	folderID int,
 	scopes []string,
 	protectedPaths []string,
+	unreadableEntries []string,
 	startedAt time.Time,
 	groups []models.UnsupportedMediaFileGroup,
 ) error {
@@ -95,8 +97,8 @@ func (r *UnsupportedFileRepository) Replace(
 		scopes = cleanPaths(scopes)
 	}
 	protectedPaths = cleanPaths(protectedPaths)
-	protectedParents := make([]string, 0, len(protectedPaths))
-	for _, path := range protectedPaths {
+	protectedParents := make([]string, 0, len(unreadableEntries))
+	for _, path := range cleanPaths(unreadableEntries) {
 		if parent := filepath.Dir(path); parent != path {
 			protectedParents = append(protectedParents, parent)
 		}
@@ -209,7 +211,8 @@ func (r *UnsupportedFileRepository) Count(ctx context.Context, search string) (i
 }
 
 // groupDirProtected reports whether Replace keeps the stored rows of dir: dir
-// is at or under a protected path, or is the directory holding one.
+// is at or under a protected path, or is the directory holding an unreadable
+// entry.
 func groupDirProtected(dir string, protectedPaths, protectedParents []string) bool {
 	for _, path := range protectedPaths {
 		if dir == path || strings.HasPrefix(dir, path+string(filepath.Separator)) {

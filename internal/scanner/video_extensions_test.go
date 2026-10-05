@@ -162,12 +162,12 @@ func TestCollectLogicalFilePathsReportsUnsupportedFiles(t *testing.T) {
 	}
 
 	for _, libraryType := range []string{"series", "movies"} {
-		_, _, unsupported, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
+		_, _, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
 		if err != nil {
 			t.Fatalf("%s: collect logical paths: %v", libraryType, err)
 		}
-		got := make([]string, 0, len(unsupported))
-		for _, file := range unsupported {
+		got := make([]string, 0, len(walk.unsupported))
+		for _, file := range walk.unsupported {
 			rel, err := filepath.Rel(root, file.Path)
 			if err != nil {
 				t.Fatalf("rel %s: %v", file.Path, err)
@@ -189,12 +189,12 @@ func TestCollectLogicalFilePathsReportsUnsupportedFiles(t *testing.T) {
 
 	// Only video walks report video files they skip.
 	for _, libraryType := range []string{"audiobooks", "ebooks"} {
-		_, _, unsupported, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
+		_, _, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, libraryType, nil)
 		if err != nil {
 			t.Fatalf("%s: collect logical paths: %v", libraryType, err)
 		}
-		if len(unsupported) != 0 {
-			t.Errorf("%s: unsupported files = %v, want none", libraryType, unsupported)
+		if len(walk.unsupported) != 0 {
+			t.Errorf("%s: unsupported files = %v, want none", libraryType, walk.unsupported)
 		}
 	}
 }
@@ -213,11 +213,11 @@ func TestCollectLogicalFilePathsLeavesIgnoredFilesUnreported(t *testing.T) {
 		writeTestFile(t, filepath.Join(root, rel), "")
 	}
 
-	_, _, unsupported, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
+	_, _, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, "movies", nil)
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
-	if len(unsupported) != 0 {
-		t.Errorf("unsupported files = %v, want none", unsupported)
+	if len(walk.unsupported) != 0 {
+		t.Errorf("unsupported files = %v, want none", walk.unsupported)
 	}
 }

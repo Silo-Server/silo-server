@@ -51,7 +51,7 @@ type SkippedRootRepository interface {
 // UnsupportedFileRepository keeps the files scans skipped because of their
 // type, for admins.
 type UnsupportedFileRepository interface {
-	Replace(ctx context.Context, folderID int, scopes []string, protectedPaths []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error
+	Replace(ctx context.Context, folderID int, scopes []string, protectedPaths []string, unreadableEntries []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error
 }
 
 // Result captures the outcome of a full ingest run for one scope.
@@ -629,7 +629,7 @@ func (e *Executor) recordUnsupportedFiles(ctx context.Context, folderID int, mod
 		return
 	}
 	groups := scanner.GroupUnsupportedFiles(folderID, scanResult.UnsupportedFiles)
-	if err := e.unsupported.Replace(ctx, folderID, scopes, scanResult.ProtectedPaths, startedAt, groups); err != nil {
+	if err := e.unsupported.Replace(ctx, folderID, scopes, scanResult.ProtectedPaths, scanResult.UnreadableEntries, startedAt, groups); err != nil {
 		slog.WarnContext(ctx, "library ingest: recording unsupported files failed", "component", "libraryingest",
 			"folder_id", folderID,
 			"mode", mode,
