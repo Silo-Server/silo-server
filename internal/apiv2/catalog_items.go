@@ -846,8 +846,10 @@ func (in *CatalogFiltersInput) catalogValues() url.Values {
 }
 
 // catalogRequest parses the scope and adds library_ids to the libraries it
-// names. The resolver intersects them with the viewer's libraries, so they
-// can narrow a scope but never widen it.
+// names, sorted and without repeats, so one set of libraries shares one
+// cached facet value list in whatever order a client sends it. The resolver
+// intersects them with the viewer's libraries, so they can narrow a scope
+// but never widen it.
 func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Problem) {
 	req, p := parseCatalogRequest(in.catalogValues())
 	if p != nil || len(in.LibraryIDs) == 0 {
@@ -862,10 +864,10 @@ func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Pro
 		if p != nil {
 			return catalogpkg.CatalogRequest{}, p
 		}
-		if !slices.Contains(req.Query.LibraryIDs, n) {
-			req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
-		}
+		req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
 	}
+	slices.Sort(req.Query.LibraryIDs)
+	req.Query.LibraryIDs = slices.Compact(req.Query.LibraryIDs)
 	return req, nil
 }
 

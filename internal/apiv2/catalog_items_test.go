@@ -427,7 +427,7 @@ func TestCatalogFiltersAndFacetSearch(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&library_id=3&library_ids=1&library_ids=3&library_ids=2&type=series", "", viewerHeaders())
-	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{3, 1, 2}) || fake.lastReq.Query.MediaScope != "series" {
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{1, 2, 3}) || fake.lastReq.Query.MediaScope != "series" {
 		t.Fatalf("library_ids: %d %s seam request %+v", rec.Code, rec.Body.String(), fake.lastReq.Query)
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?library_ids=2", "", viewerHeaders())
