@@ -497,7 +497,7 @@ func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
 		{"latest ten all disliked", allLow, []string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := anchorItemIDs(t.Context(), signals, tc.ratings, 7, "p1", becauseYouWatchedAnchors)
+			got, err := anchorItemIDs(t.Context(), signals, tc.ratings, 7, "p1", BecauseYouWatchedAnchors)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -352,9 +352,9 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 
 // Because You Watched anchors on the profile's latest completions.
 const (
-	// becauseYouWatchedAnchors is how many anchors a profile's Because You
+	// BecauseYouWatchedAnchors is how many anchors a profile's Because You
 	// Watched rows are built and read for.
-	becauseYouWatchedAnchors = 3
+	BecauseYouWatchedAnchors = 3
 	// anchorCandidateLimit is how many of the latest completions the anchors
 	// are chosen from, so disliked ones can be passed over.
 	anchorCandidateLimit = 10

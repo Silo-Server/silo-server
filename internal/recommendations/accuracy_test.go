@@ -433,3 +433,23 @@ func TestRecencyBoostLiftsNearMissesIntoTheRow(t *testing.T) {
 		t.Fatalf("boosted row %v, want new-near in and new-far out", got)
 	}
 }
+
+// A row shorter than the served window caps a genre at half of that row:
+// ten Action titles and two others in a 12-title row serve both others
+// among the first seven.
+func TestApplyGenreCapScalesToAShortRow(t *testing.T) {
+	row := make([]ScoredItem, 12)
+	genres := map[string][]string{}
+	for i := range row {
+		id := fmt.Sprintf("i%02d", i)
+		row[i] = ScoredItem{MediaItemID: id}
+		genres[id] = []string{"Action"}
+	}
+	genres["i10"], genres["i11"] = []string{"Drama"}, []string{"Comedy"}
+
+	got := mmrItemIDs(applyGenreCap(row, genres))
+	want := []string{"i00", "i01", "i02", "i03", "i04", "i05", "i10", "i11", "i06", "i07", "i08", "i09"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("applyGenreCap = %v, want %v", got, want)
+	}
+}

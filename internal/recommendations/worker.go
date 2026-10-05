@@ -938,7 +938,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
-	anchors, err := anchorItemIDs(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, becauseYouWatchedAnchors)
+	anchors, err := anchorItemIDs(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, BecauseYouWatchedAnchors)
 	if err != nil {
 		fail("recent_completed", err)
 		return res
