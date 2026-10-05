@@ -168,21 +168,27 @@ func TestQueryVectorCanceledSearchDoesNotCoolDown(t *testing.T) {
 }
 
 // A query the provider refuses, such as an overlong search, says nothing
-// about the provider, so the next search still embeds its query.
+// about the provider, so the next search still embeds its query. That holds
+// for a 4xx refusal and for the context-length 5xx a local model answers.
 func TestQueryVectorRefusedQueryDoesNotCoolDown(t *testing.T) {
-	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
-	vectorizer := &funcVectorizer{embed: func(_ context.Context, query string) ([]float32, error) {
-		if query == "an overlong refused search" {
-			return nil, &embeddings.StatusError{API: "embedding", StatusCode: 400}
-		}
-		return []float32{0.5, 0.25}, nil
-	}}
-	provider := semanticTestProvider(vectorizer, clock)
+	for name, refusal := range map[string]error{
+		"rejected request": &embeddings.StatusError{API: "embedding", StatusCode: 400},
+		"context length":   &embeddings.StatusError{API: "embedding", StatusCode: 500, Body: "the input length exceeds the context length"},
+	} {
+		clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+		vectorizer := &funcVectorizer{embed: func(_ context.Context, query string) ([]float32, error) {
+			if query == "an overlong refused search" {
+				return nil, refusal
+			}
+			return []float32{0.5, 0.25}, nil
+		}}
+		provider := semanticTestProvider(vectorizer, clock)
 
-	if _, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "an overlong refused search"}); fallback == "" {
-		t.Fatal("a refused query was searched semantically")
-	}
-	if req, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "quiet space horror"}); fallback != "" || req.Hybrid == nil {
-		t.Fatalf("next search after a refused query: fallback %q", fallback)
+		if _, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "an overlong refused search"}); fallback == "" {
+			t.Fatalf("%s: a refused query was searched semantically", name)
+		}
+		if req, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "quiet space horror"}); fallback != "" || req.Hybrid == nil {
+			t.Fatalf("%s: next search after a refused query: fallback %q", name, fallback)
+		}
 	}
 }
