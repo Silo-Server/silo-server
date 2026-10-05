@@ -229,6 +229,14 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
   expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
 });
+it("selects a delivery option when its card text is clicked", () => {
+  render(<InvitationsTab />, { wrapper: MemoryRouter });
+  fireEvent.click(screen.getByRole("button", { name: "Invite someone" }));
+  fireEvent.click(screen.getByText("You share the link yourself, for example in a chat."));
+  expect(screen.getByLabelText("Create link")).toBeChecked();
+  fireEvent.click(screen.getByText("We email the link. You can copy it too."));
+  expect(screen.getByLabelText("Send email")).toBeChecked();
+});
 it("offers only link creation when email is not configured", () => {
   mocks.emailDelivery = false;
   render(<InvitationsTab />, { wrapper: MemoryRouter });
