@@ -232,6 +232,35 @@ type fixedUsers struct{ user *models.User }
 
 func (f fixedUsers) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }
 
+// The access filter's excluded media types apply when rows are filtered for
+// the viewer, so the Jellyfin surface, which excludes audiobooks and podcasts,
+// gets rows of titles it can show rather than rows it trims to nothing.
+func TestFilterAccessibleItemIDsAppliesExcludedMediaTypesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tfilter-excluded-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	movie, audiobook := prefix+"movie", prefix+"audiobook"
+	seedRecoMediaItem(t, pool, movie, "movie", "matched")
+	seedRecoMediaItem(t, pool, audiobook, "audiobook", "matched")
+	repo := NewRepo(pool)
+
+	all, err := repo.FilterAccessibleItemIDs(ctx, []string{movie, audiobook}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("unrestricted filter kept %v, want both titles", all)
+	}
+	visible, err := repo.FilterAccessibleItemIDs(ctx, []string{movie, audiobook}, catalog.AccessFilter{ExcludedMediaTypes: []string{"audiobook", "podcast"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := visible[movie]; !ok || len(visible) != 1 {
+		t.Fatalf("filter excluding audiobooks kept %v, want only the movie", visible)
+	}
+}
+
 // An access change that reaches whole accounts marks every profile on them
 // stale and leaves other accounts alone.
 func TestMarkAccountsStalePostgres(t *testing.T) {
