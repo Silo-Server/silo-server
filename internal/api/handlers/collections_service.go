@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -318,7 +319,7 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
 			sources = append(sources, ownedCollectionDefinition{
-				PersonalCollectionDefinition: personalCollectionDefinition(c),
+				PersonalCollectionDefinition: usercollections.CollectionDefinition(c),
 				CreatorProfileID:             c.CreatorProfileID,
 				WantsCollage:                 strings.TrimSpace(c.PosterURL) == "",
 			})
@@ -342,12 +343,6 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 		views = append(views, resp)
 	}
 	return views
-}
-
-// personalCollectionDefinition is the part of a stored collection that decides
-// which titles it shows.
-func personalCollectionDefinition(c userstore.Collection) catalog.PersonalCollectionDefinition {
-	return catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition}
 }
 
 // collagesForRead is the collage service a read of personal collections uses:

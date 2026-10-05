@@ -456,10 +456,7 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 // profile's filter is the owner's. Stores kept outside Postgres have no
 // collage.
 func (h *CollectionHandler) refreshCollage(ctx context.Context, store userstore.UserStore, userID int, c *userstore.Collection) {
-	if h.Collages == nil || c == nil || strings.TrimSpace(c.PosterURL) != "" || !userstore.HasCatalogSQLState(store) {
-		return
-	}
-	h.Collages.Refresh(userID, personalCollectionDefinition(*c), AccessFilterFromContext(ctx, ""))
+	usercollections.RefreshCollage(h.Collages, store, userID, c, AccessFilterFromContext(ctx, ""))
 }
 
 // personalCollectionStore checks the account and profile before exposing or changing a collection.

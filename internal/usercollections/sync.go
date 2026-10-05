@@ -147,10 +147,7 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 // request, so the owner's content access stands in for the owner's own read;
 // other viewers' collages are built when they first read the collection.
 func (s *Service) refreshCollage(userID int, store userstore.UserStore, c *userstore.Collection, owner catalog.AccessFilter) {
-	if s.Collages == nil || c == nil || strings.TrimSpace(c.PosterURL) != "" || !userstore.HasCatalogSQLState(store) {
-		return
-	}
-	s.Collages.Refresh(userID, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition}, owner)
+	RefreshCollage(s.Collages, store, userID, c, owner)
 }
 
 // ownerFilter resolves the access of the collection's owner profile, which
