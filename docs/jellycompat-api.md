@@ -222,6 +222,15 @@ source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
 
+PlaybackInfo never offers a version whose file ffprobe rejected with no usable
+stream data recorded (the native API marks it unreadable). Files that have not
+been probed yet are still offered. When no version the request can use is
+readable, including a `MediaSourceId` that names an unreadable one,
+PlaybackInfo answers as Jellyfin does when nothing can play: `200` with an
+empty `MediaSources` list and `ErrorCode: "NoCompatibleStream"`, which Jellyfin
+Web shows as a playback error instead of trying to play. `GET /Items/{id}`
+still lists such a version, and `Static=true` direct play does not check it.
+
 Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
 the item id. Some clients therefore send a media-source id where an item id
 belongs. `PlaybackInfo`, `GET /Items/{id}`, `MediaSegments`, `Download`, static
