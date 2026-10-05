@@ -8,9 +8,9 @@ import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
-import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
 import { effectiveDownloadArtifactDir } from "./settingsPathDefaults";
 

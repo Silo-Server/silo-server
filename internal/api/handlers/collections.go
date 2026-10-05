@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,6 +31,15 @@ type CollectionHandler struct {
 	// CollectionOwners resolves the owner's access for another profile's
 	// shared collection; without it those collections cannot be read.
 	CollectionOwners catalog.PersonalCollectionAccess
+	// ItemPosters signs catalog item posters for smart previews;
+	// ArtworkResolver signs only stored collection artwork keys.
+	ItemPosters itemPosterSigner
+}
+
+// itemPosterSigner resolves item poster paths to delivery URLs in one batch;
+// catalog.DetailService implements it.
+type itemPosterSigner interface {
+	PresignImageURLs(ctx context.Context, paths []string, imageType, size string) map[string]string
 }
 
 // NewCollectionHandler creates a new CollectionHandler.
@@ -43,19 +53,20 @@ type PersonalCollectionCreateRequest struct {
 	Name                       string          `json:"name"`
 	CollectionType             string          `json:"collection_type"`
 	IsShared                   bool            `json:"is_shared"`
-	AllowedProfileIDs          []string        `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage `json:"query_definition"`
 	SortConfig                 json.RawMessage `json:"sort_config"`
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterSourceURL            string          `json:"poster_source_url"`
+	// Description is set only by the /api/v2 adapter; the frozen /api/v1
+	// create never accepted one and still ignores it.
+	Description string `json:"-"`
 }
 
 type PersonalCollectionUpdateRequest struct {
 	Name                       *string                `json:"name"`
 	Description                *string                `json:"description"`
 	IsShared                   *bool                  `json:"is_shared"`
-	AllowedProfileIDs          *[]string              `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage        `json:"query_definition"`
 	SortConfig                 json.RawMessage        `json:"sort_config"`
 	SourceURL                  *string                `json:"source_url"`
@@ -65,6 +76,10 @@ type PersonalCollectionUpdateRequest struct {
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
+	// SyncSchedule is a cadence name (see usercollections.AllowedSyncSchedules)
+	// or "" to stop syncing. Set only by the /api/v2 adapter; the frozen
+	// /api/v1 update never accepted one and still ignores it.
+	SyncSchedule *string `json:"-"`
 }
 
 type collectionItemRequest struct {
@@ -72,13 +87,15 @@ type collectionItemRequest struct {
 }
 
 type PersonalCollectionView struct {
-	ID                         string          `json:"id"`
-	ProfileID                  string          `json:"profile_id"`
-	CreatorProfileID           string          `json:"creator_profile_id"`
-	Name                       string          `json:"name"`
-	Description                string          `json:"description,omitempty"`
-	CollectionType             string          `json:"collection_type"`
-	IsShared                   bool            `json:"is_shared"`
+	ID               string `json:"id"`
+	ProfileID        string `json:"profile_id"`
+	CreatorProfileID string `json:"creator_profile_id"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	CollectionType   string `json:"collection_type"`
+	IsShared         bool   `json:"is_shared"`
+	// AllowedProfileIDs is the /api/v1 bridge's report of who sees the
+	// collection; only the v1 handlers fill it (v1CollectionAudience).
 	AllowedProfileIDs          []string        `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage `json:"query_definition"`
 	SortConfig                 json.RawMessage `json:"sort_config"`
@@ -165,6 +182,9 @@ type PersonalCollectionItemsView struct {
 type PersonalCollectionPreviewRequest struct {
 	QueryDefinition json.RawMessage `json:"query_definition"`
 	Limit           int             `json:"limit"`
+	// WithPosters signs each item's poster. Only the /api/v2 adapter sets it;
+	// the frozen /api/v1 body drops posters, so it skips the presign batch.
+	WithPosters bool `json:"-"`
 }
 
 type PersonalCollectionPreviewView struct {
@@ -176,13 +196,24 @@ type PersonalCollectionPreviewItemView struct {
 	ContentID string `json:"content_id"`
 	Title     string `json:"title"`
 	Type      string `json:"type"`
+	// PosterURL is emitted by the /api/v2 adapter only; the frozen /api/v1
+	// preview body never carried a poster.
+	PosterURL string `json:"-"`
 }
 
 // --- Handler methods ---
 
 // HandleListCollections handles GET /collections.
 func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ListPersonalCollections(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()))
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.ListPersonalCollections(r.Context(), userID, apimw.GetProfileID(r.Context()))
+	if err == nil {
+		views := make([]*PersonalCollectionView, len(resp.Collections))
+		for i := range resp.Collections {
+			views[i] = &resp.Collections[i]
+		}
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, views...)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -202,12 +233,16 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	userID := apimw.GetUserID(r.Context())
 	created, err := h.CreatePersonalCollection(r.Context(), PersonalCollectionCreateCommand{
-		UserID:     apimw.GetUserID(r.Context()),
+		UserID:     userID,
 		ProfileID:  apimw.GetProfileID(r.Context()),
 		Request:    req,
 		PosterFile: posterFileReader(r),
 	})
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &created)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -222,7 +257,11 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
-	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: apimw.GetUserID(r.Context()), ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r)})
+	userID := apimw.GetUserID(r.Context())
+	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: userID, ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r)})
+	if err == nil {
+		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -278,20 +317,25 @@ func (h *CollectionHandler) HandleAddCollectionItem(w http.ResponseWriter, r *ht
 
 type reorderRequest struct {
 	OrderedIDs []string `json:"ordered_ids"`
-	// GroupID scopes the reorder to one section. nil/absent targets Ungrouped.
+	// GroupID is kept for v1 clients; personal collection groups no longer
+	// exist, so only null or absent is accepted.
 	GroupID *string `json:"group_id,omitempty"`
 }
 
 // HandleReorderCollections handles PUT /collections/order.
-// The body must contain every collection in scope; concurrent edits that
-// would silently drop one are rejected.
+// The body must name each of the profile's own collections exactly once;
+// concurrent edits that would silently drop one are rejected.
 func (h *CollectionHandler) HandleReorderCollections(w http.ResponseWriter, r *http.Request) {
 	var req reorderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	if err := h.ReorderPersonalCollections(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req.GroupID, req.OrderedIDs); err != nil {
+	if req.GroupID != nil {
+		writeAPIError(w, fieldError("group_id", "Personal collection groups are not supported; omit group_id"))
+		return
+	}
+	if err := h.ReorderPersonalCollections(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), req.OrderedIDs); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -382,6 +426,37 @@ func (h *CollectionHandler) HandleRemoveCollectionItem(w http.ResponseWriter, r 
 
 // --- Helpers ---
 
+// v1CollectionAudience fills allowed_profile_ids for the /api/v1 bridge, which
+// still reports it: the creator alone for a private collection, every profile
+// on the login (sorted by ID) for a shared one. Visibility itself is decided
+// from is_shared; the reported list is never read back.
+func v1CollectionAudience(ctx context.Context, provider userstore.UserStoreProvider, userID int, views ...*PersonalCollectionView) error {
+	var login []string
+	for _, v := range views {
+		if !v.IsShared {
+			v.AllowedProfileIDs = []string{v.CreatorProfileID}
+			continue
+		}
+		if login == nil {
+			store, err := provider.ForUser(ctx, userID)
+			if err != nil {
+				return apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+			}
+			profiles, err := store.ListProfiles(ctx)
+			if err != nil {
+				return apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
+			}
+			login = make([]string, 0, len(profiles))
+			for _, p := range profiles {
+				login = append(login, p.ID)
+			}
+			slices.Sort(login)
+		}
+		v.AllowedProfileIDs = slices.Clone(login)
+	}
+	return nil
+}
+
 func toCollectionResponse(c userstore.Collection) PersonalCollectionView {
 	queryDefinition := defaultJSON([]byte(c.QueryDefinition))
 	sortConfig := defaultJSON([]byte(c.SortConfig))
@@ -393,7 +468,6 @@ func toCollectionResponse(c userstore.Collection) PersonalCollectionView {
 		Description:                c.Description,
 		CollectionType:             c.CollectionType,
 		IsShared:                   c.IsShared,
-		AllowedProfileIDs:          append([]string(nil), c.AllowedProfileIDs...),
 		QueryDefinition:            queryDefinition,
 		SortConfig:                 sortConfig,
 		SortOrder:                  c.SortOrder,

@@ -3,6 +3,7 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -1092,6 +1093,17 @@ func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libr
 	return results
 }
 
+// LogFetchError records a section that failed to load and is shown empty. A
+// row whose server or personal collection was deleted is expected to stay on
+// a layout until someone removes it, so it logs at debug instead of error.
+func LogFetchError(ctx context.Context, component string, sec ResolvedSection, err error) {
+	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) {
+		slog.DebugContext(ctx, "section collection no longer exists", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+		return
+	}
+	slog.ErrorContext(ctx, "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+}
+
 type sectionFetchRunner func(context.Context, ResolvedSection) (SectionWithItems, error)
 
 func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConcurrency int, runner sectionFetchRunner) []SectionWithItems {
@@ -1113,7 +1125,7 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 
 			result, err := runner(ctx, sec)
 			if err != nil {
-				slog.ErrorContext(ctx, "fetching section items", "component", "sections", "section_id", sec.ID, "type", sec.SectionType, "error", err)
+				LogFetchError(ctx, "sections", sec, err)
 				result = SectionWithItems{
 					ResolvedSection: sec,
 					Items:           []*models.MediaItem{},
@@ -1359,17 +1371,8 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 	}
 
 	// Verify the requesting profile can access this collection.
-	if collection.ProfileID != profileID && collection.CreatorProfileID != profileID {
-		canAccess := false
-		for _, allowed := range collection.AllowedProfileIDs {
-			if allowed == profileID {
-				canAccess = true
-				break
-			}
-		}
-		if !canAccess {
-			return []*models.MediaItem{}, 0, nil
-		}
+	if !collection.VisibleTo(profileID) {
+		return []*models.MediaItem{}, 0, nil
 	}
 	// Another profile's collection shows only what its owner can access too.
 	filter, err = catalog.PersonalCollectionFilter(ctx, f.CollectionOwners, filter, userID, profileID, collection.CreatorProfileID)

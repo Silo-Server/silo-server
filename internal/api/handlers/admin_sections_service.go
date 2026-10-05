@@ -6,10 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
@@ -28,7 +30,14 @@ type AdminSectionRestore = restoreDefaultsRequest
 type AdminSectionBulkCreate = bulkCreateSectionRequest
 type AdminSectionBulkResult = bulkCreateSectionResponse
 type AdminSectionPreviewRequest = previewRequest
-type AdminSectionPreviewResult = previewResponse
+
+// AdminSectionPreviewResult is a preview sample plus each item's presigned
+// poster URL keyed by content ID. Items without a poster have no entry.
+type AdminSectionPreviewResult struct {
+	Items      []*models.MediaItem
+	TotalCount int
+	PosterURLs map[string]string
+}
 type adminSectionRevisionKey struct{}
 
 func WithAdminSectionExpectedRevision(ctx context.Context, revision int64) context.Context {
@@ -247,10 +256,48 @@ func (h *SectionBulkHandler) BulkCreateAdminSections(ctx context.Context, req Ad
 }
 
 func (h *SectionHandler) PreviewAdminSection(ctx context.Context, req AdminSectionPreviewRequest) (AdminSectionPreviewResult, error) {
-	return h.previewAdminSection(ctx, req, AccessFilterFromContext(ctx, ""))
+	preview, err := h.previewAdminSection(ctx, req, AccessFilterFromContext(ctx, ""))
+	if err != nil {
+		return AdminSectionPreviewResult{}, err
+	}
+	return AdminSectionPreviewResult{Items: preview.Items, TotalCount: preview.TotalCount, PosterURLs: h.previewPosterURLs(ctx, preview.Items)}, nil
 }
-func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSectionPreviewRequest, filter catalog.AccessFilter) (AdminSectionPreviewResult, error) {
-	var none AdminSectionPreviewResult
+
+// previewPosterURLs presigns each item's poster at the variant a live row
+// serves by default, so a preview shows the image the saved row will show.
+func (h *SectionHandler) previewPosterURLs(ctx context.Context, items []*models.MediaItem) map[string]string {
+	if h.DetailSvc == nil {
+		return nil
+	}
+	posterPaths := make(map[string]string, len(items))
+	paths := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		path := sizedPosterPath(item.PosterPath, imagesize.Unset)
+		if path == "" || path == "-" {
+			continue
+		}
+		posterPaths[item.ContentID] = path
+		if !slices.Contains(paths, path) {
+			paths = append(paths, path)
+		}
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", imagesize.Unset))
+	out := make(map[string]string, len(posterPaths))
+	for contentID, path := range posterPaths {
+		if url := resolved[path].URL; url != "" {
+			out[contentID] = url
+		}
+	}
+	return out
+}
+
+// previewAdminSection is shared with the frozen /api/v1 preview, which
+// serializes previewResponse as is.
+func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSectionPreviewRequest, filter catalog.AccessFilter) (previewResponse, error) {
+	var none previewResponse
 	rec, ok := recipes.Get(req.SectionType)
 	if !ok {
 		return none, apiError(http.StatusBadRequest, "unknown_type", "section_type not registered")

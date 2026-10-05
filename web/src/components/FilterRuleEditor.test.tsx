@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -91,6 +91,32 @@ describe("FilterRuleEditor", () => {
       "In Progress",
     );
     expect(movieOptions.find((option) => option.value === "watched")?.label).toBe("Watched");
+  });
+
+  it("names each rule's controls by the rule's number", () => {
+    render(
+      <FilterRuleEditor
+        value={{
+          match: "all",
+          groups: [
+            {
+              match: "all",
+              rules: [
+                { field: "genre", op: "is", value: "Drama" },
+                { field: "rating_imdb", op: "gte", value: 7 },
+              ],
+            },
+          ],
+        }}
+        onChange={() => {}}
+      />,
+    );
+
+    const second = screen.getByRole("group", { name: "Rule 2" });
+    expect(within(second).getByRole("combobox", { name: "Field" })).toHaveTextContent(
+      "IMDb Rating",
+    );
+    expect(within(second).getByRole("button", { name: "Remove rule" })).toBeInTheDocument();
   });
 
   it("shows rules its controls cannot represent as read-only rules", () => {

@@ -34,12 +34,12 @@ func (s *interestTrackingStore) CollectionOrderRevision(ctx context.Context) (in
 	}
 	return store.CollectionOrderRevision(ctx)
 }
-func (s *interestTrackingStore) ReorderCollectionsIfRevision(ctx context.Context, profile string, group *string, ids []string, expected int64) error {
+func (s *interestTrackingStore) ReorderCollectionsIfRevision(ctx context.Context, profile string, ids []string, expected int64) error {
 	store, err := s.mutationStore()
 	if err != nil {
 		return err
 	}
-	return store.ReorderCollectionsIfRevision(ctx, profile, group, ids, expected)
+	return store.ReorderCollectionsIfRevision(ctx, profile, ids, expected)
 }
 func (s *interestTrackingStore) UpdateCollectionGroupIfRevision(ctx context.Context, id string, name, slug *string, mode *userstore.GroupSortMode, expected int64) (*userstore.CollectionGroup, error) {
 	store, err := s.mutationStore()

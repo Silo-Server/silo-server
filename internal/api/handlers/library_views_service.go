@@ -175,7 +175,7 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
-			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
+			sections.LogFetchError(ctx, "api", s, fetchErr)
 			withItems = sections.SectionWithItems{
 				ResolvedSection: s,
 				Items:           []*models.MediaItem{},
@@ -210,9 +210,9 @@ func (h *LibraryCollectionHandler) requireViewableLibrary(ctx context.Context, l
 	return requireViewableLibrary(ctx, h.FolderRepo, libraryID)
 }
 
-// LibraryUserCollections answers the viewer's own collections opted into
-// the library's Collections tab. Personal collections are private to their
-// owner; this never reveals other users' rows.
+// LibraryUserCollections answers the personal collections opted into the
+// library's Collections tab that the viewer can see: its own plus other
+// profiles' shared collections on the same login, never another login's.
 func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, libraryID, userID int, profileID string) ([]usercollections.ServerVisibleCollection, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return nil, err

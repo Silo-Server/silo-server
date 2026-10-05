@@ -42,7 +42,7 @@ vi.mock("@/hooks/useAuth", async () => {
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 
 vi.mock("@/components/AdminLayout", () => ({ default: () => <Outlet /> }));
-vi.mock("@/pages/AdminSections", () => ({ default: () => <div>Home rows page</div> }));
+vi.mock("@/pages/AdminHomeRows", () => ({ default: () => <div>Home rows page</div> }));
 
 import App from "@/App";
 

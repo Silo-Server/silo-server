@@ -1097,6 +1097,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.ArtworkStore = deps.Blobs.Assets
 		collectionHandler.ArtworkResolver = deps.ArtworkResolver
+		if detailSvc != nil {
+			collectionHandler.ItemPosters = detailSvc
+		}
 		collectionHandler.CollectionOwners = collectionOwners
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes

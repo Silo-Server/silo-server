@@ -2059,18 +2059,10 @@ func (r *CatalogResolver) catalogStoreForAccess(ctx context.Context, access Acce
 }
 
 // ProfileCanAccessCollection reports whether profileID may view a personal
-// collection. Creator access is represented in AllowedProfileIDs at write time,
-// so this is the canonical check for both browse and preference endpoints.
+// collection (userstore.Collection.VisibleTo). It is the canonical check for
+// both browse and preference endpoints.
 func ProfileCanAccessCollection(collection *userstore.Collection, profileID string) bool {
-	if collection == nil || strings.TrimSpace(profileID) == "" {
-		return false
-	}
-	for _, allowed := range collection.AllowedProfileIDs {
-		if allowed == profileID {
-			return true
-		}
-	}
-	return false
+	return collection.VisibleTo(strings.TrimSpace(profileID))
 }
 
 // PersonalListEntry pairs a list member with the timestamp it was added to

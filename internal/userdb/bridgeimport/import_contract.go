@@ -19,6 +19,8 @@ const (
 	sourceSectionOverrides    = "profile_section_overrides"
 	sourceOrderRevision       = "personal_collection_order_revision"
 	sourceSingleton           = "singleton"
+	sourceCollections         = "personal_collections"
+	sourceCollectionAudiences = "personal_collection_profiles"
 )
 
 // ProgressTransition must establish the account's durable sync generation in

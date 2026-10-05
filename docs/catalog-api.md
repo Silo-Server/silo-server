@@ -98,11 +98,69 @@ Check it before saving a Watchlist or Favorites preference. The
 all, so it cannot be used to detect the personal-list kinds. The document supports
 `If-None-Match` and returns `304` when the caller's copy is current.
 
+`login_sharing: true` reports that a personal collection is either private to its
+creator or shared with every profile on the login, that `listCollections` includes other
+profiles' shared collections, and that only the creator changes or orders a collection. Show
+**Shared with me** and the single **Show to other profiles** switch only when it is true; see
+[the personal collections API](collections-api.md). `groups` is always false.
+
 The document's `import_sources` lists the sources a new imported collection can come
 from (`mdblist`, `tmdb`, `tmdb_list`); it is empty when `imports` is false. Check for
 `tmdb_list` before calling `importTMDBListCollection` (`POST /api/v2/collections/import/tmdb-list`),
 which follows a public TMDB list. The administrator capability document
 (`getAdminCollectionCapabilities`) carries the same field for `importAdminTMDBList`.
+
+Both collection capability documents, `getCollectionCapabilities` and
+`getAdminCollectionCapabilities`, also report:
+
+- `mdblist_search`: `true` when `searchMDBListLists` and `listTopMDBListLists` return
+  lists. It is `false` when the server has no MDBList API key; those operations then answer
+  `configured: false` with no lists. Importing a pasted MDBList link does not need the key.
+- `schedule_time_zone`: the time zone the answering node runs cron collection schedules in.
+  `utc_offset` is the current offset from UTC as `±hh:mm` (for example `-05:00`), daylight
+  saving time included. `abbreviation` is the current abbreviation the node's time zone
+  database reports (for example `CDT`; some zones report a numeric form such as `-03`).
+  `name` is the IANA zone name (for example `America/Chicago`): the zone the node's `TZ`
+  environment variable names, or `UTC` when `TZ` is empty or names no known zone. It is
+  omitted when the node uses its system default zone or a `TZ` file path. Each node reports its own zone, and the
+  offset changes with daylight saving time, so read it with the schedule rather than
+  storing it. A cron `sync_schedule` with a `TZ=` or `CRON_TZ=` prefix runs in the zone
+  the prefix names instead.
+
+`getCollectionCapabilities` also reports `sync_schedule_editable`, `true` when `updateCollection`
+accepts `sync_schedule`; see [Personal sync schedules](#personal-sync-schedules).
+
+`getCollectionCapabilities` also reports `contains_item`, `true` when `listCollections` accepts
+`contains_item`; see [Collections that hold a title](#collections-that-hold-a-title).
+
+`getAdminCollectionCapabilities` also reports `section_references`, `true` when
+`listAdminCollectionSections` is available and `listAdminCollections` items carry row counts; see
+[Rows that show a server collection](#rows-that-show-a-server-collection).
+
+## Personal collection descriptions
+
+`createCollection` (`POST /api/v2/collections`) accepts an optional `description`, stored
+with the new collection and returned as `description` on collection reads. Omitting it stores
+an empty description; `null` is a validation failure. Check `create_description` in the
+`getCollectionCapabilities` document before sending it: a server without that flag rejects the
+member as unknown, and an account whose user store does not keep descriptions (the SQLite
+store) reports `false` and answers a non-empty `description` with `501 capability_unsupported`.
+`updateCollection` changes the description of an existing collection.
+
+The frozen `/api/v1/collections` create ignores a `description` member, in a JSON body and in
+the multipart `data` field alike; the collection is created with an empty description.
+
+## Personal smart previews
+
+`previewCollection` (`POST /api/v2/collections/preview`) returns the first titles a smart query
+matches within the acting profile's access. Each item carries `poster_url`, a card-size poster URL,
+when the title has a poster, and omits the member when it has none. A missing `poster_url` alone
+does not show whether the server returns posters: check `preview_posters` in the
+`getCollectionCapabilities` document. The URL can be signed and expire, like other artwork URLs,
+so read a fresh preview rather than storing it.
+`previewAdminCollection` items carry the same field.
+
+The frozen `/api/v1/collections/preview` response is unchanged and carries no poster.
 
 ## Personal collection imports
 
@@ -136,6 +194,46 @@ whether it runs on import, through `syncCollection`, or on the collection's sche
   collection, empty and with a failed first sync the caller can retry.
 
 Each viewer of a shared collection still sees only the titles that viewer can access.
+
+## Personal sync schedules
+
+`updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
+(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+`weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
+Cron expressions are a validation failure for every account, administrators included, and so is
+`sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
+schedule's next run; `""` sets `sync_schedule` to `""` and `next_sync_at` to `null`. Only the
+collection's creator can change it, as with every other member. Check `sync_schedule_editable`
+in the `getCollectionCapabilities` document before sending it: a server without that flag rejects
+the member as unknown, and the flag is `false` when `imports` is.
+
+Collection reads carry `sync_cadence`, the cadence `sync_schedule` names: `daily`, `weekly`,
+`monthly`, `""` when the collection is not synced, or `custom` for a stored schedule no cadence
+name produces. Read it instead of matching cron expressions.
+
+A sync that is running when `sync_schedule` is saved, on any node, records its result but leaves
+the `next_sync_at` the save set, even when the save kept the same cadence, and the collection a
+sync or import returns shows what was stored. A scheduled sync runs on one node: it first moves
+`next_sync_at` past the minimum interval, which is when a failed sync retries; a successful sync
+replaces that with the schedule's next run unless the schedule was saved while it ran.
+
+The frozen `/api/v1/collections/{id}` update ignores a `sync_schedule` member, and `/api/v1`
+collection responses carry no `sync_cadence`.
+
+## Collections that hold a title
+
+`listCollections` (`GET /api/v2/collections`) accepts an optional `contains_item`, a title's
+content id. Each of the acting profile's own manual collections in the response then carries
+`contains`: `true` when the collection holds the title, `false` when it does not. No other
+collection carries the member: not a smart collection or synced list, and not a collection
+another profile shares with the acting profile. Without `contains_item`, no collection carries
+it. A title the acting profile cannot access, or one that does not exist, reports `false` on
+every collection, even a collection that still stores it. Check `contains_item` in the
+`getCollectionCapabilities` document before sending it: a server without that flag rejects the
+parameter as unknown.
+
+The frozen `/api/v1/collections` list ignores a `contains_item` parameter, and its collections
+carry no `contains`.
 
 ## Library-scoped version lists
 
@@ -365,6 +463,59 @@ fall back to the ID when the title is absent. Personal membership pages hydrate
 titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
+
+## Admin template list
+
+`listAdminCollectionTemplates` (`GET /api/v2/admin/collections/templates`) lists only the
+templates with an `mdblist`, `tmdb` or `tmdb_list` source, the set a single collection can be
+created from and the same set the personal template list (`listCollectionTemplates`) offers. `tmdb_discover` and
+`tmdb_collection` templates are left out because only a template bundle can apply them; read
+their summaries from the bundle list below. A category left with no templates is dropped; the
+rest keep their order. The response schema is unchanged.
+
+The route requires acting administrator access. The frozen `/api/v1/admin/collections/templates`
+response is unchanged and still lists every built-in template.
+
+## Template bundle summaries
+
+`listAdminCollectionTemplateBundles` (`GET /api/v2/admin/collections/template-bundles`) returns
+each bundle with `templates`, a summary of every template in `template_ids` order: `id`, `title`,
+`source`, `media_kind`, `featured`, `poster_path` (omitted when the template has no poster) and
+`needs_setup`. The list covers every source a bundle uses, including `tmdb_discover` and
+`tmdb_collection` templates, so a client can describe a bundle without the template catalog.
+Check `template_summaries` in the `getAdminCollectionCapabilities` document before relying on
+`templates`; a server without it returns bundles without summaries.
+
+`featured` is the pinned-first flag a collection created from the template starts with.
+`needs_setup` is true for a template whose collection is created empty and cannot sync until an
+administrator sets its source; today that is the `tmdb_franchise_placeholder` template, which has
+no TMDB collection ID. Applying the bundle still creates that collection.
+
+The route requires acting administrator access. The frozen
+`/api/v1/admin/collections/template-bundles` response is unchanged and carries no `templates`.
+
+## Rows that show a server collection
+
+`listAdminCollectionSections` (`GET /api/v2/admin/collections/{id}/sections`) lists the rows on
+the administrator Home and library pages that show a server collection. Each item carries the
+row's `id`, `scope` (`home` or `library`), `library_id` (the library whose page holds the row;
+`null` for Home), `section_type`, `title`, `featured` (the row is its page's hero banner),
+`enabled`, `position`, and `page_row_count`, the number of rows on that page. Home rows come
+first, then library pages by library, each in page order. Rows a template bundle generated as a
+hero are listed like any other row. An unknown collection answers `404`; a collection no row
+shows answers an empty `items` list.
+
+Each `listAdminCollections` item carries `home_row_count`, the number of turned-on Home rows that
+show the collection, and `row_count`, the number of Home and library page rows that show it,
+turned-off rows included. One count covers the whole list. Both are absent from
+`getAdminCollection` and every other response that returns one collection.
+
+The rows list includes turned-off rows. Both routes read the administrator page layouts only: rows a
+profile added to its own Home are not listed or counted. A collection that `row_count` reports as
+used cannot be deleted (`409`) until those rows stop showing it.
+
+Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
+unchanged and carries no counts.
 
 ## Advisory age
 

@@ -22,6 +22,7 @@ type fakeAdminSections struct {
 	reads, updates, deletes, creates, reorders, restores, bulks, previews int
 	mismatch, readMismatch, deleted                                       bool
 	preview                                                               []*models.MediaItem
+	previewPosters                                                        map[string]string
 	previewRequest                                                        handlers.AdminSectionPreviewRequest
 	recipeChecks                                                          []bool
 }
@@ -127,7 +128,7 @@ func (f *fakeAdminSections) PreviewAdminSection(_ context.Context, req handlers.
 	if req.LibraryIDs != nil && len(req.LibraryIDs) == 0 {
 		return handlers.AdminSectionPreviewResult{}, nil
 	}
-	return handlers.AdminSectionPreviewResult{Items: f.preview, TotalCount: len(f.preview)}, nil
+	return handlers.AdminSectionPreviewResult{Items: f.preview, TotalCount: len(f.preview), PosterURLs: f.previewPosters}, nil
 }
 func (f *fakeAdminSections) AdminSectionCapabilities(context.Context) handlers.AdminSectionCapabilitiesView {
 	return f.caps
@@ -410,5 +411,40 @@ func TestAdminSectionPreviewLeavesAbsentLibraryScopeUnscoped(t *testing.T) {
 				t.Fatalf("library_id = %v, scalar request %t", scalar, tc.scalar)
 			}
 		})
+	}
+}
+
+// Preview items carry the presigned poster the service resolved, never the
+// storage key it came from; an item without one omits poster_url.
+func TestAdminSectionPreviewServesPresignedPosters(t *testing.T) {
+	f := newFakeAdminSections()
+	f.preview = []*models.MediaItem{
+		{ContentID: "item1", Title: "Signed", Type: "movie", PosterPath: "private/storage/poster", PosterThumbhash: "hash1"},
+		{ContentID: "item2", Title: "Bare", Type: "movie"},
+	}
+	f.previewPosters = map[string]string{"item1": "https://cdn.example/signed.jpg?sig=1"}
+	h := adminSectionsTestHandler(t, f)
+	rec := do(t, h, http.MethodPost, Prefix+"/admin/sections/preview", `{"section_type":"recently_added","config":{},"item_limit":3}`, bearer(adminToken))
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), "private/") {
+		t.Fatalf("preview %d %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Items []struct {
+			ContentID       string  `json:"content_id"`
+			PosterURL       *string `json:"poster_url"`
+			PosterThumbhash string  `json:"poster_thumbhash"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 2 {
+		t.Fatalf("items %s", rec.Body)
+	}
+	if got := body.Items[0]; got.ContentID != "item1" || got.PosterURL == nil || *got.PosterURL != "https://cdn.example/signed.jpg?sig=1" || got.PosterThumbhash != "hash1" {
+		t.Fatalf("signed item %s", rec.Body)
+	}
+	if got := body.Items[1]; got.ContentID != "item2" || got.PosterURL != nil {
+		t.Fatalf("item without a poster %s", rec.Body)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 29
+const schemaVersion = 30
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -287,7 +287,36 @@ func runMigrations(db *sql.DB) error {
 			return err
 		}
 	}
+	if version < 30 {
+		if err := applyCollectionLoginSharing(tx); err != nil {
+			return fmt.Errorf("migration v30 failed: %w", err)
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 30"); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// applyCollectionLoginSharing applies the #1615 rule: a shared collection
+// is shown to every profile on the login, so it stays shared only when its
+// allow list already covers every profile (its creator implied). Shared with
+// some profiles, or with nobody but its creator, it becomes private. The allow-list table stays, no
+// longer read, because the bridge importer's source contract names it.
+func applyCollectionLoginSharing(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		UPDATE personal_collections
+		   SET is_shared = 0
+		 WHERE is_shared
+		   AND EXISTS (
+		         SELECT 1 FROM profiles p
+		          WHERE p.id <> personal_collections.creator_profile_id
+		            AND NOT EXISTS (
+		                  SELECT 1 FROM personal_collection_profiles v
+		                   WHERE v.collection_id = personal_collections.id
+		                     AND v.profile_id = p.id
+		                ))`)
+	return err
 }
 
 // retireProfileThemes deletes every stored ui.theme, ui.custom_theme_vars and

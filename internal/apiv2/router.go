@@ -418,6 +418,9 @@ type Dependencies struct {
 	// CollectionImports creates synced collections from external lists and
 	// searches MDBList (*handlers.UserCollectionImportHandler).
 	CollectionImports CollectionImportService
+	// ScheduleZone reports the time zone cron collection schedules run in on
+	// this node; nil reads the process's local zone. Fixtures pin it.
+	ScheduleZone func() CollectionScheduleTimeZone
 	// CatalogAccess resolves a viewer's access filter (*handlers.ItemsHandler);
 	// every catalog read needs it alongside its own seam.
 	CatalogAccess CatalogAccessService

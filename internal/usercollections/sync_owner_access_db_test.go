@@ -133,8 +133,8 @@ func TestImportFillsItsLimitWithTitlesItsOwnerCanAccessDB(t *testing.T) {
 
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: "owner", Name: "Imported", CollectionType: "tmdb", IsShared: true,
-		AllowedProfileIDs: []string{"other"}, QueryDefinition: "{}",
-		SourceConfig: `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310","limit":3}`,
+		QueryDefinition: "{}",
+		SourceConfig:    `{"mode":"tmdb_list","url":"https://www.themoviedb.org/list/310","limit":3}`,
 	})
 	if err != nil {
 		t.Fatal(err)

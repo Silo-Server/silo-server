@@ -210,7 +210,7 @@ func (s stubStore) ReplaceCollectionItems(context.Context, string, []userstore.C
 func (s stubStore) ReorderCollectionItems(context.Context, string, []string) error {
 	panic("unused")
 }
-func (s stubStore) ReorderCollections(context.Context, string, *string, []string) error {
+func (s stubStore) ReorderCollections(context.Context, string, []string) error {
 	panic("unused")
 }
 func (s stubStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {

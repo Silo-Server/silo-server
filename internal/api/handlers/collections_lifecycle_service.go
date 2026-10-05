@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -45,7 +46,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			return none, err
 		}
 	}
-	if req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil {
+	if req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil || req.SyncSchedule != nil {
 		if err := collectionFeatureError(store, "imports"); err != nil {
 			return none, err
 		}
@@ -61,7 +62,6 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		RequestProfileID:           profileID,
 		Name:                       req.Name,
 		Description:                req.Description,
-		AllowedProfileIDs:          req.AllowedProfileIDs,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
 	if req.DisplayQueryDefinition != nil {
@@ -143,6 +143,21 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		input.SourceConfigPatch = new(string(raw))
 	}
 
+	if req.SyncSchedule != nil {
+		if !catalog.IsSyncableType(existing.CollectionType) {
+			return none, fieldError("sync_schedule", "sync_schedule can only be set on a synced list")
+		}
+		schedule, err := usercollections.ResolveSyncSchedule(*req.SyncSchedule)
+		if err != nil {
+			return none, fieldError("sync_schedule", err.Error())
+		}
+		if schedule == nil {
+			input.ClearSyncSchedule, input.ClearNextSyncAt = true, true
+		} else {
+			input.SyncSchedule, input.NextSyncAt = schedule, usercollections.InitialNextSyncAt(schedule)
+		}
+	}
+
 	if err := store.UpdateCollection(ctx, input); err != nil {
 		if errors.Is(err, userstore.ErrCollectionRevisionMismatch) {
 			return none, err
@@ -195,15 +210,38 @@ func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req P
 		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 
+	var posters map[string]string
+	if req.WithPosters {
+		posters = h.previewPosterURLs(ctx, items)
+	}
 	resp := PersonalCollectionPreviewView{Items: make([]PersonalCollectionPreviewItemView, 0, len(items)), Total: total}
 	for _, item := range items {
 		resp.Items = append(resp.Items, PersonalCollectionPreviewItemView{
 			ContentID: item.ContentID,
 			Title:     item.Title,
 			Type:      item.Type,
+			PosterURL: posters[item.PosterPath],
 		})
 	}
 	return resp, nil
+}
+
+// previewPosterURLs signs the card-size posters of the previewed items in one
+// batch, keyed by poster path. Items without a poster are not looked up.
+func (h *CollectionHandler) previewPosterURLs(ctx context.Context, items []*models.MediaItem) map[string]string {
+	if h.ItemPosters == nil {
+		return nil
+	}
+	paths := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.PosterPath != "" {
+			paths = append(paths, item.PosterPath)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	return h.ItemPosters.PresignImageURLs(ctx, paths, "poster", "small")
 }
 
 func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID int, profileID, collectionID string) error {

@@ -73,26 +73,19 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 	if input.SourceConfig == "" {
 		input.SourceConfig = "{}"
 	}
-	allowedProfiles := normalizeCollectionProfiles(input.CreatorProfileID, input.AllowedProfileIDs, input.IsShared)
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("beginning collection create: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
+	// The new collection goes to the end of its creator's own order.
 	var sortOrder int
-	err = tx.QueryRow(ctx,
+	err := s.pool.QueryRow(ctx,
 		`INSERT INTO user_personal_collections (
 			id, user_id, profile_id, creator_profile_id, name, description, collection_type, is_shared,
 			query_definition, sort_config, source_url, source_config, sync_schedule, next_sync_at,
-			sort_order, display_query_definition, include_in_server_collections, poster_url, created_at, updated_at
+			sort_order, display_query_definition, include_in_server_collections, poster_url, created_at, updated_at, native
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			COALESCE((
 				SELECT MAX(sort_order) + 1
 				FROM user_personal_collections
-				WHERE user_id = $2 AND group_id IS NULL
-			), 0), $15, $16, $17, $18, $19)
+				WHERE user_id = $2 AND creator_profile_id = $4 AND native
+			), 0), $15, $16, $17, $18, $19, TRUE)
 		RETURNING sort_order`,
 		id, s.userID, input.CreatorProfileID, input.CreatorProfileID, input.Name, input.Description,
 		input.CollectionType, input.IsShared, input.QueryDefinition, input.SortConfig,
@@ -102,18 +95,6 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 	if err != nil {
 		return nil, fmt.Errorf("creating collection: %w", err)
 	}
-	for _, profileID := range allowedProfiles {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO user_personal_collection_profiles (user_id, collection_id, profile_id)
-			 VALUES ($1, $2, $3)`,
-			s.userID, id, profileID,
-		); err != nil {
-			return nil, fmt.Errorf("creating collection profile visibility: %w", err)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing collection create: %w", err)
-	}
 	return &userstore.Collection{
 		ID:                         id,
 		ProfileID:                  input.CreatorProfileID,
@@ -122,7 +103,6 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		Description:                input.Description,
 		CollectionType:             input.CollectionType,
 		IsShared:                   input.IsShared,
-		AllowedProfileIDs:          allowedProfiles,
 		QueryDefinition:            input.QueryDefinition,
 		SortConfig:                 input.SortConfig,
 		SourceURL:                  input.SourceURL,
@@ -138,47 +118,35 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 	}, nil
 }
 
+// GetCollection reads a native collection of the login. Audiobookshelf rows,
+// which share the table, are not found.
 func (s *PostgresUserStore) GetCollection(ctx context.Context, id string) (*userstore.Collection, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT `+collectionSelectColumns+`
-		 FROM user_personal_collections WHERE user_id = $1 AND id = $2`,
+		 FROM user_personal_collections WHERE user_id = $1 AND id = $2 AND native`,
 		s.userID, id,
 	)
 	c, err := scanCollection(row)
-	if err == pgx.ErrNoRows {
-		return nil, fmt.Errorf("collection %s not found", id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("collection %s: %w", id, userstore.ErrCollectionNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting collection: %w", err)
 	}
-	c.AllowedProfileIDs, err = s.listCollectionProfiles(ctx, id)
-	if err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 
-// ListCollections fetches collections plus their allowed profile lists in one
-// query using ARRAY_AGG, avoiding the N+1 round trip a naive per-row profile
-// lookup would create.
+// ListCollections lists the collections profileID may see: its own in its
+// order, then other profiles' shared collections, grouped by creator and each
+// in its creator's order.
 func (s *PostgresUserStore) ListCollections(ctx context.Context, profileID string) ([]userstore.Collection, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+collectionSelectColumns+`,
-		        COALESCE(
-		          (SELECT array_agg(p.profile_id ORDER BY p.profile_id)
-		           FROM user_personal_collection_profiles p
-		           WHERE p.user_id = upc.user_id AND p.collection_id = upc.id),
-		          ARRAY[]::TEXT[]
-		        ) AS allowed_profile_ids
-		 FROM user_personal_collections upc
+		`SELECT `+collectionSelectColumns+`
+		 FROM user_personal_collections
 		 WHERE user_id = $1
-		   AND EXISTS (
-		     SELECT 1 FROM user_personal_collection_profiles vp
-		     WHERE vp.user_id = upc.user_id
-		       AND vp.collection_id = upc.id
-		       AND vp.profile_id = $2
-		   )
-		 ORDER BY sort_order ASC, created_at ASC, id ASC`,
+		   AND native
+		   AND (creator_profile_id = $2 OR is_shared)
+		 ORDER BY (creator_profile_id = $2) DESC, creator_profile_id ASC, sort_order ASC, created_at ASC, id ASC`,
 		s.userID, profileID,
 	)
 	if err != nil {
@@ -188,28 +156,11 @@ func (s *PostgresUserStore) ListCollections(ctx context.Context, profileID strin
 
 	var collections []userstore.Collection
 	for rows.Next() {
-		var c userstore.Collection
-		var (
-			createdAt, updatedAt   time.Time
-			nextSyncAt, lastSyncAt *time.Time
-			syncSchedule           *string
-			allowed                []string
-		)
-		if err := rows.Scan(
-			&c.ID, &c.ProfileID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType, &c.IsShared,
-			&c.QueryDefinition, &c.SortConfig, &c.SourceURL, &c.SourceConfig, &syncSchedule, &nextSyncAt,
-			&lastSyncAt, &c.LastSyncStatus, &c.LastSyncMessage, &c.DisplayQueryDefinition, &c.ItemCount, &c.IncludeInServerCollections,
-			&c.PosterURL, &c.PosterThumbhash, &c.SortOrder, &c.GroupID, &createdAt, &updatedAt, &allowed,
-		); err != nil {
+		c, err := scanCollection(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning collection row: %w", err)
 		}
-		c.SyncSchedule = syncSchedule
-		c.NextSyncAt = nextSyncAt
-		c.LastSyncAt = lastSyncAt
-		c.CreatedAt = timeToString(createdAt)
-		c.UpdatedAt = timeToString(updatedAt)
-		c.AllowedProfileIDs = allowed
-		collections = append(collections, c)
+		collections = append(collections, *c)
 	}
 	return collections, rows.Err()
 }
@@ -236,7 +187,7 @@ func (s *PostgresUserStore) updateCollectionAttempt(ctx context.Context, input u
 
 	var creatorProfileID string
 	if err := tx.QueryRow(ctx,
-		`SELECT creator_profile_id FROM user_personal_collections WHERE user_id = $1 AND id = $2`,
+		`SELECT creator_profile_id FROM user_personal_collections WHERE user_id = $1 AND id = $2 AND native`,
 		s.userID, input.ID,
 	).Scan(&creatorProfileID); err != nil {
 		return fmt.Errorf("loading collection creator: %w", err)
@@ -327,45 +278,6 @@ func (s *PostgresUserStore) updateCollectionAttempt(ctx context.Context, input u
 		)
 		if _, err := tx.Exec(ctx, query, args...); err != nil {
 			return err
-		}
-	}
-
-	if input.AllowedProfileIDs != nil || input.IsShared != nil {
-		isShared := false
-		if input.IsShared != nil {
-			isShared = *input.IsShared
-		} else {
-			if err := tx.QueryRow(ctx,
-				`SELECT is_shared FROM user_personal_collections WHERE user_id = $1 AND id = $2`,
-				s.userID, input.ID,
-			).Scan(&isShared); err != nil {
-				return err
-			}
-		}
-		allowed := []string{}
-		if input.AllowedProfileIDs != nil {
-			allowed = *input.AllowedProfileIDs
-		} else {
-			allowed, err = s.listCollectionProfilesTx(ctx, tx, input.ID)
-			if err != nil {
-				return err
-			}
-		}
-		allowed = normalizeCollectionProfiles(creatorProfileID, allowed, isShared)
-		if _, err := tx.Exec(ctx,
-			`DELETE FROM user_personal_collection_profiles WHERE user_id = $1 AND collection_id = $2`,
-			s.userID, input.ID,
-		); err != nil {
-			return err
-		}
-		for _, profileID := range allowed {
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO user_personal_collection_profiles (user_id, collection_id, profile_id)
-				 VALUES ($1, $2, $3)`,
-				s.userID, input.ID, profileID,
-			); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -481,16 +393,17 @@ func (s *PostgresUserStore) reorderCollectionItems(ctx context.Context, collecti
 	return tx.Commit(ctx)
 }
 
-// ReorderCollections sets each collection's sort_order to its index in the
-// supplied list. The list must be a permutation of the user's collections in
-// the supplied group. A nil groupID targets the implicit Ungrouped bucket.
-func (s *PostgresUserStore) ReorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string) error {
-	return s.reorderCollections(ctx, profileID, groupID, orderedIDs, nil)
+// ReorderCollections sets each of profileID's own collections' sort_order to
+// its index in the supplied list. The list must be a permutation of exactly
+// those collections: another profile's collection, shared or not, is a
+// mismatch, and nobody else's order changes.
+func (s *PostgresUserStore) ReorderCollections(ctx context.Context, profileID string, orderedIDs []string) error {
+	return s.reorderCollections(ctx, profileID, orderedIDs, nil)
 }
-func (s *PostgresUserStore) ReorderCollectionsIfRevision(ctx context.Context, profileID string, groupID *string, orderedIDs []string, expected int64) error {
-	return s.runCollectionMutation(ctx, "", expected, func() error { return s.reorderCollections(ctx, profileID, groupID, orderedIDs, &expected) })
+func (s *PostgresUserStore) ReorderCollectionsIfRevision(ctx context.Context, profileID string, orderedIDs []string, expected int64) error {
+	return s.runCollectionMutation(ctx, "", expected, func() error { return s.reorderCollections(ctx, profileID, orderedIDs, &expected) })
 }
-func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID string, groupID *string, orderedIDs []string, expected *int64) error {
+func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID string, orderedIDs []string, expected *int64) error {
 	if collectionutil.HasDuplicateOrderedIDs(orderedIDs) {
 		return fmt.Errorf("ordered_ids contains duplicates")
 	}
@@ -515,28 +428,14 @@ func (s *PostgresUserStore) reorderCollections(ctx context.Context, profileID st
 		  FROM supplied
 		  WHERE t.user_id = $2
 		    AND t.id = supplied.id
-		    AND t.group_id IS NOT DISTINCT FROM $4
-		    AND EXISTS (
-		      SELECT 1
-		      FROM user_personal_collection_profiles p
-		      WHERE p.user_id = t.user_id
-		        AND p.collection_id = t.id
-		        AND p.profile_id = $5
-		    )
+		    AND t.creator_profile_id = $4
+		    AND t.native
 		  RETURNING 1
 		)
 		SELECT (SELECT count(*) FROM upd),
 		       (SELECT count(*) FROM user_personal_collections
-		         WHERE user_id = $2
-		           AND group_id IS NOT DISTINCT FROM $4
-		           AND EXISTS (
-		             SELECT 1
-		             FROM user_personal_collection_profiles p
-		             WHERE p.user_id = user_personal_collections.user_id
-		               AND p.collection_id = user_personal_collections.id
-		               AND p.profile_id = $5
-		           ))
-	`, orderedIDs, s.userID, nowUTC(), groupID, profileID).Scan(&updated, &total); err != nil {
+		         WHERE user_id = $2 AND creator_profile_id = $4 AND native)
+	`, orderedIDs, s.userID, nowUTC(), profileID).Scan(&updated, &total); err != nil {
 		return fmt.Errorf("reordering collections: %w", err)
 	}
 	if updated != len(orderedIDs) || updated != total {
@@ -873,74 +772,17 @@ func (s *PostgresUserStore) UpdateCollectionSyncState(ctx context.Context, input
 	_, err := s.pool.Exec(ctx,
 		`UPDATE user_personal_collections
 		 SET last_sync_at = $1, last_sync_status = $2, last_sync_message = $3,
-		     item_count = $4, next_sync_at = $5, updated_at = $6
+		     item_count = $4, updated_at = $6,
+		     next_sync_at = CASE
+		         WHEN sync_schedule IS NOT DISTINCT FROM $9 AND next_sync_at IS NOT DISTINCT FROM $10 THEN $5
+		         ELSE next_sync_at
+		     END
 		 WHERE user_id = $7 AND id = $8`,
 		input.LastSyncAt, input.Status, input.Message, input.ItemCount, input.NextSyncAt,
-		nowUTC(), s.userID, input.ID,
+		nowUTC(), s.userID, input.ID, input.ScheduleAtStart, input.NextSyncAtAtStart,
 	)
 	if err != nil {
 		return fmt.Errorf("updating collection sync state: %w", err)
 	}
 	return nil
-}
-
-func (s *PostgresUserStore) listCollectionProfiles(ctx context.Context, collectionID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT profile_id
-		 FROM user_personal_collection_profiles
-		 WHERE user_id = $1 AND collection_id = $2
-		 ORDER BY profile_id ASC`,
-		s.userID, collectionID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("listing collection profiles: %w", err)
-	}
-	defer rows.Close()
-	return scanCollectionProfiles(rows)
-}
-
-func (s *PostgresUserStore) listCollectionProfilesTx(ctx context.Context, tx pgx.Tx, collectionID string) ([]string, error) {
-	rows, err := tx.Query(ctx,
-		`SELECT profile_id
-		 FROM user_personal_collection_profiles
-		 WHERE user_id = $1 AND collection_id = $2
-		 ORDER BY profile_id ASC`,
-		s.userID, collectionID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("listing collection profiles in tx: %w", err)
-	}
-	defer rows.Close()
-	return scanCollectionProfiles(rows)
-}
-
-func scanCollectionProfiles(rows pgx.Rows) ([]string, error) {
-	var profiles []string
-	for rows.Next() {
-		var profileID string
-		if err := rows.Scan(&profileID); err != nil {
-			return nil, fmt.Errorf("scanning collection profile row: %w", err)
-		}
-		profiles = append(profiles, profileID)
-	}
-	return profiles, rows.Err()
-}
-
-func normalizeCollectionProfiles(creatorProfileID string, allowedProfiles []string, isShared bool) []string {
-	if !isShared {
-		return []string{creatorProfileID}
-	}
-	seen := map[string]struct{}{creatorProfileID: {}}
-	normalized := []string{creatorProfileID}
-	for _, profileID := range allowedProfiles {
-		if profileID == "" {
-			continue
-		}
-		if _, ok := seen[profileID]; ok {
-			continue
-		}
-		seen[profileID] = struct{}{}
-		normalized = append(normalized, profileID)
-	}
-	return normalized
 }

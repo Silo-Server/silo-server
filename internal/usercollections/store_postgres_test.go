@@ -66,10 +66,14 @@ func newStoreTestFixture(t *testing.T) *storeTestFixture {
 }
 
 type storeTestCollection struct {
-	id           string
-	name         string
-	optIn        bool
-	sharedWith   []string
+	id    string
+	name  string
+	optIn bool
+	// creator defaults to storeTestOwnerProfile. shared shows the collection to
+	// every profile on the login; notNative marks an Audiobookshelf row.
+	creator      string
+	shared       bool
+	notNative    bool
 	collType     string
 	queryDef     string
 	displayQuery string
@@ -88,31 +92,26 @@ func (f *storeTestFixture) insert(t *testing.T, c storeTestCollection) {
 	if c.queryDef == "" {
 		c.queryDef = "{}" // NOT NULL; display_query_definition stays NULL when unset
 	}
+	if c.creator == "" {
+		c.creator = storeTestOwnerProfile
+	}
 	if _, err := f.pool.Exec(ctx,
 		`INSERT INTO user_personal_collections
 		   (id, user_id, profile_id, creator_profile_id, name, description, collection_type,
-		    include_in_server_collections, source_config, query_definition, display_query_definition)
+		    include_in_server_collections, source_config, query_definition, display_query_definition,
+		    is_shared, native)
 		 VALUES ($1, $2, $3, $3, $4, '', $5, $6, $7::jsonb,
-		         $8::jsonb, NULLIF($9, '')::jsonb)`,
-		c.id, f.userID, storeTestOwnerProfile, c.name, c.collType, c.optIn,
-		c.sourceConfig, c.queryDef, c.displayQuery,
+		         $8::jsonb, NULLIF($9, '')::jsonb, $10, $11)`,
+		c.id, f.userID, c.creator, c.name, c.collType, c.optIn,
+		c.sourceConfig, c.queryDef, c.displayQuery, c.shared, !c.notNative,
 	); err != nil {
 		t.Fatalf("insert collection %s: %v", c.id, err)
-	}
-	for _, profileID := range c.sharedWith {
-		if _, err := f.pool.Exec(ctx,
-			`INSERT INTO user_personal_collection_profiles (user_id, collection_id, profile_id)
-			 VALUES ($1, $2, $3)`,
-			f.userID, c.id, profileID,
-		); err != nil {
-			t.Fatalf("share collection %s with %s: %v", c.id, profileID, err)
-		}
 	}
 }
 
 // TestStoreGetEnforcesOwnershipOptInAndProfile exercises the privacy predicate
-// against a real database: only an opted-in collection shared with the asking
-// profile, and owned by the asking user, resolves.
+// against a real database: an opted-in native collection on the asking login
+// resolves when the asking profile created it or its creator shares it.
 func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 	t.Parallel()
 	f := newStoreTestFixture(t)
@@ -121,22 +120,28 @@ func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "visible", name: "Visible", optIn: true,
-		sharedWith:   []string{storeTestOwnerProfile},
 		collType:     "mdblist",
 		queryDef:     `{"match":"all"}`,
 		displayQuery: `{"match":"all","groups":[{"match":"all","rules":[{"field":"watched","op":"equals","value":false}]}]}`,
 	})
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "not-opted-in", name: "Not Opted In", optIn: false,
-		sharedWith: []string{storeTestOwnerProfile},
 	})
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "other-profile", name: "Other Profile", optIn: true,
-		sharedWith: []string{storeTestOtherProfile},
+		creator: storeTestOtherProfile,
+	})
+	f.insert(t, storeTestCollection{
+		id: storeTestIDPrefix + "shared-by-other", name: "Shared By Other", optIn: true,
+		creator: storeTestOtherProfile, shared: true,
+	})
+	f.insert(t, storeTestCollection{
+		id: storeTestIDPrefix + "audiobookshelf", name: "Audiobookshelf", optIn: true,
+		notNative: true,
 	})
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "hidden-library", name: "Hidden Library", optIn: true,
-		sharedWith: []string{storeTestOwnerProfile}, sourceConfig: `{"library_ids":[9]}`,
+		sourceConfig: `{"library_ids":[9]}`,
 	})
 
 	sum := sha256.Sum256([]byte(storeTestIDPrefix + "visible"))
@@ -150,6 +155,10 @@ func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 	if got.Name != "Visible" || got.CollectionType != "mdblist" {
 		t.Fatalf("unexpected collection: %+v", *got)
 	}
+	sum = sha256.Sum256([]byte(storeTestIDPrefix + "shared-by-other"))
+	if got, err := store.Get(ctx, f.userID, storeTestOwnerProfile, hex.EncodeToString(sum[:14]), []int{7}); err != nil || got == nil {
+		t.Fatalf("another profile's shared collection must resolve on the login: got=%v err=%v", got, err)
+	}
 
 	for _, tc := range []struct {
 		name      string
@@ -158,8 +167,10 @@ func TestStoreGetEnforcesOwnershipOptInAndProfile(t *testing.T) {
 		id        string
 	}{
 		{"not opted in", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "not-opted-in"},
-		{"shared with another profile", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "other-profile"},
+		{"another profile's private collection", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "other-profile"},
+		{"audiobookshelf row", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "audiobookshelf"},
 		{"owned by another user", f.userID + 10_000, storeTestOwnerProfile, storeTestIDPrefix + "visible"},
+		{"shared on another login", f.userID + 10_000, storeTestOwnerProfile, storeTestIDPrefix + "shared-by-other"},
 		{"scoped outside visible libraries", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "hidden-library"},
 		{"unknown id", f.userID, storeTestOwnerProfile, storeTestIDPrefix + "missing"},
 	} {
@@ -187,7 +198,7 @@ func TestStoreAnyVisible(t *testing.T) {
 	}
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "hidden-probe", name: "Hidden Probe", optIn: true,
-		sharedWith: []string{storeTestOtherProfile}, sourceConfig: `{"library_ids":[9]}`,
+		creator: storeTestOtherProfile, sourceConfig: `{"library_ids":[9]}`,
 	})
 	if visible, err := store.AnyVisible(ctx, f.userID, storeTestOtherProfile, []int{7}); err != nil || visible {
 		t.Fatalf("expected hidden-library collection not to enable the view, got visible=%v err=%v", visible, err)
@@ -195,7 +206,7 @@ func TestStoreAnyVisible(t *testing.T) {
 
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "probe", name: "Probe", optIn: true,
-		sharedWith: []string{storeTestOtherProfile},
+		creator: storeTestOtherProfile,
 	})
 
 	if visible, err := store.AnyVisible(ctx, f.userID, storeTestOtherProfile, []int{7}); err != nil || !visible {
@@ -214,7 +225,7 @@ func TestStoreCompatKeys(t *testing.T) {
 		"01K3M9K0R7D6Y9T7F1P6W2H8ZX", uuid.NewString(), "legacy-collection", "123", `test-å-\-集合`,
 	} {
 		t.Run(id, func(t *testing.T) {
-			f.insert(t, storeTestCollection{id: id, name: "Test collection", optIn: true, sharedWith: []string{storeTestOwnerProfile}})
+			f.insert(t, storeTestCollection{id: id, name: "Test collection", optIn: true})
 			sum := sha256.Sum256([]byte(id))
 			key := hex.EncodeToString(sum[:14])
 			got, err := store.Get(t.Context(), f.userID, storeTestOwnerProfile, key, nil)
@@ -247,20 +258,18 @@ func TestStoreListLibraryScope(t *testing.T) {
 
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "lib-7", name: "Scoped To 7", optIn: true,
-		sharedWith: []string{storeTestOwnerProfile}, sourceConfig: `{"library_ids":[7]}`,
+		sourceConfig: `{"library_ids":[7]}`,
 	})
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "agnostic", name: "Agnostic", optIn: true,
-		sharedWith: []string{storeTestOwnerProfile},
 	})
 	f.insert(t, storeTestCollection{
 		id: storeTestIDPrefix + "not-opted-in-list", name: "Not Opted In", optIn: false,
-		sharedWith: []string{storeTestOwnerProfile},
 	})
 	for _, kind := range []string{"mdblist", "smart"} {
 		f.insert(t, storeTestCollection{
 			id: storeTestIDPrefix + kind + "-invalid-scope", name: "Out Of Range", optIn: true,
-			sharedWith: []string{storeTestOwnerProfile}, collType: kind,
+			collType:     kind,
 			sourceConfig: `{"library_ids":[2147483648,"7"]}`,
 			queryDef:     `{"library_ids":[2147483648,"7"]}`,
 		})

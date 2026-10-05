@@ -2,6 +2,7 @@ package sections
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -152,6 +153,49 @@ func TestResolveForSettings_IncludesHidden(t *testing.T) {
 	}
 	if result[1].Hidden {
 		t.Error("section 2 should not be hidden")
+	}
+}
+
+// TestResolveForSettings_KeepsAdminTitleAsDefault: the settings view keeps
+// the admin row's own title beside the profile's rename, so the profile can
+// see what it renamed and go back to it; a profile-built row has no admin
+// title.
+func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "Favorites", ItemLimit: 10, Config: json.RawMessage(`{}`)},
+	}
+	pos := 2
+	overrides := []ProfileSectionOverride{
+		{SectionID: "1", Title: "New this week"},
+		{ID: "custom-1", IsUserAdded: true, UserSectionType: SectionHiddenGems, UserTitle: "Hidden gems", Position: &pos},
+	}
+
+	result := ResolveForSettings(admin, overrides)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 sections, got %d", len(result))
+	}
+	got := map[string][2]string{}
+	for _, r := range result {
+		got[r.ID] = [2]string{r.Title, r.DefaultTitle}
+	}
+	want := map[string][2]string{
+		"1":        {"New this week", "Recently Added"},
+		"2":        {"Favorites", "Favorites"},
+		"custom-1": {"Hidden gems", ""},
+	}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("section %s (title, default title) = %q, want %q", id, got[id], w)
+		}
+	}
+	// v1 bodies embed ResolvedSection; the field must never reach them.
+	raw, err := json.Marshal(result[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Recently Added") {
+		t.Errorf("ResolvedSection JSON carries the default title: %s", raw)
 	}
 }
 

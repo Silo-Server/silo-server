@@ -37,6 +37,15 @@ func RunProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	})
 }
 
+// RunCollectionSharing runs the personal collection visibility and owner-only
+// update conformance checks: a shared collection reaches every profile on the
+// login, a private one only its creator (#1615).
+func RunCollectionSharing(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	t.Run("CollectionSharing", func(t *testing.T) {
+		testCollectionSharing(t, newStore)
+	})
+}
+
 // RunCollectionSortPreferences runs the preference timestamp and profile
 // lifecycle conformance checks against a UserStore implementation.
 func RunCollectionSortPreferences(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
@@ -219,6 +228,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	})
 	t.Run("Collections", func(t *testing.T) {
 		testCollections(t, newStore)
+	})
+	t.Run("CollectionSharing", func(t *testing.T) {
+		testCollectionSharing(t, newStore)
 	})
 	t.Run("Settings", func(t *testing.T) {
 		testSettings(t, newStore)
@@ -1657,40 +1669,82 @@ func testCollections(t *testing.T, newStore func(t *testing.T) userstore.UserSto
 	if err := store.DeleteCollection(ctx, coll.ID); err != nil {
 		t.Fatalf("DeleteCollection: %v", err)
 	}
+}
 
+func sorted(ids []string) []string {
+	return slices.Sorted(slices.Values(ids))
+}
+
+func testCollectionSharing(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Owner"}); err != nil {
+		t.Fatalf("CreateProfile(p1): %v", err)
+	}
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p2", Name: "Viewer"}); err != nil {
 		t.Fatalf("CreateProfile(p2): %v", err)
 	}
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p3", Name: "Blocked"}); err != nil {
-		t.Fatalf("CreateProfile(p3): %v", err)
-	}
 
 	shared, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
-		CreatorProfileID:  "p1",
-		Name:              "Family Action",
-		CollectionType:    "smart",
-		IsShared:          true,
-		AllowedProfileIDs: []string{"p1", "p2"},
-		QueryDefinition:   `{"match":"all","groups":[]}`,
+		CreatorProfileID: "p1",
+		Name:             "Family Action",
+		CollectionType:   "smart",
+		IsShared:         true,
+		QueryDefinition:  `{"match":"all","groups":[]}`,
 	})
 	if err != nil {
 		t.Fatalf("CreateCollection(shared): %v", err)
 	}
-
-	visible, err := store.ListCollections(ctx, "p2")
+	private, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: "p1",
+		Name:             "Just Mine",
+	})
 	if err != nil {
-		t.Fatalf("ListCollections(p2): %v", err)
+		t.Fatalf("CreateCollection(private): %v", err)
 	}
-	if len(visible) != 1 || visible[0].ID != shared.ID {
-		t.Fatalf("ListCollections(p2) = %+v, want shared collection", visible)
+	theirs, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: "p2",
+		Name:             "Viewer's Own",
+	})
+	if err != nil {
+		t.Fatalf("CreateCollection(theirs): %v", err)
 	}
 
-	blocked, err := store.ListCollections(ctx, "p3")
-	if err != nil {
-		t.Fatalf("ListCollections(p3): %v", err)
+	// A profile created after the collection was shared still sees it.
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p3", Name: "Added Later"}); err != nil {
+		t.Fatalf("CreateProfile(p3): %v", err)
 	}
-	if len(blocked) != 0 {
-		t.Fatalf("ListCollections(p3) returned %d collections, want 0", len(blocked))
+
+	listed := func(profileID string) []string {
+		t.Helper()
+		collections, err := store.ListCollections(ctx, profileID)
+		if err != nil {
+			t.Fatalf("ListCollections(%s): %v", profileID, err)
+		}
+		ids := make([]string, 0, len(collections))
+		for _, c := range collections {
+			if !c.VisibleTo(profileID) {
+				t.Fatalf("ListCollections(%s) returned %s, which VisibleTo rejects", profileID, c.ID)
+			}
+			ids = append(ids, c.ID)
+		}
+		return ids
+	}
+	// A shared collection reaches every profile on the login, including one
+	// that no allow list ever named; a private one stays with its creator.
+	// Each profile's own collections come first.
+	if got, want := listed("p2"), []string{theirs.ID, shared.ID}; !slices.Equal(got, want) {
+		t.Fatalf("ListCollections(p2) = %v, want %v", got, want)
+	}
+	if got, want := listed("p3"), []string{shared.ID}; !slices.Equal(got, want) {
+		t.Fatalf("ListCollections(p3) = %v, want %v", got, want)
+	}
+	if got, want := listed("p1"), []string{shared.ID, private.ID}; !slices.Equal(sorted(got), sorted(want)) {
+		t.Fatalf("ListCollections(p1) = %v, want %v", got, want)
+	}
+	if got, err := store.GetCollection(ctx, private.ID); err != nil || got.VisibleTo("p2") || !got.VisibleTo("p1") {
+		t.Fatalf("private collection visibility = %+v, %v; want only its creator", got, err)
 	}
 
 	rejectedName := "Not Allowed"
@@ -1700,6 +1754,19 @@ func testCollections(t *testing.T, newStore func(t *testing.T) userstore.UserSto
 		Name:             &rejectedName,
 	}); err == nil {
 		t.Fatal("expected creator-only UpdateCollection rejection")
+	}
+
+	// Turning sharing off hides the collection from everyone but its creator.
+	notShared := false
+	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
+		ID:               shared.ID,
+		RequestProfileID: "p1",
+		IsShared:         &notShared,
+	}); err != nil {
+		t.Fatalf("UpdateCollection(is_shared=false): %v", err)
+	}
+	if got := listed("p3"); len(got) != 0 {
+		t.Fatalf("ListCollections(p3) after unsharing = %v, want none", got)
 	}
 }
 

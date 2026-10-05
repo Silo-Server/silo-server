@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { v2 } from "@/api/v2/request";
-import { requiredETag } from "@/api/personalCollections";
+import { requiredETag } from "@/api/v2/etag";
 import {
   fetchAdminGroups,
   fetchAdminCollections,
@@ -88,14 +88,9 @@ export function useCreateCollectionGroup(libraryId: number) {
         path: { library_id: String(libraryId) },
         body: input,
       }).then(adminGroupFromV2),
-    onSuccess: () => {
-      void invalidateAdminCollectionQueries(queryClient);
-      toast.success("Group created");
-    },
-    onError: (e) => {
-      toast.error(adminMutationMessage(e, "Failed to create group"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    onError: (e) => toast.error(adminMutationMessage(e, "Couldn't add the shelf")),
+    // Returned, so the caller's mutateAsync settles once the shelves are read again.
+    onSettled: () => invalidateAdminCollectionQueries(queryClient),
   });
 }
 
@@ -107,7 +102,7 @@ interface UpdateGroupInput {
   default_sort_mode?: GroupSortMode;
 }
 
-export function useUpdateCollectionGroup(_libraryId: number) {
+export function useUpdateCollectionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
@@ -117,17 +112,12 @@ export function useUpdateCollectionGroup(_libraryId: number) {
         headers: { "If-Match": requiredETag(etag) },
         body: patch,
       }).then(adminGroupFromV2),
-    onSuccess: () => {
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (e) => {
-      toast.error(adminMutationMessage(e, "Failed to update group"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    onError: (e) => toast.error(adminMutationMessage(e, "Couldn't change the shelf")),
+    onSettled: () => invalidateAdminCollectionQueries(queryClient),
   });
 }
 
-export function useDeleteCollectionGroup(_libraryId: number) {
+export function useDeleteCollectionGroup() {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
@@ -136,17 +126,12 @@ export function useDeleteCollectionGroup(_libraryId: number) {
         path: { id },
         headers: { "If-Match": requiredETag(etag) },
       }),
-    onSuccess: () => {
-      void invalidateAdminCollectionQueries(queryClient);
-      toast.success("Group deleted");
-    },
-    onError: (e) => {
-      toast.error(adminMutationMessage(e, "Failed to delete group"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    onError: (e) => toast.error(adminMutationMessage(e, "Couldn't delete the shelf")),
+    onSettled: () => invalidateAdminCollectionQueries(queryClient),
   });
 }
 
+/** Arrange reports a failed move itself, with Try again, so these don't toast. */
 export function useReorderCollectionGroups(libraryId: number) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -157,13 +142,7 @@ export function useReorderCollectionGroups(libraryId: number) {
         headers: { "If-Match": requiredETag(etag) },
         body: { ordered_ids: orderedIDs },
       }),
-    onSuccess: () => {
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (e) => {
-      toast.error(adminMutationMessage(e, "Failed to reorder groups"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    onSettled: () => invalidateAdminCollectionQueries(queryClient),
   });
 }
 
@@ -193,12 +172,6 @@ export function useReorderCollectionsInGroup(libraryId: number) {
         body: { ordered_ids: orderedIDs },
       });
     },
-    onSuccess: () => {
-      void invalidateAdminCollectionQueries(queryClient);
-    },
-    onError: (e) => {
-      toast.error(adminMutationMessage(e, "Failed to reorder collections"));
-      void invalidateAdminCollectionQueries(queryClient);
-    },
+    onSettled: () => invalidateAdminCollectionQueries(queryClient),
   });
 }

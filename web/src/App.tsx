@@ -93,7 +93,7 @@ const ItemDetail = lazy(importItemDetail);
 const EbookReader = lazy(() => import("@/pages/EbookReader"));
 const PersonDetail = lazy(importPersonDetail);
 const Collections = lazy(importCollections);
-const CollectionEditor = lazy(() => import("@/pages/CollectionEditor"));
+const CollectionEditorPage = lazy(() => import("@/pages/CollectionEditorPage"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
@@ -113,9 +113,8 @@ const AdminDevices = lazy(() => import("@/pages/AdminDevices"));
 const AdminLibraries = lazy(() => import("@/pages/AdminLibraries"));
 const AdminSettingsLayout = lazy(() => import("@/pages/admin-settings/AdminSettingsLayout"));
 const AdminNodes = lazy(() => import("@/pages/AdminNodes"));
-const AdminSections = lazy(() => import("@/pages/AdminSections"));
+const AdminHomeRows = lazy(() => import("@/pages/AdminHomeRows"));
 const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
-const AdminCollectionEditor = lazy(() => import("@/pages/AdminCollectionEditor"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
@@ -514,8 +513,11 @@ function AppRoutes() {
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
                   <Route path="collections" element={<AdminCollections />} />
-                  <Route path="collections/new" element={<AdminCollectionEditor />} />
-                  <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
+                  {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
+                  <Route element={<CollectionEditorPage scope="server" />}>
+                    <Route path="collections/new" />
+                    <Route path="collections/:id/edit" />
+                  </Route>
                   <Route path="requests" element={<AdminRequests />} />
                   {/* Autoscan is a tab on Libraries now; keep old links working. */}
                   <Route path="autoscan" element={<LegacyAutoscanRedirect />} />
@@ -529,7 +531,7 @@ function AppRoutes() {
                   <Route path="devices" element={<AdminDevices />} />
                   <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
                   <Route path="nodes" element={<AdminNodes />} />
-                  <Route path="home-rows" element={<AdminSections />} />
+                  <Route path="home-rows" element={<AdminHomeRows />} />
                   <Route path="sections" element={<LegacyAdminSectionsRedirect />} />
                   <Route path="plugins" element={<AdminPlugins />} />
                   <Route path="plugins/:pluginId" element={<AdminPluginDetail />} />
@@ -641,8 +643,10 @@ function AppRoutes() {
                             element={<LegacyPersonalCatalogRedirect source="history" />}
                           />
                           <Route path="/collections" element={<Collections />} />
-                          <Route path="/collections/new" element={<CollectionEditor />} />
-                          <Route path="/collections/:id/edit" element={<CollectionEditor />} />
+                          <Route element={<CollectionEditorPage scope="personal" />}>
+                            <Route path="/collections/new" />
+                            <Route path="/collections/:id/edit" />
+                          </Route>
                           <Route
                             path="/collections/:id"
                             element={<LegacyUserCollectionRedirect />}

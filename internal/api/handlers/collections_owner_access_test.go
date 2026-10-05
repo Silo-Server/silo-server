@@ -61,7 +61,7 @@ func TestSharedPersonalCollectionOwnerAccessDB(t *testing.T) {
 		t.Helper()
 		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 			CreatorProfileID: "owner", Name: name, CollectionType: kind, QueryDefinition: query, DisplayQueryDefinition: display,
-			IsShared: true, AllowedProfileIDs: []string{"viewer"}, IncludeInServerCollections: true,
+			IsShared: true, IncludeInServerCollections: true,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -414,16 +414,23 @@ func TestSharedPersonalCollectionOwnerAccessDB(t *testing.T) {
 		if len(tab) != 0 {
 			t.Errorf("library tab shows %d collections whose owner is unavailable, want none", len(tab))
 		}
-		// Ordering never reads members, so the order editor still offers
-		// every collection the viewer orders; a partial list would be
-		// rejected when submitted.
-		order, err := h.PersonalCollectionOrderEditor(reqCtx, f.account, "viewer", nil)
+		// Ordering never reads members, so it never depends on resolving an
+		// owner. A profile orders only its own collections: the viewer has
+		// none, and the owner's order still offers all of its own.
+		order, err := h.PersonalCollectionOrderEditor(reqCtx, f.account, "viewer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(order.OrderedIDs) != 0 {
+			t.Errorf("viewer's order editor = %v, want none of the owner's collections", order.OrderedIDs)
+		}
+		order, err = h.PersonalCollectionOrderEditor(reqCtx, f.account, "owner")
 		if err != nil {
 			t.Fatal(err)
 		}
 		wantOrder := []string{manual.ID, displayed.ID, smart.ID, sorted.ID}
 		if got := ids(slices.Clone(order.OrderedIDs)); !slices.Equal(got, ids(wantOrder)) {
-			t.Errorf("order editor = %v, want %v", order.OrderedIDs, wantOrder)
+			t.Errorf("owner's order editor = %v, want %v", order.OrderedIDs, wantOrder)
 		}
 		for _, c := range collections {
 			if _, err := h.GetPersonalCollection(reqCtx, f.account, "viewer", c.ID); err == nil {
@@ -557,7 +564,7 @@ func TestPersonalCollectionOwnerLookupBudgetDB(t *testing.T) {
 		t.Helper()
 		input := userstore.CreateCollectionInput{CreatorProfileID: creator, Name: kind, CollectionType: kind, QueryDefinition: query, DisplayQueryDefinition: display, IncludeInServerCollections: true}
 		if shared {
-			input.IsShared, input.AllowedProfileIDs = true, []string{"viewer"}
+			input.IsShared = true
 		}
 		c, err := store.CreateCollection(ctx, input)
 		if err != nil {

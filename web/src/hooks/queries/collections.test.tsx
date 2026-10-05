@@ -5,7 +5,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
-import { useSetCollectionSortPreference, useUpdateCollection } from "./collections";
+import type { Collection, CollectionsListResponse } from "@/api/types";
+import {
+  useAddItemToCollection,
+  useRemoveCollectionItem,
+  useReorderCollectionItems,
+  useReorderCollections,
+  useSetCollectionSortPreference,
+  useUpdateCollection,
+} from "./collections";
+import { collectionKeys, libraryCollectionKeys } from "./keys";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const apiWithProfileRequestContextMock = vi.hoisted(() => vi.fn());
@@ -226,5 +235,117 @@ describe("guarded collection editing", () => {
     );
     expect(errorToast).toHaveBeenCalledWith(expect.stringContaining("Reload"));
     expect(invalidate).toHaveBeenCalled();
+  });
+});
+
+describe("reordering personal collections", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  function listed(id: string, creator: string, sortOrder: number) {
+    return { id, creator_profile_id: creator, sort_order: sortOrder } as Collection;
+  }
+
+  it("sends a flat order and moves only the profile's own collections in the cache", async () => {
+    const pending = deferred<unknown>();
+    apiWithProfileRequestContextMock.mockReturnValue(pending.promise);
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    queryClient.setQueryData<CollectionsListResponse>(collectionKeys.list(), {
+      collections: [
+        listed("mine-a", "p-me", 0),
+        listed("mine-b", "p-me", 1),
+        listed("theirs", "p-parent", 0),
+      ],
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useReorderCollections(), { wrapper });
+
+    act(() => {
+      result.current.mutate({ orderedIds: ["mine-b", "mine-a"], etag: '"order"' });
+    });
+
+    await waitFor(() =>
+      expect(
+        queryClient
+          .getQueryData<CollectionsListResponse>(collectionKeys.list())
+          ?.collections.map((c) => [c.id, c.sort_order]),
+      ).toEqual([
+        ["mine-b", 0],
+        ["mine-a", 1],
+        ["theirs", 0],
+      ]),
+    );
+    expect(apiWithProfileRequestContextMock).toHaveBeenCalledWith("PUT /api/v2/collections/order", {
+      headers: { "If-Match": '"order"' },
+      body: { ordered_ids: ["mine-b", "mine-a"] },
+    });
+    pending.resolve({});
+  });
+});
+
+describe("personal collection writes refresh library Collections tabs", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  // A personal collection shown on the Collections tab is also listed, with its
+  // item count and poster, on each library's Collections tab.
+  const writes: Array<[string, () => () => Promise<unknown>]> = [
+    [
+      "adding an item",
+      () => {
+        const m = useAddItemToCollection();
+        return () => m.mutateAsync({ collectionId: "c", mediaItemId: "m" });
+      },
+    ],
+    [
+      "removing an item",
+      () => {
+        const m = useRemoveCollectionItem("c");
+        return () => m.mutateAsync("m");
+      },
+    ],
+    [
+      "reordering items",
+      () => {
+        const m = useReorderCollectionItems("c");
+        return () => m.mutateAsync({ orderedIds: ["m"], etag: '"items"' });
+      },
+    ],
+    [
+      "reordering collections",
+      () => {
+        const m = useReorderCollections();
+        return () => m.mutateAsync({ orderedIds: ["c"], etag: '"order"' });
+      },
+    ],
+    [
+      "saving a poster removal",
+      () => {
+        const m = useUpdateCollection();
+        return () =>
+          m.mutateAsync({ id: "c", etag: '"c"', body: { name: "Films" }, removePoster: true });
+      },
+    ],
+  ];
+
+  it.each(writes)("%s marks loaded library Collections tabs stale", async (_name, useWrite) => {
+    apiWithProfileRequestContextMock.mockReset().mockResolvedValue({});
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    const libraryTab = [...libraryCollectionKeys.all, 7];
+    queryClient.setQueryData(libraryTab, []);
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useWrite(), { wrapper });
+
+    await act(async () => {
+      await result.current();
+    });
+
+    await waitFor(() => expect(queryClient.getQueryState(libraryTab)?.isInvalidated).toBe(true));
   });
 });

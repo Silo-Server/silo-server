@@ -92,6 +92,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -1314,6 +1315,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media

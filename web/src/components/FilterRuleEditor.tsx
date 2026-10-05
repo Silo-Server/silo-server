@@ -10,11 +10,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { FilterConfig, FilterGroup, FilterRule } from "@/api/types";
 import {
   COLLECTION_FIELD_OPTIONS,
   getCollectionSortOptions,
   getCollectionFieldOption,
+  getDefaultRuleValue,
+  newFilterRule,
   type CollectionFieldOption,
 } from "@/components/collections/collectionBuilderFields";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
@@ -81,6 +84,290 @@ function canEditRule(
   return true;
 }
 
+function normalizeRuleValue(
+  field: string,
+  op: string,
+  value: FilterRule["value"],
+): FilterRule["value"] {
+  const fieldDef = getCollectionFieldOption(field);
+  if (!fieldDef) {
+    return value;
+  }
+  if (op === "between" && fieldDef.supportsRange) {
+    if (Array.isArray(value) && value.length === 2) {
+      return value;
+    }
+    return ["", ""];
+  }
+  if (fieldDef.inputType === "boolean") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    return String(value) === "true";
+  }
+  return value;
+}
+
+interface FilterRuleRowProps {
+  rule: FilterRule;
+  fieldOptions: CollectionFieldOption[];
+  allowPersonalizedFilters: boolean;
+  onChange: (updates: Partial<FilterRule>) => void;
+  onRemove: () => void;
+  /** Taller controls that wrap onto a second line when narrow, for roomier forms. */
+  roomy?: boolean;
+  /**
+   * Names the rule's controls as a group ("Rule 2"), so a screen reader can
+   * tell which rule a Field, Value or Remove rule control belongs to.
+   */
+  label?: string;
+}
+
+const RULE_ROW_SIZES = {
+  compact: {
+    row: "flex items-center gap-2",
+    control: "h-8 text-xs",
+    field: "w-36",
+    op: "w-24",
+    value: "flex-1",
+  },
+  roomy: {
+    row: "flex flex-wrap items-center gap-2",
+    control: "h-9 text-sm",
+    field: "w-40",
+    op: "w-36",
+    value: "min-w-40 flex-1",
+  },
+};
+
+/**
+ * One rule: field, condition and value, then a remove button. A rule these
+ * controls can't represent shows read-only and stays as saved until removed.
+ */
+export function FilterRuleRow({
+  rule,
+  fieldOptions,
+  allowPersonalizedFilters,
+  onChange,
+  onRemove,
+  roomy = false,
+  label,
+}: FilterRuleRowProps) {
+  const size = RULE_ROW_SIZES[roomy ? "roomy" : "compact"];
+  const fieldDef = getCollectionFieldOption(rule.field);
+  const operators = fieldDef?.operators ?? [];
+
+  if (!canEditRule(rule, fieldDef, allowPersonalizedFilters)) {
+    return (
+      <div
+        role="group"
+        aria-label="Rule not editable here"
+        className="border-border flex items-center gap-2 rounded-md border border-dashed px-2 py-1 text-xs"
+      >
+        <span className="flex-1">
+          <span className="font-medium">Not editable here</span>{" "}
+          <code className="text-muted-foreground">
+            {rule.field} {rule.op} {JSON.stringify(rule.value)}
+          </code>
+        </span>
+        <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={onRemove}>
+          Remove
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div role={label ? "group" : undefined} aria-label={label} className={size.row}>
+      <Select
+        value={rule.field}
+        onValueChange={(v) => {
+          const newDef = getCollectionFieldOption(v);
+          const defaultOp = newDef?.operators[0]?.value ?? "is";
+          onChange({ field: v, op: defaultOp, value: getDefaultRuleValue(v, defaultOp) });
+        }}
+      >
+        <SelectTrigger aria-label="Field" className={cn(size.control, size.field)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {fieldOptions.map((f) => (
+            <SelectItem key={f.value} value={f.value}>
+              {f.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={rule.op}
+        onValueChange={(v) =>
+          onChange({ op: v, value: normalizeRuleValue(rule.field, v, rule.value) })
+        }
+      >
+        <SelectTrigger aria-label="Condition" className={cn(size.control, size.op)}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {operators.map((op) => (
+            <SelectItem key={op.value} value={op.value}>
+              {op.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      {fieldDef?.supportsRange && rule.op === "between" ? (
+        <div className={cn("flex items-center gap-2", size.value)}>
+          {[0, 1].map((index) => {
+            const rangeValue =
+              Array.isArray(rule.value) && rule.value.length === 2 ? rule.value : ["", ""];
+            return (
+              <Input
+                key={index}
+                type={fieldDef.inputType === "number" ? "number" : "text"}
+                aria-label={index === 0 ? "From" : "To"}
+                value={String(rangeValue[index] ?? "")}
+                onChange={(e) => {
+                  const nextValue: [string | number, string | number] = [
+                    rangeValue[0] ?? "",
+                    rangeValue[1] ?? "",
+                  ];
+                  nextValue[index] =
+                    fieldDef.inputType === "number" && e.target.value !== ""
+                      ? Number(e.target.value)
+                      : e.target.value;
+                  onChange({ value: nextValue });
+                }}
+                className={cn(size.control, "min-w-0 flex-1")}
+                placeholder={index === 0 ? "From" : "To"}
+              />
+            );
+          })}
+        </div>
+      ) : fieldDef?.inputType === "boolean" ? (
+        <Select
+          value={String(Boolean(rule.value))}
+          onValueChange={(v) => onChange({ value: v === "true" })}
+        >
+          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="true">True</SelectItem>
+            <SelectItem value="false">False</SelectItem>
+          </SelectContent>
+        </Select>
+      ) : fieldDef?.inputType === "select" ? (
+        <Select value={String(rule.value)} onValueChange={(v) => onChange({ value: v })}>
+          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
+            <SelectValue placeholder="Select..." />
+          </SelectTrigger>
+          <SelectContent>
+            {fieldDef.selectOptions?.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : fieldDef?.inputType === "person_search" ? (
+        <PersonSearchSelect
+          value={String(rule.value ?? "")}
+          onChange={(v) => onChange({ value: v })}
+        />
+      ) : (
+        <Input
+          type={fieldDef?.inputType === "number" ? "number" : "text"}
+          aria-label="Value"
+          value={String(rule.value)}
+          onChange={(e) =>
+            onChange({
+              value: fieldDef?.inputType === "number" ? Number(e.target.value) : e.target.value,
+            })
+          }
+          className={cn(size.control, size.value)}
+          placeholder={rule.field === "added_at" ? "e.g. 30d, 2w" : "Value..."}
+        />
+      )}
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label="Remove rule"
+        className="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0 p-0"
+        onClick={onRemove}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+interface FilterSortControlsProps {
+  sort?: string;
+  order?: string;
+  /** A new field sends both; a new direction sends only the order. */
+  onChange: (next: { sort?: string; order: string }) => void;
+  allowPersonalizedSorts?: PersonalizedSorts;
+  sortRelevanceScope?: QuerySortRelevanceScope;
+}
+
+/** "Sort by" a field, then ascending or descending. */
+export function FilterSortControls({
+  sort,
+  order,
+  onChange,
+  allowPersonalizedSorts = false,
+  sortRelevanceScope,
+}: FilterSortControlsProps) {
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+    sort,
+  );
+  const selectedSort = normalizeQuerySortForScope(
+    { field: sort, order },
+    {
+      includePersonalized: allowPersonalizedSorts,
+      relevanceScope: sortRelevanceScope,
+      shownRatingSources,
+      keepSortField: sort,
+    },
+  );
+  return (
+    <>
+      <Select
+        value={selectedSort.field}
+        onValueChange={(v) => onChange({ sort: v, order: getDefaultQuerySortOrder(v) })}
+      >
+        <SelectTrigger aria-label="Sort by" className="h-8 w-32 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {sortOptions.map((sortOption) => (
+            <SelectItem key={sortOption.value} value={sortOption.value}>
+              {sortOption.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={order || "desc"} onValueChange={(v) => onChange({ order: v })}>
+        <SelectTrigger aria-label="Direction" className="h-8 w-28 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="desc">Descending</SelectItem>
+          <SelectItem value="asc">Ascending</SelectItem>
+        </SelectContent>
+      </Select>
+    </>
+  );
+}
+
 export default function FilterRuleEditor({
   value,
   onChange,
@@ -90,61 +377,7 @@ export default function FilterRuleEditor({
   mediaScope = "all",
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
-  const shownRatingSources = useShownRatingSources();
-  const sortOptions = getCollectionSortOptions(
-    allowPersonalizedSorts,
-    sortRelevanceScope,
-    shownRatingSources,
-    config.sort,
-  );
-  const selectedSort = normalizeQuerySortForScope(
-    { field: config.sort, order: config.order },
-    {
-      includePersonalized: allowPersonalizedSorts,
-      relevanceScope: sortRelevanceScope,
-      shownRatingSources,
-      keepSortField: config.sort,
-    },
-  );
   const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
-
-  function getDefaultRuleValue(field: string, op: string): FilterRule["value"] {
-    const fieldDef = getCollectionFieldOption(field);
-    if (op === "between" && fieldDef?.supportsRange) {
-      return ["", ""];
-    }
-    if (fieldDef?.inputType === "boolean") {
-      return false;
-    }
-    if (fieldDef?.inputType === "number") {
-      return 0;
-    }
-    return "";
-  }
-
-  function normalizeRuleValue(
-    field: string,
-    op: string,
-    value: FilterRule["value"],
-  ): FilterRule["value"] {
-    const fieldDef = getCollectionFieldOption(field);
-    if (!fieldDef) {
-      return value;
-    }
-    if (op === "between" && fieldDef.supportsRange) {
-      if (Array.isArray(value) && value.length === 2) {
-        return value;
-      }
-      return ["", ""];
-    }
-    if (fieldDef.inputType === "boolean") {
-      if (typeof value === "boolean") {
-        return value;
-      }
-      return String(value) === "true";
-    }
-    return value;
-  }
 
   function updateConfig(updates: Partial<FilterConfig>) {
     onChange({ ...config, ...updates });
@@ -152,13 +385,7 @@ export default function FilterRuleEditor({
 
   function addGroup() {
     updateConfig({
-      groups: [
-        ...config.groups,
-        {
-          match: "all",
-          rules: [{ field: "genre", op: "is", value: getDefaultRuleValue("genre", "is") }],
-        },
-      ],
+      groups: [...config.groups, { match: "all", rules: [newFilterRule()] }],
     });
   }
 
@@ -176,12 +403,7 @@ export default function FilterRuleEditor({
   function addRule(groupIdx: number) {
     const group = config.groups[groupIdx];
     if (!group) return;
-    updateGroup(groupIdx, {
-      rules: [
-        ...group.rules,
-        { field: "genre", op: "is", value: getDefaultRuleValue("genre", "is") },
-      ],
-    });
+    updateGroup(groupIdx, { rules: [...group.rules, newFilterRule()] });
   }
 
   function removeRule(groupIdx: number, ruleIdx: number) {
@@ -251,176 +473,17 @@ export default function FilterRuleEditor({
             </Button>
           </div>
 
-          {group.rules.map((rule, ruleIdx) => {
-            const fieldDef = getCollectionFieldOption(rule.field);
-            const operators = fieldDef?.operators ?? [];
-
-            if (!canEditRule(rule, fieldDef, allowPersonalizedFilters)) {
-              return (
-                <div
-                  key={ruleIdx}
-                  role="group"
-                  aria-label="Rule not editable here"
-                  className="border-border flex items-center gap-2 rounded-md border border-dashed px-2 py-1 text-xs"
-                >
-                  <span className="flex-1">
-                    <span className="font-medium">Not editable here</span>{" "}
-                    <code className="text-muted-foreground">
-                      {rule.field} {rule.op} {JSON.stringify(rule.value)}
-                    </code>
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => removeRule(groupIdx, ruleIdx)}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              );
-            }
-
-            return (
-              <div key={ruleIdx} className="flex items-center gap-2">
-                <Select
-                  value={rule.field}
-                  onValueChange={(v) => {
-                    const newDef = getCollectionFieldOption(v);
-                    const defaultOp = newDef?.operators[0]?.value ?? "is";
-                    updateRule(groupIdx, ruleIdx, {
-                      field: v,
-                      op: defaultOp,
-                      value: getDefaultRuleValue(v, defaultOp),
-                    });
-                  }}
-                >
-                  <SelectTrigger className="h-8 w-36 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fieldOptions.map((f) => (
-                      <SelectItem key={f.value} value={f.value}>
-                        {f.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={rule.op}
-                  onValueChange={(v) =>
-                    updateRule(groupIdx, ruleIdx, {
-                      op: v,
-                      value: normalizeRuleValue(rule.field, v, rule.value),
-                    })
-                  }
-                >
-                  <SelectTrigger className="h-8 w-24 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {operators.map((op) => (
-                      <SelectItem key={op.value} value={op.value}>
-                        {op.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {fieldDef?.supportsRange && rule.op === "between" ? (
-                  <div className="flex flex-1 items-center gap-2">
-                    {[0, 1].map((index) => {
-                      const rangeValue =
-                        Array.isArray(rule.value) && rule.value.length === 2
-                          ? rule.value
-                          : ["", ""];
-                      return (
-                        <Input
-                          key={index}
-                          type={fieldDef.inputType === "number" ? "number" : "text"}
-                          value={String(rangeValue[index] ?? "")}
-                          onChange={(e) => {
-                            const nextValue: [string | number, string | number] = [
-                              rangeValue[0] ?? "",
-                              rangeValue[1] ?? "",
-                            ];
-                            nextValue[index] =
-                              fieldDef.inputType === "number" && e.target.value !== ""
-                                ? Number(e.target.value)
-                                : e.target.value;
-                            updateRule(groupIdx, ruleIdx, { value: nextValue });
-                          }}
-                          className="h-8 flex-1 text-xs"
-                          placeholder={index === 0 ? "From" : "To"}
-                        />
-                      );
-                    })}
-                  </div>
-                ) : fieldDef?.inputType === "boolean" ? (
-                  <Select
-                    value={String(Boolean(rule.value))}
-                    onValueChange={(v) => updateRule(groupIdx, ruleIdx, { value: v === "true" })}
-                  >
-                    <SelectTrigger className="h-8 flex-1 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="true">True</SelectItem>
-                      <SelectItem value="false">False</SelectItem>
-                    </SelectContent>
-                  </Select>
-                ) : fieldDef?.inputType === "select" ? (
-                  <Select
-                    value={String(rule.value)}
-                    onValueChange={(v) => updateRule(groupIdx, ruleIdx, { value: v })}
-                  >
-                    <SelectTrigger className="h-8 flex-1 text-xs">
-                      <SelectValue placeholder="Select..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {fieldDef.selectOptions?.map((opt) => (
-                        <SelectItem key={opt} value={opt}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : fieldDef?.inputType === "person_search" ? (
-                  <PersonSearchSelect
-                    value={String(rule.value ?? "")}
-                    onChange={(v) => updateRule(groupIdx, ruleIdx, { value: v })}
-                  />
-                ) : (
-                  <Input
-                    type={fieldDef?.inputType === "number" ? "number" : "text"}
-                    value={String(rule.value)}
-                    onChange={(e) =>
-                      updateRule(groupIdx, ruleIdx, {
-                        value:
-                          fieldDef?.inputType === "number"
-                            ? Number(e.target.value)
-                            : e.target.value,
-                      })
-                    }
-                    className="h-8 flex-1 text-xs"
-                    placeholder={rule.field === "added_at" ? "e.g. 30d, 2w" : "Value..."}
-                  />
-                )}
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-destructive h-7 w-7 shrink-0 p-0"
-                  onClick={() => removeRule(groupIdx, ruleIdx)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            );
-          })}
+          {group.rules.map((rule, ruleIdx) => (
+            <FilterRuleRow
+              key={ruleIdx}
+              rule={rule}
+              fieldOptions={fieldOptions}
+              allowPersonalizedFilters={allowPersonalizedFilters}
+              onChange={(updates) => updateRule(groupIdx, ruleIdx, updates)}
+              onRemove={() => removeRule(groupIdx, ruleIdx)}
+              label={`Rule ${ruleIdx + 1}`}
+            />
+          ))}
 
           <Button
             type="button"
@@ -441,30 +504,13 @@ export default function FilterRuleEditor({
       {/* Sort controls */}
       <div className="border-border flex items-center gap-2 border-t pt-2">
         <span className="text-muted-foreground text-sm">Sort by</span>
-        <Select
-          value={selectedSort.field}
-          onValueChange={(v) => updateConfig({ sort: v, order: getDefaultQuerySortOrder(v) })}
-        >
-          <SelectTrigger className="h-8 w-32 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {sortOptions.map((sortOption) => (
-              <SelectItem key={sortOption.value} value={sortOption.value}>
-                {sortOption.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={config.order || "desc"} onValueChange={(v) => updateConfig({ order: v })}>
-          <SelectTrigger className="h-8 w-28 text-xs">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="desc">Descending</SelectItem>
-            <SelectItem value="asc">Ascending</SelectItem>
-          </SelectContent>
-        </Select>
+        <FilterSortControls
+          sort={config.sort}
+          order={config.order}
+          onChange={updateConfig}
+          allowPersonalizedSorts={allowPersonalizedSorts}
+          sortRelevanceScope={sortRelevanceScope}
+        />
       </div>
     </div>
   );

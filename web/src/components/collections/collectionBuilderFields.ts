@@ -1,5 +1,5 @@
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
-import type { QuerySort } from "@/api/types";
+import type { FilterRule, QuerySort } from "@/api/types";
 import { getQuerySortOptions, type QuerySortRelevanceScope } from "@/lib/querySortOptions";
 
 export interface CollectionOperatorOption {
@@ -283,4 +283,24 @@ export const COLLECTION_SORT_OPTIONS: Array<{ value: QuerySort["field"]; label: 
 export function getCollectionFieldOption(field: string): CollectionFieldOption | undefined {
   const normalizedField = field === "rating" ? "rating_imdb" : field;
   return COLLECTION_FIELD_OPTIONS.find((option) => option.value === normalizedField);
+}
+
+/** The value a rule starts with when its field or condition changes. */
+export function getDefaultRuleValue(field: string, op: string): FilterRule["value"] {
+  const fieldDef = getCollectionFieldOption(field);
+  if (op === "between" && fieldDef?.supportsRange) {
+    return ["", ""];
+  }
+  if (fieldDef?.inputType === "boolean") {
+    return false;
+  }
+  if (fieldDef?.inputType === "number") {
+    return 0;
+  }
+  return "";
+}
+
+/** The rule a new line starts with. */
+export function newFilterRule(): FilterRule {
+  return { field: "genre", op: "is", value: getDefaultRuleValue("genre", "is") };
 }

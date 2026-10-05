@@ -8,8 +8,14 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
 }));
 
+const addToCollection = vi.hoisted(() => ({
+  props: null as null | { open: boolean; mediaItemId: string; itemTitle?: string },
+}));
 vi.mock("@/components/AddToCollectionDialog", () => ({
-  default: () => null,
+  default: (props: { open: boolean; mediaItemId: string; itemTitle?: string }) => {
+    addToCollection.props = props;
+    return null;
+  },
 }));
 
 const markerMocks = vi.hoisted(() => ({
@@ -52,6 +58,24 @@ describe("ActionBar detail menu", () => {
         .getByRole("menuitem", { name: "Refresh Metadata" })
         .querySelector(".lucide-refresh-cw"),
     ).toBeTruthy();
+  });
+});
+
+describe("ActionBar Add to collection", () => {
+  it("names the title it adds", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="movie-1" itemTitle="Heat" />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add to Collection" }));
+    expect(addToCollection.props).toMatchObject({
+      open: true,
+      mediaItemId: "movie-1",
+      itemTitle: "Heat",
+    });
   });
 });
 

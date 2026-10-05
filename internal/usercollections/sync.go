@@ -163,12 +163,14 @@ func (s *Service) ownerFilter(ctx context.Context, userID int, store userstore.U
 		"error", err,
 	)
 	if stateErr := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-		ID:         collection.ID,
-		Status:     "failed",
-		Message:    ErrOwnerAccessUnavailable.Error(),
-		ItemCount:  collection.ItemCount,
-		LastSyncAt: time.Now().UTC(),
-		NextSyncAt: collection.NextSyncAt,
+		ID:                collection.ID,
+		Status:            "failed",
+		Message:           ErrOwnerAccessUnavailable.Error(),
+		ItemCount:         collection.ItemCount,
+		LastSyncAt:        time.Now().UTC(),
+		NextSyncAt:        collection.NextSyncAt,
+		ScheduleAtStart:   collection.SyncSchedule,
+		NextSyncAtAtStart: collection.NextSyncAt,
 	}); stateErr != nil {
 		s.logger.ErrorContext(ctx, "user collection sync: recording the failed sync failed",
 			"user_id", userID,
@@ -568,22 +570,24 @@ func (s *Service) applyResult(
 	}
 
 	if err := store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-		ID:         collection.ID,
-		Status:     status,
-		Message:    message,
-		ItemCount:  len(matched),
-		LastSyncAt: completedAt,
-		NextSyncAt: nextSyncAt,
+		ID:                collection.ID,
+		Status:            status,
+		Message:           message,
+		ItemCount:         len(matched),
+		LastSyncAt:        completedAt,
+		NextSyncAt:        nextSyncAt,
+		ScheduleAtStart:   collection.SyncSchedule,
+		NextSyncAtAtStart: collection.NextSyncAt,
 	}); err != nil {
 		return nil, nil, err
 	}
 
-	updated := *collection
-	updated.LastSyncAt = &completedAt
-	updated.LastSyncStatus = status
-	updated.LastSyncMessage = message
-	updated.ItemCount = len(matched)
-	updated.NextSyncAt = nextSyncAt
+	// Read the row back: a schedule edited while the sync ran, on any node,
+	// kept its own next run, and the caller renders what was stored.
+	updated, err := store.GetCollection(ctx, collection.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading the synced collection: %w", err)
+	}
 
 	s.logger.InfoContext(ctx, "user collection synced",
 		"collection_id", collection.ID,
@@ -602,5 +606,5 @@ func (s *Service) applyResult(
 		ItemsUnmatched: unmatched,
 		StartedAt:      startedAt,
 		CompletedAt:    completedAt,
-	}, &updated, nil
+	}, updated, nil
 }

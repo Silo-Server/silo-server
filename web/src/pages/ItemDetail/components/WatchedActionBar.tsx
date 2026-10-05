@@ -21,6 +21,7 @@ export default function WatchedActionBar({ item, ...props }: WatchedActionBarPro
   return (
     <ActionBar
       {...props}
+      itemTitle={item.title}
       watchedLabel={getWatchedActionLabel(item)}
       isWatched={item.user_data?.played ?? false}
       onToggleWatched={handleToggleWatched}

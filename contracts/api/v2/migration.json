@@ -35150,7 +35150,7 @@
         "path": "/api/v2/profile/sections/settings",
         "operation_id": "getProfileSectionSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag. Adds default_title, the administrator's title for the row, which v1 does not return."
     },
     {
       "listener": "api",
@@ -38218,17 +38218,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/lib/recipes.ts",
-          "line": 79,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "catalog-home",
       "release_flow": "browse_search",
       "tier": 1,

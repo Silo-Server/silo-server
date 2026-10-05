@@ -118,6 +118,22 @@ describe("AdminLayout shell attribute", () => {
   });
 });
 
+describe("AdminLayout page gutter", () => {
+  // Fixed page chrome (the collection editor's save bar) reads this gutter so
+  // it lines up with the content column instead of guessing the padding.
+  it("pads main by the gutter it publishes", () => {
+    renderAdmin();
+
+    expect(screen.getByRole("main")).toHaveClass(
+      "px-(--page-gutter)",
+      "[--page-gutter:1rem]",
+      "sm:[--page-gutter:1.5rem]",
+      "lg:[--page-gutter:2rem]",
+      "xl:[--page-gutter:2.5rem]",
+    );
+  });
+});
+
 describe("AdminLayout page title", () => {
   // The tab title, the route-change announcement and the phone header all read
   // this name, so a renamed route must not fall back to the generic "Admin"

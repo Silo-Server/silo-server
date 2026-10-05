@@ -12,9 +12,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// ServerVisibleCollection is the per-user view of a personal collection the
-// owner has opted into their own library Collections tab. Personal collections
-// are private to their owner; this list never crosses user boundaries.
+// ServerVisibleCollection is a personal collection opted into the library
+// Collections tab, as one profile sees it: its own, or another profile's on
+// the same login that is shared. This list never crosses logins.
 type ServerVisibleCollection struct {
 	ID               string `json:"id"`
 	CreatorProfileID string `json:"creator_profile_id"`
@@ -37,18 +37,15 @@ type ServerVisibleCollection struct {
 // the response.
 const serverVisibleListLimit = 500
 
-// serverVisibleWhere is the ownership + opt-in + profile-ACL predicate that
-// gates every server-visible read. Personal collections are private, so this
-// privacy boundary is defined once and shared by all readers: $1 is the owning
-// user and $2 the viewing profile.
+// serverVisibleWhere is the visibility + opt-in predicate that gates every
+// server-visible read, defined once and shared by all readers: $1 is the
+// owning user and $2 the viewing profile. A profile sees its own collections
+// and, on the same login, other profiles' shared ones; Audiobookshelf rows
+// (native = false) never reach these reads.
 const serverVisibleWhere = `upc.user_id = $1
+	AND upc.native
 	AND upc.include_in_server_collections = TRUE
-	AND EXISTS (
-		SELECT 1 FROM user_personal_collection_profiles vp
-		WHERE vp.user_id = upc.user_id
-		  AND vp.collection_id = upc.id
-		  AND vp.profile_id = $2
-	)`
+	AND (upc.creator_profile_id = $2 OR upc.is_shared)`
 
 // scopeConfigExpr picks the JSON object that carries a collection's library
 // scope: a smart collection scopes through its query, an imported one through
@@ -74,12 +71,14 @@ func scopeMatchesLibraries(scopeColumn, libraryIDsParam string) string {
 	)`
 }
 
-// ListServerVisibleByLibrary returns the current user's personal collections
-// that have opted into their library Collections tab and whose library scope
-// matches the requested library. Imported exact collections read library_ids
-// from source_config, while legacy rows can fall back to query_definition. A
+// ListServerVisibleByLibrary returns the personal collections profileID may
+// see (its own, and other profiles' shared collections on the login) that are
+// opted into the library Collections tab and whose library scope matches the
+// requested library. Imported exact collections read library_ids from
+// source_config, while legacy rows can fall back to query_definition. A
 // collection with no library_ids is treated as library-agnostic and therefore
-// visible in every library tab. Other users' collections are never returned.
+// visible in every library tab. Other logins' collections and Audiobookshelf
+// rows are never returned.
 func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID int, profileID string, libraryID int) ([]ServerVisibleCollection, error) {
 	return listServerVisible(ctx, pool, userID, profileID, []int{libraryID}, false)
 }
@@ -252,7 +251,7 @@ func (s *Store) ImageCandidates(ctx context.Context, key string) ([]ServerVisibl
 		        poster_url, poster_thumbhash, created_at, updated_at
 		 FROM user_personal_collections
 		 WHERE jellycompat_user_collection_key(id) = $1
-		   AND include_in_server_collections = TRUE AND collection_type <> 'playlist'`, key)
+		   AND native AND include_in_server_collections = TRUE AND collection_type <> 'playlist'`, key)
 	if err != nil {
 		return nil, fmt.Errorf("loading signed-image collection candidates: %w", err)
 	}

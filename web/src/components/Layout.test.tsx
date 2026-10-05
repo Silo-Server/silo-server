@@ -268,11 +268,28 @@ describe("Layout sidebar collapse", () => {
   });
 });
 
+describe("Layout page gutter", () => {
+  // Fixed page chrome (the collection editor's save bar) reads this gutter so
+  // it lines up with the content column instead of guessing the padding.
+  it("pads the page by the gutter it publishes", () => {
+    setRoute("/collections", "collections");
+    renderLayout();
+
+    expect(screen.getByRole("main").firstElementChild).toHaveClass(
+      "px-(--page-gutter)",
+      "[--page-gutter:1rem]",
+      "sm:[--page-gutter:1.5rem]",
+      "lg:[--page-gutter:2.5rem]",
+      "xl:[--page-gutter:3rem]",
+    );
+  });
+});
+
 describe("Layout request routes", () => {
   // The padded shell wraps the page in one gutter div; unpadded pages render
   // straight into <main>.
   const isShellPadded = () =>
-    screen.getByRole("main").firstElementChild?.classList.contains("lg:px-10") ?? false;
+    screen.getByRole("main").firstElementChild?.classList.contains("px-(--page-gutter)") ?? false;
 
   it.each([
     ["/requests", false, false],

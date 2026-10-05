@@ -115,16 +115,17 @@ type SectionOverridesReplaceInput struct {
 // the customization screen: the admin definition with the profile's
 // overrides applied.
 type ProfileSectionSetting struct {
-	ID          string        `json:"id" example:"s-continue-watching"`
-	SectionType string        `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
-	Title       string        `json:"title" example:"Continue Watching"`
-	Featured    bool          `json:"featured" example:"false"`
-	ItemLimit   int           `json:"item_limit" example:"20"`
-	Hidden      bool          `json:"hidden" doc:"Hidden by the profile" example:"false"`
-	IsCustom    bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
-	Customized  bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
-	Position    int           `json:"position" example:"0"`
-	Config      SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
+	ID           string        `json:"id" example:"s-continue-watching"`
+	SectionType  string        `json:"section_type" doc:"The recipe; the set is extensible" example:"continue_watching"`
+	Title        string        `json:"title" doc:"The title this profile sees: its own title override, or the administrator's title" example:"Continue Watching"`
+	DefaultTitle string        `json:"default_title" doc:"The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built" example:"Continue Watching"`
+	Featured     bool          `json:"featured" example:"false"`
+	ItemLimit    int           `json:"item_limit" example:"20"`
+	Hidden       bool          `json:"hidden" doc:"Hidden by the profile" example:"false"`
+	IsCustom     bool          `json:"is_custom" doc:"Built by the profile rather than defined by an administrator" example:"false"`
+	Customized   bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
+	Position     int           `json:"position" example:"0"`
+	Config       SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
 }
 
 // ProfileSectionSettingCollection is the getProfileSectionSettings envelope.
@@ -332,16 +333,17 @@ func (reg *Registry) getProfileSectionSettings(ctx context.Context, in *SectionO
 			return nil, p
 		}
 		items = append(items, ProfileSectionSetting{
-			ID:          s.ID,
-			SectionType: string(s.SectionType),
-			Title:       s.Title,
-			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
-			Hidden:      s.Hidden,
-			IsCustom:    s.IsCustom,
-			Customized:  s.Customized,
-			Position:    s.Position,
-			Config:      config,
+			ID:           s.ID,
+			SectionType:  string(s.SectionType),
+			Title:        s.Title,
+			DefaultTitle: s.DefaultTitle,
+			Featured:     s.Featured,
+			ItemLimit:    s.ItemLimit,
+			Hidden:       s.Hidden,
+			IsCustom:     s.IsCustom,
+			Customized:   s.Customized,
+			Position:     s.Position,
+			Config:       config,
 		})
 	}
 	return &ProfileSectionSettingCollectionOutput{Body: ProfileSectionSettingCollection{Collection: NewCollection(items)}}, nil

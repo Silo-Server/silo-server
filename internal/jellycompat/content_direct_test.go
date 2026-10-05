@@ -466,7 +466,7 @@ func (s *progressCountingStore) ReplaceCollectionItems(context.Context, string, 
 func (s *progressCountingStore) ReorderCollectionItems(context.Context, string, []string) error {
 	panic("unused")
 }
-func (s *progressCountingStore) ReorderCollections(context.Context, string, *string, []string) error {
+func (s *progressCountingStore) ReorderCollections(context.Context, string, []string) error {
 	panic("unused")
 }
 func (s *progressCountingStore) UpdateCollectionSyncState(context.Context, userstore.UpdateCollectionSyncStateInput) error {

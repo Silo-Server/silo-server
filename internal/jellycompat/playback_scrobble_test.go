@@ -606,7 +606,7 @@ func (l *compatScrobbleLocks) holdersFor(key string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if entry := l.locks[key]; entry != nil {
-		return entry.holders
+		return 1 + len(entry.waiters)
 	}
 	return 0
 }
@@ -629,6 +629,61 @@ func waitForCompatScrobbleHolders(t *testing.T, h *PlaybackHandler, upstreamID s
 		}
 		runtime.Gosched()
 	}
+}
+
+// Callers queued on an upstream session's scrobble lock take it in the order
+// they queued, so a Stopped report cannot overtake a progress report that was
+// already waiting and stage a stop from the position before it.
+func TestCompatScrobbleLocksServeWaitersInArrivalOrder(t *testing.T) {
+	h := &PlaybackHandler{}
+	locks := &h.compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	const waiters = 8
+	order := make(chan int, waiters)
+	released := make(chan struct{}, waiters)
+	for i := range waiters {
+		go func() {
+			release := locks.lock("upstream")
+			order <- i
+			release()
+			released <- struct{}{}
+		}()
+		// Queue the next caller only once this one is waiting.
+		waitForCompatScrobbleHolders(t, h, "upstream", i+2)
+	}
+	unlock()
+
+	for want := range waiters {
+		if got := <-order; got != want {
+			t.Fatalf("waiter %d took the lock in position %d, want arrival order", got, want)
+		}
+	}
+	for range waiters {
+		<-released
+	}
+	if n := locks.holdersFor("upstream"); n != 0 {
+		t.Fatalf("lock entry kept %d holders after every caller released it", n)
+	}
+}
+
+// Releasing the same scrobble lock twice panics instead of dropping the entry
+// a later caller now owns, which would let a third caller in beside it.
+func TestCompatScrobbleLocksPanicOnDoubleRelease(t *testing.T) {
+	var locks compatScrobbleLocks
+	unlock := locks.lock("upstream")
+	unlock()
+	relock := locks.lock("upstream")
+	defer relock()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("second release of a scrobble lock did not panic")
+		}
+		if n := locks.holdersFor("upstream"); n != 1 {
+			t.Fatalf("lock entry has %d holders after a rejected double release, want the new owner", n)
+		}
+	}()
+	unlock()
 }
 
 func scrobbleAt(action string, seconds float64) compatScrobbleCall {

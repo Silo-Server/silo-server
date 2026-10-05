@@ -52,7 +52,6 @@ export default tseslint.config(
       "src/hooks/queries/favorites.ts",
       "src/hooks/queries/watchlist.ts",
       "src/hooks/queries/ratings.ts",
-      "src/components/RecipeGallery/BulkApplyDialog.tsx",
       "src/hooks/queries/autoPlayNext.ts",
       "src/hooks/queries/libraryPageState.ts",
       "src/hooks/queries/pluginSettings.ts",

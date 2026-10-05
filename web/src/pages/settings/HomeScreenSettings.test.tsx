@@ -321,13 +321,13 @@ describe("HomeScreenSettings custom section permission", () => {
     });
 
     expect(sectionSaveErrorMessage(refused)).toBe(
-      "Failed to save section changes: this server does not allow profiles to build custom sections",
+      "Could not save your rows: this server does not allow profiles to build custom sections",
     );
     expect(sectionSaveErrorMessage(demo)).toBe(
-      "Failed to save section changes: This action is not available in demo mode.",
+      "Could not save your rows: This action is not available in demo mode.",
     );
-    expect(sectionSaveErrorMessage(invalid)).toBe("Failed to save section changes");
-    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Failed to save section changes");
+    expect(sectionSaveErrorMessage(invalid)).toBe("Could not save your rows");
+    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Could not save your rows");
   });
 });
 

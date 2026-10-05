@@ -112,3 +112,7 @@ func TestSQLiteAtomicJellycompatProgressHistoryRollback(t *testing.T) {
 	}
 	storetest.RunAtomicJellycompatProgress(t, store)
 }
+
+func TestSQLiteCollectionSharing(t *testing.T) {
+	storetest.RunCollectionSharing(t, newConformanceStore)
+}

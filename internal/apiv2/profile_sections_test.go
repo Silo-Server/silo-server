@@ -226,6 +226,9 @@ func TestResetProfileSectionOverrides(t *testing.T) {
 	}
 }
 
+// TestGetProfileSectionSettings: title is what the profile sees and
+// default_title the administrator's own title for that row, so a renamed row
+// carries both; a profile-built row has no administrator title.
 func TestGetProfileSectionSettings(t *testing.T) {
 	svc := &fakeProfileSections{}
 	h := newTestHandler(t, sectionDeps(svc))
@@ -234,8 +237,8 @@ func TestGetProfileSectionSettings(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 	want := `{"items":[` +
-		`{"id":"s-continue","section_type":"continue_watching","title":"Continue Watching","featured":false,"item_limit":20,"hidden":true,"is_custom":false,"customized":true,"position":0},` +
-		`{"id":"u-gems","section_type":"hidden_gems","title":"Hidden gems","featured":false,"item_limit":12,"hidden":false,"is_custom":true,"customized":false,"position":1,"config":{"library_ids":[3]}}` +
+		`{"id":"s-continue","section_type":"continue_watching","title":"Keep watching","default_title":"Continue Watching","featured":false,"item_limit":20,"hidden":true,"is_custom":false,"customized":true,"position":0},` +
+		`{"id":"u-gems","section_type":"hidden_gems","title":"Hidden gems","default_title":"","featured":false,"item_limit":12,"hidden":false,"is_custom":true,"customized":false,"position":1,"config":{"library_ids":[3]}}` +
 		`]}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())

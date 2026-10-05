@@ -33,11 +33,12 @@ import (
 )
 
 // fakeUserCollection is one row in fakeUserCollectionSource, carrying the
-// ownership and sharing facts the real store enforces in SQL.
+// ownership and sharing facts the real store enforces in SQL: its creator
+// sees it, and so does every profile on the login when it is shared.
 type fakeUserCollection struct {
 	usercollections.ServerVisibleCollection
 	userID     int
-	profileIDs []string
+	shared     bool
 	libraryIDs []int // empty means library-agnostic
 }
 
@@ -73,7 +74,7 @@ func (f *fakePersonalCollectionResolver) Resolve(_ context.Context, req catalog.
 }
 
 func (f *fakeUserCollectionSource) visible(userID int, profileID string, row fakeUserCollection) bool {
-	return row.userID == userID && slices.Contains(row.profileIDs, profileID)
+	return row.userID == userID && (row.CreatorProfileID == profileID || row.shared)
 }
 
 func (f *fakeUserCollectionSource) List(_ context.Context, userID int, profileID string, libraryIDs []int) ([]usercollections.ServerVisibleCollection, error) {
@@ -154,8 +155,7 @@ func ownedUserCollection(id, name string) fakeUserCollection {
 			CreatorProfileID: "profile-1",
 			CollectionType:   "mdblist",
 		},
-		userID:     1,
-		profileIDs: []string{"profile-1"},
+		userID: 1,
 	}
 }
 
@@ -273,20 +273,23 @@ func TestPersonalBoxSetChildCountIsVisibleCount(t *testing.T) {
 }
 
 // TestHandleItems_BoxSetListingHidesOtherProfilesPersonalCollections is the
-// privacy pin: personal collections are private, so neither another user's rows
-// nor rows their owner shared with a different profile may reach this session.
+// privacy pin: neither another login's rows nor another profile's unshared
+// collections may reach this session, while a collection another profile on
+// the login shares does.
 func TestHandleItems_BoxSetListingHidesOtherProfilesPersonalCollections(t *testing.T) {
 	otherUser := ownedUserCollection("u-2", "Someone Else's List")
-	otherUser.userID = 2
+	otherUser.userID, otherUser.shared = 2, true
 	otherProfile := ownedUserCollection("u-3", "Not My Profile")
-	otherProfile.profileIDs = []string{"profile-2"}
-	personal := &fakeUserCollectionSource{rows: []fakeUserCollection{otherUser, otherProfile}}
+	otherProfile.CreatorProfileID = "profile-2"
+	sharedByOther := ownedUserCollection("u-4", "Shared With Me")
+	sharedByOther.CreatorProfileID, sharedByOther.shared = "profile-2", true
+	personal := &fakeUserCollectionSource{rows: []fakeUserCollection{otherUser, otherProfile, sharedByOther}}
 	h := newUserCollectionsTestHandler(&fakeCollectionSource{}, personal,
 		[]upstreamUserLibrary{{ID: 1, Name: "Movies", Type: "movies"}}, nil)
 
 	result := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID)
-	if len(result.Items) != 0 {
-		t.Fatalf("expected no collections, got %v", boxSetNames(result.Items))
+	if got := boxSetNames(result.Items); !slices.Equal(got, []string{"Shared With Me"}) {
+		t.Fatalf("expected only the collection shared on this login, got %v", got)
 	}
 }
 
@@ -305,7 +308,7 @@ func TestHandleItems_BoxSetListingHidesCollectionsOutsideVisibleLibraries(t *tes
 
 func TestHandleItem_PersonalCollectionResolvesForOwnerOnly(t *testing.T) {
 	hidden := ownedUserCollection("u-3", "Not My Profile")
-	hidden.profileIDs = []string{"profile-2"}
+	hidden.CreatorProfileID = "profile-2"
 	personal := &fakeUserCollectionSource{rows: []fakeUserCollection{
 		ownedUserCollection("u-1", "My Watchlist"),
 		hidden,
@@ -426,7 +429,11 @@ func TestHandleItems_PersonalBoxSetRouteSurvivesFreshCodec(t *testing.T) {
 	}
 }
 
-func TestPersonalBoxSetABSCollectionSurvivesFreshCodec(t *testing.T) {
+// TestPersonalBoxSetSkipsAudiobookshelfCollectionsDB pins that an
+// Audiobookshelf (beta) collection never becomes a BoxSet: such rows share the
+// personal collection table but are not native, even when a legacy row is
+// opted into server collections.
+func TestPersonalBoxSetSkipsAudiobookshelfCollectionsDB(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ctx := context.Background()
 	var userID int
@@ -449,77 +456,23 @@ func TestPersonalBoxSetABSCollectionSurvivesFreshCodec(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	optIn := true
-	profiles := []string{session.ProfileID}
-	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
-		ID: id, RequestProfileID: session.ProfileID, IncludeInServerCollections: &optIn, AllowedProfileIDs: &profiles,
-	}); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE user_personal_collections SET include_in_server_collections = TRUE WHERE user_id = $1 AND id = $2`, userID, id); err != nil {
 		t.Fatal(err)
 	}
-	source := usercollections.NewStore(pool)
 	h := newCollectionsTestHandler(&fakeCollectionSource{}, nil, nil)
-	h.userCollections = source
-	h.mapper.imageTagSigner = newImageTagSigner("image-secret")
-	listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", session)
-	if len(listing.Items) != 1 || listing.Items[0].Name != "Test collection" {
-		t.Fatalf("ABS collection not listed: %+v", listing)
+	h.userCollections = usercollections.NewStore(pool)
+	if listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", session); len(listing.Items) != 0 {
+		t.Fatalf("Audiobookshelf collection listed as a BoxSet: %+v", listing.Items)
 	}
-	routeID, tag := listing.Items[0].ID, listing.Items[0].ImageTags["Primary"]
-	if tag == "" {
-		t.Fatal("listed collection has no signed artwork tag")
-	}
-	resolver := &fakePersonalCollectionResolver{result: &catalog.CatalogResult{
-		Items: []*models.MediaItem{{ContentID: "movie-tmdb-123", Type: "movie", Title: "Test movie"}}, Total: 1,
-	}}
-	h.collectionResolver = resolver
-	for _, raw := range []string{routeID, strings.ReplaceAll(routeID, "-", ""), strings.ToUpper(routeID)} {
-		t.Run(raw, func(t *testing.T) {
-			for _, path := range []string{"/Items?Ids=" + raw, "/Items?ParentId=" + raw} {
-				h.codec = NewResourceIDCodec()
-				result := performItemsRequest(t, h, path, session)
-				if len(result.Items) != 1 {
-					t.Fatalf("cold %s: %+v", path, result)
-				}
-				if strings.Contains(path, "?Ids=") && (result.Items[0].ID != routeID || result.Items[0].Type != "BoxSet") {
-					t.Fatalf("cold Ids resolved the wrong item: %+v", result.Items[0])
-				}
-				if strings.Contains(path, "?ParentId=") && (result.Items[0].Name != "Test movie" || result.Items[0].ParentID != routeID) {
-					t.Fatalf("cold ParentId resolved the wrong children: %+v", result.Items[0])
-				}
-			}
-			if resolver.gotReq.CollectionID != id {
-				t.Fatalf("resolver received %q, want original ULID %q", resolver.gotReq.CollectionID, id)
-			}
-			for _, viewer := range []*Session{session, {StreamAppUserID: userID, ProfileID: "unshared"}, {StreamAppUserID: userID + 10000, ProfileID: session.ProfileID}} {
-				h.codec = NewResourceIDCodec()
-				req := httptest.NewRequest(http.MethodGet, "/Items/"+raw, nil)
-				rctx := chi.NewRouteContext()
-				rctx.URLParams.Add("id", raw)
-				req = req.WithContext(context.WithValue(context.WithValue(req.Context(), compatSessionKey, viewer), chi.RouteCtxKey, rctx))
-				rec := httptest.NewRecorder()
-				h.HandleItem(rec, req)
-				want := http.StatusNotFound
-				if viewer == session {
-					want = http.StatusOK
-				}
-				if rec.Code != want {
-					t.Fatalf("cold detail: status=%d, want=%d, body=%s", rec.Code, want, rec.Body.String())
-				}
-			}
-			for _, imageTag := range []string{tag, "0123456789abcdef", ""} {
-				images := &ImagesHandler{codec: NewResourceIDCodec(), userCollections: source, imageTags: h.mapper.imageTagSigner}
-				req := httptest.NewRequest(http.MethodGet, "/Items/"+raw+"/Images/Primary?tag="+imageTag, nil)
-				rec := httptest.NewRecorder()
-				images.HandleItemImage(rec, withImageRouteParams(req, raw, "Primary"))
-				want := http.StatusNotFound
-				if imageTag == tag {
-					want = http.StatusOK
-				}
-				if rec.Code != want {
-					t.Fatalf("cold signed image: status=%d, want=%d, body=%s", rec.Code, want, rec.Body.String())
-				}
-			}
-		})
+	routeID := h.codec.EncodeStringID(EncodedIDUserCollection, id)
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", routeID)
+	req = req.WithContext(context.WithValue(context.WithValue(req.Context(), compatSessionKey, session), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	h.HandleItem(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("Audiobookshelf collection detail: status=%d, want 404", rec.Code)
 	}
 }
 
@@ -928,7 +881,7 @@ func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: session.ProfileID, Name: "Hand Picked", CollectionType: "manual",
-		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+		IncludeInServerCollections: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1231,8 +1184,8 @@ func TestPersonalSmartBoxSetPageStaysPagedDB(t *testing.T) {
 	}
 	if _, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: session.ProfileID, Name: "Every movie", CollectionType: "smart",
-		QueryDefinition:   fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d]}`, library),
-		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+		QueryDefinition:            fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d]}`, library),
+		IncludeInServerCollections: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1266,7 +1219,7 @@ func TestPersonalSmartBoxSetPageStaysPagedDB(t *testing.T) {
 func TestPersonalBoxSetUnresolvableOwnerFailsClosed(t *testing.T) {
 	const sharedID = "731d3da2-4f4b-4a71-8f2f-38e1d34775b0"
 	shared := ownedUserCollection(sharedID, "Shared")
-	shared.CreatorProfileID = "profile-2"
+	shared.CreatorProfileID, shared.shared = "profile-2", true
 	personal := &fakeUserCollectionSource{
 		rows:        []fakeUserCollection{shared, ownedUserCollection("u-2", "Mine")},
 		unavailable: map[string]bool{sharedID: true},
@@ -1347,7 +1300,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	}
 	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: owner.ProfileID, Name: "Shared picks", CollectionType: "manual", IsShared: true,
-		AllowedProfileIDs: []string{owner.ProfileID, viewer.ProfileID}, IncludeInServerCollections: true,
+		IncludeInServerCollections: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1436,7 +1389,7 @@ func TestPersonalBoxSetLanguageFiltersStayInVisibleLibrariesDB(t *testing.T) {
 	}
 	stored, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: session.ProfileID, Name: "Stored", CollectionType: "manual",
-		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+		IncludeInServerCollections: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1446,8 +1399,8 @@ func TestPersonalBoxSetLanguageFiltersStayInVisibleLibrariesDB(t *testing.T) {
 	}
 	smart, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
 		CreatorProfileID: session.ProfileID, Name: "Smart", CollectionType: "smart",
-		QueryDefinition:   fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d,%d]}`, visibleLib, hiddenLib),
-		AllowedProfileIDs: []string{session.ProfileID}, IncludeInServerCollections: true,
+		QueryDefinition:            fmt.Sprintf(`{"media_scope":"movie","library_ids":[%d,%d]}`, visibleLib, hiddenLib),
+		IncludeInServerCollections: true,
 	})
 	if err != nil {
 		t.Fatal(err)
