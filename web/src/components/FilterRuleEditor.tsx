@@ -50,6 +50,8 @@ interface FilterRuleEditorProps {
   allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   mediaScope?: FilterRuleMediaScope;
+  /** Where picked values come from; without it, all of the viewer's titles. */
+  valueScope?: FacetValueScope;
 }
 
 export function getFilterRuleFieldOptions(
@@ -588,6 +590,7 @@ export default function FilterRuleEditor({
   allowPersonalizedSorts = false,
   sortRelevanceScope,
   mediaScope = "all",
+  valueScope,
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
   const fieldOptions = getFilterRuleFieldOptions(allowPersonalizedFilters, mediaScope);
@@ -695,6 +698,7 @@ export default function FilterRuleEditor({
               onChange={(updates) => updateRule(groupIdx, ruleIdx, updates)}
               onRemove={() => removeRule(groupIdx, ruleIdx)}
               label={`Rule ${ruleIdx + 1}`}
+              valueScope={valueScope}
             />
           ))}
 

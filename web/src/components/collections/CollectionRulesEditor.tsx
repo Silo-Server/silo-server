@@ -115,6 +115,7 @@ export default function CollectionRulesEditor({
           allowPersonalizedSorts={allowPersonalizedSorts}
           sortRelevanceScope={sortRelevanceScope}
           mediaScope={value.media_scope ?? "all"}
+          valueScope={{ libraryIds: value.library_ids, mediaScope: value.media_scope }}
           onChange={(next) =>
             onChange({
               ...value,
