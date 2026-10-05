@@ -373,6 +373,10 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 	if row, err := r.loadSectionRow(ctx, 7, "p1", SectionKindForYouMain, ""); err != nil || row != nil {
 		t.Fatalf("for you section = %+v, %v; want none", row, err)
 	}
+	tonight, err := r.GetWatchTonight(ctx, 7, "p1", 20, catalog.AccessFilter{})
+	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"popular", "recent"}) {
+		t.Fatalf("watch tonight = %+v, %v; want the cold-start rows only", tonight, err)
+	}
 }
 
 // A profile with positive signals but no personal rows asks for them even at

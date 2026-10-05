@@ -20,7 +20,8 @@ type WatchTonightResult struct {
 // for the Watch Tonight feature. It pulls from cached for-you, because-you-watched,
 // and similar-users sources, falling back to popular/recently-added for cold-start users.
 // Results are filtered before trimming so deeper cached candidates can backfill
-// watched, low-rated, or access-disallowed recommendations.
+// watched, low-rated, or access-disallowed recommendations. With personal
+// rows off (see WithPersonalRows) only the cold-start rows are used.
 func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (WatchTonightResult, error) {
 	if limit <= 0 {
 		limit = 8
@@ -31,32 +32,36 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 
 	byID := make(map[string]ScoredItem, limit*3)
 
-	// 1. For-you main row — highest relevance band (0.80–1.00).
-	forYouItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "")
-	if err != nil {
-		return WatchTonightResult{}, err
-	}
-	mergeScored(byID, forYouItems, 0.80, 1.00)
-
-	// 2. Because-you-watched — mid band (0.55–0.75).
-	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
-	if err != nil {
-		return WatchTonightResult{}, err
-	}
-	for _, sourceID := range anchors {
-		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
+	// With recommendations disabled no personal row is served, even one
+	// still cached from before, and the cold-start rows stand in.
+	if !r.personalOff {
+		// 1. For-you main row — highest relevance band (0.80–1.00).
+		forYouItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "")
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, items, 0.55, 0.75)
-	}
+		mergeScored(byID, forYouItems, 0.80, 1.00)
 
-	// 3. Similar-users-liked — lower band (0.35–0.55).
-	similarItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
-	if err != nil {
-		return WatchTonightResult{}, err
+		// 2. Because-you-watched — mid band (0.55–0.75).
+		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
+		if err != nil {
+			return WatchTonightResult{}, err
+		}
+		for _, sourceID := range anchors {
+			items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
+			if err != nil {
+				return WatchTonightResult{}, err
+			}
+			mergeScored(byID, items, 0.55, 0.75)
+		}
+
+		// 3. Similar-users-liked — lower band (0.35–0.55).
+		similarItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
+		if err != nil {
+			return WatchTonightResult{}, err
+		}
+		mergeScored(byID, similarItems, 0.35, 0.55)
 	}
-	mergeScored(byID, similarItems, 0.35, 0.55)
 
 	isCold := len(byID) == 0
 
