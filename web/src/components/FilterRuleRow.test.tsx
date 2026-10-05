@@ -231,6 +231,14 @@ describe("FilterRuleRow", () => {
       expect(latest?.value).toBe("2y");
     });
 
+    it("writes nothing for an amount below 1", () => {
+      renderRow({ field: "added_at", op: "in_last", value: "30d" });
+      fireEvent.change(screen.getByRole("spinbutton", { name: "Amount" }), {
+        target: { value: "0" },
+      });
+      expect(latest?.value).toBe("");
+    });
+
     it("keeps hours for a saved value in hours", () => {
       renderRow({ field: "added_at", op: "in_last", value: "36h" });
       expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(36);

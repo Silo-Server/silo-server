@@ -489,7 +489,9 @@ function InLastInput({
   const units = unit === "h" ? [["h", "hours"] as const, ...IN_LAST_UNITS] : IN_LAST_UNITS;
   const write = (nextAmount: string, nextUnit: string) => {
     setUnitDraft(nextUnit);
-    onChange(/^\d+$/.test(nextAmount) ? `${Number(nextAmount)}${nextUnit}` : "");
+    // The server rejects a span of 0, so an amount below 1 writes nothing.
+    const count = /^\d+$/.test(nextAmount) ? Number(nextAmount) : 0;
+    onChange(count >= 1 ? `${count}${nextUnit}` : "");
   };
 
   return (
