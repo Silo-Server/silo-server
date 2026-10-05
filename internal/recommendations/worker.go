@@ -310,6 +310,10 @@ func (w *Worker) NotifySignalsChanged(ctx context.Context, userID int, profileID
 	if w == nil || userID <= 0 || profileID == "" {
 		return
 	}
+	// The change is already committed, so the request that made it ending
+	// must not cancel recording it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	defer cancel()
 	w.markProfileStale(ctx, userID, profileID)
 	w.RequestProfileRefresh(ctx, userID, profileID)
 }
@@ -324,6 +328,9 @@ func (w *Worker) NotifyAccountsScopeChanged(ctx context.Context, userIDs []int) 
 	if w == nil || w.accountsMarker == nil || len(userIDs) == 0 {
 		return
 	}
+	// The change is already committed; see NotifySignalsChanged.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	defer cancel()
 	marked, err := w.accountsMarker.MarkAccountsStale(ctx, userIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "marking accounts' taste profiles stale after an access change failed", "component", "recommendations", "accounts", len(userIDs), "error", err)
@@ -684,6 +691,7 @@ func (w *Worker) cacheGlobalRows(ctx context.Context, store globalRowStore, expi
 	// show, so an empty row does not keep serving its old items.
 	drop := func(recType string, prefix bool, keep []string) {
 		if _, err := store.DeleteGlobalRecommendationCache(ctx, recType, prefix, keep); err != nil {
+			failed++
 			slog.WarnContext(ctx, "deleting an empty global recommendation row failed", "component", "recommendations", "rec_type", recType, "prefix", prefix, "error", err)
 		}
 	}
