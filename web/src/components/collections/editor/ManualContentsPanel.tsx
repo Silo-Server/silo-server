@@ -684,7 +684,6 @@ export function ManualContentsPanel({
   return (
     <section
       aria-labelledby={headingId}
-      data-panel="contents"
       className="surface-panel grid content-start gap-4 rounded-[22px] p-5 sm:p-6"
     >
       <header>

@@ -4,9 +4,13 @@ import { useQueries } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 
 import { fetchAdminCollections } from "@/api/adminCollections";
+import { Button } from "@/components/ui/button";
 import { adminKeys } from "@/hooks/queries/keys";
 import {
+  LIBRARIES_NOT_PICKED,
+  NO_HEADING,
   PERSONAL_TAB_HELP,
+  SHELF_AFTER_CREATE,
   SHOW_ON_TAB_LABEL,
   serverTabHelp,
   unshareWarning,
@@ -15,6 +19,7 @@ import { SERVER_SCOPE, type CollectionDraft } from "@/lib/collections/scope";
 
 import { HideCollectionDialog } from "../HideCollectionDialog";
 import { focusLibrariesLine } from "../fields/librariesLineFocus";
+import { SettingRow } from "../fields/SettingRow";
 import { ShowToOtherProfilesField } from "../ShowToOtherProfilesField";
 import { ToggleRow } from "../fields/ToggleRow";
 
@@ -44,10 +49,20 @@ function useShelves(collectionId: string | undefined, libraries: readonly NamedL
       ? data?.groups.find((candidate) => candidate.id === entry.group_id)
       : undefined;
     const leads = entry?.featured === true && (group?.default_sort_mode ?? "manual") === "manual";
-    return `${library.name} › ${group?.name ?? "no heading"}${leads ? ", pinned first" : ""}`;
+    return `${library.name} › ${group?.name ?? NO_HEADING}${leads ? ", pinned first" : ""}`;
   });
 }
 
+/** Strong text in a row's value: the libraries, the shelf. */
+function Value({ children }: { children: ReactNode }) {
+  return <span className="text-foreground/90 font-medium">{children}</span>;
+}
+
+/**
+ * A server collection's Libraries and Shelf rows. Change moves focus to the
+ * libraries control in the contents card; Arrange opens the first library's
+ * shelves once the collection exists.
+ */
 function ServerFacts({
   collectionId,
   libraries,
@@ -58,34 +73,50 @@ function ServerFacts({
   const shelves = useShelves(collectionId, libraries);
   const first = libraries[0];
   return (
-    <dl className="grid grid-cols-[82px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[13.5px]">
-      <dt className="text-muted-foreground">Libraries</dt>
-      <dd>
-        {libraries.length > 0 ? libraries.map((library) => library.name).join(", ") : "None yet"}{" "}
-        <button
-          type="button"
-          className="font-medium underline underline-offset-4"
-          onClick={focusLibrariesLine}
-        >
-          Change
-        </button>
-      </dd>
-      <dt className="text-muted-foreground">Shelf</dt>
-      <dd>
-        {collectionId ? shelves.join(", ") : "Lands with no heading"}
-        {collectionId && first ? (
-          <>
-            {" "}
-            <Link
-              to={SERVER_SCOPE.paths.list({ view: "arrange", libraryId: first.id })}
-              className="font-medium underline underline-offset-4"
-            >
-              Arrange
-            </Link>
-          </>
-        ) : null}
-      </dd>
-    </dl>
+    <>
+      <SettingRow
+        label="Libraries"
+        value={
+          libraries.length > 0 ? (
+            <Value>{libraries.map((library) => library.name).join(", ")}</Value>
+          ) : (
+            LIBRARIES_NOT_PICKED
+          )
+        }
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Change libraries"
+            onClick={focusLibrariesLine}
+          >
+            Change
+          </Button>
+        }
+      />
+      <SettingRow
+        label="Shelf"
+        value={
+          collectionId ? (
+            <Value>{shelves.join(", ")}</Value>
+          ) : (
+            <>
+              <Value>{NO_HEADING}</Value> · {SHELF_AFTER_CREATE}
+            </>
+          )
+        }
+        action={
+          collectionId && first ? (
+            <Button asChild variant="outline" size="sm">
+              <Link to={SERVER_SCOPE.paths.list({ view: "arrange", libraryId: first.id })}>
+                Arrange
+              </Link>
+            </Button>
+          ) : null
+        }
+      />
+    </>
   );
 }
 
@@ -97,10 +128,11 @@ export interface HideConfirm {
 }
 
 /**
- * Where the collection shows. Server: its libraries, its shelf in each, the
- * Collections tab switch and the rows that show it (`rows`). Personal: sharing
- * with the other profiles on the account (hidden on a single-profile account),
- * the Collections tab switch and the viewer's own rows that show it (`rows`).
+ * Where the collection shows, as a settings list with one row each. Server:
+ * its libraries, its shelf in each, the Collections tab switch and the rows
+ * that show it (`rows`). Personal: sharing with the other profiles on the
+ * account (hidden on a single-profile account), the Collections tab switch and
+ * the viewer's own rows that show it (`rows`).
  */
 export function WhereItShowsPanel({
   scopeKind,
@@ -141,16 +173,15 @@ export function WhereItShowsPanel({
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      data-panel="where"
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
       <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
         Where it shows
       </h2>
-      {scopeKind === "server" && draft.server ? (
-        <>
-          <ServerFacts collectionId={collectionId} libraries={libraries} />
-          <div className="border-border/70 border-t pt-5">
+      <div className="divide-border/70 -my-4 grid divide-y [&>*]:py-4">
+        {scopeKind === "server" && draft.server ? (
+          <>
+            <ServerFacts collectionId={collectionId} libraries={libraries} />
             <ToggleRow
               label={SHOW_ON_TAB_LABEL}
               help={serverTabHelp(libraries.map((library) => library.name))}
@@ -161,55 +192,56 @@ export function WhereItShowsPanel({
                 else setVisible(on);
               }}
             />
-          </div>
-          {rows ? <div className="border-border/70 border-t pt-5">{rows}</div> : null}
-          <HideCollectionDialog
-            open={confirmingHide}
-            onOpenChange={setConfirmingHide}
-            name={draft.name}
-            libraryNames={libraries.map((library) => library.name)}
-            rowCount={hideConfirm?.rowCount ?? 0}
-            rowPlaces={hideConfirm?.places}
-            onConfirm={() => setVisible(false)}
-          />
-        </>
-      ) : null}
-      {scopeKind === "personal" && draft.personal ? (
-        <>
-          {otherProfileNames.length > 0 ? (
-            <ShowToOtherProfilesField
-              checked={draft.personal.shared}
-              onCheckedChange={(shared) =>
+          </>
+        ) : null}
+        {scopeKind === "personal" && draft.personal ? (
+          <>
+            {otherProfileNames.length > 0 ? (
+              <ShowToOtherProfilesField
+                checked={draft.personal.shared}
+                onCheckedChange={(shared) =>
+                  onChange((current) => ({
+                    ...current,
+                    personal: { inLibraryTabs: false, ...current.personal, shared },
+                  }))
+                }
+              >
+                {collectionId && savedShared && !draft.personal.shared ? (
+                  <p
+                    role="note"
+                    className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[13px]"
+                  >
+                    <AlertTriangle aria-hidden className="text-warning mt-0.5 size-4 shrink-0" />
+                    {unshareWarning(otherProfileNames)}
+                  </p>
+                ) : null}
+              </ShowToOtherProfilesField>
+            ) : null}
+            <ToggleRow
+              label={SHOW_ON_TAB_LABEL}
+              help={PERSONAL_TAB_HELP}
+              checked={draft.personal.inLibraryTabs}
+              onCheckedChange={(inLibraryTabs) =>
                 onChange((current) => ({
                   ...current,
-                  personal: { inLibraryTabs: false, ...current.personal, shared },
+                  personal: { shared: false, ...current.personal, inLibraryTabs },
                 }))
               }
-            >
-              {collectionId && savedShared && !draft.personal.shared ? (
-                <p
-                  role="note"
-                  className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[13px]"
-                >
-                  <AlertTriangle aria-hidden className="text-warning mt-0.5 size-4 shrink-0" />
-                  {unshareWarning(otherProfileNames)}
-                </p>
-              ) : null}
-            </ShowToOtherProfilesField>
-          ) : null}
-          <ToggleRow
-            label={SHOW_ON_TAB_LABEL}
-            help={PERSONAL_TAB_HELP}
-            checked={draft.personal.inLibraryTabs}
-            onCheckedChange={(inLibraryTabs) =>
-              onChange((current) => ({
-                ...current,
-                personal: { shared: false, ...current.personal, inLibraryTabs },
-              }))
-            }
-          />
-          {rows ? <div className="border-border/70 border-t pt-5">{rows}</div> : null}
-        </>
+            />
+          </>
+        ) : null}
+        {rows}
+      </div>
+      {scopeKind === "server" && draft.server ? (
+        <HideCollectionDialog
+          open={confirmingHide}
+          onOpenChange={setConfirmingHide}
+          name={draft.name}
+          libraryNames={libraries.map((library) => library.name)}
+          rowCount={hideConfirm?.rowCount ?? 0}
+          rowPlaces={hideConfirm?.places}
+          onConfirm={() => setVisible(false)}
+        />
       ) : null}
     </section>
   );

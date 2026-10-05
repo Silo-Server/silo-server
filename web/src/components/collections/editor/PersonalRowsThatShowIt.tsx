@@ -11,8 +11,7 @@ import {
 } from "@/lib/collections/rows";
 import type { PageRef } from "@/lib/homeRows/types";
 
-import { AddAsRowMenu } from "./AddAsRowMenu";
-import { RowsThatShowIt } from "./RowsThatShowIt";
+import { RowsOnceCreated, RowsThatShowIt } from "./RowsThatShowIt";
 import { useAddedRowHighlight } from "./useAddedRowHighlight";
 
 interface PersonalRowsProps {
@@ -32,19 +31,21 @@ interface PersonalRowsProps {
 /**
  * Where it shows on a personal collection: the rows on the viewer's own Home
  * and library pages that show it, and Add as a row (My Home, My *Library*
- * page for each library the draft matches). Nothing is read until the panel
- * comes near the screen; then one page at a time per slot (see
- * `useProfileCollectionRows`). It only links into Settings > Home Screen and
- * never changes a row itself.
+ * page for each library the draft matches). Before the collection is created
+ * it is one line. Nothing is read until the panel comes near the screen; then
+ * one page at a time per slot (see `useProfileCollectionRows`). It only links
+ * into Settings > Home Screen and never changes a row itself.
  */
 export function PersonalRowsThatShowIt(props: PersonalRowsProps) {
   const [seen, setSeen] = useState(false);
+  const created = Boolean(props.collectionId);
   const observe = useIntersectionObserver({
     onIntersect: () => setSeen(true),
-    enabled: !seen,
+    enabled: created && !seen,
     rootMargin: "200px",
   });
-  if (!seen) return <div ref={observe} className="min-h-24" />;
+  if (!created) return <RowsOnceCreated mine />;
+  if (!seen) return <div ref={observe} className="min-h-12" />;
   return <PersonalRows {...props} />;
 }
 
@@ -78,14 +79,17 @@ function PersonalRows({
   const highlightId = useAddedRowHighlight(addedRowId, listed);
 
   return (
-    <RowsThatShowIt rows={rows} libraryNames={names} highlightId={highlightId} mine>
-      <AddAsRowMenu
-        bound={matchedLibraries(visible ?? [], draftLibraryIds)}
-        others={[]}
-        mine
-        disabledReason={disabledReason}
-        onPick={(page) => onAdd(page, rowPlaceInSentence(page, names, "profile"))}
-      />
-    </RowsThatShowIt>
+    <RowsThatShowIt
+      rows={rows}
+      libraryNames={names}
+      highlightId={highlightId}
+      mine
+      addAsRow={{
+        bound: matchedLibraries(visible ?? [], draftLibraryIds),
+        others: [],
+        disabledReason,
+        onPick: (page) => onAdd(page, rowPlaceInSentence(page, names, "profile")),
+      }}
+    />
   );
 }

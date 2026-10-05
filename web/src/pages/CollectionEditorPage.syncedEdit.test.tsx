@@ -16,6 +16,7 @@ import {
   personalCapabilities,
   personalSyncedCollection,
 } from "@/test/fixtures/collectionAnswers";
+import { chooseArtwork } from "@/test/collectionArtwork";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
 
@@ -836,7 +837,7 @@ describe("server Synced list editor", () => {
       async (slot) => {
         showPage(SERVER_EDIT);
         await rename("My draft");
-        fireEvent.click(await screen.findByRole("button", { name: `Remove ${slot}` }));
+        await chooseArtwork(slot, slot === "poster" ? "Use the collage" : "Remove backdrop");
         await act(async () => {});
         expect(v2Recorder.writes()).toEqual([]);
         await save(ADMIN_PATCH);
@@ -855,7 +856,7 @@ describe("server Synced list editor", () => {
         throw new Error("Storage unavailable");
       });
       showPage(SERVER_EDIT);
-      fireEvent.click(await screen.findByRole("button", { name: "Remove poster" }));
+      await chooseArtwork("poster", "Use the collage");
       await save(ADMIN_PATCH);
       expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
       expect(v2Recorder.callsOf(ADMIN_PATCH)).toHaveLength(1);

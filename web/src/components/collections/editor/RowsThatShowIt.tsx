@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import { useId, type ComponentProps, type ReactNode } from "react";
 import { Link } from "react-router";
 import { ArrowUpRight } from "lucide-react";
 
@@ -6,105 +6,82 @@ import { CollectionRowSummary } from "@/components/collections/CollectionRowSumm
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  MY_ROWS_ONCE_CREATED,
   NO_MY_ROWS_YET,
   NO_ROWS_YET,
   ROWS_FAILED,
   ROWS_NOT_LISTED,
+  ROWS_ONCE_CREATED,
   ROWS_THAT_SHOW_IT,
   rowCountLabel,
 } from "@/lib/collections/copy";
-import { openRowPath, rowMeta, type RowsState } from "@/lib/collections/rows";
+import { openRowPath, rowMeta, type CollectionRow, type RowsState } from "@/lib/collections/rows";
 import { cn } from "@/lib/utils";
 
-/** The heading, the rows (or their loading and error states) and the note under them. */
+import { SettingRow } from "../fields/SettingRow";
+import { AddAsRowMenu } from "./AddAsRowMenu";
+
+type AddAsRowProps = Pick<ComponentProps<typeof AddAsRowMenu>, "bound" | "others" | "onPick"> & {
+  /** Why the collection can't be added as a row yet, shown under the row's name. */
+  disabledReason?: string | null;
+};
+
+/** The rows, each a link that opens it where rows are edited. */
 function RowsList({
-  headingId,
   rows,
   libraryNames,
   highlightId,
-  empty,
-  note,
 }: {
-  headingId: string;
-  rows: RowsState;
+  rows: readonly CollectionRow[];
   libraryNames: ReadonlyMap<number, string>;
   highlightId?: string | null;
-  empty: string;
-  note: string | null;
 }) {
-  const listed = rows.status === "ready" ? rows.rows : null;
   return (
-    <>
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 id={headingId} className="text-[13.5px] font-semibold">
-          {ROWS_THAT_SHOW_IT}
-        </h3>
-        {listed && listed.length > 0 ? (
-          <span className="text-muted-foreground text-[12.5px]">
-            {rowCountLabel(listed.length)}
-          </span>
-        ) : null}
-      </div>
-      {rows.status === "loading" ? (
-        <div className="grid gap-1.5" aria-hidden>
-          <Skeleton className="h-12 rounded-xl" />
-          <Skeleton className="h-12 rounded-xl" />
-        </div>
-      ) : null}
-      {rows.status === "error" ? (
-        <div role="alert" className="flex flex-wrap items-center gap-3 text-[13px]">
-          <span className="text-muted-foreground">{ROWS_FAILED}</span>
-          <Button variant="outline" size="sm" onClick={rows.onRetry}>
-            Retry
-          </Button>
-        </div>
-      ) : null}
-      {listed && listed.length === 0 ? (
-        <p className="text-muted-foreground text-[13px]">{empty}</p>
-      ) : null}
-      {listed && listed.length > 0 ? (
-        <ul className="border-border/80 divide-border/70 grid divide-y overflow-hidden rounded-xl border">
-          {listed.map((row) => {
-            const meta = rowMeta(row, libraryNames);
-            const fresh = row.id === highlightId;
-            return (
-              <li key={row.id} data-highlighted={fresh || undefined}>
-                <Link
-                  to={openRowPath(row)}
-                  aria-label={`${row.title}, ${meta}`}
-                  className={cn(
-                    "hover:bg-accent/40 focus-visible:ring-ring/50 flex items-center gap-3 px-3 py-2.5 outline-none focus-visible:ring-[3px] focus-visible:ring-inset",
-                    fresh && "bg-emerald-500/10 ring-1 ring-emerald-500/50 ring-inset",
-                    !row.enabled && "opacity-70",
-                  )}
-                >
-                  <CollectionRowSummary row={row} libraryNames={libraryNames} />
-                  <ArrowUpRight aria-hidden className="text-muted-foreground size-4 shrink-0" />
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-      {note ? <p className="text-muted-foreground text-[12.5px]">{note}</p> : null}
-    </>
+    <ul className="border-border/80 divide-border/70 grid divide-y overflow-hidden rounded-xl border">
+      {rows.map((row) => {
+        const meta = rowMeta(row, libraryNames);
+        const fresh = row.id === highlightId;
+        return (
+          <li key={row.id} data-highlighted={fresh || undefined}>
+            <Link
+              to={openRowPath(row)}
+              aria-label={`${row.title}, ${meta}`}
+              className={cn(
+                "hover:bg-accent/40 focus-visible:ring-ring/50 flex items-center gap-3 px-3 py-2.5 outline-none focus-visible:ring-[3px] focus-visible:ring-inset",
+                fresh && "bg-emerald-500/10 ring-1 ring-emerald-500/50 ring-inset",
+                !row.enabled && "opacity-70",
+              )}
+            >
+              <CollectionRowSummary row={row} libraryNames={libraryNames} />
+              <ArrowUpRight aria-hidden className="text-muted-foreground size-4 shrink-0" />
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** "Rows that show it" before the collection is created: one line, nothing to add yet. */
+export function RowsOnceCreated({ mine = false }: { mine?: boolean }) {
+  return (
+    <SettingRow label={ROWS_THAT_SHOW_IT} value={mine ? MY_ROWS_ONCE_CREATED : ROWS_ONCE_CREATED} />
   );
 }
 
 /**
- * The Home and library page rows that show a collection, styled like Home
- * rows: a house for Home, a library for a library page, each a link that
- * opens the row in Home rows. A server collection lists the administrator's
- * rows; a personal one (`mine`) the viewer's own. `rows` is null when the
- * server doesn't report them; the Add as a row menu (`children`) shows either
- * way, and stays mounted while the rows load.
+ * Where it shows, "Rows that show it": the Home and library page rows that
+ * show a collection, styled like Home rows, with Add as a row on the right.
+ * A server collection lists the administrator's rows; a personal one (`mine`)
+ * the viewer's own. `rows` is null when the server doesn't report them; Add as
+ * a row shows either way.
  */
 export function RowsThatShowIt({
   rows,
   libraryNames,
   highlightId,
   mine = false,
-  children,
+  addAsRow,
 }: {
   rows: RowsState | null;
   libraryNames: ReadonlyMap<number, string>;
@@ -112,26 +89,63 @@ export function RowsThatShowIt({
   highlightId?: string | null;
   /** The viewer's own rows: no note about rows profiles add. */
   mine?: boolean;
-  children: ReactNode;
+  addAsRow: AddAsRowProps;
 }) {
-  const headingId = useId();
+  const reasonId = useId();
+  const { disabledReason, ...menu } = addAsRow;
+  const listed = rows?.status === "ready" ? rows.rows : null;
+  let line: ReactNode = null;
+  if (rows?.status === "error") {
+    line = (
+      <span role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {ROWS_FAILED}
+        <Button variant="outline" size="sm" className="h-7" onClick={rows.onRetry}>
+          Retry
+        </Button>
+      </span>
+    );
+  } else if (listed && listed.length > 0) {
+    line = rowCountLabel(listed.length);
+  } else if (listed) {
+    line = mine ? NO_MY_ROWS_YET : NO_ROWS_YET;
+  }
+
   return (
-    <div
-      className="grid gap-2.5"
-      role={rows ? "group" : undefined}
-      aria-labelledby={rows ? headingId : undefined}
-    >
-      {rows ? (
-        <RowsList
-          headingId={headingId}
-          rows={rows}
-          libraryNames={libraryNames}
-          highlightId={highlightId}
-          empty={mine ? NO_MY_ROWS_YET : NO_ROWS_YET}
-          note={mine ? null : ROWS_NOT_LISTED}
+    <SettingRow
+      label={ROWS_THAT_SHOW_IT}
+      value={
+        line || disabledReason ? (
+          <>
+            {line}
+            {disabledReason ? (
+              <p id={reasonId} className={cn(line && "mt-1")}>
+                {disabledReason}
+              </p>
+            ) : null}
+          </>
+        ) : null
+      }
+      action={
+        <AddAsRowMenu
+          {...menu}
+          mine={mine}
+          disabled={Boolean(disabledReason)}
+          describedBy={disabledReason ? reasonId : undefined}
         />
+      }
+    >
+      {rows?.status === "loading" ? (
+        <div className="grid gap-1.5" aria-hidden>
+          <Skeleton className="h-12 rounded-xl" />
+          <Skeleton className="h-12 rounded-xl" />
+        </div>
       ) : null}
-      {children}
-    </div>
+      {listed && listed.length > 0 ? (
+        <>
+          <RowsList rows={listed} libraryNames={libraryNames} highlightId={highlightId} />
+          {mine ? null : <p className="text-muted-foreground text-[12.5px]">{ROWS_NOT_LISTED}</p>}
+        </>
+      ) : null}
+    </SettingRow>
   );
 }

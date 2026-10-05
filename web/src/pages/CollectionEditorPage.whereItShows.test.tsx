@@ -11,9 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   CHANGED_BEFORE_DELETE,
-  CREATE_IT_FIRST,
   DISCARD_KEEPS_IT_HIDDEN,
   ROWS_NOT_LISTED,
+  ROWS_ONCE_CREATED,
   SAVE_AFTER_CONFLICTS,
   SHOW_IT_FIRST,
   SHOW_ON_TAB_LABEL,
@@ -25,6 +25,7 @@ import {
   adminCollectionList,
   personalCapabilities,
 } from "@/test/fixtures/collectionAnswers";
+import { uploadArtwork } from "@/test/collectionArtwork";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
 
@@ -301,12 +302,12 @@ describe("Add as a row", () => {
     expect(safeReturnPath(params.get("return"))).toBe(EDITOR);
   });
 
-  it("waits for a new collection to be created, and says so", async () => {
+  it("waits for a new collection to be created, and says so in one line", async () => {
     showPage("/admin/collections/new?type=manual&libraryId=1");
-    const button = await screen.findByRole("button", { name: /Add as a row/ });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(CREATE_IT_FIRST);
-    expect(screen.getByText(CREATE_IT_FIRST)).toBeVisible();
+    const group = await rowsGroup();
+    expect(group).toHaveTextContent(ROWS_ONCE_CREATED);
+    expect(within(group).queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Add as a row/ })).toBeNull();
   });
 
   it("waits for a hidden collection to be shown on its Collections tab, and says so", async () => {
@@ -393,10 +394,7 @@ describe("Add as a row", () => {
     const user = userEvent.setup();
     showPage(EDITOR);
     await rowsGroup();
-    fireEvent.change(
-      within(screen.getByRole("group", { name: "Poster" })).getByLabelText("Upload poster"),
-      { target: { files: [new File(["image"], "poster.png", { type: "image/png" })] } },
-    );
+    await uploadArtwork("poster");
     const menu = await openAddAsRow(user);
     await user.click(within(menu).getByRole("menuitem", { name: "Home" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });

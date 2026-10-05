@@ -33,6 +33,8 @@ interface SaveBarProps {
   tone?: "pending" | "idle";
   /** Page placement only. The region's accessible name. */
   label?: string;
+  /** Page placement only. Classes for the bar, such as a narrower measure. */
+  className?: string;
 }
 
 function plural(count: number, word: string) {
@@ -60,6 +62,7 @@ export function SaveBar({
   visible = dirtyCount > 0,
   tone = "pending",
   label = "Unsaved changes",
+  className,
 }: SaveBarProps) {
   const text = message ?? plural(dirtyCount, "unsaved change");
   const saveDisabled = isSaving || !canSave;
@@ -82,11 +85,12 @@ export function SaveBar({
         )}
         {/* Starts at the sidebar edge the shell publishes in
             `--app-sidebar-offset`, pads by the shell's `--page-gutter` and keeps
-            the 1000px page measure, so it lines up with the content column. It
-            rises by the measured `--playback-bar-clearance`. The status stays
-            mounted (empty, without the landmark) while the bar is hidden, so
-            the first change is announced by a live region already in place.
-            Only the message is announced; the buttons stay out of it. */}
+            the 1000px page measure (or the page's own, via `className`), so it
+            lines up with the content column. It rises by the measured
+            `--playback-bar-clearance`. The status stays mounted (empty,
+            without the landmark) while the bar is hidden, so the first change
+            is announced by a live region already in place. Only the message
+            is announced; the buttons stay out of it. */}
         <div
           className={
             visible
@@ -99,7 +103,10 @@ export function SaveBar({
             aria-label={visible ? label : undefined}
             className={
               visible
-                ? "bg-popover/95 border-border pointer-events-auto flex w-full max-w-[1000px] items-center justify-between gap-2 rounded-2xl border py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl"
+                ? cn(
+                    "bg-popover/95 border-border pointer-events-auto flex w-full max-w-[1000px] items-center justify-between gap-2 rounded-2xl border py-2 pr-2 pl-4 shadow-2xl backdrop-blur-xl",
+                    className,
+                  )
                 : undefined
             }
           >

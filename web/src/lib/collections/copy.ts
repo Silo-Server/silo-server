@@ -93,6 +93,11 @@ export function unshareWarning(profileNames: readonly string[]): string {
 /** The ⋯ switch's help on a card: the menu has room for one short line. */
 export const SHOW_TO_OTHER_PROFILES_SHORT_HELP = "Every profile on this account sees it";
 
+/** The Libraries row while a server collection has none ticked. */
+export const LIBRARIES_NOT_PICKED = "Not picked yet";
+/** The Shelf row of a collection that isn't created yet, after "No heading". */
+export const SHELF_AFTER_CREATE = "Move it in Arrange once it's created";
+
 // --- Server list ------------------------------------------------------------
 
 export const ON_HOME = "On Home";
@@ -136,7 +141,8 @@ export const NO_ROWS_YET = "No Home or library page row shows it yet.";
 export const ROWS_FAILED = "Couldn't load the rows that show it.";
 export const ADD_AS_A_ROW = "Add as a row";
 export const OTHER_LIBRARIES = "Other libraries";
-export const CREATE_IT_FIRST = "Create it first, then add it as a row.";
+/** The Rows that show it row of a collection that isn't created yet. */
+export const ROWS_ONCE_CREATED = "None yet. Add it to Home or a library page once it's created.";
 export const SHOW_IT_FIRST = "Show it on the Collections tab first. Viewers couldn't open See all.";
 export const DISCARD_KEEPS_IT_HIDDEN =
   "It's saved as hidden from the Collections tab, so save to show it before adding it as a row.";
@@ -148,6 +154,8 @@ export const OPEN_ROW = "Open row";
 
 // Personal collections: rows on the viewer's own Home and library pages.
 export const NO_MY_ROWS_YET = "None of your Home or library page rows show it yet.";
+export const MY_ROWS_ONCE_CREATED =
+  "None yet. Add it to your Home or a library page once it's created.";
 export const ADD_TO_MY_HOME = "Add to my Home";
 export const ADD_TO_MY_HOME_ITEM = "Add to my Home…";
 export const ADD_TO_MY_HOME_HELP = "A row on your Home";
@@ -406,6 +414,12 @@ export function previewMatches(total: number): string {
   return total === 1 ? "1 title matches" : `${total.toLocaleString()} titles match`;
 }
 
+/** The save bar's hint on a new Smart collection, once the preview has answered. */
+export function smartCreateHint(total: number): string {
+  if (total === 0) return "Nothing matches yet. Titles that match later join on their own.";
+  return `${previewMatches(total)} now. New ones join on their own.`;
+}
+
 // --- Order ------------------------------------------------------------------
 
 export const ORDER_HELP = "A profile that picks its own sort while browsing keeps that choice.";
@@ -612,6 +626,28 @@ export const ARTWORK_SLOT_LABEL: Readonly<Record<ArtworkSlot, string>> = {
   backdrop: "Backdrop",
 };
 
+// --- Look (artwork) ---------------------------------------------------------
+
+/** What a slot will show after Save: nothing, a chosen image not saved yet, or the saved one. */
+export type ArtworkState = "none" | "new" | "saved";
+
+const ARTWORK_STATE_TEXT: Readonly<Record<ArtworkSlot, Record<ArtworkState, string>>> = {
+  poster: { none: "a collage of its titles", new: "a new image", saved: "an image" },
+  backdrop: { none: "none", new: "a new image", saved: "an image" },
+};
+
+/** "Poster: a collage of its titles · Backdrop: none", for the closed Look card. */
+export function lookSummary(slots: ReadonlyArray<[ArtworkSlot, ArtworkState]>): string {
+  return slots
+    .map(([slot, state]) => `${ARTWORK_SLOT_LABEL[slot]}: ${ARTWORK_STATE_TEXT[slot][state]}`)
+    .join(" · ");
+}
+
+/** Under the poster tile while there's no poster. */
+export const POSTER_IS_COLLAGE = "Collage of its titles";
+/** Under the backdrop tile: what the image is for. */
+export const BACKDROP_CAPTION = "Fills the top of its page";
+
 export const NOT_CREATED_YET = "Not created yet";
 export const TITLES_ALREADY_SAVED = "Titles are already saved.";
 export const SAVE_FAILED = "Couldn't save";
@@ -625,7 +661,7 @@ export const PICK_A_LIBRARY = "Pick at least one library.";
 export const NAME_IT_THEN_CREATE = "Name it, then create it.";
 
 export function titlesReadyToAdd(count: number): string {
-  return count === 0 ? NAME_IT_THEN_CREATE : `${plural(count, "title")} ready to add`;
+  return `${plural(count, "title")} ready to add`;
 }
 
 /** "Name and description not saved": the first field as labelled, the rest in lower case. */

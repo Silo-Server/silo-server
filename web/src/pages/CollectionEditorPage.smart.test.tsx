@@ -202,25 +202,6 @@ function optionsOf(combobox: HTMLElement) {
   return names;
 }
 
-/** Stand-in for `window.matchMedia` at a viewport width. */
-function viewport(width: number) {
-  vi.stubGlobal("matchMedia", (query: string) => {
-    const min = /min-width:\s*(\d+)px/.exec(query);
-    const max = /max-width:\s*(\d+)px/.exec(query);
-    const matches = (!min || width >= Number(min[1])) && (!max || width <= Number(max[1]));
-    return {
-      matches,
-      media: query,
-      addEventListener() {},
-      removeEventListener() {},
-      addListener() {},
-      removeListener() {},
-      onchange: null,
-      dispatchEvent: () => false,
-    };
-  });
-}
-
 describe("the rules", () => {
   it("server: reads as the Home rows sentence with its libraries, and has no rule-rows note", async () => {
     showServerSmart(rules(), {}, { item_count: 40 });
@@ -301,7 +282,10 @@ describe("the rules", () => {
   it("moves focus to the libraries in the sentence from Where it shows", async () => {
     showPage("/admin/collections/c1/edit");
     await sentence();
-    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    const where = screen.getByRole("region", { name: "Where it shows" });
+    const row = within(where).getByRole("group", { name: "Libraries" });
+    expect(row).toHaveTextContent("Movies, 4K Movies");
+    fireEvent.click(within(row).getByRole("button", { name: "Change libraries" }));
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: libraries("Movies, 4K Movies") }),
     );
@@ -478,28 +462,66 @@ describe("Back", () => {
   });
 });
 
+/** `names` sorted into the order their regions come on the page. */
+function inPageOrder(names: readonly string[]) {
+  return names
+    .map((name) => [name, screen.getByRole("region", { name })] as const)
+    .sort(([, a], [, b]) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+    )
+    .map(([name]) => name);
+}
+
 describe("layout", () => {
-  it.each([
-    [1023, "phone", true],
-    [1024, "stacked", false],
-    [1279, "stacked", false],
-    [1280, "columns", false],
-  ] as const)("at %ipx: %s", async (width, layout, switcher) => {
-    viewport(width);
+  it("is one column in the order a collection is made, with the preview under the rules", async () => {
     showPage("/admin/collections/c1/edit");
     await sentence();
-    const grid = screen.getByTestId("editor-grid");
-    expect(grid.className).toContain("xl:grid-cols-[minmax(0,1fr)_340px]");
-    expect(grid.className).not.toMatch(/(^|\s)lg:grid-cols/);
-    expect(grid.parentElement).toHaveAttribute("data-layout", layout);
-    const nav = screen.queryByRole("navigation", { name: "Editor sections" });
-    expect(Boolean(nav)).toBe(switcher);
-    if (nav) {
-      expect(
-        within(nav)
-          .getAllByRole("button")
-          .map((button) => button.textContent),
-      ).toEqual(["Rules", "Details", "Where it shows"]);
-    }
+    expect(screen.getByTestId("editor-column").className).toContain("max-w-3xl");
+    const order = ["Name and description", "Rules", "Live preview", "Where it shows", "Look"];
+    expect(inPageOrder([...order].reverse())).toEqual(order);
+  });
+});
+
+describe("the save bar before Create", () => {
+  it("server: says what's still missing, name then libraries, then how many titles match", async () => {
+    v2Recorder.answer("POST /api/v2/admin/collections/preview", previewOf(38, ["Alien"]));
+    const user = userEvent.setup();
+    showPage("/admin/collections/new?type=smart");
+    const create = await screen.findByRole("button", { name: "Create collection" });
+    const status = () => within(bar()).getByRole("status");
+    expect(status()).toHaveTextContent("Not created yet Name it, then create it.");
+    await rename("Fox classics");
+    expect(status()).toHaveTextContent("Not created yet Pick its libraries, then create it.");
+    expect(create).toBeDisabled();
+    const where = screen.getByRole("region", { name: "Where it shows" });
+    const row = within(where).getByRole("group", { name: "Libraries" });
+    expect(row).toHaveTextContent("Not picked yet");
+    await user.click(within(row).getByRole("button", { name: "Change libraries" }));
+    const control = document.activeElement as HTMLElement;
+    expect(control).toHaveAccessibleName(/^Libraries:/);
+    await user.click(control);
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
+    await user.keyboard("{Escape}");
+    expect(row).toHaveTextContent("Movies");
+    await vi.waitFor(() =>
+      expect(status()).toHaveTextContent(
+        "Not created yet 38 titles match now. New ones join on their own.",
+      ),
+    );
+    expect(create).toBeEnabled();
+  });
+
+  it("personal: goes from the name straight to how many titles match", async () => {
+    v2Recorder.answer("POST /api/v2/collections/preview", previewOf(1, ["Alien"]));
+    showPage("/collections/new?type=smart");
+    await screen.findByRole("button", { name: "Create collection" });
+    const status = () => within(bar()).getByRole("status");
+    expect(status()).toHaveTextContent("Not created yet Name it, then create it.");
+    await rename("Comfort");
+    await vi.waitFor(() =>
+      expect(status()).toHaveTextContent(
+        "Not created yet 1 title matches now. New ones join on their own.",
+      ),
+    );
   });
 });

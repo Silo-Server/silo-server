@@ -20,6 +20,7 @@ import {
   personalCapabilities,
   personalSyncedCollection,
 } from "@/test/fixtures/collectionAnswers";
+import { artworkTile, chooseArtwork } from "@/test/collectionArtwork";
 import { goldens } from "@/test/fixtures/collectionBodies";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
@@ -192,10 +193,9 @@ describe("admin Synced list step", () => {
   it("creates from a TMDB template pick with its server poster", async () => {
     show(<></>, "/admin/collections/new?type=synced&libraryId=1");
     fireEvent.click(await screen.findByRole("radio", { name: "Trending Movies This Week" }));
-    expect(screen.getByRole("img", { name: "Poster preview" })).toHaveAttribute(
-      "src",
-      "https://images.example/templates/trending-movies.jpg",
-    );
+    expect(
+      within(await artworkTile("poster")).getByRole("img", { name: "Poster preview" }),
+    ).toHaveAttribute("src", "https://images.example/templates/trending-movies.jpg");
     await createAndLeave();
     expect(v2Recorder.writes()).toEqual(goldens.adminTemplateTMDB);
   });
@@ -347,7 +347,7 @@ describe("personal Synced list editor", () => {
 
     async function removePoster() {
       show(<></>, "/collections/c1/edit");
-      fireEvent.click(await screen.findByRole("button", { name: "Remove poster" }));
+      await chooseArtwork("poster", "Use the collage");
       expect(within(posterSlot()).queryByRole("img")).toBeNull();
       expect(within(saveBar()).getByText(/Poster not saved/)).toBeTruthy();
     }

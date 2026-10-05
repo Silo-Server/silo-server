@@ -15,9 +15,7 @@ import {
   displayFiltersToQueryDefinition,
   queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
-import type { ArtworkDraft, ArtworkSlot, CollectionDraft } from "@/lib/collections/scope";
-
-import { ArtworkFields } from "../fields/ArtworkFields";
+import type { CollectionDraft } from "@/lib/collections/scope";
 
 function ShowOnlyField({
   value,
@@ -72,16 +70,12 @@ function ShowOnlyField({
   );
 }
 
-/** Name, description, artwork; and Show only on a personal Manual collection or Synced list. */
+/** Name and description; and Show only on a personal Manual collection or Synced list. */
 export function DetailsPanel({
   draft,
   onChange,
   showOnly,
   nameNote,
-  artworkSlots,
-  savedArtwork,
-  artworkErrors,
-  onRetryArtwork,
 }: {
   draft: CollectionDraft;
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
@@ -89,21 +83,13 @@ export function DetailsPanel({
   showOnly: boolean;
   /** A line under Name, as in "Kept your name". */
   nameNote?: string;
-  artworkSlots: readonly ArtworkSlot[];
-  savedArtwork: Partial<Record<ArtworkSlot, string | undefined>>;
-  artworkErrors?: Partial<Record<ArtworkSlot, string>>;
-  onRetryArtwork?: () => void;
 }) {
   const id = useId();
   return (
     <section
-      aria-labelledby={`${id}-heading`}
-      data-panel="details"
+      aria-label="Name and description"
       className="surface-panel grid content-start gap-4 rounded-[22px] p-5 sm:p-6"
     >
-      <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
-        Details
-      </h2>
       <div className="grid gap-2">
         <label htmlFor={`${id}-name`} className="text-[14.5px] font-semibold">
           Name
@@ -143,16 +129,6 @@ export function DetailsPanel({
         <ShowOnlyField
           value={draft.showOnly}
           onChange={(next) => onChange((current) => ({ ...current, showOnly: next }))}
-        />
-      ) : null}
-      {artworkSlots.length > 0 ? (
-        <ArtworkFields
-          slots={artworkSlots}
-          saved={savedArtwork}
-          value={draft.artwork}
-          errors={artworkErrors}
-          onRetry={onRetryArtwork}
-          onChange={(artwork: ArtworkDraft) => onChange((current) => ({ ...current, artwork }))}
         />
       ) : null}
     </section>

@@ -10,9 +10,11 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
-import { COLUMNS_QUERY, PHONE_QUERY } from "@/components/collections/editor/CollectionEditorShell";
 import {
+  LIBRARIES_NOT_PICKED,
   PERSONAL_TAB_HELP,
+  ROWS_ONCE_CREATED,
+  SHELF_AFTER_CREATE,
   SHOW_ON_TAB_LABEL,
   SHOW_TO_OTHER_PROFILES_HELP,
   SHOW_TO_OTHER_PROFILES_LABEL,
@@ -25,6 +27,12 @@ import {
   adminCollectionList,
   personalCapabilities,
 } from "@/test/fixtures/collectionAnswers";
+import {
+  artworkTile,
+  chooseArtwork,
+  openArtworkMenu,
+  uploadArtwork,
+} from "@/test/collectionArtwork";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
 
@@ -217,25 +225,6 @@ function patches() {
   return writes().filter((call) => call.operation.startsWith("PATCH"));
 }
 
-/** Stand-in for `window.matchMedia` at a viewport width. */
-function viewport(width: number) {
-  vi.stubGlobal("matchMedia", (query: string) => {
-    const min = /min-width:\s*(\d+)px/.exec(query);
-    const max = /max-width:\s*(\d+)px/.exec(query);
-    const matches = (!min || width >= Number(min[1])) && (!max || width <= Number(max[1]));
-    return {
-      matches,
-      media: query,
-      addEventListener() {},
-      removeEventListener() {},
-      addListener() {},
-      removeListener() {},
-      onchange: null,
-      dispatchEvent: () => false,
-    };
-  });
-}
-
 describe("titles save as you change them", () => {
   it("sends the rename's PATCH with the token the title add left behind", async () => {
     showPage("/collections/c1/edit");
@@ -330,10 +319,12 @@ describe("creating a Manual collection", () => {
     const router = showPage("/collections/new?type=manual");
     await addTitle("heat", "Heat");
     await addTitle("alien", "Alien");
-    expect(screen.getByText("2 titles ready to add")).toBeTruthy();
+    // The name is what's still missing; once it's there, the bar counts the titles.
+    expect(within(bar()).getByRole("status")).toHaveTextContent("Name it, then create it.");
     expect(writes()).toEqual([]);
     const name = await nameField();
     fireEvent.change(name, { target: { value: "Rainy days" } });
+    expect(within(bar()).getByRole("status")).toHaveTextContent("2 titles ready to add");
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/collections/c1/edit"));
     expect(writes().map((call) => [call.operation, call.path, call.body])).toEqual([
@@ -435,10 +426,7 @@ describe("creating a Manual collection", () => {
     });
     showPage("/admin/collections/new?type=manual&libraryId=1");
     fireEvent.change(await nameField(), { target: { value: "Staff picks" } });
-    fireEvent.change(
-      within(screen.getByRole("group", { name: "Poster" })).getByLabelText("Upload poster"),
-      { target: { files: [new File(["image"], "poster.png", { type: "image/png" })] } },
-    );
+    await uploadArtwork("poster");
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     const problem = await screen.findByText(/Couldn't save the poster/);
     expect(within(bar()).getByText("Poster not saved")).toBeTruthy();
@@ -662,37 +650,198 @@ describe("the save bar and Where it shows", () => {
   });
 });
 
-describe("layout", () => {
-  it.each([
-    [1023, "phone", true],
-    [1024, "stacked", false],
-    [1279, "stacked", false],
-    [1280, "columns", false],
-  ] as const)("at %ipx: %s", async (width, layout, switcher) => {
-    viewport(width);
-    showPage("/collections/c1/edit");
-    await nameField();
-    const grid = screen.getByTestId("editor-grid");
-    expect(grid.className).toContain("xl:grid-cols-[minmax(0,1fr)_340px]");
-    expect(grid.className).not.toMatch(/(^|\s)lg:grid-cols/);
-    expect(grid.parentElement).toHaveAttribute("data-layout", layout);
-    expect(Boolean(screen.queryByRole("navigation", { name: "Editor sections" }))).toBe(switcher);
+describe("the Look card", () => {
+  const SERVER_EDIT = "/admin/collections/c1/edit?libraryId=1";
+  const look = () => screen.getByRole("region", { name: "Look" });
+
+  it("starts closed as one line saying what each image is, and opens to the tiles", async () => {
+    showPage(SERVER_EDIT);
+    const toggle = await within(await screen.findByRole("region", { name: "Look" })).findByRole(
+      "button",
+      { name: "Look" },
+    );
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAccessibleDescription("Poster: a collage of its titles · Backdrop: none");
+    expect(within(look()).queryByRole("group", { name: "Poster" })).toBeNull();
+    fireEvent.click(toggle);
+    const done = within(look()).getByRole("button", { name: "Done" });
+    expect(done).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(document.activeElement).toBe(done));
+    expect(within(look()).getByRole("group", { name: "Poster" })).toHaveTextContent(
+      "Collage of its titles",
+    );
+    expect(within(look()).getByRole("group", { name: "Backdrop" })).toHaveTextContent(
+      "Fills the top of its page",
+    );
+    // One control per image: no link field until Paste a link… is chosen.
+    expect(within(look()).queryByRole("textbox")).toBeNull();
+    fireEvent.click(done);
+    const closed = within(look()).getByRole("button", { name: "Look" });
+    await waitFor(() => expect(document.activeElement).toBe(closed));
   });
 
-  it("the queries split at 1024px and 1280px", () => {
-    expect(PHONE_QUERY).toBe("(max-width: 1023px)");
-    expect(COLUMNS_QUERY).toBe("(min-width: 1280px)");
+  it("sums up a saved image, and a new one waiting for Save", async () => {
+    const withPoster = { ...adminCollection, poster_url: "https://images.example/poster.png" };
+    v2Recorder.answer("GET /api/v2/admin/collections/{id}", withPoster);
+    v2Recorder.answer("GET /api/v2/admin/collections", adminCollectionList(withPoster));
+    showPage(SERVER_EDIT);
+    const toggle = await within(await screen.findByRole("region", { name: "Look" })).findByRole(
+      "button",
+      { name: "Look" },
+    );
+    expect(toggle).toHaveAccessibleDescription("Poster: an image · Backdrop: none");
+    await uploadArtwork("backdrop");
+    expect(within(look()).getByText("The new backdrop saves when you press Save.")).toBeTruthy();
+    fireEvent.click(within(look()).getByRole("button", { name: "Done" }));
+    expect(within(look()).getByRole("button", { name: "Look" })).toHaveAccessibleDescription(
+      "Poster: an image · Backdrop: a new image",
+    );
+    expect(within(bar()).getByRole("status")).toHaveTextContent("Backdrop not saved");
   });
 
-  it("puts Details first on a phone in create mode", async () => {
-    viewport(390);
-    showPage("/collections/new?type=manual");
-    const nav = await screen.findByRole("navigation", { name: "Editor sections" });
+  it("Upload image… opens the file picker for that image", async () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    showPage(SERVER_EDIT);
+    const menu = await openArtworkMenu("poster");
     expect(
-      within(nav)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ).toEqual(["Details", "Titles", "Where it shows"]);
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Upload image…", "Paste a link…", "Use the collage"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Upload image…" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(click.mock.contexts[0]).toBe(
+      within(await artworkTile("poster")).getByLabelText("Upload poster"),
+    );
+    click.mockRestore();
+  });
+
+  it("Paste a link… shows the link field; Use link stages it and Save sends it", async () => {
+    v2Recorder.answer("PUT /api/v2/admin/collections/{id}/poster", adminCollection);
+    showPage(SERVER_EDIT);
+    await chooseArtwork("poster", "Paste a link…");
+    const field = await within(look()).findByRole("textbox", { name: "Poster image link" });
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(writes()).toEqual([]);
+    fireEvent.change(field, { target: { value: "  https://images.example/fox.jpg " } });
+    fireEvent.click(within(look()).getByRole("button", { name: "Use link" }));
+    expect(within(look()).queryByRole("textbox")).toBeNull();
+    expect(within(look()).getByRole("img", { name: "Poster preview" })).toHaveAttribute(
+      "src",
+      "https://images.example/fox.jpg",
+    );
+    expect(within(bar()).getByRole("status")).toHaveTextContent("Poster not saved");
+    expect(writes()).toEqual([]);
+    await save();
+    await waitFor(() =>
+      expect(writes().map((call) => call.operation)).toEqual([
+        "PATCH /api/v2/admin/collections/{id}",
+        "PUT /api/v2/admin/collections/{id}/poster",
+      ]),
+    );
+    expect(writes()[1]!.form).toEqual({ source_url: "https://images.example/fox.jpg" });
+  });
+
+  it("Cancel closes the link field without staging anything", async () => {
+    showPage(SERVER_EDIT);
+    await chooseArtwork("backdrop", "Paste a link…");
+    const field = await within(look()).findByRole("textbox", { name: "Backdrop image link" });
+    fireEvent.change(field, { target: { value: "https://images.example/wide.jpg" } });
+    fireEvent.click(within(look()).getByRole("button", { name: "Cancel" }));
+    expect(within(look()).queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(look()).getByRole("button", { name: "Change backdrop" }),
+      ),
+    );
+  });
+
+  it("Use the collage and Remove backdrop wait for an image to remove", async () => {
+    showPage(SERVER_EDIT);
+    const poster = await openArtworkMenu("poster");
+    expect(within(poster).getByRole("menuitem", { name: "Use the collage" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    fireEvent.keyDown(poster, { key: "Escape" });
+    const backdrop = await openArtworkMenu("backdrop");
+    expect(within(backdrop).getByRole("menuitem", { name: "Remove backdrop" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("Use the collage drops a new poster that isn't saved yet, sending nothing", async () => {
+    showPage(SERVER_EDIT);
+    await uploadArtwork("poster");
+    expect(within(bar()).getByRole("status")).toHaveTextContent("Poster not saved");
+    await chooseArtwork("poster", "Use the collage");
+    expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull();
+    expect(writes()).toEqual([]);
+  });
+
+  it("opens by itself when an image couldn't be saved, with Retry", async () => {
+    v2Recorder.answer("PUT /api/v2/admin/collections/{id}/poster", () => {
+      throw new Error("too large");
+    });
+    showPage(SERVER_EDIT);
+    fireEvent.change(await nameField(), { target: { value: "Renamed" } });
+    await uploadArtwork("poster");
+    fireEvent.click(within(look()).getByRole("button", { name: "Done" }));
+    await save();
+    expect(await within(look()).findByText(/Couldn't save the poster/)).toBeTruthy();
+    expect(within(look()).getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+});
+
+describe("Where it shows on a new server collection", () => {
+  it("lists Libraries, Shelf, the Collections tab and Rows that show it, one line each", async () => {
+    showPage("/admin/collections/new?type=manual");
+    await nameField();
+    const where = screen.getByRole("region", { name: "Where it shows" });
+    const libraries = within(where).getByRole("group", { name: "Libraries" });
+    expect(libraries).toHaveTextContent(LIBRARIES_NOT_PICKED);
+    expect(within(where).getByRole("group", { name: "Shelf" })).toHaveTextContent(
+      `No heading · ${SHELF_AFTER_CREATE}`,
+    );
+    expect(within(where).getByRole("switch", { name: SHOW_ON_TAB_LABEL })).toBeChecked();
+    expect(within(where).getByRole("group", { name: "Rows that show it" })).toHaveTextContent(
+      ROWS_ONCE_CREATED,
+    );
+    fireEvent.click(within(libraries).getByRole("button", { name: "Change libraries" }));
+    expect(document.activeElement).toHaveAccessibleName(/^Titles from/);
+  });
+
+  it("names the libraries once they're picked", async () => {
+    showPage("/admin/collections/new?type=manual&libraryId=1");
+    await nameField();
+    const where = screen.getByRole("region", { name: "Where it shows" });
+    expect(within(where).getByRole("group", { name: "Libraries" })).toHaveTextContent(
+      "LibrariesMovies",
+    );
+    expect(within(where).queryByRole("link", { name: "Arrange" })).toBeNull();
+  });
+});
+
+/** `names` sorted into the order their regions come on the page. */
+function inPageOrder(names: readonly string[]) {
+  return names
+    .map((name) => [name, screen.getByRole("region", { name })] as const)
+    .sort(([, a], [, b]) =>
+      a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1,
+    )
+    .map(([name]) => name);
+}
+
+describe("layout", () => {
+  it("is one column at every width, Name first, the same on a phone", async () => {
+    showPage("/collections/new?type=manual");
+    await nameField();
+    expect(screen.getByTestId("editor-column").className).toContain("max-w-3xl");
+    expect(screen.queryByRole("navigation", { name: "Editor sections" })).toBeNull();
+    const order = ["Name and description", "Titles", "Where it shows", "Look"];
+    expect(inPageOrder([...order].reverse())).toEqual(order);
   });
 });
 

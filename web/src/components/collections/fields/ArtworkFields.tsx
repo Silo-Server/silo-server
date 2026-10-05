@@ -1,36 +1,56 @@
-import { useEffect, useId, useMemo, useRef } from "react";
-import { Upload } from "lucide-react";
+import { useId, useRef, useState, type RefObject } from "react";
+import { Check, ImageIcon, LayoutGrid, Link2, Pencil, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { isArtworkStaged } from "@/hooks/queries/collectionScope";
+import { ARTWORK_SLOT_LABEL, BACKDROP_CAPTION, POSTER_IS_COLLAGE } from "@/lib/collections/copy";
 import type { ArtworkDraft, ArtworkSlot, ArtworkSlotDraft } from "@/lib/collections/scope";
 import { cn } from "@/lib/utils";
 
-const ACCEPT = "image/jpeg,image/png,image/webp";
-const SLOT_LABEL: Record<ArtworkSlot, string> = { poster: "Poster", backdrop: "Backdrop" };
+import { useArtworkPreview } from "./artworkPreview";
 
-/** An object URL for a chosen file, revoked when the file changes or the slot unmounts. */
-function useArtworkDraft(slot: ArtworkSlotDraft | undefined, savedUrl: string | undefined) {
-  const file = slot?.file ?? null;
-  const fileUrl = useMemo(() => (file ? URL.createObjectURL(file) : undefined), [file]);
-  useEffect(
-    () => () => {
-      if (fileUrl) URL.revokeObjectURL?.(fileUrl);
-    },
-    [fileUrl],
+const ACCEPT = "image/jpeg,image/png,image/webp";
+
+/** An empty slot: the collage a poster falls back to, or no backdrop. */
+export function EmptyArtwork({ slot, compact = false }: { slot: ArtworkSlot; compact?: boolean }) {
+  const Icon = slot === "poster" ? LayoutGrid : ImageIcon;
+  return (
+    <span
+      className={cn(
+        "text-muted-foreground bg-muted/30 grid size-full place-content-center justify-items-center gap-1.5 text-[12px]",
+        compact ? "[&_svg]:size-3.5" : "[&_svg]:size-4",
+      )}
+    >
+      <Icon aria-hidden />
+      {compact ? null : slot === "poster" ? "Collage" : "No backdrop"}
+    </span>
   );
-  const link = slot?.sourceUrl?.trim();
-  if (file) return fileUrl;
-  if (link) return link;
-  return slot?.remove ? undefined : savedUrl;
 }
 
-function ArtworkSlotField({
+const TILE_FRAME =
+  "border-border/80 bg-muted/20 relative overflow-hidden rounded-[10px] border shadow-lg";
+
+/**
+ * One image as a tile with one pencil button. Its menu uploads a file, opens
+ * the link box, or goes back to the collage (poster) or no backdrop. The
+ * choice is staged until Save; Undo drops it.
+ */
+function ArtworkTile({
   slot,
   savedUrl,
   value,
   onChange,
+  onPasteLink,
+  focusPasteField,
+  triggerRef,
   error,
   onRetry,
   disabled,
@@ -39,103 +59,92 @@ function ArtworkSlotField({
   savedUrl?: string;
   value?: ArtworkSlotDraft;
   onChange: (next: ArtworkSlotDraft | undefined) => void;
+  onPasteLink: () => void;
+  /** Called once the menu has closed after Paste a link…, so focus lands in the link field. */
+  focusPasteField: () => void;
+  triggerRef: (button: HTMLButtonElement | null) => void;
   error?: string;
   onRetry?: () => void;
   disabled?: boolean;
 }) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
-  const preview = useArtworkDraft(value, savedUrl);
-  const label = SLOT_LABEL[slot];
+  // After Paste a link…, focus goes to the link field rather than back to the pencil.
+  const pasting = useRef(false);
+  const preview = useArtworkPreview(value, savedUrl);
+  const label = ARTWORK_SLOT_LABEL[slot];
   const noun = label.toLowerCase();
+  const poster = slot === "poster";
   const staged = isArtworkStaged(value);
-  const pick = () => input.current?.click();
+  // Back to the collage or no backdrop: removes a saved image on Save, or drops a new one.
+  const clear = () => onChange(savedUrl ? { remove: true } : undefined);
 
   return (
-    <div role="group" aria-labelledby={`${id}-label`} className="grid content-start gap-2">
-      <span id={`${id}-label`} className="text-muted-foreground text-[13px]">
-        {label}
-      </span>
-      {preview ? (
-        <img
-          src={preview}
-          alt={`${label} preview`}
-          className={cn(
-            "bg-muted rounded-[10px] border object-cover",
-            slot === "poster" ? "aspect-[2/3] w-[92px]" : "aspect-video w-full",
-          )}
-        />
-      ) : (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={pick}
-          className={cn(
-            "border-muted-foreground/35 text-muted-foreground hover:border-primary hover:text-foreground grid place-items-center gap-1.5 rounded-[10px] border border-dashed px-2 text-center text-[12.5px] transition-colors",
-            slot === "poster" ? "aspect-[2/3] w-[92px]" : "aspect-video w-full",
-          )}
-        >
-          <span className="grid justify-items-center gap-1.5">
-            <Upload aria-hidden className="size-4" />
-            Upload or paste a link
-          </span>
-        </button>
-      )}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
-        <button
-          type="button"
-          disabled={disabled}
-          className="font-medium underline underline-offset-4"
-          onClick={pick}
-        >
-          {preview ? `Change ${noun}` : `Upload ${noun}`}
-        </button>
-        {staged ? (
-          <>
-            <span aria-hidden className="opacity-55">
-              ·
-            </span>
-            <button
+    <div
+      role="group"
+      aria-labelledby={`${id}-label`}
+      className={cn("grid content-start gap-2", poster ? "w-28" : "w-full max-w-64")}
+    >
+      <div className={cn(TILE_FRAME, poster ? "aspect-[2/3]" : "aspect-video")}>
+        {preview ? (
+          <img src={preview} alt={`${label} preview`} className="size-full object-cover" />
+        ) : (
+          <EmptyArtwork slot={slot} />
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild disabled={disabled}>
+            <Button
+              ref={triggerRef}
               type="button"
-              className="font-medium underline underline-offset-4"
-              onClick={() => onChange(undefined)}
+              size="icon-sm"
+              aria-label={`Change ${noun}`}
+              className="absolute right-1.5 bottom-1.5 size-7 rounded-lg bg-black/70 text-white ring-1 ring-white/10 backdrop-blur hover:bg-black/85 [&_svg]:size-3.5"
             >
-              Undo
-            </button>
-          </>
-        ) : savedUrl ? (
-          <>
-            <span aria-hidden className="opacity-55">
-              ·
-            </span>
-            <button
-              type="button"
-              disabled={disabled}
-              className="font-medium underline underline-offset-4"
-              onClick={() => onChange({ remove: true })}
+              <Pencil aria-hidden />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[220px]"
+            onCloseAutoFocus={(event) => {
+              if (!pasting.current) return;
+              pasting.current = false;
+              event.preventDefault();
+              focusPasteField();
+            }}
+          >
+            <DropdownMenuItem onSelect={() => input.current?.click()}>
+              <Upload aria-hidden />
+              Upload image…
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                pasting.current = true;
+                onPasteLink();
+              }}
             >
-              {`Remove ${noun}`}
-            </button>
-          </>
-        ) : null}
+              <Link2 aria-hidden />
+              Paste a link…
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={!preview} onSelect={clear}>
+              {poster ? <LayoutGrid aria-hidden /> : <Trash2 aria-hidden />}
+              {poster ? "Use the collage" : "Remove backdrop"}
+              {poster && !preview ? <Check aria-hidden className="ml-auto" /> : null}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <Input
-        type="url"
-        aria-label={`${label} link`}
-        placeholder="Or paste an image link"
-        className="h-8 text-[13px]"
-        disabled={disabled}
-        value={value?.sourceUrl ?? ""}
-        onChange={(event) =>
-          onChange(
-            event.target.value
-              ? { sourceUrl: event.target.value }
-              : value?.remove
-                ? { remove: true }
-                : undefined,
-          )
-        }
-      />
+      <div className="grid gap-0.5">
+        <span id={`${id}-label`} className="text-[13px] font-medium">
+          {label}
+        </span>
+        {poster && preview ? null : (
+          <span className="text-muted-foreground text-[12.5px] leading-snug">
+            {poster ? POSTER_IS_COLLAGE : BACKDROP_CAPTION}
+          </span>
+        )}
+      </div>
       {error ? (
         <p
           role="alert"
@@ -149,10 +158,17 @@ function ArtworkSlotField({
           ) : null}
         </p>
       ) : staged ? (
-        <p className="text-muted-foreground text-[12.5px]">
+        <p className="text-muted-foreground text-[12.5px] leading-snug">
           {value?.remove && !value.file && !value.sourceUrl?.trim()
             ? `The ${noun} is removed when you save.`
-            : `The new ${noun} saves when you press Save.`}
+            : `The new ${noun} saves when you press Save.`}{" "}
+          <button
+            type="button"
+            className="text-foreground font-medium underline underline-offset-4"
+            onClick={() => onChange(undefined)}
+          >
+            Undo
+          </button>
         </p>
       ) : null}
       <input
@@ -171,10 +187,63 @@ function ArtworkSlotField({
   );
 }
 
+/** "Paste a link…": the link field, shown only after that choice. */
+function PasteLinkBox({
+  slot,
+  initial,
+  fieldRef,
+  onUse,
+  onClose,
+}: {
+  slot: ArtworkSlot;
+  initial: string;
+  fieldRef: RefObject<HTMLInputElement | null>;
+  onUse: (link: string) => void;
+  onClose: () => void;
+}) {
+  const id = useId();
+  const [link, setLink] = useState(initial);
+  const use = () => {
+    if (link.trim()) onUse(link.trim());
+  };
+  return (
+    <div className="border-border bg-popover grid max-w-[360px] gap-2.5 rounded-xl border p-3.5">
+      <label htmlFor={`${id}-link`} className="text-[13.5px] font-semibold">
+        {`${ARTWORK_SLOT_LABEL[slot]} image link`}
+      </label>
+      <Input
+        ref={fieldRef}
+        id={`${id}-link`}
+        type="url"
+        placeholder="https://"
+        value={link}
+        onChange={(event) => setLink(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            use();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
+      />
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="button" size="sm" disabled={!link.trim()} onClick={use}>
+          Use link
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /**
- * The collection's artwork slots (server: poster and backdrop; personal:
- * poster). A choice is staged until Save; a slot whose upload failed after the
- * collection saved stays staged and offers Retry.
+ * The collection's artwork tiles (server: poster and backdrop; personal:
+ * poster). A choice is staged until Save; a slot whose upload failed after
+ * the collection saved stays staged and offers Retry.
  */
 export function ArtworkFields({
   slots,
@@ -193,14 +262,23 @@ export function ArtworkFields({
   onRetry?: () => void;
   disabled?: boolean;
 }) {
+  const [pasting, setPasting] = useState<ArtworkSlot | null>(null);
+  const triggers = useRef<Partial<Record<ArtworkSlot, HTMLButtonElement | null>>>({});
+  const pasteField = useRef<HTMLInputElement>(null);
+  const setSlot = (slot: ArtworkSlot, next: ArtworkSlotDraft | undefined) => {
+    const { [slot]: _previous, ...rest } = value;
+    onChange(next ? { ...rest, [slot]: next } : rest);
+  };
+  const closePaste = () => {
+    if (pasting) triggers.current[pasting]?.focus();
+    setPasting(null);
+  };
+
   return (
-    <div className="grid gap-2">
-      <h3 className="text-[14.5px] font-semibold">
-        Artwork <span className="text-muted-foreground font-normal">Optional</span>
-      </h3>
-      <div className={cn("grid gap-4", slots.length > 1 && "grid-cols-[92px_minmax(0,1fr)]")}>
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-start gap-5">
         {slots.map((slot) => (
-          <ArtworkSlotField
+          <ArtworkTile
             key={slot}
             slot={slot}
             savedUrl={saved[slot]}
@@ -208,17 +286,27 @@ export function ArtworkFields({
             error={errors?.[slot]}
             onRetry={onRetry}
             disabled={disabled}
-            onChange={(next) => {
-              const { [slot]: _previous, ...rest } = value;
-              onChange(next ? { ...rest, [slot]: next } : rest);
+            triggerRef={(button) => {
+              triggers.current[slot] = button;
             }}
+            onPasteLink={() => setPasting(slot)}
+            focusPasteField={() => pasteField.current?.focus()}
+            onChange={(next) => setSlot(slot, next)}
           />
         ))}
       </div>
-      {slots.includes("poster") ? (
-        <p className="text-muted-foreground text-[12.5px]">
-          With no poster, viewers see a collage.
-        </p>
+      {pasting ? (
+        <PasteLinkBox
+          key={pasting}
+          slot={pasting}
+          initial={value[pasting]?.sourceUrl ?? ""}
+          fieldRef={pasteField}
+          onClose={closePaste}
+          onUse={(sourceUrl) => {
+            setSlot(pasting, { sourceUrl });
+            closePaste();
+          }}
+        />
       ) : null}
     </div>
   );

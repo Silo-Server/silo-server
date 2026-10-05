@@ -30,7 +30,7 @@ function readOnlyHref(href: string) {
   return `${href}${href.includes("?") ? "&" : "?"}notice=read-only`;
 }
 
-/** Header and panels in their final places while the collection loads; no save bar. */
+/** Header and cards in their final places while the collection loads; no save bar. */
 function EditorSkeleton() {
   const panel = (rows: number) => (
     <div className="surface-panel grid gap-4 rounded-[22px] p-5 sm:p-6">
@@ -44,8 +44,6 @@ function EditorSkeleton() {
     <div role="status" aria-busy="true">
       <span className="sr-only">Loading collection editor…</span>
       <CollectionEditorShell
-        createMode={false}
-        contentsLabel="Titles"
         header={
           <div aria-hidden className="grid gap-4">
             <Skeleton className="h-4 w-24" />
@@ -59,10 +57,11 @@ function EditorSkeleton() {
             </div>
           </div>
         }
-        contents={panel(5)}
-        details={panel(3)}
-        where={panel(2)}
-      />
+      >
+        {panel(2)}
+        {panel(5)}
+        {panel(4)}
+      </CollectionEditorShell>
     </div>
   );
 }

@@ -32,7 +32,6 @@ export function SmartRulesPanel({
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      data-panel="contents"
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
       <div>

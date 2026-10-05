@@ -12,7 +12,7 @@ import { createMemoryRouter, RouterProvider, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
-import { CREATE_IT_FIRST, ROWS_NOT_LISTED } from "@/lib/collections/copy";
+import { MY_ROWS_ONCE_CREATED, ROWS_NOT_LISTED } from "@/lib/collections/copy";
 import { safeReturnPath, type AddedRowState } from "@/lib/homeRows/rowLinks";
 import {
   emptyPreview,
@@ -385,13 +385,12 @@ describe("Add as a row on your own pages", () => {
     expect(v2Recorder.writes()).toEqual([]);
   });
 
-  it("waits for a new collection to be created, and says so", async () => {
+  it("waits for a new collection to be created, and says so in one line", async () => {
     showPage("/collections/new?type=manual");
     await screen.findByRole("textbox", { name: "Name" });
-    reveal();
-    const button = await screen.findByRole("button", { name: /Add as a row/ });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAccessibleDescription(CREATE_IT_FIRST);
+    const group = await screen.findByRole("group", { name: "Rows that show it" });
+    expect(group).toHaveTextContent(MY_ROWS_ONCE_CREATED);
+    expect(screen.queryByRole("button", { name: /Add as a row/ })).toBeNull();
     expect(settingsReads()).toHaveLength(0);
   });
 
