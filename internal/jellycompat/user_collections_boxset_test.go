@@ -675,7 +675,7 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 		{"series", "Series"}, {"movie", "Second Movie"},
 	} {
 		id := uuid.NewString()
-		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, created_at) VALUES ($1, $2, $3, NOW() - INTERVAL '1 day')`, id, item.kind, item.title); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, content_rating, poster_path, backdrop_path, logo_path, created_at) VALUES ($1, $2, $3, '', '', '', '', NOW() - INTERVAL '1 day')`, id, item.kind, item.title); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, id) })
@@ -683,7 +683,7 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 			t.Fatal(err)
 		}
 		if item.kind == "series" {
-			if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, created_at) VALUES ($1, $2, 1, 1, 'Episode', '', NOW() - INTERVAL '1 day')`, episodeID, id); err != nil {
+			if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, still_path, imdb_id, tmdb_id, tvdb_id, created_at) VALUES ($1, $2, 1, 1, 'Episode', '', 0, '', '', '', '', NOW() - INTERVAL '1 day')`, episodeID, id); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW() - INTERVAL '1 day')`, episodeID, libraryID); err != nil {
@@ -859,7 +859,7 @@ func TestPersonalBoxSetChildCountMatchesChildrenDB(t *testing.T) {
 		id, kind string
 		library  int
 	}{{shownA, "movie", shownLib}, {shownB, "series", shownLib}, {hidden, "movie", hiddenLib}, {book, "audiobook", shownLib}, {ebook, "ebook", shownLib}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, $2, $1)`, seed.id, seed.kind); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, content_rating, poster_path, backdrop_path, logo_path) VALUES ($1, $2, $1, '', '', '', '')`, seed.id, seed.kind); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library); err != nil {
@@ -1282,7 +1282,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 		id, kind string
 		library  int
 	}{{shared, "movie", ownerLib}, {private, "movie", otherLib}, {series, "series", ownerLib}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, $2, $1)`, seed.id, seed.kind); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, content_rating, poster_path, backdrop_path, logo_path) VALUES ($1, $2, $1, '', '', '', '')`, seed.id, seed.kind); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library); err != nil {
@@ -1298,7 +1298,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	// One episode of the series lives in each library.
 	for i, library := range []int{ownerLib, otherLib} {
 		episode := fmt.Sprintf("boxset-owner-episode-%s-%d", suffix, i)
-		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview) VALUES ($1, $2, 1, $3, $1, '')`, episode, series, i+1); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, runtime, still_path, imdb_id, tmdb_id, tvdb_id) VALUES ($1, $2, 1, $3, $1, '', 0, '', '', '', '')`, episode, series, i+1); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW())`, episode, library); err != nil {
