@@ -740,8 +740,9 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 	}
 	if err != nil {
 		// A caller that gave up, and a query the provider refused (such as
-		// an overlong search), say nothing about the provider.
-		if ctx.Err() == nil && !embeddings.InputRejected(err) {
+		// an overlong search, including a local model's context-length
+		// 5xx), say nothing about the provider.
+		if ctx.Err() == nil && !embeddings.InputRefused(err) {
 			p.vecMu.Lock()
 			p.vectorFailedUntil = p.vectorNow().Add(meilisearchQueryVectorFailureCooldown)
 			p.vecMu.Unlock()

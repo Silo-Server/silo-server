@@ -384,6 +384,25 @@ func TestInputRejected(t *testing.T) {
 	}
 }
 
+// A refused input is a rejected request or a local model's context-length
+// 5xx; other server errors are not.
+func TestInputRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"rejected request": {&StatusError{API: "test provider", StatusCode: 400}, true},
+		"context length":   {fmt.Errorf("wrapped: %w", &StatusError{API: "test provider", StatusCode: 500, Body: "input length exceeds the Context Length"}), true},
+		"server error":     {&StatusError{API: "test provider", StatusCode: 503, Body: "overloaded"}, false},
+		"unauthorized":     {&StatusError{API: "test provider", StatusCode: 401}, false},
+		"nil":              {nil, false},
+	} {
+		if got := InputRefused(tc.err); got != tc.want {
+			t.Errorf("%s: InputRefused = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
 func TestOpenAIServerErrorsRetryWithBackoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0

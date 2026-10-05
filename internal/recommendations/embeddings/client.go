@@ -146,6 +146,14 @@ func Unavailable(err error) bool {
 	return isConnectError(err)
 }
 
+// InputRefused reports whether the provider refused this input rather than
+// failing for every request: a rejected request (InputRejected), or the 5xx a
+// local model such as Ollama answers an input longer than its context with.
+// The input may succeed shortened; other inputs are not affected.
+func InputRefused(err error) bool {
+	return InputRejected(err) || (err != nil && strings.Contains(strings.ToLower(err.Error()), "context length"))
+}
+
 // InputRejected reports whether the provider refused the request's input,
 // for example as too long or malformed: a 4xx response other than the
 // Unavailable ones, 408 and 429.
