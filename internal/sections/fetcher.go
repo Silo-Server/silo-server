@@ -43,6 +43,11 @@ type SectionItemMeta struct {
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
 	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	// An episode's series backdrop. The item's own backdrop is the episode's
+	// still where it has one, so a client that wants the show's picture reads
+	// this instead.
+	SeriesBackdropPath      string
+	SeriesBackdropThumbhash string
 }
 
 const recentSeasonPremiereBadgeWindowDays = 14
@@ -2728,7 +2733,9 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
-			si.status
+			si.status,
+			si.backdrop_path,
+			si.backdrop_thumbhash
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -2743,12 +2750,14 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	itemMeta := map[string]SectionItemMeta{}
 	for rows.Next() {
 		var (
-			item          models.MediaItem
-			seriesID      string
-			seasonNumber  int
-			episodeNumber int
-			seriesTitle   string
-			airDate       *time.Time
+			item                    models.MediaItem
+			seriesID                string
+			seasonNumber            int
+			episodeNumber           int
+			seriesTitle             string
+			airDate                 *time.Time
+			seriesBackdrop          string
+			seriesBackdropThumbhash string
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2770,17 +2779,21 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.BackdropThumbhash,
 			&item.LogoPath,
 			&item.Status,
+			&seriesBackdrop,
+			&seriesBackdropThumbhash,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
-			SeriesID:      &seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
-			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			SeriesID:                &seriesID,
+			SeriesTitle:             seriesTitle,
+			SeasonNumber:            &seasonNumber,
+			EpisodeNumber:           &episodeNumber,
+			Badges:                  recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			SeriesBackdropPath:      seriesBackdrop,
+			SeriesBackdropThumbhash: seriesBackdropThumbhash,
 		}
 	}
 	if err := rows.Err(); err != nil {

@@ -172,6 +172,16 @@ season selectors; clients that render season posters should keep the default. Se
 the [season-list contract](catalog-api.md#season-list-artwork) for the full
 response semantics.
 
+## Episode cards in sections
+
+On a home or library section card for an episode, `backdrop_url` is the
+episode's still, or the series backdrop when the episode has no still.
+`series_backdrop_url` is always the series backdrop, resolved at the same size,
+with `series_backdrop_thumbhash` beside it. A client can show the episode's
+picture on the card and the show's in a hero area without fetching the series.
+`series_backdrop_url` is absent when the series has no backdrop, and on cards
+that are not episodes.
+
 ## Jellyfin compatibility
 
 The Jellyfin-protocol surface maps its own `MaxWidth`/`MaxHeight`/`FillWidth`/

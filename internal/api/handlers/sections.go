@@ -359,29 +359,33 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge       *int                   `json:"-"`
-	AdvisorySource    string                 `json:"-"`
-	Status            string                 `json:"status"`
-	ShowStatus        string                 `json:"show_status,omitempty"`
-	RatingIMDB        *float64               `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64               `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int                   `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int                   `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string                 `json:"original_language,omitempty"`
-	Overview          string                 `json:"overview,omitempty"`
-	PositionSeconds   *float64               `json:"position_seconds,omitempty"`
-	DurationSeconds   *float64               `json:"duration_seconds,omitempty"`
-	ProgressUpdatedAt *string                `json:"progress_updated_at,omitempty"`
-	PosterURL         string                 `json:"poster_url,omitempty"`
-	PosterThumbhash   string                 `json:"poster_thumbhash,omitempty"`
-	BackdropURL       string                 `json:"backdrop_url,omitempty"`
-	BackdropThumbhash string                 `json:"backdrop_thumbhash,omitempty"`
-	LogoURL           string                 `json:"logo_url,omitempty"`
-	OverlaySummary    *models.OverlaySummary `json:"overlay_summary,omitempty"`
-	Badges            []string               `json:"badges,omitempty"`
-	ItemSource        string                 `json:"item_source,omitempty"`
-	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
-	UpcomingEvent     *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	AdvisoryAge       *int     `json:"-"`
+	AdvisorySource    string   `json:"-"`
+	Status            string   `json:"status"`
+	ShowStatus        string   `json:"show_status,omitempty"`
+	RatingIMDB        *float64 `json:"rating_imdb,omitempty"`
+	RatingTMDB        *float64 `json:"rating_tmdb,omitempty"`
+	RatingRTCritic    *int     `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience  *int     `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage  string   `json:"original_language,omitempty"`
+	Overview          string   `json:"overview,omitempty"`
+	PositionSeconds   *float64 `json:"position_seconds,omitempty"`
+	DurationSeconds   *float64 `json:"duration_seconds,omitempty"`
+	ProgressUpdatedAt *string  `json:"progress_updated_at,omitempty"`
+	PosterURL         string   `json:"poster_url,omitempty"`
+	PosterThumbhash   string   `json:"poster_thumbhash,omitempty"`
+	BackdropURL       string   `json:"backdrop_url,omitempty"`
+	BackdropThumbhash string   `json:"backdrop_thumbhash,omitempty"`
+	// An episode's series backdrop, for apiv2 alone (json:"-": /api/v1 is
+	// frozen).
+	SeriesBackdropURL       string                 `json:"-"`
+	SeriesBackdropThumbhash string                 `json:"-"`
+	LogoURL                 string                 `json:"logo_url,omitempty"`
+	OverlaySummary          *models.OverlaySummary `json:"overlay_summary,omitempty"`
+	Badges                  []string               `json:"badges,omitempty"`
+	ItemSource              string                 `json:"item_source,omitempty"`
+	UserState               *itemUserStateResponse `json:"user_state,omitempty"`
+	UpcomingEvent           *upcomingEventResponse `json:"upcoming_event,omitempty"`
 }
 
 type resolvedSectionResponse struct {
@@ -1290,9 +1294,10 @@ type sectionItemImageKey struct {
 }
 
 type sectionItemImageURLs struct {
-	posterURL   string
-	backdropURL string
-	logoURL     string
+	posterURL         string
+	backdropURL       string
+	seriesBackdropURL string
+	logoURL           string
 }
 
 // buildSectionsResponse renders resolved sections. libraryID carries the
@@ -1395,8 +1400,12 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	} else {
 		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
-	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
-	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
+	// The episode meta names each episode's series backdrop, which is signed
+	// in the same batch as the rest of the page's images.
+	wg.Go(func() {
+		episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess)
+		imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, episodeMeta, size)
+	})
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
 
 	wg.Wait()
@@ -1581,17 +1590,18 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 	return meta
 }
 
-func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
+func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withItems []sections.SectionWithItems, episodeMeta map[string]sections.SectionItemMeta, size imagesize.Size) map[sectionItemImageKey]sectionItemImageURLs {
 	result := make(map[sectionItemImageKey]sectionItemImageURLs)
 	if h.DetailSvc == nil {
 		return result
 	}
 
 	type pendingImages struct {
-		key          sectionItemImageKey
-		posterPath   string
-		backdropPath string
-		logoPath     string
+		key                sectionItemImageKey
+		posterPath         string
+		backdropPath       string
+		seriesBackdropPath string
+		logoPath           string
 	}
 
 	pending := make([]pendingImages, 0)
@@ -1613,18 +1623,24 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 			if item == nil {
 				continue
 			}
+			meta, ok := section.ItemMeta[item.ContentID]
+			if !ok {
+				meta = episodeMeta[item.ContentID]
+			}
 			images := pendingImages{
 				key: sectionItemImageKey{
 					sectionID: section.ID,
 					contentID: item.ContentID,
 				},
-				posterPath:   sizedPosterPath(item.PosterPath, size),
-				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
-				logoPath:     sizedFeaturedLogoPath(item.LogoPath, size),
+				posterPath:         sizedPosterPath(item.PosterPath, size),
+				backdropPath:       sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
+				seriesBackdropPath: sizedSectionBackdropPath(section.SectionType, meta.SeriesBackdropPath, size),
+				logoPath:           sizedFeaturedLogoPath(item.LogoPath, size),
 			}
 			pending = append(pending, images)
 			addPath(images.posterPath)
 			addPath(images.backdropPath)
+			addPath(images.seriesBackdropPath)
 			addPath(images.logoPath)
 		}
 	}
@@ -1632,9 +1648,10 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", size))
 	for _, images := range pending {
 		result[images.key] = sectionItemImageURLs{
-			posterURL:   resolved[images.posterPath].URL,
-			backdropURL: resolved[images.backdropPath].URL,
-			logoURL:     resolved[images.logoPath].URL,
+			posterURL:         resolved[images.posterPath].URL,
+			backdropURL:       resolved[images.backdropPath].URL,
+			seriesBackdropURL: resolved[images.seriesBackdropPath].URL,
+			logoURL:           resolved[images.logoPath].URL,
 		}
 	}
 	return result
@@ -1682,6 +1699,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		resp.DurationSeconds = meta.DurationSeconds
 		resp.ProgressUpdatedAt = meta.ProgressUpdatedAt
 		resp.ItemSource = meta.ItemSource
+		resp.SeriesBackdropThumbhash = meta.SeriesBackdropThumbhash
 	}
 
 	if resp.Genres == nil {
@@ -1693,6 +1711,7 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 
 	resp.PosterURL = imageURLs.posterURL
 	resp.BackdropURL = imageURLs.backdropURL
+	resp.SeriesBackdropURL = imageURLs.seriesBackdropURL
 	resp.LogoURL = imageURLs.logoURL
 
 	return resp

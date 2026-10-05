@@ -56,16 +56,18 @@ func convertItemMeta(in map[string]SectionItemMeta) map[string]recipes.SectionIt
 	out := make(map[string]recipes.SectionItemMeta, len(in))
 	for k, v := range in {
 		out[k] = recipes.SectionItemMeta{
-			SeriesID:          v.SeriesID,
-			SeriesTitle:       v.SeriesTitle,
-			SeasonNumber:      v.SeasonNumber,
-			EpisodeNumber:     v.EpisodeNumber,
-			Badges:            v.Badges,
-			PositionSeconds:   v.PositionSeconds,
-			DurationSeconds:   v.DurationSeconds,
-			ProgressUpdatedAt: v.ProgressUpdatedAt,
-			ItemSource:        v.ItemSource,
-			SortTimestamp:     v.SortTimestamp,
+			SeriesID:                v.SeriesID,
+			SeriesTitle:             v.SeriesTitle,
+			SeasonNumber:            v.SeasonNumber,
+			EpisodeNumber:           v.EpisodeNumber,
+			Badges:                  v.Badges,
+			PositionSeconds:         v.PositionSeconds,
+			DurationSeconds:         v.DurationSeconds,
+			ProgressUpdatedAt:       v.ProgressUpdatedAt,
+			ItemSource:              v.ItemSource,
+			SortTimestamp:           v.SortTimestamp,
+			SeriesBackdropPath:      v.SeriesBackdropPath,
+			SeriesBackdropThumbhash: v.SeriesBackdropThumbhash,
 		}
 	}
 	return out

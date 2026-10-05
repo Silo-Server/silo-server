@@ -20352,6 +20352,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "series_backdrop_thumbhash": {
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
             "type": "string"
@@ -20777,6 +20784,13 @@
           "season_number": {
             "format": "int64",
             "type": "integer"
+          },
+          "series_backdrop_thumbhash": {
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived",
+            "type": "string"
           },
           "series_id": {
             "description": "Owning series of an episode or season",
@@ -27912,6 +27926,13 @@
           "season_number": {
             "format": "int64",
             "type": "integer"
+          },
+          "series_backdrop_thumbhash": {
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived",
+            "type": "string"
           },
           "series_id": {
             "description": "Owning series of an episode or season",
@@ -47344,6 +47365,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "series_backdrop_thumbhash": {
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived",
+            "type": "string"
+          },
           "series_id": {
             "description": "Owning series of an episode or season",
             "type": "string"
@@ -47679,6 +47707,13 @@
           "season_number": {
             "format": "int64",
             "type": "integer"
+          },
+          "series_backdrop_thumbhash": {
+            "type": "string"
+          },
+          "series_backdrop_url": {
+            "description": "On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived",
+            "type": "string"
           },
           "series_id": {
             "description": "Owning series of an episode or season",
