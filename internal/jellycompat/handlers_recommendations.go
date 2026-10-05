@@ -125,7 +125,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 
 	// Both limits size allocations, so they are capped: a category cannot
-	// hold more than a cached row's titles, and a profile has few rows a
+	// hold more titles than a row read returns, and a profile has few rows a
 	// category can describe.
 	categoryLimit := 5
 	if v := q.Get("categoryLimit"); v != "" {
@@ -137,7 +137,7 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	itemLimit := 8
 	if v := q.Get("itemLimit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			itemLimit = min(n, recommendations.CacheCandidateLimit)
+			itemLimit = min(n, recommendations.MaxRowReadLimit)
 		}
 	}
 
@@ -164,13 +164,13 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	// Every anchor's row is read: one the response cannot show (a series, or a
 	// title outside ParentId) gives way to the next. Each row is read deep
 	// enough to fill its category after the categories before it took their
-	// titles, up to a cached row's length.
+	// titles, up to the most a row read returns.
 	// (The package's own max takes a fallback, so it is not used here.)
 	rowDepth := categoryLimit * itemLimit
 	if rowDepth < 2*itemLimit {
 		rowDepth = 2 * itemLimit
 	}
-	rowDepth = min(rowDepth, recommendations.CacheCandidateLimit)
+	rowDepth = min(rowDepth, recommendations.MaxRowReadLimit)
 	rows, err := h.categoryRows(r.Context(), session, recommendations.BecauseYouWatchedAnchors, rowDepth, filter)
 	if err != nil {
 		slog.WarnContext(r.Context(), "jellycompat: recommendation rows failed", "component", "jellycompat",
