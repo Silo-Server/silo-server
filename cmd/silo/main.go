@@ -3553,14 +3553,16 @@ func main() {
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 
 			// /Movies/Recommendations reads the cached rows the native API
-			// reads. Reads queue profile refreshes only while recommendations
-			// are enabled.
-			var compatRecRefresh recommendations.ReadRefreshRequester
-			if recWorker != nil {
-				compatRecRefresh = recWorker
+			// reads. With recommendations disabled it has no reader and
+			// answers an empty list, so rows cached before are not served.
+			if cfg.Recommendations.Enabled {
+				var compatRecRefresh recommendations.ReadRefreshRequester
+				if recWorker != nil {
+					compatRecRefresh = recWorker
+				}
+				compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
+					WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
 			}
-			compatDeps.RecommendationReader = recommendations.NewReader(recommendations.NewRepo(deps.DB), catalog.NewRatingsRepo(deps.DB), compatRecRefresh, userStoreProvider).
-				WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
 
 			// Construct auth service for jellycompat login.
 			userRepo := auth.NewUserRepository(deps.DB)

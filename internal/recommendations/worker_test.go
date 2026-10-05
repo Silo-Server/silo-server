@@ -330,6 +330,7 @@ type fakeGlobalRows struct {
 	extended  []string // "type" or "type*" for a prefix, with its expiry
 	extendErr error
 	deleted   []string // "type" or "type*" for a prefix, with the kept types
+	deleteErr error
 }
 
 func (f *fakeGlobalRows) result(name string, items []ScoredItem) ([]ScoredItem, error) {
@@ -390,7 +391,7 @@ func (f *fakeGlobalRows) DeleteGlobalRecommendationCache(_ context.Context, recT
 		recType += "*"
 	}
 	f.deleted = append(f.deleted, recType+"-"+strings.Join(keep, "+"))
-	return 1, nil
+	return 1, f.deleteErr
 }
 
 func (f *fakeGlobalRows) HasGlobalRecommendationCache(context.Context) (bool, error) {
@@ -793,5 +794,32 @@ func TestEmbeddingsResultReportsOutcome(t *testing.T) {
 		if res.QuotaLimited != tc.quota || res.RetryDeferred != tc.deferred || !res.MissingOnly {
 			t.Fatalf("%s: result = %+v", name, res)
 		}
+	}
+}
+
+// A delete that fails leaves an empty global row serving its old titles, so
+// it counts as a failure and the run is not recorded as clean.
+func TestCacheGlobalRowsCountsFailedDeletes(t *testing.T) {
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	store := &fakeGlobalRows{deleteErr: errors.New("db down")}
+	// Every build succeeds; the deletes of the empty top-rated row and of the
+	// genres that left the menu fail.
+	if written, failed := w.cacheGlobalRows(t.Context(), store, cacheExpiry(time.Now())); written != 4 || failed != 2 {
+		t.Fatalf("written = %d, failed = %d; want 4 and the two failed deletes", written, failed)
+	}
+}
+
+// A signal change already committed is recorded even when the request that
+// made it has ended: the stale mark and the refresh do not use its context.
+func TestNotifySignalsChangedOutlivesTheRequest(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	w.NotifySignalsChanged(ctx, 7, "p")
+	if marker.calls != 1 || marker.ctxErrs[0] != nil {
+		t.Fatalf("marks = %d, context errors = %v; want one mark with a live context", marker.calls, marker.ctxErrs)
+	}
+	if req := takeQueued(t, w); req.profileID != "p" {
+		t.Fatalf("queued %+v", req)
 	}
 }
