@@ -1502,3 +1502,72 @@ func TestHandleItems_PersonalBoxSetEpisodeOrderSort(t *testing.T) {
 		})
 	}
 }
+
+// TestPersonalBoxSetPlayAllReadsWholeCollectionDB pins, against the real
+// catalog resolver, that Play all's single uncapped request returns every
+// member of a stored collection larger than the browse page cap of 100.
+func TestPersonalBoxSetPlayAllReadsWholeCollectionDB(t *testing.T) {
+	const members = 130
+	pool := newCompatTestPool(t)
+	ctx := context.Background()
+	suffix := uuid.NewString()
+	var userID, library int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, "boxset-playall-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`, "boxset-playall-"+suffix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, members)
+	for i := range members {
+		id := fmt.Sprintf("boxset-playall-%s-%03d", suffix, i)
+		ids = append(ids, id)
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, content_rating, poster_path, backdrop_path, logo_path) VALUES ($1, 'movie', $1, '', '', '', '')`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id, library); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, library)
+	})
+
+	provider := pgstore.NewPostgresProvider(pool)
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &Session{StreamAppUserID: userID, ProfileID: uuid.NewString()}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: session.ProfileID, Name: "Test profile"}); err != nil {
+		t.Fatal(err)
+	}
+	collection, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{
+		CreatorProfileID: session.ProfileID, Name: "Everything", CollectionType: "manual", IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range ids {
+		if err := store.AddCollectionItem(ctx, collection.ID, id, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: library, Name: "Movies", Type: "movies"}}, nil)
+	h.userCollections = usercollections.NewStore(pool)
+	h.browseRepo = catalog.NewBrowseRepository(pool)
+	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
+		WithUserStoreProvider(provider)
+	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
+		return catalog.AccessFilter{UserID: userID, ProfileID: profileID, AllowedLibraryIDs: []int{library}}
+	}
+	parentID := h.codec.EncodeStringID(EncodedIDUserCollection, collection.ID)
+	result := performItemsRequest(t, h, "/Items?ParentId="+parentID+"&Filters=IsNotFolder&Recursive=true&StartIndex=125&Limit=10", session)
+	if result.TotalRecordCount != members || len(result.Items) != members-125 {
+		t.Fatalf("Play all returned %d items of %d, want %d of %d", len(result.Items), result.TotalRecordCount, members-125, members)
+	}
+}

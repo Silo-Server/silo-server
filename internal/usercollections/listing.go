@@ -65,7 +65,7 @@ func scopeMatchesLibraries(scopeColumn, libraryIDsParam string) string {
 		OR jsonb_array_length(COALESCE(` + scopeColumn + `->'library_ids', '[]'::jsonb)) = 0
 		OR EXISTS (
 			SELECT 1
-			FROM unnest(` + libraryIDsParam + `::int[]) library_id
+			FROM unnest(` + libraryIDsParam + `::bigint[]) library_id
 			WHERE ` + scopeColumn + `->'library_ids' @> to_jsonb(library_id)
 		)
 	)`

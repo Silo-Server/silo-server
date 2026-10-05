@@ -305,3 +305,27 @@ func TestStoreListLibraryScope(t *testing.T) {
 		t.Fatalf("native library listing must ignore invalid scopes: got=%v err=%v", got, err)
 	}
 }
+
+// TestStoreListWideLibraryIDs pins that library IDs above the int32 range,
+// which media_folders.id allows since it became bigint, match like any other.
+func TestStoreListWideLibraryIDs(t *testing.T) {
+	t.Parallel()
+	f := newStoreTestFixture(t)
+	store := NewStore(f.pool)
+	ctx := context.Background()
+	const wide = 3_000_000_000
+	f.insert(t, storeTestCollection{
+		id: storeTestIDPrefix + "wide", name: "Wide Library", optIn: true,
+		sourceConfig: `{"library_ids":[3000000000]}`,
+	})
+	rows, err := store.List(ctx, f.userID, storeTestOwnerProfile, []int{7, wide})
+	if err != nil || len(rows) != 1 || rows[0].Name != "Wide Library" {
+		t.Fatalf("a wide library ID must match: rows=%v err=%v", rows, err)
+	}
+	if visible, err := store.AnyVisible(ctx, f.userID, storeTestOwnerProfile, []int{wide}); err != nil || !visible {
+		t.Fatalf("a wide library ID must enable the view: visible=%v err=%v", visible, err)
+	}
+	if rows, err := store.List(ctx, f.userID, storeTestOwnerProfile, []int{7}); err != nil || len(rows) != 0 {
+		t.Fatalf("the wide-scoped collection must stay out of other libraries: rows=%v err=%v", rows, err)
+	}
+}
