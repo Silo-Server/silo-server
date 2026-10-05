@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"time"
@@ -969,15 +970,38 @@ func (w *Worker) profileRefreshLoop(ctx context.Context) {
 // then releases the key.
 func (w *Worker) runProfileRefresh(ctx context.Context, userID int, profileID string) {
 	defer w.clearProfileRefreshPending(profileRefreshKey(userID, profileID))
-	if err := w.refreshProfile(ctx, userID, profileID); err != nil {
+	err := w.refreshProfile(ctx, userID, profileID)
+	switch {
+	case errors.Is(err, errProfileRefreshElsewhere):
+		slog.InfoContext(ctx, "profile is refreshing on another server; left for the stale sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+	case err != nil:
 		slog.ErrorContext(ctx, "profile recommendation refresh failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
+}
+
+// errProfileRefreshElsewhere reports a profile refresh skipped because
+// another server holds the profile's refresh lock.
+var errProfileRefreshElsewhere = errors.New("profile refresh running on another server")
+
+// profileRefreshLock is the cluster-wide advisory lock key for one profile's
+// refresh. Keys hash into the same space as the job locks; a collision only
+// defers one refresh to the stale sweep.
+func profileRefreshLock(userID int, profileID string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("silo-recs-profile-refresh:" + profileRefreshKey(userID, profileID)))
+	return int64(h.Sum64()) //nolint:gosec // a lock key; wrapping is fine
 }
 
 // refreshProfile rebuilds one profile's taste profile and cached rows. When
 // every step succeeds it clears the stale marks set before the refresh
 // started; a mark set while it ran stays for the stale sweep. When a step
 // fails it marks the profile stale again, so the sweep retries it.
+//
+// One server at a time refreshes a profile: otherwise a refresh that read
+// older signals could finish last and overwrite a newer one's rows after that
+// one cleared the stale mark. A refresh that finds the profile's lock held
+// returns errProfileRefreshElsewhere and marks the profile stale; the holder
+// clears only marks older than its own start, so the sweep runs it again.
 func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID string) (runErr error) {
 	ctx, observation := workmetrics.Start(ctx, "recommendations", time.Time{})
 	defer workmetrics.Profile(ctx)()
@@ -995,6 +1019,18 @@ func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID strin
 	refreshCtx, cancel := context.WithTimeout(ctx, profileRefreshTimeout)
 	defer cancel()
 
+	lockCtx, cancelLock := context.WithTimeout(refreshCtx, jobLockTimeout)
+	unlock, acquired, err := w.locker.TryLock(lockCtx, profileRefreshLock(userID, profileID))
+	cancelLock()
+	if err != nil {
+		return fmt.Errorf("take profile refresh lock: %w", err)
+	}
+	if !acquired {
+		return errProfileRefreshElsewhere
+	}
+	defer unlock()
+
+	// started is read under the lock, after any earlier holder finished.
 	repo := w.engine.repo
 	started, err := repo.Now(refreshCtx)
 	if err != nil {
