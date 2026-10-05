@@ -379,11 +379,12 @@ func TestReconcileSkippedRootsSubtreeKeepsRootsOutsideScope(t *testing.T) {
 }
 
 type unsupportedFileCall struct {
-	folderID  int
-	scopes    []string
-	protected []string
-	startedAt time.Time
-	groups    []models.UnsupportedMediaFileGroup
+	folderID   int
+	scopes     []string
+	protected  []string
+	unreadable []string
+	startedAt  time.Time
+	groups     []models.UnsupportedMediaFileGroup
 }
 
 type recordingUnsupportedFileRepo struct {
@@ -391,8 +392,8 @@ type recordingUnsupportedFileRepo struct {
 	err   error
 }
 
-func (r *recordingUnsupportedFileRepo) Replace(_ context.Context, folderID int, scopes []string, protectedPaths []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error {
-	r.calls = append(r.calls, unsupportedFileCall{folderID: folderID, scopes: scopes, protected: protectedPaths, startedAt: startedAt, groups: groups})
+func (r *recordingUnsupportedFileRepo) Replace(_ context.Context, folderID int, scopes []string, protectedPaths []string, unreadableEntries []string, startedAt time.Time, groups []models.UnsupportedMediaFileGroup) error {
+	r.calls = append(r.calls, unsupportedFileCall{folderID: folderID, scopes: scopes, protected: protectedPaths, unreadable: unreadableEntries, startedAt: startedAt, groups: groups})
 	return r.err
 }
 
@@ -403,13 +404,15 @@ func TestIngestRecordsUnsupportedFiles(t *testing.T) {
 			{Path: "/movies/Ronin (1998)/VIDEO_TS/VTS_01_1.VOB", Reason: scanner.UnsupportedReasonDVDVOB},
 			{Path: "/movies/Manhunter (1986)/Manhunter (1986).rmvb", Reason: scanner.UnsupportedReasonRealMedia},
 		},
-		ProtectedPaths: []string{"/offline", "/empty", "/movies/Locked"},
+		ProtectedPaths:    []string{"/offline", "/empty", "/movies/Locked", "/movies/Thief (1981)/Thief (1981).iso"},
+		UnreadableEntries: []string{"/movies/Thief (1981)/Thief (1981).iso"},
 	}
 	wantGroups := []models.UnsupportedMediaFileGroup{
 		{MediaFolderID: 7, DirectoryPath: "/movies/Manhunter (1986)", Reason: scanner.UnsupportedReasonRealMedia, FileCount: 1, FileNames: []string{"Manhunter (1986).rmvb"}},
 		{MediaFolderID: 7, DirectoryPath: "/movies/Ronin (1998)/VIDEO_TS", Reason: scanner.UnsupportedReasonDVDVOB, FileCount: 2, FileNames: []string{"VTS_01_1.VOB", "VTS_01_2.VOB"}},
 	}
-	wantProtected := []string{"/offline", "/empty", "/movies/Locked"}
+	wantProtected := []string{"/offline", "/empty", "/movies/Locked", "/movies/Thief (1981)/Thief (1981).iso"}
+	wantUnreadable := []string{"/movies/Thief (1981)/Thief (1981).iso"}
 
 	tests := []struct {
 		name       string
@@ -453,6 +456,9 @@ func TestIngestRecordsUnsupportedFiles(t *testing.T) {
 			}
 			if fmt.Sprint(call.protected) != fmt.Sprint(wantProtected) {
 				t.Errorf("protected = %v, want %v", call.protected, wantProtected)
+			}
+			if fmt.Sprint(call.unreadable) != fmt.Sprint(wantUnreadable) {
+				t.Errorf("unreadable entries = %v, want %v", call.unreadable, wantUnreadable)
 			}
 			// The scan's start, so rows a concurrent scan refreshes later stay.
 			if call.startedAt.Before(before.Add(-time.Second)) || call.startedAt.After(time.Now()) {
