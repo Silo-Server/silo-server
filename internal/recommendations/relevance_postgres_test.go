@@ -402,8 +402,9 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	const axis = 2600
 	genres := [][]string{{"Drama"}, {"Mystery"}, {"Adventure"}}
 
+	// Enough movies that the main row's reach leaves a cluster row to build.
 	var movies []string
-	for i := range 50 {
+	for i := range 70 {
 		movies = append(movies, f.movie(t, fmt.Sprintf("movie-%02d", i), genres[i%3], "PG-13", 13, axisVector(axis, map[int]float32{axis + 1 + i: 0.05})))
 	}
 	book := func(name, mediaType string, i int) string {

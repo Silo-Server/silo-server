@@ -134,24 +134,31 @@ func TestMainRowAnchors(t *testing.T) {
 	}
 }
 
-// The main row's served window leaves the cluster rows; a row left thin is
-// emptied, and one that shared nothing is kept as it was.
+// Every title the main row can serve, its first 30 under the daily
+// rotation, leaves the cluster rows; a row left thin is emptied, and one that
+// shared nothing is kept as it was.
 func TestWithoutMainRowItems(t *testing.T) {
 	main := anchorList("m", CacheCandidateLimit)
+	reach := rotationReach(ServedRowSize)
 	overlapping := append(slices.Clone(main[:5]), anchorList("x", 12)...)
+	drawable := append(slices.Clone(main[ServedRowSize:reach]), anchorList("v", 12)...)
 	thin := append(slices.Clone(main[5:15]), anchorList("y", 9)...)
 	separate := anchorList("z", 4)
-	tailOnly := append(anchorList("w", 3), main[ServedRowSize:]...)
+	tailOnly := append(anchorList("w", 3), main[reach:]...)
 
 	rows := withoutMainRowItems([]ForYouRow{
 		{ClusterIndex: 0, Items: overlapping},
 		{ClusterIndex: 1, Items: thin},
 		{ClusterIndex: 2, Items: separate},
 		{ClusterIndex: 3, Items: tailOnly},
+		{ClusterIndex: 4, Items: drawable},
 	}, main)
 
 	if got := mmrItemIDs(rows[0].Items); !slices.Equal(got, mmrItemIDs(anchorList("x", 12))) {
 		t.Fatalf("overlapping row = %v, want its own 12 titles", got)
+	}
+	if got := mmrItemIDs(rows[4].Items); !slices.Equal(got, mmrItemIDs(anchorList("v", 12))) {
+		t.Fatalf("row sharing the rotation's draw ranks = %v, want its own 12 titles", got)
 	}
 	if rows[1].Items == nil || len(rows[1].Items) != 0 {
 		t.Fatalf("thin row = %#v, want it cached empty", rows[1].Items)
