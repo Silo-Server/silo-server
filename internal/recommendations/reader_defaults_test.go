@@ -46,12 +46,12 @@ func watchedStore(ids ...string) fakeSignalProvider {
 
 // A new profile on a server that has cached nothing, with recommendations
 // disabled (no refresher), still gets the default rows on Discover, queried
-// without the titles it watched.
+// without the titles it watched or rated low.
 func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 	repo := &fakeReaderRepo{defaults: map[string][]ScoredItem{
-		RecTypeTopRated:      scored("watched", "rated-1", "rated-2"),
+		RecTypeTopRated:      scored("watched", "disliked", "rated-1", "rated-2"),
 		RecTypeRecentlyAdded: scored("recent-1", "watched"),
-	}}
+	}, disliked: []string{"disliked"}}
 	r := &Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}
 
 	rows, err := r.GetDiscoverRows(t.Context(), 7, "p1", 20, catalog.AccessFilter{})
@@ -68,8 +68,8 @@ func TestDiscoverServesTheDefaultRowsWithNothingCached(t *testing.T) {
 		t.Fatalf("row types = %q, %q", rows[0].Type, rows[1].Type)
 	}
 	for _, call := range repo.defaultCalls {
-		if !slices.Equal(call.exclude, []string{"watched"}) || call.limit != CacheCandidateLimit {
-			t.Fatalf("%s queried with exclude=%v limit=%d, want the watched title and a full pool", call.kind, call.exclude, call.limit)
+		if !slices.Equal(call.exclude, []string{"disliked", "watched"}) || call.limit != CacheCandidateLimit {
+			t.Fatalf("%s queried with exclude=%v limit=%d, want the watched and the disliked title and a full pool", call.kind, call.exclude, call.limit)
 		}
 	}
 }
