@@ -1431,11 +1431,7 @@ func (r *CatalogResolver) facetSearchScope(ctx context.Context, req CatalogReque
 	default:
 		return facetScope{}, fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
-	scope := facetScope{filters: filters, baseRelation: "media_items mi", mediaScope: req.Query.MediaScope, empty: earlyEmpty}
-	if isEpisodeCatalogScope(req.Query.MediaScope) {
-		scope.baseRelation = episodeCatalogBaseRelation
-	}
-	return scope, nil
+	return facetScope{filters: filters, baseRelation: catalogBaseRelationForScope(req.Query.MediaScope), mediaScope: req.Query.MediaScope, empty: earlyEmpty}, nil
 }
 
 // facetValueNames returns the values without their counts, never nil.

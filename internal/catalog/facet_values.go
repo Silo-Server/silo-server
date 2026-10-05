@@ -249,7 +249,11 @@ func (c *facetValueCache) get(ctx context.Context, key string, load func(context
 		if res.Err != nil {
 			return nil, res.Err
 		}
-		return res.Val.(*facetValueList), nil
+		l, ok := res.Val.(*facetValueList)
+		if !ok {
+			return nil, fmt.Errorf("facet value load returned %T", res.Val)
+		}
+		return l, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
