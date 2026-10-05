@@ -628,12 +628,29 @@ export const ARTWORK_SLOT_LABEL: Readonly<Record<ArtworkSlot, string>> = {
 
 // --- Look (artwork) ---------------------------------------------------------
 
-/** What a slot will show after Save: nothing, a chosen image not saved yet, or the saved one. */
-export type ArtworkState = "none" | "new" | "saved";
+/**
+ * What a slot will show after Save: a chosen image not saved yet, the saved
+ * one, the collage the server made of the collection's titles, no collage yet
+ * (none of its titles has a poster, or the collage is still being made), or
+ * nothing at all (a backdrop, or a server Smart collection's poster).
+ */
+export type ArtworkState = "none" | "awaiting-collage" | "collage" | "new" | "saved";
 
 const ARTWORK_STATE_TEXT: Readonly<Record<ArtworkSlot, Record<ArtworkState, string>>> = {
-  poster: { none: "a collage of its titles", new: "a new image", saved: "an image" },
-  backdrop: { none: "none", new: "a new image", saved: "an image" },
+  poster: {
+    none: "none",
+    "awaiting-collage": "a collage once its titles have posters",
+    collage: "a collage of its titles",
+    new: "a new image",
+    saved: "an image",
+  },
+  backdrop: {
+    none: "none",
+    "awaiting-collage": "none",
+    collage: "none",
+    new: "a new image",
+    saved: "an image",
+  },
 };
 
 /** "Poster: a collage of its titles · Backdrop: none", for the closed Look card. */
@@ -643,8 +660,12 @@ export function lookSummary(slots: ReadonlyArray<[ArtworkSlot, ArtworkState]>): 
     .join(" · ");
 }
 
-/** Under the poster tile while there's no poster. */
+/** Under the poster tile while it shows the collage. */
 export const POSTER_IS_COLLAGE = "Collage of its titles";
+/** Under the poster tile while there's no image and no collage yet. */
+export const POSTER_AWAITS_COLLAGE = "A collage once its titles have posters";
+/** Under the poster tile of a collection that never gets a collage. */
+export const NO_POSTER = "No poster";
 /** Under the backdrop tile: what the image is for. */
 export const BACKDROP_CAPTION = "Fills the top of its page";
 

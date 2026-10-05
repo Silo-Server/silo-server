@@ -1349,6 +1349,8 @@ export interface Collection {
   include_in_server_collections?: boolean;
   poster_url?: string;
   poster_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its titles, not an uploaded or imported image. */
+  poster_is_collage?: boolean;
   /** Whether it holds the list's `contains_item` title; only on the profile's own manual collections. */
   contains?: boolean;
   created_at: string;
@@ -1537,6 +1539,8 @@ export interface LibraryCollection {
   backdrop_url: string;
   poster_thumbhash?: string;
   backdrop_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its members, not an uploaded or template image. */
+  poster_is_collage?: boolean;
   source_url: string;
   query_definition: QueryDefinition;
   sort_config: Record<string, unknown>;

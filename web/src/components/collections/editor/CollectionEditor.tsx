@@ -16,6 +16,7 @@ import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
 import {
   useCollectionDraft,
+  useListedPoster,
   useScopeDelete,
   useScopePreview,
   useScopeSync,
@@ -635,6 +636,14 @@ export function CollectionEditor<Raw extends WireCollection>({
   );
 
   const artworkSlots = capabilities?.artwork === false ? [] : scope.artworkSlots;
+  // Without its own poster a collection shows a collage of its titles, except
+  // a server Smart collection, whose titles come from its rules.
+  const collages = isServer ? !smart : personalCapabilities.data?.poster_collages !== false;
+  const poster = useListedPoster(scope, view, {
+    awaitCollage: created && collages && artworkSlots.length > 0,
+  });
+  // A new Synced list starts with its pick's poster.
+  const posterUrl = poster.url ?? draft.synced?.posterUrl;
 
   let rowsThatShowIt: ReactNode;
   if (!isServer) {
@@ -761,7 +770,7 @@ export function CollectionEditor<Raw extends WireCollection>({
             name={view?.name ?? draft.name}
             created={created}
             shared={view?.personal?.shared}
-            posterUrl={view?.posterUrl ?? draft.synced?.posterUrl}
+            posterUrl={posterUrl}
             meta={
               newList ? (
                 <p className="text-muted-foreground text-[14px]">{SYNCED_CREATE_SUBTITLE}</p>
@@ -816,10 +825,10 @@ export function CollectionEditor<Raw extends WireCollection>({
           <LookPanel
             slots={artworkSlots}
             saved={{
-              // A new Synced list starts with its pick's poster.
-              poster: view?.posterUrl ?? draft.synced?.posterUrl,
+              poster: poster.isCollage ? undefined : posterUrl,
               backdrop: view?.backdropUrl,
             }}
+            posterFallback={{ collages, collageUrl: poster.isCollage ? poster.url : undefined }}
             value={draft.artwork}
             errors={editor.artworkErrors}
             onRetry={() => void editor.save()}

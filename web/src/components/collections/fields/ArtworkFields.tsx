@@ -11,17 +11,52 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { isArtworkStaged } from "@/hooks/queries/collectionScope";
-import { ARTWORK_SLOT_LABEL, BACKDROP_CAPTION, POSTER_IS_COLLAGE } from "@/lib/collections/copy";
+import {
+  ARTWORK_SLOT_LABEL,
+  BACKDROP_CAPTION,
+  NO_POSTER,
+  POSTER_AWAITS_COLLAGE,
+  POSTER_IS_COLLAGE,
+  type ArtworkState,
+} from "@/lib/collections/copy";
 import type { ArtworkDraft, ArtworkSlot, ArtworkSlotDraft } from "@/lib/collections/scope";
 import { cn } from "@/lib/utils";
 
-import { useArtworkPreview } from "./artworkPreview";
+import {
+  artworkState,
+  NO_FALLBACK,
+  useArtworkPreview,
+  type ArtworkFallback,
+} from "./artworkPreview";
 
 const ACCEPT = "image/jpeg,image/png,image/webp";
 
-/** An empty slot: the collage a poster falls back to, or no backdrop. */
-export function EmptyArtwork({ slot, compact = false }: { slot: ArtworkSlot; compact?: boolean }) {
-  const Icon = slot === "poster" ? LayoutGrid : ImageIcon;
+/** Under the poster tile, by what it shows; nothing under a chosen or saved image. */
+const POSTER_CAPTION: Readonly<Partial<Record<ArtworkState, string>>> = {
+  collage: POSTER_IS_COLLAGE,
+  "awaiting-collage": POSTER_AWAITS_COLLAGE,
+  none: NO_POSTER,
+};
+
+/**
+ * An empty slot: the collage a poster falls back to (not made yet), or no
+ * image at all for a poster that never gets a collage and for a backdrop.
+ */
+export function EmptyArtwork({
+  slot,
+  compact = false,
+  collages = true,
+}: {
+  slot: ArtworkSlot;
+  compact?: boolean;
+  /** A poster without a collage to fall back to shows as no poster. */
+  collages?: boolean;
+}) {
+  const collage = slot === "poster" && collages;
+  const Icon = collage ? LayoutGrid : ImageIcon;
+  let label = "No backdrop";
+  if (collage) label = "Collage";
+  else if (slot === "poster") label = NO_POSTER;
   return (
     <span
       className={cn(
@@ -30,7 +65,7 @@ export function EmptyArtwork({ slot, compact = false }: { slot: ArtworkSlot; com
       )}
     >
       <Icon aria-hidden />
-      {compact ? null : slot === "poster" ? "Collage" : "No backdrop"}
+      {compact ? null : label}
     </span>
   );
 }
@@ -40,12 +75,13 @@ const TILE_FRAME =
 
 /**
  * One image as a tile with one pencil button. Its menu uploads a file, opens
- * the link box, or goes back to the collage (poster) or no backdrop. The
- * choice is staged until Save; Undo drops it.
+ * the link box, or goes back to the collage (poster) or no image. The choice
+ * is staged until Save; Undo drops it.
  */
 function ArtworkTile({
   slot,
   savedUrl,
+  fallback,
   value,
   onChange,
   onPasteLink,
@@ -56,7 +92,9 @@ function ArtworkTile({
   disabled,
 }: {
   slot: ArtworkSlot;
+  /** The image someone chose and saved; never the server's collage. */
   savedUrl?: string;
+  fallback: ArtworkFallback;
   value?: ArtworkSlotDraft;
   onChange: (next: ArtworkSlotDraft | undefined) => void;
   onPasteLink: () => void;
@@ -71,13 +109,16 @@ function ArtworkTile({
   const input = useRef<HTMLInputElement>(null);
   // After Paste a link…, focus goes to the link field rather than back to the pencil.
   const pasting = useRef(false);
-  const preview = useArtworkPreview(value, savedUrl);
+  const preview = useArtworkPreview(value, savedUrl, fallback);
+  const state = artworkState(value, savedUrl, fallback);
   const label = ARTWORK_SLOT_LABEL[slot];
   const noun = label.toLowerCase();
   const poster = slot === "poster";
+  const usesCollage = poster && fallback.collages;
   const staged = isArtworkStaged(value);
-  // Back to the collage or no backdrop: removes a saved image on Save, or drops a new one.
+  // Back to the collage or no image: removes a saved image on Save, or drops a new one.
   const clear = () => onChange(savedUrl ? { remove: true } : undefined);
+  const caption = poster ? POSTER_CAPTION[state] : preview ? undefined : BACKDROP_CAPTION;
 
   return (
     <div
@@ -89,7 +130,7 @@ function ArtworkTile({
         {preview ? (
           <img src={preview} alt={`${label} preview`} className="size-full object-cover" />
         ) : (
-          <EmptyArtwork slot={slot} />
+          <EmptyArtwork slot={slot} collages={fallback.collages} />
         )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild disabled={disabled}>
@@ -127,10 +168,12 @@ function ArtworkTile({
               Paste a link…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem disabled={!preview} onSelect={clear}>
-              {poster ? <LayoutGrid aria-hidden /> : <Trash2 aria-hidden />}
-              {poster ? "Use the collage" : "Remove backdrop"}
-              {poster && !preview ? <Check aria-hidden className="ml-auto" /> : null}
+            <DropdownMenuItem disabled={state !== "new" && state !== "saved"} onSelect={clear}>
+              {usesCollage ? <LayoutGrid aria-hidden /> : <Trash2 aria-hidden />}
+              {usesCollage ? "Use the collage" : `Remove ${noun}`}
+              {usesCollage && (state === "collage" || state === "awaiting-collage") ? (
+                <Check aria-hidden className="ml-auto" />
+              ) : null}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -139,11 +182,9 @@ function ArtworkTile({
         <span id={`${id}-label`} className="text-[13px] font-medium">
           {label}
         </span>
-        {poster && preview ? null : (
-          <span className="text-muted-foreground text-[12.5px] leading-snug">
-            {poster ? POSTER_IS_COLLAGE : BACKDROP_CAPTION}
-          </span>
-        )}
+        {caption ? (
+          <span className="text-muted-foreground text-[12.5px] leading-snug">{caption}</span>
+        ) : null}
       </div>
       {error ? (
         <p
@@ -248,6 +289,7 @@ function PasteLinkBox({
 export function ArtworkFields({
   slots,
   saved,
+  posterFallback = { collages: true },
   value,
   onChange,
   errors,
@@ -255,7 +297,10 @@ export function ArtworkFields({
   disabled,
 }: {
   slots: readonly ArtworkSlot[];
+  /** The images someone chose and saved, never the server's collage. */
   saved: Partial<Record<ArtworkSlot, string | undefined>>;
+  /** What the poster shows without an image of its own. */
+  posterFallback?: ArtworkFallback;
   value: ArtworkDraft;
   onChange: (next: ArtworkDraft) => void;
   errors?: Partial<Record<ArtworkSlot, string>>;
@@ -282,6 +327,7 @@ export function ArtworkFields({
             key={slot}
             slot={slot}
             savedUrl={saved[slot]}
+            fallback={slot === "poster" ? posterFallback : NO_FALLBACK}
             value={value[slot]}
             error={errors?.[slot]}
             onRetry={onRetry}

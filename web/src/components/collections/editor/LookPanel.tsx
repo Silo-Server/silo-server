@@ -7,19 +7,26 @@ import type { ArtworkSlot, ArtworkSlotDraft } from "@/lib/collections/scope";
 import { cn } from "@/lib/utils";
 
 import { ArtworkFields, EmptyArtwork } from "../fields/ArtworkFields";
-import { artworkState, useArtworkPreview } from "../fields/artworkPreview";
+import {
+  artworkState,
+  NO_FALLBACK,
+  useArtworkPreview,
+  type ArtworkFallback,
+} from "../fields/artworkPreview";
 
 /** A small poster or backdrop for the closed card. */
 function Thumb({
   slot,
   value,
   savedUrl,
+  fallback,
 }: {
   slot: ArtworkSlot;
   value?: ArtworkSlotDraft;
   savedUrl?: string;
+  fallback: ArtworkFallback;
 }) {
-  const preview = useArtworkPreview(value, savedUrl);
+  const preview = useArtworkPreview(value, savedUrl, fallback);
   return (
     <span
       className={cn(
@@ -30,7 +37,7 @@ function Thumb({
       {preview ? (
         <img src={preview} alt="" className="size-full object-cover" />
       ) : (
-        <EmptyArtwork slot={slot} compact />
+        <EmptyArtwork slot={slot} compact collages={fallback.collages} />
       )}
     </span>
   );
@@ -43,7 +50,8 @@ function Thumb({
  * an image couldn't be saved, so Retry is in sight.
  */
 export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
-  const { slots, saved, value, errors } = props;
+  const { slots, saved, value, errors, posterFallback = { collages: true } } = props;
+  const fallbackOf = (slot: ArtworkSlot) => (slot === "poster" ? posterFallback : NO_FALLBACK);
   const id = useId();
   const [open, setOpen] = useState(false);
   const failed = slots.filter((slot) => errors?.[slot]).join();
@@ -67,7 +75,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
   };
 
   const summary = lookSummary(
-    slots.map((slot) => [slot, artworkState(value[slot], saved[slot])] as const),
+    slots.map((slot) => [slot, artworkState(value[slot], saved[slot], fallbackOf(slot))] as const),
   );
 
   return (
@@ -105,7 +113,13 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
         >
           <span className="flex items-center gap-2">
             {slots.map((slot) => (
-              <Thumb key={slot} slot={slot} value={value[slot]} savedUrl={saved[slot]} />
+              <Thumb
+                key={slot}
+                slot={slot}
+                value={value[slot]}
+                savedUrl={saved[slot]}
+                fallback={fallbackOf(slot)}
+              />
             ))}
           </span>
           <span className="grid min-w-0 gap-0.5">

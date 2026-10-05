@@ -46,6 +46,7 @@ function stored(title: string, overrides: Partial<AdminCollection> = {}): AdminC
     group_id: null,
     featured: false,
     poster_url: "",
+    poster_is_collage: false,
     backdrop_url: "",
     source_url: "",
     query_definition: {},

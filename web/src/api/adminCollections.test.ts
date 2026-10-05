@@ -27,6 +27,7 @@ const collection: components["schemas"]["AdminCollection"] = {
   sort_order: 0,
   featured: false,
   poster_url: "",
+  poster_is_collage: false,
   backdrop_url: "",
   source_url: "",
   query_definition: {},

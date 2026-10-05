@@ -104,6 +104,36 @@ beforeEach(() => {
   v2Recorder.answer("POST /api/v2/collections/preview", emptyPreview);
 });
 
+describe("the Look card of a Smart collection", () => {
+  it("a server Smart collection has no collage to fall back to", async () => {
+    showPage("/admin/collections/c1/edit?libraryId=1");
+    const look = await screen.findByRole("region", { name: "Look" });
+    const toggle = await within(look).findByRole("button", { name: "Look" });
+    expect(toggle).toHaveAccessibleDescription("Poster: none · Backdrop: none");
+    fireEvent.click(toggle);
+    const poster = within(look).getByRole("group", { name: "Poster" });
+    expect(poster).toHaveTextContent("No poster");
+    fireEvent.pointerDown(within(poster).getByRole("button", { name: "Change poster" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Remove poster" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("a personal Smart collection gets a collage of its first matches", async () => {
+    showPage("/collections/c1/edit");
+    const look = await screen.findByRole("region", { name: "Look" });
+    expect(await within(look).findByRole("button", { name: "Look" })).toHaveAccessibleDescription(
+      "Poster: a collage once its titles have posters",
+    );
+  });
+});
+
 /** The server collection `c1` is Smart with these rules (and this sort_config). */
 function showServerSmart(
   query: Record<string, unknown>,

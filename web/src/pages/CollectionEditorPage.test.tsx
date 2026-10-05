@@ -661,14 +661,17 @@ describe("the Look card", () => {
       { name: "Look" },
     );
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveAccessibleDescription("Poster: a collage of its titles · Backdrop: none");
+    // No poster yet: the collage comes once the server has titles' posters to make it from.
+    expect(toggle).toHaveAccessibleDescription(
+      "Poster: a collage once its titles have posters · Backdrop: none",
+    );
     expect(within(look()).queryByRole("group", { name: "Poster" })).toBeNull();
     fireEvent.click(toggle);
     const done = within(look()).getByRole("button", { name: "Done" });
     expect(done).toHaveAttribute("aria-expanded", "true");
     await waitFor(() => expect(document.activeElement).toBe(done));
     expect(within(look()).getByRole("group", { name: "Poster" })).toHaveTextContent(
-      "Collage of its titles",
+      "A collage once its titles have posters",
     );
     expect(within(look()).getByRole("group", { name: "Backdrop" })).toHaveTextContent(
       "Fills the top of its page",
@@ -678,6 +681,50 @@ describe("the Look card", () => {
     fireEvent.click(done);
     const closed = within(look()).getByRole("button", { name: "Look" });
     await waitFor(() => expect(document.activeElement).toBe(closed));
+  });
+
+  it("shows the collage the server made in the header and the Look card, as a collage", async () => {
+    const collage = "https://images.example/collage.webp";
+    v2Recorder.answer(
+      "GET /api/v2/admin/collections",
+      adminCollectionList({ ...adminCollection, poster_url: collage, poster_is_collage: true }),
+    );
+    showPage(SERVER_EDIT);
+    const toggle = await within(await screen.findByRole("region", { name: "Look" })).findByRole(
+      "button",
+      { name: "Look" },
+    );
+    expect(toggle).toHaveAccessibleDescription("Poster: a collage of its titles · Backdrop: none");
+    expect(document.querySelector(`header img[src="${collage}"]`)).not.toBeNull();
+    const tile = await artworkTile("poster");
+    expect(within(tile).getByRole("img", { name: "Poster preview" })).toHaveAttribute(
+      "src",
+      collage,
+    );
+    expect(tile).toHaveTextContent("Collage of its titles");
+    // The collage is already in use: there's no image to remove.
+    const menu = await openArtworkMenu("poster");
+    expect(within(menu).getByRole("menuitem", { name: "Use the collage" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("shows a personal collection's collage the same way", async () => {
+    const collage = "https://images.example/mine.webp";
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, poster_url: collage, poster_is_collage: true }],
+    });
+    showPage("/collections/c1/edit");
+    const toggle = await within(await screen.findByRole("region", { name: "Look" })).findByRole(
+      "button",
+      { name: "Look" },
+    );
+    expect(toggle).toHaveAccessibleDescription("Poster: a collage of its titles");
+    expect(document.querySelector(`header img[src="${collage}"]`)).not.toBeNull();
+    expect(
+      within(await artworkTile("poster")).getByRole("img", { name: "Poster preview" }),
+    ).toHaveAttribute("src", collage);
   });
 
   it("sums up a saved image, and a new one waiting for Save", async () => {

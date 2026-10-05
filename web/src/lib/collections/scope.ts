@@ -153,6 +153,8 @@ export interface CollectionView<Raw extends WireCollection = WireCollection> {
   description: string;
   posterUrl?: string;
   posterThumbhash?: string;
+  /** `posterUrl` is the server's collage of its titles, not an image someone chose. */
+  posterIsCollage: boolean;
   backdropUrl?: string;
   itemCount: number;
   libraryIds: number[];
@@ -720,6 +722,7 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
     description: raw.description ?? "",
     posterUrl: raw.poster_url || undefined,
     posterThumbhash: raw.poster_thumbhash || undefined,
+    posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
     backdropUrl: raw.backdrop_url || undefined,
     itemCount: raw.item_count ?? 0,
     libraryIds: serverLibraryIds(raw),
@@ -848,6 +851,7 @@ export const PERSONAL_SCOPE: CollectionScope<Collection> = {
     description: raw.description ?? "",
     posterUrl: raw.poster_url || undefined,
     posterThumbhash: raw.poster_thumbhash || undefined,
+    posterIsCollage: Boolean(raw.poster_url && raw.poster_is_collage),
     itemCount: raw.item_count ?? 0,
     libraryIds: personalCollectionLibraryIds(raw),
     ownerProfileId: raw.creator_profile_id,

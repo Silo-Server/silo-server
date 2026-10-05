@@ -9,7 +9,13 @@ import getCollectionOk from "../../../../contracts/api/v2/fixtures/get_collectio
 import { PERSONAL_SCOPE, SERVER_SCOPE, type CollectionScope } from "@/lib/collections/scope";
 import { adminCollectionList, adminSmartCollection } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
-import { useCollectionDraft, useScopeEditor, useScopePreview } from "./collectionScope";
+import { collectionFromV2 } from "@/api/personalCollections";
+import {
+  useCollectionDraft,
+  useListedPoster,
+  useScopeEditor,
+  useScopePreview,
+} from "./collectionScope";
 
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 
@@ -251,5 +257,89 @@ describe("useCollectionDraft create", () => {
     });
     expect(second).toBeNull();
     expect(v2Recorder.callsOf("POST /api/v2/admin/collections")).toHaveLength(1);
+  });
+});
+
+describe("useListedPoster", () => {
+  const view = PERSONAL_SCOPE.toView(
+    collectionFromV2(getCollectionOk as Parameters<typeof collectionFromV2>[0]),
+  );
+
+  function watch(awaitCollage = true) {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    return renderHook(() => useListedPoster(PERSONAL_SCOPE, view, { awaitCollage }), { wrapper });
+  }
+
+  const listCalls = () => v2Recorder.callsOf("GET /api/v2/collections").length;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    return () => vi.useRealTimers();
+  });
+
+  it("reads the list again while a collection with titles waits for its collage", async () => {
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 2, poster_url: "" }],
+    });
+    const { result } = watch();
+    await waitFor(() => expect(listCalls()).toBe(1));
+    expect(result.current).toEqual({ url: undefined, isCollage: false });
+
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [
+        {
+          ...getCollectionOk,
+          item_count: 2,
+          poster_url: "https://images.example/collage.webp",
+          poster_is_collage: true,
+        },
+      ],
+    });
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    await waitFor(() =>
+      expect(result.current).toEqual({
+        url: "https://images.example/collage.webp",
+        isCollage: true,
+      }),
+    );
+    // The collage arrived: no more reads.
+    const calls = listCalls();
+    await act(() => vi.advanceTimersByTimeAsync(9_000));
+    expect(listCalls()).toBe(calls);
+  });
+
+  it("gives up after a short while when no collage comes", async () => {
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 2, poster_url: "" }],
+    });
+    watch();
+    await waitFor(() => expect(listCalls()).toBe(1));
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    const calls = listCalls();
+    expect(calls).toBeGreaterThan(1);
+    expect(calls).toBeLessThanOrEqual(7);
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    expect(listCalls()).toBe(calls);
+  });
+
+  it("doesn't wait for a collection without titles, or one that gets no collage", async () => {
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 0, poster_url: "" }],
+    });
+    watch();
+    await waitFor(() => expect(listCalls()).toBe(1));
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(listCalls()).toBe(1);
+
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 2, poster_url: "" }],
+    });
+    watch(false);
+    await waitFor(() => expect(listCalls()).toBe(2));
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(listCalls()).toBe(2);
   });
 });

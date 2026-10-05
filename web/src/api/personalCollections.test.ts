@@ -35,6 +35,7 @@ const collection: components["schemas"]["PersonalCollection"] = {
   include_in_server_collections: false,
   poster_url: "",
   poster_thumbhash: "",
+  poster_is_collage: false,
   created_at: "2026-09-05T00:00:00.000Z",
   updated_at: "2026-09-05T00:00:00.000Z",
 };

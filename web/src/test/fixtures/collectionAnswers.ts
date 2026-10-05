@@ -42,6 +42,7 @@ export const personalCapabilities = {
   effective_collection_sort: true,
   sort_preference_kinds: [],
   sync_schedule_editable: true,
+  poster_collages: true,
 };
 
 /**
