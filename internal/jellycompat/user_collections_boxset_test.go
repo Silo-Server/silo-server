@@ -692,6 +692,9 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 		}
 	}
 	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: libraryID, Type: "series"}}, nil)
+	// The real server always has the browse repository; episode members are
+	// hydrated through its pool.
+	h.browseRepo = catalog.NewBrowseRepository(pool)
 	h.userCollections = usercollections.NewStore(pool)
 	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).WithUserStoreProvider(provider)
 	h.accessFilter = func(_ context.Context, userID int, profileID string) catalog.AccessFilter {
@@ -1391,7 +1394,10 @@ func TestPersonalBoxSetLanguageFiltersStayInVisibleLibrariesDB(t *testing.T) {
 	}
 	exec(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, movie)
 	exec(`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($1, $3)`, movie, visibleLib, hiddenLib)
-	exec(`INSERT INTO media_files (content_id, media_folder_id, file_path, audio_language_codes, subtitle_language_codes) VALUES ($1, $2, $1 || '-en.mkv', '{en}', '{en}'), ($1, $3, $1 || '-fr.mkv', '{fr}', '{fr}')`, movie, visibleLib, hiddenLib)
+	// The language code columns are generated from the track lists.
+	exec(`INSERT INTO media_files (content_id, media_folder_id, file_path, audio_tracks, subtitle_tracks) VALUES
+		($1, $2, $1 || '-en.mkv', '[{"language":"en"}]', '[{"language":"en"}]'),
+		($1, $3, $1 || '-fr.mkv', '[{"language":"fr"}]', '[{"language":"fr"}]')`, movie, visibleLib, hiddenLib)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
