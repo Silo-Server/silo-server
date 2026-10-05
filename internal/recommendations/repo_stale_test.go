@@ -94,6 +94,31 @@ func (p *staleTestProfile) pending() bool {
 	return false
 }
 
+// A change to a profile that has no taste row yet is not lost when its first
+// build, which read the signals before the change, stores the profile: the
+// mark creates a vectorless row the build fills, and the mark outlives the
+// build's clear.
+func TestStaleMarkBeforeTheFirstBuildSurvivesItPostgres(t *testing.T) {
+	p := newStaleTestProfile(t)
+	ctx := context.Background()
+	if _, err := p.pool.Exec(ctx, `DELETE FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, p.userID, p.profile); err != nil {
+		t.Fatal(err)
+	}
+
+	started := p.now() // the first build starts reading
+	p.mark()           // a favorite lands while it reads
+	if !p.pending() {
+		t.Fatal("a mark on a profile with no taste row left nothing pending")
+	}
+	p.upsert(started)
+	if err := p.repo.ClearStaleAt(ctx, p.userID, p.profile, started); err != nil {
+		t.Fatalf("clear stale mark: %v", err)
+	}
+	if !p.pending() {
+		t.Fatalf("stale_at = %v; the change after the first build started must stay pending", p.staleAt())
+	}
+}
+
 // A change that lands while a refresh is reading signals stays pending: the
 // refresh stores the profile as of its start, and clears only marks older
 // than that start.
