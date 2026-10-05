@@ -787,21 +787,22 @@ func renameClusterRow(row *ForYouRow, cluster TasteCluster, rows []ForYouRow, ke
 	}
 }
 
-// titleAsServed gives a cluster row read for its see-all page the title
-// Discover and the For You rows give it. distinguishClusterRows may have
-// renamed it there, by the profile's other cluster rows and the day's
-// rotation, so its cached title alone does not say. A row those reads do not
-// show, such as one hidden as a repeat, keeps its title.
-func (rr *rowRead) titleAsServed(ctx context.Context, row *ForYouRow) error {
+// asServed gives a personal row read for its see-all page the title and
+// order Discover and the For You rows give it: distinguishClusterRows may
+// rename it by the profile's other cluster rows, and the day's rotation
+// reorders its served window, so the cached row alone does not say. A row
+// those reads do not show, such as one hidden as a repeat, keeps its cached
+// title and order.
+func (rr *rowRead) asServed(ctx context.Context, row *ForYouRow) error {
 	// The page rows as Discover reads them, a row of ServedRowSize items;
-	// the default rows it adds do not change a cluster row's title.
+	// the default rows it adds do not change a personal row.
 	rows, err := rr.forYouPageRows(ctx, false, ServedRowSize)
 	if err != nil {
 		return err
 	}
 	for _, served := range rows {
 		if served.personalKey == row.personalKey {
-			row.Label, row.Subject = served.Label, served.Subject
+			row.Label, row.Subject, row.Items = served.Label, served.Subject, served.Items
 			break
 		}
 	}
@@ -1077,10 +1078,10 @@ func (r *Reader) GetSection(
 		var live ForYouRow
 		live, err = read.defaultRow(ctx, recType, limit)
 		row = &live
-	case SectionKindCluster:
+	case SectionKindCluster, SectionKindForYouMain:
 		row, err = r.loadSectionRow(ctx, userID, profileID, kind, key)
 		if err == nil && row != nil {
-			err = read.titleAsServed(ctx, row)
+			err = read.asServed(ctx, row)
 		}
 	default:
 		row, err = r.loadSectionRow(ctx, userID, profileID, kind, key)
@@ -1116,7 +1117,7 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: clusterRowType, Label: ForYouLabel, Items: items}, nil
+		return &ForYouRow{Type: clusterRowType, Label: ForYouLabel, Items: items, personalKey: RecTypeForYouMain}, nil
 
 	case SectionKindCluster:
 		idx, err := strconv.Atoi(key)

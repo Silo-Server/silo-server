@@ -120,8 +120,8 @@ func TestRotateTailChangesDailyAndPerRow(t *testing.T) {
 
 // Reads rotate the main row and the cluster rows, the same way all day and
 // on every node, and leave Because You Watched and the global rows in rank
-// order. The section read rotates like a default page and keeps the whole
-// pool, and a "see all" page is never rotated.
+// order. The section read and a "see all" page rotate like the page and keep
+// the whole pool, so "see all" opens with the titles the row showed.
 func TestReadsRotateOnlyThePersonalRows(t *testing.T) {
 	pool := scoredRun("m", CacheCandidateLimit)
 	cluster := scoredRun("c", CacheCandidateLimit)
@@ -184,8 +184,11 @@ func TestReadsRotateOnlyThePersonalRows(t *testing.T) {
 	if err != nil || section == nil || !slices.Equal(scoredIDs(section.Items[:ServedRowSize]), morning[ForYouLabel]) || len(section.Items) != CacheCandidateLimit {
 		t.Fatalf("section row = %v, %v; want the page's rotation and the whole pool", section, err)
 	}
-	seeAll, err := r.GetSection(ctx, 7, "p1", SectionKindForYouMain, "", CacheCandidateLimit, catalog.AccessFilter{})
-	if err != nil || seeAll == nil || !slices.Equal(scoredIDs(seeAll.Items), scoredIDs(pool)) {
-		t.Fatalf("see all = %v, %v; want rank order", seeAll, err)
+	for kind, key := range map[string]string{SectionKindForYouMain: "", SectionKindCluster: "0"} {
+		label := map[string]string{SectionKindForYouMain: ForYouLabel, SectionKindCluster: clusterTitle("Drama")}[kind]
+		seeAll, err := r.GetSection(ctx, 7, "p1", kind, key, CacheCandidateLimit, catalog.AccessFilter{})
+		if err != nil || seeAll == nil || len(seeAll.Items) != CacheCandidateLimit || !slices.Equal(scoredIDs(seeAll.Items[:ServedRowSize]), morning[label]) {
+			t.Fatalf("see all %s = %v, %v; want the page's rotation and the whole pool", kind, seeAll, err)
+		}
 	}
 }

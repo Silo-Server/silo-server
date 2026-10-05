@@ -299,10 +299,7 @@ func (w *Worker) RequestProfileRefresh(ctx context.Context, userID int, profileI
 
 	req := profileRefreshRequest{userID: userID, profileID: profileID}
 	key := profileRefreshKey(userID, profileID)
-	if !w.claimProfileRefresh(key) {
-		// A refresh queued here reads this change when it starts; one already
-		// running may have read the signals before it, so it runs again.
-		w.askProfileRefreshAgain(key)
+	if !w.claimProfileRefreshOrAskAgain(key) {
 		return
 	}
 
@@ -361,9 +358,8 @@ func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, w
 		return false
 	}
 	key := profileRefreshKey(userID, profileID)
-	if !w.claimProfileRefresh(key) {
+	if !w.claimProfileRefreshOrAskAgain(key) {
 		w.refreshesNow.Add(-1)
-		w.askProfileRefreshAgain(key)
 		return false
 	}
 
@@ -1102,14 +1098,24 @@ func (w *Worker) clearProfileRefreshPending(key string) {
 	delete(w.profileRefreshAgain, key)
 }
 
-// askProfileRefreshAgain asks a pending profile refresh to run once more.
-func (w *Worker) askProfileRefreshAgain(key string) {
+// claimProfileRefreshOrAskAgain claims a profile's refresh, as
+// claimProfileRefresh does, or, when one is already queued or running on this
+// server, asks it to run once more and reports false. A refresh queued here
+// reads the change when it starts; one already running may have read the
+// signals before it. Both happen under one lock, so the request cannot fall
+// between a run that is finishing and its release of the key.
+func (w *Worker) claimProfileRefreshOrAskAgain(key string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if _, exists := w.profileRefreshPending[key]; !exists {
+		w.profileRefreshPending[key] = struct{}{}
+		return true
+	}
 	if w.profileRefreshAgain == nil {
 		w.profileRefreshAgain = make(map[string]struct{})
 	}
 	w.profileRefreshAgain[key] = struct{}{}
+	return false
 }
 
 // dropProfileRefreshAgain forgets a request to run again.

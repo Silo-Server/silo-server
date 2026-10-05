@@ -1959,7 +1959,7 @@ func defaultRowQuery(filter catalog.AccessFilter, kind string, exclude []string,
 			ORDER  BY %[5]s, mi.content_id
 			LIMIT  $%[6]d
 		) c
-		ORDER  BY c.type_rank::float8 / tc.titles, c.rating DESC, c.content_id
+		ORDER  BY c.type_rank::float8 / GREATEST(tc.titles, 1), c.rating DESC, c.content_id
 		LIMIT  $%[6]d`,
 		strings.Join(append(perTypeItemConditions("tc.type"), conditions...), " AND "),
 		catalogRatingSQL, highlyRatedMinRating, argIdx, catalogRatingOrderSQL, argIdx+1), args

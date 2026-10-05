@@ -127,13 +127,15 @@ func (b rowBuilder) withRecencyBoost(ctx context.Context, pool []ScoredItem) []S
 // row's served items are taken out of it; a thinner row is cached empty.
 const minClusterRowItems = 10
 
-// withoutMainRowItems takes the main row's served window out of each cluster
+// withoutMainRowItems takes every title the main row can serve, its first
+// rotationReach(ServedRowSize) under the daily rotation, out of each cluster
 // row, so the main row and a cluster row built from the same interest do not
-// open with the same titles. A row this leaves with fewer than
-// minClusterRowItems is emptied; a row it takes nothing from is kept whole.
+// show the same titles. A row this leaves with fewer than minClusterRowItems
+// is emptied; a row it takes nothing from is kept whole.
 func withoutMainRowItems(rows []ForYouRow, main []ScoredItem) []ForYouRow {
-	served := make(map[string]struct{}, ServedRowSize)
-	for _, item := range main[:min(len(main), ServedRowSize)] {
+	reach := rotationReach(ServedRowSize)
+	served := make(map[string]struct{}, reach)
+	for _, item := range main[:min(len(main), reach)] {
 		served[item.MediaItemID] = struct{}{}
 	}
 	for i, row := range rows {

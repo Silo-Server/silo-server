@@ -52,7 +52,7 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 	}
 	pin := min(rotationMaxPinned, limit/2)
 	take := limit - pin
-	end := min(pin+2*take, len(items))
+	end := min(rotationReach(limit), len(items))
 	day := date.Format(time.DateOnly)
 
 	keys := make([]float64, end-pin)
@@ -77,6 +77,17 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 		}
 	}
 	return append(out, items[end:]...)
+}
+
+// rotationReach is how far into a row rotateTail draws a window of limit
+// items from: every item it can serve is among the row's first
+// rotationReach(limit).
+func rotationReach(limit int) int {
+	if limit <= rotationMaxPinned {
+		return limit
+	}
+	pin := min(rotationMaxPinned, limit/2)
+	return pin + 2*(limit-pin)
 }
 
 // rotationUniform maps the seed, day and item to a number in (0, 1), from

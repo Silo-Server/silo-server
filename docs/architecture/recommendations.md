@@ -274,7 +274,8 @@ library sections, which scope the whole row to their libraries.
   queried.
 - **Cluster rows.** A cluster row is built `max(3, 60 × weight share) + 20`
   long (at most 60) from candidates sharing one of its dominant genres, then
-  loses the main row's served 20, so the page does not repeat its opening.
+  loses the main row's first 30, every title its daily rotation can serve,
+  so the page does not repeat the main row.
   A row left with fewer than 10 titles is cached empty, and a row cached
   empty counts as built: reads do not ask for a rebuild of it.
 - **Quality prior.** Before MMR a candidate's score becomes
@@ -307,14 +308,13 @@ library sections, which scope the whole row to their libraries.
   than half (Jaccard index), and otherwise takes the first of its dominant
   genres its title does not name yet. A row whose cached title its cluster
   no longer has keeps it. A hidden row was built, so it does not count as
-  missing. A cluster row's "see all" page reads the profile's page rows the
-  same way, for a 20-item window and the day's rotation, and takes the
-  title they give its row, so it matches the row it was opened from; a row
-  they hide keeps the cached title.
+  missing. A main or cluster row's "see all" page reads the profile's page
+  rows the same way, for a 20-item window and the day's rotation, and takes
+  the title and order they give its row, so it opens with the titles of the
+  row it was opened from; a row they hide keeps its cached title and order.
 - **Rotation.** Reads rotate the main row and the cluster rows daily, after
   filtering and before trimming; Because You Watched, Similar Users, Watch
-  Tonight, the global and default rows and "see all" pages stay in rank
-  order. For a window of `limit` items, when the row is longer and `limit`
+  Tonight and the global and default rows stay in rank order. For a window of `limit` items, when the row is longer and `limit`
   is above 10, the first `min(10, limit/2)` stay, and the other
   `take = limit − pin` are drawn from the next `2 × take`, the title at tail
   index `i` with weight `1/(i+5)`: the draw keeps the `take` largest

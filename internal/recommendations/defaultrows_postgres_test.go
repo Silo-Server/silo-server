@@ -693,3 +693,22 @@ func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
 		t.Fatalf("quality ratings = %v, want %v", quality, wantQuality)
 	}
 }
+
+// A type counted as empty a moment ago, whose titles arrive before the count
+// expires, still reads: Highly Rated never divides by a zero count.
+func TestHighlyRatedReadsPastAStaleZeroCountPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	const prefix = "tdefault-zero-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	repo := NewRepo(pool)
+	lib := newTestLibrary(t, pool, prefix+"lib")
+	movie := seedTitle(t, pool, prefix+"movie", "movie", lib, "rating_imdb = 8.0")
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{lib}}
+	if got := listDefault(t, repo, scope, RecTypeTopRated, nil, 60); !slices.Equal(got, []string{movie}) {
+		t.Fatalf("highly rated = %v, want the movie", got)
+	}
+	series := seedTitle(t, pool, prefix+"series", "series", lib, "rating_imdb = 9.0")
+	if got := listDefault(t, repo, scope, RecTypeTopRated, nil, 60); !slices.Contains(got, series) || !slices.Contains(got, movie) {
+		t.Fatalf("highly rated = %v, want the movie and the new series", got)
+	}
+}

@@ -109,6 +109,9 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
+	// The Because You Watched rows and the page rows each leave out what the
+	// profile watched; read that once.
+	r = r.WithContext(recommendations.WithWatchedSetMemo(r.Context()))
 
 	if h.reader == nil || h.items == nil {
 		writeJSON(w, http.StatusOK, []recommendationDTO{})
