@@ -60,7 +60,7 @@ func (h *AccessGroupHandler) UpdateAdminAccessGroup(ctx context.Context, id int6
 	if err := normalizeAdminGroupInput(&in); err != nil {
 		return nil, err
 	}
-	librariesChange := h.groupLibrariesChange(ctx, id, in)
+	librariesChange := h.groupLibrariesChange(in)
 	group, err := s.UpdateConditional(ctx, id, in, guard)
 	if err != nil {
 		return nil, err
@@ -121,17 +121,13 @@ func (h *AccessGroupHandler) groupMembers(ctx context.Context, id int64) []int {
 	return members
 }
 
-// groupLibrariesChange reports whether in changes group id's libraries. When
-// the current group cannot be read it assumes they change.
-func (h *AccessGroupHandler) groupLibrariesChange(ctx context.Context, id int64, in access.UpdateGroupInput) bool {
-	if in.LibraryIDs == nil || h.RecWorker == nil {
-		return false
-	}
-	current, err := h.store.Get(ctx, id)
-	if err != nil || current == nil {
-		return true
-	}
-	return (current.LibraryIDs == nil) != (*in.LibraryIDs == nil) || !sameIntSet(current.LibraryIDs, *in.LibraryIDs)
+// groupLibrariesChange reports whether in may change group id's libraries:
+// whenever it sets them. Comparing with the stored group would read it
+// outside the update's writer lock, where an overlapping update can change it
+// back and forth unnoticed; a save that keeps the same libraries only costs
+// its members a rebuild.
+func (h *AccessGroupHandler) groupLibrariesChange(in access.UpdateGroupInput) bool {
+	return in.LibraryIDs != nil && h.RecWorker != nil
 }
 func normalizeAdminGroupInput(in *access.UpdateGroupInput) error {
 	if in.Name != nil {
