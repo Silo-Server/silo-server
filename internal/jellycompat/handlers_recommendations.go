@@ -109,9 +109,10 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 		}
 	}
 
-	// The rows are read already filtered for the viewer, so a restricted
-	// profile still gets full rows of titles it can see. They are read with
-	// headroom for the compat media-type exclusions applied below.
+	// The rows are read already filtered for the viewer, including the compat
+	// media-type exclusions, so a restricted profile still gets full rows of
+	// titles it can see. They are read with headroom for titles the item
+	// load below can still drop.
 	filter := catalog.AccessFilter{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}
 	if h.accessFilter != nil {
 		filter = h.accessFilter(r.Context(), session.StreamAppUserID, session.ProfileID)

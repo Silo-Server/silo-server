@@ -1916,7 +1916,9 @@ func (r *Repo) GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[st
 }
 
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given
-// access filter. The returned map is keyed by media_items.content_id.
+// access filter, including its excluded media types (the Jellyfin surface
+// excludes audiobooks and podcasts). The returned map is keyed by
+// media_items.content_id.
 func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	if len(itemIDs) == 0 {
 		return map[string]struct{}{}, nil
@@ -1941,6 +1943,11 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+
+	if len(filter.ExcludedMediaTypes) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mi.type = ANY($%d))", argIdx))
+		args = append(args, filter.ExcludedMediaTypes)
+	}
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id
