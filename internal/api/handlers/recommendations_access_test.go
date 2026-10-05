@@ -29,7 +29,7 @@ type fakeRecsEngine struct {
 	becauseWith  catalog.AccessFilter
 }
 
-func (f *fakeRecsEngine) SimilarItems(context.Context, string, int) ([]recommendations.ScoredItem, error) {
+func (f *fakeRecsEngine) SimilarItems(context.Context, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	f.similarCalls++
 	return f.items, nil
 }

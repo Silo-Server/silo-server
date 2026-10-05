@@ -342,7 +342,7 @@ type countingRecommender struct {
 	calls int
 }
 
-func (c *countingRecommender) SimilarItems(context.Context, string, int) ([]recommendations.ScoredItem, error) {
+func (c *countingRecommender) SimilarItems(context.Context, string, int, catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	c.calls++
 	return []recommendations.ScoredItem{{MediaItemID: "movie-neighbor"}}, nil
 }
@@ -401,7 +401,7 @@ type fixedRecommender struct {
 	gotLimit int
 }
 
-func (f *fixedRecommender) SimilarItems(_ context.Context, _ string, limit int) ([]recommendations.ScoredItem, error) {
+func (f *fixedRecommender) SimilarItems(_ context.Context, _ string, limit int, _ catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	f.gotLimit = limit
 	return f.items, nil
 }

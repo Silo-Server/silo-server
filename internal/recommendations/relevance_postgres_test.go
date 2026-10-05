@@ -552,12 +552,12 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 
 	// "More like this" keeps to the item's own type: a movie's list holds no
 	// co-watched book, and an audiobook's may hold another audiobook.
-	similar, err := f.engine.SimilarItems(ctx, finished[0], 20)
+	similar, err := f.engine.SimilarItems(ctx, finished[0], 20, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	check("movie similar", map[string][]string{"similar": scoredIDs(similar)})
-	bookSimilar, err := f.engine.SimilarItems(ctx, finishedBook, 20)
+	bookSimilar, err := f.engine.SimilarItems(ctx, finishedBook, 20, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

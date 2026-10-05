@@ -608,7 +608,7 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 	// it as an unknown item, so the list cannot show what a hidden title
 	// resembles.
 	if h.recommender != nil && h.similarAnchorVisible(r.Context(), session, contentID) {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
+		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit, h.resolveAccessFilter(r.Context(), session))
 		if recErr != nil {
 			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
 				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)

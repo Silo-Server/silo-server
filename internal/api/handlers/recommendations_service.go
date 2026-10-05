@@ -328,7 +328,7 @@ func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string
 	if !visible {
 		return []recommendations.ScoredItem{}, nil
 	}
-	items, err := h.engine.SimilarItems(ctx, itemID, limit)
+	items, err := h.engine.SimilarItems(ctx, itemID, limit, filter)
 	if err != nil {
 		slog.WarnContext(ctx, "SimilarItems failed", "component", "api", "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
