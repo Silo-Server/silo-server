@@ -73,10 +73,12 @@ export function useListedPoster<Raw extends WireCollection>(
         waiting.current = null;
         return false;
       }
-      if (waiting.current?.version !== version) {
-        waiting.current = { since: Date.now(), version };
+      let wait = waiting.current;
+      if (!wait || wait.version !== version) {
+        wait = { since: Date.now(), version };
+        waiting.current = wait;
       }
-      return Date.now() - waiting.current.since < COLLAGE_WAIT_MS ? COLLAGE_POLL_MS : false;
+      return Date.now() - wait.since < COLLAGE_WAIT_MS ? COLLAGE_POLL_MS : false;
     },
   });
   const shown = useMemo(() => (listed ? scope.toView(listed) : view), [listed, scope, view]);
