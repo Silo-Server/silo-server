@@ -37,17 +37,30 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 	// source item's media type so an audiobook never appears in a movie's
 	// Similar rail (and vice versa) once audiobook embeddings exist. Titles
 	// the viewer cannot see are left out before ranking, so they do not take
-	// the list's places; callers still filter the co-watch additions.
+	// the list's places.
 	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
 
-	// 4. Co-watch neighbors.
+	// 4. Co-watch neighbors, kept to those the viewer can see, so they do not
+	// take places in the ranked list either. Without the check they are left
+	// out: they only add to the embedding candidates.
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
+	cowatchIDs := make([]string, len(cowatchPairs))
+	for i, p := range cowatchPairs {
+		cowatchIDs[i] = p.SimilarItemID
+	}
+	visible, err := e.repo.FilterAccessibleItemIDs(ctx, cowatchIDs, filter)
+	if err != nil {
+		slog.WarnContext(ctx, "filtering co-watch neighbors failed; leaving them out", "component", "recommendations", "item_id", itemID, "error", err)
+		visible = nil
+	}
 	cowatchMap := make(map[string]float64, len(cowatchPairs))
 	for _, p := range cowatchPairs {
-		cowatchMap[p.SimilarItemID] = p.JaccardScore
+		if _, ok := visible[p.SimilarItemID]; ok {
+			cowatchMap[p.SimilarItemID] = p.JaccardScore
+		}
 	}
 
 	// 5. Blend scores (70% embedding, 30% co-watch).

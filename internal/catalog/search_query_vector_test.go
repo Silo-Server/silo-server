@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
 
 // funcVectorizer embeds queries with embed and counts the calls.
@@ -162,5 +164,25 @@ func TestQueryVectorCanceledSearchDoesNotCoolDown(t *testing.T) {
 	}
 	if vectorizer.callCount() != 2 {
 		t.Fatalf("provider calls = %d, want 2", vectorizer.callCount())
+	}
+}
+
+// A query the provider refuses, such as an overlong search, says nothing
+// about the provider, so the next search still embeds its query.
+func TestQueryVectorRefusedQueryDoesNotCoolDown(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(1_000_000, 0)}
+	vectorizer := &funcVectorizer{embed: func(_ context.Context, query string) ([]float32, error) {
+		if query == "an overlong refused search" {
+			return nil, &embeddings.StatusError{API: "embedding", StatusCode: 400}
+		}
+		return []float32{0.5, 0.25}, nil
+	}}
+	provider := semanticTestProvider(vectorizer, clock)
+
+	if _, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "an overlong refused search"}); fallback == "" {
+		t.Fatal("a refused query was searched semantically")
+	}
+	if req, fallback := provider.buildMeilisearchSearchRequest(t.Context(), CatalogSearchRequest{Query: "quiet space horror"}); fallback != "" || req.Hybrid == nil {
+		t.Fatalf("next search after a refused query: fallback %q", fallback)
 	}
 }

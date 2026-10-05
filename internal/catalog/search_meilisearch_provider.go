@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 )
 
 const (
@@ -738,8 +739,9 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 		vector, err = embeddingvectors.EnsureCanonicalDimensions(vector)
 	}
 	if err != nil {
-		// A caller that gave up says nothing about the provider.
-		if ctx.Err() == nil {
+		// A caller that gave up, and a query the provider refused (such as
+		// an overlong search), say nothing about the provider.
+		if ctx.Err() == nil && !embeddings.InputRejected(err) {
 			p.vecMu.Lock()
 			p.vectorFailedUntil = p.vectorNow().Add(meilisearchQueryVectorFailureCooldown)
 			p.vecMu.Unlock()
