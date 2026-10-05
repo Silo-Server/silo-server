@@ -616,6 +616,27 @@ func TestBackfillTextStalePassPagesPastFalsePositives(t *testing.T) {
 	}
 }
 
+// Stale rows the provider refuses use none of the text-refresh quota, so a
+// full quota of them at the front of the walk cannot keep a later stale row
+// from being re-embedded.
+func TestBackfillTextStalePassWalksPastRefusedRows(t *testing.T) {
+	store := newFakeEmbeddingStore()
+	bad := map[string]bool{}
+	for _, id := range testIDs("a-refused-", embeddingTextStaleQuotaPerRun) {
+		bad[id] = true
+		store.candidates = append(store.candidates, EmbeddingTextCandidate{MediaItemID: id, Model: backfillTestModel, CanonicalText: "old text"})
+	}
+	store.candidates = append(store.candidates, EmbeddingTextCandidate{MediaItemID: "b-stale", Model: backfillTestModel, CanonicalText: "old text"})
+	calls := 0
+	b := newTestBackfill(store, refusingEmbedder(func(text string) bool { return bad[text] }, &calls), nil)
+	if err := b.run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store.stored["b-stale"]; !ok || b.counts.Embedded != 1 || b.counts.Skipped != embeddingTextStaleQuotaPerRun {
+		t.Fatalf("counts=%+v, stored b-stale=%v; want the stale row re-embedded past the refused ones", b.counts, ok)
+	}
+}
+
 func TestEmbedMissingSkipsTheTextStalePass(t *testing.T) {
 	calls := 0
 	store := newFakeEmbeddingStore("missing")
