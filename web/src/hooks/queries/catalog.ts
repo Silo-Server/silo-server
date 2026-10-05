@@ -155,6 +155,8 @@ export type CatalogFacetName =
 
 export interface CatalogFacetSearchResponse {
   matches: string[];
+  /** The matches in the same order, each with its title count in scope. */
+  values: { value: string; count: number }[];
   has_more: boolean;
 }
 

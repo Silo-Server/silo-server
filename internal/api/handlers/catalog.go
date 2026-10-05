@@ -476,8 +476,8 @@ func (h *CatalogHandler) HandleGetCatalogFilters(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, view)
 }
 
-// catalogFacetSearchResponse mirrors catalog.CatalogFacetSearchResult on
-// the wire. matches[] is always present (empty when no hits); has_more
+// catalogFacetSearchResponse is the v1 facet typeahead answer.
+// matches[] is always present (empty when no hits); has_more
 // is true when the underlying result set held more entries than the
 // requested limit.
 type catalogFacetSearchResponse struct {
@@ -529,12 +529,13 @@ func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *h
 		return
 	}
 
-	view, err := h.SearchFacet(r.Context(), viewerFromRequest(r, accessFilter), req, facet, prefix, limit)
+	// The v1 bridge keeps its prefix-only, alphabetical answer.
+	view, err := h.searchFacet(r.Context(), viewerFromRequest(r, accessFilter), req, facet, prefix, limit, catalog.FacetSearchPrefix)
 	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, view)
+	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{Matches: view.Matches(), HasMore: view.HasMore})
 }
 
 func parseIncludeTechnical(raw string) bool {

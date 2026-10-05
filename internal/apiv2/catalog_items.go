@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -62,9 +63,10 @@ type CatalogFiltersInput struct {
 	Scope         string `query:"scope" enum:"home,library"`
 	SectionID     string `query:"section_id"`
 	LibraryID     ID     `query:"library_id" example:"1"`
+	LibraryIDs    []ID   `query:"library_ids,explode" maxItems:"200" doc:"Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section" example:"[\"1\",\"2\"]"`
 	CollectionID  string `query:"collection_id"`
 	PersonID      ID     `query:"person_id"`
-	Type          string `query:"type" example:"movie"`
+	Type          string `query:"type" doc:"Media scope: movie, series, episode, audiobook, ebook, podcast, video, …" example:"movie"`
 	SkipTechnical bool   `query:"skip_technical" doc:"true omits the file-derived facets (resolutions, audio and subtitle languages)"`
 }
 
@@ -72,7 +74,7 @@ type CatalogFiltersInput struct {
 type CatalogFacetSearchInput struct {
 	CatalogFiltersInput
 	Facet string `query:"facet" required:"true" enum:"genre,studio,network,country,original_language,content_rating,author,narrator,series" doc:"The facet to search" example:"author"`
-	Q     string `query:"q" doc:"Case-insensitive prefix" example:"ste"`
+	Q     string `query:"q" doc:"Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing" example:"ste"`
 	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most matches to return; default 20, maximum 100"`
 }
 
@@ -229,8 +231,16 @@ type CatalogFiltersOutput struct {
 
 // CatalogFacetMatches is a facet typeahead answer.
 type CatalogFacetMatches struct {
-	Matches []string `json:"matches" doc:"Empty, never null"`
-	HasMore bool     `json:"has_more" doc:"Whether more values matched than limit"`
+	Matches []string            `json:"matches" doc:"The matched values in result order; empty, never null"`
+	Values  []CatalogFacetValue `json:"values" doc:"The same values in the same order, each with its title count; empty, never null"`
+	HasMore bool                `json:"has_more" doc:"Whether more values matched than limit"`
+}
+
+// CatalogFacetValue is one facet value with the number of titles in the
+// scope that carry it.
+type CatalogFacetValue struct {
+	Value string `json:"value" example:"Warner Bros. Pictures"`
+	Count int    `json:"count" doc:"Titles in the scope with this value; values can lag catalog changes by up to two minutes" example:"42"`
 }
 
 // CatalogFacetMatchesOutput is the searchCatalogFacet response.
@@ -577,7 +587,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters", "getCatalogFilters", "catalog",
 		"The facet values available in a scope, for filter menus.")), reg.getCatalogFilters)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/filters/search", "searchCatalogFacet", "catalog",
-		"Prefix typeahead over one facet of a scope.")), reg.searchCatalogFacet)
+		"Typeahead over one facet of a scope, with title counts.")), reg.searchCatalogFacet)
 	query := humaOp(http.MethodPost, Prefix+"/catalog/query", opQueryCatalogItems, "catalog",
 		"Page the catalog by a JSON rule-group query; the body form of the browse.")
 	query.DefaultStatus = http.StatusOK
@@ -833,6 +843,30 @@ func (in *CatalogFiltersInput) catalogValues() url.Values {
 	return v
 }
 
+// catalogRequest parses the scope and adds library_ids to the libraries it
+// names. The resolver intersects them with the viewer's libraries, so they
+// can narrow a scope but never widen it.
+func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Problem) {
+	req, p := parseCatalogRequest(in.catalogValues())
+	if p != nil || len(in.LibraryIDs) == 0 {
+		return req, p
+	}
+	if req.Source == catalogpkg.CatalogSourceSection {
+		return catalogpkg.CatalogRequest{}, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: "query.library_ids", Code: codeInvalid, Detail: "library_ids does not apply to source=section"})
+	}
+	for _, id := range in.LibraryIDs {
+		n, p := id.positive("query.library_ids")
+		if p != nil {
+			return catalogpkg.CatalogRequest{}, p
+		}
+		if !slices.Contains(req.Query.LibraryIDs, n) {
+			req.Query.LibraryIDs = append(req.Query.LibraryIDs, n)
+		}
+	}
+	return req, nil
+}
+
 // parseCatalogRequest runs the shared parser and reports its refusal as a
 // 422 on the query parameter the message names; the source when it names
 // none, since the source decides what the rest must carry.
@@ -1030,7 +1064,7 @@ func (reg *Registry) getCatalogFilters(ctx context.Context, in *CatalogFiltersIn
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1058,7 +1092,7 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if p != nil {
 		return nil, p
 	}
-	req, p := parseCatalogRequest(in.catalogValues())
+	req, p := in.catalogRequest()
 	if p != nil {
 		return nil, p
 	}
@@ -1066,7 +1100,11 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	if err != nil {
 		return nil, catalogProblem(err, "query.facet")
 	}
-	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: NonNil(view.Matches), HasMore: view.HasMore}}, nil
+	values := make([]CatalogFacetValue, len(view.Values))
+	for i, v := range view.Values {
+		values[i] = CatalogFacetValue{Value: v.Value, Count: v.Count}
+	}
+	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: view.Matches(), Values: values, HasMore: view.HasMore}}, nil
 }
 
 func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {

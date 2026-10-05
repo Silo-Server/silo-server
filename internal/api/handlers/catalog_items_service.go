@@ -38,8 +38,22 @@ type SortMetricsView = sortMetricsResponse
 // CatalogFiltersView is the facet document of a catalog scope.
 type CatalogFiltersView = catalogFiltersResponse
 
-// CatalogFacetSearchView is a facet typeahead answer.
-type CatalogFacetSearchView = catalogFacetSearchResponse
+// CatalogFacetSearchView is a facet typeahead answer: the matched values in
+// result order with their title counts, and whether more matched than the
+// limit.
+type CatalogFacetSearchView struct {
+	Values  []catalog.FacetValue
+	HasMore bool
+}
+
+// Matches returns the matched values without their counts, never nil.
+func (v CatalogFacetSearchView) Matches() []string {
+	out := make([]string, len(v.Values))
+	for i, fv := range v.Values {
+		out[i] = fv.Value
+	}
+	return out
+}
 
 // CatalogQueryView is one page of the JSON-body catalog query.
 type CatalogQueryView = browseResponse
@@ -194,24 +208,25 @@ func (h *CatalogHandler) Filters(ctx context.Context, v ItemViewer, req catalog.
 	return view, nil
 }
 
-// SearchFacet answers a prefix typeahead over one filter facet. limit is
-// already validated and clamped by the caller.
-func (h *CatalogHandler) SearchFacet(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, facet, prefix string, limit int) (CatalogFacetSearchView, error) {
+// SearchFacet answers a typeahead over one filter facet, ranked as
+// catalog.FacetSearchRanked describes. limit is already validated and
+// clamped by the caller.
+func (h *CatalogHandler) SearchFacet(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, facet, q string, limit int) (CatalogFacetSearchView, error) {
+	return h.searchFacet(ctx, v, req, facet, q, limit, catalog.FacetSearchRanked)
+}
+
+func (h *CatalogHandler) searchFacet(ctx context.Context, v ItemViewer, req catalog.CatalogRequest, facet, q string, limit int, mode catalog.FacetSearchMode) (CatalogFacetSearchView, error) {
 	if h == nil || h.resolver == nil || h.itemsH == nil {
 		return CatalogFacetSearchView{}, apiError(http.StatusInternalServerError, "internal_error", "Catalog is not configured")
 	}
-	result, err := h.resolver.SearchFacet(ctx, req, v.Access, facet, prefix, limit)
+	result, err := h.resolver.SearchFacet(ctx, req, v.Access, facet, q, limit, mode)
 	if err != nil {
 		if errors.Is(err, catalog.ErrInvalidCatalogRequest) {
 			return CatalogFacetSearchView{}, apiError(http.StatusBadRequest, "bad_request", err.Error())
 		}
 		return CatalogFacetSearchView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to search catalog facet")
 	}
-	matches := result.Matches
-	if matches == nil {
-		matches = []string{}
-	}
-	return CatalogFacetSearchView{Matches: matches, HasMore: result.HasMore}, nil
+	return CatalogFacetSearchView{Values: result.Values, HasMore: result.HasMore}, nil
 }
 
 // QueryItems answers one page of the JSON-body catalog query. The limit is

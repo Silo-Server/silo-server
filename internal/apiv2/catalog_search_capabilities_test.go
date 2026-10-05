@@ -26,6 +26,9 @@ func TestCatalogSearchCapabilities(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"person_prefetch":true`) {
 		t.Fatal("person prefetch reads are not advertised", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"facet_value_search":true`) {
+		t.Fatal("facet value search is not advertised", rec.Body.String())
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/search/capabilities", "", nil), TypeAuthenticationRequired)
 	deps.People = nil
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/catalog/search/capabilities", "", viewerHeaders())

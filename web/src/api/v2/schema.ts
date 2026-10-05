@@ -6000,7 +6000,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Prefix typeahead over one facet of a scope. */
+    /** Typeahead over one facet of a scope, with title counts. */
     get: operations["searchCatalogFacet"];
     put?: never;
     post?: never;
@@ -18754,8 +18754,20 @@ export interface components {
     CatalogFacetMatches: {
       /** @description Whether more values matched than limit */
       has_more: boolean;
-      /** @description Empty, never null */
+      /** @description The matched values in result order; empty, never null */
       matches: string[];
+      /** @description The same values in the same order, each with its title count; empty, never null */
+      values: components["schemas"]["CatalogFacetValue"][];
+    };
+    CatalogFacetValue: {
+      /**
+       * Format: int64
+       * @description Titles in the scope with this value; values can lag catalog changes by up to two minutes
+       * @example 42
+       */
+      count: number;
+      /** @example Warner Bros. Pictures */
+      value: string;
     };
     CatalogFilters: {
       /** @description First 1000 alphabetically; searchCatalogFacet pages the rest */
@@ -19285,6 +19297,8 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description searchCatalogFacet accepts library_ids, answers values with title counts, matches word starts, and returns the most common values for an empty q */
+      facet_value_search?: boolean;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -83023,6 +83037,8 @@ export interface operations {
         collection_id?: string;
         /** @description Opaque identifier */
         library_id?: string;
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
         /** @description Opaque identifier */
         person_id?: string;
         scope?: "home" | "library";
@@ -83039,6 +83055,7 @@ export interface operations {
           | "watchlist"
           | "history"
           | "person";
+        /** @description Media scope: movie, series, episode, audiobook, ebook, podcast, video, … */
         type?: string;
       };
       header: {
@@ -83161,11 +83178,13 @@ export interface operations {
           | "series";
         /** @description Opaque identifier */
         library_id?: string;
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
         /** @description Most matches to return; default 20, maximum 100 */
         limit?: number;
         /** @description Opaque identifier */
         person_id?: string;
-        /** @description Case-insensitive prefix */
+        /** @description Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing */
         q?: string;
         scope?: "home" | "library";
         section_id?: string;
@@ -83181,6 +83200,7 @@ export interface operations {
           | "watchlist"
           | "history"
           | "person";
+        /** @description Media scope: movie, series, episode, audiobook, ebook, podcast, video, … */
         type?: string;
       };
       header: {

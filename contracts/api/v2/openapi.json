@@ -20097,16 +20097,48 @@
             "type": "boolean"
           },
           "matches": {
-            "description": "Empty, never null",
+            "description": "The matched values in result order; empty, never null",
             "items": {
               "type": "string"
+            },
+            "type": "array"
+          },
+          "values": {
+            "description": "The same values in the same order, each with its title count; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogFacetValue"
             },
             "type": "array"
           }
         },
         "required": [
           "matches",
+          "values",
           "has_more"
+        ],
+        "type": "object"
+      },
+      "CatalogFacetValue": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Titles in the scope with this value; values can lag catalog changes by up to two minutes",
+            "examples": [
+              42
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "value": {
+            "examples": [
+              "Warner Bros. Pictures"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
         ],
         "type": "object"
       },
@@ -21354,6 +21386,10 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "facet_value_search": {
+            "description": "searchCatalogFacet accepts library_ids, answers values with title counts, matches word starts, and returns the most common values for an empty q",
             "type": "boolean"
           },
           "max_sessions_per_account": {
@@ -125541,6 +125577,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -125563,10 +125624,12 @@
             }
           },
           {
+            "description": "Media scope: movie, series, episode, audiobook, ebook, podcast, video, …",
             "explode": false,
             "in": "query",
             "name": "type",
             "schema": {
+              "description": "Media scope: movie, series, episode, audiobook, ebook, podcast, video, …",
               "examples": [
                 "movie"
               ],
@@ -125781,6 +125844,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -125803,10 +125891,12 @@
             }
           },
           {
+            "description": "Media scope: movie, series, episode, audiobook, ebook, podcast, video, …",
             "explode": false,
             "in": "query",
             "name": "type",
             "schema": {
+              "description": "Media scope: movie, series, episode, audiobook, ebook, podcast, video, …",
               "examples": [
                 "movie"
               ],
@@ -125849,12 +125939,12 @@
             }
           },
           {
-            "description": "Case-insensitive prefix",
+            "description": "Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Case-insensitive prefix",
+              "description": "Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing",
               "examples": [
                 "ste"
               ],
@@ -125983,7 +126073,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Prefix typeahead over one facet of a scope.",
+        "summary": "Typeahead over one facet of a scope, with title counts.",
         "tags": [
           "catalog"
         ],

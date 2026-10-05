@@ -69,14 +69,15 @@ func (f *fakeCatalog) Filters(_ context.Context, _ handlers.ItemViewer, req cata
 	return view, nil
 }
 
-func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, _ catalogpkg.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error) {
+func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req catalogpkg.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error) {
 	if f.err != nil {
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
-	if facet == "author" && strings.HasPrefix("frank herbert", prefix) {
-		return handlers.CatalogFacetSearchView{Matches: []string{"Frank Herbert"}, HasMore: limit == 1}, nil
+	f.lastReq = req
+	if facet == "author" && strings.HasPrefix("frank herbert", q) {
+		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, HasMore: limit == 1}, nil
 	}
-	return handlers.CatalogFacetSearchView{Matches: []string{}}, nil
+	return handlers.CatalogFacetSearchView{}, nil
 }
 
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {
@@ -407,12 +408,26 @@ func TestCatalogFiltersAndFacetSearch(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters", "", bearer(memberToken)), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=author&q=fra&limit=1", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"values":[{"value":"Frank Herbert","count":6}],"has_more":true}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=narrator&q=zz", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"matches":[]`) {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"matches":[],"values":[]`) {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&library_id=3&library_ids=1&library_ids=3&library_ids=2&type=series", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{3, 1, 2}) || fake.lastReq.Query.MediaScope != "series" {
+		t.Fatalf("library_ids: %d %s seam request %+v", rec.Code, rec.Body.String(), fake.lastReq.Query)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?library_ids=2", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{2}) {
+		t.Fatalf("filters library_ids: %d seam request %+v", rec.Code, fake.lastReq.Query)
+	}
+	for _, query := range []string{"library_ids=0", "library_ids=x", "library_ids=01", "source=section&section_id=s1&library_id=1&library_ids=2"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&"+query, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_ids" {
+			t.Fatalf("%s: errors = %+v", query, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?q=fra", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=color", "", viewerHeaders()), TypeValidationFailed)

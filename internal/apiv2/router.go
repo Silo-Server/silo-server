@@ -1077,7 +1077,7 @@ type CatalogAccessService interface {
 type CatalogBrowseService interface {
 	Browse(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, groupedByWork bool) (handlers.CatalogBrowseView, error)
 	Filters(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, includeTechnical bool) (handlers.CatalogFiltersView, error)
-	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error)
+	SearchFacet(ctx context.Context, v handlers.ItemViewer, req mediacatalog.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error)
 	AudiobookGroups(ctx context.Context, v handlers.ItemViewer, query mediacatalog.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error)
 }
 

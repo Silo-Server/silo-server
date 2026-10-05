@@ -1,8 +1,9 @@
 {
-  "revision": "f0b5e50b48a77fed38fed6c59e913aac676878e0a5f8ae09e0ff67faaadcf1f8",
+  "revision": "2716b4845234c841d9d4f87c9c84cb333e3f197f39331596f87febb3a9f7a9e7",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
+  "facet_value_search": true,
   "person_prefetch": true,
   "provider": "meilisearch",
   "result_window_limit": 1000,
