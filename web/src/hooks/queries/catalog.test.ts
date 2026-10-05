@@ -90,8 +90,9 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(url.searchParams.get("limit")).toBe("10");
     expect(result).toEqual({
       matches: ["Frank Herbert"],
-      values: [{ value: "Frank Herbert", count: 6 }],
       has_more: true,
+      values: [{ value: "Frank Herbert", count: 6 }],
+      values_has_more: true,
     });
   });
 
