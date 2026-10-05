@@ -1463,8 +1463,11 @@ func (r *Repo) MarkAllProfilesStale(ctx context.Context) (int64, error) {
 // MarkProfilesStaleForItems marks stale every taste profile whose progress,
 // history, ebook reading progress, rating, favorite or watchlist entry points
 // at one of itemIDs or at an episode of a series among them. Catalog merges
-// and splits call it after they move user state onto itemIDs. It returns how
-// many profiles it marked.
+// and splits call it after they move user state onto itemIDs, and the
+// embedding backfill after it stores their vectors. A live Postgres profile
+// with no taste row yet gets a vectorless one, as MarkProfileStale gives it,
+// so a first build that read the items before this mark does not consume it.
+// It returns how many profiles it marked.
 func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error) {
 	if len(itemIDs) == 0 {
 		return 0, nil
@@ -1474,8 +1477,14 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 			SELECT unnest($1::text[]) AS id
 			UNION
 			SELECT content_id FROM episodes WHERE series_id = ANY($1::text[])
+		), profiles AS (
+			SELECT user_id, profile_id FROM user_taste_profiles
+			UNION
+			SELECT user_id, id FROM user_profiles
 		)
-		UPDATE user_taste_profiles tp SET stale_at = NOW()
+		INSERT INTO user_taste_profiles (user_id, profile_id, embedding, updated_at, stale_at)
+		SELECT tp.user_id, tp.profile_id, NULL, to_timestamp(0), NOW()
+		FROM   profiles tp
 		WHERE EXISTS (SELECT 1 FROM user_watch_progress s JOIN ids ON ids.id = s.media_item_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		   OR EXISTS (SELECT 1 FROM user_watch_history s JOIN ids ON ids.id = s.media_item_id
@@ -1487,7 +1496,8 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 		   OR EXISTS (SELECT 1 FROM user_favorites s JOIN ids ON ids.id = s.media_item_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		   OR EXISTS (SELECT 1 FROM user_watchlist s JOIN ids ON ids.id = s.media_item_id
-		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)`,
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		ON CONFLICT (user_id, profile_id) DO UPDATE SET stale_at = NOW()`,
 		itemIDs)
 	if err != nil {
 		return 0, fmt.Errorf("mark profiles stale for items: %w", err)
