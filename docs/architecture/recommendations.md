@@ -112,7 +112,9 @@ database time it started, stores the taste profile with that time as
 refresh survives, and a failed refresh marks the profile stale again, so the
 stale sweep retries both. The scheduled taste and cache jobs take the same
 lock per profile and skip a profile another server is refreshing. Storing
-embeddings marks stale the profiles with signals on those titles, so a profile
+embeddings marks stale the profiles with signals on those titles (every profile
+when the user store is outside Postgres, where that query cannot see
+favorites, watchlist or progress), so a profile
 refreshed before its titles had vectors, or cleared by a reset, is rebuilt by
 the sweep. Marking a profile with no taste row yet creates a
 vectorless row updated at the epoch, so a change during its first build is

@@ -115,6 +115,9 @@ func (e *Engine) newBackfill() *embedBackfill {
 		model:   e.cfg.EmbeddingModel,
 		load:    e.loadEmbeddingItems,
 		refused: e.refusedEmbeds,
+		// Favorites, watchlist and progress in a store outside Postgres are
+		// out of the stale mark's reach, so stored items mark every profile.
+		signalsOutsidePostgres: e.signalReader().storeIsSeparate(),
 	}
 }
 
@@ -191,6 +194,7 @@ type embeddingStore interface {
 	ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error)
 	UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error
 	MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error)
+	MarkAllProfilesStale(ctx context.Context) (int64, error)
 }
 
 const (
@@ -216,6 +220,10 @@ type embedBackfill struct {
 	load func(ctx context.Context, ids []string) ([]*models.MediaItem, error)
 	// refused records the inputs the provider refused, across runs.
 	refused *refusedEmbedInputs
+	// signalsOutsidePostgres is set when profiles' favorites, watchlist and
+	// progress live in a user store outside Postgres, where the item-based
+	// stale mark cannot see them.
+	signalsOutsidePostgres bool
 
 	counts EmbedCounts
 	// lock is the embedding lock once this run has read or written it.
@@ -406,8 +414,10 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 // markSignalsStale marks stale the taste profiles with signals on the items
 // stored since the last call. A refresh that ran before those items had
 // vectors left them out of the taste vector, and an embeddings reset leaves
-// every profile without one; the stale sweep rebuilds them. A failure is
-// logged: the nightly taste run rebuilds every profile anyway.
+// every profile without one; the stale sweep rebuilds them. With signals in a
+// user store outside Postgres, which a single small installation uses, it
+// marks every profile. A failure is logged: the nightly taste run rebuilds
+// every profile anyway.
 func (b *embedBackfill) markSignalsStale(ctx context.Context) {
 	if len(b.stored) == 0 {
 		return
@@ -416,7 +426,13 @@ func (b *embedBackfill) markSignalsStale(ctx context.Context) {
 	b.stored = nil
 	ctx, cancel := context.WithTimeout(ctx, signalsStaleTimeout)
 	defer cancel()
-	marked, err := b.db.MarkProfilesStaleForItems(ctx, ids)
+	var marked int64
+	var err error
+	if b.signalsOutsidePostgres {
+		marked, err = b.db.MarkAllProfilesStale(ctx)
+	} else {
+		marked, err = b.db.MarkProfilesStaleForItems(ctx, ids)
+	}
 	if err != nil {
 		slog.WarnContext(ctx, "marking profiles stale after storing embeddings failed", "component", "recommendations", "items", len(ids), "error", err)
 		return
