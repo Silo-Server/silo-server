@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // ClientConfig holds embedding client configuration.
@@ -121,8 +123,10 @@ type StatusError struct {
 	Body       string
 }
 
+// Error quotes the provider's response body with credential assignments
+// masked: it reaches logs, job results and search diagnostics.
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("%s API returned %d: %s", e.API, e.StatusCode, e.Body)
+	return fmt.Sprintf("%s API returned %d: %s", e.API, e.StatusCode, logredact.SanitizeText(e.Body))
 }
 
 // Unavailable reports whether err shows that the provider cannot serve any

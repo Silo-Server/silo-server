@@ -503,19 +503,22 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 			return
 		}
 		outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
+		// A write that landed counts even when a later step for the record
+		// failed, so a run that then fails still reports the signal change.
+		if outcome.ProgressWritten {
+			summary.ProgressUpdated++
+		}
+		if outcome.HistoryCreated {
+			summary.HistoryCreated++
+		}
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
 			if record.Kind == KindEpisode {
 				importedEpisodes = append(importedEpisodes, newImportedEpisode(match.MediaItemID, record))
 			}
-			if outcome.ProgressWritten {
-				summary.ProgressUpdated++
-			} else {
+			if !outcome.ProgressWritten {
 				summary.Skipped++
-			}
-			if outcome.HistoryCreated {
-				summary.HistoryCreated++
 			}
 			if outcome.HiddenSuppressed {
 				hiddenSuppressed++

@@ -494,3 +494,13 @@ func TestOpenAIRetryRespectsContext(t *testing.T) {
 		})
 	}
 }
+
+// A provider's error body reaches logs, job results and search diagnostics,
+// so a credential it echoes is masked; the rest of the body stays.
+func TestStatusErrorMasksCredentialsInTheBody(t *testing.T) {
+	err := &StatusError{API: "test provider", StatusCode: 400, Body: `{"error":{"message":"bad request","details":"api_key=sk-live-123"}}`}
+	got := err.Error()
+	if strings.Contains(got, "sk-live-123") || !strings.Contains(got, "bad request") || !strings.Contains(got, "400") {
+		t.Fatalf("Error() = %q, want the key masked and the rest kept", got)
+	}
+}

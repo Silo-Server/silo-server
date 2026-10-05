@@ -323,7 +323,13 @@ func (b *embedBackfill) embedTextStale(ctx context.Context) error {
 		if err := b.embedBatch(ctx, staleItems, staleTexts); err != nil {
 			return err
 		}
-		quota -= len(staleItems)
+		// An item the provider refused uses none of the quota: the walk moves
+		// past it, so refused items at the front cannot starve the rest.
+		for i, item := range staleItems {
+			if !b.refused.has(item.ContentID, staleTexts[i]) {
+				quota--
+			}
+		}
 		if len(candidates) < embeddingTextStaleQuotaPerRun {
 			return nil
 		}
