@@ -562,6 +562,22 @@ func TestBackfillRetriesLongTextsShortened(t *testing.T) {
 		})
 	}
 
+	// A local model's context-length 5xx at every length is a refused input,
+	// not a provider failure, even for the first item of a run: the probe
+	// text passes, so the item is skipped and remembered and the run goes on.
+	t.Run("context length at every length, first item", func(t *testing.T) {
+		var lengths []int
+		store := newFakeEmbeddingStore("long", "z-ok")
+		reject := errors.New("embedding API returned 500: input length exceeds the context length")
+		b := newTestBackfill(store, overLengthEmbedder(100, reject, &lengths), overviews)
+		if err := b.run(context.Background(), false); err != nil {
+			t.Fatalf("run stopped on a refused input: %v", err)
+		}
+		if b.counts.Skipped != 1 || b.counts.Embedded != 1 || b.counts.Failed != 0 || !b.refused.has("long", fullText) {
+			t.Fatalf("counts=%+v refused recorded=%v", b.counts, b.refused.has("long", fullText))
+		}
+	})
+
 	t.Run("rejected at every length", func(t *testing.T) {
 		var lengths []int
 		// "a-ok" sorts first, so the run has stored an item when "long"

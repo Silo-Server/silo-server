@@ -439,8 +439,10 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 			}
 			// A refused input says nothing about the provider: it is skipped
 			// and is not a failure, so permanently refused items at the head
-			// of the backlog cannot stop every run.
-			if embeddings.InputRejected(err) {
+			// of the backlog cannot stop every run. That includes the 5xx a
+			// local model answers an over-long input with, which the
+			// shortened retries also got.
+			if lengthMayBeRefused(err) {
 				if err := b.checkProviderAcceptsInput(ctx); err != nil {
 					b.counts.Failed++
 					return err
