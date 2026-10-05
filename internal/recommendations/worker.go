@@ -352,7 +352,11 @@ func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID st
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
 		return false
 	}
-	w.markProfileStale(ctx, userID, profileID)
+	// The picks are already committed, so neither the stale mark nor a queued
+	// refresh may depend on the caller still waiting; see NotifySignalsChanged.
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	w.markProfileStale(markCtx, userID, profileID)
+	cancel()
 	return w.refreshNow(ctx, userID, profileID, refreshNowWait, w.refreshProfile)
 }
 
@@ -361,7 +365,7 @@ func (w *Worker) RefreshProfileNow(ctx context.Context, userID int, profileID st
 func (w *Worker) refreshNow(ctx context.Context, userID int, profileID string, wait time.Duration, refresh func(context.Context, int, string) error) bool {
 	if w.refreshesNow.Add(1) > maxRefreshesNow {
 		w.refreshesNow.Add(-1)
-		w.RequestProfileRefresh(ctx, userID, profileID)
+		w.RequestProfileRefresh(context.WithoutCancel(ctx), userID, profileID)
 		return false
 	}
 	key := profileRefreshKey(userID, profileID)
