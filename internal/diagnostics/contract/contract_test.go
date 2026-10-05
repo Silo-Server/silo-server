@@ -157,10 +157,23 @@ func TestValidateManifestOccurrenceCount(t *testing.T) {
 		})
 	}
 
-	for _, count := range []string{"0", "-1", "1000001", "1.5", `"3"`} {
-		t.Run("rejects "+count, func(t *testing.T) {
-			if _, err := ValidateManifest(withCount(t, count)); err == nil {
-				t.Fatalf("ValidateManifest() error = nil for occurrence_count %s", count)
+	for _, tc := range []struct {
+		count   string
+		wantErr string
+	}{
+		{count: "0", wantErr: "must be between 1 and 1000000"},
+		{count: "-1", wantErr: "must be between 1 and 1000000"},
+		{count: "1000001", wantErr: "must be between 1 and 1000000"},
+		{count: "1.5", wantErr: "must be an integer"},
+		{count: `"3"`, wantErr: "must be an integer"},
+		// The schema types the field as integer, so null is not an omission.
+		{count: "null", wantErr: "must not be null"},
+	} {
+		t.Run("rejects "+tc.count, func(t *testing.T) {
+			_, err := ValidateManifest(withCount(t, tc.count))
+			want := "manifest.report.occurrence_count: " + tc.wantErr
+			if err == nil || err.Error() != want {
+				t.Fatalf("ValidateManifest() error = %v, want %q", err, want)
 			}
 		})
 	}
