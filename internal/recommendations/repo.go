@@ -1437,6 +1437,16 @@ func (r *Repo) MarkAccountsStale(ctx context.Context, userIDs []int) (int64, err
 	return tag.RowsAffected(), nil
 }
 
+// MarkAllProfilesStale marks every taste profile stale and returns how many
+// it marked. A policy change that can reach every account's scope calls it.
+func (r *Repo) MarkAllProfilesStale(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE user_taste_profiles SET stale_at = NOW()`)
+	if err != nil {
+		return 0, fmt.Errorf("mark all profiles stale: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // MarkProfilesStaleForItems marks stale every taste profile whose progress,
 // history, ebook reading progress, rating, favorite or watchlist entry points
 // at one of itemIDs or at an episode of a series among them. Catalog merges

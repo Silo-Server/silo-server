@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // EmbeddingLockSettingKey is the server setting that stores the embedding
@@ -20,6 +21,42 @@ const EmbeddingLockSettingKey = embeddingLockSettingKey
 // is refreshing stale profiles, which read embeddings and write taste
 // profiles.
 var ErrStaleSweepRunning = errors.New("stale profile sweep is running")
+
+// ErrEmbeddingSettingsPendingRestart reports an embeddings reset refused
+// because the saved embedding model or base URL is not the one this server
+// runs with: a reset now would let this server re-embed with the old model
+// and lock it again before the restart applies the new one.
+var ErrEmbeddingSettingsPendingRestart = errors.New("saved embedding settings take effect after a restart")
+
+// SavedConfig loads the recommendation settings as they are saved now, which
+// the server runs with after its next restart.
+type SavedConfig func(context.Context) (config.RecommendationsConfig, error)
+
+// WithSavedConfig lets ResetEmbeddings refuse while saved embedding settings
+// wait for a restart, and returns the worker.
+func (w *Worker) WithSavedConfig(load SavedConfig) *Worker {
+	if w != nil {
+		w.savedConfig = load
+	}
+	return w
+}
+
+// checkEmbeddingSettingsActive returns ErrEmbeddingSettingsPendingRestart
+// when the saved embedding model or base URL differs from the running one.
+func (w *Worker) checkEmbeddingSettingsActive(ctx context.Context) error {
+	if w.savedConfig == nil || w.engine == nil {
+		return nil
+	}
+	saved, err := w.savedConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load saved embedding settings: %w", err)
+	}
+	running := w.engine.cfg
+	if saved.EmbeddingModel != running.EmbeddingModel || saved.EmbeddingBaseURL != running.EmbeddingBaseURL {
+		return ErrEmbeddingSettingsPendingRestart
+	}
+	return nil
+}
 
 // resetEmbeddingsTimeout bounds the reset transaction.
 const resetEmbeddingsTimeout = 2 * time.Minute
@@ -42,7 +79,9 @@ type EmbeddingsReset struct {
 // (embeddings, taste profiles, the cache) and the stale sweep's lock, so none
 // of them interleaves with it on any server; co-watch pairs do not depend on
 // embeddings. A busy job or sweep refuses the reset with ErrJobRunning,
-// ErrJobRunningElsewhere or ErrStaleSweepRunning. A profile refresh already
+// ErrJobRunningElsewhere or ErrStaleSweepRunning, and saved embedding
+// settings that wait for a restart refuse it with
+// ErrEmbeddingSettingsPendingRestart. A profile refresh already
 // running when the reset commits can still write one taste profile built from
 // the old embeddings; the profile's next refresh after re-embedding replaces
 // it.
@@ -50,6 +89,9 @@ type EmbeddingsReset struct {
 // Every item that lost its embedding gets a search index upsert, so its
 // search document drops the old vector on the next index sync.
 func (w *Worker) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
+	if err := w.checkEmbeddingSettingsActive(ctx); err != nil {
+		return EmbeddingsReset{}, err
+	}
 	release, err := w.claimJobs(JobEmbeddings, JobTasteProfiles, JobRecommendations)
 	if err != nil {
 		return EmbeddingsReset{}, err

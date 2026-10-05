@@ -2618,13 +2618,27 @@ func main() {
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
 		} else {
-			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB))
+			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
+				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
+					saved, err := settingsRepo.GetAll(ctx)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					savedCfg, err := config.LoadFromDB(saved)
+					if err != nil {
+						return config.RecommendationsConfig{}, err
+					}
+					return savedCfg.Recommendations, nil
+				})
 			deps.RecWorker = recWorker
 			// Watch-provider syncs rebuild a profile's recommendations once
 			// per run that imported something.
 			if watchProviderService != nil {
 				watchProviderService.WithSignalsChangedNotifier(recWorker)
 			}
+			// A scope policy can change every profile's scope, and cached
+			// rows are built under it.
+			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
 	}
 

@@ -70,6 +70,7 @@ type profileStaleMarker interface {
 // *Repo implements it.
 type accountsStaleMarker interface {
 	MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error)
+	MarkAllProfilesStale(ctx context.Context) (int64, error)
 }
 
 // Worker runs scheduled recommendation jobs.
@@ -80,6 +81,7 @@ type Worker struct {
 	history               JobHistory
 	staleMarker           profileStaleMarker
 	accountsMarker        accountsStaleMarker
+	savedConfig           SavedConfig
 	mu                    sync.Mutex
 	running               map[JobName]bool
 	profileRefreshCh      chan profileRefreshRequest
@@ -406,6 +408,26 @@ func (w *Worker) NotifyAccountsScopeChanged(ctx context.Context, userIDs []int) 
 		return
 	}
 	slog.InfoContext(ctx, "access change: taste profiles marked stale", "component", "recommendations", "accounts", len(userIDs), "profiles", marked)
+}
+
+// NotifyPolicyChanged records that an access policy change may have changed
+// the scope of every profile: a custom scope policy can widen or narrow any
+// account's libraries or maturity limits. Every taste profile is marked stale
+// and the stale sweep rebuilds them; reads already filter out titles the new
+// scope forbids, but only a rebuild adds the titles it allows.
+func (w *Worker) NotifyPolicyChanged(ctx context.Context) {
+	if w == nil || w.accountsMarker == nil {
+		return
+	}
+	// The change is already committed; see NotifySignalsChanged.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	defer cancel()
+	marked, err := w.accountsMarker.MarkAllProfilesStale(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "marking taste profiles stale after a policy change failed", "component", "recommendations", "error", err)
+		return
+	}
+	slog.InfoContext(ctx, "policy change: taste profiles marked stale", "component", "recommendations", "profiles", marked)
 }
 
 // RequestReadRefresh queues a refresh for a profile whose cached rows a read

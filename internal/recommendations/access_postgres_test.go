@@ -264,6 +264,14 @@ func TestMarkAccountsStalePostgres(t *testing.T) {
 	if n := countRows(t, pool, `SELECT count(*) FROM user_taste_profiles WHERE user_id = $1 AND stale_at IS NOT NULL`, other); n != 0 {
 		t.Fatalf("other account has %d stale profiles, want 0", n)
 	}
+
+	// A policy change reaches every account.
+	if _, err := repo.MarkAllProfilesStale(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM user_taste_profiles WHERE user_id = $1 AND stale_at IS NOT NULL`, other); n != 1 {
+		t.Fatalf("other account has %d stale profiles after a policy change, want 1", n)
+	}
 }
 
 // Deleting a profile removes its ratings and recommendation state with it,
