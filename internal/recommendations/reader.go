@@ -396,7 +396,7 @@ func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
 	missingPersonalized := level > 0 && (len(mainItems) == 0 || missingClusters)
 	if len(mainItems) > 0 {
 		personalRows = append(personalRows, ForYouRow{
-			Type:  "cluster",
+			Type:  clusterRowType,
 			Label: "For You",
 			Items: mainItems,
 		})
@@ -471,7 +471,7 @@ func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
 		}
 	}
 	return ForYouRow{
-		Type:         "cluster",
+		Type:         clusterRowType,
 		Label:        title,
 		ClusterIndex: cluster.ClusterIdx,
 		Items:        items,
@@ -738,7 +738,7 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: "cluster", Label: "For You", Items: items}, nil
+		return &ForYouRow{Type: clusterRowType, Label: "For You", Items: items}, nil
 
 	case SectionKindCluster:
 		idx, err := strconv.Atoi(key)
@@ -811,6 +811,10 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 
 	return nil, nil
 }
+
+// clusterRowType is the type the API reports for the main row and every
+// taste-cluster row.
+const clusterRowType = "cluster"
 
 // selectDailyGenres picks up to n genres from the available list using a
 // deterministic daily seed so the selection is stable within a day for a given profile.

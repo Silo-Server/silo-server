@@ -72,7 +72,7 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 			continue
 		}
 		if len(candidates) == 0 {
-			rows = append(rows, ForYouRow{Type: "cluster", Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
+			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
 
@@ -97,7 +97,7 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 		}
 
 		rows = append(rows, ForYouRow{
-			Type:         "cluster",
+			Type:         clusterRowType,
 			Label:        title,
 			ClusterIndex: c.ClusterIdx,
 			Items:        reranked,
@@ -143,7 +143,7 @@ func (e *Engine) buildAggregatedRow(ctx context.Context, userID int, profileID s
 	}
 
 	return &ForYouRow{
-		Type:  "cluster",
+		Type:  clusterRowType,
 		Label: "For You",
 		Items: reranked,
 	}, nil
