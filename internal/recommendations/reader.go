@@ -975,11 +975,16 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		return nil, err
 	}
 	if len(genreSamplers) > 0 {
-		// Exclude genres that overlap with the user's taste clusters.
+		// Exclude genres that overlap with the user's taste clusters, unless
+		// personal rows are off: the page is then not shaped by taste.
 		excludeGenres := make(map[string]struct{})
-		clusters, clusterErr := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
-		if clusterErr != nil {
-			slog.WarnContext(ctx, "GetDiscoverRows: failed to load taste clusters for genre exclusion", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", clusterErr)
+		var clusters []TasteCluster
+		if !r.personalOff {
+			var clusterErr error
+			clusters, clusterErr = r.repo.GetTasteClusterMeta(ctx, userID, profileID)
+			if clusterErr != nil {
+				slog.WarnContext(ctx, "GetDiscoverRows: failed to load taste clusters for genre exclusion", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", clusterErr)
+			}
 		}
 		for _, c := range clusters {
 			for _, g := range c.DominantGenres {

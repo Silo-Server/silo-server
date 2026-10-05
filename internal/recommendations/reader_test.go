@@ -350,6 +350,7 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 			RecTypeRecentlyAdded:                {{MediaItemID: "recent"}},
 			RecTypeGenreSamplerPrefix + "Drama": {{MediaItemID: "top-drama"}},
 		},
+		genres: map[string][]ScoredItem{"Drama": {{MediaItemID: "top-drama"}}},
 	}
 	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}).WithPersonalRows(false)
 	ctx := t.Context()
@@ -372,6 +373,10 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 	}
 	if row, err := r.loadSectionRow(ctx, 7, "p1", SectionKindForYouMain, ""); err != nil || row != nil {
 		t.Fatalf("for you section = %+v, %v; want none", row, err)
+	}
+	discover, err := r.GetDiscoverRows(ctx, 7, "p1", ServedRowSize, catalog.AccessFilter{})
+	if err != nil || !slices.Contains(rowLabels(discover), genreRowLabel("Drama")) {
+		t.Fatalf("discover = %v, %v; want the Drama genre row, not left out for the cached Drama taste", rowLabels(discover), err)
 	}
 	tonight, err := r.GetWatchTonight(ctx, 7, "p1", 20, catalog.AccessFilter{})
 	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"popular", "recent"}) {
