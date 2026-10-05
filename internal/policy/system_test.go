@@ -57,6 +57,30 @@ func TestSystemCrossNodeConvergenceEventAndPoll(t *testing.T) {
 	waitForChangeApplied(t, &appliedPollB, 1)
 }
 
+// A change committed without a successful local reload, as when the origin's
+// synchronous reload fails, is announced by the poll reload that loads it, and
+// only once however many reloads load it again.
+func TestSystemAnnouncesAChangeLoadedByALaterReload(t *testing.T) {
+	ctx := context.Background()
+	_, store := newPolicyStoreTest(t, ctx)
+	system := newStartedPolicySystem(t, ctx, store, &cache.NoopEventBus{}, time.Hour)
+	defer system.Stop()
+	var applied atomic.Int32
+	system.OnChangeApplied(func(context.Context) { applied.Add(1) })
+
+	_, generation := activatePolicyVersion(t, ctx, store, 0, "sha-recovery")
+	system.reloadIfGenerationChanged(ctx)
+	if system.Generation() != generation || applied.Load() != 1 {
+		t.Fatalf("after the poll reload: generation %d (want %d), hook ran %d times (want 1)", system.Generation(), generation, applied.Load())
+	}
+	if err := system.reloadFromStore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := applied.Load(); n != 1 {
+		t.Fatalf("a second reload of the same generation ran the hook again: %d times", n)
+	}
+}
+
 // waitForChangeApplied waits until the change hook counted by applied has run
 // want times.
 func waitForChangeApplied(t *testing.T, applied *atomic.Int32, want int32) {

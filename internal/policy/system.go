@@ -30,6 +30,9 @@ type System struct {
 	cancel   context.CancelFunc
 	reloadCh chan struct{}
 	wg       sync.WaitGroup
+	// reloadMu serializes reloads, so each loads the store's snapshot after
+	// the previous one applied and the loaded generation never goes back.
+	reloadMu sync.Mutex
 
 	// changeApplied runs after this node loads a newer policy generation;
 	// announcedGeneration is the newest one it ran for, or the boot load's.
@@ -402,34 +405,50 @@ func (s *System) engineOptions(extra ...EngineOption) []EngineOption {
 }
 
 func (s *System) reloadFromStore(ctx context.Context) error {
-	sources, generation, err := s.loadSnapshot(ctx)
+	announce, err := s.reloadSerialized(ctx)
 	if err != nil {
 		return err
+	}
+	s.mu.RLock()
+	changeApplied := s.changeApplied
+	s.mu.RUnlock()
+	if announce && changeApplied != nil {
+		changeApplied(ctx)
+	}
+	return nil
+}
+
+// reloadSerialized loads the store's current policy into the engine, one
+// reload at a time: overlapping reloads could otherwise apply an older
+// snapshot after a newer one. It reports whether the loaded generation is
+// newer than any announced before.
+func (s *System) reloadSerialized(ctx context.Context) (announce bool, err error) {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	sources, generation, err := s.loadSnapshot(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	s.mu.RLock()
 	engine := s.engine
 	s.mu.RUnlock()
 	if engine == nil {
-		return errors.New("policy system is not started")
+		return false, errors.New("policy system is not started")
 	}
 	if err := engine.Reload(ctx, sources, generation); err != nil {
-		return err
+		return false, err
 	}
 	s.mu.Lock()
 	s.bootDegradedReason = ""
-	// Concurrent reloads of one generation announce it once.
-	announce := generation > s.announcedGeneration
+	// Two reloads of one generation announce it once.
+	announce = generation > s.announcedGeneration
 	if announce {
 		s.announcedGeneration = generation
 	}
-	changeApplied := s.changeApplied
 	s.mu.Unlock()
 	s.logger.InfoContext(ctx, "policy engine reloaded", "generation", generation)
-	if announce && changeApplied != nil {
-		changeApplied(ctx)
-	}
-	return nil
+	return announce, nil
 }
 
 func (s *System) loadSnapshot(ctx context.Context) (map[string]ActiveSource, int64, error) {
