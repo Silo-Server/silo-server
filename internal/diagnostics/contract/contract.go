@@ -194,7 +194,9 @@ type reportWire struct {
 	Platform         *string `json:"platform"`
 	OSVersion        *string `json:"os_version"`
 	ProfileID        *string `json:"profile_id"`
-	OccurrenceCount  *int    `json:"occurrence_count"`
+	// OccurrenceCount stays raw so an explicit null can be told apart from an
+	// omitted field.
+	OccurrenceCount json.RawMessage `json:"occurrence_count"`
 }
 
 type destinationWire struct {
@@ -566,12 +568,9 @@ func validateReport(w reportWire) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	occurrenceCount := 0
-	if w.OccurrenceCount != nil {
-		if *w.OccurrenceCount < 1 || *w.OccurrenceCount > MaxOccurrenceCount {
-			return Report{}, fieldError("manifest.report.occurrence_count", "must be between 1 and %d", MaxOccurrenceCount)
-		}
-		occurrenceCount = *w.OccurrenceCount
+	occurrenceCount, err := validateOccurrenceCount(w.OccurrenceCount)
+	if err != nil {
+		return Report{}, err
 	}
 
 	return Report{
@@ -585,6 +584,26 @@ func validateReport(w reportWire) (Report, error) {
 		ProfileID:        profileID,
 		OccurrenceCount:  occurrenceCount,
 	}, nil
+}
+
+// validateOccurrenceCount returns 0 when the field is omitted (a single
+// occurrence). The schema types the field as integer, so null is rejected.
+func validateOccurrenceCount(raw json.RawMessage) (int, error) {
+	const path = "manifest.report.occurrence_count"
+	if raw == nil {
+		return 0, nil
+	}
+	if isRawNull(raw) {
+		return 0, fieldError(path, "must not be null")
+	}
+	var count int
+	if err := json.Unmarshal(raw, &count); err != nil {
+		return 0, fieldError(path, "must be an integer")
+	}
+	if count < 1 || count > MaxOccurrenceCount {
+		return 0, fieldError(path, "must be between 1 and %d", MaxOccurrenceCount)
+	}
+	return count, nil
 }
 
 func validateDestination(w destinationWire) (Destination, error) {
