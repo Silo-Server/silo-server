@@ -463,8 +463,8 @@ type tasteProfilesResult struct {
 	// or the profile was deleted after the job listed it. Their previous
 	// vector, clusters and personal rows are cleared.
 	NoOp int `json:"no_op"`
-	// Busy counts profiles another server was refreshing when the job reached
-	// them; that refresh rebuilds them.
+	// Busy counts profiles another server held when the job reached them;
+	// they are marked stale for a full refresh.
 	Busy      int `json:"busy"`
 	Failed    int `json:"failed"`
 	Remaining int `json:"remaining"`
@@ -492,6 +492,7 @@ func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, erro
 		unlock, acquired, err := w.tryProfileLock(ctx, s.UserID, s.ProfileID)
 		if err == nil && !acquired {
 			res.Busy++
+			w.markBusyProfileStale(ctx, s.UserID, s.ProfileID)
 			continue
 		}
 		var written bool
@@ -648,8 +649,8 @@ type cacheResult struct {
 	CachedRows     int   `json:"cached_rows"`
 	FailedProfiles int   `json:"failed_profiles"`
 	BuildErrors    int   `json:"build_errors"`
-	// Busy counts profiles another server was refreshing; that refresh
-	// rebuilds their rows.
+	// Busy counts profiles another server held; they are marked stale for a
+	// full refresh.
 	Busy int `json:"busy"`
 }
 
@@ -699,6 +700,7 @@ func (w *Worker) doRecommendations(ctx context.Context) (cacheResult, error) {
 		}
 		if !acquired {
 			res.Busy++
+			w.markBusyProfileStale(ctx, p.UserID, p.ProfileID)
 			continue
 		}
 		built := w.cacheUserRows(ctx, repo, p.UserID, p.ProfileID, expires)
@@ -1020,6 +1022,16 @@ func (w *Worker) tryProfileLock(ctx context.Context, userID int, profileID strin
 		return nil, false, fmt.Errorf("take profile refresh lock: %w", err)
 	}
 	return unlock, acquired, nil
+}
+
+// markBusyProfileStale marks stale a profile a scheduled job skipped because
+// another server held its lock. The holder may be the other scheduled job,
+// which rebuilds only its own stage, so the stale sweep runs a full refresh
+// after it; the mark is newer than the holder's start, so it is not cleared.
+func (w *Worker) markBusyProfileStale(ctx context.Context, userID int, profileID string) {
+	markCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), staleMarkTimeout)
+	defer cancel()
+	w.markProfileStale(markCtx, userID, profileID)
 }
 
 // errProfileRefreshElsewhere reports a profile refresh skipped because

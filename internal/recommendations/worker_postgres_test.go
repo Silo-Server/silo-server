@@ -387,9 +387,10 @@ func TestTasteProfileSubjectsSkipDeletedProfilesPostgres(t *testing.T) {
 	}
 }
 
-// The scheduled taste job skips a profile another server is refreshing: it
-// read its signals earlier than that refresh and could overwrite the newer
-// taste profile. A later run, with the lock free, rebuilds it.
+// The scheduled taste job skips a profile another server holds: it read its
+// signals earlier than that holder and could overwrite the newer taste
+// profile. The skipped profile is marked stale, and a later run with the lock
+// free rebuilds it.
 func TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()
@@ -411,12 +412,19 @@ func TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres(t *testing.T) {
 
 	busy := newJobTestWorker(&keyedLocker{held: map[int64]bool{profileRefreshLock(userID, profile): true}}, nil)
 	busy.engine = engine
+	busy.staleMarker = engine.repo
 	res, err := busy.doTasteProfiles(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Busy < 1 || !updatedAt().Equal(stored) {
 		t.Fatalf("taste job with the profile locked elsewhere: busy %d, updated_at %v; want it skipped and left at %v", res.Busy, updatedAt(), stored)
+	}
+	// The holder may be the cache job, which does not rebuild the taste
+	// profile, so the skipped profile is left for the stale sweep.
+	var pending bool
+	if err := pool.QueryRow(ctx, `SELECT stale_at > updated_at FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, userID, profile).Scan(&pending); err != nil || !pending {
+		t.Fatalf("skipped profile pending = %v, %v; want it marked stale", pending, err)
 	}
 
 	free := newJobTestWorker(&fakeLocker{}, nil)
