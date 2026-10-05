@@ -254,6 +254,18 @@ describe("FilterRuleRow", () => {
       expect(latest).toEqual({ field: "added_at", op: "in_last", value: "" });
       expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveValue(null);
     });
+
+    it("starts over when the condition changes from a date range to a span", () => {
+      renderRow({ field: "release_date", op: "between", value: ["1990-01-01", "1999-12-31"] });
+      choose(condition(), "in the last");
+      expect(latest).toEqual({ field: "release_date", op: "in_last", value: "" });
+    });
+
+    it("keeps a date range's start when the condition changes to after", () => {
+      renderRow({ field: "release_date", op: "between", value: ["1990-01-01", "1999-12-31"] });
+      choose(condition(), "after");
+      expect(latest).toEqual({ field: "release_date", op: "gt", value: "1990-01-01" });
+    });
   });
 
   it("moves focus to the value control when asked", async () => {

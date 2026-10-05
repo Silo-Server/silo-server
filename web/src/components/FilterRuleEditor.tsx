@@ -116,8 +116,9 @@ function normalizeRuleValue(
     return ["", ""];
   }
   if (Array.isArray(value)) {
-    // Leaving "between" keeps where the range started.
-    return value[0] ?? getDefaultRuleValue(field, op);
+    // Leaving "between" keeps where the range started, if the new condition
+    // takes such a value.
+    value = value[0] ?? getDefaultRuleValue(field, op);
   }
   if (fieldDef.inputType === "boolean") {
     if (typeof value === "boolean") {
