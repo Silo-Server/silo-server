@@ -271,4 +271,18 @@ func TestV1RecentlyAddedDropsInaccessibleItemsPostgres(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("recently added = %v, want the kids titles newest first %v", got, want)
 	}
+
+	// Hidden titles newer than every visible one do not take the list's
+	// places: it reads past them to fill the limit.
+	for i := range 10 {
+		id := fmt.Sprintf("%snewer-adult-%d", prefix, i)
+		exec(`INSERT INTO media_items (content_id,type,title,status,genres,created_at) VALUES ($1,'movie',$1,'matched','{}',NOW() + make_interval(hours => 2000 + $2))`, id, i)
+		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, adults)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/recommendations/recently-added?limit=2", nil)
+	rec = httptest.NewRecorder()
+	h.HandleRecentlyAdded(rec, req.WithContext(ctx))
+	if got := decodeScoredItems(t, rec); !slices.Equal(got, want[:2]) {
+		t.Fatalf("recently added with limit 2 = %v, want %v", got, want[:2])
+	}
 }
