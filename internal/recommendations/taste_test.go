@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -288,6 +289,84 @@ func TestClearTasteProfileKeepsTheRowAndDropsPersonalStatePostgres(t *testing.T)
 	}
 	if n := countRows(t, pool, `SELECT COUNT(*) FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`, userID, gone); n != 0 {
 		t.Fatalf("profile cleared without create keeps %d cached rows", n)
+	}
+}
+
+// deletingStoreProvider deletes a profile, and purges its recommendation
+// state as the profile handler does, right after the first time a refresh
+// checks that the profile exists: the deletion lands between that check and
+// the refresh's writes.
+type deletingStoreProvider struct {
+	userstore.UserStoreProvider
+	repo    *Repo
+	userID  int
+	profile string
+	checks  int
+}
+
+func (p *deletingStoreProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
+	store, err := p.UserStoreProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return deletingStore{UserStore: store, p: p}, nil
+}
+
+type deletingStore struct {
+	userstore.UserStore
+	p *deletingStoreProvider
+}
+
+func (s deletingStore) GetProfile(ctx context.Context, profileID string) (*userstore.Profile, error) {
+	profile, err := s.UserStore.GetProfile(ctx, profileID)
+	s.p.checks++
+	if err != nil || s.p.checks > 1 || profileID != s.p.profile {
+		return profile, err
+	}
+	if err := s.DeleteProfile(ctx, profileID); err != nil {
+		return nil, err
+	}
+	return profile, s.p.repo.PurgeProfile(ctx, s.p.userID, profileID)
+}
+
+// A profile deleted after a refresh checked that it exists, and purged before
+// the refresh wrote, does not keep the taste row the refresh then writes: the
+// refresh checks again after its last write and purges what it wrote.
+func TestRefreshPurgesAProfileDeletedWhileItWritesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "ttaste-racing-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, _ := newTasteTestAccount(t, pool, prefix)
+	movie := prefix + "movie"
+	seedRecoMediaItem(t, pool, movie, "movie", "matched")
+	repo := NewRepo(pool)
+	if err := repo.UpsertEmbedding(ctx, movie, axisVector(1750, nil), "test-model", movie); err != nil {
+		t.Fatal(err)
+	}
+	racing := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES($1, $2, 'racing')`, racing, userID); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, duration_seconds, completed)
+			VALUES(gen_random_uuid()::text, $1, $2, $3, 5400, true)`, userID, racing, movie); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider := &deletingStoreProvider{UserStoreProvider: pgstore.NewPostgresProvider(pool), repo: repo, userID: userID, profile: racing}
+	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, provider, config.RecommendationsConfig{})
+
+	stored, err := engine.refreshTasteProfile(ctx, userID, racing)
+	if err != nil || !stored {
+		t.Fatalf("refresh = %v, %v; want a stored vector the recheck then purges", stored, err)
+	}
+	if provider.checks != 2 {
+		t.Fatalf("existence checks = %d, want one before the writes and one after", provider.checks)
+	}
+	if n := countRows(t, pool, `SELECT COUNT(*) FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, userID, racing); n != 0 {
+		t.Fatalf("profile deleted during its refresh has %d taste rows, want none", n)
 	}
 }
 
