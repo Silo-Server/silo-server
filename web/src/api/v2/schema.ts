@@ -15997,7 +15997,7 @@ export interface components {
       taste_clusters: number;
       /**
        * Format: int64
-       * @description Taste profiles deleted.
+       * @description Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.
        */
       taste_profiles: number;
     };
