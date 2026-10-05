@@ -172,6 +172,83 @@ func TestUnsupportedFileRepositoryReplace(t *testing.T) {
 	expect("deleted library", folderID)
 }
 
+// A scan that could not read one file saw the folder holding it only in part.
+// That folder's rows stay, a partial count found there does not overwrite the
+// stored one, and a group found there for the first time is added. Folders
+// below it and a sibling sharing a string prefix are not protected.
+func TestUnsupportedFileRepositoryReplaceKeepsTheFolderOfAnUnreadableFile(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Unreadable File Test")
+	repo := NewUnsupportedFileRepository(pool)
+	base := fmt.Sprintf("/unsupported-unreadable-%d", time.Now().UnixNano())
+	afterEverything := time.Now().Add(time.Hour)
+
+	group := func(dir, reason string, names ...string) models.UnsupportedMediaFileGroup {
+		return models.UnsupportedMediaFileGroup{MediaFolderID: folderID, DirectoryPath: base + dir, Reason: reason, FileCount: len(names), FileNames: names}
+	}
+	expect := func(step string, want ...string) {
+		t.Helper()
+		result, err := pool.Query(ctx, `SELECT directory_path, reason, file_count, file_names FROM unsupported_media_files WHERE media_folder_id = $1`, folderID)
+		if err != nil {
+			t.Fatalf("query rows: %v", err)
+		}
+		defer result.Close()
+		got := []string{}
+		for result.Next() {
+			var dir, reason string
+			var count int
+			var names []string
+			if err := result.Scan(&dir, &reason, &count, &names); err != nil {
+				t.Fatalf("scan row: %v", err)
+			}
+			got = append(got, fmt.Sprintf("%s %s %d %s", strings.TrimPrefix(dir, base), reason, count, strings.Join(names, ",")))
+		}
+		sort.Strings(got)
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Fatalf("%s: rows = %v, want %v", step, got, want)
+		}
+	}
+	row := func(dir, reason string, count int, names string) string {
+		return fmt.Sprintf("%s %s %d %s", dir, reason, count, names)
+	}
+
+	if err := repo.Replace(ctx, folderID, nil, nil, afterEverything, []models.UnsupportedMediaFileGroup{
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso", "b.iso"),
+		group("/movies/Title", UnsupportedReasonDiscImage, "title.iso"),
+		group("/movies/Title/Extras", UnsupportedReasonDVDVOB, "VTS_01_1.VOB"),
+		group("/movies/Title2", UnsupportedReasonRealMedia, "title2.rmvb"),
+	}); err != nil {
+		t.Fatalf("first replace: %v", err)
+	}
+
+	// title.iso, b.iso and d.iso can't be read. The walk still found a.iso next
+	// to b.iso, and c.rmvb next to d.iso in a folder with no row yet.
+	if err := repo.Replace(ctx, folderID, nil, []string{
+		base + "/movies/Title/title.iso",
+		base + "/movies/Mixed/b.iso",
+		base + "/movies/New/d.iso",
+	}, afterEverything, []models.UnsupportedMediaFileGroup{
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso"),
+		group("/movies/New", UnsupportedReasonRealMedia, "c.rmvb"),
+	}); err != nil {
+		t.Fatalf("replace with unreadable files: %v", err)
+	}
+	expect("unreadable files",
+		row("/movies/Mixed", UnsupportedReasonDiscImage, 2, "a.iso,b.iso"),
+		row("/movies/New", UnsupportedReasonRealMedia, 1, "c.rmvb"),
+		row("/movies/Title", UnsupportedReasonDiscImage, 1, "title.iso"),
+	)
+
+	// Once every file reads again, the next scan replaces the rows as usual.
+	if err := repo.Replace(ctx, folderID, nil, nil, afterEverything, []models.UnsupportedMediaFileGroup{
+		group("/movies/Mixed", UnsupportedReasonDiscImage, "a.iso"),
+	}); err != nil {
+		t.Fatalf("readable replace: %v", err)
+	}
+	expect("readable again", row("/movies/Mixed", UnsupportedReasonDiscImage, 1, "a.iso"))
+}
+
 func TestUnsupportedFileRepositoryListPage(t *testing.T) {
 	pool := newDeadRootTestPool(t)
 	ctx := context.Background()
@@ -314,5 +391,68 @@ func TestScanSubtreeProtectsASuspectEmptyRoot(t *testing.T) {
 	}
 	if fmt.Sprint(result.ProtectedPaths) != fmt.Sprint([]string{root}) {
 		t.Errorf("protected paths = %v, want [%s]", result.ProtectedPaths, root)
+	}
+}
+
+// A disc image that turns into a symlink to a file that is gone can't be read,
+// so the scan protects that file, and the list keeps the row of the folder
+// holding it instead of dropping it as no longer found.
+func TestScanKeepsTheRowOfAFolderWithAnUnreadableFile(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unsupported Unreadable Scan Test")
+
+	root := filepath.Join(t.TempDir(), "movies")
+	title := filepath.Join(root, "Thief (1981)")
+	iso := filepath.Join(title, "Thief (1981).iso")
+	writeTestFile(t, filepath.Join(root, "Heat (1995)", "Heat (1995).mkv"), "fake payload")
+	writeTestFile(t, iso, "fake payload")
+	folder := &models.MediaFolder{ID: folderID, Paths: []string{root}, Type: "movies", Name: "Unsupported Unreadable Scan Test", Enabled: true}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, false, 0)
+	repo := NewUnsupportedFileRepository(pool)
+	// Each scan starts after every row's last sighting, so only protection
+	// keeps a row the scan did not find.
+	scan := func(step string) *ScanResult {
+		t.Helper()
+		result, err := scanner.ScanFolder(ctx, folder)
+		if err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		if err := repo.Replace(ctx, folderID, nil, result.ProtectedPaths, time.Now().Add(time.Hour), GroupUnsupportedFiles(folderID, result.UnsupportedFiles)); err != nil {
+			t.Fatalf("%s: replace: %v", step, err)
+		}
+		return result
+	}
+	count := func(step string) int {
+		t.Helper()
+		var n int
+		err := pool.QueryRow(ctx, `SELECT COALESCE(SUM(file_count), 0) FROM unsupported_media_files WHERE media_folder_id = $1 AND directory_path = $2 AND reason = $3`,
+			folderID, title, UnsupportedReasonDiscImage).Scan(&n)
+		if err != nil {
+			t.Fatalf("%s: query row: %v", step, err)
+		}
+		return n
+	}
+
+	scan("first scan")
+	if got := count("first scan"); got != 1 {
+		t.Fatalf("first scan: disc image count = %d, want 1", got)
+	}
+
+	if err := os.Remove(iso); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone.iso"), iso); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	result := scan("second scan")
+	if fmt.Sprint(result.ProtectedPaths) != fmt.Sprint([]string{iso}) {
+		t.Errorf("protected paths = %v, want [%s]", result.ProtectedPaths, iso)
+	}
+	if len(result.UnsupportedFiles) != 0 {
+		t.Errorf("unsupported files = %v, want none", result.UnsupportedFiles)
+	}
+	if got := count("second scan"); got != 1 {
+		t.Errorf("second scan: disc image count = %d, want the row kept at 1", got)
 	}
 }
