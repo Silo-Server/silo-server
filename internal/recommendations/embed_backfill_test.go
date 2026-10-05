@@ -46,6 +46,13 @@ type fakeEmbeddingStore struct {
 	upsertErr error
 	// marked records each MarkProfilesStaleForItems call's items.
 	marked [][]string
+	// markedAll counts MarkAllProfilesStale calls.
+	markedAll int
+}
+
+func (f *fakeEmbeddingStore) MarkAllProfilesStale(context.Context) (int64, error) {
+	f.markedAll++
+	return 1, nil
 }
 
 func (f *fakeEmbeddingStore) MarkProfilesStaleForItems(_ context.Context, itemIDs []string) (int64, error) {
@@ -258,8 +265,20 @@ func TestBackfillMarksProfilesStaleForStoredItems(t *testing.T) {
 	for _, ids := range store.marked {
 		marked += len(ids)
 	}
-	if len(store.marked) != 3 || marked != b.counts.Embedded || marked != 2*signalsStaleBatch+200 {
-		t.Fatalf("marks = %d calls for %d items, want 3 calls for every one of the %d stored", len(store.marked), marked, b.counts.Embedded)
+	if len(store.marked) != 3 || marked != b.counts.Embedded || marked != 2*signalsStaleBatch+200 || store.markedAll != 0 {
+		t.Fatalf("marks = %d calls for %d items (%d whole-server), want 3 calls for every one of the %d stored", len(store.marked), marked, store.markedAll, b.counts.Embedded)
+	}
+
+	// With signals in a user store outside Postgres, the item-based mark
+	// cannot see them, so the run marks every profile instead.
+	outside := newFakeEmbeddingStore(testIDs("item-", 25)...)
+	b = newTestBackfill(outside, vectorsOf(768, &calls), nil)
+	b.signalsOutsidePostgres = true
+	if err := b.run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if outside.markedAll != 1 || len(outside.marked) != 0 {
+		t.Fatalf("store outside Postgres: %d whole-server marks and %d item marks, want one whole-server mark", outside.markedAll, len(outside.marked))
 	}
 }
 
