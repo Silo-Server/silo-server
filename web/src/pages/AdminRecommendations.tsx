@@ -388,8 +388,8 @@ function RecEmbeddingResetCard({
         <div className="space-y-1">
           <h2 className="text-sm font-semibold">Reset Embeddings</h2>
           <p className="text-muted-foreground text-sm">
-            Deletes the embedding lock, every item embedding and personal recommendation rows,
-            and clears taste profiles, so you can switch embedding models. Run the embedding job
+            Deletes the embedding lock, every item embedding and personal recommendation rows, and
+            clears taste profiles, so you can switch embedding models. Run the embedding job
             afterwards; taste profiles rebuild as their titles are embedded again.
           </p>
         </div>
