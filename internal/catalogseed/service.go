@@ -1231,6 +1231,12 @@ func (s *Service) acceptedEmbeddings(ctx context.Context, tx pgx.Tx, records []E
 	if len(records) == 0 {
 		return records, nil
 	}
+	// Held until the import commits, so a reset cannot delete embeddings and
+	// the lock between this read and the inserts; a reset running now is
+	// waited for.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, recommendations.EmbeddingWritersLock); err != nil {
+		return nil, fmt.Errorf("waiting for an embeddings reset: %w", err)
+	}
 	model := s.embeddingModel
 	lock, err := recommendations.ReadEmbeddingLock(ctx, tx)
 	if err != nil {
