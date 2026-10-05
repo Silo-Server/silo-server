@@ -205,7 +205,7 @@ func (h *AccessGroupHandler) HandleUpdate(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	librariesChange := h.groupLibrariesChange(r.Context(), id, input)
+	librariesChange := h.groupLibrariesChange(input)
 	group, err := h.store.Update(r.Context(), id, input)
 	if err != nil {
 		writeAccessGroupError(w, err, "Failed to update access group")

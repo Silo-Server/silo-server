@@ -1411,11 +1411,14 @@ func (r *Repo) PurgeProfile(ctx context.Context, userID int, profileID string) e
 // MarkProfileStale sets stale_at = NOW() on a user's taste profile. It always
 // advances the mark, even over a pending one: a refresh that started reading
 // before this change must not clear it (see ClearStaleAt). A profile with no
-// taste profile row has nothing to mark.
+// taste row yet gets one with no vector, updated at the epoch, so the mark
+// survives a first build that read the signals before this change; readers
+// treat the row as no taste profile until a refresh stores one.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE user_taste_profiles SET stale_at = NOW()
-		WHERE  user_id = $1 AND profile_id = $2`,
+		INSERT INTO user_taste_profiles (user_id, profile_id, embedding, updated_at, stale_at)
+		VALUES ($1, $2, NULL, to_timestamp(0), NOW())
+		ON CONFLICT (user_id, profile_id) DO UPDATE SET stale_at = NOW()`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)

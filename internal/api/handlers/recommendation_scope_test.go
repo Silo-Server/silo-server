@@ -114,8 +114,10 @@ func (f *fakeGroupStore) MemberIDs(context.Context, int64) ([]int, error) {
 	return []int{11, 12}, nil
 }
 
-// A change to an access group's libraries, or its deletion, rebuilds its
-// members' recommendations; other group edits do not.
+// An update that sets an access group's libraries, or its deletion, rebuilds
+// its members' recommendations; other group edits do not. A save of the same
+// libraries rebuilds too: the stored set could only be compared outside the
+// update's writer lock, where an overlapping update can change it.
 func TestAccessGroupLibraryChangesRebuildMembers(t *testing.T) {
 	ctx := t.Context()
 	guard := access.GroupPrecondition{Any: true}
@@ -128,7 +130,7 @@ func TestAccessGroupLibraryChangesRebuildMembers(t *testing.T) {
 		want  int
 	}{
 		{"name only", access.UpdateGroupInput{Name: &name}, 0},
-		{"same libraries", access.UpdateGroupInput{LibraryIDs: libs(2, 1)}, 0},
+		{"same libraries", access.UpdateGroupInput{LibraryIDs: libs(2, 1)}, 1},
 		{"new libraries", access.UpdateGroupInput{LibraryIDs: libs(1)}, 1},
 	} {
 		n := &recordingScopeNotifier{}
