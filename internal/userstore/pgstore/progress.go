@@ -1395,7 +1395,7 @@ func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query
 		`+completedHistoryVisibleSQL+`
 		GROUP BY h.media_item_id
 		ORDER BY h.media_item_id ASC`,
-		s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs,
+		profilePlanArgs(s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing completed history items: %w", err)

@@ -1101,9 +1101,34 @@ func (qb *QueryBuilder) buildAddedAtClause(rule QueryRule) (string, error) {
 	}
 }
 
+// buildReleaseDateClause compares the item's release date: release_date when
+// set, else a well-formed first_air_date. The comparison is emitted once per
+// source column, ((release_date IS NOT NULL AND cmp) OR (release_date IS NULL
+// AND first_air_date cmp)), rather than over their COALESCE, so the
+// release_date indexes can serve it. Both forms agree for every NULL
+// combination, including under NOT.
 func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
-	column := qb.releaseDateFilterExpr()
+	// Build the comparison once around a marker so both arms reuse the same
+	// bound arguments, then substitute each source column for the marker.
+	const column = "\x00release_date\x00"
+	clause, err := qb.buildReleaseDateComparison(column, rule)
+	if err != nil {
+		return "", err
+	}
+	if isEpisodeCatalogScope(qb.mediaScope) {
+		return strings.ReplaceAll(clause, column, qb.alias+".episode_air_date"), nil
+	}
+	releaseDate := qb.alias + ".release_date"
+	trimmedAirDate := fmt.Sprintf("NULLIF(BTRIM(%s.first_air_date), '')", qb.alias)
+	firstAirDate := fmt.Sprintf("(CASE WHEN %[1]s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN %[1]s::date ELSE NULL END)", trimmedAirDate)
+	return fmt.Sprintf("((%[1]s IS NOT NULL AND %[2]s) OR (%[1]s IS NULL AND %[3]s))",
+		releaseDate,
+		strings.ReplaceAll(clause, column, releaseDate),
+		strings.ReplaceAll(clause, column, firstAirDate),
+	), nil
+}
 
+func (qb *QueryBuilder) buildReleaseDateComparison(column string, rule QueryRule) (string, error) {
 	switch rule.Op {
 	case "gt":
 		return qb.buildTypedComparisonClause(column, ">", rule.Value, "date"), nil
@@ -1351,19 +1376,6 @@ func (qb *QueryBuilder) releaseDateSortExpr() string {
 	return queryColumnSQL(qb.alias, querySortDefs["release_date"].columnSQL)
 }
 
-func (qb *QueryBuilder) releaseDateFilterExpr() string {
-	if isEpisodeCatalogScope(qb.mediaScope) {
-		return fmt.Sprintf("%s.episode_air_date", qb.alias)
-	}
-	firstAirDate := fmt.Sprintf("NULLIF(BTRIM(%s.first_air_date), '')", qb.alias)
-	return fmt.Sprintf(
-		`COALESCE(%s.release_date, CASE WHEN %s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN %s::date ELSE NULL END)`,
-		qb.alias,
-		firstAirDate,
-		firstAirDate,
-	)
-}
-
 func (qb *QueryBuilder) addedAtFilterExpr() string {
 	if isEpisodeCatalogScope(qb.mediaScope) {
 		return fmt.Sprintf("%s.episode_created_at", qb.alias)
@@ -1408,6 +1420,21 @@ func (qb *QueryBuilder) addedAtSortPlan() (string, []string, []any, bool) {
 			qb.alias,
 		)
 		return "sort_added.added_at", []string{joinSQL}, args, true
+	}
+
+	if len(qb.libraryIDs) == 1 {
+		// The executor's library scope admits only members of this library,
+		// so the inner join drops no row, and its one (content, library) row
+		// is the MIN the aggregate below would compute. first_seen_at is NOT
+		// NULL, so the order matches idx_item_libraries_folder_seen_content
+		// and a page reads only its own rows instead of aggregating the whole
+		// library.
+		joinSQL := fmt.Sprintf(
+			`JOIN media_item_libraries sort_added ON sort_added.content_id = %s AND sort_added.media_folder_id = %s`,
+			qb.libraryContentExpr(),
+			placeholders[0],
+		)
+		return "sort_added.first_seen_at", []string{joinSQL}, args, false
 	}
 
 	joinSQL := fmt.Sprintf(
