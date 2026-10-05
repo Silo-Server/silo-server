@@ -172,3 +172,14 @@ func TestCompatSimilarSkipsTheRecommenderForAHiddenAnchor(t *testing.T) {
 		t.Fatalf("response = %d %s, want an empty result", rec.Code, rec.Body.String())
 	}
 }
+
+// Oversized limits are capped before they size anything.
+func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
+	reader := &fakeRowReader{}
+	h := newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{UserID: 7, ProfileID: "kid"})
+	rec := httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
+	if rec.Code != http.StatusOK || reader.gotLimit != 2*recommendations.CacheCandidateLimit {
+		t.Fatalf("status %d, read limit %d; want 200 and twice a cached row's length", rec.Code, reader.gotLimit)
+	}
+}
