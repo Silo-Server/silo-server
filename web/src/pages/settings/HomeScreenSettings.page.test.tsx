@@ -73,7 +73,6 @@ let serverRows: Record<string, SettingsSectionEntry[]>;
 let saved: Record<string, SectionOverride[]>;
 let puts: Array<{ page: string; overrides: SectionOverride[] }>;
 let calls: Array<{ operation: string; args: Args }>;
-let allowRuleRows: boolean;
 let held: Map<string, Array<() => void>>;
 let observers: Array<{ callback: IntersectionObserverCallback; targets: Set<Element> }>;
 
@@ -137,7 +136,6 @@ beforeEach(() => {
   saved = {};
   puts = [];
   calls = [];
-  allowRuleRows = false;
   held = new Map();
   observers = [];
   vi.stubGlobal(
@@ -163,8 +161,6 @@ beforeEach(() => {
     if (queue) await new Promise<void>((resume) => queue.push(resume));
     const key = pageKey(args);
     switch (operation) {
-      case "GET /api/v2/profile/sections/flags":
-        return { allow_profile_custom_sections: allowRuleRows };
       case "GET /api/v2/profile/sections/settings":
         return { items: resolve(key) };
       case "GET /api/v2/profile/sections":
@@ -587,126 +583,56 @@ describe("rule rows on Settings > Home Screen", () => {
     return within(picker);
   }
 
-  it("offers rule rows to an admin account with the server setting off", async () => {
-    mocks.role = "admin";
-    await renderPage();
-    expect(
-      (await pickerCards()).getByRole("button", { name: "Titles matching rules" }),
-    ).toBeInTheDocument();
-  });
-
-  it("doesn't offer rule rows to other accounts while the server setting is off", async () => {
-    await renderPage();
-    const picker = await pickerCards();
-    expect(picker.getByRole("button", { name: "Hidden gems" })).toBeInTheDocument();
-    expect(picker.queryByRole("button", { name: "Titles matching rules" })).toBeNull();
-  });
-
-  const ruleRows: SectionOverride[] = [
-    {
-      id: "rule-1",
-      position: 2,
-      hidden: false,
-      title: "90s Crowd-Pleasers",
-      section_type: "custom_filter",
-      config: {},
+  it.each(["user", "admin"])(
+    "offers rule rows to a %s account without reading a server setting",
+    async (role) => {
+      mocks.role = role;
+      await renderPage();
+      const picker = await pickerCards();
+      expect(picker.getByRole("button", { name: "Titles matching rules" })).toBeInTheDocument();
+      // Editor's picks stays off the picker for new rows.
+      expect(picker.queryByRole("button", { name: "Editor's picks" })).toBeNull();
+      expect(
+        calls.some(
+          ({ operation }) =>
+            operation.includes("/sections/flags") || operation.includes("/admin/settings"),
+        ),
+      ).toBe(false);
     },
-    {
-      id: "rule-2",
-      position: 3,
-      hidden: true,
-      title: "Short Comedies",
-      section_type: "custom_filter",
-      config: {},
-    },
-  ];
+  );
 
-  it("locks a page holding the profile's rule rows until they are deleted together", async () => {
-    saved.home = ruleRows;
-    render(
-      <MemoryRouter initialEntries={["/settings/home-screen"]}>
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-        >
-          <HomeScreenSettings />
-        </QueryClientProvider>
-      </MemoryRouter>,
-    );
-    const note = await screen.findByText(/Rule rows are turned off on this server/);
-    expect(note).toHaveTextContent("(90s Crowd-Pleasers, Short Comedies)");
-    expect(screen.getByRole("button", { name: "Add row" })).toBeDisabled();
-    expect(rowSwitch("Show Row a on my Home")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Move Row a" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    let menu = await rowMenu("Row a");
-    expect(within(menu).getByRole("menuitem", { name: "Edit row…" })).toHaveAttribute(
+  it("keeps a page with the profile's rule rows and Editor's picks rows open to change", async () => {
+    saved.home = [
+      {
+        id: "rule-1",
+        position: 2,
+        hidden: false,
+        title: "90s Crowd-Pleasers",
+        section_type: "custom_filter",
+        config: {},
+      },
+      {
+        id: "picks-1",
+        position: 3,
+        hidden: false,
+        title: "Staff Picks",
+        section_type: "admin_curated_list",
+        config: { item_ids: ["x"] },
+      },
+    ];
+    await renderPage();
+    expect(rowSwitch("Show 90s Crowd-Pleasers on my Home")).toBeEnabled();
+    const menu = await rowMenu("Staff Picks");
+    expect(within(menu).getByRole("menuitem", { name: "Edit row…" })).not.toHaveAttribute(
       "aria-disabled",
       "true",
     );
     await userEvent.keyboard("{Escape}");
-    menu = await rowMenu("90s Crowd-Pleasers");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((item) => item.textContent),
-    ).toEqual(["Delete rule rows…"]);
-    await userEvent.click(within(menu).getByRole("menuitem", { name: "Delete rule rows…" }));
 
-    const dialog = await screen.findByRole("dialog", { name: "Delete your rule rows?" });
-    expect(
-      within(within(dialog).getByRole("list", { name: "Rows to delete" }))
-        .getAllByRole("listitem")
-        .map((item) => item.textContent),
-    ).toEqual(["90s Crowd-Pleasers", "Short Comedies"]);
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete rule rows" }));
-
+    await userEvent.click(rowSwitch("Show Row a on my Home"));
     await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0]!.overrides.some((o) => o.id === "rule-1" || o.id === "rule-2")).toBe(false);
-    await waitFor(() =>
-      expect(screen.queryByText(/Rule rows are turned off on this server/)).toBeNull(),
+    expect(puts[0]!.overrides.map((o) => o.id)).toEqual(
+      expect.arrayContaining(["rule-1", "picks-1"]),
     );
-    await waitFor(() => expect(rowSwitch("Show Row a on my Home")).toBeEnabled());
-  });
-
-  it("keeps the page from changing until the kinds of rows load, as Editor's Picks rows lock it too", async () => {
-    mocks.catalog.mockRejectedValueOnce(new Error("catalog down"));
-    saved.home = [
-      {
-        id: "picks-1",
-        position: 2,
-        hidden: false,
-        title: "Staff Picks",
-        section_type: "admin_curated_list",
-        config: { item_ids: [] },
-      },
-    ];
-    render(
-      <MemoryRouter initialEntries={["/settings/home-screen"]}>
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-        >
-          <HomeScreenSettings />
-        </QueryClientProvider>
-      </MemoryRouter>,
-    );
-    expect(
-      await screen.findByText(/The kinds of rows didn't load, so this page can't change/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add row" })).toBeDisabled();
-    expect(rowSwitch("Show Row a on my Home")).toBeDisabled();
-
-    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
-    const note = await screen.findByText(/Rule rows are turned off on this server/);
-    expect(note).toHaveTextContent("(Staff Picks)");
-  });
-
-  it("never locks an admin account's page", async () => {
-    mocks.role = "admin";
-    saved.home = ruleRows;
-    await renderPage();
-    expect(screen.queryByText(/Rule rows are turned off on this server/)).toBeNull();
-    expect(rowSwitch("Show 90s Crowd-Pleasers on my Home")).toBeEnabled();
   });
 });

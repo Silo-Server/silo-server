@@ -290,8 +290,11 @@ func TestProfileSectionsDenied(t *testing.T) {
 	}
 	// A missing service fails closed.
 	unwired := sectionDeps(nil)
-	unwired.ProfileSections, unwired.SectionFlags = nil, nil
+	unwired.ProfileSections = nil
 	hu := newTestHandler(t, unwired)
 	requireProblem(t, do(t, hu, http.MethodGet, "/api/v2/profile/sections", "", auth), TypeDependencyUnavailable)
-	requireProblem(t, do(t, hu, http.MethodGet, "/api/v2/profile/sections/flags", "", auth), TypeDependencyUnavailable)
+	// The flag is a constant now and needs no service.
+	if rec := do(t, hu, http.MethodGet, "/api/v2/profile/sections/flags", "", auth); rec.Code != 200 {
+		t.Fatalf("unwired flags: %d %s", rec.Code, rec.Body.String())
+	}
 }

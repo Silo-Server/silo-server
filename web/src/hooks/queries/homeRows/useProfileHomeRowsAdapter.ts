@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router";
 import type { HomeSectionItemsResponse, SettingsSectionEntry } from "@/api/types";
-import { v2 } from "@/api/v2/request";
 import { sectionKeys } from "@/hooks/queries/keys";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { fetchHomeSectionItems, fetchLibrarySectionItems } from "@/hooks/queries/sections";
-import { useOptionalAuth } from "@/hooks/useAuth";
 import { pageParam, parsePageParam, samePage } from "@/lib/homeRows/pages";
 import {
   buildProfileRowCreate,
@@ -16,7 +14,6 @@ import {
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import { peekItemsOf, profilePeekKey, profilePeekSeed } from "@/lib/homeRows/peek";
 import { draftFromRow, mergeReloadedDraft, type RowDraft } from "@/lib/homeRows/rowDraft";
-import { ruleRowKinds } from "@/lib/homeRows/ruleRows";
 import type {
   EditSession,
   HomeRow,
@@ -25,33 +22,13 @@ import type {
   PageRef,
 } from "@/lib/homeRows/types";
 import { fetchRecipeCatalog, type RecipeCatalogResponse } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes, isTraktConfig } from "@/lib/sectionTypes";
+import { isTraktConfig } from "@/lib/sectionTypes";
 import { useProfileHomeRows } from "./useProfileHomeRows";
 import { useProfileRowCollections } from "./useRowCollectionOptions";
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
-/** Why the page can't change: the server refuses every save that still holds these rows. */
-export interface ProfilePageLock {
-  reason: "rule-rows-off";
-  rowIds: string[];
-}
-
 export interface ProfileHomeRowsAdapter extends HomeRowsAdapter {
-  /**
-   * Set while rule rows are off for profiles and this page holds rule rows
-   * this profile added: the server then refuses every save of the page until
-   * they are gone, so only deleting them is offered.
-   */
-  pageLock: ProfilePageLock | null;
-  /**
-   * Whether the page lock is known. Admin-only kinds such as Editor's Picks
-   * lock the page too, and only the recipe catalog names them, so a page
-   * holding rows this profile added can't change until the catalog loads.
-   */
-  pageLockCheck: "ready" | "loading" | "failed";
-  /** Loads the recipe catalog again after it failed. */
-  reloadCatalog(): void;
   /** Removes server rows from this page and deletes the profile's own rows, in one save. */
   remove(ids: string[]): void;
   /** Drops every change this profile made on this page. */
@@ -64,8 +41,6 @@ export interface ProfileHomeRowsAdapter extends HomeRowsAdapter {
   overridesFailed: boolean;
   /** The rows are on screen but the saved changes are still loading, so editing waits. */
   overridesLoading: boolean;
-  /** Reset is possible now, page lock or not: it removes the rule rows too. */
-  canReset: boolean;
   catalog: RecipeCatalogResponse | undefined;
   catalogFailed: boolean;
 }
@@ -95,9 +70,8 @@ function viewerItemsKey(page: PageRef, rowId: string) {
 
 /**
  * Settings > Home Screen as a Home rows adapter: this profile's rows on one
- * page (`?page=home|<libraryId>`), saved through `useProfileHomeRows`. Rule
- * rows follow #1118: an admin account keeps them, other accounts only while
- * the server lets profiles add them; the components read only the result.
+ * page (`?page=home|<libraryId>`), saved through `useProfileHomeRows`. Every
+ * profile may add rule rows; no server setting is read.
  */
 export function useProfileHomeRowsAdapter(): ProfileHomeRowsAdapter {
   const queryClient = useQueryClient();
@@ -152,13 +126,6 @@ export function useProfileHomeRowsAdapter(): ProfileHomeRowsAdapter {
     [libraries],
   );
 
-  const role = useOptionalAuth()?.user?.role;
-  const flags = useQuery({
-    queryKey: ["profile-section-flags"],
-    queryFn: () => v2("GET /api/v2/profile/sections/flags"),
-    staleTime: FIVE_MINUTES,
-  });
-  const ruleRows = canAddAdminOnlyRecipes(role, flags.data?.allow_profile_custom_sections);
   const catalogQuery = useQuery({
     queryKey: ["recipe-catalog"],
     queryFn: fetchRecipeCatalog,
@@ -169,20 +136,7 @@ export function useProfileHomeRowsAdapter(): ProfileHomeRowsAdapter {
 
   const { sections } = homeRows;
   const rows = useMemo(() => sections.map(toHomeRow), [sections]);
-  let pageLockCheck: ProfileHomeRowsAdapter["pageLockCheck"] = "ready";
-  if (!ruleRows && flags.isSuccess && !catalog && sections.some((section) => section.is_custom)) {
-    pageLockCheck = catalogQuery.isError ? "failed" : "loading";
-  }
-  const pageLock = useMemo<ProfilePageLock | null>(() => {
-    // Unknown until the flag loads; a save refused meanwhile still says why.
-    if (ruleRows || !flags.isSuccess || !catalog) return null;
-    const kinds = ruleRowKinds(catalog);
-    const rowIds = sections
-      .filter((section) => section.is_custom && kinds.has(section.section_type))
-      .map((section) => section.id);
-    return rowIds.length > 0 ? { reason: "rule-rows-off", rowIds } : null;
-  }, [catalog, flags.isSuccess, ruleRows, sections]);
-  const canEdit = homeRows.canEdit && pageLock === null && pageLockCheck === "ready";
+  const { canEdit } = homeRows;
 
   let status: HomeRowsAdapter["status"] = "ready";
   if (!pageKnown || !onRequestedPage) status = "loading";
@@ -321,28 +275,19 @@ export function useProfileHomeRowsAdapter(): ProfileHomeRowsAdapter {
       if (canEdit) setHidden(id, !shown);
     },
     setHero,
-    capabilities: {
-      draftPreview: false,
-      ruleRows,
-      libraryCopies: false,
-      profileRuleRowsSwitch: false,
-    },
+    capabilities: { draftPreview: false, libraryCopies: false },
     create,
     openEdit,
     reloadEdit: (session) => openEdit(session.row.id),
     save,
     peek,
     collections,
-    pageLock,
-    pageLockCheck,
-    reloadCatalog: () => void catalogQuery.refetch(),
     remove: homeRows.remove,
     reset: homeRows.reset,
     restoreOriginalName,
     lastWriteAt,
     overridesFailed: homeRows.overridesFailed,
     overridesLoading: status === "ready" && !homeRows.ready && !homeRows.overridesFailed,
-    canReset: homeRows.canEdit,
     catalog,
     catalogFailed: catalogQuery.isError,
   };

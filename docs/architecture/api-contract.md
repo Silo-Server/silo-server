@@ -1321,7 +1321,12 @@ method, and read back in `snake_case` like the write (the Phase 1 catalogs flagg
 casing mismatch). `getProfileSectionSettings` also returns `default_title`, the administrator's
 own title for each admin row next to the profile's effective `title`, so a client can show that a
 profile renamed a row and offer the original name back (saving an empty `title` override restores
-it); it is empty for a profile-built row, and v1 does not return it. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+it); it is empty for a profile-built row, and v1 does not return it. `getProfileSectionFlags`
+keeps `allow_profile_custom_sections` for clients that read it, but it is deprecated and always
+`true`: profiles may always add rule rows (`custom_filter`), with no server setting. On both
+versions, `replaceProfileSectionOverrides` refuses with `403 custom_disabled` only a profile that
+is not an admin adding a new row of an `admin_only` recipe (Editor's picks,
+`admin_curated_list`); a row of that kind already saved on the page is kept and may change. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 **Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1

@@ -4,7 +4,6 @@ import type { components } from "@/api/v2/schema";
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { everyRecipe } from "@/lib/homeRows/recipeCatalogFixture.test-support";
 import { matchRecipePreset } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 
 import {
   buildHomeLayoutFile,
@@ -69,7 +68,8 @@ function target(overrides: Partial<HomeLayoutImportTarget> = {}): HomeLayoutImpo
       ["recently_added", { adminOnly: false }],
       ["profile_activity_feed", { adminOnly: false }],
       ["trending_discover", { adminOnly: false }],
-      ["custom_filter", { adminOnly: true }],
+      ["custom_filter", { adminOnly: false }],
+      ["admin_curated_list", { adminOnly: true }],
     ]),
     allowAdminOnlyRecipes: true,
     personalCollectionIds: new Set(["mine"]),
@@ -292,8 +292,11 @@ describe("planHomeLayoutImport on the same server", () => {
             scope: "home",
             overrides: [
               { user_section_type: "collection", user_config: { user_collection_id: "theirs" } },
-              { section_type: "custom_filter", title: "Filtered" },
-              { section_type: "genre", title: "Legacy genre" },
+              {
+                section_type: "admin_curated_list",
+                title: "Staff picks",
+                config: { item_ids: ["x"] },
+              },
               { user_section_type: "trending_discover", user_config: { source: "trakt" } },
               { user_section_type: "hidden_gems", removed: true },
             ],
@@ -309,8 +312,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedPages).toEqual(["Library 9"]);
     expect(plan.skippedSections).toEqual([
       { page: "Home", title: "collection", reason: "collection" },
-      { page: "Home", title: "Filtered", reason: "custom_disabled" },
-      { page: "Home", title: "Legacy genre", reason: "custom_disabled" },
+      { page: "Home", title: "Staff picks", reason: "custom_disabled" },
       { page: "Home", title: "trending_discover", reason: "trakt" },
     ]);
   });
@@ -1012,7 +1014,7 @@ describe("home layout round trip for every row kind", () => {
   }
 
   it("imports every kind back unchanged into an admin account", () => {
-    const plan = importAs(canAddAdminOnlyRecipes("admin", undefined));
+    const plan = importAs(true);
     const written = exported.pages[0]!.overrides;
 
     expect(plan.skippedSections).toEqual([]);
@@ -1028,14 +1030,15 @@ describe("home layout round trip for every row kind", () => {
     }
   });
 
-  it("skips the rule rows when a non-admin profile may not build them", () => {
-    const plan = importAs(canAddAdminOnlyRecipes("user", false));
+  it("imports rule rows but not Editor's picks into an account that is not an admin", () => {
+    const plan = importAs(false);
 
     expect(plan.skippedSections).toEqual([
       { page: "Home", title: "Editor's Picks", reason: "custom_disabled" },
-      { page: "Home", title: "90s Horror", reason: "custom_disabled" },
-      { page: "Home", title: "Horror", reason: "custom_disabled" },
     ]);
-    expect(plan.pages[0]!.overrides).toHaveLength(exported.pages[0]!.overrides.length - 3);
+    expect(plan.pages[0]!.overrides).toHaveLength(exported.pages[0]!.overrides.length - 1);
+    expect(plan.pages[0]!.overrides.map((override) => override.title)).toEqual(
+      expect.arrayContaining(["90s Horror", "Horror"]),
+    );
   });
 });

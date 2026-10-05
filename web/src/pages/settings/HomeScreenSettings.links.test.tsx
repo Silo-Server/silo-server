@@ -70,6 +70,7 @@ let puts: Array<{ page: string; overrides: SectionOverride[] }>;
 /** When set, a profile PUT waits for it and fails when it rejects. */
 let putGate: Promise<void> | null;
 /** When set, the next read of the page's rows fails. */
+let failSavedRead: boolean;
 let failNextRead: boolean;
 
 function deferred() {
@@ -124,6 +125,7 @@ beforeEach(() => {
   puts = [];
   putGate = null;
   failNextRead = false;
+  failSavedRead = false;
   vi.stubGlobal(
     "IntersectionObserver",
     class {
@@ -136,8 +138,6 @@ beforeEach(() => {
   mocks.request.mockImplementation(async (operation: string, args: Args = {}) => {
     const key = args.query?.scope === "library" ? `library:${args.query.library_id}` : "home";
     switch (operation) {
-      case "GET /api/v2/profile/sections/flags":
-        return { allow_profile_custom_sections: false };
       case "GET /api/v2/profile/sections/settings":
         if (failNextRead) {
           failNextRead = false;
@@ -145,6 +145,7 @@ beforeEach(() => {
         }
         return { items: resolve(key) };
       case "GET /api/v2/profile/sections":
+        if (failSavedRead) throw new Error("read failed");
         return { items: saved[key] ?? [] };
       case "PUT /api/v2/profile/sections":
         puts.push({ page: key, overrides: args.body!.overrides });
@@ -232,17 +233,8 @@ describe("?add= on Settings > Home Screen", () => {
   });
 
   it("opens nothing on a page that can't change", async () => {
-    // Rule rows are off on this server, so the profile's rule row locks the page.
-    saved.home = [
-      {
-        id: "rule-1",
-        position: 2,
-        hidden: false,
-        title: "90s Crowd-Pleasers",
-        section_type: "custom_filter",
-        config: {},
-      },
-    ];
+    // The profile's saved changes didn't load, so the page can't change.
+    failSavedRead = true;
     setup("/settings/home-screen?add=collection:user:mine");
     await waitFor(() =>
       expect(mocks.error).toHaveBeenCalledWith("This page can't change right now."),

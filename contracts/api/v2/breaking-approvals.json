@@ -1,3 +1,18 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "getAdminSectionSettings",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "c84f2053ffc9feaf140d1efe483b1a890e53caffbae740a5088c76804635638e",
+      "reason": "Pre-lock removal, owner decision: the Let profiles add rule rows setting is gone and profiles may always add rule rows, so there is nothing left to read. getProfileSectionFlags keeps allow_profile_custom_sections, always true and deprecated. The web admin stops calling this operation in the same change; silo-apple and silo-android never called it. The frozen /api/v1 route keeps answering, always true.",
+      "approved_in": "#192"
+    },
+    {
+      "operation_id": "updateAdminSectionSettings",
+      "change_id": "api-path-removed-without-deprecation",
+      "fingerprint": "53d640609cee613e839b55131e2dd2d5ca929c38a80b33c685a35c44a5e8a767",
+      "reason": "Pre-lock removal, owner decision: the Let profiles add rule rows setting is gone and profiles may always add rule rows, so there is nothing left to change. The web admin's More menu switch, the only caller, is removed in the same change; silo-apple and silo-android never called it. The frozen /api/v1 route still accepts a write and changes nothing.",
+      "approved_in": "#192"
+    }
+  ]
 }

@@ -46,7 +46,9 @@ type RecipeDefinition struct {
 	Presets          []GalleryPreset `json:"presets"`
 	AvoidDuplicates  bool            `json:"avoid_duplicates"`
 	SupportsRotation bool            `json:"supports_rotation"`
-	AdminOnly        bool            `json:"admin_only"`
+	// AdminOnly recipes may be added only by an admin; a profile that is not
+	// an admin keeps and changes the sections of them it already has.
+	AdminOnly bool `json:"admin_only"`
 	// Hidden recipes are still resolvable (so existing sections with that type
 	// keep working) but the API gallery list omits them. Used to phase out
 	// duplicate type aliases like `genre` (which is just a custom_filter).

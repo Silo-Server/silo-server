@@ -25,16 +25,13 @@ describe("row kind catalog", () => {
 });
 
 describe("picker groups", () => {
-  const counts = (ruleRows: boolean) =>
+  const counts = () =>
     Object.fromEntries(
-      pickerGroups(recipeCatalogFixture, { ruleRows }).map((group) => [
-        group.label,
-        group.cards.length,
-      ]),
+      pickerGroups(recipeCatalogFixture).map((group) => [group.label, group.cards.length]),
     );
 
-  it("offers the approved groups and card counts on the admin surface", () => {
-    expect(counts(true)).toEqual({
+  it("offers the approved groups and card counts on every surface", () => {
+    expect(counts()).toEqual({
       "Keep watching": 5,
       "What's new": 4,
       Popular: 4,
@@ -42,14 +39,6 @@ describe("picker groups", () => {
       "Moods & themes": 11,
       "Collections & rules": 2,
     });
-  });
-
-  it("hides the rule card without rule rows", () => {
-    const cards = pickerGroups(recipeCatalogFixture, { ruleRows: false }).flatMap(
-      (group) => group.cards,
-    );
-    expect(cards.map((card) => card.type)).not.toContain("custom_filter");
-    expect(cards.map((card) => card.type)).toContain("collection");
   });
 
   it("never offers Editor's Picks, genre or award rows for new rows", () => {
@@ -77,7 +66,7 @@ describe("picker groups", () => {
         ],
       },
     };
-    const types = pickerGroups(withRetired, { ruleRows: true }).flatMap((group) =>
+    const types = pickerGroups(withRetired).flatMap((group) =>
       group.cards.map((card) => card.type),
     );
     expect(types).not.toContain("admin_curated_list");
@@ -86,9 +75,7 @@ describe("picker groups", () => {
   });
 
   it("orders cards as the design lists them", () => {
-    const popular = pickerGroups(recipeCatalogFixture, { ruleRows: true }).find(
-      (group) => group.group === "popular",
-    )!;
+    const popular = pickerGroups(recipeCatalogFixture).find((group) => group.group === "popular")!;
     expect(popular.cards.map((card) => card.label)).toEqual([
       "Trending on this server",
       "Most watched",

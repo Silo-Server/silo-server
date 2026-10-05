@@ -136,9 +136,6 @@ beforeEach(() => {
       return { items: rows.map((row) => ({ ...row })) };
     if (operation === "GET /api/v2/admin/sections/{id}")
       return { ...rows.find((row) => row.id === args.path?.id)! };
-    // Read by More's "Let profiles add rule rows" whenever the menu opens.
-    if (operation === "GET /api/v2/admin/settings/sections")
-      return { allow_profile_custom_sections: false };
     writes.push({ operation, args });
     if (args.headers?.["If-Match"] !== `"rev-${revision}"` || args.path?.id === failID)
       throw v2Problem(412, "precondition_failed", "Changed on another client");

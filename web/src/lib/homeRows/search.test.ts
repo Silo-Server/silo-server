@@ -3,7 +3,7 @@ import { pickerGroups } from "./catalog";
 import { recipeCatalogFixture } from "./recipeCatalogFixture.test-support";
 import { searchPickerGroups } from "./search";
 
-const groups = pickerGroups(recipeCatalogFixture, { ruleRows: true });
+const groups = pickerGroups(recipeCatalogFixture);
 
 function types(query: string) {
   return searchPickerGroups(groups, query).flatMap((group) => group.cards.map((card) => card.type));

@@ -41,7 +41,6 @@ type SectionHandler struct {
 	UserRepo              *auth.UserRepository
 	AccessGroups          access.GroupPolicyProvider // optional; resolves inherited library access when no scope is in context
 	DetailSvc             *catalog.DetailService
-	Settings              catalog.SettingsStore
 	CollectionRepo        *catalog.LibraryCollectionRepository
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
 	EbookProgress         EbookReaderProgressLister
@@ -765,23 +764,37 @@ func (h *SectionHandler) HandleSaveProfileOverrides(w http.ResponseWriter, r *ht
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// adminOnlyRecipeError refuses a new section of an admin-only recipe
+// (Editor's picks) from a profile that is not an admin. The code and message
+// are the frozen v1 ones from when a server setting decided this.
+func adminOnlyRecipeError() *APIError {
+	return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+}
+
+// userAddedRecipe is the recipe a stored user-added override runs, read the
+// way the resolver reads it.
+func userAddedRecipe(o userstore.SectionOverride) string {
+	if o.UserSectionType != "" {
+		return o.UserSectionType
+	}
+	return o.SectionType
+}
+
 // SaveProfileOverrides replaces the profile's override set for one page:
-// the recipe gate on user-added sections (registered recipe, admin-only
-// recipes need the admin role or the allow-custom setting, config validated
-// by the recipe), then the store write. v1 PUT /profile/sections and v2
-// replaceProfileSectionOverrides both call it; a failure is an *APIError
-// carrying the v1 status, code and message.
+// the recipe gate on user-added sections (registered recipe, config
+// validated by the recipe, and a profile that is not an admin may keep but
+// not add a section of an admin-only recipe), then the store write. v1 PUT
+// /profile/sections and v2 replaceProfileSectionOverrides both call it; a
+// failure is an *APIError carrying the v1 status, code and message.
 func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite) error {
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
 	// Gate: validate user-added overrides before touching the store.
-	allowCustom := false
-	if h.Settings != nil {
-		v, _ := h.Settings.Get(ctx, SectionsAllowProfileCustomSettingKey)
-		allowCustom = v == "true"
-	}
 	isAdmin := apimw.IsAdmin(ctx)
+	// ID -> recipe of the admin-only sections a non-admin sends; each must
+	// already be saved on this page with the same recipe.
+	keptAdminOnly := make(map[string]string)
 
 	type trendingCandidate struct {
 		id     string
@@ -865,8 +878,11 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 		if !ok {
 			return apiError(http.StatusBadRequest, "unknown_recipe", "section_type not registered: "+recipeType)
 		}
-		if rec.Definition().AdminOnly && !isAdmin && !allowCustom {
-			return apiError(http.StatusForbidden, "custom_disabled", "this server does not allow profiles to build custom sections")
+		if rec.Definition().AdminOnly && !isAdmin {
+			if o.ID == "" {
+				return adminOnlyRecipeError()
+			}
+			keptAdminOnly[o.ID] = recipeType
 		}
 		// Validate whichever config the resolver will actually use.
 		cfg := o.UserConfig
@@ -905,6 +921,12 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 	}
 	if err := h.rejectLegacyTraktReactivationByRemoval(ctx, existing, retainedSectionIDs); err != nil {
 		return err
+	}
+	for id, recipeType := range keptAdminOnly {
+		old, ok := existingByID[id]
+		if !ok || old.SectionID != "" || userAddedRecipe(old) != recipeType {
+			return adminOnlyRecipeError()
+		}
 	}
 	for id, write := range sourceWrites {
 		old, ok := existingByID[id]

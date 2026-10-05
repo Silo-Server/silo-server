@@ -39,7 +39,6 @@ import {
 import { canCopyToLibraries } from "./bulkCopy";
 import { pickerGroups } from "./catalog";
 import { draftForPreset } from "./rowDraft";
-import { ruleRowKinds } from "./ruleRows";
 
 const uuid = vi.hoisted(() => ({ next: 0 }));
 vi.mock("@/lib/uuid", () => ({ randomUUID: () => `uuid-${++uuid.next}` }));
@@ -733,32 +732,18 @@ describe("profile entries", () => {
   });
 });
 
-// canAddAdminOnlyRecipes itself is pinned in HomeScreenSettings.test.tsx; its
-// result is the `ruleRows` capability both pickers and the page lock read.
-describe("rule-row gate (#1118, #989)", () => {
-  const offered = (ruleRows: boolean) =>
-    pickerGroups(recipeCatalogFixture, { ruleRows }).flatMap((group) =>
+// Both pickers share one list: the server lets every profile add rule rows
+// and refuses only new rows of an admin-only kind from a profile.
+describe("rule rows for every profile", () => {
+  it("offers rule rows and no admin-only kind", () => {
+    const offered = pickerGroups(recipeCatalogFixture).flatMap((group) =>
       group.cards.map((card) => card.type),
     );
-
-  it("drops exactly the catalog's admin-only kinds from a restricted profile's picker", () => {
-    const kept = new Set(offered(false));
-    const dropped = offered(true).filter((type) => !kept.has(type));
-    expect(dropped).toEqual(["custom_filter"]);
-    const adminOnly = new Set(
-      everyRecipe()
-        .filter((def) => def.admin_only)
-        .map((def) => def.type),
-    );
-    expect(dropped.every((type) => adminOnly.has(type))).toBe(true);
-    expect([...kept].some((type) => adminOnly.has(type))).toBe(false);
-  });
-
-  it("locks a restricted profile's page on every kind its picker drops", () => {
-    const kept = new Set(offered(false));
-    const kinds = ruleRowKinds(recipeCatalogFixture);
-    for (const type of offered(true).filter((type) => !kept.has(type))) {
-      expect(kinds.has(type)).toBe(true);
-    }
+    expect(offered).toContain("custom_filter");
+    const adminOnly = everyRecipe()
+      .filter((def) => def.admin_only)
+      .map((def) => def.type);
+    expect(adminOnly).toEqual(["admin_curated_list"]);
+    expect(offered.some((type) => adminOnly.includes(type))).toBe(false);
   });
 });

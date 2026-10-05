@@ -23,7 +23,6 @@ import { sectionKeys } from "@/hooks/queries/keys";
 import { invalidateSettingValueQueries } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { fetchRecipeCatalog } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { randomUUID } from "@/lib/uuid";
 import {
@@ -107,31 +106,17 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
     staleTime: 5 * 60 * 1000,
   });
   const recipeCatalog = recipeCatalogQuery.data;
-  const role = useOptionalAuth()?.user?.role;
-  const flagsQuery = useQuery({
-    queryKey: ["profile-section-flags"],
-    queryFn: () => v2("GET /api/v2/profile/sections/flags"),
-    staleTime: 5 * 60 * 1000,
-    enabled: role !== "admin",
-  });
-  const allowAdminOnlyRecipes =
-    role === "admin" || flagsQuery.data
-      ? canAddAdminOnlyRecipes(role, flagsQuery.data?.allow_profile_custom_sections)
-      : undefined;
+  // Only an admin adds new rows of an admin-only kind (Editor's picks).
+  const allowAdminOnlyRecipes = useOptionalAuth()?.user?.role === "admin";
 
   const targetReady = Boolean(
-    identityQuery.data &&
-    personalCollectionIds &&
-    profileIds &&
-    recipeCatalog &&
-    allowAdminOnlyRecipes !== undefined,
+    identityQuery.data && personalCollectionIds && profileIds && recipeCatalog,
   );
   const targetError =
     identityQuery.isError ||
     (refs.personalCollections && collectionsQuery.isError) ||
     (refs.profiles && profilesQuery.isError) ||
-    recipeCatalogQuery.isError ||
-    flagsQuery.isError;
+    recipeCatalogQuery.isError;
 
   const plan = useMemo<HomeLayoutImportPlan | null>(() => {
     if (
@@ -139,8 +124,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
       !identityQuery.data ||
       !personalCollectionIds ||
       !profileIds ||
-      !recipeCatalog ||
-      allowAdminOnlyRecipes === undefined
+      !recipeCatalog
     ) {
       return null;
     }

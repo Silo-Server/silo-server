@@ -116,7 +116,6 @@ type Dependencies struct {
 	WatchTogetherPicker             WatchTogetherPickerService
 	WatchTogetherCapability         WatchTogetherCapabilityService
 	WatchTogetherSuggestions        WatchTogetherSuggestionService
-	AdminSectionSettingsWrite       AdminSectionSettingsWriteService
 	AdminDashboardStats             AdminDashboardStatsService
 	AdminHardwareAcceleration       AdminHardwareAccelerationService
 	AdminDashboardLayout            AdminDashboardLayoutService
@@ -383,9 +382,6 @@ type Dependencies struct {
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
-	// SectionFlags reads the profile-facing sections settings
-	// (*handlers.SectionSettingsHandler).
-	SectionFlags SectionFlagService
 	// Requests serves media requests and the discovery surface
 	// (*requests.Service, the value *handlers.RequestsHandler wraps).
 	AdminSubtitleInspection            AdminSubtitleInspectionService
@@ -825,12 +821,6 @@ type ProfileSectionService interface {
 	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
 	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
-}
-
-// SectionFlagService is the slice of *handlers.SectionSettingsHandler
-// getProfileSectionFlags uses.
-type SectionFlagService interface {
-	AllowProfileCustomSections(ctx context.Context) bool
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile

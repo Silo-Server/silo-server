@@ -510,9 +510,7 @@ export function useAdminHomeRows(): AdminHomeRows {
     setHero: (id, hero) => quickAction(id, "hero", hero),
     capabilities: {
       draftPreview: previewAvailable,
-      ruleRows: true,
       libraryCopies: page.kind === "library",
-      profileRuleRowsSwitch: true,
     },
     create,
     copyToLibraries,

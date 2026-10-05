@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { SettingsSectionEntry } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 
 import {
   applySectionDeletion,
@@ -283,19 +282,7 @@ describe("HomeScreenSettings helpers", () => {
   });
 });
 
-describe("HomeScreenSettings custom section permission", () => {
-  it("offers admin-only recipes to admins and to profiles the server allows", () => {
-    expect(canAddAdminOnlyRecipes("admin", false)).toBe(true);
-    expect(canAddAdminOnlyRecipes("admin", undefined)).toBe(true);
-    expect(canAddAdminOnlyRecipes("user", true)).toBe(true);
-  });
-
-  it("withholds admin-only recipes from other profiles, including before the flag loads", () => {
-    expect(canAddAdminOnlyRecipes("user", false)).toBe(false);
-    expect(canAddAdminOnlyRecipes("user", undefined)).toBe(false);
-    expect(canAddAdminOnlyRecipes(undefined, undefined)).toBe(false);
-  });
-
+describe("HomeScreenSettings save refusals", () => {
   it("explains a permission denial with the server's stated cause", () => {
     const refused = new V2ProblemError("replaceProfileSectionOverrides", {
       type: "https://siloserver.org/docs/api/v2/problems/permission_denied",

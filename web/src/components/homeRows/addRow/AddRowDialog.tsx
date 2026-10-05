@@ -142,11 +142,7 @@ export function AddRowDialog({
     else headingRef.current?.focus();
   }, [step]);
 
-  const groups = useMemo(
-    () =>
-      searchPickerGroups(pickerGroups(catalog, { ruleRows: adapter.capabilities.ruleRows }), query),
-    [catalog, adapter.capabilities.ruleRows, query],
-  );
+  const groups = useMemo(() => searchPickerGroups(pickerGroups(catalog), query), [catalog, query]);
   const typesOnPage = useMemo(
     () => new Set(adapter.rows.map((row) => row.sectionType)),
     [adapter.rows],
@@ -471,7 +467,6 @@ export function AddRowDialog({
             onLibraryPage={adapter.page.kind === "library"}
             onVariant={(presetKey) => setDraft(withVariant(draft, def, presetKey))}
             libraryPages={copyPages}
-            ruleRowsNote={adapter.capabilities.profileRuleRowsSwitch}
             contentLocked={session?.kindLocked}
           />
         </div>

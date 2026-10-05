@@ -295,19 +295,15 @@ function cardFor(def: RecipeDefinition): PickerCard {
 
 /**
  * The picker's groups and cards: one card per row kind the catalog offers,
- * minus the kinds no longer offered for new rows. Without `ruleRows` the
- * admin-only kinds (rule rows) are left out, as the server would refuse them.
+ * minus the kinds no longer offered for new rows. Every surface offers rule
+ * rows; the one admin-only kind, Editor's picks, is no longer offered.
  */
-export function pickerGroups(
-  catalog: RecipeCatalogResponse | undefined,
-  { ruleRows }: { ruleRows: boolean },
-): PickerGroup[] {
+export function pickerGroups(catalog: RecipeCatalogResponse | undefined): PickerGroup[] {
   const defs = Object.values(catalog?.categories ?? {})
     .flatMap((list) => list ?? [])
     .filter(
       (def) =>
         !NOT_OFFERED_FOR_NEW_ROWS.has(def.type) &&
-        (ruleRows || !def.admin_only) &&
         (def.presets.length > 0 || def.type === "custom_filter"),
     );
   const rank = (type: string) => {

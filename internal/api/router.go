@@ -1867,8 +1867,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			sectionHandler.AccessGroups = accessGroupStore
 		}
 		if settingsRepo != nil {
-			sectionHandler.Settings = settingsRepo
-			sectionSettingsHandler = &handlers.SectionSettingsHandler{Settings: settingsRepo}
+			sectionSettingsHandler = &handlers.SectionSettingsHandler{}
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
@@ -2824,10 +2823,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
-	}
-	if sectionSettingsHandler != nil {
-		v2deps.SectionFlags = sectionSettingsHandler
-		v2deps.AdminSectionSettingsWrite = sectionSettingsHandler
 	}
 	if webhookSyncHandler != nil {
 		v2deps.WebhookSync = webhookSyncHandler

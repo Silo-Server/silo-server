@@ -140,7 +140,7 @@ type ProfileSectionSettingCollectionOutput struct {
 
 // ProfileSectionFlags is what this server lets profiles do to their pages.
 type ProfileSectionFlags struct {
-	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Whether non-admin profiles may build sections from admin-only recipes" example:"false"`
+	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Deprecated; always true. Profiles may always add rule rows (custom_filter). Kept for clients that still read it." example:"true" deprecated:"true"`
 }
 
 // ProfileSectionFlagsOutput is the getProfileSectionFlags response.
@@ -174,9 +174,9 @@ func registerProfileSections(reg *Registry) {
 
 	replace := humaOp(http.MethodPut, Prefix+"/profile/sections", "replaceProfileSectionOverrides", "profile_sections",
 		"Replace the acting profile's section overrides for one page.")
-	// v1 refuses a profile-built section of an admin-only recipe with 403
-	// custom_disabled unless the server allows it; the status is this
-	// operation's own, not one the class implies.
+	// A profile that is not an admin adding a new section of an admin-only
+	// recipe (Editor's picks) is refused with 403 custom_disabled, as on v1;
+	// the status is this operation's own, not one the class implies.
 	replace.Errors = []int{http.StatusForbidden}
 	Register(reg, Operation{
 		Operation:      replace,
@@ -205,8 +205,7 @@ func registerProfileSections(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profile/sections/flags", "getProfileSectionFlags", "profile_sections",
 			"Get what this server lets profiles do to their pages."),
-		Class:         ClassProfileScoped,
-		ServiceBacked: true,
+		Class: ClassProfileScoped,
 	}, reg.getProfileSectionFlags)
 }
 
@@ -349,13 +348,10 @@ func (reg *Registry) getProfileSectionSettings(ctx context.Context, in *SectionO
 	return &ProfileSectionSettingCollectionOutput{Body: ProfileSectionSettingCollection{Collection: NewCollection(items)}}, nil
 }
 
-// getProfileSectionFlags reads the same setting v1 GET /profile/sections/flags
-// does.
-func (reg *Registry) getProfileSectionFlags(ctx context.Context, _ *struct{}) (*ProfileSectionFlagsOutput, error) {
-	if reg.deps.SectionFlags == nil {
-		return nil, unavailable("section")
-	}
-	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: reg.deps.SectionFlags.AllowProfileCustomSections(ctx)}}, nil
+// getProfileSectionFlags answers what v1 GET /profile/sections/flags does:
+// profiles may always add rule rows, so the flag is always true.
+func (reg *Registry) getProfileSectionFlags(context.Context, *struct{}) (*ProfileSectionFlagsOutput, error) {
+	return &ProfileSectionFlagsOutput{Body: ProfileSectionFlags{AllowProfileCustomSections: true}}, nil
 }
 
 // sectionProblem maps the v1 decision onto problem types: a rejected recipe

@@ -797,10 +797,9 @@ func TestApplyDiversityFilterHandlesNilAndEmpty(t *testing.T) {
 	}
 }
 
-// TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled verifies that
-// a non-admin profile attempting to save a user-added admin_curated_list override
-// gets 403 when the allow_profile_custom_sections setting is disabled (the default).
-func TestSaveProfileOverridesRejectsAdminOnlyRecipeWhenSettingDisabled(t *testing.T) {
+// TestSaveProfileOverridesRejectsNewAdminOnlyRecipe verifies that a non-admin
+// profile adding a user-added admin_curated_list override gets 403.
+func TestSaveProfileOverridesRejectsNewAdminOnlyRecipe(t *testing.T) {
 	// StoreProvider is nil so we test the gate in isolation.
 	// The gate runs BEFORE the StoreProvider check, so a 403 is returned before
 	// the nil-StoreProvider 500 path is reached.

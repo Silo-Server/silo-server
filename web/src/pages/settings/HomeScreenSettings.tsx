@@ -13,10 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { DeleteRuleRowsDialog } from "@/components/homeRows/DeleteRuleRowsDialog";
 import { HideWatchedCard } from "@/components/homeRows/HideWatchedCard";
 import { HomeRowsPage, type SharedRowMenuItems } from "@/components/homeRows/HomeRowsPage";
-import { PageLockNote } from "@/components/homeRows/notes";
 import type { PageMoreMenuItem } from "@/components/calm/PageMoreMenu";
 import { RemoveRowDialog } from "@/components/homeRows/RemoveRowDialog";
 import { ResetProfileDialog } from "@/components/homeRows/ResetProfileDialog";
@@ -98,7 +96,6 @@ export default function HomeScreenSettings() {
   // A row added from a link, waiting for its save to land before going back.
   const landing = useRef<{ ids: string[]; onAdded: (newIds: string[]) => void } | null>(null);
   const [removing, setRemoving] = useState<HomeRow | null>(null);
-  const [deletingRuleRows, setDeletingRuleRows] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   // Set when a confirmed delete takes away the control that opened its dialog.
   const removedOpener = useRef(false);
@@ -126,9 +123,6 @@ export default function HomeScreenSettings() {
     [collectionOptions, profileId],
   );
 
-  const { pageLock } = adapter;
-  const lockedRows = pageLock ? adapter.rows.filter((row) => pageLock.rowIds.includes(row.id)) : [];
-
   function openRow(row: HomeRow) {
     if (!adapter.canEdit) return;
     void adapter
@@ -143,11 +137,8 @@ export default function HomeScreenSettings() {
     adapter,
     catalog: adapter.catalog,
     catalogFailed: adapter.catalogFailed,
-    // Its saved changes and any rule-row lock decide whether the page can change.
-    settled:
-      adapter.status === "ready" &&
-      !adapter.overridesLoading &&
-      adapter.pageLockCheck !== "loading",
+    // Its saved changes decide whether the page can change.
+    settled: adapter.status === "ready" && !adapter.overridesLoading,
     onAdd: (seed) => setRowDialog({ session: null, seed }),
     onEdit: openRow,
   });
@@ -177,14 +168,6 @@ export default function HomeScreenSettings() {
     setRemoving(null);
   }
 
-  function confirmDeleteRuleRows() {
-    if (!pageLock) return;
-    removedOpener.current = true;
-    focus.afterRemoval(pageLock.rowIds[0]!);
-    adapter.remove(pageLock.rowIds);
-    setDeletingRuleRows(false);
-  }
-
   function skipReturnFocus() {
     const skip = removedOpener.current;
     removedOpener.current = false;
@@ -192,17 +175,6 @@ export default function HomeScreenSettings() {
   }
 
   function rowMenuItems(row: HomeRow, shared: SharedRowMenuItems): ActionMenuItem[] {
-    if (pageLock?.rowIds.includes(row.id)) {
-      return [
-        {
-          key: "delete-rule-rows",
-          label: "Delete rule rows…",
-          icon: Trash2,
-          destructive: true,
-          onSelect: () => setDeletingRuleRows(true),
-        },
-      ];
-    }
     const busy = !adapter.canEdit;
     return [
       {
@@ -269,7 +241,7 @@ export default function HomeScreenSettings() {
       help: "Brings back hidden rows and original names, and removes rows you added.",
       icon: RotateCcw,
       group: true,
-      disabled: !adapter.canReset,
+      disabled: !adapter.canEdit,
       opensDialog: true,
       onSelect: () => setResetOpen(true),
     },
@@ -283,14 +255,7 @@ export default function HomeScreenSettings() {
   }
 
   let notice = null;
-  if (pageLock) {
-    notice = (
-      <PageLockNote
-        titles={lockedRows.map((row) => row.title)}
-        onDelete={() => setDeletingRuleRows(true)}
-      />
-    );
-  } else if (adapter.overridesFailed) {
+  if (adapter.overridesFailed) {
     notice = (
       <LoadFailedNote
         what="Your saved changes"
@@ -298,15 +263,7 @@ export default function HomeScreenSettings() {
         onRetry={() => void adapter.reload()}
       />
     );
-  } else if (adapter.pageLockCheck === "failed") {
-    notice = (
-      <LoadFailedNote
-        what="The kinds of rows"
-        retryLabel="Try again"
-        onRetry={adapter.reloadCatalog}
-      />
-    );
-  } else if (adapter.overridesLoading || adapter.pageLockCheck === "loading") {
+  } else if (adapter.overridesLoading) {
     notice = (
       <p role="status" className="text-muted-foreground text-sm">
         Loading your saved changes…
@@ -340,14 +297,6 @@ export default function HomeScreenSettings() {
         pageName={pageName}
         onConfirm={confirmRemove}
         onOpenChange={(open) => !open && setRemoving(null)}
-        skipReturnFocus={skipReturnFocus}
-      />
-      <DeleteRuleRowsDialog
-        open={deletingRuleRows && pageLock !== null}
-        titles={lockedRows.map((row) => row.title)}
-        pageName={pageName}
-        onConfirm={confirmDeleteRuleRows}
-        onOpenChange={setDeletingRuleRows}
         skipReturnFocus={skipReturnFocus}
       />
       <ResetProfileDialog

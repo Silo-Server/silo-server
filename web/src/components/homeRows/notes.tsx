@@ -51,26 +51,3 @@ export function ReorderHint() {
     </p>
   );
 }
-
-/**
- * Settings > Home Screen while rule rows are off and the page holds this
- * profile's rule rows: the server refuses every change to the page until
- * they are deleted, so that is the one thing offered.
- */
-export function PageLockNote({ titles, onDelete }: { titles: string[]; onDelete: () => void }) {
-  return (
-    <div
-      role="status"
-      className="border-warning/40 bg-warning/10 flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-sm"
-    >
-      <CircleAlert aria-hidden className="text-warning size-[18px] shrink-0" />
-      <p className="min-w-0 flex-1">
-        Rule rows are turned off on this server, so this page can&apos;t change while it has your
-        rule rows ({titles.join(", ")}).
-      </p>
-      <Button size="sm" variant="outline" onClick={onDelete}>
-        Delete rule rows…
-      </Button>
-    </div>
-  );
-}

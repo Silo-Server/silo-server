@@ -9,7 +9,7 @@
           "presets": [],
           "avoid_duplicates": false,
           "supports_rotation": false,
-          "admin_only": true
+          "admin_only": false
         }
       ]
     },

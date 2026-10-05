@@ -1,5 +1,4 @@
 import { useId } from "react";
-import { Info } from "lucide-react";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -129,7 +128,6 @@ export function RowForm({
   onVariant,
   collectionChoices,
   libraryPages,
-  ruleRowsNote = false,
   contentLocked = false,
 }: {
   draft: RowDraft;
@@ -148,8 +146,6 @@ export function RowForm({
   collectionChoices: CollectionChoices;
   /** Add row on a library page, for a kind that can be copied: the pages it may also go to. */
   libraryPages?: { pages: LibraryPage[]; currentId: number };
-  /** On a rule row, end the form by saying which switch lets profiles add rule rows too. */
-  ruleRowsNote?: boolean;
   /**
    * What the row shows can't change (a server row on Settings > Home Screen):
    * no collection picker, rules or title list, and no rule order.
@@ -258,15 +254,6 @@ export function RowForm({
         ) : null}
         <ParamFields {...fieldProps} slot="more" />
       </MoreOptions>
-      {rules && ruleRowsNote ? (
-        <p className="bg-accent/70 text-foreground/75 flex items-start gap-2.5 rounded-xl px-3.5 py-[11px] text-[13px] leading-normal">
-          <Info aria-hidden className="text-muted-foreground mt-0.5 size-[15px] shrink-0" />
-          <span>
-            Only admins can add rule rows unless{" "}
-            <strong className="font-semibold">Let profiles add rule rows</strong> is on in More.
-          </span>
-        </p>
-      ) : null}
     </div>
   );
 }
