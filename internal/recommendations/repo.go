@@ -1438,9 +1438,10 @@ func (r *Repo) MarkAccountsStale(ctx context.Context, userIDs []int) (int64, err
 }
 
 // MarkProfilesStaleForItems marks stale every taste profile whose progress,
-// history, rating, favorite or watchlist entry points at one of itemIDs or at
-// an episode of a series among them. Catalog merges and splits call it after
-// they move user state onto itemIDs. It returns how many profiles it marked.
+// history, ebook reading progress, rating, favorite or watchlist entry points
+// at one of itemIDs or at an episode of a series among them. Catalog merges
+// and splits call it after they move user state onto itemIDs. It returns how
+// many profiles it marked.
 func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error) {
 	if len(itemIDs) == 0 {
 		return 0, nil
@@ -1455,6 +1456,8 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 		WHERE EXISTS (SELECT 1 FROM user_watch_progress s JOIN ids ON ids.id = s.media_item_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		   OR EXISTS (SELECT 1 FROM user_watch_history s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM ebook_reader_progress s JOIN ids ON ids.id = s.content_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
 		   OR EXISTS (SELECT 1 FROM user_ratings s JOIN ids ON ids.id = s.media_item_id
 		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
