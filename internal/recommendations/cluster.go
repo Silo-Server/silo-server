@@ -345,6 +345,9 @@ func clusterAssignments(items []clusterItem) []int {
 		if minK == maxK {
 			return compactAssignments(assignments)
 		}
+		// Only profiles under 200 titles get here: from 200,
+		// determinClusterCount is already kmeansMaxClusters, so minK == maxK
+		// above. The n x n matrix stays under 200 x 200.
 		if distances == nil {
 			distances = cosineDistances(items)
 		}
