@@ -556,12 +556,13 @@ func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
 		}
 	}
 
-	build(1)
-	if cached(mainKey) || cached(becauseKey) {
-		t.Fatal("a main or Because You Watched row survived an empty rebuild")
+	// The main row is composed from the clusters, so it fails with them.
+	build(2)
+	if cached(becauseKey) {
+		t.Fatal("the Because You Watched row survived an empty rebuild")
 	}
-	if !cached(clusterKey) {
-		t.Fatal("the cluster row was dropped although its build failed")
+	if !cached(mainKey) || !cached(clusterKey) {
+		t.Fatal("the main or cluster row was dropped although its build failed")
 	}
 	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeSimilarUsersLiked, ""); err != nil || items == nil || len(items) != 0 {
 		t.Fatalf("similar users row = %v, %v; want it cached empty", items, err)
@@ -570,13 +571,17 @@ func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
 		t.Fatal("another profile's row was dropped")
 	}
 
-	// Once the cluster can be read and comes out empty, its row goes too.
 	if err := repo.UpsertTasteClusters(ctx, userID, profile, []TasteCluster{{ClusterIdx: 0, Embedding: taste, Label: "Test", MemberCount: 1, TotalWeight: 1}}); err != nil {
 		t.Fatal(err)
 	}
+	// Once the clusters can be read, the empty main row goes, and the
+	// cluster row is cached empty, so reads know it was built.
 	build(0)
-	if cached(clusterKey) {
-		t.Fatal("the cluster row survived an empty rebuild")
+	if cached(mainKey) {
+		t.Fatal("the main row survived an empty rebuild")
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeForYouClusterPrefix+"0", ""); err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("cluster row = %v, %v; want it cached empty", items, err)
 	}
 }
 

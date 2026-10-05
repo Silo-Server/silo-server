@@ -219,8 +219,9 @@ Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
 the new run's expiry; a global row whose rebuild finds nothing, and a genre row
 whose genre left the menu, is deleted. A personal row whose build fails keeps
-its cached version and the refresh is retried; a main, cluster or Because You
-Watched row whose rebuild finds nothing is deleted.
+its cached version and the refresh is retried; a main or Because You Watched
+row whose rebuild finds nothing is deleted, and a cluster row that rebuilds
+empty is cached empty (see Cluster rows).
 
 ## Access
 

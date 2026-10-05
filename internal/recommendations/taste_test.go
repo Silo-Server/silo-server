@@ -439,8 +439,8 @@ func TestRefreshWritesNoTasteRowForADeletedProfilePostgres(t *testing.T) {
 	}
 
 	refresh(live)
-	if meta, err := repo.GetTasteProfileMeta(ctx, userID, live); err != nil || meta == nil || len(meta.SignalCounts) != 0 {
-		t.Fatalf("live profile meta = %+v, %v; want an empty row", meta, err)
+	if meta, err := repo.GetTasteProfileMeta(ctx, userID, live); err != nil || meta == nil || len(meta.SignalCounts) != 1 || meta.SignalCounts[signalCountPositiveTitles] != 0 {
+		t.Fatalf("live profile meta = %+v, %v; want a row with no positive titles", meta, err)
 	}
 }
 
