@@ -179,7 +179,7 @@ func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
 	h := newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{UserID: 7, ProfileID: "kid"})
 	rec := httptest.NewRecorder()
 	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
-	if rec.Code != http.StatusOK || reader.gotLimit != 2*recommendations.CacheCandidateLimit {
-		t.Fatalf("status %d, read limit %d; want 200 and twice a cached row's length", rec.Code, reader.gotLimit)
+	if rec.Code != http.StatusOK || reader.gotLimit != recommendations.MaxRowReadLimit {
+		t.Fatalf("status %d, read limit %d; want 200 and the most a row read returns", rec.Code, reader.gotLimit)
 	}
 }
