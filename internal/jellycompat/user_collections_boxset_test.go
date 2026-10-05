@@ -683,7 +683,7 @@ func TestHandleItems_PersonalBoxSetMediaTypeFilters(t *testing.T) {
 			t.Fatal(err)
 		}
 		if item.kind == "series" {
-			if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, created_at) VALUES ($1, $2, 1, 1, 'Episode', NOW() - INTERVAL '1 day')`, episodeID, id); err != nil {
+			if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview, created_at) VALUES ($1, $2, 1, 1, 'Episode', '', NOW() - INTERVAL '1 day')`, episodeID, id); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW() - INTERVAL '1 day')`, episodeID, libraryID); err != nil {
@@ -1298,7 +1298,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	// One episode of the series lives in each library.
 	for i, library := range []int{ownerLib, otherLib} {
 		episode := fmt.Sprintf("boxset-owner-episode-%s-%d", suffix, i)
-		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, $3, $1)`, episode, series, i+1); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title, overview) VALUES ($1, $2, 1, $3, $1, '')`, episode, series, i+1); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW())`, episode, library); err != nil {
@@ -1334,6 +1334,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	owners := fixedOwnerAccess{libraries: []int{ownerLib}}
 	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: ownerLib, Name: "A", Type: "movies"}, {ID: otherLib, Name: "B", Type: "movies"}}, nil)
 	h.userCollections = usercollections.NewStore(pool)
+	h.browseRepo = catalog.NewBrowseRepository(pool)
 	h.episodeRepo = catalog.NewEpisodeRepository(pool)
 	h.collectionOwners = owners
 	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
