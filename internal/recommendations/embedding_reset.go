@@ -170,6 +170,11 @@ func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, so
 	if err == nil && sourceDimensions > 0 {
 		err = lock.Validate(baseURL, model, sourceDimensions)
 	}
+	// Stored vectors of another width conflict whatever the model returns,
+	// so this needs no probe of the provider.
+	if err == nil && lock.StorageDimensions != 0 && lock.StorageDimensions != CanonicalEmbeddingDimensions {
+		return fmt.Sprintf("Embeddings were stored at %d dimensions; this server stores %d. Reset embeddings.", lock.StorageDimensions, CanonicalEmbeddingDimensions)
+	}
 	if err != nil {
 		switch {
 		case lock.BaseURL != "" && lock.BaseURL != baseURL:
