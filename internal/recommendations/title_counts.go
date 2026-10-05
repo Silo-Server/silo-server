@@ -22,7 +22,7 @@ const titleCountTTL = 10 * time.Minute
 const titleCountCacheMax = 1024
 
 // titleCountTimeout bounds a shared count, which runs detached from the
-// request that started it so the others waiting on it are not cancelled with
+// request that started it so the others waiting on it are not canceled with
 // that request.
 const titleCountTimeout = 30 * time.Second
 
@@ -76,7 +76,11 @@ func (c *titleCountCache) get(ctx context.Context, repo *Repo, filter catalog.Ac
 	if err != nil {
 		return nil, err
 	}
-	return counted.([]int64), nil
+	counts, ok := counted.([]int64)
+	if !ok {
+		return nil, fmt.Errorf("title counts: unexpected %T", counted)
+	}
+	return counts, nil
 }
 
 // titleCountKey identifies the titles filter admits: the fields
