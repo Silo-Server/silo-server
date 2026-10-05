@@ -12409,7 +12409,7 @@
             "type": "integer"
           },
           "taste_profiles": {
-            "description": "Taste profiles deleted.",
+            "description": "Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.",
             "format": "int64",
             "type": "integer"
           }

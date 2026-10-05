@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -43,6 +44,13 @@ type fakeEmbeddingStore struct {
 	pages     []string
 	stored    map[string]storedTestEmbedding
 	upsertErr error
+	// marked records each MarkProfilesStaleForItems call's items.
+	marked [][]string
+}
+
+func (f *fakeEmbeddingStore) MarkProfilesStaleForItems(_ context.Context, itemIDs []string) (int64, error) {
+	f.marked = append(f.marked, slices.Clone(itemIDs))
+	return int64(len(itemIDs)), nil
 }
 
 func newFakeEmbeddingStore(missing ...string) *fakeEmbeddingStore {
@@ -233,6 +241,25 @@ func TestBackfillWritesTheLockFromTheFirstStorableVector(t *testing.T) {
 	}
 	if store.lockWrites != 1 || store.lock.SourceDimensions != 768 || store.lock.Model != backfillTestModel || b.counts.Embedded != 25 || calls != 3 {
 		t.Fatalf("lock=%+v writes=%d counts=%+v calls=%d", store.lock, store.lockWrites, b.counts, calls)
+	}
+}
+
+// The profiles with signals on stored items are marked stale, in batches of
+// signalsStaleBatch items and once more for the rest when the run ends: a
+// refresh that ran before the items had vectors left them out.
+func TestBackfillMarksProfilesStaleForStoredItems(t *testing.T) {
+	calls := 0
+	store := newFakeEmbeddingStore(testIDs("item-", 2*signalsStaleBatch+200)...)
+	b := newTestBackfill(store, vectorsOf(768, &calls), nil)
+	if err := b.run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	marked := 0
+	for _, ids := range store.marked {
+		marked += len(ids)
+	}
+	if len(store.marked) != 3 || marked != b.counts.Embedded || marked != 2*signalsStaleBatch+200 {
+		t.Fatalf("marks = %d calls for %d items, want 3 calls for every one of the %d stored", len(store.marked), marked, b.counts.Embedded)
 	}
 }
 

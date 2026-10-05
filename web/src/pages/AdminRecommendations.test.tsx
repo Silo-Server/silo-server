@@ -295,7 +295,7 @@ describe("AdminRecommendations", () => {
     await click(findButton(dialog as HTMLElement, "Reset embeddings"));
     expect(mocks.resetMutateAsync).toHaveBeenCalledOnce();
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
-      expect.stringContaining("deleted 1,200 embeddings and 3 taste profiles"),
+      expect.stringContaining("deleted 1,200 embeddings and cleared 3 taste profiles"),
     );
     expect(mocks.toastError).not.toHaveBeenCalled();
   });

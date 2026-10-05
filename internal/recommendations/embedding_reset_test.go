@@ -314,10 +314,17 @@ func TestResetEmbeddingsPostgres(t *testing.T) {
 	if lock, err := repo.GetEmbeddingLock(ctx); err != nil || lock != nil {
 		t.Fatalf("lock after reset = %+v, %v", lock, err)
 	}
-	for _, table := range []string{"media_item_embeddings", "user_taste_profiles", "user_taste_clusters"} {
+	for _, table := range []string{"media_item_embeddings", "user_taste_clusters"} {
 		if n := countRows(t, repo.pool, `SELECT COUNT(*) FROM `+table); n != 0 {
 			t.Fatalf("%s has %d rows after reset", table, n)
 		}
+	}
+	// Taste rows stay, without vectors, for the embedding job to mark stale.
+	if n := countRows(t, repo.pool, `SELECT COUNT(*) FROM user_taste_profiles WHERE embedding IS NOT NULL`); n != 0 {
+		t.Fatalf("%d taste profiles keep a vector after reset", n)
+	}
+	if n := countRows(t, repo.pool, `SELECT COUNT(*) FROM user_taste_profiles WHERE user_id = $1`, f.userID); n == 0 {
+		t.Fatal("reset deleted the profile's taste row; the embedding job could not mark it stale")
 	}
 	if n := countRows(t, repo.pool, `SELECT COUNT(*) FROM recommendation_cache WHERE user_id IS NOT NULL`); n != 0 {
 		t.Fatalf("%d per-profile cache rows after reset", n)

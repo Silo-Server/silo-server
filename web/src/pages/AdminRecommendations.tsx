@@ -388,9 +388,9 @@ function RecEmbeddingResetCard({
         <div className="space-y-1">
           <h2 className="text-sm font-semibold">Reset Embeddings</h2>
           <p className="text-muted-foreground text-sm">
-            Deletes the embedding lock, every item embedding, taste profiles and personal
-            recommendation rows, so you can switch embedding models. Run the embedding job
-            afterwards to rebuild them.
+            Deletes the embedding lock, every item embedding and personal recommendation rows, and
+            clears taste profiles, so you can switch embedding models. Run the embedding job
+            afterwards; taste profiles rebuild as their titles are embedded again.
           </p>
         </div>
         <Button
@@ -412,7 +412,7 @@ function RecEmbeddingResetCard({
         open={confirming}
         onOpenChange={setConfirming}
         title="Reset embeddings?"
-        description="Every item embedding, taste profile and personal recommendation row is deleted. Personal recommendations and semantic search stay unavailable until the embedding job has run again."
+        description="Every item embedding and personal recommendation row is deleted, and taste profiles are cleared. Personal recommendations and semantic search stay unavailable until the embedding job has run again."
         confirmLabel="Reset embeddings"
         variant="destructive"
         isPending={isPending}
@@ -534,7 +534,7 @@ export default function AdminRecommendations() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
       toast.success(
-        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString()} embeddings and ${deleted.taste_profiles.toLocaleString()} taste profiles.`,
+        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString()} embeddings and cleared ${deleted.taste_profiles.toLocaleString()} taste profiles.`,
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to reset embeddings");

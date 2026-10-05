@@ -60,8 +60,8 @@ storage dimensions) in `server_settings`. Every later vector must match it.
   so an unusable model never pins the lock.
 - Vectors are zero-padded to 3072 for storage; cosine is unaffected.
 - Changing the model or base URL requires the admin embeddings reset, which
-  deletes the lock, embeddings, taste profiles, clusters and per-profile
-  cached rows in one transaction while holding the embedding, taste and cache
+  deletes the lock, embeddings, clusters and per-profile cached rows, and
+  clears every taste vector, in one transaction while holding the embedding, taste and cache
   job claims and the stale sweep lock. Its transaction also takes the
   embedding writers lock (`EmbeddingWritersLock`) exclusively, which a catalog
   import carrying embeddings holds shared for its transaction, so the reset
@@ -121,9 +121,13 @@ database time it started, stores the taste profile with that time as
 made on the same server while the refresh runs makes it run once more as soon
 as it ends, so a burst of changes is applied within seconds. A mark set during
 the refresh from another server survives, and a failed refresh marks the
-profile stale again, so the stale sweep retries both. Marking a profile with no
-taste row yet creates a vectorless row updated at the epoch, so a change during
-its first build is not lost. A refresh that finds the profile's lock held by
+profile stale again, so the stale sweep retries both. The scheduled taste and
+cache jobs take the same lock per profile and skip a profile another server is
+refreshing. Storing embeddings marks stale the profiles with signals on those
+titles, so a profile refreshed before its titles had vectors, or cleared by a
+reset, is rebuilt by the sweep. Marking a profile with no taste row yet creates
+a vectorless row updated at the epoch, so a change during its first build is
+not lost. A refresh that finds the profile's lock held by
 another server marks the profile stale and stops, so two refreshes never
 finish out of order.
 
