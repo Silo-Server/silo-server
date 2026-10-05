@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -108,6 +109,10 @@ func (h *AccessGroupHandler) groupMembers(ctx context.Context, id int64) []int {
 	if h.RecWorker == nil || !ok {
 		return nil
 	}
+	// The update has committed: the request ending must not leave its
+	// members' rows built under the old scope.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	members, err := lister.MemberIDs(ctx, id)
 	if err != nil {
 		slog.WarnContext(ctx, "listing access group members for a recommendations rebuild failed", "component", "api", "access_group_id", id, "error", err)
