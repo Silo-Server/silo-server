@@ -34,6 +34,10 @@ type CollectionHandler struct {
 	// ItemPosters signs catalog item posters for smart previews;
 	// ArtworkResolver signs only stored collection artwork keys.
 	ItemPosters itemPosterSigner
+	// Collages serves and builds the collage a collection without an
+	// uploaded or imported poster shows; nil when artwork storage is not
+	// configured.
+	Collages *catalog.PersonalCollectionCollages
 }
 
 // itemPosterSigner resolves item poster paths to delivery URLs in one batch;
@@ -113,8 +117,12 @@ type PersonalCollectionView struct {
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterURL                  string          `json:"poster_url,omitempty"`
 	PosterThumbhash            string          `json:"poster_thumbhash,omitempty"`
-	CreatedAt                  string          `json:"created_at"`
-	UpdatedAt                  string          `json:"updated_at"`
+	// PosterIsCollage reports that PosterURL is the collection's collage for
+	// the reading profile rather than an uploaded or imported poster. Only
+	// /api/v2 reads show collages and carry it.
+	PosterIsCollage bool   `json:"-"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type PersonalCollectionListView struct {
@@ -136,6 +144,10 @@ type CollectionCapabilitiesView struct {
 	// distinguish a server that also stores the personal-list kinds
 	// ('watchlist', 'favorites') from one that rejects them.
 	SortPreferenceKinds []string `json:"sort_preference_kinds"`
+	// PosterCollages reports that /api/v2 personal collection reads show a
+	// collage when a collection has no uploaded or imported poster. The
+	// frozen /api/v1 body does not carry it.
+	PosterCollages bool `json:"-"`
 }
 
 type CollectionDisplayFilterPresetsView struct {

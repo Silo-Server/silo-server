@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	neturl "net/url"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -26,11 +25,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -62,6 +59,9 @@ type LibraryCollectionHandler struct {
 	// CollectionOwners resolves the owner's access for another profile's
 	// shared collection opted into the library tab.
 	CollectionOwners catalog.PersonalCollectionAccess
+	// PersonalCollages serves the collages of the personal collections opted
+	// into a library tab; nil when artwork storage is not configured.
+	PersonalCollages *catalog.PersonalCollectionCollages
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -178,82 +178,19 @@ func (h *LibraryCollectionHandler) storeBundledTemplatePoster(
 	return true, storedPath, thumbhash, nil
 }
 
-// ComposeCollectionCollage implements catalog.CollageGenerator. It fetches the
-// source posters, composes them, and stores the result in the collection's
-// collage directory with key as its revision, so every node that builds the
-// same collage writes the same objects.
+// ComposeCollectionCollage implements catalog.CollageGenerator for server
+// collections; see collectionCollageComposer.
 func (h *LibraryCollectionHandler) ComposeCollectionCollage(ctx context.Context, collectionID, key string, sources []string) (string, string, error) {
-	if len(sources) == 0 {
-		return "", "", collage.ErrNotEnoughImages
-	}
-
-	slog.InfoContext(ctx, "collage: generating poster", "component", "api", "collection_id", collectionID, "item_poster_count", len(sources))
-
-	// Resolve poster paths to fetchable URLs. The collage is stored under the
-	// key of all its sources, so a source that doesn't resolve or download
-	// fails the build rather than being left out. A later read retries it.
-	resolved := h.detailSvc.PresignImageURLs(ctx, sources, "poster", "small")
-	imageData := make([][]byte, 0, len(sources))
-	for _, path := range sources {
-		url := resolved[path]
-		if url == "" {
-			return "", "", fmt.Errorf("collage source %q did not resolve", path)
-		}
-		data, err := h.fetchImageURL(ctx, url)
-		if err != nil {
-			// A transport error names the presigned URL; keep it out of logs.
-			var urlErr *neturl.Error
-			if errors.As(err, &urlErr) {
-				err = urlErr.Err
-			}
-			return "", "", fmt.Errorf("fetching collage source %q: %w", path, err)
-		}
-		imageData = append(imageData, data)
-	}
-
-	// Compose the collage.
-	composited, err := collage.ComposePoster(imageData)
-	if err != nil {
-		return "", "", err
-	}
-
-	// Process through the standard image pipeline (generates WebP variants + thumbhash).
-	s3Path, thumbhash, err := putCollectionImageVariants(ctx, h.ArtworkStore, collectionCollageDir(adminCollectionImagePrefix, collectionID), key, collectionPosterWidths, composited)
-	if err != nil {
-		return "", "", fmt.Errorf("processing collage image: %w", err)
-	}
-	if want := h.CollectionCollagePath(collectionID, key); s3Path != want {
-		return "", "", fmt.Errorf("collage stored at %q, want %q", s3Path, want)
-	}
-
-	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
-	return s3Path, thumbhash, nil
+	return h.collageComposer().ComposeCollectionCollage(ctx, collectionID, key, sources)
 }
 
 // CollectionCollagePath implements catalog.CollageGenerator.
 func (h *LibraryCollectionHandler) CollectionCollagePath(collectionID, key string) string {
-	return artworkkey.Original(collectionCollageDir(adminCollectionImagePrefix, collectionID), key, ".webp")
+	return h.collageComposer().CollectionCollagePath(collectionID, key)
 }
 
-// fetchImageURL downloads an image from a resolved URL.
-func (h *LibraryCollectionHandler) fetchImageURL(ctx context.Context, imageURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	client := h.httpClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image fetch returned status %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, collectionImageMaxBytes))
+func (h *LibraryCollectionHandler) collageComposer() collectionCollageComposer {
+	return collectionCollageComposer{prefix: adminCollectionImagePrefix, store: h.ArtworkStore, posters: h.detailSvc, httpClient: h.httpClient}
 }
 
 type libraryCollectionResponse struct {
@@ -287,6 +224,9 @@ type libraryCollectionResponse struct {
 	ItemCount         int             `json:"item_count"`
 	CreatedAt         string          `json:"created_at"`
 	UpdatedAt         string          `json:"updated_at"`
+	// PosterIsCollage reports that PosterURL is the viewer's collage of the
+	// collection's members (withViewerPosters). Only /api/v2 carries it.
+	PosterIsCollage bool `json:"-"`
 }
 
 type libraryCollectionGroupResponse struct {
@@ -2827,6 +2767,7 @@ func (h *LibraryCollectionHandler) libraryCollectionResponseOf(ctx context.Conte
 		PosterURL:         h.presignGPURLCtx(ctx, collection.PosterURL),
 		BackdropURL:       h.presignGPURLCtx(ctx, collection.BackdropURL),
 		PosterThumbhash:   collection.PosterThumbhash,
+		PosterIsCollage:   collection.PosterAutoGenerated && collection.PosterURL != "",
 		BackdropThumbhash: collection.BackdropThumbhash,
 		SourceURL:         collection.SourceURL,
 		QueryDefinition:   defaultJSON(collection.QueryDefinition),

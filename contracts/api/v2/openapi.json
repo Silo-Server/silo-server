@@ -3296,6 +3296,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -3352,6 +3359,7 @@
           "featured",
           "poster_url",
           "backdrop_url",
+          "poster_is_collage",
           "source_url",
           "query_definition",
           "sort_config",
@@ -22708,6 +22716,13 @@
             ],
             "type": "boolean"
           },
+          "poster_collages": {
+            "description": "A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "preview_posters": {
             "description": "previewCollection items carry poster_url when the title has a poster",
             "examples": [
@@ -22774,6 +22789,7 @@
           "sync_schedule_editable",
           "contains_item",
           "preview_posters",
+          "poster_collages",
           "revision",
           "state",
           "allowed"
@@ -34808,6 +34824,13 @@
               "null"
             ]
           },
+          "poster_is_collage": {
+            "description": "poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "examples": [
               ""
@@ -34908,6 +34931,7 @@
           "include_in_server_collections",
           "poster_url",
           "poster_thumbhash",
+          "poster_is_collage",
           "created_at",
           "updated_at"
         ],

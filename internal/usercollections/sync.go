@@ -39,6 +39,10 @@ type Service struct {
 	TMDBLists          catalog.TMDBListFetcher
 	TraktCollections   catalog.TraktCollectionFetcher
 	TraktTokenResolver catalog.TraktAccessTokenResolver
+
+	// Collages builds the collage of a synced collection without an uploaded
+	// or imported poster; nil when artwork storage is not configured.
+	Collages *catalog.PersonalCollectionCollages
 }
 
 // NewService builds the sync service. owners resolves each collection
@@ -131,7 +135,22 @@ func (s *Service) RunSync(ctx context.Context, userID int, store userstore.UserS
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
+	result, updated, err := s.applyResult(ctx, store, collection, startedAt, members, len(contentIDs), scanned, unmatched)
+	if err == nil {
+		s.refreshCollage(userID, store, updated, owner)
+	}
+	return result, updated, err
+}
+
+// refreshCollage builds, in the background, the collage a synced collection
+// shows its owner when it has no uploaded or imported poster. A sync has no
+// request, so the owner's content access stands in for the owner's own read;
+// other viewers' collages are built when they first read the collection.
+func (s *Service) refreshCollage(userID int, store userstore.UserStore, c *userstore.Collection, owner catalog.AccessFilter) {
+	if s.Collages == nil || c == nil || strings.TrimSpace(c.PosterURL) != "" || !userstore.HasCatalogSQLState(store) {
+		return
+	}
+	s.Collages.Refresh(userID, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition}, owner)
 }
 
 // ownerFilter resolves the access of the collection's owner profile, which

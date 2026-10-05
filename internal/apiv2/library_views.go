@@ -376,7 +376,8 @@ func (reg *Registry) getLibraryCollections(ctx context.Context, in *LibraryViewI
 	if p != nil {
 		return nil, p
 	}
-	view, err := svc.LibraryCollectionsTab(ctx, id, userID, profileID)
+	// Marked as /api/v2, personal collections show their collages.
+	view, err := svc.LibraryCollectionsTab(handlers.WithNativeAPIV2(ctx), id, userID, profileID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -422,7 +423,8 @@ func (reg *Registry) listLibraryUserCollections(ctx context.Context, in *Library
 	if p != nil {
 		return nil, p
 	}
-	views, err := svc.LibraryUserCollections(ctx, id, userID, profileID)
+	// Marked as /api/v2, personal collections show their collages.
+	views, err := svc.LibraryUserCollections(handlers.WithNativeAPIV2(ctx), id, userID, profileID)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

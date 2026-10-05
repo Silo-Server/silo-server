@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -236,24 +237,30 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 
 // withVisibleItemCounts sets each personal collection's item_count to the
 // members the acting profile can see, as the personal collection routes do:
-// for another profile's collection, only those its owner can access too. A
-// collection whose owner cannot be resolved is left out of the result.
+// for another profile's collection, only those its owner can access too. On
+// /api/v2 a collection without an uploaded or imported poster takes its
+// collage for that profile, once built. A collection whose owner cannot be
+// resolved is left out of the result.
 func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, userID int, profileID string, collections []usercollections.ServerVisibleCollection) []usercollections.ServerVisibleCollection {
 	sources := make([]ownedCollectionDefinition, 0, len(collections))
 	for _, c := range collections {
 		sources = append(sources, ownedCollectionDefinition{
 			PersonalCollectionDefinition: catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition},
 			CreatorProfileID:             c.CreatorProfileID,
+			WantsCollage:                 strings.TrimSpace(c.PosterPath) == "",
 		})
 	}
-	counts, unavailable := ownerScopedCollectionCounts(ctx, h.Executor, h.CollectionOwners, userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	out := collections[:0]
 	for _, c := range collections {
-		if unavailable[c.ID] {
+		if reads.unavailable[c.ID] {
 			continue
 		}
-		if n, ok := counts[c.ID]; ok {
+		if n, ok := reads.counts[c.ID]; ok {
 			c.ItemCount = n
+		}
+		if collage, ok := reads.posters[c.ID]; ok {
+			c.PosterPath, c.PosterThumbhash = collage.Path, collage.Thumbhash
 		}
 		out = append(out, c)
 	}

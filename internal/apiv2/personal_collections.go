@@ -47,6 +47,7 @@ type PersonalCollection struct {
 	IncludeInServerCollections bool            `json:"include_in_server_collections" example:"false"`
 	PosterURL                  string          `json:"poster_url" doc:"Presigned, short-lived; empty when there is no poster" example:""`
 	PosterThumbhash            string          `json:"poster_thumbhash" example:""`
+	PosterIsCollage            bool            `json:"poster_is_collage" doc:"poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url. See getCollectionCapabilities poster_collages" example:"false"`
 	CreatedAt                  Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt                  Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
 	Contains                   *bool           `json:"contains,omitempty" doc:"Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access" example:"true"`
@@ -145,6 +146,7 @@ type CollectionCapabilities struct {
 	SyncScheduleEditable      bool                           `json:"sync_schedule_editable" doc:"updateCollection accepts sync_schedule on a synced list; false when imports is false" example:"true"`
 	ContainsItem              bool                           `json:"contains_item" doc:"listCollections accepts contains_item and marks the acting profile's own manual collections with contains" example:"true"`
 	PreviewPosters            bool                           `json:"preview_posters" doc:"previewCollection items carry poster_url when the title has a poster" example:"true"`
+	PosterCollages            bool                           `json:"poster_collages" doc:"A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork" example:"true"`
 }
 
 // importableCollectionSources are the import sources a new collection can be
@@ -526,7 +528,7 @@ func personalCollectionOf(v handlers.PersonalCollectionView) PersonalCollection 
 		NextSyncAt: instantOfStamp(v.NextSyncAt), LastSyncAt: instantOfStamp(v.LastSyncAt),
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage,
 		ItemCount: v.ItemCount, IncludeInServerCollections: v.IncludeInServerCollections,
-		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash,
+		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, PosterIsCollage: v.PosterIsCollage,
 	}
 	if v.GroupID != nil {
 		out.GroupID = new(ID(*v.GroupID))
@@ -583,7 +585,8 @@ func (reg *Registry) listCollections(ctx context.Context, in *PersonalCollection
 		return nil, p
 	}
 	profileID := profileFrom(ctx)
-	view, err := svc.ListPersonalCollections(ctx, userID, profileID)
+	// Marked as /api/v2, the read shows collections' collages (#1618).
+	view, err := svc.ListPersonalCollections(handlers.WithNativeAPIV2(ctx), userID, profileID)
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
@@ -648,6 +651,7 @@ func (reg *Registry) getCollectionCapabilities(ctx context.Context, _ *Capabilit
 		SyncScheduleEditable:      features.Imports,
 		ContainsItem:              true,
 		PreviewPosters:            true,
+		PosterCollages:            v.PosterCollages && features.Artwork,
 	}}, nil
 }
 

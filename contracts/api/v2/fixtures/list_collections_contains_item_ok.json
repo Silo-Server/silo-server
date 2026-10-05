@@ -23,6 +23,7 @@
       "include_in_server_collections": false,
       "poster_url": "",
       "poster_thumbhash": "",
+      "poster_is_collage": false,
       "created_at": "2026-01-02T03:04:05.678Z",
       "updated_at": "2026-01-02T03:04:05.678Z",
       "contains": true
@@ -50,6 +51,7 @@
       "include_in_server_collections": false,
       "poster_url": "",
       "poster_thumbhash": "",
+      "poster_is_collage": false,
       "created_at": "2026-01-02T03:04:05.678Z",
       "updated_at": "2026-01-02T03:04:05.678Z"
     }

@@ -31,6 +31,7 @@ type AdminCollection struct {
 	PosterURL         string          `json:"poster_url"`
 	BackdropURL       string          `json:"backdrop_url"`
 	PosterThumbhash   string          `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url" example:"false"`
 	BackdropThumbhash string          `json:"backdrop_thumbhash,omitempty"`
 	SourceURL         string          `json:"source_url"`
 	QueryDefinition   json.RawMessage `json:"query_definition"`
@@ -486,6 +487,7 @@ func adminCollectionOf(v handlers.AdminCollection) AdminCollection {
 		PosterURL:         v.PosterURL,
 		BackdropURL:       v.BackdropURL,
 		PosterThumbhash:   v.PosterThumbhash,
+		PosterIsCollage:   v.PosterIsCollage && v.PosterURL != "",
 		BackdropThumbhash: v.BackdropThumbhash,
 		SourceURL:         v.SourceURL,
 		QueryDefinition:   v.QueryDefinition,

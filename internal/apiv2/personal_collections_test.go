@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +30,8 @@ type fakePersonalCollections struct {
 	holdingErr   error
 	holdingCalls []string
 	features     userstore.CollectionFeatures
+	// collages answers Capabilities' PosterCollages.
+	collages bool
 }
 
 func (f *fakePersonalCollections) PersonalCollectionFeatures(context.Context, int) (userstore.CollectionFeatures, error) {
@@ -59,6 +62,7 @@ func (f *fakePersonalCollections) Capabilities() handlers.CollectionCapabilities
 		DisplayFilterPresets:  handlers.CollectionDisplayFilterPresetsView{Watched: []string{"all", "watched", "unwatched"}, Media: []string{"all", "movie", "series"}},
 		CollectionDefaultSort: true, CollectionSortPreferences: true, EffectiveCollectionSort: true,
 		SortPreferenceKinds: []string{"library", "user", "watchlist", "favorites"},
+		PosterCollages:      f.collages,
 	}
 }
 
@@ -198,17 +202,23 @@ func collectionDeps(t *testing.T) (Dependencies, *fakePersonalCollections, *fake
 }
 
 func TestListCollections(t *testing.T) {
-	deps, _, _ := collectionDeps(t)
+	deps, pc, _ := collectionDeps(t)
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/collections", "", viewerHeaders())
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"items":[{"id":"c1","profile_id":"p-owner","creator_profile_id":"p-owner","name":"Rainy days","description":"","collection_type":"manual","is_shared":false,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"},` +
-		`{"id":"c2","profile_id":"p-primary","creator_profile_id":"p-primary","name":"Family night","description":"","collection_type":"manual","is_shared":true,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"}],` +
+	want := `{"items":[{"id":"c1","profile_id":"p-owner","creator_profile_id":"p-owner","name":"Rainy days","description":"","collection_type":"manual","is_shared":false,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","poster_is_collage":false,"created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"},` +
+		`{"id":"c2","profile_id":"p-primary","creator_profile_id":"p-primary","name":"Family night","description":"","collection_type":"manual","is_shared":true,"query_definition":{},"sort_config":{},"sort_order":0,"group_id":null,"source_url":"","sync_schedule":"","sync_cadence":"","next_sync_at":null,"last_sync_at":null,"last_sync_status":"","last_sync_message":"","item_count":4,"include_in_server_collections":false,"poster_url":"","poster_thumbhash":"","poster_is_collage":false,"created_at":"2026-01-02T03:04:05.678Z","updated_at":"2026-01-02T03:04:05.678Z"}],` +
 		`"groups":[]}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// A collage poster is marked as one.
+	pc.list.Collections[0].PosterURL, pc.list.Collections[0].PosterThumbhash, pc.list.Collections[0].PosterIsCollage = "https://cdn.test/collage.webp", "th", true
+	rec = do(t, h, http.MethodGet, "/api/v2/collections", "", viewerHeaders())
+	if !strings.Contains(rec.Body.String(), `"poster_url":"https://cdn.test/collage.webp","poster_thumbhash":"th","poster_is_collage":true`) {
+		t.Fatalf("collage body = %s", rec.Body.String())
 	}
 	// Another profile sees an empty, never-null envelope.
 	rec = do(t, h, http.MethodGet, "/api/v2/collections", "", with(bearer(memberToken), "X-Profile-Id", "p-primary"))
@@ -237,10 +247,20 @@ func TestGetCollectionCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"groups":false,"login_sharing":true,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"],"create_description":true,"mdblist_search":true,"schedule_time_zone":{"utc_offset":"-05:00","abbreviation":"CDT","name":"America/Chicago"},"sync_schedule_editable":false,"contains_item":true,"preview_posters":true}` + "\n"
+	want := `{"groups":false,"login_sharing":true,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"],"create_description":true,"mdblist_search":true,"schedule_time_zone":{"utc_offset":"-05:00","abbreviation":"CDT","name":"America/Chicago"},"sync_schedule_editable":false,"contains_item":true,"preview_posters":true,"poster_collages":false}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
+	// Collages need both the server's collage support and the account's artwork.
+	pc.collages = true
+	for _, artwork := range []bool{false, true} {
+		pc.features.Artwork = artwork
+		rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", viewerHeaders())
+		if want := fmt.Sprintf(`"poster_collages":%t`, artwork); !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("artwork %v: body = %s, want %s", artwork, rec.Body.String(), want)
+		}
+	}
+	pc.collages, pc.features.Artwork = false, false
 	// A store that does not persist descriptions does not advertise them.
 	pc.features.Description = false
 	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/collections/capabilities", "", viewerHeaders())

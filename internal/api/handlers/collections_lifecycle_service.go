@@ -184,6 +184,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated collection")
 	}
+	h.refreshCollage(ctx, store, userID, collection)
 
 	return h.collectionView(ctx, store, userID, profileID, *collection)
 }
@@ -358,6 +359,7 @@ func (h *CollectionHandler) AddPersonalCollectionItem(ctx context.Context, userI
 	if err := store.AddCollectionItem(ctx, collectionID, itemID, position); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to add item to collection")
 	}
+	h.refreshCollage(ctx, store, userID, collection)
 
 	return nil
 }
@@ -383,6 +385,7 @@ func (h *CollectionHandler) ReorderPersonalCollectionItems(ctx context.Context, 
 		}
 		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
+	h.refreshCollage(ctx, store, userID, collection)
 
 	return nil
 }
@@ -405,6 +408,7 @@ func (h *CollectionHandler) RemovePersonalCollectionItem(ctx context.Context, us
 	if err := store.RemoveCollectionItem(ctx, collectionID, itemID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to remove item from collection")
 	}
+	h.refreshCollage(ctx, store, userID, collection)
 
 	return nil
 }
@@ -417,7 +421,7 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		return apiError(http.StatusBadRequest, "bad_request", `type must be "poster"`)
 	}
 
-	store, _, err := h.personalCollectionStore(ctx, userID, profileID, collectionID, true)
+	store, collection, err := h.personalCollectionStore(ctx, userID, profileID, collectionID, true)
 	if err != nil {
 		return err
 	}
@@ -440,7 +444,22 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear poster")
 	}
+	// The collection shows its collage again.
+	collection.PosterURL = ""
+	h.refreshCollage(ctx, store, userID, collection)
 	return nil
+}
+
+// refreshCollage builds, in the background, the collage the acting profile
+// sees for c when c has no uploaded or imported poster, so it is ready before
+// the next read. Only the creator changes a collection, so the acting
+// profile's filter is the owner's. Stores kept outside Postgres have no
+// collage.
+func (h *CollectionHandler) refreshCollage(ctx context.Context, store userstore.UserStore, userID int, c *userstore.Collection) {
+	if h.Collages == nil || c == nil || strings.TrimSpace(c.PosterURL) != "" || !userstore.HasCatalogSQLState(store) {
+		return
+	}
+	h.Collages.Refresh(userID, personalCollectionDefinition(*c), AccessFilterFromContext(ctx, ""))
 }
 
 // personalCollectionStore checks the account and profile before exposing or changing a collection.

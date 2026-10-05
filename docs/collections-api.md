@@ -50,6 +50,32 @@ Collections tab. It never changes what a viewer can open elsewhere.
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
 
+## Posters
+
+A collection's poster is an image its creator uploaded (`uploadCollectionPoster`), linked
+(`poster_source_url`) or imported with a list, or otherwise a collage of its first titles'
+posters, composed by the server. The collage follows the viewer: it shows the first titles
+(up to four) that the viewer sees in the collection by the rules above, so another profile's
+collage of a shared collection never shows a title that profile can't open. Members keep their
+stored order; a smart collection uses its first matches in its query order. The display filter
+does not narrow the collage.
+
+- `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
+  collage in `poster_url`, and `listCollections` marks it with `poster_is_collage: true`.
+  `getCollection` and `updateCollection` carry no `poster_url`; clients take the poster from
+  the list.
+- The server builds collages in the background, after a collection is created, edited or
+  synced, or its poster removed, and when a read finds one missing. Until then, and when no
+  title the viewer sees has a poster, `poster_url` is empty and clients show their
+  placeholder.
+- `getCollectionCapabilities` reports `poster_collages: true` when the server shows collages.
+  It is false when the server has no artwork storage (and then `artwork` is false too), and for
+  an account on the SQLite user store.
+- `deleteCollectionImage` removes an uploaded poster; the collection then shows its collage.
+
+The `/api/v1` bridge does not show collages: its personal collection and library tab reads keep
+returning only uploaded and imported posters.
+
 ## Listing and order
 
 `listCollections` returns the acting profile's own collections in its order, then the shared
@@ -70,6 +96,8 @@ including another profile's shared collection, is a `422 validation_failed` at
 
 - `login_sharing: true`: the model above. A client shows **Shared with me** and the single
   sharing switch only when it is present and true.
+- `poster_collages`: collections without an uploaded or imported poster show a collage (see
+  [Posters](#posters)).
 - `groups: false`: personal collection groups are no longer supported.
 
 ## Groups (being removed)

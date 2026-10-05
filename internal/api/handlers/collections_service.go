@@ -102,6 +102,7 @@ func (h *CollectionHandler) Capabilities() CollectionCapabilitiesView {
 		CollectionSortPreferences: true,
 		EffectiveCollectionSort:   true,
 		SortPreferenceKinds:       sortPreferenceKinds,
+		PosterCollages:            h.Collages != nil,
 	}
 }
 
@@ -175,6 +176,7 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 			collection = refreshed
 		}
 	}
+	h.refreshCollage(ctx, store, cmd.UserID, collection)
 	return h.collectionView(ctx, store, cmd.UserID, cmd.ProfileID, *collection)
 }
 
@@ -307,34 +309,55 @@ func (h *CollectionHandler) ReorderCollectionGroups(ctx context.Context, userID 
 
 // collectionViews renders stored collections with their posters presigned and
 // item_count set to the members profileID can see: for another profile's
-// collection, only those its owner can access too. A collection whose owner
-// cannot be resolved is left out.
+// collection, only those its owner can access too. On /api/v2 a collection
+// without an uploaded or imported poster shows its collage for that profile,
+// once built. A collection whose owner cannot be resolved is left out.
 func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection) []PersonalCollectionView {
-	var counts map[string]int
-	var unavailable map[string]bool
+	var reads ownedCollectionReads
 	if userstore.HasCatalogSQLState(store) {
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
 			sources = append(sources, ownedCollectionDefinition{
-				PersonalCollectionDefinition: catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition},
+				PersonalCollectionDefinition: personalCollectionDefinition(c),
 				CreatorProfileID:             c.CreatorProfileID,
+				WantsCollage:                 strings.TrimSpace(c.PosterURL) == "",
 			})
 		}
-		counts, unavailable = ownerScopedCollectionCounts(ctx, h.Executor, h.CollectionOwners, userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+		reads = ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.Collages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	}
 	views := make([]PersonalCollectionView, 0, len(collections))
 	for _, c := range collections {
-		if unavailable[c.ID] {
+		if reads.unavailable[c.ID] {
 			continue
 		}
-		if n, ok := counts[c.ID]; ok {
+		if n, ok := reads.counts[c.ID]; ok {
 			c.ItemCount = n
 		}
 		resp := toCollectionResponse(c)
-		resp.PosterURL = h.presignUserCollectionPoster(ctx, c.PosterURL)
+		posterPath := c.PosterURL
+		if collage, ok := reads.posters[c.ID]; ok {
+			posterPath, resp.PosterThumbhash, resp.PosterIsCollage = collage.Path, collage.Thumbhash, true
+		}
+		resp.PosterURL = h.presignUserCollectionPoster(ctx, posterPath)
 		views = append(views, resp)
 	}
 	return views
+}
+
+// personalCollectionDefinition is the part of a stored collection that decides
+// which titles it shows.
+func personalCollectionDefinition(c userstore.Collection) catalog.PersonalCollectionDefinition {
+	return catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition}
+}
+
+// collagesForRead is the collage service a read of personal collections uses:
+// /api/v2 reads show collages, while the frozen /api/v1 bridge keeps showing
+// only uploaded and imported posters.
+func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCollages) *catalog.PersonalCollectionCollages {
+	if !isNativeAPIV2(ctx) {
+		return nil
+	}
+	return collages
 }
 
 // collectionView renders one stored collection as collectionViews does, and
@@ -372,10 +395,14 @@ func (h *CollectionHandler) PersonalCollectionFeatures(ctx context.Context, user
 	if err != nil {
 		return userstore.CollectionFeatures{}, apiError(500, "internal_error", "Failed to access user store")
 	}
-	if features, ok := store.(userstore.CollectionFeatureProvider); ok {
-		return features.CollectionFeatures(), nil
+	features := userstore.CollectionFeatures{}
+	if provider, ok := store.(userstore.CollectionFeatureProvider); ok {
+		features = provider.CollectionFeatures()
 	}
-	return userstore.CollectionFeatures{}, nil
+	// Without artwork storage no poster can be uploaded or composed, as
+	// server collections report it.
+	features.Artwork = features.Artwork && h.ArtworkStore != nil
+	return features, nil
 }
 
 func collectionFeatureError(store userstore.UserStore, feature string) error {
