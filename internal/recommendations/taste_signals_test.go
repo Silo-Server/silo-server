@@ -291,3 +291,34 @@ func TestBuildCanonicalImplicitSignalsScalesQuietSeriesByDepth(t *testing.T) {
 		t.Fatalf("dropped series weight = %v, want far below 0.3", dropped)
 	}
 }
+
+// Several favorited episodes of one series weigh as one favorite of the
+// series, at the newest one's decay; entries with no title are dropped.
+func TestNewestDecayByTitleCountsATitleOnce(t *testing.T) {
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	type entry struct {
+		id string
+		at time.Time
+	}
+	refs := map[string]canonicalContentRef{
+		"ep-1":  {Kind: canonicalKindSeries, CanonicalID: "series"},
+		"ep-2":  {Kind: canonicalKindSeries, CanonicalID: "series"},
+		"movie": {Kind: canonicalKindMovie, CanonicalID: "movie"},
+	}
+	entries := []entry{
+		{"ep-1", now.AddDate(0, 0, -360)},
+		{"ep-2", now.AddDate(0, 0, -180)},
+		{"movie", now},
+		{"unknown", now},
+	}
+	decays := newestDecayByTitle(entries, refs, func(e entry) (string, time.Time) { return e.id, e.at }, now, 180)
+	if len(decays) != 2 {
+		t.Fatalf("decays = %v, want one per title", decays)
+	}
+	if got, want := decays["series"], timeDecay(now.AddDate(0, 0, -180), now, 180); math.Abs(got-want) > 1e-9 {
+		t.Fatalf("series decay = %v, want the newest episode's %v", got, want)
+	}
+	if got := decays["movie"]; math.Abs(got-1) > 1e-9 {
+		t.Fatalf("movie decay = %v, want 1", got)
+	}
+}
