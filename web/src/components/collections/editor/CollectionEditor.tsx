@@ -638,7 +638,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   const artworkSlots = capabilities?.artwork === false ? [] : scope.artworkSlots;
   // Without its own poster a collection shows a collage of its titles, except
   // a server Smart collection, whose titles come from its rules.
-  const collages = isServer ? !smart : personalCapabilities.data?.poster_collages !== false;
+  const collages = isServer ? !smart : personalCapabilities.data?.poster_collages === true;
   const poster = useListedPoster(scope, view, {
     awaitCollage: created && collages && artworkSlots.length > 0,
   });

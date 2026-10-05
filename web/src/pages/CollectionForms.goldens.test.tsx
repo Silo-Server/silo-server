@@ -19,7 +19,12 @@ import {
   personalCapabilities,
   personalSmartCollection,
 } from "@/test/fixtures/collectionAnswers";
-import { chooseArtwork, pasteArtworkLink, uploadArtwork } from "@/test/collectionArtwork";
+import {
+  chooseArtwork,
+  openArtworkMenu,
+  pasteArtworkLink,
+  uploadArtwork,
+} from "@/test/collectionArtwork";
 import { goldens } from "@/test/fixtures/collectionBodies";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import CollectionEditorPage from "./CollectionEditorPage";
@@ -366,5 +371,22 @@ describe("personal manual page: a title added before Save", () => {
     await saveOnPage(2);
     expect(writes()).toEqual(goldens.personalAddThenRename);
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("personal collages need the server's capability", () => {
+  it("offers to remove the poster, not a collage, when the server doesn't report collages", async () => {
+    // An older server's capabilities have no poster_collages.
+    v2Recorder.answer("GET /api/v2/collections/capabilities", {
+      ...personalCapabilities,
+      poster_collages: undefined,
+    });
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, poster_url: "https://images.example/poster.png" }],
+    });
+    showPage("/collections/c1/edit");
+    const menu = await openArtworkMenu("poster");
+    expect(within(menu).queryByRole("menuitem", { name: "Use the collage" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: /^Remove/ })).toBeTruthy();
   });
 });
