@@ -21,6 +21,9 @@ const (
 	// 2048, tag/run 128, plus registered attrs) so it never rejects a valid
 	// line, while keeping per-line memory bounded when validating.
 	MaxLogLineBytes = 64 * 1024
+	// MaxOccurrenceCount bounds manifest.report.occurrence_count, the number of
+	// times a client grouped repeats of one issue into a single report.
+	MaxOccurrenceCount = 1_000_000
 )
 
 var (
@@ -98,6 +101,9 @@ type Report struct {
 	Platform         string
 	OSVersion        string
 	ProfileID        string
+	// OccurrenceCount is how many times the client saw this issue before
+	// sending the report; 0 when the manifest omits it (a single occurrence).
+	OccurrenceCount int
 }
 
 type Destination struct {
@@ -188,6 +194,7 @@ type reportWire struct {
 	Platform         *string `json:"platform"`
 	OSVersion        *string `json:"os_version"`
 	ProfileID        *string `json:"profile_id"`
+	OccurrenceCount  *int    `json:"occurrence_count"`
 }
 
 type destinationWire struct {
@@ -539,6 +546,13 @@ func validateReport(w reportWire) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	occurrenceCount := 0
+	if w.OccurrenceCount != nil {
+		if *w.OccurrenceCount < 1 || *w.OccurrenceCount > MaxOccurrenceCount {
+			return Report{}, fieldError("manifest.report.occurrence_count", "must be between 1 and %d", MaxOccurrenceCount)
+		}
+		occurrenceCount = *w.OccurrenceCount
+	}
 
 	return Report{
 		Type:             reportType,
@@ -549,6 +563,7 @@ func validateReport(w reportWire) (Report, error) {
 		Platform:         platform,
 		OSVersion:        osVersion,
 		ProfileID:        profileID,
+		OccurrenceCount:  occurrenceCount,
 	}, nil
 }
 

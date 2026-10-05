@@ -2926,6 +2926,7 @@ export interface ClientDiagnosticManifest {
     platform: DiagnosticPlatform;
     os_version: string;
     profile_id?: string;
+    occurrence_count?: number;
     [key: string]: unknown;
   };
   destination: {
