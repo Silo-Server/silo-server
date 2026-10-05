@@ -58,6 +58,9 @@ type compatCollection struct {
 	personal bool
 	// source is the personal collection row, kept for counting its items.
 	source *usercollections.ServerVisibleCollection
+	// counted marks a personal collection whose ItemCount is already the
+	// viewer's count, so it is not counted twice in one request.
+	counted bool
 }
 
 // compatNonVideoMemberTypes are the media types besides audiobook and podcast
@@ -93,7 +96,7 @@ func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Sessi
 	}
 	var sources []usercollections.ServerVisibleCollection
 	for _, c := range collections {
-		if c.personal && c.source != nil {
+		if c.personal && c.source != nil && !c.counted {
 			sources = append(sources, *c.source)
 		}
 	}
@@ -102,9 +105,13 @@ func (h *ItemsHandler) withVisibleItemCounts(ctx context.Context, session *Sessi
 	}
 	counts, unavailable := h.userCollections.CountVisible(ctx, h.collectionOwners, session.StreamAppUserID, session.ProfileID, sources, h.personalMemberAccess(ctx, session))
 	for _, c := range collections {
-		if n, ok := counts[c.ID]; ok && c.personal {
+		if !c.personal || c.counted {
+			continue
+		}
+		if n, ok := counts[c.ID]; ok {
 			c.ItemCount = n
 		}
+		c.counted = true
 	}
 	return unavailable
 }
@@ -373,17 +380,10 @@ func (h *ItemsHandler) loadVisibleLibraryCollection(ctx context.Context, session
 // uploaded poster show that viewer's collage; personal collections show their
 // own poster and never enter the collage lookup, which knows only library
 // collections. A shared personal collection whose owner cannot be resolved is
-// left out; dropped counts them.
-func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*compatCollection) (items []baseItemDTO, dropped int) {
+// left out.
+func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Session, collections []*compatCollection) []baseItemDTO {
 	if unavailable := h.withVisibleItemCounts(ctx, session, collections); len(unavailable) > 0 {
-		kept := make([]*compatCollection, 0, len(collections))
-		for _, c := range collections {
-			if c.personal && unavailable[c.ID] {
-				continue
-			}
-			kept = append(kept, c)
-		}
-		dropped, collections = len(collections)-len(kept), kept
+		collections = slices.DeleteFunc(slices.Clone(collections), func(c *compatCollection) bool { return c.personal && unavailable[c.ID] })
 	}
 	library := make([]*models.LibraryCollection, 0, len(collections))
 	for _, c := range collections {
@@ -399,7 +399,7 @@ func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Sess
 		}
 		posters = viewerCollectionPosters(ctx, h.collectionPosters, access, library)
 	}
-	items = make([]baseItemDTO, 0, len(collections))
+	items := make([]baseItemDTO, 0, len(collections))
 	for _, c := range collections {
 		poster := posters[c.ID]
 		if c.personal {
@@ -407,7 +407,7 @@ func (h *ItemsHandler) boxSetsFromCollections(ctx context.Context, session *Sess
 		}
 		items = append(items, h.boxSetFromCollection(ctx, c, poster))
 	}
-	return items, dropped
+	return items
 }
 
 // boxSetFromCollection maps a collection to a Jellyfin BoxSet DTO showing
@@ -530,7 +530,7 @@ func (h *ItemsHandler) boxSetsByIDs(ctx context.Context, session *Session, colle
 			collections = append(collections, collection)
 		}
 	}
-	items, _ := h.boxSetsFromCollections(ctx, session, collections)
+	items := h.boxSetsFromCollections(ctx, session, collections)
 	return items, nil
 }
 
@@ -610,6 +610,12 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 			}
 			matched = append(matched, newPersonalCompatCollection(c))
 		}
+		// Count every listed personal collection before paging, as the native
+		// listing does, so one whose owner cannot be resolved is left out of
+		// the total too, not only out of the page it lands on.
+		if unavailable := h.withVisibleItemCounts(r.Context(), session, matched); len(unavailable) > 0 {
+			matched = slices.DeleteFunc(matched, func(c *compatCollection) bool { return c.personal && unavailable[c.ID] })
+		}
 	}
 
 	if query.sort == "sort_title" {
@@ -634,10 +640,10 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 	if query.countOnly {
 		page = nil
 	}
-	items, dropped := h.boxSetsFromCollections(r.Context(), session, page)
+	items := h.boxSetsFromCollections(r.Context(), session, page)
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            items,
-		TotalRecordCount: len(matched) - dropped,
+		TotalRecordCount: len(matched),
 		StartIndex:       query.startIndex,
 	})
 }
@@ -684,7 +690,7 @@ func (h *ItemsHandler) handleBoxSetItem(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
 		return
 	}
-	items, _ := h.boxSetsFromCollections(r.Context(), session, []*compatCollection{collection})
+	items := h.boxSetsFromCollections(r.Context(), session, []*compatCollection{collection})
 	if len(items) == 0 {
 		// Fail closed: never describe a shared collection under the viewer's
 		// access alone.
@@ -775,7 +781,7 @@ func (h *ItemsHandler) HandleItemCollections(w http.ResponseWriter, r *http.Requ
 	for _, c := range page {
 		compat = append(compat, &compatCollection{LibraryCollection: c})
 	}
-	dtos, _ := h.boxSetsFromCollections(r.Context(), session, compat)
+	dtos := h.boxSetsFromCollections(r.Context(), session, compat)
 	applyItemsResponseOptions(dtos, parseItemsQuery(r, h.codec))
 	writeJSON(w, http.StatusOK, queryResultDTO{
 		Items:            dtos,
@@ -1132,13 +1138,14 @@ func (h *ItemsHandler) expandCollectionLeaves(ctx context.Context, session *Sess
 	if err != nil {
 		return nil, err
 	}
-	return h.expandMemberLeaves(ctx, session, query, contentIDs, members)
+	return h.expandMemberLeaves(ctx, h.resolveAccessFilter(ctx, session), query, contentIDs, members)
 }
 
 // expandMemberLeaves turns members into playable leaf IDs in contentIDs
-// order: movies and episodes as they are, series as their visible episodes.
-// members carries each visible member's type; others are dropped.
-func (h *ItemsHandler) expandMemberLeaves(ctx context.Context, session *Session, query itemsQuery, contentIDs []string, members []upstreamListItem) ([]string, error) {
+// order: movies and episodes as they are, series as their episodes visible
+// under access. members carries each visible member's type; others are
+// dropped.
+func (h *ItemsHandler) expandMemberLeaves(ctx context.Context, access catalog.AccessFilter, query itemsQuery, contentIDs []string, members []upstreamListItem) ([]string, error) {
 	memberTypes := make(map[string]string, len(members))
 	for _, member := range members {
 		memberTypes[member.ContentID] = strings.ToLower(member.Type)
@@ -1146,7 +1153,7 @@ func (h *ItemsHandler) expandMemberLeaves(ctx context.Context, session *Session,
 	var seriesEpisodes map[string][]string
 	if query.allowsItemType(compatEpisodeType) {
 		var err error
-		if seriesEpisodes, err = h.collectionSeriesEpisodeIDs(ctx, session, members); err != nil {
+		if seriesEpisodes, err = h.collectionSeriesEpisodeIDs(ctx, access, members); err != nil {
 			return nil, err
 		}
 	}
@@ -1169,7 +1176,7 @@ func (h *ItemsHandler) expandMemberLeaves(ctx context.Context, session *Session,
 // expanded series episodes match the episodes of an episode-scoped smart
 // collection. Playback-quality limits apply at PlaybackInfo, as for every
 // listing. Without a database pool it falls back to live-file presence.
-func (h *ItemsHandler) visibleEpisodeIDs(ctx context.Context, session *Session, episodeIDs []string) (map[string]bool, error) {
+func (h *ItemsHandler) visibleEpisodeIDs(ctx context.Context, access catalog.AccessFilter, episodeIDs []string) (map[string]bool, error) {
 	if len(episodeIDs) == 0 {
 		return map[string]bool{}, nil
 	}
@@ -1181,7 +1188,6 @@ func (h *ItemsHandler) visibleEpisodeIDs(ctx context.Context, session *Session, 
 		return h.episodeRepo.HasFilesByIDs(ctx, episodeIDs)
 	}
 
-	access := h.resolveAccessFilter(ctx, session)
 	conditions := []string{"el.episode_id = ANY($1)"}
 	args := []any{episodeIDs}
 	if access.AllowedLibraryIDs != nil {
@@ -1216,7 +1222,7 @@ func (h *ItemsHandler) visibleEpisodeIDs(ctx context.Context, session *Session, 
 // member, regular seasons first and specials last. Series members were already
 // access-filtered; each episode is checked too, since a series can span
 // libraries with different access.
-func (h *ItemsHandler) collectionSeriesEpisodeIDs(ctx context.Context, session *Session, members []upstreamListItem) (map[string][]string, error) {
+func (h *ItemsHandler) collectionSeriesEpisodeIDs(ctx context.Context, access catalog.AccessFilter, members []upstreamListItem) (map[string][]string, error) {
 	var seriesIDs []string
 	for _, member := range members {
 		if strings.EqualFold(member.Type, compatSeriesType) {
@@ -1237,7 +1243,7 @@ func (h *ItemsHandler) collectionSeriesEpisodeIDs(ctx context.Context, session *
 			allIDs = append(allIDs, episode.ContentID)
 		}
 	}
-	visible, err := h.visibleEpisodeIDs(ctx, session, allIDs)
+	visible, err := h.visibleEpisodeIDs(ctx, access, allIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1346,7 +1352,18 @@ func (h *ItemsHandler) handlePersonalBoxSetLeaves(w http.ResponseWriter, r *http
 	for _, item := range result.Items {
 		members = append(members, upstreamListItem{ContentID: item.ContentID, Type: item.Type})
 	}
-	leaves, err := h.expandMemberLeaves(ctx, session, query, contentIDsFromListItems(members), members)
+	// Series expand under the same owner-limited access the members were read
+	// with, so a shared collection never plays an episode its owner cannot see.
+	var creator string
+	if collection.source != nil {
+		creator = collection.source.CreatorProfileID
+	}
+	episodeAccess, err := catalog.PersonalCollectionFilter(ctx, h.collectionOwners, access, session.StreamAppUserID, session.ProfileID, creator)
+	if err != nil {
+		writeCompatUpstreamError(w, err)
+		return
+	}
+	leaves, err := h.expandMemberLeaves(ctx, episodeAccess, query, contentIDsFromListItems(members), members)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return

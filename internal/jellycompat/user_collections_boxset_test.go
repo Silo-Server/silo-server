@@ -1231,6 +1231,11 @@ func TestPersonalBoxSetUnresolvableOwnerFailsClosed(t *testing.T) {
 	if got := boxSetNames(listing.Items); !slices.Equal(got, []string{"Mine"}) || listing.TotalRecordCount != 1 {
 		t.Fatalf("listing = %v (total %d), want only Mine", got, listing.TotalRecordCount)
 	}
+	// The left-out collection is gone from the total on every page, not only
+	// from the page it would have landed on.
+	if paged := performItemsRequest(t, h, "/Items?ParentId="+collectionsViewID+"&SortBy=SortName&Limit=1"); !slices.Equal(boxSetNames(paged.Items), []string{"Mine"}) || paged.TotalRecordCount != 1 {
+		t.Fatalf("first page = %v (total %d), want Mine with total 1", boxSetNames(paged.Items), paged.TotalRecordCount)
+	}
 	if personal.gotCountViewer != "profile-1" {
 		t.Fatalf("counted for viewer %q, want the session profile", personal.gotCountViewer)
 	}
@@ -1252,7 +1257,9 @@ func (f fixedOwnerAccess) OwnerFilter(context.Context, int, string) (catalog.Acc
 
 // TestPersonalBoxSetOwnerLimitDB pins that a personal BoxSet shared with
 // another profile shows that profile only the titles the owner can access too,
-// in ChildCount and in its children, while the owner still sees every member.
+// in ChildCount, its children and Play all, while the owner still sees every
+// member. Play all expands a series under the same limit, so the viewer never
+// gets an episode from a library the owner cannot access.
 func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	pool := newCompatTestPool(t)
 	ctx := context.Background()
@@ -1267,12 +1274,12 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	shared, private := "boxset-owner-shared-"+suffix, "boxset-owner-private-"+suffix
+	shared, private, series := "boxset-owner-shared-"+suffix, "boxset-owner-private-"+suffix, "boxset-owner-series-"+suffix
 	for _, seed := range []struct {
-		id      string
-		library int
-	}{{shared, ownerLib}, {private, otherLib}} {
-		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, 'movie', $1)`, seed.id); err != nil {
+		id, kind string
+		library  int
+	}{{shared, "movie", ownerLib}, {private, "movie", otherLib}, {series, "series", ownerLib}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title) VALUES ($1, $2, $1)`, seed.id, seed.kind); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seed.id, seed.library); err != nil {
@@ -1282,9 +1289,19 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 		_, _ = pool.Exec(ctx, `DELETE FROM user_collection_revisions WHERE user_id = $1`, userID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shared, private})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{shared, private, series})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{ownerLib, otherLib})
 	})
+	// One episode of the series lives in each library.
+	for i, library := range []int{ownerLib, otherLib} {
+		episode := fmt.Sprintf("boxset-owner-episode-%s-%d", suffix, i)
+		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, $3, $1)`, episode, series, i+1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at) VALUES ($1, $2, NOW())`, episode, library); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	provider := pgstore.NewPostgresProvider(pool)
 	store, err := provider.ForUser(ctx, userID)
@@ -1305,7 +1322,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, member := range []string{shared, private} {
+	for i, member := range []string{shared, private, series} {
 		if err := store.AddCollectionItem(ctx, collection.ID, member, i); err != nil {
 			t.Fatal(err)
 		}
@@ -1314,6 +1331,7 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	owners := fixedOwnerAccess{libraries: []int{ownerLib}}
 	h := newCollectionsTestHandler(&fakeCollectionSource{}, []upstreamUserLibrary{{ID: ownerLib, Name: "A", Type: "movies"}, {ID: otherLib, Name: "B", Type: "movies"}}, nil)
 	h.userCollections = usercollections.NewStore(pool)
+	h.episodeRepo = catalog.NewEpisodeRepository(pool)
 	h.collectionOwners = owners
 	h.collectionResolver = catalog.NewCatalogResolver(catalog.NewBrowseRepository(pool), catalog.NewItemRepository(pool)).
 		WithUserStoreProvider(provider).WithPersonalCollectionAccess(owners)
@@ -1322,12 +1340,12 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		session *Session
-		want    int
+		name         string
+		session      *Session
+		want, leaves int
 	}{
-		{"viewer sees only the owner's titles", viewer, 1},
-		{"owner sees every member", owner, 2},
+		{"viewer sees only the owner's titles", viewer, 2, 2},
+		{"owner sees every member", owner, 3, 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			listing := performItemsRequest(t, h, "/Items?IncludeItemTypes=BoxSet", tc.session)
@@ -1337,6 +1355,10 @@ func TestPersonalBoxSetOwnerLimitDB(t *testing.T) {
 			children := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID, tc.session)
 			if listing.Items[0].ChildCount != tc.want || children.TotalRecordCount != tc.want || len(children.Items) != tc.want {
 				t.Fatalf("ChildCount=%d children=%d of %d, want %d", listing.Items[0].ChildCount, len(children.Items), children.TotalRecordCount, tc.want)
+			}
+			playAll := performItemsRequest(t, h, "/Items?ParentId="+listing.Items[0].ID+"&Filters=IsNotFolder&Recursive=true", tc.session)
+			if playAll.TotalRecordCount != tc.leaves {
+				t.Fatalf("Play all returned %d leaves, want %d", playAll.TotalRecordCount, tc.leaves)
 			}
 		})
 	}
