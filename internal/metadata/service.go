@@ -455,6 +455,7 @@ type MetadataService struct {
 	seriesWork      map[string]*seriesEpisodeWork
 	hooks           metadataServiceHooks
 	imageCacher     ImageCacher
+	libraryRoots    LibraryRootResolver
 	imageCacheJobs  ImageCacheJobEnqueuer
 	autoCacheImages atomic.Bool // hot-reloaded from metadata.cache_images
 	imageResolver   interface {
@@ -597,6 +598,12 @@ func (s *MetadataService) SetImageCacher(c ImageCacher) {
 
 func (s *MetadataService) SetImageCacheJobEnqueuer(enqueuer ImageCacheJobEnqueuer) {
 	s.imageCacheJobs = enqueuer
+}
+
+// SetLibraryRootResolver sets the resolver that confines local sidecar artwork
+// reads for the admin image picker to the item's library roots.
+func (s *MetadataService) SetLibraryRootResolver(resolver LibraryRootResolver) {
+	s.libraryRoots = resolver
 }
 
 // SetAutoCacheImages controls whether refresh pipelines automatically cache
@@ -8248,8 +8255,15 @@ func primaryProviderID(ids map[string]string) string {
 // providerIDs should come from the parent MediaItem (for seasons/episodes,
 // the caller resolves up to the series item). contentType is "movie" or "series".
 func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]RemoteImage, map[string]string, error) {
-	contentLevel := contentType
-	chain, err := s.resolveChainCached(ctx, folderID, contentLevel)
+	return s.fetchItemImages(ctx, ImageRequest{
+		ProviderIDs: providerIDs,
+		ContentType: contentType,
+		Language:    language,
+	}, folderID)
+}
+
+func (s *MetadataService) fetchItemImages(ctx context.Context, req ImageRequest, folderID int) ([]RemoteImage, map[string]string, error) {
+	chain, err := s.resolveChainCached(ctx, folderID, req.ContentType)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}
@@ -8262,11 +8276,7 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 		if !ok {
 			continue
 		}
-		images, err := ip.GetImages(ctx, ImageRequest{
-			ProviderIDs: providerIDs,
-			ContentType: contentType,
-			Language:    language,
-		})
+		images, err := ip.GetImages(ctx, req)
 		if err != nil {
 			slog.WarnContext(ctx, "fetch item images: provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)

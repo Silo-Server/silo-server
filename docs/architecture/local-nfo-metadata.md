@@ -68,7 +68,8 @@ Sidecar images (`poster`/`folder`/`cover`, `fanart`/`backdrop`/`background`,
 by the provider's `GetImages` (`internal/metadata/nfo/images.go`). Clients —
 including jellycompat — always receive the normal presigned
 `poster_url`/`backdrop_url`/`logo_url`; library files are never served
-directly, and API nodes never need filesystem access to libraries.
+directly. The admin image picker (below) is the only API path that reads
+sidecar images.
 
 - Sources are recorded as `file://<absolute-logical-path>` in `*_source_path`
   columns and cached by the metadata image-cache processor under
@@ -96,6 +97,26 @@ directly, and API nodes never need filesystem access to libraries.
 must mount the media libraries at the same paths as the scanner/metadata
 worker, otherwise local artwork jobs fail until the mount is present.
 
+### Admin image picker
+
+`GET /api/v2/admin/items/{id}/images` also offers a movie's or series' local
+sidecar artwork. The provider request carries the item's media files and
+sidecar directories, so the NFO provider returns the same files a refresh
+would. Each local choice has the provider ID `local`, keeps its `file://` path
+as `original_url`, and shows a 300-pixel-wide WebP preview as an inline `data:`
+URI (the web client authenticates with a bearer token, so an `<img>` cannot
+fetch an authenticated preview route). The preview is read under the same
+root confinement, symlink and size checks as the processor; a file that fails
+them is left out of the list.
+
+`POST .../images/apply` with a `file://` `original_url` caches the file only
+when the item's discovery offers it for that image type, reads it under the
+same checks, stores it under the same `local/...` key the processor would use,
+and publishes it with the images lock like any other choice. Seasons, episodes
+and frozen v1 keep provider-only choices. The node serving the admin API reads
+the file, so it needs the same library mounts as the processor; without them
+local choices are simply not offered.
+
 ## Series depth and mixed libraries
 
 `SeasonsRequest`/`EpisodesRequest` carry local path context; `season.nfo`
@@ -115,8 +136,8 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 
 ## Known limitations
 
-- The admin image picker does not surface local art (automatic chain path
-  only).
+- The admin image picker offers local art for movies and series only, not
+  for seasons or episodes.
 - Multi-part movies: a basename-mismatched NFO in a folder holding multiple
   content groups is not found (directory candidates are suppressed there).
 - No NFO writing, no music/audiobook/ebook NFO (those ecosystems use

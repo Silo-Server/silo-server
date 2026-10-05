@@ -933,36 +933,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		p.markFailed(ctx, job, "image cacher does not support local artwork")
 		return imageCacheProcessResult{outcome: "failed"}
 	}
-	if p.libraryRoots == nil {
-		p.markFailed(ctx, job, "missing library root resolver for local artwork")
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-
-	localPath := filepath.Clean(strings.TrimSpace(job.SourcePath)[len("file://"):])
-	rootsContentID := firstNonEmpty(job.SeriesID, job.TargetContentID)
-	roots, err := p.libraryRoots.LibraryRootsForContent(ctx, rootsContentID)
-	if err != nil {
-		p.markFailed(ctx, job, fmt.Sprintf("resolving library roots: %v", err))
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-	if !localImagePathWithinRoots(localPath, roots) {
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-	// The lexical check above cannot see through symlinks. Resolve the path and
-	// roots and re-confine so an intermediate directory symlink planted inside a
-	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
-	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
-	// symlinked root still matches. This is a confinement GATE only: the read
-	// below still uses the logical path so readLocalImageFile's Lstat keeps
-	// rejecting a symlinked leaf. A not-yet-existent path (ErrNotExist) falls
-	// through to the reader, which classifies it as the stable "missing" failure.
-	if _, err := localImagePathResolvedWithinRoots(localPath, roots); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		p.markFailed(ctx, job, "local image path outside library roots: "+localPath)
-		return imageCacheProcessResult{outcome: "failed"}
-	}
-
-	data, err := readLocalImageFile(localPath)
+	data, err := readConfinedLocalImage(ctx, p.libraryRoots, firstNonEmpty(job.SeriesID, job.TargetContentID), job.SourcePath)
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
 		return imageCacheProcessResult{outcome: "failed"}
@@ -1014,6 +985,39 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		p.deleteStaleLocalPrefix(ctx, previousCachedPath, cachedPath)
 	}
 	return processResult
+}
+
+// readConfinedLocalImage reads a file:// sidecar image after confining it to
+// the library roots of rootsContentID. Its error texts are the stable local
+// failures isStableProviderImageFailure matches.
+func readConfinedLocalImage(ctx context.Context, resolver LibraryRootResolver, rootsContentID, sourcePath string) ([]byte, error) {
+	if resolver == nil {
+		return nil, errors.New("missing library root resolver for local artwork")
+	}
+	sourcePath = strings.TrimSpace(sourcePath)
+	if !isLocalImageSourcePath(sourcePath) {
+		return nil, fmt.Errorf("not a local image source: %q", sourcePath)
+	}
+	localPath := filepath.Clean(sourcePath[len("file://"):])
+	roots, err := resolver.LibraryRootsForContent(ctx, rootsContentID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving library roots: %w", err)
+	}
+	if !localImagePathWithinRoots(localPath, roots) {
+		return nil, errors.New("local image path outside library roots: " + localPath)
+	}
+	// The lexical check above cannot see through symlinks. Resolve the path and
+	// roots and re-confine so an intermediate directory symlink planted inside a
+	// root (e.g. a link pointing out of the library) cannot pull an out-of-root
+	// file into the cache. EvalSymlinks resolves both sides, so a legitimately
+	// symlinked root still matches. This is a confinement GATE only: the read
+	// below still uses the logical path so readLocalImageFile's Lstat keeps
+	// rejecting a symlinked leaf. A not-yet-existent path (ErrNotExist) falls
+	// through to the reader, which classifies it as the stable "missing" failure.
+	if _, err := localImagePathResolvedWithinRoots(localPath, roots); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, errors.New("local image path outside library roots: " + localPath)
+	}
+	return readLocalImageFile(localPath)
 }
 
 // deleteStaleLocalPrefix removes the previous hashed local/ image prefix
