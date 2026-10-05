@@ -49,16 +49,19 @@ const COLLAGE_POLL_MS = 3_000;
  * back to the editor's copy. A collection with no poster of its own shows the
  * collage the server makes of its titles in the background after a change, so
  * while one with titles shows no poster (`awaitCollage`), the list is read
- * again every few seconds for a short while.
+ * again every few seconds for a short while. `version` names the saved state
+ * the editor holds (its ETag): a save moves it and starts a new wait, even
+ * after an earlier one gave up.
  */
 export function useListedPoster<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   view: CollectionView<Raw> | undefined,
-  { awaitCollage }: { awaitCollage: boolean },
+  { awaitCollage, version }: { awaitCollage: boolean; version?: string },
 ): { url?: string; isCollage: boolean } {
   const id = view?.id;
-  // When this wait for a collage began; reset once the poster arrives.
-  const waitingSince = useRef<number | null>(null);
+  // When this wait for a collage began, and for which saved version; reset
+  // once the poster arrives.
+  const waiting = useRef<{ since: number; version?: string } | null>(null);
   const { data: listed } = useQuery({
     queryKey: scope.keys.list,
     queryFn: () => scope.fetchList(),
@@ -67,11 +70,13 @@ export function useListedPoster<Raw extends WireCollection>(
     refetchInterval: (query) => {
       const entry = query.state.data?.collections.find((c) => c.id === id);
       if (!awaitCollage || !entry || entry.poster_url || !entry.item_count) {
-        waitingSince.current = null;
+        waiting.current = null;
         return false;
       }
-      waitingSince.current ??= Date.now();
-      return Date.now() - waitingSince.current < COLLAGE_WAIT_MS ? COLLAGE_POLL_MS : false;
+      if (waiting.current?.version !== version) {
+        waiting.current = { since: Date.now(), version };
+      }
+      return Date.now() - waiting.current.since < COLLAGE_WAIT_MS ? COLLAGE_POLL_MS : false;
     },
   });
   const shown = useMemo(() => (listed ? scope.toView(listed) : view), [listed, scope, view]);

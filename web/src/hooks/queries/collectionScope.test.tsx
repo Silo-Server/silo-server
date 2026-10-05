@@ -270,7 +270,11 @@ describe("useListedPoster", () => {
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
-    return renderHook(() => useListedPoster(PERSONAL_SCOPE, view, { awaitCollage }), { wrapper });
+    return renderHook(
+      ({ version }: { version: string }) =>
+        useListedPoster(PERSONAL_SCOPE, view, { awaitCollage, version }),
+      { wrapper, initialProps: { version: "saved-1" } },
+    );
   }
 
   const listCalls = () => v2Recorder.callsOf("GET /api/v2/collections").length;
@@ -323,6 +327,26 @@ describe("useListedPoster", () => {
     expect(calls).toBeLessThanOrEqual(7);
     await act(() => vi.advanceTimersByTimeAsync(30_000));
     expect(listCalls()).toBe(calls);
+  });
+
+  it("waits again after a save, even once an earlier wait gave up", async () => {
+    v2Recorder.answer("GET /api/v2/collections", {
+      items: [{ ...getCollectionOk, item_count: 2, poster_url: "" }],
+    });
+    const { rerender } = watch();
+    await waitFor(() => expect(listCalls()).toBe(1));
+    await act(() => vi.advanceTimersByTimeAsync(30_000));
+    const gaveUp = listCalls();
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(listCalls()).toBe(gaveUp);
+
+    // The save moves the editor's version and reads the list again before
+    // the server has built the new collage.
+    rerender({ version: "saved-2" });
+    await act(() => client.invalidateQueries({ queryKey: PERSONAL_SCOPE.keys.list }));
+    const afterSave = listCalls();
+    await act(() => vi.advanceTimersByTimeAsync(6_000));
+    expect(listCalls()).toBeGreaterThan(afterSave);
   });
 
   it("doesn't wait for a collection without titles, or one that gets no collage", async () => {
