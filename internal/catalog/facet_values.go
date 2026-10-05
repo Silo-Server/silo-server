@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 )
 
 // FacetValue is one facet value and the number of titles in the scope that
@@ -54,9 +55,16 @@ const (
 	// distinct values than this is never cached; its searches push an
 	// escaped match into SQL instead.
 	facetValueCacheBudget = 500_000
-	// facetValueLoadTimeout bounds one list build, which runs on after the
-	// request that started it is canceled.
+	// facetValueLoadTimeout bounds one list build, including its wait for a
+	// fill slot; the build runs on after the request that started it is
+	// canceled.
 	facetValueLoadTimeout = 30 * time.Second
+	// facetValueFillLimit caps how many lists one node builds at once. A
+	// build can hold up to facetValueCacheBudget values before the budget
+	// check turns it away, so a burst of misses across many scopes, as
+	// after a restart, holds at most this many such lists in memory and
+	// runs at most this many list queries; the rest wait for a slot.
+	facetValueFillLimit = 4
 )
 
 // facetEntry is one cached value with its lowercased form for matching.
@@ -173,20 +181,22 @@ func isFacetWordSeparator(r rune) bool {
 // part of the key and two viewers share a list only when their scope SQL
 // is identical. Entries expire after ttl; the cache evicts least recently
 // used lists once the values it holds exceed budget. Concurrent misses
-// for one key run one load.
+// for one key run one load, and at most cap(fills) loads run at once.
 type facetValueCache struct {
 	ttl         time.Duration
 	budget      int
 	loadTimeout time.Duration
 	now         func() time.Time
+	flights     singleflight.Group
+	// fills holds a slot for each list being built.
+	fills chan struct{}
 
 	mu      sync.Mutex
 	entries map[string]*facetCacheItem
 	// lru is the sentinel of a ring of the entries: lru.next is the most
 	// recently used, lru.prev the least.
-	lru     facetCacheItem
-	used    int
-	flights map[string]*facetFlight
+	lru  facetCacheItem
+	used int
 }
 
 type facetCacheItem struct {
@@ -197,23 +207,14 @@ type facetCacheItem struct {
 	prev, next *facetCacheItem
 }
 
-type facetFlight struct {
-	done chan struct{}
-	list *facetValueList
-	err  error
-	// waiters counts the callers that joined the flight, under the cache
-	// lock.
-	waiters int
-}
-
 func newFacetValueCache(ttl time.Duration, budget int) *facetValueCache {
 	c := &facetValueCache{
 		ttl:         ttl,
 		budget:      budget,
 		loadTimeout: facetValueLoadTimeout,
 		now:         time.Now,
+		fills:       make(chan struct{}, facetValueFillLimit),
 		entries:     make(map[string]*facetCacheItem),
-		flights:     make(map[string]*facetFlight),
 	}
 	c.lru.prev, c.lru.next = &c.lru, &c.lru
 	return c
@@ -237,52 +238,68 @@ func (c *facetValueCache) get(ctx context.Context, key string, load func(context
 	if c == nil {
 		return load(ctx)
 	}
-	c.mu.Lock()
-	if item, ok := c.entries[key]; ok {
-		if c.now().Before(item.expires) {
-			c.unlinkLocked(item)
-			c.pushFrontLocked(item)
-			c.mu.Unlock()
-			return item.list, nil
-		}
-		c.removeLocked(item)
+	if l, ok := c.lookup(key); ok {
+		return l, nil
 	}
-	f, ok := c.flights[key]
-	if ok {
-		f.waiters++
-	} else {
-		f = &facetFlight{done: make(chan struct{})}
-		c.flights[key] = f
-		go c.fly(context.WithoutCancel(ctx), key, f, load)
-	}
-	c.mu.Unlock()
+	flight := c.flights.DoChan(key, func() (any, error) {
+		return c.fill(context.WithoutCancel(ctx), key, load)
+	})
 	select {
-	case <-f.done:
-		return f.list, f.err
+	case res := <-flight:
+		if res.Err != nil {
+			return nil, res.Err
+		}
+		return res.Val.(*facetValueList), nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
 }
 
-// fly runs the load for a flight and publishes its result, caching it
-// when it succeeded. A panicking load fails the flight instead of the
-// process.
-func (c *facetValueCache) fly(ctx context.Context, key string, f *facetFlight, load func(context.Context) (*facetValueList, error)) {
+// lookup returns key's list while it is fresh, dropping it once expired.
+func (c *facetValueCache) lookup(key string) (*facetValueList, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	if !c.now().Before(item.expires) {
+		c.removeLocked(item)
+		return nil, false
+	}
+	c.unlinkLocked(item)
+	c.pushFrontLocked(item)
+	return item.list, true
+}
+
+// fill builds key's list in a fill slot and caches it when the load
+// succeeds. A panicking load fails the flight instead of the process.
+func (c *facetValueCache) fill(ctx context.Context, key string, load func(context.Context) (*facetValueList, error)) (l *facetValueList, err error) {
+	// A flight that starts just after another one stored the list finds it
+	// here instead of building it again.
+	if l, ok := c.lookup(key); ok {
+		return l, nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, c.loadTimeout)
+	defer cancel()
+	select {
+	case c.fills <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-c.fills }()
 	defer func() {
-		cancel()
 		if r := recover(); r != nil {
-			f.list, f.err = nil, fmt.Errorf("facet value load panicked: %v", r)
+			l, err = nil, fmt.Errorf("facet value load panicked: %v", r)
 		}
-		c.mu.Lock()
-		delete(c.flights, key)
-		if f.err == nil {
-			c.storeLocked(key, f.list)
-		}
-		c.mu.Unlock()
-		close(f.done)
 	}()
-	f.list, f.err = load(ctx)
+	if l, err = load(ctx); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.storeLocked(key, l)
+	c.mu.Unlock()
+	return l, nil
 }
 
 func (c *facetValueCache) storeLocked(key string, l *facetValueList) {

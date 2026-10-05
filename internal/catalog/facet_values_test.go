@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -201,20 +202,10 @@ func TestFacetValueCacheSingleflight(t *testing.T) {
 		})
 	}
 	started.Wait()
-	// Land the load only once every other caller has joined its flight.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		c.mu.Lock()
-		f := c.flights["k"]
-		joined := f != nil && f.waiters == callers-1
-		c.mu.Unlock()
-		if joined {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("callers did not join one flight")
-		}
-		time.Sleep(time.Millisecond)
+	// Callers that miss the cache before the load lands join its flight;
+	// later ones find the stored list. Either way one load serves them all.
+	for calls.Load() == 0 {
+		runtime.Gosched()
 	}
 	close(release)
 	wg.Wait()
@@ -294,8 +285,49 @@ func TestFacetValueCacheTimedOutLoadIsNotCached(t *testing.T) {
 func TestFacetValueCachePanickingLoadFailsTheFlight(t *testing.T) {
 	c := newFacetValueCache(time.Minute, 100)
 	_, err := c.get(t.Context(), "k", func(context.Context) (*facetValueList, error) { panic("boom") })
-	if err == nil || len(c.entries) != 0 || len(c.flights) != 0 {
-		t.Fatalf("err = %v entries=%d flights=%d", err, len(c.entries), len(c.flights))
+	if err == nil || len(c.entries) != 0 || len(c.fills) != 0 {
+		t.Fatalf("err = %v entries=%d fills=%d", err, len(c.entries), len(c.fills))
+	}
+	if l, err := c.get(t.Context(), "k", func(context.Context) (*facetValueList, error) { return listOf(2), nil }); err != nil || len(l.entries) != 2 {
+		t.Fatalf("after a panic: list=%+v err=%v", l, err)
+	}
+}
+
+// Misses for different scopes build at most cap(fills) lists at once; a
+// build that cannot get a slot within the load timeout fails uncached.
+func TestFacetValueCacheBoundsConcurrentFills(t *testing.T) {
+	c := newFacetValueCache(time.Minute, 100)
+	c.fills = make(chan struct{}, 1)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		_, err := c.get(t.Context(), "a", func(context.Context) (*facetValueList, error) {
+			close(entered)
+			<-release
+			return listOf(1), nil
+		})
+		first <- err
+	}()
+	<-entered
+
+	c.loadTimeout = 20 * time.Millisecond
+	var calls atomic.Int32
+	load := func(context.Context) (*facetValueList, error) {
+		calls.Add(1)
+		return listOf(3), nil
+	}
+	if _, err := c.get(t.Context(), "b", load); !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 0 {
+		t.Fatalf("second scope: err=%v loads=%d, want a deadline before its load ran", err, calls.Load())
+	}
+
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+	c.loadTimeout = time.Minute
+	if l, err := c.get(t.Context(), "b", load); err != nil || len(l.entries) != 3 || calls.Load() != 1 {
+		t.Fatalf("after the slot freed: list=%+v err=%v loads=%d", l, err, calls.Load())
 	}
 }
 

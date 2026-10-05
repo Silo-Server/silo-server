@@ -86,8 +86,9 @@ scope's full SQL and arguments, so viewers with different library access,
 disabled libraries, or rating limits never share one. Each node keeps its own
 lists, so `count` and newly added values can lag catalog changes by up to two
 minutes. A node holds at most 500,000 values across all lists and drops the
-least recently used list first. A scope with more distinct values than that is
-searched in SQL on every request, with the same matching and order.
+least recently used list first, and builds at most four lists at once. A scope
+with more distinct values than that is searched in SQL on every request, with
+the same matching and order.
 
 `GET /api/v2/catalog/search/capabilities` advertises `facet_value_search: true`
 when the server accepts `library_ids`, answers `values` and `values_has_more`,
