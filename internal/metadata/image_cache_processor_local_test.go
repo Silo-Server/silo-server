@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -318,5 +319,41 @@ func TestProcessLocalImageFailsWithoutRootResolver(t *testing.T) {
 	}
 	if len(cacher.bytesReq) != 0 {
 		t.Fatal("must not cache without confinement roots")
+	}
+}
+
+// A directory swapped for a symlink to outside the library after the path was
+// resolved must not let the read follow it out: the open goes through an
+// os.Root for the resolved root.
+func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	showDir := filepath.Join(root, "Show")
+	if err := os.Mkdir(showDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	posterPath := writeLocalPoster(t, showDir)
+	if err := os.WriteFile(filepath.Join(outside, "poster.jpg"), []byte("outside-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	// Swap the show directory for a link out of the library.
+	if err := os.Rename(showDir, filepath.Join(root, "Show.moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, showDir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	data, err := readLocalImageFile(posterPath, resolvedRoot, resolvedPath)
+	if err == nil {
+		t.Fatalf("read %q through a swapped directory, want an error", data)
+	}
+	if strings.Contains(string(data), "outside") {
+		t.Fatalf("read the outside file")
 	}
 }
