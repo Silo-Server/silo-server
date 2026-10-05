@@ -1154,21 +1154,29 @@ func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Contex
 	if len(files) == 0 {
 		return nil
 	}
+	// Every episode of a series usually shares one observed root, so check
+	// each distinct root and group once rather than once per file.
+	type observedRootKey struct {
+		folderID        int
+		root            string
+		groupKeyVersion int
+		contentGroupKey string
+	}
+	usable := make(map[observedRootKey]bool)
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		if file == nil || file.ObservedRootPath == "" {
 			continue
 		}
-		if !s.canUseObservedRootForDirectorySidecars(
-			ctx,
-			file.MediaFolderID,
-			file.ObservedRootPath,
-			file.GroupKeyVersion,
-			file.ContentGroupKey,
-		) {
-			continue
+		key := observedRootKey{file.MediaFolderID, file.ObservedRootPath, file.GroupKeyVersion, file.ContentGroupKey}
+		ok, checked := usable[key]
+		if !checked {
+			ok = s.canUseObservedRootForDirectorySidecars(ctx, key.folderID, key.root, key.groupKeyVersion, key.contentGroupKey)
+			usable[key] = ok
 		}
-		paths = append(paths, file.ObservedRootPath)
+		if ok {
+			paths = append(paths, file.ObservedRootPath)
+		}
 	}
 	return compactUniqueFilePaths(paths)
 }

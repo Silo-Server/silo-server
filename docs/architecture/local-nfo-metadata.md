@@ -99,10 +99,12 @@ worker, otherwise local artwork jobs fail until the mount is present.
 
 ### Admin image picker
 
+When the NFO provider is enabled for the library,
 `GET /api/v2/admin/items/{id}/images` also offers a movie's or series' local
 sidecar artwork. The provider request carries the item's media files and
 sidecar directories, so the NFO provider returns the same files a refresh
-would. Each local choice has the provider ID `local`, keeps its `file://` path
+would. Libraries without the NFO provider get no local choices, matching
+refresh. Each local choice has the provider ID `local`, keeps its `file://` path
 as `original_url`, and shows a 300-pixel-wide WebP preview as an inline `data:`
 URI (the web client authenticates with a bearer token, so an `<img>` cannot
 fetch an authenticated preview route). The preview is read under the same

@@ -480,8 +480,9 @@ memory, and stores no server-side snapshot. Provider failures expose generic
 messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
-For a movie or series the list also offers its local sidecar artwork (the
-`poster.jpg`, `fanart.jpg` and similar files a refresh would use). These
+For a movie or series in a library with the NFO provider enabled, the list also
+offers its local sidecar artwork (the `poster.jpg`, `fanart.jpg` and similar
+files a refresh would use). These
 choices have `provider_id` `local`, a `file://` `original_url`, and a small
 WebP preview as a `data:` URI in `url`. A file that cannot be read under the
 library-root, symlink and size checks is left out. Frozen v1 lists provider

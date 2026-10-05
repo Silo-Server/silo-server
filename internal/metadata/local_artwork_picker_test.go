@@ -228,3 +228,33 @@ func TestApplyLocalItemImageRejectsSymlinkedDirectoryEscape(t *testing.T) {
 		t.Fatalf("cached %d images, want none", len(cacher.bytesReq))
 	}
 }
+
+type countingObservedLocationRepo struct {
+	gets int
+}
+
+func (r *countingObservedLocationRepo) Get(context.Context, int, string) (*models.ObservedMediaLocation, error) {
+	r.gets++
+	return &models.ObservedMediaLocation{ContentGroupCount: 1}, nil
+}
+
+// The picker lists a series' local artwork on every page and again on apply,
+// so the sidecar directory check runs once per distinct observed root rather
+// than once per episode file.
+func TestDirectorySidecarSearchPathsChecksEachRootOnce(t *testing.T) {
+	locations := &countingObservedLocationRepo{}
+	service := &MetadataService{observedLocationRepo: locations}
+	files := make([]*models.MediaFile, 0, 301)
+	for i := range 300 {
+		files = append(files, &models.MediaFile{ID: i + 1, MediaFolderID: 7, ObservedRootPath: "/media/Other/Show", ContentGroupKey: "show"})
+	}
+	files = append(files, &models.MediaFile{ID: 301, MediaFolderID: 7, ObservedRootPath: "/media/Other/Show Extras", ContentGroupKey: "show"})
+
+	paths := service.directorySidecarSearchPathsForFiles(context.Background(), files)
+	if locations.gets != 2 {
+		t.Fatalf("observed location lookups = %d, want one per distinct root (2)", locations.gets)
+	}
+	if len(paths) != 2 || paths[0] != "/media/Other/Show" || paths[1] != "/media/Other/Show Extras" {
+		t.Fatalf("paths = %v", paths)
+	}
+}

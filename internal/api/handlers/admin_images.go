@@ -89,7 +89,7 @@ const localImageProviderID = "local"
 // offersLocalImages reports whether the picker offers local sidecar artwork
 // for an item type: the NFO provider serves movies and series only.
 func offersLocalImages(itemType string) bool {
-	return itemType == "movie" || itemType == "series"
+	return itemType == itemTypeMovie || itemType == "series"
 }
 
 // --- Request/Response types ---
