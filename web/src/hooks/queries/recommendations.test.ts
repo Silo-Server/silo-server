@@ -188,8 +188,13 @@ describe("taste seeding on the v2 contract", () => {
       expect(recInvalidations()).toBe(2);
       await vi.advanceTimersByTimeAsync(12_000);
       expect(recInvalidations()).toBe(3);
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(recInvalidations()).toBe(3);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(recInvalidations()).toBe(4);
+      // The last refetch comes after the server's two-minute refresh timeout.
+      await vi.advanceTimersByTimeAsync(80_000);
+      expect(recInvalidations()).toBe(5);
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(recInvalidations()).toBe(5);
     } finally {
       vi.useRealTimers();
     }
