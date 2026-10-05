@@ -37,21 +37,22 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int, fil
 	// source item's media type so an audiobook never appears in a movie's
 	// Similar rail (and vice versa) once audiobook embeddings exist. Titles
 	// the viewer cannot see are left out before ranking, so they do not take
-	// the list's places; callers still filter the co-watch additions.
+	// the list's places.
 	embCandidates, err := e.repo.FindSimilar(ctx, embedding, []string{itemID}, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar items: %w", err)
 	}
 
-	// 4. Co-watch neighbors of the source item's media type: co-watch counts
-	// ebook reading too, and the rail keeps to one type like the embedding
-	// search. A source of unknown type keeps every neighbor.
+	// 4. Co-watch neighbors of the source item's media type that the viewer
+	// can see: co-watch counts ebook reading too, the rail keeps to one type
+	// like the embedding search, and hidden neighbors must not take places in
+	// the ranked list. A source of unknown type keeps every type.
 	var cowatchTypes []string
 	if sourceType != "" {
 		cowatchTypes = []string{sourceType}
 	}
 	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
-	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, catalog.AccessFilter{}, cowatchTypes)
+	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchTypes)
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors: %w", err)
 	}
