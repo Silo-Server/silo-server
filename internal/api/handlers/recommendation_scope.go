@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"context"
-	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // Cached recommendation rows are built under a profile's access scope and
@@ -39,23 +37,14 @@ func notifyScopeSettingChanged(ctx context.Context, notifier SignalsChangedNotif
 	}
 }
 
-// profileScopeChanged reports whether an update changes the profile's access
-// scope: its maturity limits or its library restrictions. Clients often send
-// unchanged values back, so only a different value counts.
-func profileScopeChanged(current *userstore.Profile, req ProfileUpdateRequest) bool {
-	if current == nil {
-		return true
-	}
-	switch {
-	case req.MaxContentRating != nil && *req.MaxContentRating != current.MaxContentRating,
-		req.MaxAdvisoryAge != nil && *req.MaxAdvisoryAge != current.MaxAdvisoryAge,
-		req.RequireAdvisoryAge != nil && *req.RequireAdvisoryAge != current.RequireAdvisoryAge,
-		req.LibraryRestrictionsEnabled != nil && *req.LibraryRestrictionsEnabled != current.LibraryRestrictionsEnabled:
-		return true
-	case req.AllowedLibraryIDs != nil:
-		return !sameIntSet(*req.AllowedLibraryIDs, current.AllowedLibraryIDs)
-	}
-	return false
+// profileScopeSet reports whether an update sets any field of the profile's
+// access scope: its maturity limits or its library restrictions. A value
+// equal to the stored one counts too: the stored profile is read outside the
+// update's writer lock, where an overlapping update can change it, and a
+// rebuild of one profile is cheap.
+func profileScopeSet(req ProfileUpdateRequest) bool {
+	return req.MaxContentRating != nil || req.MaxAdvisoryAge != nil || req.RequireAdvisoryAge != nil ||
+		req.LibraryRestrictionsEnabled != nil || req.AllowedLibraryIDs != nil
 }
 
 // accountScopeChanged reports whether an account update can change its
@@ -63,11 +52,4 @@ func profileScopeChanged(current *userstore.Profile, req ProfileUpdateRequest) b
 // decides whether an access group applies.
 func accountScopeChanged(input models.UpdateUserInput) bool {
 	return input.LibraryIDs.Set || input.AccessGroupID.Set || input.Role != nil
-}
-
-func sameIntSet(a, b []int) bool {
-	a, b = slices.Clone(a), slices.Clone(b)
-	slices.Sort(a)
-	slices.Sort(b)
-	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }

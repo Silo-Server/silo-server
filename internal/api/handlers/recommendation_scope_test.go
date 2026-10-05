@@ -15,8 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-func TestProfileScopeChanged(t *testing.T) {
-	current := &userstore.Profile{MaxContentRating: "PG", MaxAdvisoryAge: 10, LibraryRestrictionsEnabled: true, AllowedLibraryIDs: []int{2, 5}}
+func TestProfileScopeSet(t *testing.T) {
 	str := func(v string) *string { return &v }
 	num := func(v int) *int { return &v }
 	flag := func(v bool) *bool { return &v }
@@ -27,15 +26,15 @@ func TestProfileScopeChanged(t *testing.T) {
 		want bool
 	}{
 		{"name only", ProfileUpdateRequest{Name: str("Kid")}, false},
-		{"same values sent back", ProfileUpdateRequest{MaxContentRating: str("PG"), MaxAdvisoryAge: num(10), LibraryRestrictionsEnabled: flag(true), AllowedLibraryIDs: ids(5, 2)}, false},
+		{"same values sent back", ProfileUpdateRequest{MaxContentRating: str("PG"), MaxAdvisoryAge: num(10), LibraryRestrictionsEnabled: flag(true), AllowedLibraryIDs: ids(5, 2)}, true},
 		{"rating ceiling", ProfileUpdateRequest{MaxContentRating: str("PG-13")}, true},
 		{"advisory age", ProfileUpdateRequest{MaxAdvisoryAge: num(0)}, true},
 		{"require advisory age", ProfileUpdateRequest{RequireAdvisoryAge: flag(true)}, true},
 		{"restrictions off", ProfileUpdateRequest{LibraryRestrictionsEnabled: flag(false)}, true},
 		{"allowed libraries", ProfileUpdateRequest{AllowedLibraryIDs: ids(2)}, true},
 	} {
-		if got := profileScopeChanged(current, tc.req); got != tc.want {
-			t.Errorf("%s: changed = %v, want %v", tc.name, got, tc.want)
+		if got := profileScopeSet(tc.req); got != tc.want {
+			t.Errorf("%s: set = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
@@ -158,8 +157,9 @@ func TestAccessGroupLibraryChangesRebuildMembers(t *testing.T) {
 	}
 }
 
-// A profile update that changes the profile's restrictions rebuilds its
-// recommendations; one that sends the same values back does not.
+// A profile update that sets the profile's restrictions rebuilds its
+// recommendations, even when it sends the stored value back; one that sets
+// only other fields does not.
 func TestProfileRestrictionChangeRebuildsRecommendations(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "kid", Name: "Kid", MaxContentRating: "PG"}); err != nil {
@@ -169,20 +169,23 @@ func TestProfileRestrictionChangeRebuildsRecommendations(t *testing.T) {
 	h := NewProfileHandler(testUserStoreProvider{store: store})
 	h.RecWorker = n
 	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: "admin", TokenType: auth.TokenTypeAccess})
-	update := func(rating string) {
+	update := func(req ProfileUpdateRequest) {
 		t.Helper()
-		if _, err := h.UpdateProfile(ctx, ProfileUpdateCommand{UserID: 1, ProfileID: "kid", Request: ProfileUpdateRequest{MaxContentRating: &rating}}); err != nil {
+		if _, err := h.UpdateProfile(ctx, ProfileUpdateCommand{UserID: 1, ProfileID: "kid", Request: req}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	update("PG")
+	name := "Kiddo"
+	update(ProfileUpdateRequest{Name: &name})
 	if len(n.profiles) != 0 {
-		t.Fatalf("unchanged rating rebuilt %v", n.profiles)
+		t.Fatalf("a name change rebuilt %v", n.profiles)
 	}
-	update("G")
-	if !slices.Equal(n.profiles, []string{"kid"}) {
-		t.Fatalf("rebuilt %v, want kid after its ceiling changed", n.profiles)
+	same, lower := "PG", "G"
+	update(ProfileUpdateRequest{MaxContentRating: &same})
+	update(ProfileUpdateRequest{MaxContentRating: &lower})
+	if !slices.Equal(n.profiles, []string{"kid", "kid"}) {
+		t.Fatalf("rebuilt %v, want kid for each update that set its ceiling", n.profiles)
 	}
 }
 

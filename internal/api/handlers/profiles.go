@@ -663,7 +663,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		h.PINAttempts.Reset(resetCtx, ratelimit.ProfilePINKey(userID, profileID))
 		cancel()
 	}
-	if profileScopeChanged(currentProfile, req) {
+	if profileScopeSet(req) {
 		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
