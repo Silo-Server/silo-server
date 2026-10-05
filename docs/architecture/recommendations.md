@@ -62,7 +62,9 @@ storage dimensions) in `server_settings`. Every later vector must match it.
 - Changing the model or base URL requires the admin embeddings reset, which
   deletes the lock, embeddings, taste profiles, clusters and per-profile
   cached rows in one transaction while holding the embedding, taste and cache
-  job claims and the stale sweep lock.
+  job claims and the stale sweep lock. It refuses while the saved model or
+  base URL differs from the one the server runs with, since the old model
+  could otherwise be embedded and locked again before the restart.
 - Catalog seed imports keep only embeddings from the locked model, or the
   configured one when nothing is locked, and never write the lock.
 - The canonical text stored with a vector is always the full text, even when
@@ -109,12 +111,15 @@ that server, and it runs detached from the request with the usual 2-minute
 budget: a slower refresh finishes in the background and is not queued again.
 At most 4 run at once per server; past that the refresh is queued.
 
-A refresh records the database time it started, stores the taste profile with
-that time as `updated_at`, and clears only stale marks set before it. A
-refresh request made on the same server while the refresh runs makes it run
-once more as soon as it ends, so a burst of changes is applied within seconds.
-A mark set during the refresh from another server survives, and a failed
-refresh marks the profile stale again, so the stale sweep retries both.
+A refresh takes a cluster-wide advisory lock for the profile, then records the
+database time it started, stores the taste profile with that time as
+`updated_at`, and clears only stale marks set before it. A refresh request
+made on the same server while the refresh runs makes it run once more as soon
+as it ends, so a burst of changes is applied within seconds. A mark set during
+the refresh from another server survives, and a failed refresh marks the
+profile stale again, so the stale sweep retries both. A refresh that finds the
+profile's lock held by another server marks the profile stale and stops, so
+two refreshes never finish out of order.
 
 - Episodes roll up to their series. A series decays once by its most recent
   signal, as a movie decays by its last watch. A series with no signal for
@@ -232,7 +237,8 @@ limits, with PIN verification skipped. A profile
 whose scope cannot be resolved is not cached. Profile restriction, hidden
 library, account and access-group changes trigger a rebuild; account- and
 group-wide changes mark the affected profiles stale in one statement for the
-stale sweep.
+stale sweep. An applied policy change marks every profile stale the same way,
+since a custom scope policy can change any account's scope.
 
 Every read filters again with the viewer's access filter. List endpoints that
 return bare identifiers filter before answering, and a list anchored on an

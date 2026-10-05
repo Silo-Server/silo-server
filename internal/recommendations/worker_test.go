@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -729,6 +730,40 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	}
 	if marker.calls != 2 || marker.ctxErrs[0] != nil || marker.ctxErrs[1] != nil {
 		t.Fatalf("marks = %d with context errors %v; want two marks with live contexts", marker.calls, marker.ctxErrs)
+	}
+}
+
+// A profile another server is refreshing is not rebuilt here: the refresh
+// reads nothing, marks the profile stale for the sweep, and releases its
+// pending key. Concurrent refreshes could otherwise finish out of order and
+// leave the older one's rows.
+func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
+	w, marker := newRefreshTestWorker()
+	marker.w = nil
+	locker := &fakeLocker{held: true}
+	w.locker = locker
+	// The engine has no repo, so a refresh that went ahead would panic.
+
+	if err := w.refreshProfile(t.Context(), 7, "p"); !errors.Is(err, errProfileRefreshElsewhere) {
+		t.Fatalf("refresh while another server holds the lock = %v, want errProfileRefreshElsewhere", err)
+	}
+	if marker.calls != 1 {
+		t.Fatalf("stale marks = %d, want 1 so the sweep runs the profile again", marker.calls)
+	}
+	if !slices.Equal(locker.keys, []int64{profileRefreshLock(7, "p")}) {
+		t.Fatalf("locks tried %#x, want only the profile's refresh lock", locker.keys)
+	}
+
+	key := profileRefreshKey(7, "p")
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("claim failed")
+	}
+	w.runProfileRefresh(t.Context(), 7, "p", w.refreshProfile)
+	if !w.claimProfileRefresh(key) {
+		t.Fatal("a deferred refresh kept its pending key")
+	}
+	if profileRefreshLock(7, "p") == profileRefreshLock(7, "q") || profileRefreshLock(7, "p") == profileRefreshLock(8, "p") {
+		t.Fatal("different profiles share a refresh lock")
 	}
 }
 
