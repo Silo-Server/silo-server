@@ -159,8 +159,16 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.ImageSize), nil
 }
 
-// LibrarySectionItems answers one section of the library with its items.
+// LibrarySectionItems answers one section of the library with its items, or
+// an error when its items cannot be fetched.
 func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer) (SectionView, error) {
+	return h.librarySectionItems(ctx, libraryID, sectionID, viewer, false)
+}
+
+// librarySectionItems is LibrarySectionItems. With emptyOnFetchError, a
+// section whose items cannot be fetched answers with no items, as the frozen
+// v1 endpoint always has.
+func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer SectionViewer, emptyOnFetchError bool) (SectionView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionView{}, err
 	}
@@ -178,7 +186,10 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 			// As on Home, a failed single section answers an error rather
 			// than an empty row.
 			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
+			if !emptyOnFetchError {
+				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
+			}
+			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
 		resp := h.buildSections(ctx, []sections.SectionWithItems{withItems}, &libraryID, viewer.Access, viewer.ImageSize)
 		if len(resp.Sections) == 0 {
