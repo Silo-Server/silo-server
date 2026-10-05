@@ -107,11 +107,19 @@ func TestProfileAccessFilterFallbackFailsClosed(t *testing.T) {
 	}
 }
 
-type recordingAccountsMarker struct{ got [][]int }
+type recordingAccountsMarker struct {
+	got [][]int
+	all int
+}
 
 func (m *recordingAccountsMarker) MarkAccountsStale(_ context.Context, userIDs []int) (int64, error) {
 	m.got = append(m.got, userIDs)
 	return int64(len(userIDs)), nil
+}
+
+func (m *recordingAccountsMarker) MarkAllProfilesStale(context.Context) (int64, error) {
+	m.all++
+	return 0, nil
 }
 
 // An account-wide access change marks the accounts' profiles stale in one
@@ -130,4 +138,20 @@ func TestNotifyAccountsScopeChangedMarksWithoutRefreshing(t *testing.T) {
 
 	var nilWorker *Worker
 	nilWorker.NotifyAccountsScopeChanged(t.Context(), []int{3}) // recommendations disabled
+}
+
+// A policy change marks every profile stale in one call and queues nothing.
+func TestNotifyPolicyChangedMarksEveryProfileWithoutRefreshing(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	marker := &recordingAccountsMarker{}
+	w.accountsMarker = marker
+
+	w.NotifyPolicyChanged(t.Context())
+	if marker.all != 1 {
+		t.Fatalf("whole-server marks = %d, want 1", marker.all)
+	}
+	assertNothingQueued(t, w, "after a policy change")
+
+	var nilWorker *Worker
+	nilWorker.NotifyPolicyChanged(t.Context()) // recommendations disabled
 }

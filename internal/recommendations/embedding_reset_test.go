@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // keyedLocker refuses the keys another server holds and grants the rest.
@@ -98,6 +99,38 @@ func TestResetEmbeddingsRefusesWhileProfilesAreSwept(t *testing.T) {
 		t.Fatalf("locks taken %#x, released %d", keys, released)
 	}
 	assertNothingRunning(t, w)
+}
+
+// Saved embedding settings that wait for a restart refuse a reset before it
+// claims anything: this server would re-embed with the old model and lock it
+// again. Matching settings let the reset go on to its claims.
+func TestResetEmbeddingsRefusesWhileSavedSettingsWaitForARestart(t *testing.T) {
+	running := config.RecommendationsConfig{EmbeddingModel: "old", EmbeddingBaseURL: "http://embed:11434"}
+	for _, tc := range []struct {
+		name  string
+		saved config.RecommendationsConfig
+		want  error
+	}{
+		{"new model", config.RecommendationsConfig{EmbeddingModel: "new", EmbeddingBaseURL: running.EmbeddingBaseURL}, ErrEmbeddingSettingsPendingRestart},
+		{"new base URL", config.RecommendationsConfig{EmbeddingModel: running.EmbeddingModel, EmbeddingBaseURL: "http://other:11434"}, ErrEmbeddingSettingsPendingRestart},
+		{"active", running, ErrStaleSweepRunning},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			locker := &keyedLocker{held: map[int64]bool{staleSweepLock: true}}
+			w := newJobTestWorker(locker, nil)
+			w.engine = &Engine{cfg: running}
+			w.WithSavedConfig(func(context.Context) (config.RecommendationsConfig, error) { return tc.saved, nil })
+
+			_, err := w.ResetEmbeddings(t.Context())
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("reset = %v, want %v", err, tc.want)
+			}
+			if keys, _ := locker.snapshot(); errors.Is(tc.want, ErrEmbeddingSettingsPendingRestart) && len(keys) != 0 {
+				t.Fatalf("a refused reset took locks %#x", keys)
+			}
+			assertNothingRunning(t, w)
+		})
+	}
 }
 
 func TestResetEmbeddingsHoldsEveryClaimWhileItRuns(t *testing.T) {

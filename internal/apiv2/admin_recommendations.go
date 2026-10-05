@@ -98,7 +98,8 @@ func registerAdminRecommendations(reg *Registry) {
 	}
 	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item embedding, taste profiles and per-profile cached rows in one transaction.")
 	reset.Description = "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. " +
-		"It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server. " +
+		"It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, " +
+		"and while saved embedding settings wait for a server restart. " +
 		"Run the embedding job afterwards to build the new embedding space."
 	reset.Errors = append(reset.Errors, http.StatusConflict)
 	Register(reg, reset, reg.resetAdminRecommendationEmbeddings)
@@ -113,6 +114,9 @@ func (reg *Registry) resetAdminRecommendationEmbeddings(ctx context.Context, _ *
 	if err != nil {
 		if errors.Is(err, recommendations.ErrJobRunning) || errors.Is(err, recommendations.ErrJobRunningElsewhere) || errors.Is(err, recommendations.ErrStaleSweepRunning) {
 			return nil, NewProblem(TypeConflict, "Recommendation work that uses embeddings is running on this or another server. Reset embeddings after it finishes.")
+		}
+		if errors.Is(err, recommendations.ErrEmbeddingSettingsPendingRestart) {
+			return nil, NewProblem(TypeConflict, "The saved embedding settings take effect after a server restart. Restart the server, then reset embeddings.")
 		}
 		return nil, serviceProblem(err)
 	}

@@ -31,6 +31,9 @@ type System struct {
 	reloadCh chan struct{}
 	wg       sync.WaitGroup
 
+	// changeApplied runs after ApplyChanged applies a change on this node.
+	changeApplied func(context.Context)
+
 	// bootDegradedReason is set when the initial engine could not load the
 	// full stored policy (store unreachable or custom bundle failed) and is
 	// cleared by the first successful reload from the store.
@@ -323,6 +326,19 @@ func (s *System) NotifyChanged(ctx context.Context) error {
 	return s.ApplyChanged(ctx).Err()
 }
 
+// OnChangeApplied registers fn to run after ApplyChanged has reloaded this
+// node with a committed change and published it. It runs once per change, on
+// the node that made it, so fn may update state every node shares; other
+// nodes only reload.
+func (s *System) OnChangeApplied(fn func(context.Context)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.changeApplied = fn
+	s.mu.Unlock()
+}
+
 // ApplyChanged reloads this node synchronously, publishes a cross-node
 // invalidation event, and reports per-step outcomes so callers can distinguish
 // "persisted" from "live". The last known-good engine remains active on reload
@@ -341,6 +357,14 @@ func (s *System) ApplyChanged(ctx context.Context) ApplyStatus {
 		if err := s.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPolicyChanged}); err != nil {
 			s.logger.ErrorContext(ctx, "policy change publish failed", "error", err)
 			status.PublishErr = err
+		}
+	}
+	if status.LocalReloadErr == nil {
+		s.mu.RLock()
+		changeApplied := s.changeApplied
+		s.mu.RUnlock()
+		if changeApplied != nil {
+			changeApplied(ctx)
 		}
 	}
 	status.Generation = s.Generation()
