@@ -3516,7 +3516,7 @@ export interface paths {
     put?: never;
     /**
      * Delete the embedding lock, every item embedding, taste profiles and per-profile cached rows in one transaction.
-     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.
+     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.
      */
     post: operations["resetAdminRecommendationEmbeddings"];
     delete?: never;
