@@ -158,7 +158,33 @@ func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID 
 	if err != nil {
 		return false, err
 	}
-	return e.rebuildTasteProfile(ctx, userID, profileID, started)
+	stored, err := e.rebuildTasteProfile(ctx, userID, profileID, started)
+	if err != nil {
+		return stored, err
+	}
+	return stored, e.purgeIfProfileDeleted(ctx, userID, profileID)
+}
+
+// purgeIfProfileDeleted deletes the recommendation state of a profile deleted
+// while a rebuild wrote it. The rebuild checks that its profile exists before
+// writing, but a deletion can land between that check and the writes, after
+// the deletion's own purge ran. Profiles may live outside Postgres, so the
+// check cannot share the writes' transaction; run after the rebuild's last
+// write, either this check sees the deletion or the deletion's purge comes
+// after every write.
+func (e *Engine) purgeIfProfileDeleted(ctx context.Context, userID int, profileID string) error {
+	store, err := e.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user store for user %d: %w", userID, err)
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("get profile %s: %w", profileID, err)
+	}
+	if profile != nil {
+		return nil
+	}
+	return e.repo.PurgeProfile(ctx, userID, profileID)
 }
 
 // rebuildTasteProfile is refreshTasteProfile for a refresh that started at
