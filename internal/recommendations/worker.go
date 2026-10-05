@@ -1042,6 +1042,9 @@ func (w *Worker) refreshProfile(ctx context.Context, userID int, profileID strin
 	if built := w.cacheUserRows(refreshCtx, repo, userID, profileID, cacheExpiry(started)); built.failed > 0 {
 		return fmt.Errorf("rebuild recommendation cache: %d steps failed", built.failed)
 	}
+	if err := w.engine.purgeIfProfileDeleted(refreshCtx, userID, profileID); err != nil {
+		return fmt.Errorf("check profile still exists: %w", err)
+	}
 	if err := repo.ClearStaleAt(refreshCtx, userID, profileID, started); err != nil {
 		slog.WarnContext(ctx, "failed to clear stale profile marker", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
 	}
