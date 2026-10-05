@@ -2706,7 +2706,8 @@ func main() {
 				watchProviderService.WithSignalsChangedNotifier(recWorker)
 			}
 			// A scope policy can change every profile's scope, and cached
-			// rows are built under it.
+			// rows are built under it; each node marks them after it loads a
+			// new policy generation.
 			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
 	}

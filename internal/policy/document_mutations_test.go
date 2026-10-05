@@ -319,7 +319,8 @@ func TestDocumentServiceCommittedApplyFailure(t *testing.T) {
 			if err != nil || !result.Persisted || result.Generation != 2 || result.Document.ActiveVersionID == nil {
 				t.Fatalf("committed result lost: %+v %v", result, err)
 			}
-			// Only a change this node applied reaches the change hook.
+			// The hook runs once this node has loaded the change; a failed
+			// reload has not, and a later event or poll reload runs it.
 			want := 1
 			if failure == "local reload" {
 				want = 0

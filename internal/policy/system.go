@@ -31,8 +31,10 @@ type System struct {
 	reloadCh chan struct{}
 	wg       sync.WaitGroup
 
-	// changeApplied runs after ApplyChanged applies a change on this node.
-	changeApplied func(context.Context)
+	// changeApplied runs after this node loads a newer policy generation;
+	// announcedGeneration is the newest one it ran for, or the boot load's.
+	changeApplied       func(context.Context)
+	announcedGeneration int64
 
 	// bootDegradedReason is set when the initial engine could not load the
 	// full stored policy (store unreachable or custom bundle failed) and is
@@ -128,6 +130,7 @@ func (s *System) Start(ctx context.Context) error {
 	}
 	s.engine = engine
 	s.bootDegradedReason = bootDegradedReason
+	s.announcedGeneration = engine.Revision()
 	s.pdp = NewPDP(engine, WithDecisionLogger(s.decisionLogger))
 	s.cancel = cancel
 	s.mu.Unlock()
@@ -326,10 +329,12 @@ func (s *System) NotifyChanged(ctx context.Context) error {
 	return s.ApplyChanged(ctx).Err()
 }
 
-// OnChangeApplied registers fn to run after ApplyChanged has reloaded this
-// node with a committed change and published it. It runs once per change, on
-// the node that made it, so fn may update state every node shares; other
-// nodes only reload.
+// OnChangeApplied registers fn to run each time this node loads a newer policy
+// generation than it had, whichever reload loaded it: the synchronous one
+// after a local change, or a later event or poll reload, which also covers a
+// local reload that failed. Every node runs fn after it applies the change,
+// so state fn invalidates is invalidated again after the last node applies
+// it. The boot load does not run fn.
 func (s *System) OnChangeApplied(fn func(context.Context)) {
 	if s == nil {
 		return
@@ -357,14 +362,6 @@ func (s *System) ApplyChanged(ctx context.Context) ApplyStatus {
 		if err := s.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPolicyChanged}); err != nil {
 			s.logger.ErrorContext(ctx, "policy change publish failed", "error", err)
 			status.PublishErr = err
-		}
-	}
-	if status.LocalReloadErr == nil {
-		s.mu.RLock()
-		changeApplied := s.changeApplied
-		s.mu.RUnlock()
-		if changeApplied != nil {
-			changeApplied(ctx)
 		}
 	}
 	status.Generation = s.Generation()
@@ -421,8 +418,17 @@ func (s *System) reloadFromStore(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	s.bootDegradedReason = ""
+	// Concurrent reloads of one generation announce it once.
+	announce := generation > s.announcedGeneration
+	if announce {
+		s.announcedGeneration = generation
+	}
+	changeApplied := s.changeApplied
 	s.mu.Unlock()
 	s.logger.InfoContext(ctx, "policy engine reloaded", "generation", generation)
+	if announce && changeApplied != nil {
+		changeApplied(ctx)
+	}
 	return nil
 }
 
