@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -291,5 +293,33 @@ func TestDirectorySidecarSearchPathsChecksEachRootOnce(t *testing.T) {
 	}
 	if len(paths) != 2 || paths[0] != "/media/Other/Show" || paths[1] != "/media/Other/Show Extras" {
 		t.Fatalf("paths = %v", paths)
+	}
+}
+
+// Sidecar discovery does not depend on the provider chain, so a chain that
+// fails to resolve still lists the item's local artwork and reports the
+// failure instead of failing the whole listing.
+func TestFetchItemImagesWithLocalSurvivesChainFailure(t *testing.T) {
+	root := t.TempDir()
+	poster := "file://" + writeLocalPoster(t, root)
+	local := &recordingImageProvider{images: []RemoteImage{{ProviderID: "nfo", URL: poster, Type: ImagePoster}}}
+	service, _ := newLocalPickerServiceForTest(local, nil, []string{root})
+	pool, err := pgxpool.New(context.Background(), "postgres://silo@127.0.0.1:1/silo?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	service.chainRepo = NewChainRepository(pool)
+	service.chainCache = map[string]chainCacheEntry{}
+
+	images, providerErrors, err := service.FetchItemImagesWithLocal(context.Background(), nil, "series", "en", 7, "local-series-1")
+	if err != nil {
+		t.Fatalf("FetchItemImagesWithLocal: %v", err)
+	}
+	if len(images) != 1 || images[0].URL != poster {
+		t.Fatalf("images = %+v, want only the local poster", images)
+	}
+	if providerErrors["chain"] == "" {
+		t.Fatalf("provider errors = %v, want the chain failure", providerErrors)
 	}
 }

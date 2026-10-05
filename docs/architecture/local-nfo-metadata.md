@@ -82,9 +82,10 @@ sidecar images.
   roots: a lexical check on the logical path, then a symlink-resolving re-check
   (both path and roots are resolved, so a legitimately symlinked root stays
   valid while an intermediate directory symlink escaping a root is rejected).
-  The file is then opened through an `os.Root` for the resolved root, so a
-  directory swapped for a symlink after the check cannot lead the open out of
-  it.
+  Each library root is opened as an `os.Root` before the path is resolved, and
+  the file is opened through the handle that is the same directory as the
+  resolved root. A root or directory swapped for a symlink after that point
+  cannot lead the open out of the library.
   Missing/unreadable/out-of-root and structurally-unusable (non-regular,
   over-cap) paths are stable failures with a long retry deferral; recovery is
   refresh-driven — the provider-artwork backfill sweep deliberately skips

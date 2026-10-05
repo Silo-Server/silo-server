@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/imageutil"
@@ -37,7 +38,10 @@ func IsLocalImageSource(url string) bool {
 func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int, contentID string) ([]RemoteImage, map[string]string, error) {
 	images, providerErrors, err := s.FetchItemImages(ctx, providerIDs, contentType, language, folderID)
 	if err != nil {
-		return nil, nil, err
+		// Sidecar discovery does not use the chain, so a chain failure still
+		// lists the item's local artwork and reports the failure.
+		slog.WarnContext(ctx, "metadata: image provider chain unavailable for picker", "component", "metadata", "folder_id", folderID, "error", err)
+		images, providerErrors = nil, map[string]string{"chain": err.Error()}
 	}
 	images = slices.DeleteFunc(images, func(image RemoteImage) bool {
 		return isLocalImageSourcePath(image.URL)

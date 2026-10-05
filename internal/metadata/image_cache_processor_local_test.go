@@ -323,8 +323,8 @@ func TestProcessLocalImageFailsWithoutRootResolver(t *testing.T) {
 }
 
 // A directory swapped for a symlink to outside the library after the path was
-// resolved must not let the read follow it out: the open goes through an
-// os.Root for the resolved root.
+// resolved must not let the read follow it out: the open goes through the
+// root handle taken before resolution.
 func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
@@ -337,9 +337,16 @@ func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) 
 		t.Fatal(err)
 	}
 
+	pinned := openLibraryRoots([]string{root})
+	defer closeLibraryRoots(pinned)
 	resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
+	}
+	handle := pinnedLibraryRoot(pinned, resolvedRoot)
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	if handle == nil || err != nil {
+		t.Fatalf("pinned root %v, rel error %v", handle, err)
 	}
 	// Swap the show directory for a link out of the library.
 	if err := os.Rename(showDir, filepath.Join(root, "Show.moved")); err != nil {
@@ -349,11 +356,74 @@ func TestReadLocalImageFileRefusesDirectorySwappedAfterResolution(t *testing.T) 
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	data, err := readLocalImageFile(posterPath, resolvedRoot, resolvedPath)
-	if err == nil {
-		t.Fatalf("read %q through a swapped directory, want an error", data)
+	data, err := readLocalImageFile(posterPath, handle, rel)
+	if err == nil || strings.Contains(string(data), "outside") {
+		t.Fatalf("read %q (err %v) through a swapped directory, want an error", data, err)
 	}
-	if strings.Contains(string(data), "outside") {
-		t.Fatalf("read the outside file")
+}
+
+// A library root replaced by a link out of the library after Silo opened it
+// cannot redirect the read, whether the swap lands before or after the image
+// path is resolved.
+func TestReadConfinedLocalImageRefusesRootSwappedAfterOpening(t *testing.T) {
+	setup := func(t *testing.T) (root, posterPath, outside string) {
+		t.Helper()
+		base := t.TempDir()
+		root = filepath.Join(base, "library")
+		outside = filepath.Join(base, "outside")
+		for dir, content := range map[string]string{root: "poster-bytes", outside: "outside-bytes"} {
+			if err := os.MkdirAll(filepath.Join(dir, "Show"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "Show", "poster.jpg"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root, filepath.Join(root, "Show", "poster.jpg"), outside
 	}
+	swapRoot := func(t *testing.T, root, outside string) {
+		t.Helper()
+		if err := os.Rename(root, root+".moved"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, root); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+	}
+
+	t.Run("swapped before resolution", func(t *testing.T) {
+		root, posterPath, outside := setup(t)
+		pinned := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(pinned)
+		swapRoot(t, root, outside)
+
+		_, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if pinnedLibraryRoot(pinned, resolvedRoot) != nil {
+			t.Fatal("the replacement root matched the root opened before the swap")
+		}
+	})
+
+	t.Run("swapped after resolution", func(t *testing.T) {
+		root, posterPath, outside := setup(t)
+		pinned := openLibraryRoots([]string{root})
+		defer closeLibraryRoots(pinned)
+		resolvedPath, resolvedRoot, err := localImagePathResolvedWithinRoots(posterPath, []string{root})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		handle := pinnedLibraryRoot(pinned, resolvedRoot)
+		rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+		if handle == nil || err != nil {
+			t.Fatalf("pinned root %v, rel error %v", handle, err)
+		}
+		swapRoot(t, root, outside)
+
+		data, err := readLocalImageFile(posterPath, handle, rel)
+		if err == nil || strings.Contains(string(data), "outside") {
+			t.Fatalf("read %q (err %v) after the root was swapped, want an error", data, err)
+		}
+	})
 }
