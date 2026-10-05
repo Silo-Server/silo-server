@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,12 +54,14 @@ const (
 )
 
 // PersonalCollectionCollages serves and builds personal collection collages.
-// A nil receiver, or one without a CollageGen, serves and builds nothing.
+// A nil receiver, or one without a generator, serves and builds nothing.
 type PersonalCollectionCollages struct {
 	pool *pgxpool.Pool
-	// CollageGen composes and stores collages; nil when artwork storage is
-	// not configured.
-	CollageGen CollageGenerator
+	// gen composes and stores collages. It is set once the API router has
+	// built its poster signer, possibly after scheduled syncs have started
+	// calling Refresh, so it is read and written atomically; it stays unset
+	// when artwork storage is not configured.
+	gen atomic.Pointer[collageGeneratorRef]
 	// RefreshDelay is how long Refresh waits before reading a collection's
 	// titles, so later changes in a burst join the same refresh.
 	RefreshDelay time.Duration
@@ -82,19 +85,45 @@ type personalCollageRefresh struct {
 	access     AccessFilter
 }
 
+// collageGeneratorRef boxes a CollageGenerator for atomic.Pointer.
+type collageGeneratorRef struct{ CollageGenerator }
+
 // NewPersonalCollectionCollages serves the collages of the personal
-// collections in pool's user store, composed and stored by gen.
+// collections in pool's user store, composed and stored by gen. A nil gen
+// serves and builds nothing until SetCollageGenerator supplies one.
 func NewPersonalCollectionCollages(pool *pgxpool.Pool, gen CollageGenerator) *PersonalCollectionCollages {
-	return &PersonalCollectionCollages{
+	p := &PersonalCollectionCollages{
 		pool:                 pool,
-		CollageGen:           gen,
 		RefreshDelay:         defaultPersonalCollageRefreshDelay,
 		SmartRefreshInterval: defaultSmartCollageRefreshInterval,
 	}
+	p.SetCollageGenerator(gen)
+	return p
+}
+
+// SetCollageGenerator sets the generator that composes and stores collages.
+// It is safe to call while collages are served and refreshed.
+func (p *PersonalCollectionCollages) SetCollageGenerator(gen CollageGenerator) {
+	if gen == nil {
+		p.gen.Store(nil)
+		return
+	}
+	p.gen.Store(&collageGeneratorRef{gen})
+}
+
+// generator returns the collage generator, or nil when there is none.
+func (p *PersonalCollectionCollages) generator() CollageGenerator {
+	if p == nil || p.pool == nil {
+		return nil
+	}
+	if ref := p.gen.Load(); ref != nil {
+		return ref.CollageGenerator
+	}
+	return nil
 }
 
 func (p *PersonalCollectionCollages) enabled() bool {
-	return p != nil && p.pool != nil && p.CollageGen != nil
+	return p.generator() != nil
 }
 
 func (p *PersonalCollectionCollages) buildQueue() *collageBuildQueue {
@@ -103,7 +132,7 @@ func (p *PersonalCollectionCollages) buildQueue() *collageBuildQueue {
 }
 
 func (p *PersonalCollectionCollages) collageSet(userID int) collageSet {
-	return collageSet{store: personalCollageStore{pool: p.pool, userID: userID}, gen: p.CollageGen, queue: p.buildQueue()}
+	return collageSet{store: personalCollageStore{pool: p.pool, userID: userID}, gen: p.generator(), queue: p.buildQueue()}
 }
 
 // Posters returns the collage each of account userID's collections shows the
@@ -215,23 +244,6 @@ func (p *PersonalCollectionCollages) refreshSmart(ctx context.Context, userID in
 		return collage.ErrNotEnoughImages
 	}
 	return nil
-}
-
-// Prepare builds the collage the viewer described by access sees for c,
-// unless it is already stored. It returns collage.ErrNotEnoughImages when that
-// viewer can see none of c's titles with a poster.
-func (p *PersonalCollectionCollages) Prepare(ctx context.Context, userID int, c PersonalCollectionDefinition, access AccessFilter) error {
-	if !p.enabled() {
-		return nil
-	}
-	if IsLiveQueryType(c.CollectionType) {
-		return p.refreshSmart(ctx, userID, c, access)
-	}
-	sources, err := p.ListSources(ctx, userID, []PersonalCollectionDefinition{c}, access)
-	if err != nil {
-		return err
-	}
-	return p.collageSet(userID).prepare(ctx, c.ID, sources[c.ID])
 }
 
 // Refresh builds, in the background and after RefreshDelay, the collage the

@@ -263,6 +263,12 @@ type Dependencies struct {
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
+	// PersonalCollectionCollages serves and builds personal collection
+	// collages. main.go builds it beside UserCollectionSync, before scheduled
+	// syncs start, and hands it to both; the router gives it its generator
+	// once the poster signer exists. Nil builds one here when artwork
+	// storage is configured.
+	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
 	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
@@ -1049,7 +1055,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var personalCollages *catalog.PersonalCollectionCollages
 	if deps.DB != nil && detailSvc != nil {
 		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, nil); gen != nil {
-			personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, gen)
+			personalCollages = deps.PersonalCollectionCollages
+			if personalCollages == nil {
+				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			}
+			personalCollages.SetCollageGenerator(gen)
 		}
 	}
 	if deps.DB != nil {
@@ -1110,9 +1120,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.CollectionOwners = collectionOwners
 		collectionHandler.Collages = personalCollages
-		if deps.UserCollectionSync != nil {
-			deps.UserCollectionSync.Collages = personalCollages
-		}
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.

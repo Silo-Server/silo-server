@@ -2772,6 +2772,11 @@ func main() {
 			}
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
+			// Syncs refresh collages and start with the task manager below,
+			// before the router exists, so the collage service is shared from
+			// here; the router gives it its generator.
+			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			userSync.Collages = deps.PersonalCollectionCollages
 			// Trakt fetchers are wired in router.go (they need settingsRepo);
 			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())

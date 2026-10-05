@@ -190,7 +190,7 @@ func TestPersonalCollectionCollagesFollowTheViewerDB(t *testing.T) {
 	t.Run("the owner's collage is its own", func(t *testing.T) {
 		ownerSources, _ := collages.ListSources(ctx, userID, []PersonalCollectionDefinition{manualDef}, unrestricted)
 		ownerRef := CollectionCollageRef{CollectionID: manual.ID, Key: CollectionCollageKey(ownerSources[manual.ID])}
-		if err := collages.Prepare(ctx, userID, manualDef, unrestricted); err != nil {
+		if err := prepareCollage(ctx, collages, userID, manualDef, unrestricted); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
 		got := collages.Posters(ctx, userID, []PersonalCollectionDefinition{manualDef}, unrestricted)[manual.ID]
@@ -220,7 +220,7 @@ func TestPersonalCollectionCollagesFollowTheViewerDB(t *testing.T) {
 	})
 
 	t.Run("a smart collection's collage follows its query", func(t *testing.T) {
-		if err := collages.Prepare(ctx, userID, smartDef, pg); err != nil {
+		if err := prepareCollage(ctx, collages, userID, smartDef, pg); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
 		got := collages.Posters(ctx, userID, []PersonalCollectionDefinition{smartDef}, pg)[smart.ID]
@@ -235,7 +235,7 @@ func TestPersonalCollectionCollagesFollowTheViewerDB(t *testing.T) {
 		if got := off.Posters(ctx, userID, []PersonalCollectionDefinition{manualDef}, kidReadsShared); len(got) != 0 {
 			t.Fatalf("posters = %+v, want none", got)
 		}
-		if err := off.Prepare(ctx, userID, manualDef, unrestricted); err != nil {
+		if err := prepareCollage(ctx, off, userID, manualDef, unrestricted); err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
 		var nilCollages *PersonalCollectionCollages
@@ -385,7 +385,7 @@ func TestPersonalCollectionCollageListReadsSkipSmartQueriesDB(t *testing.T) {
 	gen := &fakeCollageGenerator{}
 	collages := NewPersonalCollectionCollages(pool, gen)
 	for _, c := range smart {
-		if err := collages.Prepare(ctx, userID, c, viewer); err != nil {
+		if err := prepareCollage(ctx, collages, userID, c, viewer); err != nil {
 			t.Fatalf("prepare %s: %v", c.ID, err)
 		}
 	}
@@ -427,4 +427,20 @@ func TestPersonalCollectionCollageListReadsSkipSmartQueriesDB(t *testing.T) {
 			t.Fatalf("changed definition served %+v before its collage was built", got)
 		}
 	})
+}
+
+// prepareCollage builds, in the foreground, the collage the viewer described
+// by access sees for c, unless it is already stored.
+func prepareCollage(ctx context.Context, p *PersonalCollectionCollages, userID int, c PersonalCollectionDefinition, access AccessFilter) error {
+	if !p.enabled() {
+		return nil
+	}
+	if IsLiveQueryType(c.CollectionType) {
+		return p.refreshSmart(ctx, userID, c, access)
+	}
+	sources, err := p.ListSources(ctx, userID, []PersonalCollectionDefinition{c}, access)
+	if err != nil {
+		return err
+	}
+	return p.collageSet(userID).prepare(ctx, c.ID, sources[c.ID])
 }
