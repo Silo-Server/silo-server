@@ -659,7 +659,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 	}
-	if profileScopeChanged(currentProfile, req) {
+	if profileScopeSet(req) {
 		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
