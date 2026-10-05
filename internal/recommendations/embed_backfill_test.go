@@ -50,6 +50,15 @@ type fakeEmbeddingStore struct {
 	markedAll int
 }
 
+func (f *fakeEmbeddingStore) HasEmbeddingsFromModel(_ context.Context, model string) (bool, error) {
+	for _, e := range f.stored {
+		if e.model == model {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeEmbeddingStore) MarkAllProfilesStale(context.Context) (int64, error) {
 	f.markedAll++
 	return 1, nil
@@ -279,6 +288,32 @@ func TestBackfillMarksProfilesStaleForStoredItems(t *testing.T) {
 	}
 	if outside.markedAll != 1 || len(outside.marked) != 0 {
 		t.Fatalf("store outside Postgres: %d whole-server marks and %d item marks, want one whole-server mark", outside.markedAll, len(outside.marked))
+	}
+}
+
+// Vectors a catalog import stored carry no lock, and with every item embedded
+// no run stores one to write it from. A run that finds them and no lock embeds
+// the probe text once and writes the lock; without them it writes none.
+func TestBackfillLocksImportedEmbeddings(t *testing.T) {
+	calls := 0
+	store := newFakeEmbeddingStore()
+	store.stored["imported"] = storedTestEmbedding{model: backfillTestModel, text: "imported"}
+	b := newTestBackfill(store, vectorsOf(768, &calls), nil)
+	if err := b.run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || store.lockWrites != 1 || store.lock.Model != backfillTestModel || store.lock.SourceDimensions != 768 {
+		t.Fatalf("calls=%d lock writes=%d lock=%+v; want one probe and a lock for the imported model", calls, store.lockWrites, store.lock)
+	}
+
+	calls = 0
+	empty := newFakeEmbeddingStore()
+	b = newTestBackfill(empty, vectorsOf(768, &calls), nil)
+	if err := b.run(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || empty.lockWrites != 0 {
+		t.Fatalf("no imported vectors: calls=%d lock writes=%d, want none", calls, empty.lockWrites)
 	}
 }
 

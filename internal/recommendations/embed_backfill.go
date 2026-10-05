@@ -195,6 +195,7 @@ type embeddingStore interface {
 	UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error
 	MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error)
 	MarkAllProfilesStale(ctx context.Context) (int64, error)
+	HasEmbeddingsFromModel(ctx context.Context, model string) (bool, error)
 }
 
 const (
@@ -257,6 +258,9 @@ func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
 		if err := b.embedTextStale(ctx); err != nil {
 			return err
 		}
+	}
+	if err := b.lockImportedEmbeddings(ctx); err != nil {
+		return err
 	}
 	if b.counts.Embedded == 0 && b.lastErr != nil {
 		return fmt.Errorf("embedding run stored none of the %d items it tried: %w", b.counts.Failed+b.counts.Skipped, b.lastErr)
@@ -565,6 +569,39 @@ func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector
 	b.counts.Embedded++
 	b.stored = append(b.stored, item.ContentID)
 	return true, nil
+}
+
+// lockImportedEmbeddings writes the embedding lock for vectors a catalog
+// import stored. The import never writes it, since a bundle records neither
+// the base URL nor the source dimensions, and once every item has a vector no
+// run stores one to write it from, so semantic search, which follows the
+// locked model, would stay off. It embeds embedProbeText once to learn the
+// configured provider's dimensions. A run that stored a vector, or found a
+// lock, has nothing to do.
+func (b *embedBackfill) lockImportedEmbeddings(ctx context.Context) error {
+	if b.lock != nil || b.counts.Embedded > 0 {
+		return nil
+	}
+	lock, err := b.db.GetEmbeddingLock(ctx)
+	if err != nil {
+		return fmt.Errorf("load embedding lock: %w", err)
+	}
+	if lock != nil {
+		b.lock = lock
+		return nil
+	}
+	imported, err := b.db.HasEmbeddingsFromModel(ctx, b.model)
+	if err != nil || !imported {
+		return err
+	}
+	vector, err := b.embedText(ctx, embedProbeText)
+	if err != nil {
+		if stop := runStopError(ctx, err); stop != nil {
+			return stop
+		}
+		return providerUnavailable(err)
+	}
+	return b.ensureLock(ctx, vector)
 }
 
 // ensureLock checks vector against the embedding lock, writing the lock from

@@ -69,7 +69,10 @@ storage dimensions) in `server_settings`. Every later vector must match it.
   base URL differs from the one the server runs with, since the old model
   could otherwise be embedded and locked again before the restart.
 - Catalog seed imports keep only embeddings from the locked model, or the
-  configured one when nothing is locked, and never write the lock.
+  configured one when nothing is locked, and never write the lock. An
+  embedding run that finds such vectors and no lock embeds a probe text with
+  the configured provider and writes the lock from it, so semantic search
+  turns on even when every item already has a vector.
 - The canonical text stored with a vector is always the full text, even when
   the provider only accepted a shortened copy, so Pass 2 does not re-embed it.
 
