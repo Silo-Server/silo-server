@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -189,7 +190,17 @@ type embeddingStore interface {
 	ItemsNeedingEmbedding(ctx context.Context, currentModel, afterID string, limit int) ([]string, error)
 	ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error)
 	UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error
+	MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error)
 }
+
+const (
+	// signalsStaleBatch is how many stored items a run collects before it
+	// marks the profiles with signals on them stale. Each mark checks every
+	// taste profile, so it runs per batch rather than per embedding chunk.
+	signalsStaleBatch = 500
+	// signalsStaleTimeout bounds one of those marks.
+	signalsStaleTimeout = time.Minute
+)
 
 type embeddingLockReader interface {
 	GetEmbeddingLock(ctx context.Context) (*EmbeddingLock, error)
@@ -216,12 +227,17 @@ type embedBackfill struct {
 	lastErr error
 	// probed records that the provider embedded embedProbeText in this run.
 	probed bool
+	// stored lists the items stored since profiles with signals on them were
+	// last marked stale.
+	stored []string
 }
 
 func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
 	if err := checkEmbeddingLockConfig(ctx, b.db, b.baseURL, b.model); err != nil {
 		return err
 	}
+	// The vectors stored are committed, however the run ends.
+	defer b.markSignalsStale(context.WithoutCancel(ctx))
 	if includeTextStale {
 		// The full run retries every input refused since the last one.
 		b.refused.reset()
@@ -356,6 +372,9 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if len(b.stored) >= signalsStaleBatch {
+			b.markSignalsStale(ctx)
+		}
 		end := min(start+embeddingBackfillBatchSize, len(items))
 		chunkItems, chunkTexts := items[start:end], texts[start:end]
 
@@ -382,6 +401,29 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		}
 	}
 	return nil
+}
+
+// markSignalsStale marks stale the taste profiles with signals on the items
+// stored since the last call. A refresh that ran before those items had
+// vectors left them out of the taste vector, and an embeddings reset leaves
+// every profile without one; the stale sweep rebuilds them. A failure is
+// logged: the nightly taste run rebuilds every profile anyway.
+func (b *embedBackfill) markSignalsStale(ctx context.Context) {
+	if len(b.stored) == 0 {
+		return
+	}
+	ids := b.stored
+	b.stored = nil
+	ctx, cancel := context.WithTimeout(ctx, signalsStaleTimeout)
+	defer cancel()
+	marked, err := b.db.MarkProfilesStaleForItems(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "marking profiles stale after storing embeddings failed", "component", "recommendations", "items", len(ids), "error", err)
+		return
+	}
+	if marked > 0 {
+		slog.InfoContext(ctx, "embeddings stored: taste profiles marked stale", "component", "recommendations", "items", len(ids), "profiles", marked)
+	}
 }
 
 // embedEach embeds and stores items one call at a time.
@@ -509,6 +551,7 @@ func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector
 		return false, nil
 	}
 	b.counts.Embedded++
+	b.stored = append(b.stored, item.ContentID)
 	return true, nil
 }
 
