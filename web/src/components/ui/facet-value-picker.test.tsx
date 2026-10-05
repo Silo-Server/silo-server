@@ -178,6 +178,19 @@ describe("FacetValuePicker", () => {
     expect(picked).toBe("A24");
   });
 
+  it("uses typed text on Enter before the list has answered it", async () => {
+    serve();
+    const trigger = renderPicker();
+    await userEvent.click(trigger());
+    await screen.findByRole("option", { name: /^Warner Bros\. Pictures/ });
+
+    // Enter lands before the search for "Aard" is sent, while the list on
+    // screen still answers the empty search.
+    await userEvent.type(screen.getByRole("combobox", { name: "Search studios" }), "Aard{Enter}");
+    expect(picked).toBe("Aard");
+    expect(trigger()).toHaveTextContent("Aard");
+  });
+
   it("starts a search with a letter typed on the closed picker", async () => {
     serve();
     const trigger = renderPicker();

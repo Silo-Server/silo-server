@@ -196,8 +196,11 @@ function FacetValueList({
       setActive(move());
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const option = options[active];
-      if (option) onPick(option.value);
+      // Until the list answers what is typed, its first option belongs to an
+      // earlier search, so Enter uses the typed text unless an option was chosen.
+      const chosen = current || highlight.options === options ? options[active] : undefined;
+      const next = chosen?.value ?? typed;
+      if (next) onPick(next);
     } else if (event.key === "Tab") {
       event.preventDefault();
       onDismiss();
