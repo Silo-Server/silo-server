@@ -241,7 +241,8 @@ additive fields.
     "app_build": "20841",
     "platform": "android-tv",     // android | android-tv | ios | tvos  (macos reserved)
     "os_version": "11 (API 30)",
-    "profile_id": "prof_…"        // capturing profile, attribution only
+    "profile_id": "prof_…",       // capturing profile, attribution only
+    "occurrence_count": 3         // optional; repeats of one issue the client grouped into this report
   },
   "destination": { "server_instance_id": "srv_…" },   // consent binding; server rejects mismatches
   "consent": { "mode": "prompt", "notice_version": 1 },  // prompt | always | manual

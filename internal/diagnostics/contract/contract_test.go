@@ -108,10 +108,69 @@ func TestValidateManifestRejectsCrashOnManualReports(t *testing.T) {
 	}
 }
 
+func TestValidateManifestOccurrenceCount(t *testing.T) {
+	withCount := func(t *testing.T, count string) []byte {
+		t.Helper()
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(mustReadFixture(t, "v1/fixtures/valid/android-tv-crash-ueh.json"), &m); err != nil {
+			t.Fatalf("parse crash fixture: %v", err)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(m["report"], &report); err != nil {
+			t.Fatalf("parse report: %v", err)
+		}
+		if count == "" {
+			delete(report, "occurrence_count")
+		} else {
+			report["occurrence_count"] = json.RawMessage(count)
+		}
+		reportJSON, err := json.Marshal(report)
+		if err != nil {
+			t.Fatalf("marshal report: %v", err)
+		}
+		m["report"] = reportJSON
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal manifest: %v", err)
+		}
+		return data
+	}
+
+	for _, tc := range []struct {
+		name  string
+		count string
+		want  int
+	}{
+		{name: "absent means one occurrence", count: "", want: 0},
+		{name: "one", count: "1", want: 1},
+		{name: "repeats", count: "42", want: 42},
+		{name: "maximum", count: "1000000", want: MaxOccurrenceCount},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest, err := ValidateManifest(withCount(t, tc.count))
+			if err != nil {
+				t.Fatalf("ValidateManifest() error = %v", err)
+			}
+			if manifest.Report.OccurrenceCount != tc.want {
+				t.Fatalf("OccurrenceCount = %d, want %d", manifest.Report.OccurrenceCount, tc.want)
+			}
+		})
+	}
+
+	for _, count := range []string{"0", "-1", "1000001", "1.5", `"3"`} {
+		t.Run("rejects "+count, func(t *testing.T) {
+			if _, err := ValidateManifest(withCount(t, count)); err == nil {
+				t.Fatalf("ValidateManifest() error = nil for occurrence_count %s", count)
+			}
+		})
+	}
+}
+
 func TestSchemaEnumsAndRequiredFieldsStayInSync(t *testing.T) {
 	manifest := mustReadObject(t, "v1/manifest.schema.json")
 	assertStringsEqual(t, "manifest.required", schemaStrings(t, manifest, "required"), manifestRequiredFields)
 	assertConstInt(t, "manifest.schema_version.const", schemaValue(t, manifest, "properties", "schema_version", "const"), SchemaVersion)
+	assertConstInt(t, "manifest.report.occurrence_count.maximum", schemaValue(t, manifest, "properties", "report", "properties", "occurrence_count", "maximum"), MaxOccurrenceCount)
 	assertStringsEqual(t, "manifest.report.required", schemaStrings(t, manifest, "properties", "report", "required"), manifestReportRequiredFields)
 	assertStringsEqual(t, "manifest.destination.required", schemaStrings(t, manifest, "properties", "destination", "required"), manifestDestinationRequiredFields)
 	assertStringsEqual(t, "manifest.consent.required", schemaStrings(t, manifest, "properties", "consent", "required"), manifestConsentRequiredFields)
