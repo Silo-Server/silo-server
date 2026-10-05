@@ -40,10 +40,11 @@ export function useTasteSeedItems(enabled = true) {
  * When the recommendation surfaces are refetched again after a taste-seed
  * submission. The server answers once the profile's refresh is done or after
  * a few seconds; a slower refresh lands later, and these refetches pick it up.
- * The last one comes after the server's two-minute refresh timeout, when the
- * refresh can no longer be running.
+ * A submission that arrives while a refresh is reading makes that refresh run
+ * once more when it ends, each run within the server's two-minute timeout, so
+ * the last refetch comes after two timeouts, when neither can be running.
  */
-const TASTE_SEED_REFETCH_DELAYS_MS = [3_000, 15_000, 45_000, 125_000] as const;
+const TASTE_SEED_REFETCH_DELAYS_MS = [3_000, 15_000, 45_000, 125_000, 245_000] as const;
 
 /**
  * Submits a batch of selected content IDs as favorites and triggers a single
