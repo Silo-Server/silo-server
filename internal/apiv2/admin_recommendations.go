@@ -53,7 +53,7 @@ type AdminRecommendationStarted struct {
 type AdminRecommendationStartedOutput struct{ Body AdminRecommendationStarted }
 type AdminRecommendationEmbeddingsReset struct {
 	Embeddings    int64 `json:"embeddings" doc:"Item embeddings deleted."`
-	TasteProfiles int64 `json:"taste_profiles" doc:"Taste profiles deleted."`
+	TasteProfiles int64 `json:"taste_profiles" doc:"Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again."`
 	TasteClusters int64 `json:"taste_clusters" doc:"Taste clusters deleted."`
 	CachedRows    int64 `json:"cached_rows" doc:"Per-profile cached recommendation rows deleted. Global rows are kept."`
 }

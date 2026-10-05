@@ -191,13 +191,17 @@ func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 		count *int64
 	}{
 		{"taste clusters", `DELETE FROM user_taste_clusters`, &res.TasteClusters},
-		{"taste profiles", `DELETE FROM user_taste_profiles`, &res.TasteProfiles},
+		// Taste rows keep their signal counts and lose only their vectors:
+		// when the embedding job stores their titles' vectors again it marks
+		// these rows stale, and the stale sweep rebuilds them. A deleted row
+		// would wait for the nightly taste run.
+		{"taste profiles", `UPDATE user_taste_profiles SET embedding = NULL WHERE embedding IS NOT NULL`, &res.TasteProfiles},
 		// Global rows have no user and do not use embeddings.
 		{"cached rows", `DELETE FROM recommendation_cache WHERE user_id IS NOT NULL`, &res.CachedRows},
 	} {
 		tag, err := tx.Exec(ctx, step.query)
 		if err != nil {
-			return res, fmt.Errorf("delete %s: %w", step.what, err)
+			return res, fmt.Errorf("reset %s: %w", step.what, err)
 		}
 		*step.count = tag.RowsAffected()
 	}
