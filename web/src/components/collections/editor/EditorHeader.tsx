@@ -153,16 +153,22 @@ export function EditorHeader({
         <ChevronLeft aria-hidden className="size-4" />
         {back.label}
       </Link>
-      <header className="grid grid-cols-[64px_minmax(0,1fr)] items-end gap-x-5 gap-y-3 sm:grid-cols-[64px_minmax(0,1fr)_auto]">
+      {/* The poster column only when there is a poster; Look shows the collage otherwise. */}
+      <header
+        className={cn(
+          "grid items-end gap-x-5 gap-y-3",
+          posterUrl
+            ? "grid-cols-[64px_minmax(0,1fr)] sm:grid-cols-[64px_minmax(0,1fr)_auto]"
+            : "grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto]",
+        )}
+      >
         {posterUrl ? (
           <img
             src={posterUrl}
             alt=""
             className="bg-muted aspect-[2/3] w-16 self-start rounded-[10px] object-cover"
           />
-        ) : (
-          <span aria-hidden className="bg-muted aspect-[2/3] w-16 self-start rounded-[10px]" />
-        )}
+        ) : null}
         <div className="grid min-w-0 gap-1.5">
           <div className="flex flex-wrap gap-2">
             <Tag icon={<KindIcon aria-hidden className="size-3.5" />}>
@@ -181,7 +187,7 @@ export function EditorHeader({
           {meta}
         </div>
         {created ? (
-          <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
+          <div className={cn("flex items-center gap-2", posterUrl && "col-span-2 sm:col-span-1")}>
             {open.length > 0 ? <OpenButton targets={open} /> : null}
             {actions.length > 0 ? <ActionMenu label="More actions" items={actions} /> : null}
           </div>
