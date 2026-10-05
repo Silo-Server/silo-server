@@ -277,9 +277,11 @@ library sections, which scope the whole row to their libraries.
   share. Any other profile, or one whose anchors find nothing, gets the
   candidates nearest its averaged taste vector, ranked by MMR.
 - **Genre pass.** In a row from the averaged taste vector, a stable reorder
-  of the MMR order lets no genre hold more than half of the served window
-  while the row has other titles to offer. It deletes nothing and moves
-  nothing past the window. A composed row skips it: its slots already
+  of the MMR order keeps each genre to half of the served window while the
+  row has other titles to offer. It is greedy in rank order and never
+  revisits a title it let in, so with multi-genre titles a genre can exceed
+  half when only a different set of titles would meet the cap. It deletes
+  nothing and moves nothing past the window. A composed row skips it: its slots already
   spread the window over the interests by weight, and the cap would cut an
   interest heavier than half the profile below its share.
 - **Type supplements.** The main row holds at least a fifth of its length of

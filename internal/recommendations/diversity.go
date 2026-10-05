@@ -106,13 +106,16 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 // hold while the row has items of other genres to offer.
 const servedGenreShare = 0.5
 
-// applyGenreCap reorders a row ranked by MMR so that no genre holds more than
+// applyGenreCap reorders a row ranked by MMR to keep any one genre to
 // servedGenreShare of its served window, its first ServedRowSize positions or
-// the whole row when shorter, while the row has other items to offer. It walks the row in order: an item enters the window
-// only if none of its genres already holds that many places there, and the
-// items it passes over fill the window's remaining places, in order, when the
-// row runs out of others. Everything after the window keeps its order, and no
-// item is removed. Items without genre data are never counted.
+// the whole row when shorter. It is greedy and keeps relevance order: it walks
+// the row in order, an item enters the window only if none of its genres
+// already holds that many places there, and the items it passes over fill the
+// window's remaining places, in order, when the row runs out of others. It
+// never revisits a title it let in, so with multi-genre titles a genre can
+// exceed the share even when another choice of titles would meet it; the
+// higher-ranked titles win. Everything after the window keeps its order, and
+// no item is removed. Items without genre data are never counted.
 func applyGenreCap(items []ScoredItem, genres map[string][]string) []ScoredItem {
 	window := min(len(items), ServedRowSize)
 	maxPerGenre := max(1, int(servedGenreShare*float64(window)))
