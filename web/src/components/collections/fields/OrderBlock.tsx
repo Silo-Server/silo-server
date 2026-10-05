@@ -214,7 +214,10 @@ function SmartOrder({
   );
 }
 
-/** "[ 250   max titles ]": commits on blur or Enter. */
+/**
+ * "[ 250   | max titles ]", drawn like the Sort selects beside it: commits on
+ * blur or Enter.
+ */
 function MaxTitlesInput({
   limit,
   placeholder,
@@ -229,7 +232,7 @@ function MaxTitlesInput({
   onCommit: (input: HTMLInputElement) => void;
 }) {
   return (
-    <label className="border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 flex h-11 items-center gap-2 rounded-md border px-3 focus-within:ring-[3px]">
+    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px] has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-50">
       <Input
         key={limit ?? ""}
         type="number"
@@ -240,13 +243,16 @@ function MaxTitlesInput({
         placeholder={placeholder}
         defaultValue={limit ?? ""}
         disabled={disabled}
-        className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 disabled:opacity-100"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
       />
-      <span aria-hidden className="text-muted-foreground shrink-0 text-[12.5px]">
+      <span
+        aria-hidden
+        className="border-border text-muted-foreground flex shrink-0 items-center self-stretch border-l pl-3"
+      >
         max titles
       </span>
     </label>

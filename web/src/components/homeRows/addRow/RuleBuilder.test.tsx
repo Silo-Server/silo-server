@@ -195,6 +195,20 @@ describe("RuleBuilder", () => {
     expect(latest!.groups[0]!.rules).toHaveLength(2);
   });
 
+  it("moves focus to the value of the rule just added", async () => {
+    render(<Harness initial={query()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    const third = screen.getByRole("group", { name: "Rule 3" });
+    expect(within(third).getByRole("combobox", { name: "Value" })).toHaveFocus();
+    expect(within(third).getByRole("combobox", { name: "Value" })).toHaveTextContent(
+      "Pick a genre",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add an “or” group" }));
+    const group = screen.getByRole("group", { name: "Group 2" });
+    expect(within(group).getByRole("combobox", { name: "Value" })).toHaveFocus();
+  });
+
   it("adds an “or” group: titles match the first group or the new one", async () => {
     render(<Harness initial={query()} />);
     await userEvent.click(screen.getByRole("button", { name: "Add an “or” group" }));
@@ -234,7 +248,7 @@ describe("RuleBuilder", () => {
     render(<Harness initial={query()} />);
     const second = screen.getByRole("group", { name: "Rule 2" });
     expect(within(second).getByRole("combobox", { name: "Field" })).toHaveTextContent(
-      "IMDb Rating",
+      "IMDb rating",
     );
     await userEvent.click(within(second).getByRole("button", { name: "Remove rule" }));
     expect(latest!.groups[0]!.rules).toEqual([

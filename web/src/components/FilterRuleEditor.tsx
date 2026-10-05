@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
@@ -5,7 +6,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -13,6 +16,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FilterConfig, FilterGroup, FilterRule } from "@/api/types";
 import {
+  COLLECTION_FIELD_GROUPS,
   COLLECTION_FIELD_OPTIONS,
   getCollectionSortOptions,
   getCollectionFieldOption,
@@ -20,7 +24,9 @@ import {
   newFilterRule,
   type CollectionFieldOption,
 } from "@/components/collections/collectionBuilderFields";
+import { FacetValuePicker } from "@/components/ui/facet-value-picker";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
+import type { FacetValueScope } from "@/hooks/queries/facetValues";
 import {
   getDefaultQuerySortOrder,
   normalizeQuerySortForScope,
@@ -84,6 +90,16 @@ function canEditRule(
   return true;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/** "30d": the server trims and ignores case, and reads m as months. */
+const IN_LAST = /^\s*(\d+)\s*([hdwmy])\s*$/i;
+const IN_LAST_UNITS: ReadonlyArray<[string, string]> = [
+  ["d", "days"],
+  ["w", "weeks"],
+  ["m", "months"],
+  ["y", "years"],
+];
+
 function normalizeRuleValue(
   field: string,
   op: string,
@@ -99,11 +115,20 @@ function normalizeRuleValue(
     }
     return ["", ""];
   }
+  if (Array.isArray(value)) {
+    // Leaving "between" keeps where the range started.
+    return value[0] ?? getDefaultRuleValue(field, op);
+  }
   if (fieldDef.inputType === "boolean") {
     if (typeof value === "boolean") {
       return value;
     }
     return String(value) === "true";
+  }
+  if (fieldDef.inputType === "date") {
+    // A date and "in the last 30 days" don't convert into each other.
+    const text = String(value ?? "");
+    return (op === "in_last" ? IN_LAST : ISO_DATE).test(text) ? text : "";
   }
   return value;
 }
@@ -121,6 +146,10 @@ interface FilterRuleRowProps {
    * tell which rule a Field, Value or Remove rule control belongs to.
    */
   label?: string;
+  /** Where picked values come from; without it, all of the viewer's titles. */
+  valueScope?: FacetValueScope;
+  /** Moves focus to the value control, for a rule just added. */
+  focusValue?: boolean;
 }
 
 const RULE_ROW_SIZES = {
@@ -140,6 +169,8 @@ const RULE_ROW_SIZES = {
   },
 };
 
+type RuleRowSize = (typeof RULE_ROW_SIZES)["roomy"];
+
 /**
  * One rule: field, condition and value, then a remove button. A rule these
  * controls can't represent shows read-only and stays as saved until removed.
@@ -152,12 +183,18 @@ export function FilterRuleRow({
   onRemove,
   roomy = false,
   label,
+  valueScope,
+  focusValue = false,
 }: FilterRuleRowProps) {
   const size = RULE_ROW_SIZES[roomy ? "roomy" : "compact"];
   const fieldDef = getCollectionFieldOption(rule.field);
-  const operators = fieldDef?.operators ?? [];
+  const valueRef = useRef<HTMLDivElement>(null);
 
-  if (!canEditRule(rule, fieldDef, allowPersonalizedFilters)) {
+  useEffect(() => {
+    if (focusValue) valueRef.current?.querySelector<HTMLElement>("button, input")?.focus();
+  }, [focusValue]);
+
+  if (!fieldDef || !canEditRule(rule, fieldDef, allowPersonalizedFilters)) {
     return (
       <div
         role="group"
@@ -177,6 +214,10 @@ export function FilterRuleRow({
     );
   }
 
+  // Status and genre "contains" are offered only to a rule that already uses them.
+  const fields = fieldOptions.filter((f) => !f.hidden || f.value === fieldDef.value);
+  const operators = fieldDef.operators.filter((op) => !op.hidden || op.value === rule.op);
+
   return (
     <div role={label ? "group" : undefined} aria-label={label} className={size.row}>
       <Select
@@ -191,11 +232,19 @@ export function FilterRuleRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {fieldOptions.map((f) => (
-            <SelectItem key={f.value} value={f.value}>
-              {f.label}
-            </SelectItem>
-          ))}
+          {COLLECTION_FIELD_GROUPS.map(([group, name]) => {
+            const inGroup = fields.filter((f) => f.group === group);
+            return inGroup.length > 0 ? (
+              <SelectGroup key={group}>
+                <SelectLabel>{name}</SelectLabel>
+                {inGroup.map((f) => (
+                  <SelectItem key={f.value} value={f.value}>
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ) : null;
+          })}
         </SelectContent>
       </Select>
 
@@ -217,79 +266,15 @@ export function FilterRuleRow({
         </SelectContent>
       </Select>
 
-      {fieldDef?.supportsRange && rule.op === "between" ? (
-        <div className={cn("flex items-center gap-2", size.value)}>
-          {[0, 1].map((index) => {
-            const rangeValue =
-              Array.isArray(rule.value) && rule.value.length === 2 ? rule.value : ["", ""];
-            return (
-              <Input
-                key={index}
-                type={fieldDef.inputType === "number" ? "number" : "text"}
-                aria-label={index === 0 ? "From" : "To"}
-                value={String(rangeValue[index] ?? "")}
-                onChange={(e) => {
-                  const nextValue: [string | number, string | number] = [
-                    rangeValue[0] ?? "",
-                    rangeValue[1] ?? "",
-                  ];
-                  nextValue[index] =
-                    fieldDef.inputType === "number" && e.target.value !== ""
-                      ? Number(e.target.value)
-                      : e.target.value;
-                  onChange({ value: nextValue });
-                }}
-                className={cn(size.control, "min-w-0 flex-1")}
-                placeholder={index === 0 ? "From" : "To"}
-              />
-            );
-          })}
-        </div>
-      ) : fieldDef?.inputType === "boolean" ? (
-        <Select
-          value={String(Boolean(rule.value))}
-          onValueChange={(v) => onChange({ value: v === "true" })}
-        >
-          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="true">True</SelectItem>
-            <SelectItem value="false">False</SelectItem>
-          </SelectContent>
-        </Select>
-      ) : fieldDef?.inputType === "select" ? (
-        <Select value={String(rule.value)} onValueChange={(v) => onChange({ value: v })}>
-          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
-            <SelectValue placeholder="Select..." />
-          </SelectTrigger>
-          <SelectContent>
-            {fieldDef.selectOptions?.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : fieldDef?.inputType === "person_search" ? (
-        <PersonSearchSelect
-          value={String(rule.value ?? "")}
-          onChange={(v) => onChange({ value: v })}
+      <div ref={valueRef} className="contents">
+        <RuleValueControl
+          rule={rule}
+          fieldDef={fieldDef}
+          size={size}
+          valueScope={valueScope}
+          onChange={(value) => onChange({ value })}
         />
-      ) : (
-        <Input
-          type={fieldDef?.inputType === "number" ? "number" : "text"}
-          aria-label="Value"
-          value={String(rule.value)}
-          onChange={(e) =>
-            onChange({
-              value: fieldDef?.inputType === "number" ? Number(e.target.value) : e.target.value,
-            })
-          }
-          className={cn(size.control, size.value)}
-          placeholder={rule.field === "added_at" ? "e.g. 30d, 2w" : "Value..."}
-        />
-      )}
+      </div>
 
       <Button
         type="button"
@@ -301,6 +286,236 @@ export function FilterRuleRow({
       >
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
+    </div>
+  );
+}
+
+/** The control a rule's value takes, by its field's input type and condition. */
+function RuleValueControl({
+  rule,
+  fieldDef,
+  size,
+  valueScope,
+  onChange,
+}: {
+  rule: FilterRule;
+  fieldDef: CollectionFieldOption;
+  size: RuleRowSize;
+  valueScope: FacetValueScope | undefined;
+  onChange: (value: FilterRule["value"]) => void;
+}) {
+  const control = cn(size.control, "min-w-0");
+  const unit = fieldDef.unit ? (
+    <span className="text-muted-foreground shrink-0 text-sm">{fieldDef.unit}</span>
+  ) : null;
+
+  if (fieldDef.supportsRange && rule.op === "between") {
+    const range = Array.isArray(rule.value) && rule.value.length === 2 ? rule.value : ["", ""];
+    return (
+      <div className={cn("flex items-center gap-2", size.value)}>
+        {(["From", "To"] as const).map((name, index) => {
+          const set = (next: string | number) => {
+            const value: [string | number, string | number] = [range[0] ?? "", range[1] ?? ""];
+            value[index] = next;
+            onChange(value);
+          };
+          return fieldDef.inputType === "date" ? (
+            <DateInput
+              key={name}
+              label={name}
+              value={range[index]}
+              onChange={set}
+              className={cn(control, "flex-1")}
+            />
+          ) : (
+            <Input
+              key={name}
+              type={fieldDef.inputType === "number" ? "number" : "text"}
+              aria-label={name}
+              placeholder={name}
+              value={String(range[index] ?? "")}
+              onChange={(e) =>
+                set(
+                  fieldDef.inputType === "number" && e.target.value !== ""
+                    ? Number(e.target.value)
+                    : e.target.value,
+                )
+              }
+              className={cn(control, "flex-1")}
+            />
+          );
+        })}
+        {unit}
+      </div>
+    );
+  }
+
+  switch (fieldDef.inputType) {
+    case "boolean":
+      return (
+        <Select value={String(Boolean(rule.value))} onValueChange={(v) => onChange(v === "true")}>
+          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="true">Yes</SelectItem>
+            <SelectItem value="false">No</SelectItem>
+          </SelectContent>
+        </Select>
+      );
+    case "select":
+      return (
+        <Select value={String(rule.value)} onValueChange={onChange}>
+          <SelectTrigger aria-label="Value" className={cn(size.control, size.value)}>
+            <SelectValue placeholder="Pick one" />
+          </SelectTrigger>
+          <SelectContent>
+            {fieldDef.selectOptions?.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    case "person_search":
+      return <PersonSearchSelect value={String(rule.value ?? "")} onChange={onChange} />;
+    case "facet":
+      return (
+        <FacetValuePicker
+          facet={fieldDef.facet ?? "genre"}
+          value={String(rule.value ?? "")}
+          onChange={onChange}
+          scope={valueScope}
+          placeholder={fieldDef.placeholder ?? "Pick a value"}
+          searchLabel={fieldDef.searchLabel ?? "Search values"}
+          className={cn(size.control, size.value)}
+        />
+      );
+    case "date":
+      return rule.op === "in_last" ? (
+        <InLastInput
+          value={rule.value}
+          onChange={onChange}
+          className={cn("flex items-center gap-2", size.value)}
+          control={control}
+        />
+      ) : (
+        <DateInput
+          label="Value"
+          value={rule.value}
+          onChange={onChange}
+          className={cn(size.control, size.value)}
+        />
+      );
+    default:
+      return (
+        <div className={cn("flex items-center gap-2", size.value)}>
+          <Input
+            type={fieldDef.inputType === "number" ? "number" : "text"}
+            aria-label="Value"
+            value={String(rule.value)}
+            onChange={(e) =>
+              onChange(fieldDef.inputType === "number" ? Number(e.target.value) : e.target.value)
+            }
+            className={cn(control, "flex-1")}
+            placeholder="Value"
+          />
+          {unit}
+        </div>
+      );
+  }
+}
+
+/** A calendar date; a saved value that isn't YYYY-MM-DD stays editable as text. */
+function DateInput({
+  label,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  value: FilterRule["value"] | undefined;
+  onChange: (value: string) => void;
+  className: string;
+}) {
+  const text = String(value ?? "");
+  return (
+    <Input
+      type={text === "" || ISO_DATE.test(text) ? "date" : "text"}
+      aria-label={label}
+      value={text}
+      onChange={(e) => onChange(e.target.value)}
+      className={className}
+    />
+  );
+}
+
+/**
+ * "in the last [30] [days]", written as "30d". A saved value in hours keeps
+ * an hours choice; one that doesn't read as a number and unit stays as text.
+ */
+function InLastInput({
+  value,
+  onChange,
+  className,
+  control,
+}: {
+  value: FilterRule["value"];
+  onChange: (value: string) => void;
+  className: string;
+  control: string;
+}) {
+  const text = String(value ?? "");
+  const parsed = IN_LAST.exec(text);
+  // The unit picked while the number is blank, which writes nothing yet.
+  const [unitDraft, setUnitDraft] = useState("d");
+
+  if (text.trim() !== "" && !parsed) {
+    return (
+      <div className={className}>
+        <Input
+          aria-label="Value"
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(control, "flex-1")}
+        />
+      </div>
+    );
+  }
+
+  const amount = parsed?.[1] ?? "";
+  const unit = parsed?.[2]?.toLowerCase() ?? unitDraft;
+  const units = unit === "h" ? [["h", "hours"] as const, ...IN_LAST_UNITS] : IN_LAST_UNITS;
+  const write = (nextAmount: string, nextUnit: string) => {
+    setUnitDraft(nextUnit);
+    onChange(/^\d+$/.test(nextAmount) ? `${Number(nextAmount)}${nextUnit}` : "");
+  };
+
+  return (
+    <div className={className}>
+      <Input
+        type="number"
+        min={1}
+        step={1}
+        aria-label="Amount"
+        placeholder="30"
+        value={amount}
+        onChange={(e) => write(e.target.value.trim(), unit)}
+        className={cn(control, "w-20 flex-none")}
+      />
+      <Select value={unit} onValueChange={(next) => write(amount, next)}>
+        <SelectTrigger aria-label="Unit" className={cn(control, "flex-1")}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {units.map(([value, name]) => (
+            <SelectItem key={value} value={value}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

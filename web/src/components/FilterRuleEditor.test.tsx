@@ -65,7 +65,7 @@ describe("FilterRuleEditor", () => {
       supportsRange: true,
     });
     expect(getCollectionFieldOption("release_date")).toMatchObject({
-      inputType: "text",
+      inputType: "date",
       supportsRange: true,
     });
     expect(getCollectionFieldOption("actor")).toMatchObject({
@@ -78,7 +78,7 @@ describe("FilterRuleEditor", () => {
     });
     expect(getCollectionFieldOption("resolution")).toMatchObject({
       inputType: "select",
-      selectOptions: expect.arrayContaining(["2160p"]),
+      selectOptions: expect.arrayContaining([{ value: "2160p", label: "2160p" }]),
     });
   });
 
@@ -88,7 +88,7 @@ describe("FilterRuleEditor", () => {
 
     expect(ebookOptions.find((option) => option.value === "watched")?.label).toBe("Read");
     expect(ebookOptions.find((option) => option.value === "in_progress")?.label).toBe(
-      "In Progress",
+      "In progress",
     );
     expect(movieOptions.find((option) => option.value === "watched")?.label).toBe("Watched");
   });
@@ -114,7 +114,7 @@ describe("FilterRuleEditor", () => {
 
     const second = screen.getByRole("group", { name: "Rule 2" });
     expect(within(second).getByRole("combobox", { name: "Field" })).toHaveTextContent(
-      "IMDb Rating",
+      "IMDb rating",
     );
     expect(within(second).getByRole("button", { name: "Remove rule" })).toBeInTheDocument();
   });

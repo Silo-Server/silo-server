@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import type { FilterRule, QueryDefinition, QueryGroup } from "@/api/types";
 import { newFilterRule } from "@/components/collections/collectionBuilderFields";
@@ -104,6 +105,10 @@ export function RuleBuilder({
     libraries.some((library) => library.id === id),
   );
 
+  // The rule just added, "group:rule", whose value control takes focus.
+  const [focusRule, setFocusRule] = useState<string | null>(null);
+  const valueScope = { libraryIds: value.library_ids, mediaScope: scope };
+
   const setGroups = (next: QueryGroup[]) => onChange({ ...value, groups: next });
   const setGroup = (index: number, group: QueryGroup) =>
     setGroups(groups.map((entry, at) => (at === index ? group : entry)));
@@ -123,9 +128,11 @@ export function RuleBuilder({
     const group = groups[index];
     if (!group) {
       setGroups([{ match: "all", rules: [newFilterRule()] }]);
+      setFocusRule("0:0");
       return;
     }
     setGroup(index, { ...group, rules: [...group.rules, newFilterRule()] });
+    setFocusRule(`${index}:${group.rules.length}`);
   }
 
   function updateRule(index: number, ruleIndex: number, updates: Partial<FilterRule>) {
@@ -139,6 +146,7 @@ export function RuleBuilder({
   function removeRule(index: number, ruleIndex: number) {
     const group = groups[index]!;
     const rules = group.rules.filter((_, at) => at !== ruleIndex);
+    setFocusRule(null);
     setGroups(
       rules.length === 0
         ? groups.filter((_, at) => at !== index)
@@ -153,6 +161,7 @@ export function RuleBuilder({
       match: several ? value.match : "any",
       groups: [...groups, { match: "all", rules: [newFilterRule()] }],
     });
+    setFocusRule(`${groups.length}:0`);
   }
 
   const join = several ? GROUP_JOIN_NAMES[value.match] : "or";
@@ -258,7 +267,10 @@ export function RuleBuilder({
                   size="icon"
                   aria-label={`Remove group ${index + 1}`}
                   className="text-muted-foreground ml-auto size-8"
-                  onClick={() => setGroups(groups.filter((_, at) => at !== index))}
+                  onClick={() => {
+                    setFocusRule(null);
+                    setGroups(groups.filter((_, at) => at !== index));
+                  }}
                 >
                   <X aria-hidden className="size-4" />
                 </Button>
@@ -274,6 +286,8 @@ export function RuleBuilder({
                 onRemove={() => removeRule(index, ruleIndex)}
                 roomy
                 label={`Rule ${ruleIndex + 1}`}
+                valueScope={valueScope}
+                focusValue={focusRule === `${index}:${ruleIndex}`}
               />
             ))}
             <div className="flex flex-wrap items-center gap-1">

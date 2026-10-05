@@ -60,6 +60,27 @@ describe("OrderBlock, Smart", () => {
     expect(input).toHaveAttribute("placeholder", "No limit");
   });
 
+  it("draws the max titles field like the selects beside it, with its unit inside", () => {
+    const { input } = renderSmart();
+    const field = input.closest("label")!;
+    const sortBy = screen.getByRole("combobox", { name: "Sort by" });
+    for (const surface of ["h-11", "rounded-md", "border", "border-border", "bg-background"]) {
+      expect(sortBy).toHaveClass(surface);
+      expect(field).toHaveClass(surface);
+    }
+    expect(field).toHaveTextContent("max titles");
+  });
+
+  it("commits a whole number on Enter", () => {
+    const { input, onChange } = renderSmart();
+    input.focus();
+    fireEvent.change(input, { target: { value: "40" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).not.toHaveFocus();
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ rules: expect.objectContaining({ limit: 40 }) });
+  });
+
   it("keeps a limit above 500", () => {
     const { input, onChange } = renderSmart();
     fireEvent.change(input, { target: { value: "2000" } });
