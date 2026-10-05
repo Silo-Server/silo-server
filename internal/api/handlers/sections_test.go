@@ -551,6 +551,36 @@ func TestBuildSectionsResponseSignsEpisodeSeriesBackdropsInTheSameBatch(t *testi
 	}
 }
 
+func TestBuildSectionsResponseCarriesDatesForApiv2Only(t *testing.T) {
+	released, lastAired := "1995-12-15", "2024-03-01"
+	h := &SectionHandler{}
+	withItems := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recent"},
+		Items: []*models.MediaItem{
+			{ContentID: "movie", Type: "movie", Title: "Heat", Status: "matched", ReleaseDate: &released},
+			{ContentID: "series", Type: "series", Title: "Show", Status: "matched", LastAirDate: &lastAired},
+		},
+	}}
+
+	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+
+	movie, series := resp.Sections[0].Items[0], resp.Sections[0].Items[1]
+	if movie.ReleaseDate == nil || *movie.ReleaseDate != released {
+		t.Errorf("movie release date = %v, want %s", movie.ReleaseDate, released)
+	}
+	if series.LastAirDate == nil || *series.LastAirDate != lastAired {
+		t.Errorf("series last air date = %v, want %s", series.LastAirDate, lastAired)
+	}
+	// /api/v1 is frozen: the dates reach apiv2 alone.
+	v1, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal v1 response: %v", err)
+	}
+	if bytes.Contains(v1, []byte("release_date")) || bytes.Contains(v1, []byte("last_air_date")) {
+		t.Errorf("v1 response carries a date: %s", v1)
+	}
+}
+
 func TestValidateSectionConfigAcceptsContinueTypes(t *testing.T) {
 	tests := []string{
 		`{"continue_type":"watching"}`,

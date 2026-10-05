@@ -9,6 +9,7 @@
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestEpisodeTargetsCarrySeriesBackdropBesideStill
+./internal/sections TestEpisodeTargetsCarryAirDateAndRatings
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 
 # Profile history and account/invitation persistence.

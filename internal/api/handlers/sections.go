@@ -359,16 +359,19 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge       *int     `json:"-"`
-	AdvisorySource    string   `json:"-"`
-	Status            string   `json:"status"`
-	ShowStatus        string   `json:"show_status,omitempty"`
-	RatingIMDB        *float64 `json:"rating_imdb,omitempty"`
-	RatingTMDB        *float64 `json:"rating_tmdb,omitempty"`
-	RatingRTCritic    *int     `json:"rating_rt_critic,omitempty"`
-	RatingRTAudience  *int     `json:"rating_rt_audience,omitempty"`
-	OriginalLanguage  string   `json:"original_language,omitempty"`
-	Overview          string   `json:"overview,omitempty"`
+	AdvisoryAge      *int     `json:"-"`
+	AdvisorySource   string   `json:"-"`
+	Status           string   `json:"status"`
+	ShowStatus       string   `json:"show_status,omitempty"`
+	RatingIMDB       *float64 `json:"rating_imdb,omitempty"`
+	RatingTMDB       *float64 `json:"rating_tmdb,omitempty"`
+	RatingRTCritic   *int     `json:"rating_rt_critic,omitempty"`
+	RatingRTAudience *int     `json:"rating_rt_audience,omitempty"`
+	OriginalLanguage string   `json:"original_language,omitempty"`
+	Overview         string   `json:"overview,omitempty"`
+	// apiv2 alone (json:"-": /api/v1 is frozen).
+	ReleaseDate       *string  `json:"-"`
+	LastAirDate       *string  `json:"-"`
 	PositionSeconds   *float64 `json:"position_seconds,omitempty"`
 	DurationSeconds   *float64 `json:"duration_seconds,omitempty"`
 	ProgressUpdatedAt *string  `json:"progress_updated_at,omitempty"`
@@ -1682,6 +1685,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		RatingRTAudience:  item.RatingRTAudience,
 		OriginalLanguage:  item.OriginalLanguage,
 		Overview:          item.Overview,
+		ReleaseDate:       item.ReleaseDate,
+		LastAirDate:       item.LastAirDate,
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,
 		OverlaySummary:    overlaySummary,
