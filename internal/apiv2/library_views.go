@@ -114,6 +114,7 @@ type CuratedCollection struct {
 	ItemCount         int             `json:"item_count" example:"12"`
 	CreatedAt         Instant         `json:"created_at" example:"2026-01-02T03:04:05.678Z"`
 	UpdatedAt         Instant         `json:"updated_at" example:"2026-01-02T03:04:05.678Z"`
+	PosterIsCollage   bool            `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages" example:"false"`
 }
 
 // LibraryCollectionCard is a collection as the Collections tab shows it.
@@ -345,6 +346,7 @@ func curatedCollectionOf(v handlers.LibraryCollectionView) CuratedCollection {
 		ManagementMode: v.ManagementMode, ManagementSource: v.ManagementSource, ManagementKey: v.ManagementKey,
 		LastSyncStatus: v.LastSyncStatus, LastSyncMessage: v.LastSyncMessage, LastSyncAt: instantOfStamp(v.LastSyncAt), SyncSchedule: v.SyncSchedule, NextSyncAt: instantOfStamp(v.NextSyncAt),
 		ItemCount: v.ItemCount, CreatedAt: created, UpdatedAt: updated,
+		PosterIsCollage: v.PosterIsCollage && v.PosterURL != "",
 	}
 }
 

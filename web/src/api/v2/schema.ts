@@ -20158,6 +20158,11 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       next_sync_at?: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived; empty when none */
       poster_url: string;

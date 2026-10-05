@@ -496,4 +496,17 @@ func TestLibraryCollectionCardsMarkCollages(t *testing.T) {
 	if got := userCollectionOf(usercollections.ServerVisibleCollection{ID: "unsigned", PosterIsCollage: true}); got.PosterIsCollage {
 		t.Fatalf("user collection without poster_url = %+v, want no poster_is_collage", got)
 	}
+	// getLibraryCollections' full collections[] entries mark it too.
+	for _, tc := range []struct {
+		view handlers.LibraryCollectionView
+		want bool
+	}{
+		{handlers.LibraryCollectionView{ID: "collage", PosterURL: "https://cdn.test/collage.webp", PosterIsCollage: true}, true},
+		{handlers.LibraryCollectionView{ID: "uploaded", PosterURL: "https://cdn.test/uploaded.webp"}, false},
+		{handlers.LibraryCollectionView{ID: "unsigned", PosterIsCollage: true}, false},
+	} {
+		if got := curatedCollectionOf(tc.view); got.PosterIsCollage != tc.want {
+			t.Fatalf("curated %s poster_is_collage = %v, want %v", tc.view.ID, got.PosterIsCollage, tc.want)
+		}
+	}
 }

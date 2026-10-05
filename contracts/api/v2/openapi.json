@@ -23936,6 +23936,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -24020,7 +24027,8 @@
           "last_sync_message",
           "item_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "poster_is_collage"
         ],
         "type": "object"
       },
