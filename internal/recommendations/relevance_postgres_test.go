@@ -510,16 +510,16 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 
 	// The finished audiobook never anchors: the anchors are the three latest
 	// movies, on the SQL path and the user-store path.
-	sqlAnchors, err := f.repo.GetRecentCompletedItemIDs(ctx, userID, viewer, becauseYouWatchedAnchors)
+	sqlAnchors, err := f.repo.GetRecentCompletedItemIDs(ctx, userID, viewer, BecauseYouWatchedAnchors)
 	if err != nil {
 		t.Fatal(err)
 	}
-	anchors, err := anchorItemIDs(ctx, f.engine.signalReader(), nil, userID, viewer, becauseYouWatchedAnchors)
+	anchors, err := anchorItemIDs(ctx, f.engine.signalReader(), nil, userID, viewer, BecauseYouWatchedAnchors)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, got := range [][]string{sqlAnchors, anchors} {
-		if want := finished[:becauseYouWatchedAnchors]; !slices.Equal(got, want) {
+		if want := finished[:BecauseYouWatchedAnchors]; !slices.Equal(got, want) {
 			t.Fatalf("anchors = %v, want the latest movies %v", got, want)
 		}
 	}

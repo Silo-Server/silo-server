@@ -132,8 +132,8 @@ func TestCompatRecommendationsReadTheCachedRowsForTheViewer(t *testing.T) {
 	if reader.gotLimit != 12 || reader.gotProfile != "kid" || !slices.Equal(reader.gotFilter.AllowedLibraryIDs, []int{4}) {
 		t.Fatalf("read limit=%d profile=%q filter=%+v, want twice itemLimit, kid and the session filter", reader.gotLimit, reader.gotProfile, reader.gotFilter)
 	}
-	if reader.gotWatched.maxRows != 5 || reader.gotWatched.limit != 12 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
-		t.Fatalf("because-watched read = %+v, want categoryLimit rows of twice itemLimit under the session filter", reader.gotWatched)
+	if reader.gotWatched.maxRows != recommendations.BecauseYouWatchedAnchors || reader.gotWatched.limit != 12 || !slices.Equal(reader.gotWatched.filter.AllowedLibraryIDs, []int{4}) {
+		t.Fatalf("because-watched read = %+v, want every anchor's row of twice itemLimit under the session filter", reader.gotWatched)
 	}
 	if !slices.Equal(items.gotFilter.AllowedLibraryIDs, []int{4}) || !slices.Contains(items.gotIDs, "kids-anchor") {
 		t.Fatalf("hydration ids=%v filter=%+v, want the anchor fetched under the session filter", items.gotIDs, items.gotFilter)
@@ -241,8 +241,8 @@ func TestCompatRecommendationsServeMoviesOnly(t *testing.T) {
 			t.Fatalf("%s filter = %+v, want series excluded", name, filter)
 		}
 	}
-	if reader.gotWatched.maxRows != 10 {
-		t.Fatalf("because-watched rows read = %d, want every anchor up to categoryLimit", reader.gotWatched.maxRows)
+	if reader.gotWatched.maxRows != recommendations.BecauseYouWatchedAnchors {
+		t.Fatalf("because-watched rows read = %d, want every anchor", reader.gotWatched.maxRows)
 	}
 	var got []string
 	for _, c := range categories {
@@ -259,6 +259,13 @@ func TestCompatRecommendationsServeMoviesOnly(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("categories = %q, want %q", got, want)
+	}
+
+	// A category limit of one still reads past a series anchor.
+	rec = httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?categoryLimit=1"))
+	if one := decodeCategories(t, rec); len(one) != 1 || one[0].BaselineItemName != "Title anchor-movie-a" {
+		t.Fatalf("categoryLimit=1 categories = %+v, want the first movie anchor", one)
 	}
 
 	// A library ParentId narrows the rows and the hydration to the library.

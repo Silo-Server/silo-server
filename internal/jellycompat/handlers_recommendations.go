@@ -161,7 +161,9 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 			return
 		}
 	}
-	rows, err := h.categoryRows(r.Context(), session, categoryLimit, min(2*itemLimit, recommendations.MaxRowReadLimit), filter)
+	// Every anchor's row is read: one the response cannot show (a series, or a
+	// title outside ParentId) gives way to the next.
+	rows, err := h.categoryRows(r.Context(), session, recommendations.BecauseYouWatchedAnchors, min(2*itemLimit, recommendations.MaxRowReadLimit), filter)
 	if err != nil {
 		slog.WarnContext(r.Context(), "jellycompat: recommendation rows failed", "component", "jellycompat",
 			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)

@@ -267,7 +267,7 @@ func (r *Reader) SectionForYouFill(ctx context.Context, userID int, profileID st
 		return cmp.Compare(weights[b.ClusterIndex], weights[a.ClusterIndex])
 	})
 
-	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
+	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileI
 	if sourceItemID != "" {
 		sourceIDs = append(sourceIDs, sourceItemID)
 	} else {
-		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
+		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
 		if err != nil {
 			return nil, err
 		}

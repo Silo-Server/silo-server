@@ -39,7 +39,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 	mergeScored(byID, forYouItems, 0.80, 1.00)
 
 	// 2. Because-you-watched — mid band (0.55–0.75).
-	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, becauseYouWatchedAnchors)
+	anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
 	if err != nil {
 		return WatchTonightResult{}, err
 	}

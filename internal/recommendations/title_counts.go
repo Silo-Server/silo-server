@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -19,11 +21,19 @@ const titleCountTTL = 10 * time.Minute
 // titleCountCacheMax bounds the scopes held; a full cache starts over.
 const titleCountCacheMax = 1024
 
+// titleCountTimeout bounds a shared count, which runs detached from the
+// request that started it so the others waiting on it are not cancelled with
+// that request.
+const titleCountTimeout = 30 * time.Second
+
 // titleCountCache holds, per access scope, the title counts countTitlesByType
 // last read. Each server keeps its own.
 type titleCountCache struct {
 	mu      sync.Mutex
 	entries map[[sha256.Size]byte]titleCountEntry
+	// counting runs one count per scope at a time; reads that miss while it
+	// runs wait for its result rather than each counting the catalog.
+	counting singleflight.Group
 }
 
 type titleCountEntry struct {
@@ -48,17 +58,25 @@ func (c *titleCountCache) get(ctx context.Context, repo *Repo, filter catalog.Ac
 	if ok && time.Now().Before(entry.expires) {
 		return entry.counts, nil
 	}
-	counts, err := repo.countTitlesByType(ctx, filter)
+	counted, err, _ := c.counting.Do(string(key[:]), func() (any, error) {
+		countCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), titleCountTimeout)
+		defer cancel()
+		counts, err := repo.countTitlesByType(countCtx, filter)
+		if err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if len(c.entries) >= titleCountCacheMax {
+			clear(c.entries)
+		}
+		c.entries[key] = titleCountEntry{counts: counts, expires: time.Now().Add(titleCountTTL)}
+		return counts, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.entries) >= titleCountCacheMax {
-		clear(c.entries)
-	}
-	c.entries[key] = titleCountEntry{counts: counts, expires: time.Now().Add(titleCountTTL)}
-	return counts, nil
+	return counted.([]int64), nil
 }
 
 // titleCountKey identifies the titles filter admits: the fields
