@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // weightedAverage computes a weighted average of embedding vectors. Each entry
@@ -293,14 +294,15 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	// Favorites and watchlist entries count once per canonical title, as
 	// watches do, so favorited episodes of one series are one favorite.
 	favSet := make(map[string]struct{}, len(favorites))
-	for _, f := range favorites {
-		ref, ok := refs[f.MediaItemID]
-		if !ok || ref.CanonicalID == "" {
-			continue
-		}
-		favSet[ref.CanonicalID] = struct{}{}
-		s := ensureSignal(ref.CanonicalID)
-		s.IntentWeight += WeightFavorited * timeDecay(parseSignalTime(f.AddedAt, now), now, halfLife)
+	// Favorites and watchlist entries weigh once per canonical title, at
+	// their newest entry: several favorited episodes are one favorited series.
+	favDecay := newestDecayByTitle(favorites, refs, func(f userstore.Favorite) (string, time.Time) {
+		return f.MediaItemID, parseSignalTime(f.AddedAt, now)
+	}, now, halfLife)
+	for id, decay := range favDecay {
+		favSet[id] = struct{}{}
+		s := ensureSignal(id)
+		s.IntentWeight += WeightFavorited * decay
 		s.Favorited = true
 	}
 	if len(favSet) > 0 {
@@ -308,14 +310,12 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	}
 
 	watchlistSet := make(map[string]struct{}, len(watchlist))
-	for _, w := range watchlist {
-		ref, ok := refs[w.MediaItemID]
-		if !ok || ref.CanonicalID == "" {
-			continue
-		}
-		watchlistSet[ref.CanonicalID] = struct{}{}
-		s := ensureSignal(ref.CanonicalID)
-		s.IntentWeight += WeightWatchlist * timeDecay(parseSignalTime(w.AddedAt, now), now, halfLife)
+	watchlistDecay := newestDecayByTitle(watchlist, refs, func(w userstore.WatchlistEntry) (string, time.Time) {
+		return w.MediaItemID, parseSignalTime(w.AddedAt, now)
+	}, now, halfLife)
+	for id, decay := range watchlistDecay {
+		watchlistSet[id] = struct{}{}
+		ensureSignal(id).IntentWeight += WeightWatchlist * decay
 	}
 	if len(watchlistSet) > 0 {
 		signalCounts["watchlist"] = len(watchlistSet)
@@ -450,6 +450,22 @@ func tasteVector(items []clusterItem) []float32 {
 		weights[i] = item.weight
 	}
 	return weightedAverage(vecs, weights)
+}
+
+// newestDecayByTitle maps each canonical title among entries to the time
+// decay of its newest entry, so a title with several entries (episodes of one
+// series) counts once. Entries that resolve to no title are dropped.
+func newestDecayByTitle[E any](entries []E, refs map[string]canonicalContentRef, entry func(E) (string, time.Time), now time.Time, halfLife float64) map[string]float64 {
+	decays := make(map[string]float64, len(entries))
+	for _, e := range entries {
+		itemID, at := entry(e)
+		ref, ok := refs[itemID]
+		if !ok || ref.CanonicalID == "" {
+			continue
+		}
+		decays[ref.CanonicalID] = max(decays[ref.CanonicalID], timeDecay(at, now, halfLife))
+	}
+	return decays
 }
 
 // clearTasteProfile stores a profile that has no positive signal, or none
