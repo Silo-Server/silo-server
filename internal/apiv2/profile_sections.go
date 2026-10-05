@@ -140,7 +140,7 @@ type ProfileSectionSettingCollectionOutput struct {
 
 // ProfileSectionFlags is what this server lets profiles do to their pages.
 type ProfileSectionFlags struct {
-	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Deprecated; always true. Profiles may always add rule rows (custom_filter). Kept for clients that still read it." example:"true" deprecated:"true"`
+	AllowProfileCustomSections bool `json:"allow_profile_custom_sections" doc:"Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it." example:"true" deprecated:"true"`
 }
 
 // ProfileSectionFlagsOutput is the getProfileSectionFlags response.
@@ -362,9 +362,13 @@ func sectionProblem(err error) *Problem {
 	if !ok {
 		return serviceProblem(err)
 	}
-	if apiErr.Status == http.StatusBadRequest {
+	switch {
+	case apiErr.Status == http.StatusBadRequest:
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 			WithErrors(ProblemError{Location: locationOverrides, Code: codeInvalid, Detail: apiErr.Message})
+	case apiErr.Code == "custom_disabled":
+		// v1 keeps the message from when a server setting decided this.
+		return NewProblem(TypePermissionDenied, "Only an admin can add an Editor's picks row.")
 	}
 	return serviceProblem(err)
 }

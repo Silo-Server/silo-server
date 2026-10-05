@@ -26006,7 +26006,7 @@ export interface components {
     ProfileSectionFlags: {
       /**
        * @deprecated
-       * @description Deprecated; always true. Profiles may always add rule rows (custom_filter). Kept for clients that still read it.
+       * @description Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it.
        * @example true
        */
       allow_profile_custom_sections: boolean;

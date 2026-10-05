@@ -1323,10 +1323,13 @@ own title for each admin row next to the profile's effective `title`, so a clien
 profile renamed a row and offer the original name back (saving an empty `title` override restores
 it); it is empty for a profile-built row, and v1 does not return it. `getProfileSectionFlags`
 keeps `allow_profile_custom_sections` for clients that read it, but it is deprecated and always
-`true`: profiles may always add rule rows (`custom_filter`), with no server setting. On both
-versions, `replaceProfileSectionOverrides` refuses with `403 custom_disabled` only a profile that
-is not an admin adding a new row of an `admin_only` recipe (Editor's picks,
-`admin_curated_list`); a row of that kind already saved on the page is kept and may change. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+`true`: profiles may always add rule rows (`custom_filter`), with no server setting. Whether a
+profile that is not an admin may add a new row of a recipe is that recipe's `admin_only` in
+`listSectionRecipes`; clients follow it instead of the flag. On both versions,
+`replaceProfileSectionOverrides` refuses only a profile that is not an admin adding a new row of
+an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kind already saved on
+the page is kept and may change. v1 answers `403 custom_disabled` with its frozen message; v2
+answers `403 permission_denied` saying only an admin can add an Editor's picks row. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 **Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1

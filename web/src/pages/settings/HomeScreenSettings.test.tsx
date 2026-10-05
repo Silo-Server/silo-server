@@ -288,7 +288,7 @@ describe("HomeScreenSettings save refusals", () => {
       type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
       title: "Permission denied",
       status: 403,
-      detail: "this server does not allow profiles to build custom sections",
+      detail: "Only an admin can add an Editor's picks row.",
       instance: "test",
     });
     const invalid = new V2ProblemError("replaceProfileSectionOverrides", {
@@ -308,7 +308,7 @@ describe("HomeScreenSettings save refusals", () => {
     });
 
     expect(sectionSaveErrorMessage(refused)).toBe(
-      "Could not save your rows: this server does not allow profiles to build custom sections",
+      "Could not save your rows: Only an admin can add an Editor's picks row.",
     );
     expect(sectionSaveErrorMessage(demo)).toBe(
       "Could not save your rows: This action is not available in demo mode.",
