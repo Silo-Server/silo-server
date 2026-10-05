@@ -75,7 +75,13 @@ func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req 
 	}
 	f.lastReq = req
 	if facet == "author" && strings.HasPrefix("frank herbert", q) {
-		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, HasMore: limit == 1}, nil
+		return handlers.CatalogFacetSearchView{
+			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
+			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,
+		}, nil
+	}
+	if facet == "genre" && q == "" {
+		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Drama", Count: 9}}, ValuesHasMore: true}, nil
 	}
 	return handlers.CatalogFacetSearchView{}, nil
 }
@@ -408,11 +414,16 @@ func TestCatalogFiltersAndFacetSearch(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters", "", bearer(memberToken)), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=author&q=fra&limit=1", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"values":[{"value":"Frank Herbert","count":6}],"has_more":true}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true,"values":[{"value":"Frank Herbert","count":6}],"values_has_more":true}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=narrator&q=zz", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"matches":[],"values":[]`) {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[],"values_has_more":false}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	// An empty q: no prefix matches, while values ranks the common ones.
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=genre", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[{"value":"Drama","count":9}],"values_has_more":true}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&library_id=3&library_ids=1&library_ids=3&library_ids=2&type=series", "", viewerHeaders())

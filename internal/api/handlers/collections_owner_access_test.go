@@ -260,11 +260,11 @@ func TestSharedPersonalCollectionOwnerAccessDB(t *testing.T) {
 			if got := ids(facets.Genres); !slices.Equal(got, expectedGenres) {
 				t.Errorf("%s: catalog filter genres = %v, want %v", c.Name, got, expectedGenres)
 			}
-			matches, err := catalogResolver.SearchFacet(reqCtx, source, filter, "genre", "owner-access-genre", 50, catalog.FacetSearchPrefix)
+			matches, err := catalogResolver.SearchFacet(reqCtx, source, filter, "genre", "owner-access-genre", 50)
 			if err != nil {
 				t.Fatalf("%s: catalog facet search: %v", c.Name, err)
 			}
-			if got := ids(CatalogFacetSearchView{Values: matches.Values}.Matches()); !slices.Equal(got, expectedGenres) {
+			if got := ids(matches.Matches); !slices.Equal(got, expectedGenres) {
 				t.Errorf("%s: catalog facet search = %v, want %v", c.Name, got, expectedGenres)
 			}
 

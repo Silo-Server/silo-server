@@ -11,7 +11,7 @@ import (
 type CatalogSearchCapabilities struct {
 	Capability
 	PeopleMediaScope      bool   `json:"people_media_scope,omitzero" doc:"People search accepts media_scope and filters credits by viewer access"`
-	FacetValueSearch      bool   `json:"facet_value_search,omitzero" doc:"searchCatalogFacet accepts library_ids, answers values with title counts, matches word starts, and returns the most common values for an empty q"`
+	FacetValueSearch      bool   `json:"facet_value_search,omitzero" doc:"searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q"`
 	PersonPrefetch        bool   `json:"person_prefetch,omitzero" doc:"Person reads accept prefetch=true for speculative reads that do not queue a provider refresh"`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`

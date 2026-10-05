@@ -10,14 +10,6 @@ import (
 	"time"
 )
 
-func facetValueNames(values []FacetValue) []string {
-	out := make([]string, len(values))
-	for i, v := range values {
-		out[i] = v.Value
-	}
-	return out
-}
-
 func testFacetList() *facetValueList {
 	return newFacetValueList([]FacetValue{
 		{Value: "Software House", Count: 500},
@@ -90,11 +82,11 @@ func TestFacetValueListHasMore(t *testing.T) {
 
 func TestFacetValueListPrefixMode(t *testing.T) {
 	list := testFacetList()
-	got, hasMore := list.search(facetSearch{Q: "war", Limit: 2, Mode: FacetSearchPrefix})
+	got, hasMore := list.search(facetSearch{Q: "war", Limit: 2, Mode: facetSearchPrefix})
 	if names := facetValueNames(got); !slices.Equal(names, []string{"Warner Bros. Pictures", "Warp"}) || !hasMore {
 		t.Fatalf("prefix search = %v hasMore=%v", names, hasMore)
 	}
-	got, hasMore = list.search(facetSearch{Q: "war", Limit: 5, Mode: FacetSearchPrefix})
+	got, hasMore = list.search(facetSearch{Q: "war", Limit: 5, Mode: facetSearchPrefix})
 	if names := facetValueNames(got); !slices.Equal(names, []string{"Warner Bros. Pictures", "Warp", "warp films"}) || hasMore {
 		t.Fatalf("prefix search = %v hasMore=%v", names, hasMore)
 	}
@@ -397,32 +389,48 @@ func (f *columnRecordingFetcher) SearchColumnValues(_ context.Context, column fa
 	return []FacetValue{{Value: "Drama", Count: 3}}, true, nil
 }
 
-func TestSearchFacetEmptyQueryByModeAndFacet(t *testing.T) {
+// matches keeps the prefix answer every client reads, A-Z and nothing for
+// an empty q; values carries the ranked answer.
+func TestSearchFacetAnswersMatchesAndValues(t *testing.T) {
 	facets := &columnRecordingFetcher{}
 	resolver := &CatalogResolver{browseRepo: &BrowseRepository{}, facets: facets}
 	req := CatalogRequest{Source: CatalogSourceQuery}
 
-	got, err := resolver.SearchFacet(t.Context(), req, AccessFilter{}, "genre", "  ", 500, FacetSearchRanked)
+	got, err := resolver.SearchFacet(t.Context(), req, AccessFilter{}, "genre", "  ", 500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.HasMore || len(got.Values) != 1 || len(facets.searches) != 1 {
-		t.Fatalf("ranked empty q = %+v, searches %v", got, facets.searches)
+	if got.Matches == nil || len(got.Matches) != 0 || got.HasMore {
+		t.Fatalf("empty q matches = %v hasMore=%v, want none", got.Matches, got.HasMore)
 	}
-	if s := facets.searches[0]; s.Q != "" || s.Limit != catalogFacetSearchMaxLimit || s.Mode != FacetSearchRanked || facets.columns[0] != facetColumns[facetGenre] {
+	if !got.ValuesHasMore || len(got.Values) != 1 || len(facets.searches) != 1 {
+		t.Fatalf("empty q values = %+v, searches %v", got, facets.searches)
+	}
+	if s := facets.searches[0]; s.Q != "" || s.Limit != catalogFacetSearchMaxLimit || s.Mode != facetSearchRanked || facets.columns[0] != facetColumns[facetGenre] {
 		t.Fatalf("search = %+v column = %+v", s, facets.columns[0])
 	}
 
-	for _, tc := range []struct {
-		facet string
-		mode  FacetSearchMode
-	}{{"genre", FacetSearchPrefix}, {"author", FacetSearchRanked}, {"series", FacetSearchRanked}} {
-		got, err := resolver.SearchFacet(t.Context(), req, AccessFilter{}, tc.facet, "", 10, tc.mode)
-		if err != nil || got.Values == nil || len(got.Values) != 0 {
-			t.Fatalf("%s mode %d: got %+v err %v, want an empty list", tc.facet, tc.mode, got, err)
+	facets.searches = nil
+	got, err = resolver.SearchFacet(t.Context(), req, AccessFilter{}, "genre", " dr ", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []facetSearch{{Q: "dr", Limit: 10, Mode: facetSearchPrefix}, {Q: "dr", Limit: 10, Mode: facetSearchRanked}}
+	if !slices.Equal(facets.searches, want) {
+		t.Fatalf("searches = %+v, want %+v", facets.searches, want)
+	}
+	if !slices.Equal(got.Matches, []string{"Drama"}) || !got.HasMore || len(got.Values) != 1 || !got.ValuesHasMore {
+		t.Fatalf("q=dr answer = %+v", got)
+	}
+
+	facets.searches = nil
+	for _, facet := range []string{"author", "series"} {
+		got, err := resolver.SearchFacet(t.Context(), req, AccessFilter{}, facet, "", 10)
+		if err != nil || got.Matches == nil || len(got.Matches) != 0 || got.Values == nil || len(got.Values) != 0 {
+			t.Fatalf("%s: got %+v err %v, want empty lists", facet, got, err)
 		}
 	}
-	if len(facets.searches) != 1 {
+	if len(facets.searches) != 0 {
 		t.Fatalf("empty q reached the fetcher: %v", facets.searches)
 	}
 }
@@ -437,7 +445,7 @@ func TestSearchFacetHistoryScopeIsStableAcrossCalls(t *testing.T) {
 		facets := &columnRecordingFetcher{}
 		resolver.facets = facets
 		for _, q := range []string{"d", "dr"} {
-			if _, err := resolver.SearchFacet(t.Context(), req, access, "genre", q, 10, FacetSearchRanked); err != nil {
+			if _, err := resolver.SearchFacet(t.Context(), req, access, "genre", q, 10); err != nil {
 				t.Fatal(err)
 			}
 		}

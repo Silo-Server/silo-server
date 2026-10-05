@@ -68,11 +68,10 @@ export function useFacetValues(facet: CatalogFacetName, q: string, scope: FacetV
         ranked ? { libraryIds, mediaScope } : { mediaScope },
         { signal },
       );
-      return {
-        // An older server answers names only.
-        values: ranked ? answer.values : answer.matches.map((value) => ({ value })),
-        hasMore: answer.has_more,
-      };
+      // An older server answers names only, in matches.
+      return ranked
+        ? { values: answer.values, hasMore: answer.values_has_more }
+        : { values: answer.matches.map((value) => ({ value })), hasMore: answer.has_more };
     },
     placeholderData: keepPreviousData,
     staleTime: 60 * 1000,

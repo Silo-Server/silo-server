@@ -74,8 +74,8 @@ type CatalogFiltersInput struct {
 type CatalogFacetSearchInput struct {
 	CatalogFiltersInput
 	Facet string `query:"facet" required:"true" enum:"genre,studio,network,country,original_language,content_rating,author,narrator,series" doc:"The facet to search" example:"author"`
-	Q     string `query:"q" doc:"Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing" example:"ste"`
-	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most matches to return; default 20, maximum 100"`
+	Q     string `query:"q" doc:"Case-insensitive search text; see matches and values for how each answers it" example:"ste"`
+	Limit int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most values to return in matches and in values; default 20, maximum 100"`
 }
 
 // AudiobookGroupsInput is the listAudiobookGroups query.
@@ -229,11 +229,13 @@ type CatalogFiltersOutput struct {
 	Body CatalogFilters
 }
 
-// CatalogFacetMatches is a facet typeahead answer.
+// CatalogFacetMatches is a facet typeahead answer. matches is the prefix
+// answer every client has read; values is the ranked answer with counts.
 type CatalogFacetMatches struct {
-	Matches []string            `json:"matches" doc:"The matched values in result order; empty, never null"`
-	Values  []CatalogFacetValue `json:"values" doc:"The same values in the same order, each with its title count; empty, never null"`
-	HasMore bool                `json:"has_more" doc:"Whether more values matched than limit"`
+	Matches       []string            `json:"matches" doc:"Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null"`
+	HasMore       bool                `json:"has_more" doc:"Whether more values than limit start with q"`
+	Values        []CatalogFacetValue `json:"values" doc:"The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null"`
+	ValuesHasMore bool                `json:"values_has_more" doc:"Whether more values matched than limit for values"`
 }
 
 // CatalogFacetValue is one facet value with the number of titles in the
@@ -1104,7 +1106,10 @@ func (reg *Registry) searchCatalogFacet(ctx context.Context, in *CatalogFacetSea
 	for i, v := range view.Values {
 		values[i] = CatalogFacetValue{Value: v.Value, Count: v.Count}
 	}
-	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{Matches: view.Matches(), Values: values, HasMore: view.HasMore}}, nil
+	return &CatalogFacetMatchesOutput{Body: CatalogFacetMatches{
+		Matches: NonNil(view.Matches), HasMore: view.HasMore,
+		Values: values, ValuesHasMore: view.ValuesHasMore,
+	}}, nil
 }
 
 func (reg *Registry) queryCatalogItems(ctx context.Context, cursors *Cursors, in *CatalogQueryInput) (*CatalogBrowseOutput, error) {

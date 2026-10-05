@@ -22,14 +22,23 @@ const STUDIOS = [
   { value: "Aardman", count: 1 },
 ];
 
-/** Answers like the server: case-insensitive word starts, most titles first. */
+/**
+ * Answers like the server: values by case-insensitive word starts, most
+ * titles first; matches only whole-value prefixes, A to Z.
+ */
 function answerStudios(call: RecordedCall) {
   const q = String(call.query?.q ?? "").toLowerCase();
   const values = STUDIOS.filter(({ value }) => {
     const lowered = value.toLowerCase();
     return lowered.startsWith(q) || lowered.split(/[^a-z0-9]+/).some((w) => w.startsWith(q));
   });
-  return { matches: values.map((entry) => entry.value), values, has_more: false };
+  const matches =
+    q === ""
+      ? []
+      : STUDIOS.map((entry) => entry.value)
+          .filter((value) => value.toLowerCase().startsWith(q))
+          .sort();
+  return { matches, has_more: false, values, values_has_more: false };
 }
 
 function serve({ ranked = true } = {}) {
@@ -224,6 +233,19 @@ describe("FacetValuePicker", () => {
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByRole("dialog", { name: "Add row" })).toBeInTheDocument();
+  });
+
+  it("asks to narrow the search when the ranked values ran over the limit", async () => {
+    serve();
+    // has_more speaks for matches, which a ranked server's picker doesn't read.
+    v2Recorder.answer(SEARCH, (call: RecordedCall) => ({
+      ...answerStudios(call),
+      has_more: false,
+      values_has_more: true,
+    }));
+    const trigger = renderPicker();
+    await userEvent.click(trigger());
+    expect(await screen.findByText("Keep typing to narrow")).toBeInTheDocument();
   });
 
   it("only searches typed text on a server without ranked value search", async () => {

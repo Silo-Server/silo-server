@@ -529,13 +529,12 @@ func (h *CatalogHandler) HandleGetCatalogFacetSearch(w http.ResponseWriter, r *h
 		return
 	}
 
-	// The v1 bridge keeps its prefix-only, alphabetical answer.
-	view, err := h.searchFacet(r.Context(), viewerFromRequest(r, accessFilter), req, facet, prefix, limit, catalog.FacetSearchPrefix)
+	matches, hasMore, err := h.resolver.SearchFacetV1(r.Context(), req, accessFilter, facet, prefix, limit)
 	if err != nil {
-		writeAPIError(w, err)
+		writeAPIError(w, facetSearchError(err))
 		return
 	}
-	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{Matches: view.Matches(), HasMore: view.HasMore})
+	writeJSON(w, http.StatusOK, catalogFacetSearchResponse{Matches: matches, HasMore: hasMore})
 }
 
 func parseIncludeTechnical(raw string) bool {

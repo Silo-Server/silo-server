@@ -588,13 +588,15 @@ func TestSearchFacet_EbookScopeForwardsMediaScope(t *testing.T) {
 		"author",
 		"Au",
 		20,
-		FacetSearchRanked,
 	)
 	if err != nil {
 		t.Fatalf("SearchFacet returned error: %v", err)
 	}
 	if len(result.Values) != 1 || result.Values[0] != (FacetValue{Value: "Author", Count: 1}) {
 		t.Fatalf("values = %v, want Author", result.Values)
+	}
+	if !slices.Equal(result.Matches, []string{"Author"}) {
+		t.Fatalf("matches = %v, want Author", result.Matches)
 	}
 
 	facets.mu.Lock()
@@ -623,7 +625,6 @@ func TestSearchFacet_EbookScopeRejectsNarratorFacet(t *testing.T) {
 		"narrator",
 		"Na",
 		20,
-		FacetSearchRanked,
 	)
 	if err == nil {
 		t.Fatal("expected narrator facet to be rejected for ebook scope")

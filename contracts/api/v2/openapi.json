@@ -20101,28 +20101,33 @@
         "additionalProperties": false,
         "properties": {
           "has_more": {
-            "description": "Whether more values matched than limit",
+            "description": "Whether more values than limit start with q",
             "type": "boolean"
           },
           "matches": {
-            "description": "The matched values in result order; empty, never null",
+            "description": "Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "values": {
-            "description": "The same values in the same order, each with its title count; empty, never null",
+            "description": "The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null",
             "items": {
               "$ref": "#/components/schemas/CatalogFacetValue"
             },
             "type": "array"
+          },
+          "values_has_more": {
+            "description": "Whether more values matched than limit for values",
+            "type": "boolean"
           }
         },
         "required": [
           "matches",
+          "has_more",
           "values",
-          "has_more"
+          "values_has_more"
         ],
         "type": "object"
       },
@@ -21397,7 +21402,7 @@
             "type": "boolean"
           },
           "facet_value_search": {
-            "description": "searchCatalogFacet accepts library_ids, answers values with title counts, matches word starts, and returns the most common values for an empty q",
+            "description": "searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q",
             "type": "boolean"
           },
           "max_sessions_per_account": {
@@ -125550,12 +125555,12 @@
             }
           },
           {
-            "description": "Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing",
+            "description": "Case-insensitive search text; see matches and values for how each answers it",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Case-insensitive search text. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series a name matches when it starts with q, A-Z, and an empty q returns nothing",
+              "description": "Case-insensitive search text; see matches and values for how each answers it",
               "examples": [
                 "ste"
               ],
@@ -125563,13 +125568,13 @@
             }
           },
           {
-            "description": "Most matches to return; default 20, maximum 100",
+            "description": "Most values to return in matches and in values; default 20, maximum 100",
             "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
               "default": 20,
-              "description": "Most matches to return; default 20, maximum 100",
+              "description": "Most values to return in matches and in values; default 20, maximum 100",
               "format": "int64",
               "maximum": 100,
               "minimum": 1,

@@ -22,25 +22,25 @@ type FacetValue struct {
 	Count int
 }
 
-// FacetSearchMode picks how a facet typeahead matches and orders values.
-type FacetSearchMode int
+// facetSearchMode picks how a facet typeahead matches and orders values.
+type facetSearchMode int
 
 const (
-	// FacetSearchRanked matches q at the start of the value or of any word in
+	// facetSearchRanked matches q at the start of the value or of any word in
 	// it. Whole-value prefix matches come first, then word-start matches;
 	// within each group more titles first, then A-Z. An empty q returns the
-	// most common values.
-	FacetSearchRanked FacetSearchMode = iota
-	// FacetSearchPrefix is the v1 bridge behavior: whole-value prefix
-	// matches in A-Z order, and nothing for an empty q.
-	FacetSearchPrefix
+	// most common values. It answers v2 values.
+	facetSearchRanked facetSearchMode = iota
+	// facetSearchPrefix matches q at the start of the value, A-Z by
+	// lowercased code points. It answers v2 matches.
+	facetSearchPrefix
 )
 
 // facetSearch is one typeahead request against a facet.
 type facetSearch struct {
 	Q     string
 	Limit int
-	Mode  FacetSearchMode
+	Mode  facetSearchMode
 }
 
 const (
@@ -102,7 +102,7 @@ func compareFacetNames(a, b facetEntry) int {
 func (l *facetValueList) search(s facetSearch) ([]FacetValue, bool) {
 	q := strings.ToLower(strings.TrimSpace(s.Q))
 	limit := s.Limit
-	if s.Mode == FacetSearchPrefix {
+	if s.Mode == facetSearchPrefix {
 		var matched []facetEntry
 		for _, e := range l.entries {
 			if strings.HasPrefix(e.lower, q) {
@@ -426,7 +426,7 @@ func searchFacetValuesSQL(ctx context.Context, pool *pgxpool.Pool, values string
 	}
 	var where, order string
 	switch {
-	case s.Mode == FacetSearchPrefix:
+	case s.Mode == facetSearchPrefix:
 		where = fmt.Sprintf("WHERE LOWER(name) LIKE $%d ESCAPE '\\'", bind(likePrefixPattern(q)))
 		order = `LOWER(name) COLLATE "C", name COLLATE "C"`
 	case q == "":

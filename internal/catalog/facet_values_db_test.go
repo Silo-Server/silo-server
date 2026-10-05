@@ -115,6 +115,33 @@ func TestSearchColumnFacetDB(t *testing.T) {
 		}
 	})
 
+	t.Run("v2 keeps prefix matches beside ranked values", func(t *testing.T) {
+		resolver := NewCatalogResolver(NewBrowseRepository(pool), nil)
+		req := CatalogRequest{Source: CatalogSourceQuery, Query: QueryDefinition{LibraryIDs: []int{libA}}}
+		got, err := resolver.SearchFacet(ctx, req, AccessFilter{}, "studio", "war", 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got.Matches, []string{"Warner Bros. " + sfx}) || got.HasMore {
+			t.Errorf("matches = %v hasMore=%v, want the prefix match only", got.Matches, got.HasMore)
+		}
+		if names := facetValueNames(got.Values); !slices.Equal(names, []string{"Warner Bros. " + sfx, "Time Warner " + sfx}) {
+			t.Errorf("values = %v", names)
+		}
+		got, err = resolver.SearchFacet(ctx, req, AccessFilter{}, "studio", "t", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A-Z, not by title count: "Time Warner" (1 title) before "Trim
+		// Co" (2 titles).
+		if !slices.Equal(got.Matches, []string{"Time Warner " + sfx}) || !got.HasMore {
+			t.Errorf("matches = %v hasMore=%v, want Time Warner and more", got.Matches, got.HasMore)
+		}
+		if names := facetValueNames(got.Values); !slices.Equal(names, []string{"Trim Co " + sfx}) || !got.ValuesHasMore {
+			t.Errorf("values = %v valuesHasMore=%v, want Trim Co and more", names, got.ValuesHasMore)
+		}
+	})
+
 	t.Run("over-budget fallback escapes the query", func(t *testing.T) {
 		tiny := newFacetValueCache(time.Minute, 1)
 		for _, tc := range []struct {
@@ -126,7 +153,7 @@ func TestSearchColumnFacetDB(t *testing.T) {
 			{facetSearch{Q: "war", Limit: 10}, []FacetValue{{Value: "Warner Bros. " + sfx, Count: 2}, {Value: "Time Warner " + sfx, Count: 1}}},
 			{facetSearch{Q: "bros. " + sfx[:3], Limit: 10}, []FacetValue{{Value: "Warner Bros. " + sfx, Count: 2}}},
 			{facetSearch{Q: "", Limit: 2}, []FacetValue{{Value: "Trim Co " + sfx, Count: 2}, {Value: "Warner Bros. " + sfx, Count: 2}}},
-			{facetSearch{Q: "1", Limit: 10, Mode: FacetSearchPrefix}, []FacetValue{{Value: "100% Studios " + sfx, Count: 1}, {Value: "1000 Studios " + sfx, Count: 1}}},
+			{facetSearch{Q: "1", Limit: 10, Mode: facetSearchPrefix}, []FacetValue{{Value: "100% Studios " + sfx, Count: 1}, {Value: "1000 Studios " + sfx, Count: 1}}},
 		} {
 			got, _ := search(t, tiny, studios, []int{libA}, tc.s)
 			if !slices.Equal(got, tc.want) {

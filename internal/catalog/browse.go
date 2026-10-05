@@ -1116,7 +1116,8 @@ func listDistinctAudiobookSeriesWithSource(
 
 // searchDistinctPeopleByKindWithSource is the typeahead equivalent of
 // listDistinctPeopleByKindWithSource, for facet=author and facet=narrator:
-// names starting with prefix in A-Z order, each with its title count.
+// names whose lowercased form matches the LIKE pattern, ordered by
+// LOWER(name), each with its title count. The pattern is lowercased in SQL.
 func searchDistinctPeopleByKindWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -1124,10 +1125,9 @@ func searchDistinctPeopleByKindWithSource(
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
-	prefix string,
+	pattern string,
 	limit int,
 ) ([]FacetValue, bool, error) {
-	prefix = strings.TrimSpace(prefix)
 	if limit <= 0 {
 		return []FacetValue{}, false, nil
 	}
@@ -1137,8 +1137,8 @@ func searchDistinctPeopleByKindWithSource(
 	}
 	args = append(args, int(kind))
 	kindIdx := len(args)
-	args = append(args, likePrefixPattern(prefix))
-	prefixIdx := len(args)
+	args = append(args, pattern)
+	patternIdx := len(args)
 	query := fmt.Sprintf(`
 		SELECT name, n FROM (
 			SELECT p.name AS name, count(DISTINCT mi.content_id) AS n
@@ -1148,27 +1148,27 @@ func searchDistinctPeopleByKindWithSource(
 			%s
 			  AND p.name IS NOT NULL
 			  AND BTRIM(p.name) <> ''
-			  AND LOWER(p.name) LIKE $%d ESCAPE '\'
+			  AND LOWER(p.name) LIKE LOWER($%d) ESCAPE '\'
 			GROUP BY p.name
 		) matches
 		ORDER BY LOWER(name), name
 		LIMIT %d
-	`, fromClause, kindIdx, browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	`, fromClause, kindIdx, browseFilterPrefix(whereClause), patternIdx, limit+1)
 	return searchFacetValues(ctx, pool, query, args, limit)
 }
 
 // searchDistinctAudiobookSeriesWithSource is the typeahead equivalent of
-// listDistinctAudiobookSeriesWithSource.
+// listDistinctAudiobookSeriesWithSource, matching and ordering like
+// searchDistinctPeopleByKindWithSource.
 func searchDistinctAudiobookSeriesWithSource(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	filters BrowseFilters,
 	baseRelation string,
 	mediaScope string,
-	prefix string,
+	pattern string,
 	limit int,
 ) ([]FacetValue, bool, error) {
-	prefix = strings.TrimSpace(prefix)
 	if limit <= 0 {
 		return []FacetValue{}, false, nil
 	}
@@ -1176,8 +1176,8 @@ func searchDistinctAudiobookSeriesWithSource(
 	if empty {
 		return []FacetValue{}, false, nil
 	}
-	args = append(args, likePrefixPattern(prefix))
-	prefixIdx := len(args)
+	args = append(args, pattern)
+	patternIdx := len(args)
 	query := fmt.Sprintf(`
 		SELECT name, n FROM (
 			SELECT BTRIM(s.series_name) AS name, count(DISTINCT mi.content_id) AS n
@@ -1186,12 +1186,12 @@ func searchDistinctAudiobookSeriesWithSource(
 			%s
 			  AND s.series_name IS NOT NULL
 			  AND BTRIM(s.series_name) <> ''
-			  AND LOWER(BTRIM(s.series_name)) LIKE $%d ESCAPE '\'
+			  AND LOWER(BTRIM(s.series_name)) LIKE LOWER($%d) ESCAPE '\'
 			GROUP BY 1
 		) names
 		ORDER BY LOWER(name), name
 		LIMIT %d
-	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), prefixIdx, limit+1)
+	`, fromClause, bookSeriesTableForMediaScope(mediaScope), browseFilterPrefix(whereClause), patternIdx, limit+1)
 	return searchFacetValues(ctx, pool, query, args, limit)
 }
 

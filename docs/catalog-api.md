@@ -59,21 +59,26 @@ so the parameter can narrow a scope but never widen it; a scope left with no
 library answers no values. `library_ids` is refused with `source=section`.
 `getCatalogFilters` accepts it too.
 
-The answer carries `matches`, the matched values in result order, and `values`,
-the same values in the same order with `count`, the number of titles in the
-scope that carry the value. `has_more` is true when more values matched than
-`limit`.
+The answer carries two lists, each at most `limit` long.
 
-For `genre`, `studio`, `network`, `country`, `original_language`, and
-`content_rating`, matching ignores case. A value matches when it starts with `q`
-or when any word in it does; words are split on any character that is not a
+`matches` holds the values that start with `q`, ignoring case, in A to Z order,
+and is empty for an empty `q`. `has_more` is true when more values than `limit`
+start with `q`. This is the answer `matches` has always given, so a client that
+reads only `matches` sees no change.
+
+`values` is the ranked answer, each entry with `count`, the number of titles in
+the scope that carry the value. `values_has_more` is true when more values
+matched than `limit`. For `genre`, `studio`, `network`, `country`,
+`original_language`, and `content_rating`, a value matches when it starts with
+`q` or when any word in it does; words are split on any character that is not a
 letter or digit, so `bros` finds `Warner Bros. Pictures`. Values that start with
 `q` come first, then word matches. Within each group, values with more titles
-come first, then A to Z by lowercased code point. `%` and `_` in `q` match
-literally. An empty `q` returns the most common values.
+come first, then A to Z. An empty `q` returns the most common values. For
+`author`, `narrator`, and `series`, `values` holds the names in `matches`, and an
+empty `q` returns nothing.
 
-For `author`, `narrator`, and `series`, a name matches when it starts with `q`,
-in A to Z order, and an empty `q` returns nothing.
+Matching ignores case, A to Z compares lowercased code points, and `%` and `_`
+in `q` match literally.
 
 The server answers the first six facets from an in-memory list of the scope's
 values, built with one query and kept for two minutes. The list is keyed by the
@@ -85,9 +90,13 @@ least recently used list first. A scope with more distinct values than that is
 searched in SQL on every request, with the same matching and order.
 
 `GET /api/v2/catalog/search/capabilities` advertises `facet_value_search: true`
-when the server accepts `library_ids`, answers `values`, matches word starts,
-and returns common values for an empty `q`. The v1 bridge keeps prefix-only
-matching in A to Z order and returns nothing for an empty `q`.
+when the server accepts `library_ids`, answers `values` and `values_has_more`,
+matches word starts in `values`, and returns common values for an empty `q`.
+
+`GET /api/v1/catalog/filters/search` is frozen and answers as it always has:
+names that start with `q`, read live from the database in `LOWER(name)` order
+under the database collation, with `%` and `_` in `q` acting as wildcards. It
+returns nothing for an empty `q`.
 
 ## Saved browse sort
 
