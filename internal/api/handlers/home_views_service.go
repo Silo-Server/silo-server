@@ -62,8 +62,16 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	return response, nil
 }
 
-// HomeSectionItems answers one section of the home page with its items.
+// HomeSectionItems answers one section of the home page with its items, or an
+// error when its items cannot be fetched.
 func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer) (SectionView, error) {
+	return h.homeSectionItems(ctx, sectionID, viewer, false)
+}
+
+// homeSectionItems is HomeSectionItems. With emptyOnFetchError, a section
+// whose items cannot be fetched answers with no items, as the frozen v1
+// endpoint always has.
+func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer, emptyOnFetchError bool) (SectionView, error) {
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -82,13 +90,10 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 			// empty row, a failed single section answers an error, so a
 			// client can tell it from a section with nothing to show. A
 			// deleted collection is not a failure and keeps its empty row.
-			if !sections.IsMissingCollection(fetchErr) {
+			if !emptyOnFetchError && !sections.IsMissingCollection(fetchErr) {
 				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
-			}
+			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
 		withItems.ItemLimit = s.ItemLimit
 		items := []sections.SectionWithItems{withItems}
