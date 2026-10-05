@@ -35,7 +35,7 @@ type storedTestEmbedding struct {
 type fakeEmbeddingStore struct {
 	lock       *EmbeddingLock
 	lockWrites int
-	// missing lists, sorted, the items Pass 1 finds.
+	// missing lists, sorted, the items Pass 1 finds until they are stored.
 	missing []string
 	// candidates lists, sorted by ID, the rows the Pass 2 SQL flags.
 	candidates []EmbeddingTextCandidate
@@ -67,6 +67,9 @@ func (f *fakeEmbeddingStore) SetEmbeddingLock(_ context.Context, lock EmbeddingL
 func (f *fakeEmbeddingStore) ItemsNeedingEmbedding(_ context.Context, _, afterID string, limit int) ([]string, error) {
 	var ids []string
 	for _, id := range f.missing {
+		if _, ok := f.stored[id]; ok {
+			continue
+		}
 		if id > afterID && len(ids) < limit {
 			ids = append(ids, id)
 		}
@@ -117,6 +120,7 @@ func newTestBackfill(store *fakeEmbeddingStore, client embedder, overviews map[s
 			}
 			return items, nil
 		},
+		refused: newRefusedEmbedInputs(),
 	}
 }
 
@@ -355,66 +359,112 @@ func TestBackfillStopsWhenFallbackItemsKeepFailing(t *testing.T) {
 	})
 }
 
-// A refused input says nothing about the provider: it never stops the run as
-// a failed first item, so a permanently refused item at the head of the
-// backlog cannot block every run. Refusals still count toward the
-// consecutive limit, so a provider that refuses everything (Gemini answers a
-// bad key with 400) stops after three items.
-func TestBackfillRefusedInputsOnlyCountTowardTheConsecutiveLimit(t *testing.T) {
-	refused := &embeddings.StatusError{API: "embedding", StatusCode: 400, Body: "invalid input"}
-	refusing := func(bad func(text string) bool, calls *int) quotaTestEmbedder {
-		return func(_ context.Context, texts []string) ([][]float32, error) {
-			*calls++
-			for _, text := range texts {
-				if bad(text) {
-					return nil, refused
-				}
-			}
-			out := make([][]float32, len(texts))
-			for i := range out {
-				out[i] = testVector(8)
-			}
-			return out, nil
-		}
-	}
+var testRefusal = &embeddings.StatusError{API: "embedding", StatusCode: 400, Body: "invalid input"}
 
-	t.Run("refused first item", func(t *testing.T) {
+// refusingEmbedder answers a call with testRefusal when bad reports one of
+// its texts, and counts its calls.
+func refusingEmbedder(bad func(text string) bool, calls *int) quotaTestEmbedder {
+	return func(_ context.Context, texts []string) ([][]float32, error) {
+		*calls++
+		for _, text := range texts {
+			if bad(text) {
+				return nil, testRefusal
+			}
+		}
+		out := make([][]float32, len(texts))
+		for i := range out {
+			out[i] = testVector(8)
+		}
+		return out, nil
+	}
+}
+
+// A refused input says nothing about the provider: it is skipped and never
+// counts as a failure, so refused items at the head of the backlog cannot
+// stop every run. A provider that refuses every input (Gemini answers a bad
+// key with 400) still stops the run, because it refuses the probe text too.
+func TestBackfillSkipsRefusedInputs(t *testing.T) {
+	t.Run("refused items at the head of the backlog", func(t *testing.T) {
 		calls := 0
-		store := newFakeEmbeddingStore(testIDs("item-", 12)...)
-		b := newTestBackfill(store, refusing(func(text string) bool { return text == "item-0000" }, &calls), nil)
-		if err := b.run(context.Background(), true); err != nil {
+		ids := testIDs("item-", 30)
+		bad := map[string]bool{}
+		for _, id := range ids[:maxConsecutiveEmbedFailures+1] {
+			bad[id] = true
+		}
+		store := newFakeEmbeddingStore(ids...)
+		b := newTestBackfill(store, refusingEmbedder(func(text string) bool { return bad[text] }, &calls), nil)
+		if err := b.run(context.Background(), false); err != nil {
 			t.Fatal(err)
 		}
-		// The first batch falls back to ten single calls; the second batch
-		// succeeds.
-		if b.counts.Embedded != 11 || b.counts.Skipped != 1 || b.counts.Failed != 0 || calls != 12 {
+		// The first batch falls back to single calls, with one probe after
+		// the first refusal; the other two batches succeed.
+		if b.counts.Embedded != 26 || b.counts.Skipped != 4 || b.counts.Failed != 0 || calls != 14 {
 			t.Fatalf("counts=%+v calls=%d", b.counts, calls)
 		}
-		if _, ok := store.stored["item-0000"]; ok || len(store.stored) != 11 {
-			t.Fatalf("stored %d items, including the refused one: %v", len(store.stored), ok)
+		for id := range bad {
+			if _, ok := store.stored[id]; ok || !b.refused.has(id, id) {
+				t.Fatalf("refused %s: stored=%v recorded=%v", id, ok, b.refused.has(id, id))
+			}
 		}
 	})
 
-	t.Run("successes reset the count", func(t *testing.T) {
+	t.Run("a provider that refuses every input stops the run", func(t *testing.T) {
 		calls := 0
-		bad := map[string]bool{"item-0000": true, "item-0002": true, "item-0003": true, "item-0005": true, "item-0006": true}
-		b := newTestBackfill(newFakeEmbeddingStore(testIDs("item-", 10)...), refusing(func(text string) bool { return bad[text] }, &calls), nil)
-		if err := b.run(context.Background(), true); err != nil {
-			t.Fatal(err)
-		}
-		if b.counts.Embedded != 5 || b.counts.Skipped != 5 {
-			t.Fatalf("counts=%+v", b.counts)
-		}
-	})
-
-	t.Run("three refused in a row stop the run", func(t *testing.T) {
-		calls := 0
-		b := newTestBackfill(newFakeEmbeddingStore(testIDs("item-", 30)...), refusing(func(string) bool { return true }, &calls), nil)
-		err := b.run(context.Background(), true)
-		if calls != 4 || b.counts.Skipped != 3 || b.counts.Embedded != 0 || !errors.Is(err, refused) || !strings.HasPrefix(err.Error(), "embedding provider unavailable: ") {
+		b := newTestBackfill(newFakeEmbeddingStore(testIDs("item-", 30)...), refusingEmbedder(func(string) bool { return true }, &calls), nil)
+		err := b.run(context.Background(), false)
+		// The batch, the first item, and the probe.
+		if calls != 3 || b.counts.Failed != 1 || b.counts.Skipped != 0 || !errors.Is(err, testRefusal) || !strings.HasPrefix(err.Error(), "embedding provider unavailable: ") {
 			t.Fatalf("calls=%d counts=%+v error=%v", calls, b.counts, err)
 		}
+		// The item is not recorded as refused, so the next run tries it again.
+		if b.refused.has("item-0000", "item-0000") {
+			t.Fatal("recorded an item the provider was down for")
+		}
 	})
+}
+
+// When only refused items are left, the catch-up pass completes, then holds
+// them back until their text changes or a full run retries them, so it does
+// not resend them or record a run every 15 minutes.
+func TestEmbedMissingHoldsBackRefusedInputs(t *testing.T) {
+	calls := 0
+	store := newFakeEmbeddingStore("bad-1", "bad-2")
+	client := refusingEmbedder(func(text string) bool { return text == "bad-1" || text == "bad-2" }, &calls)
+	refused := newRefusedEmbedInputs()
+	run := func(full bool, overviews map[string]string) (EmbedCounts, error) {
+		calls = 0
+		b := newTestBackfill(store, client, overviews)
+		b.refused = refused
+		err := b.run(context.Background(), full)
+		return b.counts, err
+	}
+
+	counts, err := run(false, nil)
+	// The batch, each item alone, and one probe.
+	if err != nil || counts.Skipped != 2 || counts.Embedded != 0 || calls != 4 {
+		t.Fatalf("first pass: counts=%+v calls=%d error=%v", counts, calls, err)
+	}
+	if isIdleRun(newEmbeddingsResult(counts, err, true), err) {
+		t.Fatal("the first pass that refused items is not recorded")
+	}
+
+	counts, err = run(false, nil)
+	if err != nil || counts != (EmbedCounts{}) || calls != 0 || !isIdleRun(newEmbeddingsResult(counts, err, true), err) {
+		t.Fatalf("second pass: counts=%+v calls=%d error=%v", counts, calls, err)
+	}
+
+	counts, err = run(false, map[string]string{"bad-1": "A corrected overview."})
+	if err != nil || counts.Embedded != 1 || counts.Skipped != 0 || calls != 1 {
+		t.Fatalf("pass after bad-1's text changed: counts=%+v calls=%d error=%v", counts, calls, err)
+	}
+
+	counts, err = run(true, nil)
+	if err != nil || counts.Skipped != 1 || counts.Embedded != 0 || calls != 3 {
+		t.Fatalf("full run: counts=%+v calls=%d error=%v", counts, calls, err)
+	}
+	if counts, err = run(false, nil); err != nil || calls != 0 {
+		t.Fatalf("pass after the full run: counts=%+v calls=%d error=%v", counts, calls, err)
+	}
 }
 
 func TestBackfillRunThatStoresNothingFails(t *testing.T) {

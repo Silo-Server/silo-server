@@ -334,6 +334,59 @@ func TestTasteProfileSubjectsReadTheSQLiteStorePostgres(t *testing.T) {
 	}
 }
 
+// On the Postgres store the nightly taste job skips the rows of a profile its
+// account no longer lists, as the purge migration does, and keeps an account
+// that lists no profile at all. A store outside Postgres cannot tell, so it
+// keeps them.
+func TestTasteProfileSubjectsSkipDeletedProfilesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	userID, live := newTasteTestAccount(t, pool, "taste-subjects-deleted-")
+	var unlisted int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+		"taste-subjects-unlisted-"+uuid.NewString()).Scan(&unlisted); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, unlisted) })
+
+	repo := NewRepo(pool)
+	vec := axisVector(1800, nil)
+	for _, s := range []StaleProfile{{UserID: userID, ProfileID: live}, {UserID: userID, ProfileID: "deleted"}, {UserID: unlisted, ProfileID: "unlisted"}} {
+		if err := repo.UpsertTasteProfile(ctx, s.UserID, s.ProfileID, vec, map[string]int{}, "", time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	engine := NewEngine(pool, nil, nil, nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	subjectsOf := func() []string {
+		t.Helper()
+		subjects, _, err := w.tasteProfileSubjects(ctx)
+		if err != nil {
+			t.Fatalf("list subjects: %v", err)
+		}
+		var profiles []string
+		for _, s := range subjects {
+			if s.UserID == userID || s.UserID == unlisted {
+				profiles = append(profiles, s.ProfileID)
+			}
+		}
+		slices.Sort(profiles)
+		return profiles
+	}
+
+	want := []string{live, "unlisted"}
+	slices.Sort(want)
+	if got := subjectsOf(); !slices.Equal(got, want) {
+		t.Fatalf("subjects on the Postgres store = %v, want %v", got, want)
+	}
+	engine.WithUserStoreOutsidePostgres(true)
+	if got := subjectsOf(); !slices.Contains(got, "deleted") {
+		t.Fatalf("subjects on a store outside Postgres = %v, want the unlisted profile kept", got)
+	}
+}
+
 // The profile's cached rows leave out what it watched and what it favorited,
 // including taste-seed picks and a favorited episode's series, while its
 // watchlist titles stay recommendable. This covers the main and cluster rows,
@@ -429,6 +482,93 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		if !slices.Contains(ids, row.mustHave) {
 			t.Fatalf("%s row %v is missing %s", row.recType, ids, row.mustHave)
 		}
+	}
+}
+
+// A main, cluster or Because You Watched row whose rebuild finds nothing, here
+// after the profile's access narrowed to no library, is deleted instead of
+// serving its old picks until it expires. A row whose build fails keeps its
+// cached version, and Similar Users is still cached empty.
+func TestCacheUserRowsDropRowsThatRebuildEmptyPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcache-empty-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	repo := NewRepo(pool)
+
+	anchor := prefix + "anchor"
+	taste := axisVector(2200, nil)
+	seedRecoMediaItem(t, pool, anchor, "movie", "matched")
+	if err := repo.UpsertEmbedding(ctx, anchor, taste, "test-model", anchor); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := repo.UpsertTasteProfile(ctx, userID, profile, taste, map[string]int{"watch_high": 1}, "", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, '` + anchor + `', true, NOW())`,
+		// Restrictions with no library allowed admit no title.
+		`UPDATE user_profiles SET library_restrictions_enabled = true WHERE user_id = $1 AND id = $2`,
+		// A cluster without an embedding cannot be read, so the cluster build fails.
+		`INSERT INTO user_taste_clusters(user_id, profile_id, cluster_idx, embedding, dominant_genres, label, member_count, total_weight) VALUES($1, $2, 0, NULL, '[]', 'Broken', 1, 1)`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, userID, profile); err != nil {
+			t.Fatalf("seed %q: %v", stmt, err)
+		}
+	}
+
+	type cacheKey struct{ profile, recType, source string }
+	mainKey := cacheKey{profile, RecTypeForYouMain, ""}
+	clusterKey := cacheKey{profile, RecTypeForYouClusterPrefix + "0", ""}
+	becauseKey := cacheKey{profile, RecTypeBecauseWatched, anchor}
+	otherKey := cacheKey{"other", RecTypeForYouMain, ""}
+	oldPicks := []ScoredItem{{MediaItemID: prefix + "old-pick", Score: 1}}
+	for _, k := range []cacheKey{mainKey, clusterKey, becauseKey, otherKey} {
+		if err := repo.UpsertRecommendationCache(ctx, userID, k.profile, k.recType, k.source, oldPicks, cacheExpiry(now)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cached := func(k cacheKey) bool {
+		t.Helper()
+		return countRows(t, pool, `
+			SELECT COUNT(*) FROM recommendation_cache
+			WHERE  user_id = $1 AND profile_id = $2 AND rec_type = $3 AND source_item_id = $4`,
+			userID, k.profile, k.recType, k.source) == 1
+	}
+
+	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	build := func(wantFailed int) {
+		t.Helper()
+		if built := w.cacheUserRows(ctx, repo, userID, profile, cacheExpiry(now)); built.failed != wantFailed {
+			t.Fatalf("cache build = %+v, want %d failed", built, wantFailed)
+		}
+	}
+
+	build(1)
+	if cached(mainKey) || cached(becauseKey) {
+		t.Fatal("a main or Because You Watched row survived an empty rebuild")
+	}
+	if !cached(clusterKey) {
+		t.Fatal("the cluster row was dropped although its build failed")
+	}
+	if items, err := repo.GetRecommendationCache(ctx, userID, profile, RecTypeSimilarUsersLiked, ""); err != nil || items == nil || len(items) != 0 {
+		t.Fatalf("similar users row = %v, %v; want it cached empty", items, err)
+	}
+	if !cached(otherKey) {
+		t.Fatal("another profile's row was dropped")
+	}
+
+	// Once the cluster can be read and comes out empty, its row goes too.
+	if err := repo.UpsertTasteClusters(ctx, userID, profile, []TasteCluster{{ClusterIdx: 0, Embedding: taste, Label: "Test", MemberCount: 1, TotalWeight: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	build(0)
+	if cached(clusterKey) {
+		t.Fatal("the cluster row survived an empty rebuild")
 	}
 }
 

@@ -93,6 +93,18 @@ const tasteProfileRefreshSubjectsQuery = `
 	UNION
 	SELECT DISTINCT user_id, profile_id FROM user_watchlist`
 
+// postgresStoreTasteProfileSubjectsQuery is tasteProfileRefreshSubjectsQuery
+// on the Postgres user store, where user_profiles lists every profile. Like
+// the purge migration, it leaves out a profile missing from an account that
+// lists others, so rows its deletion left behind (ebook reading progress, a
+// taste row written while it was being deleted) are not rebuilt every night.
+// An account that lists no profile at all is kept.
+const postgresStoreTasteProfileSubjectsQuery = `
+	SELECT s.user_id, s.profile_id
+	FROM   (` + tasteProfileRefreshSubjectsQuery + `) s
+	WHERE  EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id = s.user_id AND p.id = s.profile_id)
+	   OR  NOT EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id = s.user_id)`
+
 // NewWorker creates a new recommendation Worker.
 func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
 	if embeddingsJobTimeout <= 0 {
@@ -324,6 +336,16 @@ func (w *Worker) NotifyAccountsScopeChanged(ctx context.Context, userIDs []int) 
 // found missing, at most once per readRefreshInterval per profile on this
 // server. Signal changes go through NotifySignalsChanged, which is not
 // throttled.
+// ReadRefreshDue reports whether RequestReadRefresh would queue a refresh for
+// the profile now, so a read can skip checking whether one is worth asking
+// for.
+func (w *Worker) ReadRefreshDue(userID int, profileID string) bool {
+	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
+		return false
+	}
+	return w.readRefreshes.due(profileRefreshKey(userID, profileID), readRefreshInterval)
+}
+
 func (w *Worker) RequestReadRefresh(ctx context.Context, userID int, profileID string) {
 	if w == nil || w.engine == nil || userID <= 0 || profileID == "" {
 		return
@@ -407,8 +429,9 @@ type tasteProfilesResult struct {
 	Profiles  int `json:"profiles"`
 	Refreshed int `json:"refreshed"`
 	// NoOp counts profiles whose refresh stored no taste vector: no positive
-	// signal, or none of their positively signaled titles has an embedding
-	// yet. Their previous vector, clusters and personal rows are cleared.
+	// signal, none of their positively signaled titles has an embedding yet,
+	// or the profile was deleted after the job listed it. Their previous
+	// vector, clusters and personal rows are cleared.
 	NoOp      int `json:"no_op"`
 	Failed    int `json:"failed"`
 	Remaining int `json:"remaining"`
@@ -452,9 +475,14 @@ func (w *Worker) doTasteProfiles(ctx context.Context) (tasteProfilesResult, erro
 // a taste profile or any signal. failed counts subjects that could not be
 // read.
 func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProfile, failed int, err error) {
+	signals := w.engine.signalReader()
+	query := postgresStoreTasteProfileSubjectsQuery
+	if signals.storeIsSeparate() {
+		query = tasteProfileRefreshSubjectsQuery
+	}
 	// Read every subject before refreshing, so the query's connection is not
 	// held for the whole job.
-	rows, err := w.engine.pool.Query(ctx, tasteProfileRefreshSubjectsQuery)
+	rows, err := w.engine.pool.Query(ctx, query)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list taste profile subjects: %w", err)
 	}
@@ -473,7 +501,6 @@ func (w *Worker) tasteProfileSubjects(ctx context.Context) (subjects []StaleProf
 	if err := rows.Err(); err != nil {
 		return nil, failed, fmt.Errorf("list taste profile subjects: %w", err)
 	}
-	signals := w.engine.signalReader()
 	if !signals.storeIsSeparate() {
 		return subjects, failed, nil
 	}
@@ -735,7 +762,9 @@ type userRowsResult struct {
 	failed int
 }
 
-// cacheUserRows generates and caches personalized rows for a single user.
+// cacheUserRows generates and caches personalized rows for a single user. A
+// main, cluster or Because You Watched row whose rebuild finds nothing is
+// deleted; a row whose build or write fails keeps its cached version.
 func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, profileID, expires string) userRowsResult {
 	var res userRowsResult
 	fail := func(step string, err error, attrs ...any) {
@@ -750,6 +779,18 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 			return
 		}
 		res.cached++
+	}
+	// putOrDrop caches a rebuilt row, or deletes the cached one when the
+	// rebuild found nothing, so it does not keep serving its old items until
+	// it expires. A row whose build failed never gets here.
+	putOrDrop := func(recType, sourceItemID string, items []ScoredItem) {
+		if len(items) > 0 {
+			put(recType, sourceItemID, items)
+			return
+		}
+		if err := repo.DeleteProfileRecommendationCache(ctx, userID, profileID, recType, sourceItemID); err != nil {
+			fail("delete_cache", err, "rec_type", recType, "source_item_id", sourceItemID)
+		}
 	}
 
 	// Rows are built under the scope the profile's reads are filtered by. A
@@ -779,22 +820,24 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 	aggregatedRow, err := w.engine.buildAggregatedRow(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	if err != nil {
 		fail("main_row", err)
-	} else if aggregatedRow != nil && len(aggregatedRow.Items) > 0 {
-		put(RecTypeForYouMain, "", aggregatedRow.Items)
+	} else {
+		var items []ScoredItem
+		if aggregatedRow != nil {
+			items = aggregatedRow.Items
+		}
+		putOrDrop(RecTypeForYouMain, "", items)
 	}
 
 	// Cache per-cluster ForYou rows. buildClusterRows logs each cluster whose
-	// candidate query failed.
+	// candidate query failed and returns no row for it, so its cached row
+	// stays.
 	clusterRows, failedClusters, err := w.engine.buildClusterRows(ctx, userID, profileID, CacheCandidateLimit, excludeIDs, accessFilter)
 	res.failed += failedClusters
 	if err != nil {
 		fail("cluster_rows", err)
 	}
 	for _, row := range clusterRows {
-		if len(row.Items) == 0 {
-			continue
-		}
-		put(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
+		putOrDrop(fmt.Sprintf("%s%d", RecTypeForYouClusterPrefix, row.ClusterIndex), "", row.Items)
 	}
 
 	// An empty Similar Users row is cached too: it records that the row was
@@ -821,9 +864,7 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 			fail("because_you_watched", err, "source_item_id", sourceItemID)
 			continue
 		}
-		if len(items) > 0 {
-			put(RecTypeBecauseWatched, sourceItemID, items)
-		}
+		putOrDrop(RecTypeBecauseWatched, sourceItemID, items)
 	}
 
 	return res
@@ -998,4 +1039,17 @@ func (t *refreshThrottle) allow(key string, interval time.Duration) bool {
 	}
 	t.last[key] = now
 	return true
+}
+
+// due reports whether allow would let key go ahead now, without recording
+// it.
+func (t *refreshThrottle) due(key string, interval time.Duration) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	now := time.Now()
+	if t.now != nil {
+		now = t.now()
+	}
+	at, ok := t.last[key]
+	return !ok || now.Sub(at) >= interval
 }

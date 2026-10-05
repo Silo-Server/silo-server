@@ -150,7 +150,8 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 // refreshTasteProfile is RefreshTasteProfile, also reporting whether it stored
 // a taste vector. A profile with no positive signal, or none whose title has
 // an embedding yet, gets none: its vector, clusters and cached personal rows
-// are cleared instead (see clearTasteProfile).
+// are cleared instead (see clearTasteProfile). A profile deleted since the
+// refresh was queued gets no vector and no taste row.
 func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID string) (bool, error) {
 	started, err := e.repo.Now(ctx)
 	if err != nil {
@@ -296,8 +297,20 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		signalCounts["watchlist"]++
 	}
 
+	// A refresh queued before its profile was deleted must not bring back the
+	// taste row the deletion purged, even from signals that outlive a profile
+	// such as watch history; it only clears a row left behind. Profiles may
+	// live outside Postgres, so the user store says whether it still exists.
+	userProfile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("get profile %s: %w", profileID, err)
+	}
+	if userProfile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
+	}
+
 	if len(signals) == 0 {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started)
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
 	}
 
 	allIDs := make([]string, 0, len(signals))
@@ -374,7 +387,7 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 	// profile disliked or abandoned, and would recommend their opposites.
 	profile := weightedAverage(vecs, embWeights)
 	if len(positiveItems) == 0 || profile == nil {
-		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started)
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
 	}
 
 	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
@@ -396,9 +409,10 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 // clearTasteProfile stores a profile that has no positive signal, or none
 // whose title has an embedding: its signal counts without a taste vector, and
 // none of the clusters or cached personal rows an earlier vector produced.
-// Readers then treat it as having no taste profile.
-func (e *Engine) clearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, started time.Time) error {
-	if err := e.repo.ClearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started); err != nil {
+// Readers then treat it as having no taste profile. Without create a missing
+// row stays missing (see Repo.ClearTasteProfile).
+func (e *Engine) clearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, started time.Time, create bool) error {
+	if err := e.repo.ClearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, create); err != nil {
 		return fmt.Errorf("clear taste profile: %w", err)
 	}
 	return nil

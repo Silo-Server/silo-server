@@ -186,7 +186,7 @@ func TestClearTasteProfileKeepsTheRowAndDropsPersonalStatePostgres(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := repo.ClearTasteProfile(ctx, userID, cleared, map[string]int{"watch_low": 1}, "PG-13", started); err != nil {
+	if err := repo.ClearTasteProfile(ctx, userID, cleared, map[string]int{"watch_low": 1}, "PG-13", started, true); err != nil {
 		t.Fatalf("clear taste profile: %v", err)
 	}
 
@@ -255,11 +255,123 @@ func TestClearTasteProfileKeepsTheRowAndDropsPersonalStatePostgres(t *testing.T)
 
 	// A profile with no row yet gets one, so later changes can mark it.
 	const fresh = "fresh"
-	if err := repo.ClearTasteProfile(ctx, userID, fresh, map[string]int{}, "", started); err != nil {
+	if err := repo.ClearTasteProfile(ctx, userID, fresh, map[string]int{}, "", started, true); err != nil {
 		t.Fatal(err)
 	}
 	if meta, err := repo.GetTasteProfileMeta(ctx, userID, fresh); err != nil || meta == nil || len(meta.SignalCounts) != 0 {
 		t.Fatalf("fresh profile meta = %+v, %v; want an empty row", meta, err)
+	}
+
+	// Without create an existing row is still cleared, but a missing one is
+	// not created, while the profile's clusters and cached rows still go.
+	if err := repo.ClearTasteProfile(ctx, userID, fresh, map[string]int{"rated_low": 2}, "", started, false); err != nil {
+		t.Fatal(err)
+	}
+	if meta, err := repo.GetTasteProfileMeta(ctx, userID, fresh); err != nil || meta == nil || meta.SignalCounts["rated_low"] != 2 {
+		t.Fatalf("fresh profile meta = %+v, %v; want the existing row updated", meta, err)
+	}
+	const gone = "gone"
+	if err := repo.UpsertTasteClusters(ctx, userID, gone, []TasteCluster{{ClusterIdx: 0, Embedding: vec, Label: "Drama", MemberCount: 1, TotalWeight: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertRecommendationCache(ctx, userID, gone, RecTypeForYouMain, "", items, expires); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ClearTasteProfile(ctx, userID, gone, map[string]int{"rated_low": 1}, "", started, false); err != nil {
+		t.Fatal(err)
+	}
+	if meta, err := repo.GetTasteProfileMeta(ctx, userID, gone); err != nil || meta != nil {
+		t.Fatalf("meta without create = %+v, %v; want no row", meta, err)
+	}
+	if n := countRows(t, pool, `SELECT COUNT(*) FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`, userID, gone); n != 0 {
+		t.Fatalf("profile cleared without create keeps %d clusters", n)
+	}
+	if n := countRows(t, pool, `SELECT COUNT(*) FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`, userID, gone); n != 0 {
+		t.Fatalf("profile cleared without create keeps %d cached rows", n)
+	}
+}
+
+// A refresh that runs after its profile was deleted, as a queued one can,
+// writes no taste row: not from no signal, and not from a rewatch in the
+// watch history the deletion keeps. A row left behind loses its vector and
+// clusters. A live profile with no signal still gets its row.
+func TestRefreshWritesNoTasteRowForADeletedProfilePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "ttaste-deleted-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, live := newTasteTestAccount(t, pool, prefix)
+	movie := prefix + "movie"
+	seedRecoMediaItem(t, pool, movie, "movie", "matched")
+	repo := NewRepo(pool)
+	vec := axisVector(1750, nil)
+	if err := repo.UpsertEmbedding(ctx, movie, vec, "test-model", movie); err != nil {
+		t.Fatal(err)
+	}
+	provider := pgstore.NewPostgresProvider(pool)
+	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, provider, config.RecommendationsConfig{})
+
+	gone := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES($1, $2, 'gone')`, gone, userID); err != nil {
+		t.Fatal(err)
+	}
+	store, err := provider.ForUser(ctx, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteProfile(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	refresh := func(profile string) {
+		t.Helper()
+		if stored, err := engine.refreshTasteProfile(ctx, userID, profile); err != nil || stored {
+			t.Fatalf("refresh of %s stored a vector = %v, %v; want none", profile, stored, err)
+		}
+	}
+	tasteRows := func(profile string) int {
+		t.Helper()
+		return countRows(t, pool, `SELECT COUNT(*) FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, userID, profile)
+	}
+
+	refresh(gone)
+	if n := tasteRows(gone); n != 0 {
+		t.Fatalf("deleted profile with no signal has %d taste rows, want none", n)
+	}
+
+	for range 2 {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, duration_seconds, completed)
+			VALUES(gen_random_uuid()::text, $1, $2, $3, 5400, true)`, userID, gone, movie); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refresh(gone)
+	if n := tasteRows(gone); n != 0 {
+		t.Fatalf("deleted profile with a rewatch has %d taste rows, want none", n)
+	}
+
+	started, err := repo.Now(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertTasteProfile(ctx, userID, gone, vec, map[string]int{"rewatch": 1}, "", started); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertTasteClusters(ctx, userID, gone, []TasteCluster{{ClusterIdx: 0, Embedding: vec, Label: "Drama", MemberCount: 1, TotalWeight: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	refresh(gone)
+	if emb, err := repo.GetTasteProfile(ctx, userID, gone); err != nil || emb != nil {
+		t.Fatalf("leftover taste vector = %d dims, %v; want it cleared", len(emb), err)
+	}
+	if n := countRows(t, pool, `SELECT COUNT(*) FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`, userID, gone); n != 0 {
+		t.Fatalf("leftover profile keeps %d clusters", n)
+	}
+
+	refresh(live)
+	if meta, err := repo.GetTasteProfileMeta(ctx, userID, live); err != nil || meta == nil || len(meta.SignalCounts) != 0 {
+		t.Fatalf("live profile meta = %+v, %v; want an empty row", meta, err)
 	}
 }
 
