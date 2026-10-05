@@ -46,6 +46,9 @@
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
 
+# Image cache jobs run again for artwork the target no longer holds.
+./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
+
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
