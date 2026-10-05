@@ -237,8 +237,10 @@ limits, with PIN verification skipped. A profile
 whose scope cannot be resolved is not cached. Profile restriction, hidden
 library, account and access-group changes trigger a rebuild; account- and
 group-wide changes mark the affected profiles stale in one statement for the
-stale sweep. An applied policy change marks every profile stale the same way,
-since a custom scope policy can change any account's scope.
+stale sweep. A policy change marks every profile stale the same way, since a
+custom scope policy can change any account's scope: each server marks them
+when it loads the new policy generation, so a sweep that rebuilt a profile
+under the old policy before its server reloaded is followed by a new mark.
 
 Every read filters again with the viewer's access filter. List endpoints that
 return bare identifiers filter before answering, and a list anchored on an
