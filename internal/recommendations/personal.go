@@ -30,7 +30,8 @@ func clusterTitle(label string) string {
 }
 
 // buildClusterRows generates per-cluster recommendation rows. A cluster whose
-// candidate query fails is logged and skipped; failed counts them.
+// candidate query fails is logged and skipped; failed counts them. A cluster
+// with no candidates gets a row without items, so its cached row is dropped.
 func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
 	clusters, err := e.repo.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
@@ -71,6 +72,7 @@ func (e *Engine) buildClusterRows(ctx context.Context, userID int, profileID str
 			continue
 		}
 		if len(candidates) == 0 {
+			rows = append(rows, ForYouRow{Type: "cluster", Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
 

@@ -79,6 +79,8 @@ type countingReadRefresher struct{ calls int }
 
 func (c *countingReadRefresher) RequestReadRefresh(context.Context, int, string) { c.calls++ }
 
+func (c *countingReadRefresher) ReadRefreshDue(int, string) bool { return true }
+
 // A read of a profile with no taste profile asks for a refresh only when the
 // profile has signals to build one from.
 func TestReaderRefreshesAProfileWithoutTasteOnlyWhenItHasSignals(t *testing.T) {

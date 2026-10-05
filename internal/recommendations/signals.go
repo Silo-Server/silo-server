@@ -423,9 +423,9 @@ func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID 
 }
 
 // pageProgress visits the profile's progress rows with the given status a
-// page at a time, newest first. It pages by keyset, so each page costs the
-// same however deep the history goes, and a row whose updated_at moves while
-// the walk runs is neither read twice nor skipped.
+// page at a time, newest first. It pages by keyset, so no row is read twice.
+// A row updated while the walk runs moves ahead of the cursor and is not
+// visited; the change that updated it queues a refresh of its own.
 func pageProgress(ctx context.Context, store userstore.UserStore, profileID, status string, visit func([]userstore.WatchProgress) error) error {
 	var after *userstore.ProgressKey
 	for {

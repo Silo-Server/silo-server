@@ -70,11 +70,18 @@ storage dimensions) in `server_settings`. Every later vector must match it.
 A run stops at once on provider limits, rejected credentials, a wrong model or
 URL (401/403/404) and unreachable hosts. It also stops after three single-item
 failures in a row, and when the first single-item retry after a failed batch
-fails before anything was stored, unless the provider refused that input. An
-input refused at every length counts as skipped and only counts toward the
-consecutive limit, so one bad item cannot stop every run. A lock that conflicts
-with the configuration fails every run, including the catch-up pass every 15
-minutes, until an administrator resets embeddings or restores the settings.
+fails before anything was stored. An input the provider refuses at every
+length (a 4xx answer other than 401, 403, 404, 408 and 429) counts as skipped
+and is not a failure: refused items cannot stop a run, and a run whose only
+misses are refused inputs completes. The first refusal before anything is
+stored is followed by one call with a fixed test text, and a provider that
+refuses that too, as Gemini does a bad API key with 400, stops the run. Each
+server remembers in memory the items it saw refused, with a hash of their
+text, and its catch-up passes skip them until the text changes; the nightly
+or a manual embedding run clears the record and retries them, and so does a
+restart. A lock that conflicts with the configuration fails every run,
+including the catch-up pass every 15 minutes, until an administrator resets
+embeddings or restores the settings.
 
 Search indexes only vectors from the locked model, and semantic search is
 ready for a type once a lock exists and at least 85% of that type's eligible
@@ -126,7 +133,9 @@ shown on their own. Below the floor the row is cached empty.
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
 the new run's expiry; a global row whose rebuild finds nothing, and a genre row
-whose genre left the menu, is deleted.
+whose genre left the menu, is deleted. A personal row whose build fails keeps
+its cached version and the refresh is retried; a main, cluster or Because You
+Watched row whose rebuild finds nothing is deleted.
 
 ## Access
 
@@ -143,7 +152,9 @@ Every read filters again with the viewer's access filter. List endpoints that
 return bare identifiers filter before answering, and a list anchored on an
 item the viewer cannot see answers as one anchored on an unknown item.
 Deleting a profile purges its ratings, taste profile, clusters and cached rows
-on both user-store backends.
+on both user-store backends. A refresh that runs afterwards writes no taste row
+for a profile the user store no longer lists, and on the Postgres store the
+nightly taste job skips such profiles, as the purge migration does.
 
 ## Reads
 

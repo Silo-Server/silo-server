@@ -30,9 +30,10 @@ type countingSignalsNotifier struct{ calls int }
 
 func (n *countingSignalsNotifier) NotifySignalsChanged(context.Context, int, string) { n.calls++ }
 
-// Applied events that change a profile's taste signals report it: a played
-// item, a favorite change, an unplay. A mid-play position update, a stale or
-// unmatched event, and an event for an unmapped user do not.
+// Applied events that change a profile's taste signals report it: a stop at
+// any position (providers send only stop-like events), a played item, a
+// favorite change, an unplay. A stale or unmatched event and an event for an
+// unmapped user do not.
 func TestWebhookEventsReportSignalChangesPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -99,14 +100,15 @@ func TestWebhookEventsReportSignalChangesPostgres(t *testing.T) {
 		outcome string
 		want    int // notifications so far
 	}{
-		{"position update", event(1, ActionImportProgress, "ext-mapped", tmdbID, false, 600), OutcomeApplied, 0},
-		{"played", event(2, ActionImportProgress, "ext-mapped", tmdbID, true, 6000), OutcomeApplied, 1},
-		{"favorite added", event(3, ActionAddFavorite, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 2},
-		{"favorite toggled", event(4, ActionToggleFavorite, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 3},
-		{"unplayed", event(5, ActionMarkUnplayed, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 4},
-		{"stale unplay", event(0, ActionMarkUnplayed, "ext-mapped", tmdbID, false, 0), OutcomeSkipped, 4},
-		{"unmatched", event(6, ActionImportProgress, "ext-mapped", "no-such-"+tmdbID, true, 6000), OutcomeUnmatched, 4},
-		{"unmapped user", event(7, ActionImportProgress, "ext-unmapped", tmdbID, true, 6000), OutcomeSkipped, 4},
+		{"early stop", event(1, ActionImportProgress, "ext-mapped", tmdbID, false, 600), OutcomeApplied, 1},
+		{"stop past half way", event(2, ActionImportProgress, "ext-mapped", tmdbID, false, 4200), OutcomeApplied, 2},
+		{"played", event(3, ActionImportProgress, "ext-mapped", tmdbID, true, 6000), OutcomeApplied, 3},
+		{"favorite added", event(4, ActionAddFavorite, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 4},
+		{"favorite toggled", event(5, ActionToggleFavorite, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 5},
+		{"unplayed", event(6, ActionMarkUnplayed, "ext-mapped", tmdbID, false, 0), OutcomeApplied, 6},
+		{"stale unplay", event(0, ActionMarkUnplayed, "ext-mapped", tmdbID, false, 0), OutcomeSkipped, 6},
+		{"unmatched", event(7, ActionImportProgress, "ext-mapped", "no-such-"+tmdbID, true, 6000), OutcomeUnmatched, 6},
+		{"unmapped user", event(8, ActionImportProgress, "ext-unmapped", tmdbID, true, 6000), OutcomeSkipped, 6},
 	} {
 		provider.event = step.event
 		req := httptest.NewRequest(http.MethodPost, "/webhook", http.NoBody)

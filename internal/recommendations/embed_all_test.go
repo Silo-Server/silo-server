@@ -76,7 +76,8 @@ func newEmbedAllTestEngine(t *testing.T, pool *pgxpool.Pool, fake embedder, mode
 			EmbeddingModel:   model,
 			EmbeddingBaseURL: "http://embed.test",
 		},
-		pool: pool,
+		pool:          pool,
+		refusedEmbeds: newRefusedEmbedInputs(),
 	}
 }
 

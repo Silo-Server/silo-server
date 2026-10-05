@@ -451,11 +451,10 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Failed to apply imported watch progress")
 	}
-	// A position update mid-play does not move the taste profile; the event
-	// that marks the item played does.
-	if record.Played {
-		s.notifySignalsChanged(ctx, conn.UserID, profileID)
-	}
+	// Only stop-like events reach here (see the providers), and any recorded
+	// stop can move the taste profile: a finish, a stop at half way or more,
+	// or an early abandonment. The native stop path notifies the same way.
+	s.notifySignalsChanged(ctx, conn.UserID, profileID)
 
 	if err := s.repo.UpsertItemState(ctx, ItemState{
 		ConnectionID:       conn.ID,

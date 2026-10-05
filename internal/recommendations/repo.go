@@ -739,13 +739,38 @@ func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID str
 	return nil
 }
 
+// clearTasteVectorQuery clears an existing taste row. A row a concurrent
+// profile purge deleted stays deleted: UPDATE skips it, where an upsert would
+// insert it again.
+const clearTasteVectorQuery = `
+		UPDATE user_taste_profiles
+		SET    embedding          = NULL,
+		       signal_counts      = $3,
+		       max_content_rating = $4,
+		       updated_at         = $5
+		WHERE  user_id = $1 AND profile_id = $2`
+
+// createClearedTasteProfileQuery is clearTasteVectorQuery that also creates a
+// missing row.
+const createClearedTasteProfileQuery = `
+		INSERT INTO user_taste_profiles
+			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5)
+		ON CONFLICT (user_id, profile_id) DO UPDATE
+			SET embedding          = NULL,
+			    signal_counts      = EXCLUDED.signal_counts,
+			    max_content_rating = EXCLUDED.max_content_rating,
+			    updated_at         = EXCLUDED.updated_at`
+
 // ClearTasteProfile stores a profile that has no positive taste signal. In one
-// transaction it keeps or creates the profile's row with signalCounts and no
-// taste vector, and deletes the profile's taste clusters and every cached row
-// of the profile; global rows are not the profile's. Keeping the row lets
-// MarkProfileStale mark it and lets readers compute its cold-start level.
-// updatedAt is as for UpsertTasteProfile.
-func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, updatedAt time.Time) error {
+// transaction it sets the profile's row to signalCounts and no taste vector,
+// and deletes the profile's taste clusters and every cached row of the
+// profile; global rows are not the profile's. Keeping the row lets
+// MarkProfileStale mark it and lets readers compute its cold-start level. A
+// missing row is created only with create, which a refresh passes only for a
+// profile its user store still lists, so the row a profile deletion purged
+// does not come back. updatedAt is as for UpsertTasteProfile.
+func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, updatedAt time.Time, create bool) error {
 	countsJSON, err := json.Marshal(signalCounts)
 	if err != nil {
 		return fmt.Errorf("marshaling signal counts: %w", err)
@@ -760,16 +785,11 @@ func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID stri
 	if err := lockTasteClusters(ctx, tx, userID, profileID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO user_taste_profiles
-			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
-		VALUES ($1, $2, NULL, $3, $4, $5)
-		ON CONFLICT (user_id, profile_id) DO UPDATE
-			SET embedding          = NULL,
-			    signal_counts      = EXCLUDED.signal_counts,
-			    max_content_rating = EXCLUDED.max_content_rating,
-			    updated_at         = EXCLUDED.updated_at
-	`, userID, profileID, countsJSON, maxContentRating, updatedAt); err != nil {
+	query := clearTasteVectorQuery
+	if create {
+		query = createClearedTasteProfileQuery
+	}
+	if _, err := tx.Exec(ctx, query, userID, profileID, countsJSON, maxContentRating, updatedAt); err != nil {
 		return fmt.Errorf("clear taste vector for user %d profile %s: %w", userID, profileID, err)
 	}
 	if _, err := tx.Exec(ctx,
@@ -996,6 +1016,19 @@ func (r *Repo) DeleteGlobalRecommendationCache(ctx context.Context, recType stri
 		return 0, fmt.Errorf("delete global recommendation cache %s: %w", recType, err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// DeleteProfileRecommendationCache deletes a profile's cached row recType for
+// sourceItemID, which is empty for rows without a source item. Global rows are
+// not a profile's; see DeleteGlobalRecommendationCache.
+func (r *Repo) DeleteProfileRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM recommendation_cache
+		WHERE  user_id = $1 AND profile_id = $2 AND rec_type = $3 AND source_item_id = $4`,
+		userID, profileID, recType, sourceItemID); err != nil {
+		return fmt.Errorf("delete recommendation cache %s for user %d profile %s: %w", recType, userID, profileID, err)
+	}
+	return nil
 }
 
 // GetRecommendationCache retrieves cached recommendation results that have not

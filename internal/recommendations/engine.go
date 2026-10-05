@@ -42,6 +42,9 @@ type Engine struct {
 	pool          *pgxpool.Pool
 	unrated       access.UnratedContentPolicy
 	scopes        ScopeResolver
+	// refusedEmbeds are the inputs the embedding provider refused; see
+	// refusedEmbedInputs.
+	refusedEmbeds *refusedEmbedInputs
 }
 
 // WithScopeResolver installs the resolver the API resolves request scopes
@@ -104,6 +107,7 @@ func NewEngine(
 		embClient:     embeddings.NewClient(embCfg),
 		cfg:           cfg,
 		pool:          pool,
+		refusedEmbeds: newRefusedEmbedInputs(),
 	}
 }
 

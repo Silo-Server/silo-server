@@ -2,10 +2,12 @@ package recommendations
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -23,8 +25,14 @@ const (
 	embeddingTextStaleQuotaPerRun = 200
 
 	// maxConsecutiveEmbedFailures ends a run once this many items in a row
-	// fail to embed one at a time: the provider is down, not the items.
+	// fail to embed one at a time: the provider is down, not the items. Inputs
+	// the provider refuses do not count.
 	maxConsecutiveEmbedFailures = 3
+
+	// embedProbeText is embedded once when a run's first refused input comes
+	// before anything is stored, to tell a refused input from a provider that
+	// refuses every input. The admin connection check sends the same text.
+	embedProbeText = "silo connection test"
 
 	// An item whose text the provider rejects is retried shortened to
 	// embedRetryRunes, then to embedRetryShortRunes, when the text is longer
@@ -45,7 +53,8 @@ type EmbedCounts struct {
 	// retries them.
 	Failed int `json:"failed"`
 	// Skipped counts items whose input the provider refused, as too long or
-	// invalid, at every length tried.
+	// invalid, at every length tried. Items the catch-up pass holds back
+	// because the provider refused the same text earlier are not counted.
 	Skipped int `json:"skipped"`
 }
 
@@ -68,7 +77,8 @@ type EmbedCounts struct {
 // deadline stops it), Pass 2 is skipped, so new items get covered before
 // text-changed ones are refreshed.
 //
-// A run that attempted items and stored none of them returns an error.
+// A run that attempted items and stored none of them returns an error, unless
+// the provider only refused their inputs.
 func (e *Engine) EmbedAll(ctx context.Context) (EmbedCounts, error) {
 	b := e.newBackfill()
 	err := b.run(ctx, true)
@@ -78,6 +88,8 @@ func (e *Engine) EmbedAll(ctx context.Context) (EmbedCounts, error) {
 // EmbedMissing runs Pass 1 of EmbedAll only: it embeds items that have no
 // embedding or one from another model. The worker runs it every few minutes,
 // so newly matched items get embeddings without waiting for the nightly run.
+// It skips items whose unchanged text the provider refused since this
+// server's last EmbedAll.
 func (e *Engine) EmbedMissing(ctx context.Context) (EmbedCounts, error) {
 	b := e.newBackfill()
 	err := b.run(ctx, false)
@@ -101,7 +113,53 @@ func (e *Engine) newBackfill() *embedBackfill {
 		baseURL: e.cfg.EmbeddingBaseURL,
 		model:   e.cfg.EmbeddingModel,
 		load:    e.loadEmbeddingItems,
+		refused: e.refusedEmbeds,
 	}
+}
+
+// refusedEmbedInputs records the items whose embedding text the provider
+// refused at every length, with a hash of that text. Pass 1 skips an item
+// while its text still hashes the same, so the catch-up pass does not resend
+// a refused text every few minutes. EmbedAll clears the record first and
+// retries them all. The record is held in memory: each server's Engine keeps
+// its own, and a restart clears it. A nil record remembers nothing.
+type refusedEmbedInputs struct {
+	mu    sync.Mutex
+	texts map[string][sha256.Size]byte
+}
+
+func newRefusedEmbedInputs() *refusedEmbedInputs {
+	return &refusedEmbedInputs{texts: map[string][sha256.Size]byte{}}
+}
+
+func (r *refusedEmbedInputs) add(itemID, text string) {
+	if r == nil {
+		return
+	}
+	hash := sha256.Sum256([]byte(text))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.texts[itemID] = hash
+}
+
+// has reports whether the provider refused itemID with this text.
+func (r *refusedEmbedInputs) has(itemID, text string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	hash, ok := r.texts[itemID]
+	r.mu.Unlock()
+	return ok && hash == sha256.Sum256([]byte(text))
+}
+
+func (r *refusedEmbedInputs) reset() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	clear(r.texts)
 }
 
 // loadEmbeddingItems loads items with their cast and crew, which the
@@ -145,20 +203,28 @@ type embedBackfill struct {
 	model   string
 	// load returns the items to embed, with the people their text names.
 	load func(ctx context.Context, ids []string) ([]*models.MediaItem, error)
+	// refused records the inputs the provider refused, across runs.
+	refused *refusedEmbedInputs
 
 	counts EmbedCounts
 	// lock is the embedding lock once this run has read or written it.
 	lock *EmbeddingLock
 	// consecutiveFailures counts the items in a row whose single-item embed
-	// failed.
+	// failed for a reason other than a refused input.
 	consecutiveFailures int
-	// lastErr is the newest per-item failure.
+	// lastErr is the newest per-item failure other than a refused input.
 	lastErr error
+	// probed records that the provider embedded embedProbeText in this run.
+	probed bool
 }
 
 func (b *embedBackfill) run(ctx context.Context, includeTextStale bool) error {
 	if err := checkEmbeddingLockConfig(ctx, b.db, b.baseURL, b.model); err != nil {
 		return err
+	}
+	if includeTextStale {
+		// The full run retries every input refused since the last one.
+		b.refused.reset()
 	}
 	if err := b.embedMissing(ctx); err != nil {
 		return err
@@ -194,11 +260,17 @@ func (b *embedBackfill) embedMissing(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("get items for embedding: %w", err)
 		}
-		texts := make([]string, len(items))
-		for i, item := range items {
-			texts[i] = embeddings.BuildEmbeddingText(item)
+		toEmbed := make([]*models.MediaItem, 0, len(items))
+		texts := make([]string, 0, len(items))
+		for _, item := range items {
+			text := embeddings.BuildEmbeddingText(item)
+			if b.refused.has(item.ContentID, text) {
+				continue
+			}
+			toEmbed = append(toEmbed, item)
+			texts = append(texts, text)
 		}
-		if err := b.embedBatch(ctx, items, texts); err != nil {
+		if err := b.embedBatch(ctx, toEmbed, texts); err != nil {
 			return err
 		}
 	}
@@ -268,9 +340,11 @@ func embeddingTextNeedsRefresh(storedModel, storedCanonicalText, generatedCanoni
 // per item, so one item the provider rejects does not block the rest.
 //
 // It returns an error that ends the run when the provider will not serve it
-// (a limit, rejected credentials, an unreachable host, or repeated failures),
-// when a vector cannot be stored under the embedding lock, or when ctx ends.
-// Other per-item failures are counted and the item is retried next run.
+// (a limit, rejected credentials, an unreachable host, repeated failures, or
+// a refusal of every input), when a vector cannot be stored under the
+// embedding lock, or when ctx ends. Other per-item failures are counted and
+// the item is retried next run; an item whose input the provider refused is
+// recorded in b.refused instead.
 func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaItem, texts []string) error {
 	for start := 0; start < len(items); start += embeddingBackfillBatchSize {
 		if err := ctx.Err(); err != nil {
@@ -315,21 +389,26 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 			if stop := runStopError(ctx, err); stop != nil {
 				return stop
 			}
-			b.lastErr = err
-			rejected := embeddings.InputRejected(err)
-			if rejected {
+			// A refused input says nothing about the provider: it is skipped
+			// and is not a failure, so permanently refused items at the head
+			// of the backlog cannot stop every run.
+			if embeddings.InputRejected(err) {
+				if err := b.checkProviderAcceptsInput(ctx); err != nil {
+					b.counts.Failed++
+					return err
+				}
 				b.counts.Skipped++
-			} else {
-				b.counts.Failed++
+				b.refused.add(item.ContentID, texts[i])
+				slog.WarnContext(ctx, "skipping item, provider refused its text", "component", "recommendations", "item_id", item.ContentID, "error", err)
+				continue
 			}
+			b.lastErr = err
+			b.counts.Failed++
 			b.consecutiveFailures++
 			slog.WarnContext(ctx, "skipping item, embed failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
 			// The batch call already failed; when the first item alone fails
 			// too and nothing has been stored, the provider is not working.
-			// A refused input says nothing about the provider, so it only
-			// counts toward the consecutive limit: one permanently refused
-			// item at the head of the backlog must not stop every run.
-			if (i == 0 && b.counts.Embedded == 0 && !rejected) || b.consecutiveFailures >= maxConsecutiveEmbedFailures {
+			if (i == 0 && b.counts.Embedded == 0) || b.consecutiveFailures >= maxConsecutiveEmbedFailures {
 				return providerUnavailable(err)
 			}
 			continue
@@ -381,6 +460,24 @@ func (b *embedBackfill) embedText(ctx context.Context, text string) ([]float32, 
 		return nil, fmt.Errorf("embedding API returned %d vectors for 1 input", len(vectors))
 	}
 	return vectors[0], nil
+}
+
+// checkProviderAcceptsInput is called after a refused input. Until the run
+// has stored a vector, it embeds embedProbeText once, and returns an error
+// that ends the run when that fails too: a provider that refuses every input
+// (Gemini answers a bad API key with 400) is down, not the items.
+func (b *embedBackfill) checkProviderAcceptsInput(ctx context.Context) error {
+	if b.probed || b.counts.Embedded > 0 {
+		return nil
+	}
+	if _, err := b.embedText(ctx, embedProbeText); err != nil {
+		if stop := runStopError(ctx, err); stop != nil {
+			return stop
+		}
+		return providerUnavailable(err)
+	}
+	b.probed = true
+	return nil
 }
 
 // save stores one item's vector with canonicalText. It returns an error, which

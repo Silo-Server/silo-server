@@ -653,9 +653,15 @@ func TestRequestReadRefreshThrottlesEachProfile(t *testing.T) {
 	w.readRefreshes.now = func() time.Time { return now }
 	ctx := t.Context()
 
+	if !w.ReadRefreshDue(7, "p") {
+		t.Fatal("a first read refresh is not due")
+	}
 	w.RequestReadRefresh(ctx, 7, "p")
 	takeQueued(t, w)
 	now = now.Add(time.Minute)
+	if w.ReadRefreshDue(7, "p") {
+		t.Fatal("a read refresh is due again within the interval")
+	}
 	w.RequestReadRefresh(ctx, 7, "p")
 	assertNothingQueued(t, w, "second read within the interval")
 

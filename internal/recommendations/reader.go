@@ -32,6 +32,9 @@ const (
 // read as a row that was never built.
 type ReadRefreshRequester interface {
 	RequestReadRefresh(ctx context.Context, userID int, profileID string)
+	// ReadRefreshDue reports whether RequestReadRefresh would queue a
+	// refresh for the profile now.
+	ReadRefreshDue(userID int, profileID string) bool
 }
 
 // readerRepo is the part of *Repo the Reader reads.
@@ -82,9 +85,10 @@ func (r *Reader) requestRefresh(ctx context.Context, userID int, profileID strin
 // requestRefreshIfSignals asks for a refresh of a profile that has no taste
 // profile yet, when it has signals to build one from. Its first refresh
 // request lives in one server's memory and can be lost; this lets a later
-// read recover it. A profile with nothing to build from asks for nothing.
+// read recover it. A profile with nothing to build from asks for nothing,
+// and the signals are checked only when a refresh would be let through.
 func (r *Reader) requestRefreshIfSignals(ctx context.Context, userID int, profileID string) {
-	if r.refresh == nil {
+	if r.refresh == nil || !r.refresh.ReadRefreshDue(userID, profileID) {
 		return
 	}
 	has, err := r.signalReader().HasSignals(ctx, userID, profileID)
