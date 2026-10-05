@@ -370,6 +370,44 @@ func TestResetEmbeddingsRollsBackPostgres(t *testing.T) {
 	}
 }
 
+// A reset refuses while a catalog import carrying embeddings holds the
+// embedding writers lock: the import read the embedding lock before the reset
+// and would insert vectors after it. Nothing is deleted.
+func TestResetEmbeddingsRefusesDuringACatalogImportPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	snapshotEmbeddingLock(t, pool)
+	ctx := t.Context()
+	repo := NewRepo(pool)
+	f := seedResetFixture(t, ctx, repo)
+
+	importTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = importTx.Rollback(context.Background()) }()
+	if _, err := importTx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, EmbeddingWritersLock); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.ResetEmbeddings(ctx); !errors.Is(err, ErrCatalogImportRunning) {
+		t.Fatalf("reset during an import = %v, want ErrCatalogImportRunning", err)
+	}
+	if lock, err := repo.GetEmbeddingLock(ctx); err != nil || lock == nil || lock.Model != "model-a" {
+		t.Fatalf("lock after a refused reset = %+v, %v", lock, err)
+	}
+	if n := countRows(t, repo.pool, `SELECT COUNT(*) FROM media_item_embeddings WHERE media_item_id = ANY($1)`, f.itemIDs); n != len(f.itemIDs) {
+		t.Fatalf("%d of %d embeddings left after a refused reset", n, len(f.itemIDs))
+	}
+
+	// Once the import commits, the reset goes ahead.
+	if err := importTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ResetEmbeddings(ctx); err != nil {
+		t.Fatalf("reset after the import = %v", err)
+	}
+}
+
 func TestCacheRefreshedAtPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()

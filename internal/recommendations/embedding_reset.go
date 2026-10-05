@@ -22,6 +22,17 @@ const EmbeddingLockSettingKey = embeddingLockSettingKey
 // profiles.
 var ErrStaleSweepRunning = errors.New("stale profile sweep is running")
 
+// ErrCatalogImportRunning reports an embeddings reset refused because a
+// catalog import that carries embeddings is running: it read the embedding
+// lock before the reset and would insert vectors after it.
+var ErrCatalogImportRunning = errors.New("catalog import with embeddings is running")
+
+// EmbeddingWritersLock is the advisory lock key an embeddings reset takes
+// exclusively and a catalog import that carries embeddings takes shared, each
+// for its transaction, so an import's embeddings and the lock it read them
+// against land entirely before or entirely after a reset.
+const EmbeddingWritersLock int64 = 0x53494C4F52525354 // "SILORRST"
+
 // ErrEmbeddingSettingsPendingRestart reports an embeddings reset refused
 // because the saved embedding model or base URL is not the one this server
 // runs with: a reset now would let this server re-embed with the old model
@@ -79,7 +90,8 @@ type EmbeddingsReset struct {
 // (embeddings, taste profiles, the cache) and the stale sweep's lock, so none
 // of them interleaves with it on any server; co-watch pairs do not depend on
 // embeddings. A busy job or sweep refuses the reset with ErrJobRunning,
-// ErrJobRunningElsewhere or ErrStaleSweepRunning, and saved embedding
+// ErrJobRunningElsewhere or ErrStaleSweepRunning, a catalog import carrying
+// embeddings refuses it with ErrCatalogImportRunning, and saved embedding
 // settings that wait for a restart refuse it with
 // ErrEmbeddingSettingsPendingRestart. A profile refresh already
 // running when the reset commits can still write one taste profile built from
@@ -151,6 +163,14 @@ func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 		return res, fmt.Errorf("begin embeddings reset: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, EmbeddingWritersLock).Scan(&locked); err != nil {
+		return res, fmt.Errorf("take embedding writers lock: %w", err)
+	}
+	if !locked {
+		return res, ErrCatalogImportRunning
+	}
 
 	if _, err := tx.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, embeddingLockSettingKey); err != nil {
 		return res, fmt.Errorf("delete embedding lock: %w", err)
