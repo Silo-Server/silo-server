@@ -116,6 +116,10 @@
 # variants out of retirement.
 ./internal/catalog TestCollectionCollageReadsKeepActiveVariantsDB
 
+# Personal smart collection collages: a list read serves recorded collages
+# with one statement and never runs the collections' queries.
+./internal/catalog TestPersonalCollectionCollageListReadsSkipSmartQueriesDB
+
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB

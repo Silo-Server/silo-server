@@ -80,6 +80,15 @@ above with these differences:
   predicates as the collection's item count and pages, manga chapters excluded. A smart
   collection's sources are the first matches of its query, read like its item pages, so a smart
   personal collection has a collage. The display filter is not applied.
+- A list read never runs a smart collection's query. A background refresh reads its matches,
+  builds their collage, and records it in `user_personal_collection_smart_collages`, keyed by
+  collection and a hash of the viewer's access filter, with a hash of the query definition it was
+  made for (no collage when the viewer can see no match with a poster). A read serves that
+  record with one statement for all of a list's smart collections. It queues a refresh when the
+  record is missing or names another definition (serving nothing until then), or is older than
+  `SmartRefreshInterval` (15 minutes; serving the recorded collage meanwhile), so a new match
+  reaches the collage within that time. A record goes with its collection, and with its collage
+  when that collage is retired as unused.
 - `user_personal_collection_poster_variants` holds the collages, keyed by account, collection
   and collage key, and goes with its collection or account (`ON DELETE CASCADE`). Its delete
   trigger is the same `queue_deleted_collection_collage`.

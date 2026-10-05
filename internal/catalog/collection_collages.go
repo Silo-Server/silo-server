@@ -196,33 +196,7 @@ func (c collageSet) build(ctx context.Context, ref CollectionCollageRef, sources
 
 // buildLater builds a collage a read found missing, off the request.
 func (c collageSet) buildLater(ref CollectionCollageRef, sources []string) {
-	q := c.queue
-	if !q.claim(ref, time.Now()) {
-		return
-	}
-	go func() {
-		failed := true
-		defer func() {
-			if r := recover(); r != nil {
-				slog.Error("collage: build panic", "component", "catalog", "collection_id", ref.CollectionID, "panic", r, "stack", string(debug.Stack()))
-			}
-			q.finish(ref, failed, time.Now())
-		}()
-		q.slots <- struct{}{}
-		defer func() { <-q.slots }()
-
-		ctx, cancel := context.WithTimeout(context.Background(), collageBuildTimeout)
-		defer cancel()
-		err := c.build(ctx, ref, sources)
-		switch {
-		case err == nil:
-			failed = false
-		case errors.Is(err, collage.ErrNotEnoughImages):
-			slog.DebugContext(ctx, "collage: no usable source images", "component", "catalog", "collection_id", ref.CollectionID)
-		default:
-			slog.WarnContext(ctx, "collage: background build failed", "component", "catalog", "collection_id", ref.CollectionID, "error", err)
-		}
-	}()
+	c.queue.runLater(ref, func(ctx context.Context) error { return c.build(ctx, ref, sources) })
 }
 
 // collageBuildQueue runs the collage builds reads ask for in the background.
@@ -264,6 +238,37 @@ func (q *collageBuildQueue) claim(ref CollectionCollageRef, now time.Time) bool 
 	}
 	q.pending[ref] = time.Time{}
 	return true
+}
+
+// runLater runs work for ref off the request, unless work for ref is already
+// running or recently failed.
+func (q *collageBuildQueue) runLater(ref CollectionCollageRef, work func(ctx context.Context) error) {
+	if !q.claim(ref, time.Now()) {
+		return
+	}
+	go func() {
+		failed := true
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("collage: build panic", "component", "catalog", "collection_id", ref.CollectionID, "panic", r, "stack", string(debug.Stack()))
+			}
+			q.finish(ref, failed, time.Now())
+		}()
+		q.slots <- struct{}{}
+		defer func() { <-q.slots }()
+
+		ctx, cancel := context.WithTimeout(context.Background(), collageBuildTimeout)
+		defer cancel()
+		err := work(ctx)
+		switch {
+		case err == nil:
+			failed = false
+		case errors.Is(err, collage.ErrNotEnoughImages):
+			slog.DebugContext(ctx, "collage: no usable source images", "component", "catalog", "collection_id", ref.CollectionID)
+		default:
+			slog.WarnContext(ctx, "collage: background build failed", "component", "catalog", "collection_id", ref.CollectionID, "error", err)
+		}
+	}()
 }
 
 func (q *collageBuildQueue) finish(ref CollectionCollageRef, failed bool, now time.Time) {
