@@ -387,6 +387,48 @@ func TestTasteProfileSubjectsSkipDeletedProfilesPostgres(t *testing.T) {
 	}
 }
 
+// The scheduled taste job skips a profile another server is refreshing: it
+// read its signals earlier than that refresh and could overwrite the newer
+// taste profile. A later run, with the lock free, rebuilds it.
+func TestTasteProfileJobSkipsAProfileRefreshingElsewherePostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	userID, profile := newTasteTestAccount(t, pool, "taste-job-busy-")
+	repo := NewRepo(pool)
+	stored := time.Now().Add(-time.Hour).UTC().Truncate(time.Microsecond)
+	if err := repo.UpsertTasteProfile(ctx, userID, profile, axisVector(1800, nil), map[string]int{}, "", stored); err != nil {
+		t.Fatal(err)
+	}
+	updatedAt := func() time.Time {
+		t.Helper()
+		var at time.Time
+		if err := pool.QueryRow(ctx, `SELECT updated_at FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`, userID, profile).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at.UTC()
+	}
+	engine := NewEngine(pool, catalog.NewRatingsRepo(pool), catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{})
+
+	busy := newJobTestWorker(&keyedLocker{held: map[int64]bool{profileRefreshLock(userID, profile): true}}, nil)
+	busy.engine = engine
+	res, err := busy.doTasteProfiles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Busy < 1 || !updatedAt().Equal(stored) {
+		t.Fatalf("taste job with the profile locked elsewhere: busy %d, updated_at %v; want it skipped and left at %v", res.Busy, updatedAt(), stored)
+	}
+
+	free := newJobTestWorker(&fakeLocker{}, nil)
+	free.engine = engine
+	if _, err := free.doTasteProfiles(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if updatedAt().Equal(stored) {
+		t.Fatal("taste job with the lock free did not rebuild the profile")
+	}
+}
+
 // The profile's cached rows leave out what it watched and what it favorited,
 // including taste-seed picks and a favorited episode's series, while its
 // watchlist titles stay recommendable. This covers the main and cluster rows,
