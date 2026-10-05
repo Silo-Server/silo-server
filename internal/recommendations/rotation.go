@@ -15,8 +15,8 @@ import (
 // the main row and the cluster rows once a day: the best-matched head stays,
 // and the rest of the served window is drawn from the next-ranked titles,
 // favoring the higher ranks. The draw is a pure function of the profile, the
-// row, the server's local date and the items, so every node serves the same
-// rotation without shared state, as long as the nodes share a time zone.
+// row, the UTC date and the items, so every node serves the same rotation
+// without shared state, whatever its time zone.
 const (
 	// rotationMaxPinned is the most leading items a rotation leaves in
 	// place.
@@ -53,7 +53,7 @@ func rotateTail(items []ScoredItem, limit int, seedKey string, date time.Time) [
 	pin := min(rotationMaxPinned, limit/2)
 	take := limit - pin
 	end := min(rotationReach(limit), len(items))
-	day := date.Format(time.DateOnly)
+	day := date.UTC().Format(time.DateOnly)
 
 	keys := make([]float64, end-pin)
 	order := make([]int, end-pin)

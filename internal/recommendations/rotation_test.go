@@ -192,3 +192,23 @@ func TestReadsRotateOnlyThePersonalRows(t *testing.T) {
 		}
 	}
 }
+
+// The rotation follows the UTC date, so servers in different time zones
+// serve the same window at the same moment, even where their local dates
+// differ.
+func TestRotateTailIsTheSameInEveryTimeZone(t *testing.T) {
+	items := scoredRun("m", CacheCandidateLimit)
+	// 23:30 UTC is already the next day in Tokyo and still the same day in
+	// Los Angeles.
+	at := time.Date(2026, 10, 1, 23, 30, 0, 0, time.UTC)
+	want := rotateTail(items, ServedRowSize, rotationSeed, at)
+	for _, zone := range []string{"Asia/Tokyo", "America/Los_Angeles"} {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			t.Skipf("time zone data unavailable: %v", err)
+		}
+		if got := rotateTail(items, ServedRowSize, rotationSeed, at.In(loc)); !slices.Equal(got, want) {
+			t.Fatalf("%s served %v, want the UTC rotation %v", zone, scoredIDs(got), scoredIDs(want))
+		}
+	}
+}

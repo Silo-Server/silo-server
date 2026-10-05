@@ -322,10 +322,10 @@ library sections, which scope the whole row to their libraries.
   `ln(u)·(i+5)`, with `u` from `sha256(userID|profileID|rowKey|date|itemID)`.
   The draws keep rank order and the titles not drawn follow them, so
   nothing is lost. `rowKey` is the row's cache key, so a title two rows
-  share is drawn independently in each, and `date` is the server's local
-  `YYYY-MM-DD`, so rows change overnight. The draw needs no shared state:
-  every node serves the same rotation, provided all nodes run in the same
-  time zone. Home and library sections rotate the main and taste-match rows
+  share is drawn independently in each, and `date` is the UTC
+  `YYYY-MM-DD`, so rows change once a day at 00:00 UTC. The draw needs no
+  shared state: every node serves the same rotation, whatever its time
+  zone. Home and library sections rotate the main and taste-match rows
   like a 20-item page.
 - **Titles.** Row titles come from one vocabulary in
   `internal/recommendations/titles.go`: For You, `Because you enjoy

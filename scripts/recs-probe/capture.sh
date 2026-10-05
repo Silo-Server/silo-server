@@ -106,7 +106,7 @@ for pid in "${profiles[@]}"; do
 	cards "$dir" >"$dir/cards.jsonl"
 
 	echo "[$label] profile $pid"
-	jq -r '"  signals: positive=\([.signal_counts | to_entries[] | select(.key != "rated_low" and .key != "watch_low") | .value] | add // 0) counts=\(.signal_counts | tostring) updated_at=\(.updated_at // "never")"' "$dir/taste.json"
+	jq -r '"  signals: positive=\([.signal_counts | to_entries[] | select(.key != "rated_low" and .key != "watch_low" and .key != "rated_3" and .key != "positive_titles") | .value] | add // 0) counts=\(.signal_counts | tostring) updated_at=\(.updated_at // "never")"' "$dir/taste.json"
 	jq -r '"  main: type=\(.type) title=\(.title | @json) cards=\(.items | length)"' "$dir/main.json"
 	jq -r '"  discover: rows=\(.items | length) [\([.items[] | "\(.type):\(.title)=\(.items | length)"] | join(", "))]"' "$dir/discover.json"
 	jq -r '"  discover rows with 10+ cards: \([.items[] | select((.items | length) >= 10)] | length)"' "$dir/discover.json"
