@@ -334,13 +334,7 @@ function RuleValueControl({
               aria-label={name}
               placeholder={name}
               value={String(range[index] ?? "")}
-              onChange={(e) =>
-                set(
-                  fieldDef.inputType === "number" && e.target.value !== ""
-                    ? Number(e.target.value)
-                    : e.target.value,
-                )
-              }
+              onChange={(e) => set(inputValue(fieldDef, e.target.value))}
               className={cn(control, "flex-1")}
             />
           );
@@ -415,9 +409,7 @@ function RuleValueControl({
             type={fieldDef.inputType === "number" ? "number" : "text"}
             aria-label="Value"
             value={String(rule.value)}
-            onChange={(e) =>
-              onChange(fieldDef.inputType === "number" ? Number(e.target.value) : e.target.value)
-            }
+            onChange={(e) => onChange(inputValue(fieldDef, e.target.value))}
             className={cn(control, "flex-1")}
             placeholder="Value"
           />
@@ -425,6 +417,11 @@ function RuleValueControl({
         </div>
       );
   }
+}
+
+/** A typed value: a number for number fields, except that a cleared field stays empty. */
+function inputValue(fieldDef: CollectionFieldOption, text: string): string | number {
+  return fieldDef.inputType === "number" && text !== "" ? Number(text) : text;
 }
 
 /** A calendar date; a saved value that isn't YYYY-MM-DD stays editable as text. */
