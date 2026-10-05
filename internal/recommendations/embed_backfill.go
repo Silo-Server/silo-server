@@ -442,7 +442,7 @@ func (b *embedBackfill) embedEach(ctx context.Context, items []*models.MediaItem
 // succeeded, or 0 for the full text.
 func (b *embedBackfill) embedOne(ctx context.Context, text string) (vector []float32, limit int, err error) {
 	vector, err = b.embedText(ctx, text)
-	if err == nil || runStopError(ctx, err) != nil || utf8.RuneCountInString(text) <= embedRetryRunes {
+	if err == nil || !lengthMayBeRefused(err) || runStopError(ctx, err) != nil || utf8.RuneCountInString(text) <= embedRetryRunes {
 		return vector, 0, err
 	}
 	for _, runes := range []int{embedRetryRunes, embedRetryShortRunes} {
@@ -450,11 +450,20 @@ func (b *embedBackfill) embedOne(ctx context.Context, text string) (vector []flo
 		if err == nil {
 			return vector, runes, nil
 		}
-		if runStopError(ctx, err) != nil {
+		if !lengthMayBeRefused(err) || runStopError(ctx, err) != nil {
 			break
 		}
 	}
 	return nil, 0, err
+}
+
+// lengthMayBeRefused reports whether err can mean the provider refused the
+// input's length: a refused input, or the 5xx a local model such as Ollama
+// answers an input longer than its context with. Only then is a shortened
+// text worth sending; after any other failure a shortened vector would be
+// stored under the full text and never refreshed.
+func lengthMayBeRefused(err error) bool {
+	return embeddings.InputRejected(err) || strings.Contains(strings.ToLower(err.Error()), "context length")
 }
 
 func (b *embedBackfill) embedText(ctx context.Context, text string) ([]float32, error) {

@@ -552,15 +552,17 @@ func TestBackfillRetriesLongTextsShortened(t *testing.T) {
 		}
 	})
 
-	t.Run("short texts and limits are not retried shortened", func(t *testing.T) {
+	t.Run("short texts and failures other than length are not retried shortened", func(t *testing.T) {
 		for name, err := range map[string]error{
-			"short text": errors.New("embedding API returned 500: crashed"),
-			"limit":      &embeddings.RateLimitError{},
+			"short text":         errors.New("embedding API returned 500: crashed"),
+			"limit":              &embeddings.RateLimitError{},
+			"server error":       &embeddings.StatusError{API: "embedding", StatusCode: 503, Body: "unavailable"},
+			"malformed response": errors.New("embedding API returned 0 vectors for 1 input"),
 		} {
 			calls := 0
-			text := "short"
-			if name == "limit" {
-				text = fullText
+			text := fullText
+			if name == "short text" {
+				text = "short"
 			}
 			b := newTestBackfill(newFakeEmbeddingStore(), quotaTestEmbedder(func(context.Context, []string) ([][]float32, error) {
 				calls++
