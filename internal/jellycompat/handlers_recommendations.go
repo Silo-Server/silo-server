@@ -46,6 +46,10 @@ const (
 // response carries at most.
 const compatBecauseWatchedRows = 2
 
+// compatMaxCategories caps categoryLimit: the categories a response can hold
+// are a profile's Because You Watched rows and taste clusters.
+const compatMaxCategories = 20
+
 // compatRecommendationExcludedTypes are the recommendable media types
 // /Movies/Recommendations leaves out. Jellyfin answers it with movies only,
 // each category built from a movie the user played or liked, and clients
@@ -57,10 +61,6 @@ var compatRecommendationExcludedTypes = []string{compatSeriesType}
 type recommendationItemLoader interface {
 	GetByIDsWithAccess(ctx context.Context, contentIDs []string, access catalog.AccessFilter) ([]*models.MediaItem, error)
 }
-
-// compatMaxCategories caps categoryLimit: the categories a response can hold
-// are a profile's Because You Watched rows and taste clusters.
-const compatMaxCategories = 20
 
 // RecommendationsHandler serves the Jellyfin Movies/Recommendations endpoint
 // from the same cached rows the native API reads, keeping only their movies

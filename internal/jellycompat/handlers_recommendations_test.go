@@ -376,17 +376,6 @@ func TestCompatSimilarSkipsTheRecommenderForAHiddenAnchor(t *testing.T) {
 	}
 }
 
-// Oversized limits are capped before they size anything.
-func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
-	reader := &fakeRowReader{}
-	h := newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{UserID: 7, ProfileID: "kid"})
-	rec := httptest.NewRecorder()
-	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
-	if rec.Code != http.StatusOK || reader.gotLimit != recommendations.MaxRowReadLimit {
-		t.Fatalf("status %d, read limit %d; want 200 and the most a row read returns", rec.Code, reader.gotLimit)
-	}
-}
-
 // similarItemRepo loads the requested items the viewer may see, recording
 // the access filter of each load.
 type similarItemRepo struct {
@@ -465,5 +454,17 @@ func TestCompatSimilarServesTheRecommenderAccessFiltered(t *testing.T) {
 		if !slices.Equal(filter.AllowedLibraryIDs, []int{4}) || filter.ProfileID != "kid" {
 			t.Fatalf("load filter = %+v, want the session's", filter)
 		}
+	}
+}
+
+// Oversized limits are capped before they size anything: a category holds
+// at most a cached row's titles.
+func TestCompatRecommendationsCapTheirLimits(t *testing.T) {
+	reader := &fakeRowReader{rows: []recommendations.ForYouRow{clusterRow(0, "Drama", "movie-1")}}
+	h := newTestRecommendationsHandler(reader, &fakeItemLoader{}, catalog.AccessFilter{UserID: 7, ProfileID: "kid"})
+	rec := httptest.NewRecorder()
+	h.HandleRecommendations(rec, recommendationsRequest(t, "?itemLimit=1000000000&categoryLimit=1000000000"))
+	if rec.Code != http.StatusOK || reader.gotLimit != recommendations.MaxRowReadLimit {
+		t.Fatalf("status %d, read limit %d; want 200 and the most a row read returns", rec.Code, reader.gotLimit)
 	}
 }
