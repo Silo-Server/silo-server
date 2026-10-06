@@ -368,15 +368,21 @@ func TestItemRefreshSeasonWithoutSeasonStoreIsUnavailable(t *testing.T) {
 
 // Non-video libraries resolve each file to itself, so two files in one folder
 // are two targets: the per-directory shortcut applies only to folder scans.
-func TestItemRefreshResolvesEachFileOutsideVideoLibraries(t *testing.T) {
+// The scanner scans an audiobook file's whole book directory, so a book in
+// several parts is one file scan per directory, not one per part.
+func TestItemRefreshScansEachAudiobookDirectoryOnce(t *testing.T) {
 	root := t.TempDir()
 	partOne := writeMediaFile(t, root, "Author", "Book", "Part 1.mp3")
 	partTwo := writeMediaFile(t, root, "Author", "Book", "Part 2.mp3")
+	partThree := writeMediaFile(t, root, "Author", "Book", "Part 3.mp3")
+	otherBook := writeMediaFile(t, root, "Author", "Sequel", "Part 1.mp3")
 	queue := &fakeAutoscanQueue{}
 	files := &fakeItemRefreshFiles{byContentID: map[string][]*models.MediaFile{
 		"book-1": {
 			{ID: 1, ContentID: "book-1", FilePath: partOne},
 			{ID: 2, ContentID: "book-1", FilePath: partTwo},
+			{ID: 3, ContentID: "book-1", FilePath: partThree},
+			{ID: 4, ContentID: "book-1", FilePath: otherBook},
 		},
 	}}
 	handler := newItemRefreshHandler(root, "audiobook", queue, files, nil)
@@ -388,7 +394,7 @@ func TestItemRefreshResolvesEachFileOutsideVideoLibraries(t *testing.T) {
 	}
 	assertQueuedScans(t, queue, []queuedScan{
 		{libraryID: 7, mode: scantrigger.ModeFile, path: partOne, trigger: itemRefreshTrigger},
-		{libraryID: 7, mode: scantrigger.ModeFile, path: partTwo, trigger: itemRefreshTrigger},
+		{libraryID: 7, mode: scantrigger.ModeFile, path: otherBook, trigger: itemRefreshTrigger},
 	})
 }
 

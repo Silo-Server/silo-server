@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
@@ -84,8 +85,10 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 	seen := make(map[autoscanTargetKey]struct{}, len(files))
 	// Once a file resolves to a scan of its whole directory, the directory's
 	// other files add nothing, so a series costs one resolve per season folder
-	// rather than per episode. Files that resolve to themselves (non-video
-	// libraries, files at a library root) are each resolved.
+	// rather than per episode. An audiobook file target counts too: the
+	// scanner scans its whole book directory for any one of its files, so a
+	// book in many parts is one scan, not one per part. Other files that
+	// resolve to themselves (files at a library root, say) are each resolved.
 	scannedDirs := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		if file == nil {
@@ -105,6 +108,9 @@ func (h *AutoscanHandler) HandleItemRefresh(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		if target != nil && target.Mode == scantrigger.ModeSubtree && filepath.Clean(target.Path) == dir {
+			scannedDirs[dir] = struct{}{}
+		}
+		if target != nil && target.Mode == scantrigger.ModeFile && target.Folder != nil && librarykind.IsAudiobook(target.Folder.Type) {
 			scannedDirs[dir] = struct{}{}
 		}
 		targets = appendAutoscanTarget(targets, seen, target)
