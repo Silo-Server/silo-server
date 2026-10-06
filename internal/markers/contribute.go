@@ -194,6 +194,12 @@ var authSchemeProse = func() map[string]bool {
 // left to logredact.SecretKey, so new markers there apply here too.
 var keyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*"?)([^\s"',;&]+)`)
 
+// quotedKeyValueInText matches a key and its single- or double-quoted value,
+// as in "api_key='abc'" or `password="two words"`. keyValueInText alone would
+// stop a quoted value at its first space or miss a single-quoted one. An
+// unterminated quote runs to the end.
+var quotedKeyValueInText = regexp.MustCompile(`([\w.-]+)("?\s*[:=]\s*)(?:"([^"]*)"?|'([^']*)'?)`)
+
 // submissionErrorText is a provider error's message safe to log and store.
 // URL errors are sanitized structurally; in other error text (gRPC status
 // text from a plugin, say) a quoted URL loses its query, fragment and
@@ -228,6 +234,16 @@ func submissionErrorText(err error) string {
 // assignment of its own: gRPC renders a status as "desc = api_key=...", where
 // the outer pair's value is the inner one.
 func maskKeyValueSecrets(msg string) string {
+	// A secret's quoted value is masked whole first, quotes kept. Other
+	// quoted pairs are left for the pass below, which looks inside them.
+	msg = quotedKeyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
+		m := quotedKeyValueInText.FindStringSubmatchIndex(pair)
+		if !logredact.SecretKey(strings.ReplaceAll(pair[m[2]:m[3]], "-", "_")) {
+			return pair
+		}
+		quote := pair[m[5]]
+		return pair[:m[5]] + string(quote) + logredact.Placeholder + string(quote)
+	})
 	return keyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
 		m := keyValueInText.FindStringSubmatch(pair)
 		// Header-style names ("x-api-key") use hyphens where SecretKey's

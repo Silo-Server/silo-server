@@ -58,6 +58,10 @@ func TestSubmissionErrorTextMasksSecretsOutsideHTTPURLs(t *testing.T) {
 		// "desc = " runs straight into a description that starts with one.
 		{"rpc error: code = Unauthenticated desc = api_key=FAKE_FIXTURE_9 rejected", "FAKE_FIXTURE_9", "desc = api_key=[REDACTED] rejected"},
 		{"reason=token=FAKE_FIXTURE_10", "FAKE_FIXTURE_10", "reason=token=[REDACTED]"},
+		// Quoted values are masked whole, single quotes too.
+		{"rejected api_key='FAKE_FIXTURE_11' for provider", "FAKE_FIXTURE_11", "api_key='[REDACTED]' for provider"},
+		{`login failed: password="first FAKE_FIXTURE_12" rejected`, "FAKE_FIXTURE_12", `password="[REDACTED]" rejected`},
+		{`password="unterminated FAKE_FIXTURE_13`, "FAKE_FIXTURE_13", `password="[REDACTED]"`},
 		// Short or unpadded credentials after a scheme word are still masked.
 		{"Authorization: Basic " + strings.ToUpper(tok[:4]) + tok[4:], strings.ToUpper(tok[:4]) + tok[4:], "Basic [REDACTED]"},
 		{"Authorization: Bearer " + tok[:6] + "-" + tok[6:], tok[:6] + "-" + tok[6:], "Bearer [REDACTED]"},
