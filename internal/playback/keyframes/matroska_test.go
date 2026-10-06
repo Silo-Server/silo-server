@@ -136,16 +136,23 @@ func TestReadMatroskaTracksAfterClustersThroughSeekHead(t *testing.T) {
 	wantIndex(t, got, err)
 }
 
-// A truncated cue point after a good one makes the index incomplete: the
-// good one alone would leave out later keyframes.
+// Malformed data in a cue point makes the index incomplete: the points read
+// around it would leave out the keyframe it indexes.
 func TestReadMatroskaRejectsMalformedCues(t *testing.T) {
-	good := cuePoint(0, 2)
-	truncated := cuePoint(2_216, 2)
-	truncated = truncated[:len(truncated)-3]
-	malformed := el(idCues, good, truncated)
-	_, err := read(slices.Concat(ebmlHeader, el(idSegment, info, tracks, malformed, cluster)))
-	if !errors.Is(err, ErrNoIndex) {
-		t.Fatalf("err = %v, want ErrNoIndex", err)
+	truncatedPoint := cuePoint(2_216, 2)
+	truncatedPoint = truncatedPoint[:len(truncatedPoint)-3]
+	// A whole cue point whose track position holds a cut-off CueTrack.
+	truncatedTrack := el(idCuePoint, uintEl(idCueTime, 2_216), el(idCueTrackPos, uintEl(idCueTrack, 2)[:5]))
+	for name, malformed := range map[string][]byte{
+		"truncated cue point":      el(idCues, cuePoint(0, 2), cuePoint(4_218, 2), truncatedPoint),
+		"truncated track position": el(idCues, cuePoint(0, 2), truncatedTrack, cuePoint(4_218, 2)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := read(slices.Concat(ebmlHeader, el(idSegment, info, tracks, malformed, cluster)))
+			if !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrNoIndex", err)
+			}
+		})
 	}
 }
 

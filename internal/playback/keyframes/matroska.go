@@ -427,11 +427,14 @@ func cueTimes(cues []byte, video uint64) ([]uint64, bool) {
 			case idCueTime:
 				t, hasTime = readUint(v), true
 			case idCueTrackPos:
-				children(v, func(id uint64, v []byte) {
+				// Malformed data here could hide the video track's entry.
+				if !childrenComplete(v, func(id uint64, v []byte) {
 					if id == idCueTrack && readUint(v) == video {
 						isVideo = true
 					}
-				})
+				}) {
+					complete = false
+				}
 			}
 		}) {
 			complete = false
