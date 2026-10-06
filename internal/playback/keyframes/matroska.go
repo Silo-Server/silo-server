@@ -501,14 +501,17 @@ func cuePoints(cues []byte, video uint64) ([]cuePoint, bool) {
 					track uint64
 					pos   int64 = -1
 				)
-				children(v, func(id uint64, v []byte) {
+				// Malformed data here could hide the video track's entry.
+				if !childrenComplete(v, func(id uint64, v []byte) {
 					switch id {
 					case idCueTrack:
 						track = readUint(v)
 					case idCueClusterPosition:
 						pos = int64(readUint(v))
 					}
-				})
+				}) {
+					complete = false
+				}
 				if track == video {
 					isVideo, cluster = true, pos
 				}
