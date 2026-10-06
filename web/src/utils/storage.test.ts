@@ -8,22 +8,9 @@ describe("appearance cache namespacing", () => {
     localStorage.clear();
   });
 
-  it("reads back what the same account wrote", () => {
-    appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
-
-    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1")).toBe("large");
-  });
-
-  it("hides another account's cached values", () => {
-    appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
-    appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
-
-    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2")).toBeNull();
-    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2")).toBeNull();
-  });
-
   it("keeps both accounts' values, so returning to the first still warm starts", () => {
     appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2")).toBeNull();
     appearanceCache.set(KEYS.UI_TEXT_SCALE, "x-large", "2");
 
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1")).toBe("large");
@@ -36,14 +23,9 @@ describe("appearance cache namespacing", () => {
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1")).toBeNull();
   });
 
-  it("falls back to the last account that wrote while nobody is signed in", () => {
-    appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
-
-    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, null)).toBe("large");
-  });
-
   it("follows the pointer to the most recent account, not the first", () => {
     appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, null)).toBe("large");
     appearanceCache.set(KEYS.UI_TEXT_SCALE, "x-large", "2");
 
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, null)).toBe("x-large");

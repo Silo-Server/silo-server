@@ -105,6 +105,32 @@ func TestLoadFromDBPolicyEditorEnabledDefaultsFalse(t *testing.T) {
 	}
 }
 
+func TestLoadFromDBScannerRealtimeMonitoringDefaultsTrue(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if !cfg.Scanner.RealtimeMonitoring {
+		t.Fatal("Scanner.RealtimeMonitoring = false, want default true")
+	}
+
+	cfg, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "false"})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if cfg.Scanner.RealtimeMonitoring {
+		t.Fatal("Scanner.RealtimeMonitoring = true, want configured false")
+	}
+
+	_, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "maybe"})
+	if err == nil {
+		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
+	}
+	if !strings.Contains(err.Error(), "scanner.realtime_monitoring") {
+		t.Fatalf("LoadFromDB() error = %v, want key name", err)
+	}
+}
+
 func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {
@@ -219,6 +245,23 @@ playback:
 `)
 	if got := m[playbackSegmentRetentionSettingKey]; got != "0" {
 		t.Fatalf("segment retention = %q, want explicit disable", got)
+	}
+}
+
+func TestYAMLToSettingsMapScannerRealtimeMonitoring(t *testing.T) {
+	m := yamlSettingsMapFromString(t, `server:
+  mode: integrated
+`)
+	if got := m["scanner.realtime_monitoring"]; got != "true" {
+		t.Fatalf("scanner.realtime_monitoring = %q, want default true", got)
+	}
+
+	m = yamlSettingsMapFromString(t, `
+scanner:
+  realtime_monitoring: false
+`)
+	if got := m["scanner.realtime_monitoring"]; got != "false" {
+		t.Fatalf("scanner.realtime_monitoring = %q, want explicit false", got)
 	}
 }
 

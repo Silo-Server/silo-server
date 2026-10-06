@@ -153,11 +153,17 @@ describe("appearance cache ownership", () => {
     expectSeeded(renderAppearance().captured);
   });
 
-  it("keeps the warm start while auth is still bootstrapping", () => {
+  it.each([
+    { user: null, profile: null },
+    { user: { id: 2 }, profile: { id: "p2" } },
+  ])("keeps the warm start while auth is still bootstrapping: %j", (identity) => {
     seedAccountOneAppearance();
-    mocks.useOptionalAuth.mockReturnValue({ loading: true, user: null, profile: null });
+    mocks.useOptionalAuth.mockReturnValue({ loading: true, ...identity });
 
     expectSeeded(renderAppearance().captured);
+    expect(mocks.useEffectiveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
   });
 
   it("keeps the warm start on the profile picker, before a profile is chosen", () => {

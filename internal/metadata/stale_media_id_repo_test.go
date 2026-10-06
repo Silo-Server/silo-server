@@ -101,30 +101,6 @@ func TestIsMissingContentForeignKeyViolation(t *testing.T) {
 	}
 }
 
-func TestIsPgConstraintViolation(t *testing.T) {
-	const code = "23503"
-	const constraint = "some_fkey"
-	cases := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"generic", errors.New("boom"), false},
-		{"wrong code", &pgconn.PgError{Code: "23505", ConstraintName: constraint}, false},
-		{"wrong constraint", &pgconn.PgError{Code: code, ConstraintName: "other"}, false},
-		{"match", &pgconn.PgError{Code: code, ConstraintName: constraint}, true},
-		{"wrapped match", fmt.Errorf("x: %w", &pgconn.PgError{Code: code, ConstraintName: constraint}), true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isPgConstraintViolation(tc.err, code, constraint); got != tc.want {
-				t.Fatalf("isPgConstraintViolation(%v) = %v, want %v", tc.err, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestResolveStaleUpsertError(t *testing.T) {
 	// The benign missing-parent race is swallowed (nil); every other error is
 	// wrapped and propagated so a real failure still surfaces.

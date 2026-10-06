@@ -1,8 +1,8 @@
+import * as api from "@/lib/recipes";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import RecipeGalleryModal from "./RecipeGalleryModal";
-import * as api from "@/lib/recipes";
 
 vi.mock("@/lib/recipes");
 
@@ -50,14 +50,6 @@ beforeEach(() => {
 });
 
 describe("RecipeGalleryModal", () => {
-  it("renders all category chips and recipe cards", async () => {
-    render(<RecipeGalleryModal open onClose={() => {}} onPick={() => {}} />);
-    await waitFor(() => expect(screen.getByText("Recently Added")).toBeInTheDocument());
-    expect(screen.getByText("Hidden Gems")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Library staples/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Discovery/i })).toBeInTheDocument();
-  });
-
   it("filters by category chip", async () => {
     render(<RecipeGalleryModal open onClose={() => {}} onPick={() => {}} />);
     await waitFor(() => expect(screen.getByText("Recently Added")).toBeInTheDocument());

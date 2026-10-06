@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -177,42 +178,69 @@ func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
 	}
 }
 
-func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
-	)
-	req := httptest.NewRequest("GET", "/Library/VirtualFolders", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !AdminAPIKeyFromContext(r.Context()) {
-			t.Fatal("expected admin API key marker in context")
+func TestAdminAPIKeyActivityAttribution(t *testing.T) {
+	for _, route := range []struct {
+		method string
+		path   string
+		wrap   func(*AdminAPIKeyAuthenticator) func(http.Handler) http.Handler
+	}{
+		{http.MethodPost, "/Library/Media/Updated", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
+			return a.RequireAdminAPIKey
+		}},
+		{http.MethodGet, "/Library/VirtualFolders", func(a *AdminAPIKeyAuthenticator) func(http.Handler) http.Handler {
+			return RequireSessionOrAdminAPIKey(NewAuthenticator(NewSessionStore(time.Hour, nil), nil), a)
+		}},
+	} {
+		for _, tc := range []struct {
+			name   string
+			token  string
+			role   string
+			scopes []string
+			status int
+		}{
+			{name: "valid", token: "sa_test", role: "admin", status: http.StatusNoContent},
+			{name: "unknown", token: "sa_unknown", role: "admin", status: http.StatusUnauthorized},
+			{name: "non-admin", token: "sa_test", role: "user", status: http.StatusForbidden},
+			{name: "scoped", token: "sa_test", role: "admin", scopes: []string{auth.ScopeAdminUsers}, status: http.StatusForbidden},
+		} {
+			t.Run(route.path+"/"+tc.name, func(t *testing.T) {
+				authn := newAdminAPIKeyAuthForTest(
+					&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test", Scopes: tc.scopes}},
+					&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: tc.role, Enabled: true}},
+				)
+				capture := &activityCapture{}
+				called := false
+				handler := activitylog.NewMiddleware(capture, "node-a")(route.wrap(authn)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = true
+					if !AdminAPIKeyFromContext(r.Context()) {
+						t.Fatal("missing admin API key marker")
+					}
+					w.WriteHeader(http.StatusNoContent)
+				})))
+				req := httptest.NewRequest(route.method, route.path, nil)
+				req.Header.Set("X-Emby-Token", tc.token)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code != tc.status {
+					t.Fatalf("status = %d, want %d", rec.Code, tc.status)
+				}
+				accepted := tc.status == http.StatusNoContent
+				if called != accepted {
+					t.Fatalf("handler called = %v, want %v", called, accepted)
+				}
+				entries := capture.take()
+				if len(entries) != 1 || entries[0].StatusCode != tc.status {
+					t.Fatalf("entries = %+v, want one entry with status %d", entries, tc.status)
+				}
+				if accepted {
+					if entries[0].UserID == nil || *entries[0].UserID != 2 {
+						t.Fatalf("UserID = %v, want account 2", entries[0].UserID)
+					}
+				} else if entries[0].UserID != nil {
+					t.Fatalf("rejected request UserID = %v, want nil", entries[0].UserID)
+				}
+			})
 		}
-		w.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRequireAdminAPIKey_RejectsNonAdminKey(t *testing.T) {
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "user", Enabled: true}},
-	)
-	req := httptest.NewRequest("POST", "/Library/Media/Updated", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler should not run")
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

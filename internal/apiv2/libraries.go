@@ -34,7 +34,10 @@ type Library struct {
 	ChapterThumbnailsEnabled   bool     `json:"chapter_thumbnails_enabled" example:"false"`
 	ChapterThumbnailsSupported bool     `json:"chapter_thumbnails_supported" doc:"Whether the server can produce chapter thumbnails (public asset storage is configured)" example:"true"`
 	IntroDetectionEnabled      bool     `json:"intro_detection_enabled" example:"false"`
+	TrickplayEnabled           bool     `json:"trickplay_enabled" doc:"Generate seek-bar preview images for the library's video files" example:"false"`
+	TrickplaySupported         bool     `json:"trickplay_supported" doc:"Whether the server can produce seek-bar previews (public asset storage is configured)" example:"true"`
 	TrailerKinds               []string `json:"trailer_kinds" doc:"Remote video kinds fetched during metadata refresh; empty disables them" example:"[\"trailer\"]"`
+	RealtimeMonitoring         bool     `json:"realtime_monitoring" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 	SortOrder                  int      `json:"sort_order" doc:"Position among libraries, lowest first" example:"0"`
 	PosterURL                  string   `json:"poster_url,omitempty" doc:"Presigned poster URL; absent when the library has no poster"`
 	LastScannedAt              *Instant `json:"last_scanned_at,omitempty" doc:"Absent until the first scan completes"`
@@ -51,7 +54,9 @@ type LibraryCreate struct {
 	MetadataLanguage         string   `json:"metadata_language,omitempty" doc:"ISO 639-1 code; default en" example:"en"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty" doc:"Requires public asset storage" example:"false"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty" example:"false"`
+	TrickplayEnabled         bool     `json:"trickplay_enabled,omitempty" doc:"Generate seek-bar preview images; requires public asset storage" example:"false"`
 	TrailerKinds             []string `json:"trailer_kinds,omitempty" doc:"Remote video kinds to fetch; omitted applies the default (every provider kind), empty disables them" example:"[\"trailer\"]"`
+	RealtimeMonitoring       *bool    `json:"realtime_monitoring,omitempty" doc:"Scan automatically when files in the library's folders change; omitted means true. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
 
 // LibraryUpdate is the updateLibrary body; omitted members are unchanged
@@ -65,7 +70,9 @@ type LibraryUpdate struct {
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty" nullable:"false" example:"false"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty" nullable:"false" example:"false"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty" nullable:"false" example:"false"`
+	TrickplayEnabled         *bool     `json:"trickplay_enabled,omitempty" nullable:"false" doc:"Generate seek-bar preview images; turning it off deletes the library's previews" example:"false"`
 	TrailerKinds             *[]string `json:"trailer_kinds,omitempty" nullable:"false" doc:"Replaces the allow-list; empty disables remote videos" example:"[\"trailer\"]"`
+	RealtimeMonitoring       *bool     `json:"realtime_monitoring,omitempty" nullable:"false" doc:"Scan automatically when files in the library's folders change. Takes effect only while the server-wide scanner.realtime_monitoring setting is on." example:"true"`
 }
 
 // LibraryCreateInput is the createLibrary request.
@@ -1056,6 +1063,8 @@ func (reg *Registry) createLibrary(ctx context.Context, in *LibraryCreateInput) 
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
+		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
+		TrickplayEnabled:         in.Body.TrickplayEnabled,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1090,6 +1099,8 @@ func (reg *Registry) updateLibrary(ctx context.Context, in *LibraryUpdateInput) 
 		ChapterThumbnailsEnabled: in.Body.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    in.Body.IntroDetectionEnabled,
 		TrailerKinds:             in.Body.TrailerKinds,
+		RealtimeMonitoring:       in.Body.RealtimeMonitoring,
+		TrickplayEnabled:         in.Body.TrickplayEnabled,
 	})
 	if err != nil {
 		return nil, libraryProblem(err)
@@ -1487,7 +1498,10 @@ func libraryOf(v handlers.LibraryView) Library {
 		ChapterThumbnailsEnabled:   v.ChapterThumbnailsEnabled,
 		ChapterThumbnailsSupported: v.ChapterThumbnailsSupported,
 		IntroDetectionEnabled:      v.IntroDetectionEnabled,
+		TrickplayEnabled:           v.TrickplayEnabled,
+		TrickplaySupported:         v.TrickplaySupported,
 		TrailerKinds:               NonNil(v.TrailerKinds),
+		RealtimeMonitoring:         v.RealtimeMonitoring,
 		SortOrder:                  v.SortOrder,
 		PosterURL:                  v.PosterURL,
 		LastScannedAt:              instantPtr(v.LastScannedAt),

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import QRCode from "react-qr-code";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { sessionFromTokenPair } from "@/api/v2/account";
-import { v2, type V2Result } from "@/api/v2/request";
+import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { CHANGE_PASSWORD_PATH, usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
@@ -25,6 +25,16 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
+import { formatDeviceCode, spokenDeviceCode } from "@/lib/deviceCode";
+import {
+  clearSignedOut,
+  leaveForProvider,
+  networkIdentityName,
+  networkSignInRefusalText,
+  oauthFailureText,
+  oauthStartHref,
+  wasSignedOut,
+} from "@/lib/externalSignIn";
 import { toast } from "sonner";
 
 type DeviceLoginSession = V2Result<"POST /api/v2/auth/device/start">;
@@ -69,6 +79,20 @@ function buildDevicePayload() {
   };
 }
 
+// Picker value for "let the server route by account" (no provider sent).
+const AUTO_PROVIDER = "auto";
+
+/**
+ * Withdraws a pairing request nobody will finish (D4), so the approver's
+ * phone shows it as canceled instead of a live code. Best effort: the
+ * request expires on its own anyway.
+ */
+function cancelDeviceLogin(deviceCode: string) {
+  void v2("POST /api/v2/auth/device/cancel", { body: { device_code: deviceCode } }).catch(
+    () => undefined,
+  );
+}
+
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -78,7 +102,17 @@ export default function Login() {
   const [deviceSession, setDeviceSession] = useState<DeviceLoginSession | null>(null);
   const [deviceStatusMessage, setDeviceStatusMessage] = useState("");
   const [devicePolling, setDevicePolling] = useState(false);
-  const [showDeviceFallback, setShowDeviceFallback] = useState(false);
+  // The device code of a request still waiting for approval, which leaving
+  // the page or starting over withdraws.
+  const pendingDeviceCode = useRef<string | null>(null);
+  const providerPickerId = useId();
+  const providerPickerHintId = useId();
+  const [loginRefusal, setLoginRefusal] = useState<string | null>(null);
+  // Read once: a sign-out in this tab keeps the page from sending the person
+  // straight back to the provider (see markSignedOut).
+  const [signedOutHere] = useState(wasSignedOut);
+  const autoRedirected = useRef(false);
+  const [providersReady, setProvidersReady] = useState(false);
   const {
     login,
     completeLogin,
@@ -89,6 +123,10 @@ export default function Login() {
     setupLoading,
     setupRequired,
     providers = [],
+    refreshSignInProviders,
+    sessionRestoreUnavailable = false,
+    sessionRestoreProviderUnavailable = false,
+    retrySessionRestore,
   } = useAuth();
   const [searchParams] = useSearchParams();
   const { serverName, loginSubtitle } = useServerBranding();
@@ -109,6 +147,22 @@ export default function Login() {
 
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
 
+  // Another browser may have changed the server's provider since this tab
+  // started. Read it again before choosing a form or redirecting automatically.
+  useEffect(() => {
+    let canceled = false;
+    if (!refreshSignInProviders) {
+      setProvidersReady(true);
+      return;
+    }
+    void refreshSignInProviders().finally(() => {
+      if (!canceled) setProvidersReady(true);
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [refreshSignInProviders]);
+
   const credentialProviders = useMemo(
     () => providers.filter((entry) => entry.mode === "credentials"),
     [providers],
@@ -117,15 +171,79 @@ export default function Login() {
     () => providers.filter((entry) => entry.mode === "oauth" && entry.installation_id),
     [providers],
   );
+  // A network provider (such as Tailscale) is listed only when this browser
+  // reached the server through it, with the device owner's name.
+  const networkProviders = useMemo(
+    () => providers.filter((entry) => entry.mode === "network" && entry.installation_id),
+    [providers],
+  );
+  const [networkSigningIn, setNetworkSigningIn] = useState<string | null>(null);
 
   const oauthError =
-    searchParams.get("error") === "oauth_failed" ? searchParams.get("reason") : null;
-  const nextParam = redirectTarget ? `?next=${encodeURIComponent(redirectTarget)}` : "";
+    searchParams.get("error") === "oauth_failed"
+      ? searchParams.get("reason") || "login_failed"
+      : null;
+  // /login?local=1 shows the password form even while local password sign-in
+  // is off, for break-glass admins.
+  const localBypass = searchParams.get("local") === "1";
+  // Set by "Not you? Switch account": the provider is asked to let the
+  // person pick another provider account instead of reusing its session.
+  const switchingAccount = searchParams.get("switch_account") === "1";
+  // With a directory (LDAP) provider the server routes a password sign-in
+  // that names no provider by account: accounts with a local password sign in
+  // locally (their password never reaches the directory), everyone else goes
+  // to the directory. Default to that instead of preselecting one provider,
+  // which would fail directory users on Local, or send a break-glass admin's
+  // password to the directory while local sign-in is off.
+  const hasDirectoryProvider = credentialProviders.some((entry) => entry.id !== "local");
   const selectedProvider =
     provider ||
+    (hasDirectoryProvider ? AUTO_PROVIDER : undefined) ||
     credentialProviders.find((entry) => entry.default)?.id ||
     credentialProviders[0]?.id ||
     "";
+
+  // With local password sign-in off and no directory, only the OAuth or
+  // network provider can sign anyone in, so the password form is hidden. It
+  // stays when the provider list could not be read (no provider at all).
+  const passwordFormShown =
+    localBypass ||
+    credentialProviders.length > 0 ||
+    (oauthProviders.length === 0 && networkProviders.length === 0);
+  const startHref = (installationId: string) =>
+    oauthStartHref(installationId, { next: redirectTarget, selectAccount: switchingAccount });
+  // The only way in is one OAuth provider: go there directly, unless the
+  // person asked for the password form, just came back from a failure, is
+  // switching account or signed out in this tab (the provider may still
+  // have its own session and would sign them straight back in).
+  const autoRedirectProvider =
+    !passwordFormShown &&
+    oauthProviders.length === 1 &&
+    networkProviders.length === 0 &&
+    !searchParams.has("error") &&
+    !switchingAccount &&
+    !signedOutHere &&
+    !sessionRestoreUnavailable
+      ? oauthProviders[0]
+      : null;
+  const autoRedirectHref = autoRedirectProvider?.installation_id
+    ? startHref(autoRedirectProvider.installation_id)
+    : null;
+  const readyToRedirect =
+    providersReady &&
+    !loading &&
+    !setupLoading &&
+    !setupRequired &&
+    !user &&
+    !pendingPasswordChange;
+
+  useEffect(() => {
+    if (!autoRedirectHref || !readyToRedirect || autoRedirected.current) {
+      return;
+    }
+    autoRedirected.current = true;
+    leaveForProvider(autoRedirectHref);
+  }, [autoRedirectHref, readyToRedirect]);
 
   const navigateAfterLogin = usePostSignInNavigation(redirectTarget);
 
@@ -152,6 +270,7 @@ export default function Login() {
 
         if (result.status === "approved" && result.tokens) {
           shouldPollAgain = false;
+          pendingDeviceCode.current = null;
           const session = sessionFromTokenPair(result.tokens);
           completeLogin(session);
           setDeviceStatusMessage("Signed in. Loading profiles...");
@@ -161,19 +280,28 @@ export default function Login() {
 
         if (result.status === "denied") {
           shouldPollAgain = false;
+          pendingDeviceCode.current = null;
           setDeviceStatusMessage("Approval was denied. Start a new code to try again.");
           setDeviceSession(null);
           return;
         }
 
-        if (result.status === "expired" || result.status === "consumed") {
+        if (
+          result.status === "expired" ||
+          result.status === "consumed" ||
+          result.status === "canceled"
+        ) {
           shouldPollAgain = false;
+          pendingDeviceCode.current = null;
           setDeviceStatusMessage("This code is no longer valid. Start a new one.");
           setDeviceSession(null);
           return;
         }
 
-        setDeviceStatusMessage("Waiting for approval on your phone...");
+        // Someone opened the link on a phone: the person carries on there.
+        setDeviceStatusMessage(
+          result.opened ? "Continue on your phone." : "Waiting for approval on your phone...",
+        );
       } catch (error) {
         if (!cancelled) {
           setDeviceStatusMessage(error instanceof Error ? error.message : "Device sign-in failed");
@@ -197,7 +325,15 @@ export default function Login() {
     };
   }, [completeLogin, deviceSession, navigateAfterLogin]);
 
-  if (loading || setupLoading) {
+  // Leaving the page withdraws a request still waiting for approval.
+  useEffect(
+    () => () => {
+      if (pendingDeviceCode.current) cancelDeviceLogin(pendingDeviceCode.current);
+    },
+    [],
+  );
+
+  if (loading || setupLoading || !providersReady) {
     return (
       <main className="auth-shell">
         <AuthBackground />
@@ -225,13 +361,51 @@ export default function Login() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    setLoginRefusal(null);
     try {
-      const signedIn = await login(username, password, selectedProvider || undefined);
+      const signedIn = await login(
+        username,
+        password,
+        selectedProvider && selectedProvider !== AUTO_PROVIDER ? selectedProvider : undefined,
+      );
       await navigateAfterLogin(signedIn);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Login failed");
+      const refusal = err instanceof V2ProblemError ? passwordLoginRefusal(err.problemType) : null;
+      if (refusal) {
+        setLoginRefusal(refusal);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Login failed");
+      }
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleNetworkSignIn(entry: (typeof networkProviders)[number]) {
+    setNetworkSigningIn(entry.id);
+    setLoginRefusal(null);
+    try {
+      const pair = await v2("POST /api/v2/auth/network/{id}/sign-in", {
+        path: { id: entry.installation_id ?? "" },
+        body: {},
+        retryAuthentication: false,
+      });
+      clearSignedOut();
+      const session = sessionFromTokenPair(pair);
+      completeLogin(session);
+      await navigateAfterLogin(session.user);
+    } catch (err) {
+      const refusal =
+        err instanceof V2ProblemError
+          ? networkSignInRefusalText(err.problemType, entry.display_name)
+          : null;
+      if (refusal) {
+        setLoginRefusal(refusal);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Sign-in failed");
+      }
+    } finally {
+      setNetworkSigningIn(null);
     }
   }
 
@@ -239,9 +413,9 @@ export default function Login() {
     setStartingDeviceLogin(true);
     try {
       const data = await v2("POST /api/v2/auth/device/start", { body: buildDevicePayload() });
+      pendingDeviceCode.current = data.device_code;
       setDeviceSession(data);
       setDeviceStatusMessage("Waiting for approval on your phone...");
-      setShowDeviceFallback(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to start device login");
     } finally {
@@ -252,9 +426,37 @@ export default function Login() {
   const signupHref = redirectTarget
     ? `/signup?redirect=${encodeURIComponent(redirectTarget)}`
     : "/signup";
-  // Only a local password can be reset here; an external provider owns its own.
+  // Only a local password can be reset here; an external provider owns its
+  // own. So the link shows only while the form is explicitly the local one:
+  // the local provider picked (or the only one), or /login?local=1 with no
+  // password provider listed. Automatic routing may send the name to a
+  // directory, and there is no form when the provider is the only way in.
   const forgotPasswordShown =
-    passwordResetAvailable && (!selectedProvider || selectedProvider === "local");
+    passwordResetAvailable &&
+    passwordFormShown &&
+    (!selectedProvider || selectedProvider === "local");
+  const oauthProviderNames = oauthProviders.map((entry) => entry.display_name).join(" or ");
+  function passwordLoginRefusal(problemType: string): string | null {
+    switch (problemType) {
+      case "local_login_disabled":
+        return oauthProviderNames
+          ? `Password sign-in is turned off on this server. Sign in with ${oauthProviderNames} instead.`
+          : "Password sign-in is turned off on this server.";
+      case "password_expired":
+        return "Your directory password has expired. Change it with your organization, then sign in again.";
+      case "permission_denied":
+        // Sign-in has no caller yet, so the only denial is a disabled account.
+        return oauthFailureText("account_disabled");
+      case "not_permitted":
+      case "account_required":
+      case "email_in_use":
+      case "identity_linked_elsewhere":
+      case "provider_unavailable":
+        return oauthFailureText(problemType);
+      default:
+        return null;
+    }
+  }
   const forgotPasswordHref = username.trim()
     ? `/forgot-password?login=${encodeURIComponent(username.trim())}`
     : "/forgot-password";
@@ -269,85 +471,179 @@ export default function Login() {
           <CardDescription className="mt-2 text-sm leading-6">{loginSubtitle}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {sessionRestoreUnavailable && (
+            <div
+              role="alert"
+              className="border-border bg-muted/40 space-y-2 rounded-md border p-3 text-sm"
+            >
+              <p>
+                {/* Only a 503 provider_unavailable is the provider's; any
+                    other outage is the server's or the network's. */}
+                {sessionRestoreProviderUnavailable
+                  ? "Can't reach the sign-in provider right now."
+                  : "Can't restore your session right now."}{" "}
+                You&apos;re still signed in; try again in a moment.
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={retrySessionRestore}>
+                Try again
+              </Button>
+            </div>
+          )}
           {oauthError && (
-            <div className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border p-3 text-sm">
-              Sign-in failed: {decodeURIComponent(oauthError)}
+            <div
+              role="alert"
+              className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border p-3 text-sm"
+            >
+              {oauthFailureText(oauthError)}
+            </div>
+          )}
+          {loginRefusal && (
+            <div
+              role="alert"
+              className="border-destructive/30 bg-destructive/10 text-destructive rounded-md border p-3 text-sm"
+            >
+              {loginRefusal}
+            </div>
+          )}
+          {autoRedirectProvider && readyToRedirect && (
+            <p className="text-muted-foreground text-sm" role="status">
+              Taking you to {autoRedirectProvider.display_name}…
+            </p>
+          )}
+          {switchingAccount && oauthProviders.length > 0 && (
+            <p className="text-muted-foreground text-sm">
+              Choose the account to sign in with. You may be asked which account to use at the
+              sign-in provider.
+            </p>
+          )}
+          {networkProviders.length > 0 && (
+            <div className="space-y-2">
+              {networkProviders.map((entry) => {
+                const owner = networkIdentityName(entry);
+                let label = `Continue with ${entry.display_name}`;
+                if (networkSigningIn === entry.id) label = "Signing in…";
+                else if (owner) label = `Continue as ${owner}`;
+                return (
+                  <Button
+                    key={entry.id}
+                    type="button"
+                    className="h-auto w-full justify-start gap-3 py-2"
+                    disabled={networkSigningIn !== null}
+                    onClick={() => void handleNetworkSignIn(entry)}
+                  >
+                    {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
+                    <span className="flex flex-col items-start text-left">
+                      <span>{label}</span>
+                      {owner && (
+                        <span className="text-xs font-normal opacity-80">
+                          via {entry.display_name}
+                        </span>
+                      )}
+                    </span>
+                  </Button>
+                );
+              })}
+              {(passwordFormShown || oauthProviders.length > 0) && (
+                <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
+                  <div className="bg-border h-px flex-1" />
+                  <span>or</span>
+                  <div className="bg-border h-px flex-1" />
+                </div>
+              )}
             </div>
           )}
           {oauthProviders.length > 0 && (
             <div className="space-y-2">
               {oauthProviders.map((entry) => (
-                <form
+                <Button
                   key={entry.id}
-                  method="post"
-                  action={`/api/v2/auth/oauth/${entry.installation_id}/init${nextParam}`}
+                  asChild
+                  variant="outline"
+                  className="w-full justify-start gap-3"
                 >
-                  <Button type="submit" variant="outline" className="w-full justify-start gap-3">
+                  <a href={startHref(entry.installation_id ?? "")} onClick={() => clearSignedOut()}>
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
                     <span>{entry.display_name}</span>
-                  </Button>
-                </form>
+                  </a>
+                </Button>
               ))}
-              <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
-                <div className="bg-border h-px flex-1" />
-                <span>or</span>
-                <div className="bg-border h-px flex-1" />
-              </div>
+              {passwordFormShown && (
+                <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
+                  <div className="bg-border h-px flex-1" />
+                  <span>or</span>
+                  <div className="bg-border h-px flex-1" />
+                </div>
+              )}
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                autoFocus
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <Label htmlFor="password">Password</Label>
-                {forgotPasswordShown && (
-                  <Link
-                    to={forgotPasswordHref}
-                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
-                  >
-                    Forgot password?
-                  </Link>
-                )}
-              </div>
-              <PasswordInput
-                id="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            </div>
-            {credentialProviders.length > 1 && (
+          {passwordFormShown && (
+            <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label>Sign in with</Label>
-                <Select value={selectedProvider} onValueChange={setProvider}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {credentialProviders.map((entry) => (
-                      <SelectItem key={entry.id} value={entry.id}>
-                        {entry.display_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  autoFocus
+                  required
+                />
               </div>
-            )}
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Signing in..." : "Sign in"}
-            </Button>
-          </form>
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Label htmlFor="password">Password</Label>
+                  {forgotPasswordShown && (
+                    <Link
+                      to={forgotPasswordHref}
+                      className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                    >
+                      Forgot password?
+                    </Link>
+                  )}
+                </div>
+                <PasswordInput
+                  id="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
+              {(credentialProviders.length > 1 || hasDirectoryProvider) && (
+                <div className="space-y-2">
+                  <Label htmlFor={providerPickerId}>Sign in with</Label>
+                  <Select value={selectedProvider} onValueChange={setProvider}>
+                    <SelectTrigger
+                      id={providerPickerId}
+                      className="w-full"
+                      aria-describedby={hasDirectoryProvider ? providerPickerHintId : undefined}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {hasDirectoryProvider && (
+                        <SelectItem value={AUTO_PROVIDER}>Automatic</SelectItem>
+                      )}
+                      {credentialProviders.map((entry) => (
+                        <SelectItem key={entry.id} value={entry.id}>
+                          {entry.display_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {hasDirectoryProvider ? (
+                    <p id={providerPickerHintId} className="text-muted-foreground text-xs">
+                      Automatic: accounts with a Silo password sign in with it, everyone else with
+                      the directory.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? "Signing in..." : "Sign in"}
+              </Button>
+            </form>
+          )}
 
           <div className="space-y-4">
             <Separator />
@@ -373,37 +669,21 @@ export default function Login() {
                   <div className="flex justify-center rounded-md bg-white p-3">
                     <QRCode value={deviceSession.verification_uri_complete} size={176} />
                   </div>
-                  <div className="space-y-2 text-center">
-                    <div>
-                      <div className="text-muted-foreground text-xs tracking-[0.12em] uppercase">
-                        Match code
-                      </div>
-                      <div className="text-lg font-semibold">{deviceSession.match_code}</div>
+                  <div className="space-y-1 text-center">
+                    <p className="text-muted-foreground text-sm">
+                      Or go to{" "}
+                      <span className="text-foreground break-all">
+                        {deviceSession.verification_uri}
+                      </span>{" "}
+                      and enter
+                    </p>
+                    <div
+                      className="font-mono text-2xl font-semibold tracking-[0.12em]"
+                      aria-hidden="true"
+                    >
+                      {formatDeviceCode(deviceSession.user_code)}
                     </div>
-                    {showDeviceFallback ? (
-                      <div className="space-y-2">
-                        <div>
-                          <div className="text-muted-foreground text-xs tracking-[0.12em] uppercase">
-                            Enter this code if needed
-                          </div>
-                          <div className="font-mono text-lg font-semibold">
-                            {deviceSession.user_code}
-                          </div>
-                        </div>
-                        <p className="text-muted-foreground text-xs break-all">
-                          {deviceSession.verification_uri}
-                        </p>
-                      </div>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="text-muted-foreground hover:text-foreground mx-auto h-auto px-0 py-1 text-xs"
-                        onClick={() => setShowDeviceFallback(true)}
-                      >
-                        Can&apos;t scan the QR code?
-                      </Button>
-                    )}
+                    <span className="sr-only">{spokenDeviceCode(deviceSession.user_code)}</span>
                   </div>
                   <div className="space-y-2">
                     <Button
@@ -411,9 +691,12 @@ export default function Login() {
                       variant="outline"
                       className="w-full"
                       onClick={() => {
+                        if (pendingDeviceCode.current) {
+                          cancelDeviceLogin(pendingDeviceCode.current);
+                          pendingDeviceCode.current = null;
+                        }
                         setDeviceSession(null);
                         setDeviceStatusMessage("");
-                        setShowDeviceFallback(false);
                       }}
                     >
                       Start over

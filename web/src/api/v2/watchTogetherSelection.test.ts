@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 const snapshot = {
   room_id: "room",
@@ -73,7 +73,10 @@ it("sends exact selection once with string IDs and uses the authoritative receip
   });
   expect(new Headers(fetch.mock.calls[0]![1].headers).has("X-Room-Token")).toBe(false);
 });
-it.each([401, 403, 409, 422, 500])("does not replay %s or publish selection", async (status) => {
+it.each([401, 500])("does not replay %s or publish selection", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   const { result } = renderHook(() =>

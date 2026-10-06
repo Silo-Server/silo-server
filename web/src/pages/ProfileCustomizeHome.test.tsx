@@ -138,3 +138,46 @@ it("opens Build Custom instead of rendering an inert action", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "+ Build Custom" }));
   expect(screen.getByRole("dialog").textContent).toContain("New section");
 });
+it("gives a new server-default section override its own ID", async () => {
+  const normal = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation(async (op: string, ...args: unknown[]) =>
+    op === "GET /api/v2/profile/sections/settings"
+      ? {
+          items: [
+            {
+              id: "trakt",
+              is_custom: false,
+              title: "Trending on Trakt",
+              section_type: "trending_discover",
+              position: 0,
+              item_limit: 20,
+              featured: false,
+              hidden: false,
+              customized: false,
+              config: { source: "trakt" },
+            },
+          ],
+        }
+      : normal(op, ...args),
+  );
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Hide" }));
+  await waitFor(() =>
+    expect(mocks.request).toHaveBeenCalledWith(
+      "PUT /api/v2/profile/sections",
+      expect.objectContaining({
+        body: {
+          overrides: [
+            expect.objectContaining(other),
+            expect.objectContaining({ id: "own" }),
+            expect.objectContaining({
+              id: expect.stringMatching(/.+/),
+              section_id: "trakt",
+              hidden: true,
+            }),
+          ],
+        },
+      }),
+    ),
+  );
+});

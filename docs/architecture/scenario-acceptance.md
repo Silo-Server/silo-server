@@ -761,10 +761,15 @@ deployment is exercised.
 `device_lookup.by_code`, `device_lookup.meaning` and `device_lookup.shape`.
 Original public requests, database requirements and assertions remain unchanged.
 V2 preserves code normalization, masked address and device metadata, with an
-explicit temporary boolean and empty user_code on token lookup. Eight
-transport requests reseed independently; 16 combined snapshots cover complete
-users, profiles, API-key, settings, login-session and device-request tables
-(96 observations), with every row unchanged. Required DSN, pre-setup scratch/API-key
+explicit temporary boolean and empty user_code on token lookup, and adds
+requested_at, server_id and server_name. The executor seeds the server identity
+with the fixture, so reporting server_id is not a settings write. A v2 lookup of
+a pending request writes opened_at and extends expires_at: the fixture request
+gains opened_at (updated_at matches it) and an expiry at least five minutes past
+it, and no other column changes. Eight transport requests reseed independently;
+16 combined snapshots cover complete users, profiles, API-key, settings,
+login-session and device-request tables (96 observations). V1 leaves every row
+unchanged; v2 changes only the looked-up request. Required DSN, pre-setup scratch/API-key
 occupancy and fixed-selector gates fail closed. No start, approval, poll, token
 collection or enrollment is exercised. These four frozen pairs remain separate
 from NEW acceptance.
@@ -773,8 +778,9 @@ from NEW acceptance.
 
 `make test-scenario-device-lookup-errors` requires `device_lookup.expired`,
 `device_lookup.not_found` and `device_lookup.no_params`. Original public/database
-requests and assertions remain unchanged. V2 preserves expired status with 200,
-uses a 404 Problem for unknown tokens, and rejects missing parameters with a
+requests and assertions remain unchanged. V2 preserves expired status with 200
+(adding requested_at, server_id and server_name, without marking the request
+opened), uses a 404 Problem for unknown tokens, and rejects missing parameters with a
 422 validation Problem instead of legacy 404. Six transport requests reseed
 independently; 12 combined snapshots cover complete users, profiles, API-key,
 settings, login-session and device-request tables (72 observations), with every
@@ -1144,7 +1150,8 @@ guards run before setup. No successful creation, send or other cohort runs.
 `device_poll.denied` and `device_poll.expired`. Original requests, public
 principals, database requirements and 200 assertions remain unchanged. V2
 reports the same state and three-second polling interval with empty profile
-fields, temporary=false and no tokens or session expiry. Six real-router
+fields, temporary=false, opened=false and no tokens or session expiry; a pending
+poll also returns the request's current expires_at. Six real-router
 requests reseed independently; twelve combined full snapshots compare users,
 profiles, API keys, settings, login sessions and device requests (72 table
 observations), with no exemptions. Required DSN, pre-constructor occupancy and

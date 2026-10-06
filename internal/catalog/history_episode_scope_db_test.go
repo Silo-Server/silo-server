@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -273,4 +274,42 @@ func TestResolveHistoryEpisodeScope(t *testing.T) {
 		})
 	}
 
+	// History results and their facets must agree on the letter a leading
+	// article title belongs to: "The Hobbit" sorts, and is listed, under H.
+	// Seeded last because it adds a watched item the cases above do not expect.
+	hobbitID := fmt.Sprintf("hes-hobbit-%d", suffix)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, sort_title, status, genres)
+		VALUES ($1, 'movie', 'The Hobbit', 'Hobbit, The', 'matched', ARRAY['HES-Hobbit'])`, hobbitID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, hobbitID)
+	})
+	if err := store.AddHistory(ctx, userstore.WatchHistoryEntry{ProfileID: profileID, MediaItemID: hobbitID, WatchedAt: base.Add(-2 * time.Minute).Format(time.RFC3339), Completed: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		prefix string
+		listed bool
+	}{
+		{prefix: "h", listed: true},
+		{prefix: "t", listed: false},
+	} {
+		t.Run("name prefix results match facets prefix="+tc.prefix, func(t *testing.T) {
+			req := CatalogRequest{Source: CatalogSourceHistory, Limit: 60, NamePrefix: tc.prefix, Query: QueryDefinition{Sort: QuerySort{Field: "date_viewed", Order: "desc"}}}
+			result, err := resolver.Resolve(t.Context(), req, access)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inResults := slices.ContainsFunc(result.Items, func(item *models.MediaItem) bool { return item.ContentID == hobbitID })
+			filters, err := resolver.ListFiltersWithOptions(t.Context(), req, access, CatalogFilterOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inFacets := slices.Contains(filters.Genres, "HES-Hobbit")
+			if inResults != tc.listed || inFacets != tc.listed {
+				t.Fatalf("prefix %q: in results=%v, in facets=%v, want both %v", tc.prefix, inResults, inFacets, tc.listed)
+			}
+		})
+	}
 }

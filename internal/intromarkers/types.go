@@ -338,6 +338,15 @@ type MarkerPatch struct {
 	DetectedAt   time.Time
 }
 
+// MarkerWithdrawal takes back a file's marker of one kind that local analysis
+// wrote with Algorithm, when its current rules no longer produce it.
+type MarkerWithdrawal struct {
+	Kind         markerKind
+	ExpectedFile *models.MediaFile
+	FileID       int
+	Algorithm    string
+}
+
 type Fingerprint struct {
 	MediaFileID           int
 	FileHash              string
@@ -454,11 +463,14 @@ type RunSummary struct {
 	CreditsGroupsSkipped          int `json:"credits_groups_skipped"`
 	CreditsChapterMarkersWritten  int `json:"credits_chapter_markers_written"`
 	CreditsVersionMarkersCopied   int `json:"credits_version_markers_copied"`
-	CreditsFingerprintsComputed   int `json:"credits_fingerprints_computed"`
-	CreditsFingerprintCacheHits   int `json:"credits_fingerprint_cache_hits"`
-	CreditsFingerprintErrors      int `json:"credits_fingerprint_errors"`
-	CreditsAudioMarkersWritten    int `json:"credits_audio_markers_written"`
-	CreditsRejected               int `json:"credits_rejected"`
+	// CreditsChapterMarkersWithdrawn counts chapter credits cleared because
+	// the file's chapters no longer produce them.
+	CreditsChapterMarkersWithdrawn int `json:"credits_chapter_markers_withdrawn"`
+	CreditsFingerprintsComputed    int `json:"credits_fingerprints_computed"`
+	CreditsFingerprintCacheHits    int `json:"credits_fingerprint_cache_hits"`
+	CreditsFingerprintErrors       int `json:"credits_fingerprint_errors"`
+	CreditsAudioMarkersWritten     int `json:"credits_audio_markers_written"`
+	CreditsRejected                int `json:"credits_rejected"`
 	// Credits tail pass counters: keyframe statistics and silences of the
 	// files whose credits are placed, and the markers video helped place.
 	CreditsTailScansComputed        int `json:"credits_tail_scans_computed"`

@@ -61,6 +61,10 @@ type ItemsHandler struct {
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
+	// collectionPosters is optional; when set, BoxSets show each viewer the
+	// collage of the members it can access. Without it, only uploaded and
+	// template posters are shown.
+	collectionPosters CollectionPosterResolver
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
 	queryExecutor   smartCollectionQueryExecutor
@@ -74,6 +78,9 @@ type ItemsHandler struct {
 	// unbounded progress scan. It is the section subsystem's read-time fetcher and
 	// is independent of any virtual-library/hub-section exposure.
 	sectionsFetcher *sections.Fetcher
+	// realtimeMonitoring reads the live server-wide
+	// scanner.realtime_monitoring switch. Nil counts as on, the default.
+	realtimeMonitoring func() bool
 }
 
 type MarkerPopulationService interface {
@@ -915,6 +922,14 @@ func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, []struct{}{})
 }
 
+// enableRealtimeMonitor is a library's Jellyfin EnableRealtimeMonitor value:
+// real-time monitoring is effective only while both the library's switch and
+// the live server-wide switch are on. A nil server reader counts as on, the
+// setting's default.
+func enableRealtimeMonitor(server func() bool, library bool) bool {
+	return library && (server == nil || server())
+}
+
 // HandleVirtualFolders serves GET /Library/VirtualFolders.
 // Returns library metadata so clients like Infuse know library collection types.
 func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Request) {
@@ -939,7 +954,7 @@ func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Reque
 			ItemID:         h.codec.EncodeIntID(EncodedIDLibrary, int64(lib.ID)),
 			LibraryOptions: virtualLibraryOptDTO{
 				Enabled:                 true,
-				EnableRealtimeMonitor:   true,
+				EnableRealtimeMonitor:   enableRealtimeMonitor(h.realtimeMonitoring, lib.RealtimeMonitoring),
 				EnableInternetProviders: true,
 				SeasonZeroDisplayName:   "Specials",
 				TypeOptions:             []string{},
@@ -1397,8 +1412,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch. Jellyfin expects a flat list of parent series,
-// so this compatibility path explicitly opts out of the native TV scan-event
-// grouping that may return episode cards or repeat a series across scan runs.
+// so this compatibility path explicitly opts out of the native TV arrival-event
+// grouping that may return episode cards or repeat a series across arrivals.
 // The cached *models.MediaItem values are treated read-only;
 // LocalizeItemModels deep-copies before any presign mutation.
 func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
@@ -1858,6 +1873,12 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 // the result before detail hydration. Only the bounded AdjacentTo window
 // bypasses paging.
 func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, seriesID, requestedSeasonID string, page bool) {
+	// Jellyfin returns every episode when Limit is absent, and Infuse relies on
+	// that to build its season list; parseItemsQuery's default page size is for
+	// item browsing.
+	if query.limitDefaulted {
+		query.limit = catalog.MaxEpisodePageSize
+	}
 	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)

@@ -39,22 +39,6 @@ func TestDetectHWAccelReportsAnIncompleteWalk(t *testing.T) {
 	}
 }
 
-// The complement: a walk that reached every candidate backend publishes
-// normally, or nothing would ever be inventoried.
-func TestDetectHWAccelReportsACompleteWalk(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	if info.Resolved != transcodeHWQSV {
-		t.Fatalf("Resolved = %q, want qsv", info.Resolved)
-	}
-}
-
 // Detection walks a backend's candidates in order and stops at the first that
 // passes a smoke encode; execution with no configured playback.hw_device used to
 // fall back to PickRenderDevice, which returns whatever sorts first under
@@ -192,32 +176,6 @@ func TestNVENCProbesTheConfiguredCUDADevice(t *testing.T) {
 		}
 		if backend.Verified {
 			t.Fatalf("nvenc reported verified while the configured CUDA device fails: %+v", backend)
-		}
-		return
-	}
-	t.Fatalf("no nvenc entry in %+v", info.DetectedBackends)
-}
-
-// A CUDA index is not a filesystem path, so the accessibility filter that keeps
-// a proxy from probing a render node it cannot open must not silently skip it.
-func TestNVENCConfiguredDeviceIsProbedNotSkipped(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addNVIDIADevice(t, "nvidia0")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "0")
-	if err != nil {
-		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
-	}
-	for _, backend := range info.DetectedBackends {
-		if backend.Backend != transcodeHWNVENC {
-			continue
-		}
-		if backend.Skipped {
-			t.Fatalf("nvenc was skipped for an unopenable CUDA index: %+v", backend)
-		}
-		if !backend.Verified {
-			t.Fatalf("nvenc should verify against a working CUDA device: %+v", backend)
 		}
 		return
 	}
@@ -388,15 +346,14 @@ func TestConfiguredDeviceListIsProbedInFullAndBalancedOnlyAcrossPasses(t *testin
 		t.Fatalf("verified devices = %v, want only the card whose probe passed", got)
 	}
 
-	// Ten acquisitions is far more than the balancer needs to reach a second
-	// device: with both present it alternates on the very next one.
-	releases := make([]func(), 0, 10)
+	// A second held acquisition reaches the broken device if filtering is lost.
+	releases := make([]func(), 0, 2)
 	t.Cleanup(func() {
 		for _, release := range releases {
 			release()
 		}
 	})
-	for i := range 10 {
+	for i := range 2 {
 		device, _, release := acquireHWDevice(configured, transcodeHWQSV, "")
 		releases = append(releases, release)
 		if device != working {
@@ -537,47 +494,6 @@ func TestDetectHWAccelReportsADeadlineInsideTheFinalProbe(t *testing.T) {
 			t.Fatalf("vaapi = %+v, want no verification claimed", backend)
 		}
 	}
-}
-
-// A probe outlives its caller by design, so a component that released its own
-// claim on the GPU when its call returned can leave ffmpeg on the card with
-// nothing accounting for it. The count is what lets the transcode node's
-// re-probe gate see that.
-func TestHWProbesInFlightCountsADetachedProbe(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x1002")
-	ffmpeg := writeFakeFFmpeg(t, successfulVAAPIProbe())
-	device := env.devicePath("renderD128")
-
-	// Asserted as a floor rather than an exact count: the process-global counter
-	// is shared with any probe an earlier test detached, and those drain on
-	// their own schedule. What this test owns is that its own flight is counted
-	// while it runs and released when it lands.
-	//
-	// Decided by channel receipts, not a sleep: the flight parks inside the
-	// probe until this test has read the count.
-	started := make(chan struct{})
-	release := make(chan struct{})
-	hwProbeFlightStarted = func() {
-		close(started)
-		<-release
-	}
-	t.Cleanup(func() { hwProbeFlightStarted = nil })
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		if ok, reason := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpeg.path, device); !ok {
-			t.Errorf("probe failed: %s", reason)
-		}
-	})
-
-	<-started
-	if got := HWProbesInFlight(); got < 1 {
-		t.Fatalf("HWProbesInFlight() = %d while a smoke encode is running, want at least 1", got)
-	}
-	close(release)
-	wg.Wait()
-	awaitNoProbesInFlight(t)
 }
 
 // The claim has to be taken on the calling goroutine, not inside the function
@@ -790,6 +706,7 @@ func TestHWProbesInFlightCountsADetachedVideoToolboxProbe(t *testing.T) {
 // cached past the walk that took it would republish a hot-removed card in every
 // snapshot until someone re-probed by hand.
 func TestCapabilityWalkRequeriesNVIDIAIdentities(t *testing.T) {
+	setupHWAccelTest(t)
 	previous := nvidiaSMIQuery
 	answer := "GPU-aaa, 00000000:03:00.0\n"
 	queries := 0

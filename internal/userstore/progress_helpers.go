@@ -2,6 +2,7 @@ package userstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,12 @@ import (
 type HistoryVisibilityStore interface {
 	VisibleHistoryTimestamps(ctx context.Context, profileID string, mediaItemIDs []string, at time.Time) (map[string]string, error)
 }
+
+// ErrHistoryEntryExists reports that a history entry with the given ID is
+// already stored. Random IDs never collide; a caller that derives the ID from
+// a play uses it to record that play once. A completed entry repeating an ID
+// stored incomplete is not refused: it marks the stored entry completed.
+var ErrHistoryEntryExists = errors.New("watch history entry already exists")
 
 type VisibleHistoryAdder interface {
 	AddVisibleHistory(ctx context.Context, entry WatchHistoryEntry) (WatchHistoryEntry, error)
@@ -165,6 +172,14 @@ type SeriesEpisodeRollupStore interface {
 	SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]SeriesWatchCounts, error)
 	// SeasonEpisodeWatchCounts groups episodes by their season row ID.
 	SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]SeriesWatchCounts, error)
+}
+
+// HomeDismissalItemReader reads a profile's dismissals of specific items on
+// one Home surface, so a caller that needs a series' episodes does not list
+// every dismissal of the surface. Implemented by the Postgres store; callers
+// fall back to ListHomeDismissals and filter.
+type HomeDismissalItemReader interface {
+	ListHomeDismissalsForItems(ctx context.Context, profileID, surface string, mediaItemIDs []string) ([]HomeItemDismissal, error)
 }
 
 // EpisodeParentCompletionStore determines whether every available episode of a

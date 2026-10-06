@@ -227,10 +227,26 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 	if collections == nil {
 		collections = []usercollections.ServerVisibleCollection{}
 	}
+	h.withVisibleItemCounts(ctx, userID, collections)
 	for i := range collections {
 		collections[i].PosterURL = h.presignGPURLCtx(ctx, collections[i].PosterPath)
 	}
 	return collections, nil
+}
+
+// withVisibleItemCounts sets each personal collection's item_count to the
+// members the acting profile can see, as the personal collection routes do.
+func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, userID int, collections []usercollections.ServerVisibleCollection) {
+	sources := make([]catalog.PersonalCollectionDefinition, 0, len(collections))
+	for _, c := range collections {
+		sources = append(sources, catalog.PersonalCollectionDefinition{ID: c.ID, CollectionType: c.CollectionType, QueryDefinition: c.QueryDefinition, DisplayQueryDefinition: c.DisplayQueryDefinition})
+	}
+	counts := visiblePersonalCollectionCounts(ctx, h.Executor, userID, sources, AccessFilterFromContext(ctx, ""))
+	for i := range collections {
+		if n, ok := counts[collections[i].ID]; ok {
+			collections[i].ItemCount = n
+		}
+	}
 }
 
 // LibraryCollectionsTab answers the library's Collections tab: every
@@ -244,6 +260,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	if err != nil {
 		return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
+	adminCollections = h.withViewerPosters(ctx, adminCollections, AccessFilterFromContext(ctx, ""))
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
 		Collections: h.libraryCollectionResponsesOf(ctx, adminCollections),
@@ -272,6 +289,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 				if loadErr != nil {
 					return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 				}
+				h.withVisibleItemCounts(ctx, userID, loadedUserCollections)
 				userCollections = loadedUserCollections
 				userCollectionsLoaded = true
 			}

@@ -28,6 +28,10 @@ func NewEpisodeRepository(pool *pgxpool.Pool) *EpisodeRepository {
 	return &EpisodeRepository{pool: pool}
 }
 
+// MaxEpisodePageSize is the most episodes one BrowseEpisodes or
+// ListUpcoming page returns.
+const MaxEpisodePageSize = 1000
+
 // episodeColumns is the list of columns returned by all SELECT queries on episodes.
 const episodeColumns = `content_id, series_id, season_id, season_number, episode_number,
 	title, default_metadata_language, overview, air_date, runtime,
@@ -1125,7 +1129,7 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 			return nil, 0, err
 		}
 	}
-	args = append(args, min(max(limit, 0), 1000), max(offset, 0))
+	args = append(args, min(max(limit, 0), MaxEpisodePageSize), max(offset, 0))
 	rows, err := r.pool.Query(ctx, "SELECT "+episodeColumns+" FROM episodes WHERE "+where+fmt.Sprintf(" ORDER BY air_date, LOWER(title), content_id LIMIT $%d OFFSET $%d", index, index+1), args...)
 	if err != nil {
 		return nil, 0, err
@@ -1205,7 +1209,7 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 			return nil, 0, err
 		}
 	}
-	args = append(args, min(max(filters.Limit, 0), 1000), max(filters.Offset, 0))
+	args = append(args, min(max(filters.Limit, 0), MaxEpisodePageSize), max(filters.Offset, 0))
 	pageOrder := strings.ReplaceAll(order, "e.", "episode_page.")
 	query := "SELECT " + episodeColumns + " FROM (SELECT e.*" + from + fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", order, index, index+1) + ") episode_page" + " ORDER BY " + pageOrder
 	rows, err := r.pool.Query(ctx, query, args...)

@@ -44,6 +44,9 @@ describe("ImageSelectorTab", () => {
     const onImageApplied = vi.fn();
 
     render(<ImageSelectorTab item={item(itemType)} enabled onImageApplied={onImageApplied} />);
+    const notice = screen.queryByText(/check for plugin updates and update TMDB and TVDB/i);
+    if (itemType === "season") expect(notice).toBeInTheDocument();
+    else expect(notice).not.toBeInTheDocument();
     const tab = { poster: "Posters", backdrop: "Backdrops", logo: "Logos" }[type];
     fireEvent.click(screen.getByRole("button", { name: tab }));
     fireEvent.click(screen.getByRole("button", { name: "TMDB" }));

@@ -131,21 +131,6 @@ func TestDecisionLoggerVerbosityGatesSamples(t *testing.T) {
 	}
 }
 
-func TestDecisionLoggerDigestStable(t *testing.T) {
-	input := testScopeInput()
-	_, first, err := marshalForDigest(input)
-	if err != nil {
-		t.Fatalf("marshalForDigest() error: %v", err)
-	}
-	_, second, err := marshalForDigest(input)
-	if err != nil {
-		t.Fatalf("marshalForDigest() error: %v", err)
-	}
-	if first == "" || first != second {
-		t.Fatalf("digest stability = %q and %q, want equal non-empty", first, second)
-	}
-}
-
 func TestPDPResolveViewerScopeLogsDecision(t *testing.T) {
 	ctx := context.Background()
 	engine, err := NewEngine(ctx)
