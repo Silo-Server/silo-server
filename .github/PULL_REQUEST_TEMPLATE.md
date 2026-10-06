@@ -31,10 +31,24 @@ One line per kind of check and its result; do not list tests by name. Name requi
 checks that were not run or did not pass. Include a short output excerpt only when it
 explains a failure.
 <!-- Do not include private domains, hostnames, IPs, Tailscale or Report Shelf URLs,
-local paths, credentials, personal data, or private media details. Attach screenshots
-or recordings only when the user explicitly requests them. A maintainer may end this
-section with `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`; that page
-requires Silo-Server organization sign-in. -->
+local paths, credentials, personal data, or private media details. -->
+
+## Evidence
+
+| Before | After |
+| ------ | ----- |
+| | |
+
+Surface and build:
+<!-- Required when this change alters what a user sees: UI, or which items or what
+item details clients show, such as search results, home sections, recommendations,
+metadata, artwork, sorting, or filtering. See "Show visible changes" in
+CONTRIBUTING.md. Use before-and-after screenshots of the same screen and data, a short
+recording when motion or a flow matters, or before-and-after API response excerpts
+when no client shows the change yet. Crop or blur private details. A maintainer may
+link `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/` instead; that page
+requires Silo-Server organization sign-in. When nothing visible changes, replace this
+section's content with "Evidence: none, no user-visible change". -->
 
 ## Risks
 
@@ -44,6 +58,7 @@ Migration, compatibility, security, or operational impact, or "None identified".
 
 - [ ] I read and can explain the complete diff.
 - [ ] This pull request addresses one concern.
+- [ ] The Evidence section shows every change a user can see, or says there is none.
 
 ## AI Disclosure
 
