@@ -464,6 +464,38 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(relatedItemIds(queryClient, "episode-1")).toEqual(new Set(["episode-1", "series-1"]));
   });
 
+  it("refreshes open episode grids for an item the cache doesn't know yet", async () => {
+    // A scan adds an episode: its event names only the new episode, which no
+    // cached query mentions, so the season grid that should list it refreshes.
+    const queryClient = new QueryClient();
+    const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
+    queryClient.setQueryData(seasonEpisodesKey, { episodes: [{ content_id: "episode-1" }] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-new" });
+
+    expect(queryClient.getQueryState(seasonEpisodesKey)?.isInvalidated).toBe(true);
+  });
+
+  it("narrows series-keyed queries to the event's series", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(catalogKeys.itemDetail("episode-1"), {
+      content_id: "episode-1",
+      series_id: "series-1",
+    });
+    const ownSeasonsKey = catalogKeys.seriesSeasons("series-1");
+    const otherSeasonsKey = catalogKeys.seriesSeasons("series-9");
+    const otherEpisodesKey = catalogKeys.seasonEpisodes("series-9", 1);
+    queryClient.setQueryData(ownSeasonsKey, { seasons: [] });
+    queryClient.setQueryData(otherSeasonsKey, { seasons: [] });
+    queryClient.setQueryData(otherEpisodesKey, { episodes: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1" });
+
+    expect(queryClient.getQueryState(ownSeasonsKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherSeasonsKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(otherEpisodesKey)?.isInvalidated).toBe(false);
+  });
+
   it("refreshes a directly opened season when its series changes", async () => {
     const queryClient = new QueryClient();
     // A season page opened by URL caches its detail and episodes, but not the

@@ -166,7 +166,12 @@ export function getQueryKeyItemId(queryKey: readonly unknown[]): string | undefi
   ) {
     return queryKey[2];
   }
-  if (queryKey[0] === "catalog" && queryKey[1] === "items" && typeof queryKey[2] === "string") {
+  // A series' season list, season detail and episodes are keyed by series.
+  if (
+    queryKey[0] === "catalog" &&
+    (queryKey[1] === "items" || queryKey[1] === "series") &&
+    typeof queryKey[2] === "string"
+  ) {
     return queryKey[2];
   }
   // ratingKeys.list() shares the ["ratings", x] shape; "list" is not an item ID.
@@ -323,9 +328,33 @@ export async function invalidateMediaSurfaceQueries(
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
   const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
+  // An item nothing in the cache knows about, such as an episode a scan just
+  // added, can't be traced to the lists that should now show it, so its
+  // event refreshes as if unscoped by item, as it did before narrowing. A
+  // caller that names the keys it changed (watchedKeys) has scoped it already.
+  const scoped =
+    options.itemId &&
+    !options.watchedKeys?.length &&
+    relatedIds?.size === 1 &&
+    !cacheNamesItem(queryClient, options.itemId)
+      ? { ...options, itemId: undefined }
+      : options;
   await queryClient.invalidateQueries({
-    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, options, relatedIds),
+    predicate: (query) =>
+      shouldInvalidateMediaSurfaceQuery(
+        query.queryKey,
+        scoped,
+        scoped.itemId ? relatedIds : undefined,
+      ),
   });
+}
+
+// cacheNamesItem reports whether any cached query is keyed by itemId.
+function cacheNamesItem(queryClient: QueryClient, itemId: string): boolean {
+  return queryClient
+    .getQueryCache()
+    .getAll()
+    .some((query) => getQueryKeyItemId(query.queryKey) === itemId);
 }
 
 export function scheduleMediaSurfaceInvalidation(
