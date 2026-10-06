@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { CheckSquare, RefreshCw, Search, Shuffle, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
+import { cn } from "@/lib/utils";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CastCarousel from "@/components/CastCarousel";
@@ -19,6 +20,7 @@ import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
 import { useRemoveHistory } from "@/hooks/queries/history";
+import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRequestFeatureStatus, useRequestSearch } from "@/hooks/queries/useRequests";
 import { useWatchlistTitles } from "@/hooks/queries/watchlistTitles";
 import WatchlistTabs, { WatchlistTabPanel } from "@/components/watchlist/WatchlistTabs";
@@ -135,6 +137,7 @@ function CatalogResults({
     isCollectionSource || state.source === "watchlist" || state.source === "favorites";
   const allowPersonalizedOverlayControls = catalogSourceAllowsOverlay(state.source);
   const removeHistory = useRemoveHistory();
+  const { startShuffle, isStarting: isStartingShuffle } = useStartShuffle();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
@@ -367,6 +370,8 @@ function CatalogResults({
   }, []);
 
   const totalItems = catalogQuery.data?.totalItems ?? 0;
+  const shuffleCollectionId = isCollectionSource ? state.collection_id?.trim() : undefined;
+  const canShuffleCollection = Boolean(shuffleCollectionId) && totalItems > 0;
   // For an in-app search the count reflects local library hits only; requestable
   // matches live in a separate section, so scope the label to avoid a "0 results"
   // reading while an outside-library result is visible.
@@ -397,7 +402,29 @@ function CatalogResults({
             {defaultCatalogSubtitle(state.source)}
           </p>
         </div>
-        <div className="items-baseline gap-3 sm:flex">
+        <div
+          className={cn(
+            "items-baseline gap-3 sm:flex",
+            canShuffleCollection && "flex items-center",
+          )}
+        >
+          {canShuffleCollection && shuffleCollectionId ? (
+            <Button
+              variant="outline"
+              className="self-center rounded-full"
+              disabled={isStartingShuffle}
+              onClick={() =>
+                startShuffle({
+                  kind:
+                    state.source === "user_collection" ? "user_collection" : "library_collection",
+                  id: shuffleCollectionId,
+                })
+              }
+            >
+              <Shuffle aria-hidden="true" />
+              Shuffle
+            </Button>
+          ) : null}
           <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
           {showExactResultCount ? (
             <div className="text-right tabular-nums" role="status" aria-live="polite">

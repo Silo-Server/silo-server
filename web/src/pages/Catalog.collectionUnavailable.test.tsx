@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
   useCatalogFilters: () => ({ data: undefined, isLoading: false }),

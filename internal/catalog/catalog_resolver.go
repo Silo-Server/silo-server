@@ -2125,59 +2125,82 @@ func (r *CatalogResolver) loadCollectionSourceIDs(ctx context.Context, req Catal
 	return contentIDsFromMediaItems(items), nil
 }
 
+// CollectionMembers returns a library or personal collection's title and
+// the members the viewer may see: the same access-filtered items the catalog
+// lists for source=library_collection or source=user_collection. A missing
+// collection, or one the viewer cannot reach, is ErrCatalogSourceNotFound.
+func (r *CatalogResolver) CollectionMembers(ctx context.Context, source CatalogSource, collectionID string, access AccessFilter) (string, []*models.MediaItem, error) {
+	if source == CatalogSourceLibraryCollection {
+		// The library-collection catalog route checks the viewer's libraries
+		// before listing; loadCollectionSource checks only visibility.
+		collection, err := NewLibraryCollectionRepository(r.itemRepo.pool).GetByID(ctx, collectionID)
+		if err != nil || !CanAccessLibraryCollection(collection, access) {
+			return "", nil, ErrCatalogSourceNotFound
+		}
+	}
+	return r.loadCollectionSource(ctx, CatalogRequest{Source: source, CollectionID: collectionID}, access)
+}
+
 func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
+	_, items, err := r.loadCollectionSource(ctx, req, access)
+	return items, err
+}
+
+func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter) (string, []*models.MediaItem, error) {
 	switch req.Source {
 	case CatalogSourceLibraryCollection:
 		collectionRepo := NewLibraryCollectionRepository(r.itemRepo.pool)
 		collection, err := collectionRepo.GetByID(ctx, req.CollectionID)
 		if err != nil || collection.Visibility != LibraryCollectionVisibilityVisible {
-			return nil, ErrCatalogSourceNotFound
+			return "", nil, ErrCatalogSourceNotFound
 		}
 		if IsLiveQueryType(collection.CollectionType) || catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
 			def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
 			if err != nil {
-				return nil, fmt.Errorf("%w: parsing library collection query_definition: %v", ErrInvalidCatalogRequest, err)
+				return "", nil, fmt.Errorf("%w: parsing library collection query_definition: %w", ErrInvalidCatalogRequest, err)
 			}
 			if len(collection.LibraryIDs) > 0 {
 				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
 			} else if collection.LibraryID > 0 {
 				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
 			}
-			return r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), stripCatalogUserScope(access))
+			items, err := r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), stripCatalogUserScope(access))
+			return collection.Title, items, err
 		}
 
 		collectionItems, err := collectionRepo.ListItems(ctx, collection.ID)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		contentIDs := make([]string, 0, len(collectionItems))
 		for _, item := range collectionItems {
 			contentIDs = append(contentIDs, item.MediaItemID)
 		}
-		return r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
+		items, err := r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
+		return collection.Title, items, err
 	case CatalogSourceUserCollection:
 		store, err := r.catalogStoreForAccess(ctx, access)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		collection, err := store.GetCollection(ctx, req.CollectionID)
 		if err != nil || !ProfileCanAccessCollection(collection, access.ProfileID) {
-			return nil, ErrCatalogSourceNotFound
+			return "", nil, ErrCatalogSourceNotFound
 		}
 		var items []*models.MediaItem
 		if IsLiveQueryType(collection.CollectionType) {
 			def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 			if err != nil {
-				return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
+				return "", nil, fmt.Errorf("%w: parsing user collection query_definition: %w", ErrInvalidCatalogRequest, err)
 			}
 			items, err = r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), access)
 			if err != nil {
-				return nil, err
+				return "", nil, err
 			}
 		} else {
 			collectionItems, err := store.ListCollectionItems(ctx, collection.ID)
 			if err != nil {
-				return nil, err
+				return "", nil, err
 			}
 			contentIDs := make([]string, 0, len(collectionItems))
 			for _, item := range collectionItems {
@@ -2185,12 +2208,13 @@ func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req
 			}
 			items, err = r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
 			if err != nil {
-				return nil, err
+				return "", nil, err
 			}
 		}
-		return FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
+		items, err = FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
+		return collection.Name, items, err
 	default:
-		return nil, fmt.Errorf("%w: source %q is not a collection source", ErrInvalidCatalogRequest, req.Source)
+		return "", nil, fmt.Errorf("%w: source %q is not a collection source", ErrInvalidCatalogRequest, req.Source)
 	}
 }
 

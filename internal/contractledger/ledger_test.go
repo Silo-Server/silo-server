@@ -1127,6 +1127,10 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"createShuffle":                        "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
+	"advanceShuffle":                       "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
+	"skipShuffleItem":                      "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",
+	"deleteShuffle":                        "V2-only shuffle playback. It deletes the caller's shuffle by id and answers 204 when it is already gone, so a replay converges on the same state.",
 	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
 	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
 	"startSubtitleSync":                    "V2-only sync of a stored subtitle or a sidecar (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that reaches the same timing.",

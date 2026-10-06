@@ -760,6 +760,12 @@ PUT /api/v2/settings/values/nav.shortcuts/item	non-media
 DELETE /api/v2/settings/values/{key}	non-media
 GET /api/v2/settings/values/{key}	non-media
 PUT /api/v2/settings/values/{key}	non-media
+POST /api/v2/shuffles	non-media
+GET /api/v2/shuffles/capabilities	non-media
+DELETE /api/v2/shuffles/{shuffle_id}	non-media
+GET /api/v2/shuffles/{shuffle_id}	non-media
+POST /api/v2/shuffles/{shuffle_id}/advance	non-media
+POST /api/v2/shuffles/{shuffle_id}/skip	non-media
 GET /api/v2/stream/{session_id}	non-media
 HEAD /api/v2/stream/{session_id}	non-media
 GET /api/v2/stream/{session_id}/subtitles/{track}	non-media
@@ -1989,6 +1995,12 @@ PUT /api/v2/settings/values/nav.shortcuts/item	non-media
 DELETE /api/v2/settings/values/{key}	non-media
 GET /api/v2/settings/values/{key}	non-media
 PUT /api/v2/settings/values/{key}	non-media
+POST /api/v2/shuffles	non-media
+GET /api/v2/shuffles/capabilities	non-media
+DELETE /api/v2/shuffles/{shuffle_id}	non-media
+GET /api/v2/shuffles/{shuffle_id}	non-media
+POST /api/v2/shuffles/{shuffle_id}/advance	non-media
+POST /api/v2/shuffles/{shuffle_id}/skip	non-media
 GET /api/v2/stream/{session_id}	non-media
 HEAD /api/v2/stream/{session_id}	non-media
 GET /api/v2/stream/{session_id}/subtitles/{track}	non-media
