@@ -624,14 +624,22 @@ func absoluteSessionAge(ctx context.Context, db dbQuerier) (time.Duration, error
 
 // applyAnswer acts on the provider's answer: role sync for an active
 // account, revocation of every login session and API key of a refused one
-// (only the sessions opened through the identity for a break-glass
-// account), and of the API keys and Audiobookshelf sessions of an account
-// whose provider cannot
-// re-check it and has not vouched for it within the absolute age
-// (staleAuth).
+// (only the sessions opened through the identity for a break-glass account,
+// or for a network identity that defers to the account's primary provider),
+// and of the API keys and Audiobookshelf sessions of an account whose
+// provider cannot re-check it and has not vouched for it within the absolute
+// age (staleAuth). A deferring network identity changes nothing else: the
+// primary provider sets the role and bounds the account's credentials.
 func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *LinkedIdentity, checkStatus string, account *pluginv1.AuthenticateResponse, staleAuth bool, out *recheckOutcome) error {
+	authority, err := primaryAuthorityOf(ctx, tx, identity.UserID, identity.InstallationID)
+	if err != nil {
+		return err
+	}
 	switch {
 	case checkStatus == CheckStatusActive:
+		if authority.defers {
+			return nil
+		}
 		user, err := lockUser(ctx, tx, identity.UserID)
 		if err != nil {
 			return err
@@ -650,11 +658,12 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 		if err != nil {
 			return err
 		}
-		if user.BreakGlass {
+		if user.BreakGlass || authority.defers {
 			// A break-glass account keeps its local sessions and API keys
 			// independent of the provider (linkIdentityTx does not attach
-			// them): the refusal ends only the sessions opened through the
-			// identity.
+			// them), and an account whose primary provider still vouches for
+			// it keeps what that provider opened: the refusal ends only the
+			// sessions opened through the identity.
 			if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW()
 				WHERE identity_id = $1 AND user_id = $2 AND revoked_at IS NULL`, identity.ID, identity.UserID); err != nil {
 				return fmt.Errorf("revoking provider sessions: %w", err)
@@ -666,7 +675,8 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
-				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus, "break_glass", true}})
+				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,
+				"break_glass", user.BreakGlass, "primary_identity", authority.defers}})
 			return nil
 		}
 		if err := RevokeSignInsInTransaction(ctx, tx, identity.UserID); err != nil {
@@ -681,7 +691,7 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 		out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 			auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus}})
 	case checkStatus == CheckStatusUnsupported:
-		if !staleAuth {
+		if !staleAuth || authority.defers {
 			return nil
 		}
 		// Login sessions already stop sliding (verdictAbsoluteAge); API keys
@@ -733,7 +743,10 @@ const scheduledRecheckBatch = 100
 // through the identity that is not refreshing. An identity whose provider
 // last answered unsupported is skipped when its account has local password
 // sign-in turned on: asking again could only repeat an answer that bounds
-// nothing for it (staleProviderAuth).
+// nothing for it (staleProviderAuth). An identity at an enabled primary
+// provider is also due while its account has a live login session opened
+// through a network identity: those sessions defer to it (primaryAuthorityOf),
+// but their refresh re-checks only the network identity.
 //
 // At an installation that is no longer an enabled sign-in provider nobody
 // can be asked, so the pass only bounds the API keys and Audiobookshelf
@@ -741,7 +754,7 @@ const scheduledRecheckBatch = 100
 // absolute age ($3, auth.refresh_token_expiry in seconds), as for an
 // unsupported answer (staleProviderAuth). Login sessions already stop
 // sliding at refresh.
-const idleIdentityCondition = `
+var idleIdentityCondition = `
 	(i.last_checked_at IS NULL OR i.last_check_status = ''
 		OR i.last_checked_at <= NOW() - make_interval(secs => $1)
 		OR (i.last_check_status = 'unavailable' AND i.last_checked_at <= NOW() - make_interval(secs => $2)))
@@ -756,7 +769,15 @@ const idleIdentityCondition = `
 			AND (a.expires_at IS NULL OR a.expires_at > NOW()))
 		OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.identity_id = i.id AND s.revoked_at IS NULL AND s.expires_at > NOW()
 			AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
-				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled)))`
+				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled))
+		OR EXISTS (SELECT 1 FROM auth_sessions s JOIN plugin_auth_identities n ON n.id = s.identity_id
+			WHERE s.user_id = i.user_id AND n.user_id = i.user_id AND n.plugin_installation_id <> i.plugin_installation_id
+				AND s.revoked_at IS NULL AND s.expires_at > NOW()
+				AND EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = n.plugin_installation_id
+					AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `)
+				AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
+					WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled
+						AND NOT ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `)))`
 
 // IdleRecheckDue reports whether the scheduled pass has an identity to
 // re-check (RecheckIdleIdentities).

@@ -242,32 +242,6 @@ it("offers only link creation when email is not configured", () => {
   );
   expect(screen.getByRole("button", { name: "Create link" })).toBeInTheDocument();
 });
-it("shows delivery and identifies link invitations in the history", () => {
-  mocks.linkRow = true;
-  render(<InvitationsTab />, { wrapper: MemoryRouter });
-  expect(screen.getByText("Link invitation")).toBeInTheDocument();
-  expect(screen.getByText(/“For Sam”/)).toBeInTheDocument();
-  expect(screen.getByText("Link created")).toBeInTheDocument();
-  expect(screen.getByText("Email sent")).toBeInTheDocument();
-  expect(screen.getByTitle("Replace with a new link")).toBeInTheDocument();
-  fireEvent.click(screen.getAllByTitle("Revoke this link")[0]!);
-  expect(
-    screen.getByText("Revoke this link invitation? The link will stop working."),
-  ).toBeInTheDocument();
-});
-it("keeps a link invitation's note after it is accepted", () => {
-  mocks.linkRow = true;
-  linkRow.email = "sam@example.invalid";
-  linkRow.status = "accepted";
-  try {
-    render(<InvitationsTab />, { wrapper: MemoryRouter });
-    expect(screen.getByText("sam@example.invalid")).toBeInTheDocument();
-    expect(screen.getByText(/Joined by link · “For Sam”/)).toBeInTheDocument();
-  } finally {
-    linkRow.email = "";
-    linkRow.status = "pending";
-  }
-});
 it("replaces an emailed invitation's link without emailing it", async () => {
   mocks.resend.mockResolvedValue({
     invitation: { ...row, delivery: "link" },

@@ -344,6 +344,7 @@ function episodeFileFromV2(file: EpisodeFileV2): EpisodeFile {
     audio_channels: file.audio_channels ?? 0,
     container: file.container ?? "",
     file_size: file.file_size,
+    ...(file.unreadable ? { unreadable: true } : {}),
   };
 }
 

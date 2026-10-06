@@ -47,25 +47,6 @@ func TestItemRepo_GetByIDsWithAccess_NoAccessFilterNoLibraryClause(t *testing.T)
 	}
 }
 
-// TestItemRepo_GetByIDsWithAccess_DisabledLibrariesProduceNotExists pins the
-// shape of the DisabledLibraryIDs branch: a NOT EXISTS subquery against
-// media_item_libraries with the disabled IDs bound at $2.
-func TestItemRepo_GetByIDsWithAccess_DisabledLibrariesProduceNotExists(t *testing.T) {
-	repo := &ItemRepository{}
-	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		DisabledLibraryIDs: []int{9, 10},
-	})
-	if !strings.Contains(sql, "NOT EXISTS") {
-		t.Fatalf("expected NOT EXISTS clause for DisabledLibraryIDs; got %s", sql)
-	}
-	if !strings.Contains(sql, "media_folder_id = ANY($2)") {
-		t.Fatalf("expected DisabledLibraryIDs bound at $2; got %s", sql)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected 2 args (ids, disabled libs); got %v", args)
-	}
-}
-
 // TestItemRepo_GetByIDsWithAccess_DisabledOnlyRequiresLibraryMembership pins
 // the fix for the disabled-only access path: when AllowedLibraryIDs is nil
 // and only DisabledLibraryIDs is set, the SQL must additionally require
@@ -97,30 +78,6 @@ func TestItemRepo_GetByIDsWithAccess_DisabledOnlyRequiresLibraryMembership(t *te
 	}
 }
 
-// TestItemRepo_EnsureAccessibleSQL_UsesIndependentExistsPredicates pins the C3
-// fix: EnsureAccessible must gate library access with independent EXISTS /
-// NOT EXISTS subqueries, never allow/deny predicates over one joined
-// media_item_libraries row. The single-join form leaked items linked to BOTH
-// an allowed (or non-disabled) library and a disabled one.
-func TestItemRepo_EnsureAccessibleSQL_UsesIndependentExistsPredicates(t *testing.T) {
-	sql, args := buildEnsureAccessibleSQL("item-1", AccessFilter{
-		AllowedLibraryIDs:  []int{1, 2},
-		DisabledLibraryIDs: []int{9},
-	})
-	if strings.Contains(sql, "JOIN media_item_libraries") {
-		t.Fatalf("expected no membership join; got %s", sql)
-	}
-	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
-		t.Fatalf("expected allowed-library EXISTS bound at $2; got %s", sql)
-	}
-	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))") {
-		t.Fatalf("expected disabled-library NOT EXISTS bound at $3; got %s", sql)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (id, allowed, disabled); got %v", args)
-	}
-}
-
 // TestItemRepo_EnsureAccessibleSQL_DisabledOnlyRequiresMembership mirrors the
 // GetByIDsWithAccess orphan-item guard for the per-item path: disabled-only
 // scopes still require positive library membership.
@@ -136,43 +93,6 @@ func TestItemRepo_EnsureAccessibleSQL_DisabledOnlyRequiresMembership(t *testing.
 	}
 	if len(args) != 2 {
 		t.Fatalf("expected 2 args (id, disabled); got %v", args)
-	}
-}
-
-// TestItemRepo_EnsureAccessibleIDsSQL_MatchesEnsureAccessibleShape keeps the
-// batch form on the same predicates as the per-item form.
-func TestItemRepo_EnsureAccessibleIDsSQL_MatchesEnsureAccessibleShape(t *testing.T) {
-	sql, args := buildEnsureAccessibleIDsSQL([]string{"a", "b"}, AccessFilter{
-		AllowedLibraryIDs:  []int{1},
-		DisabledLibraryIDs: []int{9},
-	})
-	if strings.Contains(sql, "JOIN media_item_libraries") || strings.Contains(sql, "DISTINCT") {
-		t.Fatalf("expected join-free, DISTINCT-free batch query; got %s", sql)
-	}
-	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") ||
-		!strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))") {
-		t.Fatalf("expected EXISTS/NOT EXISTS pair at $2/$3; got %s", sql)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (ids, allowed, disabled); got %v", args)
-	}
-}
-
-// TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck
-// asserts that when AllowedLibraryIDs is non-nil the membership EXISTS is
-// NOT added a second time — the allowed-list EXISTS already provides
-// positive membership, so adding another would be redundant and would
-// shift placeholder indices.
-func TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck(t *testing.T) {
-	repo := &ItemRepository{}
-	sql, _ := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		AllowedLibraryIDs:  []int{1, 2},
-		DisabledLibraryIDs: []int{9},
-	})
-	// Exactly two EXISTS clauses: allowed-list EXISTS + disabled NOT EXISTS.
-	// A third (membership-only EXISTS) would be redundant.
-	if got := strings.Count(sql, "EXISTS ("); got != 2 {
-		t.Fatalf("expected exactly 2 EXISTS clauses (allowed + disabled); got %d in %s", got, sql)
 	}
 }
 

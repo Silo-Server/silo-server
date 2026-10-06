@@ -28,28 +28,6 @@ func decodeVirtualFolders(t *testing.T, rec *httptest.ResponseRecorder) map[stri
 	return out
 }
 
-func TestEnableRealtimeMonitorCombinesServerAndLibrarySwitches(t *testing.T) {
-	on := func() bool { return true }
-	off := func() bool { return false }
-	for _, tc := range []struct {
-		name    string
-		server  func() bool
-		library bool
-		want    bool
-	}{
-		{"both on", on, true, true},
-		{"server off", off, true, false},
-		{"library off", on, false, false},
-		{"both off", off, false, false},
-		{"no server reader counts as on", nil, true, true},
-		{"no server reader, library off", nil, false, false},
-	} {
-		if got := enableRealtimeMonitor(tc.server, tc.library); got != tc.want {
-			t.Errorf("%s: enableRealtimeMonitor = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 func TestVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
 	serverOn := true
 	codec := NewResourceIDCodec()
@@ -81,6 +59,11 @@ func TestVirtualFoldersReportRealtimeMonitorConfiguration(t *testing.T) {
 	got = request()
 	if got["Movies"] || got["Shows"] {
 		t.Fatalf("server off: EnableRealtimeMonitor = %v, want all false", got)
+	}
+	h.realtimeMonitoring = nil
+	got = request()
+	if !got["Movies"] || got["Shows"] {
+		t.Fatalf("default server switch: EnableRealtimeMonitor = %v, want Movies true, Shows false", got)
 	}
 }
 

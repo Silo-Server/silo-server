@@ -7,9 +7,9 @@ import { cn } from "@/lib/utils";
 // known only from TMDB read the same under their artwork.
 export const MEDIA_CARD_CAPTION_CLASS = "px-1 pt-3";
 export const MEDIA_CARD_TITLE_CLASS =
-  "block truncate text-[14px] font-semibold tracking-tight hover:underline";
+  "block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";
 export const MEDIA_CARD_META_CLASS =
-  "text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline";
+  "text-muted-foreground mt-1 block truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase hover:underline";
 
 // The centred hover action on a poster card: Play on library titles, Request
 // on titles outside the library. media-card-play-trigger owns the hover/focus

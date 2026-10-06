@@ -432,15 +432,15 @@ func TestStartTranscodeRejectsUnvalidatedBitstreamFilter(t *testing.T) {
 		VideoBitstreamFilter: "arbitrary_filter=1",
 		TargetCodecVideo:     "copy",
 	})
-	if err == nil {
-		t.Fatal("unvalidated bitstream filter was accepted")
+	if err == nil || !strings.Contains(err.Error(), "unsupported video bitstream filter recipe") {
+		t.Fatalf("expected bitstream-filter admission rejection, got %v", err)
 	}
 	_, err = StartTranscode(context.Background(), TranscodeOpts{
 		VideoBitstreamFilter: DV7ToHDR10BitstreamFilter,
 		TargetCodecVideo:     "h264",
 	})
-	if err == nil {
-		t.Fatal("DV copy filter was accepted for encoded video")
+	if err == nil || !strings.Contains(err.Error(), "unsupported video bitstream filter recipe") {
+		t.Fatalf("expected bitstream-filter admission rejection for encoded video, got %v", err)
 	}
 }
 
@@ -503,8 +503,8 @@ func TestStartTranscodeRejectsInvalidVideoSampleEntry(t *testing.T) {
 		{TargetCodecVideo: "copy", VideoSampleEntry: "dvhe"},
 		{TargetCodecVideo: "h264", VideoSampleEntry: VideoSampleEntryDVH1},
 	} {
-		if _, err := StartTranscode(context.Background(), opts); err == nil {
-			t.Fatalf("invalid recipe accepted: %+v", opts)
+		if _, err := StartTranscode(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "unsupported video sample-entry recipe") {
+			t.Fatalf("expected sample-entry admission rejection for %+v, got %v", opts, err)
 		}
 	}
 }
@@ -610,24 +610,6 @@ func TestBuildFFmpegArgs_CopyVideoFromStartUsesJellyfinTimestamps(t *testing.T) 
 	}
 	if strings.Contains(joined, "-avoid_negative_ts make_zero") {
 		t.Fatalf("copy-video from-start must not rewrite negative timestamps: %s", joined)
-	}
-}
-
-func TestBuildFFmpegArgs_DolbyVisionHEVCCopyUsesAnnexBFilter(t *testing.T) {
-	args := buildFFmpegArgs(TranscodeOpts{
-		InputPath:        "/media/movie.mkv",
-		OutputDir:        "/tmp/out",
-		SessionID:        "session-dovi-copy",
-		SourceVideoCodec: "hevc",
-		TargetCodecVideo: "copy",
-		TargetCodecAudio: "copy",
-		VideoSampleEntry: VideoSampleEntryDVH1,
-		SegmentDuration:  2,
-	})
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-c:v copy -bsf:v hevc_mp4toannexb -tag:v dvh1 -strict unofficial") {
-		t.Fatalf("Dolby Vision HEVC copy should match Jellyfin's fMP4 bitstream recipe: %s", joined)
 	}
 }
 
@@ -1648,36 +1630,6 @@ func TestTranscodesAudioMatchesFFmpegDefault(t *testing.T) {
 	}
 }
 
-func TestIsAudioToAACStereoDownmixV3RequiresExactRecipeShape(t *testing.T) {
-	tests := []struct {
-		name           string
-		codec          string
-		sourceChannels int
-		targetChannels int
-		want           bool
-	}{
-		{name: "AAC default stereo", codec: "aac", sourceChannels: 6, want: true},
-		{name: "AAC explicit stereo", codec: " AAC ", sourceChannels: 8, targetChannels: 2, want: true},
-		{name: "stereo source", codec: "aac", sourceChannels: 2, targetChannels: 2},
-		{name: "unknown source", codec: "aac", targetChannels: 2},
-		{name: "default AAC codec", sourceChannels: 6, targetChannels: 2, want: true},
-		{name: "unknown codec", codec: "unknown", sourceChannels: 6, targetChannels: 2},
-		{name: "Opus", codec: "opus", sourceChannels: 6, targetChannels: 2},
-		{name: "EAC3", codec: "eac3", sourceChannels: 6, targetChannels: 2},
-		{name: "mono output", codec: "aac", sourceChannels: 6, targetChannels: 1},
-		{name: "negative output", codec: "aac", sourceChannels: 6, targetChannels: -1},
-		{name: "noncanonical stereo output", codec: "aac", sourceChannels: 6, targetChannels: 3},
-		{name: "surround output", codec: "aac", sourceChannels: 6, targetChannels: 6},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := IsAudioToAACStereoDownmixV3(test.sourceChannels, test.codec, test.targetChannels); got != test.want {
-				t.Fatalf("IsAudioToAACStereoDownmixV3() = %t, want %t", got, test.want)
-			}
-		})
-	}
-}
-
 func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t *testing.T) {
 	const boostFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	const normalizeFilter = "aresample=async=1"
@@ -1688,6 +1640,7 @@ func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t 
 		targetChannels int
 		wantFilter     string
 	}{
+		{name: "AAC alias to stereo", codec: " AAC ", sourceChannels: 8, targetChannels: 2, wantFilter: boostFilter},
 		{name: "DTS 5.1 to AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: 2, wantFilter: boostFilter},
 		{name: "TrueHD 7.1 to default AAC stereo", sourceChannels: 8, targetChannels: 2, wantFilter: boostFilter},
 		{name: "EAC3 surround to default AAC stereo", codec: "aac", sourceChannels: 6, wantFilter: boostFilter},
@@ -1707,6 +1660,9 @@ func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if got, want := IsAudioToAACStereoDownmixV3(tt.sourceChannels, tt.codec, tt.targetChannels), tt.wantFilter == boostFilter; got != want {
+				t.Fatalf("downmix recipe match = %t, want %t", got, want)
+			}
 			args := appendAudioArgs(nil, TranscodeOpts{
 				TargetCodecAudio:    tt.codec,
 				SourceAudioChannels: tt.sourceChannels,
@@ -2054,6 +2010,9 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 	for name, candidate := range map[string]TranscodeOpts{"explicit": opts, "automatic full-hardware stage": pipeline.Current()} {
 		t.Run(name, func(t *testing.T) {
 			joined := strings.Join(buildFFmpegArgs(candidate), " ")
+			if !strings.Contains(joined, "-c:v h264_nvenc") {
+				t.Fatalf("full-hardware encoder must remain NVENC: %s", joined)
+			}
 			if !strings.Contains(joined, "-hwaccel cuda -hwaccel_output_format cuda -noautorotate -hwaccel_device 1 ") {
 				t.Fatalf("full-hardware NVENC should decode on CUDA device 1: %s", joined)
 			}

@@ -3,6 +3,7 @@ import type { components } from "./v2/schema";
 import { storage } from "../utils/storage";
 import { randomUUID } from "../lib/uuid";
 import { problemId } from "./v2/problemId";
+import { API_READ_TIMEOUT_MS, startRequestDeadline } from "./requestDeadline";
 
 type ProfileUnverifiedListener = () => void;
 let profileUnverifiedListener: ProfileUnverifiedListener | null = null;
@@ -78,9 +79,18 @@ async function isProviderOutage(res: Response): Promise<boolean> {
 
 let accessToken: string | null = null;
 let authContextVersion = 0;
+/**
+ * How one refresh exchange ended. `rejected`: the server refused it.
+ * `unavailable`: no verdict on the session arrived (no network, the
+ * deadline, a 5xx, 408 or 429). `superseded`: the account or server changed
+ * while it ran, so its answer was discarded.
+ */
+type RefreshOutcome = "refreshed" | "rejected" | "unavailable" | "superseded";
+
 let pendingRefresh: {
   authContextVersion: number;
   serverOrigin: string;
+  outcome: Promise<RefreshOutcome>;
   promise: Promise<boolean>;
 } | null = null;
 /**
@@ -326,18 +336,61 @@ function getDeviceHeaders(): Record<string, string> {
 
 /** Share one token rotation across player and ordinary API requests. */
 export function refreshAuthentication(): Promise<boolean> {
+  return sharedRefresh().promise;
+}
+
+/** The in-flight refresh for this account and server, started if there is none. */
+function sharedRefresh(): { outcome: Promise<RefreshOutcome>; promise: Promise<boolean> } {
   const serverOrigin = currentServerOrigin();
   if (
     pendingRefresh?.authContextVersion === authContextVersion &&
     pendingRefresh.serverOrigin === serverOrigin
   ) {
-    return pendingRefresh.promise;
+    return pendingRefresh;
   }
-  const promise = attemptRefresh().finally(() => {
-    if (pendingRefresh?.promise === promise) pendingRefresh = null;
+  const outcome = attemptRefresh().finally(() => {
+    if (pendingRefresh?.outcome === outcome) pendingRefresh = null;
   });
-  pendingRefresh = { authContextVersion, serverOrigin, promise };
-  return promise;
+  const promise = outcome.then((result) => result === "refreshed");
+  pendingRefresh = { authContextVersion, serverOrigin, outcome, promise };
+  return pendingRefresh;
+}
+
+/**
+ * A request met a 401, and the token refresh that should answer it got no
+ * verdict from the server (no network, the deadline, a 5xx). The session may
+ * still be good, so the request fails like a network error rather than with
+ * the 401, which would read as the server refusing the session.
+ */
+export class SessionRefreshUnavailableError extends Error {
+  constructor() {
+    super("The session could not be refreshed because the server did not answer.");
+    this.name = "SessionRefreshUnavailableError";
+  }
+}
+
+/**
+ * Waits for `promise` unless `signal` aborts first, in which case it rejects
+ * with the signal's reason. The promise itself keeps running, so a shared
+ * refresh still completes for the other requests waiting on it.
+ */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | null | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function getAuthContextVersion(): number {
@@ -376,9 +429,9 @@ export function lastRefreshFailureWasProviderOutage(): boolean {
   return lastRefreshProviderOutage;
 }
 
-async function attemptRefresh(): Promise<boolean> {
+async function attemptRefresh(): Promise<RefreshOutcome> {
   const rt = getRefreshToken();
-  if (!rt) return false;
+  if (!rt) return "rejected";
 
   // A refresh response belongs only to the account/server that started it.
   // Discarding it after a context switch prevents a delayed old-account
@@ -389,10 +442,17 @@ async function attemptRefresh(): Promise<boolean> {
   let sessionRejected = false;
   let transient = false;
   let providerOutage = false;
+  // Every request that meets a 401 joins this one refresh, so a server that
+  // stops answering it must not hold them all forever. Abandoning the
+  // exchange is safe: the server does not spend a refresh token on use.
+  const deadline = startRequestDeadline(
+    API_READ_TIMEOUT_MS,
+    () => new DOMException("The token refresh timed out", "TimeoutError"),
+  );
 
   try {
     const data = await refreshAccessToken(rt, async (input, init) => {
-      const res = await fetch(input, init);
+      const res = await fetch(input, { ...init, signal: deadline.signal });
       if (!res.ok) {
         sessionRejected = await isSessionRejection(res);
         transient = isTransientRefreshFailure(res.status);
@@ -404,9 +464,13 @@ async function attemptRefresh(): Promise<boolean> {
       startingAuthContextVersion !== authContextVersion ||
       startingServerOrigin !== currentServerOrigin()
     ) {
-      return false;
+      return "superseded";
     }
-    lastRefreshTransient = !data && transient;
+    // A refusal is only a verdict once its answer arrived whole. If the
+    // deadline cut the exchange short (headers in, problem body stalled),
+    // whatever was read of it decides nothing about the session.
+    const noVerdict = transient || deadline.expired;
+    lastRefreshTransient = !data && noVerdict;
     lastRefreshProviderOutage = !data && providerOutage;
     if (!data) {
       // Only a mid-session refusal ends the session here. The boot restore
@@ -417,7 +481,7 @@ async function attemptRefresh(): Promise<boolean> {
       if (hadAccessToken && sessionRejected && getRefreshToken() === rt) {
         sessionRejectedListener?.();
       }
-      return false;
+      return noVerdict ? "unavailable" : "rejected";
     }
     if (accessToken === null) {
       // Nothing to rotate: this exchange establishes the session (the boot
@@ -427,13 +491,15 @@ async function attemptRefresh(): Promise<boolean> {
       refreshCurrentAccessToken(data.access_token);
     }
     setRefreshToken(data.refresh_token);
-    return true;
+    return "refreshed";
   } catch {
     // No answer at all (the network, a body that did not parse): the
     // session was not refused.
     lastRefreshTransient = true;
     lastRefreshProviderOutage = false;
-    return false;
+    return "unavailable";
+  } finally {
+    deadline.dispose();
   }
 }
 
@@ -549,8 +615,10 @@ export async function fetchWithSession(
   );
   // Wait out a boot-time session restore so the request carries the restored
   // token. A request that brings its own authority does not depend on it.
+  // The wait follows the request's signal, so a caller's deadline or abort
+  // still ends it while the restore runs on for everyone else.
   if (sessionRestore && !accessToken && !explicitAuthorization && !snapshot) {
-    await sessionRestore;
+    await untilAborted(sessionRestore, options.signal);
   }
   const headers = buildApiHeaders(options);
   const requestProfileId = headers["X-Profile-Id"] ?? null;
@@ -578,11 +646,20 @@ export async function fetchWithSession(
     // Join the shared refresh before reading the body: an await in between
     // lets a concurrent refresh finish first, and this request would then
     // start a second one against whatever session replaced it.
-    const refresh = refreshAuthentication();
-    const [problem, refreshed] = await Promise.all([unauthorizedProblemId(res), refresh]);
+    const { outcome, promise: refresh } = sharedRefresh();
+    // The refresh is shared and has its own deadline; this request stops
+    // waiting for it when its own signal aborts, without cancelling it.
+    const [problem, refreshOutcome] = await untilAborted(
+      Promise.all([unauthorizedProblemId(res), outcome]),
+      options.signal,
+    );
+    const refreshed = refreshOutcome === "refreshed";
     const roleChanged = problem === "token_refresh_required";
     if (snapshot && !isProfileRequestContextCurrent(snapshot)) {
       throw new StaleApiRequestContextError();
+    }
+    if (refreshOutcome === "unavailable") {
+      throw new SessionRefreshUnavailableError();
     }
     if (refreshed && roleChanged && reportedRoleChangeRefresh !== refresh) {
       reportedRoleChangeRefresh = refresh;

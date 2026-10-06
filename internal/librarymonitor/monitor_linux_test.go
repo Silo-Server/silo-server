@@ -73,8 +73,8 @@ func TestReconcileFollowsLibrariesAndTheServerSwitch(t *testing.T) {
 		row, _ := statusOf(rows, 2)
 		return onlyMonitoring(1, 2)(rows) && row.Directories == 6
 	})
-	if row, _ := statusOf(rows, 2); row.Backend != "inotify" {
-		t.Fatalf("library 2 row = %+v, want inotify", row)
+	if row, _ := statusOf(rows, 2); row.Backend != "inotify" || row.Detail != "" {
+		t.Fatalf("library 2 row = %+v, want inotify with no detail", row)
 	}
 	for _, root := range []string{disabled.Paths[0], optedOut.Paths[0]} {
 		if b.addCount(root) != 0 {
@@ -358,7 +358,7 @@ func TestUnsupportedAndFuseFilesystems(t *testing.T) {
 	})
 	unsupported, _ := statusOf(rows, 1)
 	// Single-folder libraries: the detail needs no path prefix.
-	if !strings.HasPrefix(unsupported.Detail, "NFS network filesystems") {
+	if !strings.HasPrefix(unsupported.Detail, "NFS network filesystems") || !strings.Contains(unsupported.Detail, "nightly scan") {
 		t.Fatalf("unsupported detail = %q, want it to name NFS", unsupported.Detail)
 	}
 	caveat, _ := statusOf(rows, 2)
@@ -367,17 +367,6 @@ func TestUnsupportedAndFuseFilesystems(t *testing.T) {
 	}
 	if b.addCount(nfs) != 0 {
 		t.Fatal("an unsupported filesystem was walked")
-	}
-}
-
-func TestMonitoredRootReportsInotify(t *testing.T) {
-	root := t.TempDir()
-	folders := &fakeFolders{}
-	folders.set(library(1, root))
-	_, _, _, status := fakeMonitor(t, folders, nil)
-	rows := waitStatus(t, status, "monitoring", onlyMonitoring(1))
-	if rows[0].Backend != "inotify" || rows[0].Detail != "" {
-		t.Fatalf("row = %+v, want inotify with no detail", rows[0])
 	}
 }
 
@@ -416,8 +405,13 @@ func TestWatchLimitReleasesOnlyThatLibrary(t *testing.T) {
 		return hasState(1, StateLimitReached)(rows) && hasState(2, StateMonitoring)(rows)
 	})
 	row, _ := statusOf(rows, 1)
-	if row.Directories != 7 || row.Backend != "inotify" || !strings.Contains(row.Detail, "(1234)") {
-		t.Fatalf("limit row = %+v, want all 7 directories counted and the limit named", row)
+	if row.Directories != 7 || row.Backend != "inotify" {
+		t.Fatalf("limit row = %+v, want all 7 directories counted and inotify", row)
+	}
+	for _, part := range []string{"max_user_watches (1234)", "7 watches", "on the host"} {
+		if !strings.Contains(row.Detail, part) {
+			t.Errorf("limit detail %q does not contain %q", row.Detail, part)
+		}
 	}
 	if n := m.primary.Directories(tight); n != 0 {
 		t.Fatalf("%d watches kept for a library over the limit, want 0", n)

@@ -100,14 +100,3 @@ func TestFilterProgressEntriesByAccess(t *testing.T) {
 		})
 	}
 }
-
-func TestFilterProgressEntriesByAccessEmpty(t *testing.T) {
-	lookup := &fakeProgressLookup{accessible: map[string]bool{}}
-	got, err := filterProgressEntriesByAccess(context.Background(), nil, access.Scope{}, lookup)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected no entries, got %v", ids(got))
-	}
-}

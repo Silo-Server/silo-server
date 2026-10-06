@@ -76,15 +76,6 @@ export function cancelItemDetailQueries(queryClient: QueryClient, itemId: string
   });
 }
 
-export function setCachedItemDetail(queryClient: QueryClient, itemId: string, detail: ItemDetail) {
-  queryClient.setQueriesData<ItemDetail>(
-    {
-      predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
-    },
-    detail,
-  );
-}
-
 export function removeItemFromHomeSectionCaches(
   queryClient: QueryClient,
   itemId: string,

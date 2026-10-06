@@ -138,7 +138,7 @@ func TestJellyfinFetchResumableItems_IncludesExpectedQueryAndPaginates(t *testin
 	}))
 	defer server.Close()
 
-	client := NewJellyfinClient()
+	client := newUnthrottledJellyfinClient()
 	auth := jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}
 
 	items, err := client.FetchResumableItems(trustLoopback(context.Background()), auth)
@@ -201,7 +201,7 @@ func TestJellyfinFetchItems_PaginatesPlayedItems(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewJellyfinClient()
+	client := newUnthrottledJellyfinClient()
 	// A saved source address may end in "/"; Jellyfin 404s on "//Items".
 	auth := jellyfinLocalAuth{BaseURL: server.URL + "/", UserID: "user-1", AccessToken: "token-1"}
 
@@ -224,4 +224,12 @@ func TestJellyfinHTTPErrorUsesJellyfinBranding(t *testing.T) {
 	if err != "jellyfin http 401" {
 		t.Fatalf("error = %q, want jellyfin branding", err)
 	}
+}
+
+// Local HTTP fixtures exercise decoding and paging without the production rate limit.
+// Keep the guarded transport so address-policy checks still run.
+func newUnthrottledJellyfinClient() *JellyfinClient {
+	client := NewJellyfinClient()
+	client.limiter = nil
+	return client
 }

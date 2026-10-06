@@ -30,6 +30,7 @@ type RootAssignment struct {
 	LegacyRootPath         string
 	LegacyType             string
 	HasFolderIDs           bool
+	HasFileIDs             bool
 	HasSeasonStructure     bool
 	HasMovieEvidence       bool
 	HasEpisodePattern      bool
@@ -264,6 +265,9 @@ func inferFileRootAssignment(
 	if ids := ParseFolderIDs(filepath.Base(assignment.RootPath)); ids != nil && assignment.RootPath != assignment.LibraryRootPath {
 		assignment.HasFolderIDs = true
 	}
+	// Recorded for every file: an override can still force the root's final
+	// type, so callers apply the movie-only rule once that type is known.
+	assignment.HasFileIDs = FileNameHasProviderTag(filePath)
 
 	return assignment
 }

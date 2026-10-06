@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +20,51 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+func TestMimeFromExtension(t *testing.T) {
+	cases := map[string]string{
+		"movie.mkv":     "video/x-matroska",
+		"movie.MP4":     "video/mp4",
+		"movie.f4v":     "video/mp4",
+		"movie.webm":    "video/webm",
+		"movie.mov":     "video/quicktime",
+		"movie.3gp":     "video/3gpp",
+		"movie.3g2":     "video/3gpp2",
+		"movie.divx":    "video/x-msvideo",
+		"movie.ts":      "video/mp2t",
+		"movie.m2ts":    "video/mp2t",
+		"movie.mts":     "video/mp2t",
+		"movie.mpg":     "video/mpeg",
+		"movie.mpeg":    "video/mpeg",
+		"movie.asf":     "video/x-ms-asf",
+		"movie.ogv":     "video/ogg",
+		"movie.ogm":     "video/ogg",
+		"book.m4b":      "audio/mp4",
+		"track.opus":    "audio/ogg",
+		"movie.unknown": "application/octet-stream",
+		"movie":         "application/octet-stream",
+	}
+	for name, want := range cases {
+		if got := MimeFromExtension(name); got != want {
+			t.Errorf("MimeFromExtension(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestMediaMIMETypesListsEveryKnownTypeOnce(t *testing.T) {
+	got := MediaMIMETypes()
+	if !slices.IsSorted(got) || len(slices.Compact(slices.Clone(got))) != len(got) {
+		t.Fatalf("MediaMIMETypes() = %v, want sorted and unique", got)
+	}
+	for ext, mime := range mediaMIMETypes {
+		if !slices.Contains(got, mime) {
+			t.Errorf("MediaMIMETypes() is missing %q (for %s)", mime, ext)
+		}
+	}
+	if slices.Contains(got, "application/octet-stream") {
+		t.Error("MediaMIMETypes() must list only types of known extensions")
+	}
+}
 
 func TestServeDirectPlayHTTPContract(t *testing.T) {
 	const content = "0123456789abcdefghijklmnopqrstuvwxyz"

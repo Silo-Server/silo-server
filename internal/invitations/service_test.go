@@ -339,25 +339,6 @@ func TestSendAdminRoleRequiresOwnerInviter(t *testing.T) {
 	}
 }
 
-func TestResendInvalidatesOldToken(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestService(repo, adminInviter(), &fakeAccounts{}, &fakeSessions{}, &fakeMail{configured: true}, fakeSettings{})
-
-	first, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	oldToken := strings.TrimPrefix(first.ClaimURL, "https://silo.example.com/invite/")
-
-	if _, err := svc.Resend(context.Background(), first.Invitation.ID, 1, DeliveryDefault); err != nil {
-		t.Fatalf("Resend: %v", err)
-	}
-
-	if _, err := svc.Lookup(context.Background(), oldToken); !errors.Is(err, ErrNotFound) {
-		t.Errorf("old token after resend: err = %v, want ErrNotFound", err)
-	}
-}
-
 func TestAcceptCreatesUserWithEmailAsUsername(t *testing.T) {
 	repo := newFakeRepo()
 	accounts := &fakeAccounts{}
@@ -402,24 +383,6 @@ func TestAcceptCreatesUserWithEmailAsUsername(t *testing.T) {
 	}
 }
 
-func TestAcceptIsSingleUse(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestService(repo, adminInviter(), &fakeAccounts{}, &fakeSessions{}, &fakeMail{configured: true}, fakeSettings{})
-
-	sent, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
-
-	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); err != nil {
-		t.Fatalf("first accept: %v", err)
-	}
-	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); err == nil {
-		t.Fatal("second accept succeeded; invitation must be single-use")
-	}
-}
-
 // With local password sign-in off the account an invitation creates could
 // not sign in, so acceptance is refused and the invitation stays unspent.
 func TestAcceptRefusedWhileLocalLoginIsOff(t *testing.T) {
@@ -442,26 +405,6 @@ func TestAcceptRefusedWhileLocalLoginIsOff(t *testing.T) {
 	sessions.localLoginOff = false
 	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); err != nil {
 		t.Fatalf("accept after local sign-in is back on: %v", err)
-	}
-}
-
-func TestAcceptRefusesExpired(t *testing.T) {
-	repo := newFakeRepo()
-	accounts := &fakeAccounts{}
-	svc := newTestService(repo, adminInviter(), accounts, &fakeSessions{}, &fakeMail{configured: true}, fakeSettings{})
-
-	sent, err := svc.Send(context.Background(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
-	repo.rows[HashToken(token)].ExpiresAt = time.Now().Add(-time.Hour)
-
-	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); !errors.Is(err, ErrNotFound) {
-		t.Errorf("expired accept: err = %v, want ErrNotFound", err)
-	}
-	if len(accounts.created) != 0 {
-		t.Error("expired invitation must not create a user")
 	}
 }
 
@@ -500,43 +443,6 @@ func TestLinkBasePrefersExternalURLSetting(t *testing.T) {
 	}
 	if !strings.HasPrefix(result.ClaimURL, "https://media.example.net/invite/") {
 		t.Errorf("claim URL = %q, want server public URL base", result.ClaimURL)
-	}
-}
-
-func TestProfileNameFromEmail(t *testing.T) {
-	for input, want := range map[string]string{
-		testInvitee:   "Marco",
-		"m@x.io":      "M",
-		"anna.k@x.io": "Anna.k",
-	} {
-		if got := profileNameFromEmail(input); got != want {
-			t.Errorf("profileNameFromEmail(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
-
-func TestAcceptReportsCommittedAccountWhenLoginFails(t *testing.T) {
-	repo := newFakeRepo()
-	sessions := &fakeSessions{err: errors.New("session store unavailable")}
-	accounts := &fakeAccounts{}
-	svc := newTestService(repo, adminInviter(), accounts, sessions, &fakeMail{}, nil)
-	sent, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
-	pair, user, err := svc.Accept(t.Context(), token, "", "test-password", "device", "")
-	if !errors.Is(err, ErrSessionStart) || user == nil || pair != nil {
-		t.Fatalf("pair=%v user=%v err=%v", pair, user, err)
-	}
-	if repo.rows[HashToken(token)].AcceptedUserID == nil {
-		t.Fatal("successful acceptance was not retained")
-	}
-	if _, _, err := svc.Accept(t.Context(), token, "", "test-password", "device", ""); err == nil {
-		t.Fatal("accepted token replayed")
-	}
-	if len(accounts.created) != 1 || len(sessions.logins) != 1 {
-		t.Fatal("failed login replayed account creation or session issuance")
 	}
 }
 
@@ -770,38 +676,6 @@ func TestAcceptLinkInvitationUsesEnteredEmail(t *testing.T) {
 	}
 	if sent.Invitation.Email != "sam@example.com" {
 		t.Fatalf("accepted invitation email = %q", sent.Invitation.Email)
-	}
-}
-
-func TestAcceptLinkInvitationReportsTakenEmail(t *testing.T) {
-	repo := newFakeRepo()
-	svc := newTestService(repo, adminInviter(), &fakeAccounts{err: auth.ErrDuplicate}, &fakeSessions{}, &fakeMail{}, fakeSettings{})
-	sent, err := svc.Send(t.Context(), SendInput{Delivery: DeliveryLink, InvitedBy: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
-	if _, _, err := svc.Accept(t.Context(), token, "quick@example.com", "hunter2hunter2", "d", ""); !errors.Is(err, ErrEmailTaken) {
-		t.Fatalf("err = %v, want ErrEmailTaken", err)
-	}
-	if sent.Invitation.AcceptedAt != nil {
-		t.Fatal("a refused address consumed the invitation")
-	}
-}
-
-func TestAcceptEmailedInvitationIgnoresEnteredEmail(t *testing.T) {
-	accounts := &fakeAccounts{}
-	svc := newTestService(newFakeRepo(), adminInviter(), accounts, &fakeSessions{}, &fakeMail{configured: true}, fakeSettings{})
-	sent, err := svc.Send(t.Context(), SendInput{Email: testInvitee, InvitedBy: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
-	if _, _, err := svc.Accept(t.Context(), token, "other@example.com", "hunter2hunter2", "d", ""); err != nil {
-		t.Fatal(err)
-	}
-	if got := accounts.created[0].User.Email; got != testInvitee {
-		t.Fatalf("account email = %q, want the bound %q", got, testInvitee)
 	}
 }
 

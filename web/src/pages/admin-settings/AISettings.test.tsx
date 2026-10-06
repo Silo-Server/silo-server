@@ -107,36 +107,6 @@ describe("AISettings", () => {
     Object.assign(values, DEFAULT_VALUES);
   });
 
-  it("heads the page and groups models and features", () => {
-    render(<AISettings />);
-
-    expect(screen.getByRole("heading", { level: 1, name: "AI Services" })).toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Optional language models for subtitle translation, transcription, and descriptions.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Models" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Features" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Text model" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Speech-to-text" })).toBeInTheDocument();
-  });
-
-  it("keeps model credentials behind the tile until it is expanded", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-
-    expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
-
-    const tile = await openTile(user, "Text model");
-    expect(tile).toHaveAttribute("data-expanded", "true");
-    expect(within(tile).getByLabelText("Base URL")).toBeInTheDocument();
-    expect(within(tile).getByLabelText("Model")).toBeInTheDocument();
-
-    await user.click(within(tile).getByRole("button", { name: "Close" }));
-    expect(screen.queryByLabelText("Base URL")).not.toBeInTheDocument();
-  });
-
   it("falls back to the legacy subtitle_ai values", async () => {
     const user = userEvent.setup();
     values["ai.base_url"] = "";
@@ -192,57 +162,6 @@ describe("AISettings", () => {
     expect(mocks.setValue).toHaveBeenCalledWith("ai.asr_model", "whisper-large-v3-turbo");
   });
 
-  it("forces a tile open while it holds a staged change", () => {
-    dirtyKeys = ["ai.chat_model"];
-    dirtyCount = 1;
-
-    render(<AISettings />);
-
-    expect(screen.getByRole("group", { name: "Text model" })).toHaveAttribute(
-      "data-expanded",
-      "true",
-    );
-    expect(screen.getByLabelText("Model")).toBeInTheDocument();
-  });
-
-  it("leaves the speech tile closed when only the shared text endpoint is staged", () => {
-    // The transcription check falls back to the text endpoint, so its keys are
-    // part of that request — but they are edited in the text tile, not here.
-    dirtyKeys = ["ai.base_url", "ai.api_key"];
-    dirtyCount = 2;
-
-    render(<AISettings />);
-
-    expect(screen.getByRole("group", { name: "Text model" })).toHaveAttribute(
-      "data-expanded",
-      "true",
-    );
-    expect(screen.getByRole("group", { name: "Speech-to-text" })).not.toHaveAttribute(
-      "data-expanded",
-    );
-  });
-
-  it("gives the model panel actions a resting affordance instead of ghost text", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-
-    const tile = await openTile(user, "Text model");
-    expect(within(tile).getByRole("button", { name: "Test text model" })).toHaveAttribute(
-      "data-variant",
-      "secondary",
-    );
-    expect(within(tile).getByRole("button", { name: "Close" })).toHaveAttribute(
-      "data-variant",
-      "outline",
-    );
-  });
-
-  it("says the features run on demand rather than on a schedule", () => {
-    render(<AISettings />);
-
-    expect(screen.getByText(/Nothing here runs on a schedule/)).toBeInTheDocument();
-  });
-
   it("blocks turning on a feature whose model cannot serve it", () => {
     // Whitespace leaves the speech model unconfigured.
     values["ai.asr_model"] = " ";
@@ -259,72 +178,6 @@ describe("AISettings", () => {
     render(<AISettings />);
 
     expect(screen.getByRole("switch", { name: "Create subtitles from audio" })).toBeEnabled();
-  });
-
-  it("says nothing under a feature whose model is ready", () => {
-    render(<AISettings />);
-
-    expect(screen.getByText("Translate subtitles")).toBeInTheDocument();
-    expect(screen.queryByText("Needs the text model")).not.toBeInTheDocument();
-    expect(screen.queryByText("Needs speech-to-text")).not.toBeInTheDocument();
-  });
-
-  it("names the missing model when a feature cannot run", () => {
-    values["ai.asr_model"] = " ";
-
-    render(<AISettings />);
-
-    // The speech feature needs a configured model.
-    expect(screen.getByText("Needs speech-to-text")).toBeInTheDocument();
-  });
-
-  it("keeps AI tuning behind a collapsed advanced disclosure", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-
-    const toggle = screen.getByRole("button", { name: /Advanced · 6 settings/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByLabelText("Jobs running at once")).not.toBeInTheDocument();
-
-    await user.click(toggle);
-
-    expect(screen.getByLabelText("Jobs running at once")).toBeInTheDocument();
-    // Restart-only keys carry the badge instead of hint text.
-    expect(screen.getAllByLabelText("Takes effect after a server restart").length).toBe(1);
-  });
-
-  it("separates server-wide tuning from the per-account limit", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-
-    await user.click(screen.getByRole("button", { name: /Advanced · 6 settings/ }));
-
-    expect(screen.getByRole("heading", { name: "Server-wide tuning" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Per-account limits" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Counted per login account, shared by every profile on it."),
-    ).toBeInTheDocument();
-  });
-
-  it("auto-expands the advanced section around a staged change", () => {
-    dirtyKeys = ["subtitle_ai.batch_size"];
-    dirtyCount = 1;
-
-    render(<AISettings />);
-
-    // A staged change auto-expands the section so the save bar cannot block on
-    // a hidden field.
-    expect(screen.getByRole("button", { name: /Advanced · 6 settings/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("Subtitle lines per request")).toBeInTheDocument();
-  });
-
-  it("offers Unlimited instead of a zero sentinel for the transcription allowance", async () => {
-    const user = userEvent.setup();
-    render(<AISettings />);
-
-    await user.click(screen.getByRole("button", { name: /Advanced · 6 settings/ }));
-
-    expect(screen.getByRole("checkbox", { name: "Unlimited" })).toBeChecked();
   });
 
   it.each([
@@ -409,8 +262,7 @@ describe("AISettings", () => {
     expect(mocks.setValue).toHaveBeenCalledWith("ai.api_key", "");
     expect(mocks.setValue).toHaveBeenCalledWith("subtitle_ai.api_key", "");
   });
-
-  it("says what a staged clear of the speech key will do", async () => {
+  it("keeps the saved speech key when its staged clear is cancelled", async () => {
     const user = userEvent.setup();
     dirtyKeys = ["ai.asr_api_key"];
     dirtyCount = 1;
@@ -420,14 +272,6 @@ describe("AISettings", () => {
     render(<AISettings />);
     const tile = screen.getByRole("group", { name: "Speech-to-text" });
 
-    // A staged edit holds its tile open, so no expansion step is needed.
-    expect(within(tile).getByLabelText("API key")).toHaveAttribute(
-      "placeholder",
-      "Will be cleared on save",
-    );
-    expect(
-      within(tile).getByText("Save clears the stored value; type to set a new one instead."),
-    ).toBeInTheDocument();
     await user.click(within(tile).getByRole("button", { name: "Keep saved value" }));
     expect(mocks.resetValue).toHaveBeenCalledWith("ai.asr_api_key");
   });

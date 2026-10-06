@@ -64,6 +64,9 @@ func TestChapterThumbnailNotifierTargetsMatchingSessions(t *testing.T) {
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
+	if payload.SessionID != matchA.ID || payload.FileID != 100 || payload.ChapterIndex != 7 {
+		t.Fatalf("payload = %#v, want matching session/file/chapter identifiers", payload)
+	}
 	// thumbnail_path names the served object; the notifier signs it as is.
 	if want := "https://example.com/chapter-images/100/7/w300.webp"; payload.ThumbnailURL != want {
 		t.Fatalf("thumbnail_url = %q, want %q", payload.ThumbnailURL, want)

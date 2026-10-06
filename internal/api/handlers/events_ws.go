@@ -600,6 +600,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 			evt.ChannelTasks,
 			evt.ChannelScans,
 			evt.ChannelSettings,
+			evt.ChannelDownloadPreparations,
 		)
 	}
 	return channels
@@ -644,6 +645,10 @@ func (h *EventsHandler) snapshotForChannel(
 ) (json.RawMessage, error) {
 	switch channel {
 	case evt.ChannelCatalog, evt.ChannelUserState:
+		return json.RawMessage("null"), nil
+	case evt.ChannelDownloadPreparations:
+		// Events only say what changed; clients re-read the admin list, and a
+		// null snapshot tells a reconnecting client to do so.
 		return json.RawMessage("null"), nil
 	case evt.ChannelNotifications:
 		// Recent unread deliveries for the bound profile so reconnecting

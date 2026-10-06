@@ -29,6 +29,8 @@ type ExternalSignInService interface {
 	TestAuthBinding(ctx context.Context, installationID int, capabilityID string, staged []plugins.StagedConfig) (plugins.AuthConnectionTestResult, error)
 	CredentialsLinkingAvailable() bool
 	LinkAccountIdentityCredentials(ctx context.Context, userID int, in handlers.CredentialsLinkInput) (handlers.ExternalIdentityView, error)
+	NetworkLinkingAvailable() bool
+	LinkAccountIdentityNetwork(ctx context.Context, userID int, in handlers.NetworkLinkInput) (handlers.ExternalIdentityView, error)
 }
 
 // ExternalSignInCapabilities describes the external sign-in operations this
@@ -45,6 +47,10 @@ type ExternalSignInCapabilities struct {
 	// CredentialsLinking is directory (LDAP) linking, which needs no OAuth
 	// handshake, so it sits with the identity operations.
 	CredentialsLinking bool `json:"credentials_linking" doc:"Whether linkAccountIdentityWithCredentials links a directory (LDAP) identity to the caller's account with the directory username and password"`
+	// NetworkSignIn is sign-in and linking through a network identity
+	// provider (a network access plugin such as Tailscale), which needs no
+	// password or browser.
+	NetworkSignIn bool `json:"network_sign_in" doc:"Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network"`
 }
 
 // ExternalSignInCapabilitiesOutput is the getExternalSignInCapabilities
@@ -154,7 +160,18 @@ type AccountIdentityCredentialsLinkInput struct {
 	}
 }
 
-// AccountIdentityOutput is the linkAccountIdentityWithCredentials response.
+// AccountIdentityNetworkLinkInput links the network identity of the
+// request's overlay peer to the caller's account.
+type AccountIdentityNetworkLinkInput struct {
+	RawBody []byte
+	Body    struct {
+		InstallationID ID     `json:"installation_id" doc:"The network identity auth plugin installation, as listAuthProviders shows it" example:"5"`
+		Password       string `json:"password" minLength:"1" maxLength:"1024" doc:"The account's current local password" example:"correct horse battery staple"`
+	}
+}
+
+// AccountIdentityOutput is the linkAccountIdentityWithCredentials and
+// linkAccountIdentityWithNetwork response.
 type AccountIdentityOutput struct {
 	Location string `header:"Location"`
 	Body     AccountIdentity
@@ -241,6 +258,24 @@ func credentialsLinkProblem(err error) error {
 	return serviceProblem(err)
 }
 
+// networkLinkProblem renders a failed linkAccountIdentityWithNetwork.
+func networkLinkProblem(err error) error {
+	switch {
+	case errors.Is(err, auth.ErrNetworkIdentityRequired):
+		return NewProblem(TypeNetworkIdentityRequired, "Open this server through the sign-in provider's network address to link this device's identity.")
+	case errors.Is(err, auth.ErrUnknownAuthInstallation):
+		return NewProblem(TypeNotFound, "No enabled network sign-in provider has this installation.")
+	case errors.Is(err, auth.ErrInvalidCredentials):
+		// The plugin could not identify the device; nothing the person
+		// typed was wrong.
+		return NewProblem(TypeNotPermitted, "The provider does not permit this device to link.")
+	}
+	if p := linkingRefusalProblem(err, "provider"); p != nil {
+		return p
+	}
+	return serviceProblem(err)
+}
+
 // linkingRefusalProblem renders the refusals every way of linking an
 // identity shares (link tickets, native link completion, directory
 // linking), so each answers them with the same problem type. provider names
@@ -298,6 +333,7 @@ func registerExternalSignIn(reg *Registry) {
 				out.Body.ProviderRecheck = true
 				out.Body.ConnectionTest = svc.ConnectionTestAvailable()
 				out.Body.CredentialsLinking = svc.CredentialsLinkingAvailable()
+				out.Body.NetworkSignIn = svc.NetworkLinkingAvailable() && reg.deps.Sessions != nil
 			}
 			return out, nil
 		})
@@ -390,6 +426,40 @@ func registerExternalSignIn(reg *Registry) {
 			})
 			if err != nil {
 				return nil, credentialsLinkProblem(err)
+			}
+			return &AccountIdentityOutput{Location: Prefix + "/account/identities", Body: accountIdentityOf(view)}, nil
+		})
+
+	network := humaOp(http.MethodPost, Prefix+"/account/identities/link-network", "linkAccountIdentityWithNetwork", "account",
+		"Link the network identity of this device (such as its Tailscale login) to the caller's account.")
+	network.Description = "Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking (local password sign-in turns off unless the account is break-glass; audited). listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in."
+	network.DefaultStatus = http.StatusCreated
+	network.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
+	Register(reg, Operation{Operation: network, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},
+		func(ctx context.Context, in *AccountIdentityNetworkLinkInput) (*AccountIdentityOutput, error) {
+			svc, p := reg.externalSignIn()
+			if p != nil {
+				return nil, p
+			}
+			if !svc.NetworkLinkingAvailable() {
+				return nil, unavailable("network sign-in linking")
+			}
+			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+				return nil, p
+			}
+			claims, p := linkingClaims(ctx)
+			if p != nil {
+				return nil, p
+			}
+			installationID, p := in.Body.InstallationID.positive(locationBody + ".installation_id")
+			if p != nil {
+				return nil, p
+			}
+			view, err := svc.LinkAccountIdentityNetwork(ctx, claims.UserID, handlers.NetworkLinkInput{
+				InstallationID: installationID, Password: in.Body.Password,
+			})
+			if err != nil {
+				return nil, networkLinkProblem(err)
 			}
 			return &AccountIdentityOutput{Location: Prefix + "/account/identities", Body: accountIdentityOf(view)}, nil
 		})

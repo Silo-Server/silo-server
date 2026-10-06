@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -19,8 +20,11 @@ import (
 const (
 	cloudflareURLMode                  = "cloudflare_token"
 	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
-	chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
+
+// ChapterThumbnailSoftwareToneMapSettingKey lets chapter thumbnail extraction
+// tone-map HDR frames on the CPU when no hardware tone mapper is available.
+const ChapterThumbnailSoftwareToneMapSettingKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 
 // PlaybackTranscodeHardwareToneMapSettingKey and
 // PlaybackTranscodeSoftwareToneMapSettingKey are server-wide execution policy
@@ -163,6 +167,12 @@ func PreviewImageWidth(value string) int {
 // seasons are analyzed at once and how many ffmpeg processes read audio.
 const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 
+// ServerLANDiscoverySettingKey advertises the API server on the local network
+// (DNS-SD service _silo._tcp, internal/landiscovery) so clients can find it
+// without an address. The responder starts with the API listener, so a change
+// takes effect on restart.
+const ServerLANDiscoverySettingKey = "server.lan_discovery"
+
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
 	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
@@ -256,6 +266,7 @@ var adminSettingDefaults = map[string]string{
 	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
 	"theme.catalog_url":         DefaultThemeCatalogURL,
 
+	ServerLANDiscoverySettingKey:              "true",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
@@ -313,17 +324,17 @@ var adminSettingDefaults = map[string]string{
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
 	"playback.trickplay_execution":                   "local",
-	chapterThumbnailSoftwareToneMapKey:               "false",
-	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
-	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
+	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
+	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
+	PlaybackTranscodeSoftwareToneMapSettingKey:       "true",
 	CatalogScopeVersionsToLibrarySettingKey:          "false",
 	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
 	CatalogExtraRatingSourcesSettingKey:              "",
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
-	Allow4KTranscodeSettingKey:                       "false",
-	"enable_transcode_throttle":                      "false",
-	"transcode_throttle_seconds":                     "300",
+	Allow4KTranscodeSettingKey:                       "true",
+	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
+	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
 	"audiobookshelf_compat.enabled":           "true",
 	"jellyfin_compat.enabled":                 "true",
@@ -514,6 +525,17 @@ func EffectiveAdminSettings(stored map[string]string) map[string]string {
 	return effective
 }
 
+// AdminSettingEnabled reads a stored boolean setting as the Admin UI shows
+// it: an absent or empty value is the setting's default, so a runtime reader
+// and an untouched settings form cannot disagree.
+func AdminSettingEnabled(key, stored string) bool {
+	value := strings.TrimSpace(stored)
+	if value == "" {
+		value = adminSettingDefaults[key]
+	}
+	return strings.EqualFold(value, "true")
+}
+
 func applyLegacyAdminSettingFallback(effective, stored map[string]string, canonical, legacy string) {
 	if stored[canonical] != "" {
 		return
@@ -554,9 +576,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
 		PlaybackKeyframePlaylistSettingKey,
-		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
+		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
-		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
+		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
 		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
@@ -573,7 +595,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey:
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
 		return normalizeAdminBool(key, value)
 
 	case AuthProviderRecheckIntervalSettingKey:
@@ -631,7 +653,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
 		return normalizeAdminInt(key, value, 1, 99)
-	case "transcode_throttle_seconds":
+	case playback.TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
 	case playbackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)

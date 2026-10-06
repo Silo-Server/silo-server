@@ -329,9 +329,15 @@ type PlaybackHandler struct {
 	// and node-affinity rule for free. The reconstruction recipe is carried in the
 	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
 	// round-trip a native stream token.
-	tm                     *playback.TranscodeManager
-	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
-	SubtitleBlobs          subtitles.BlobStore   // optional; backs downloaded subtitle reads
+	tm            *playback.TranscodeManager
+	SubtitleRepo  subtitles.Repository // optional; enables downloaded subtitles
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
+	// as they are on disk.
+	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a client is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync               subtitles.PlaySyncer
 	Trickplay              TrickplaySheets       // optional; serves seek-bar preview sheets
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
@@ -361,6 +367,10 @@ type PlaybackHandler struct {
 	// compatAutoTranscodePipeline is a test seam for the hw_accel=auto
 	// fallback pipeline; nil uses playback.NewAutoTranscodePipeline.
 	compatAutoTranscodePipeline func(context.Context, playback.TranscodeOpts) *playback.AutoTranscodePipeline
+	// compatScrobbleLocks orders each upstream session's start, report, and
+	// terminal-staging scrobbles; see sendCompatResumeStart, applyCompatReport,
+	// and stageCompatStop.
+	compatScrobbleLocks compatScrobbleLocks
 }
 
 func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {
@@ -521,7 +531,10 @@ func (h *PlaybackHandler) toneMapPolicyResult(ctx context.Context) (tonemap.Poli
 	if err != nil {
 		return tonemap.PolicyNone, fmt.Errorf("load software tone-map setting: %w", err)
 	}
-	return tonemap.NewPolicy(strings.EqualFold(hardware, "true"), strings.EqualFold(software, "true")), nil
+	return tonemap.NewPolicy(
+		config.AdminSettingEnabled(config.PlaybackTranscodeHardwareToneMapSettingKey, hardware),
+		config.AdminSettingEnabled(config.PlaybackTranscodeSoftwareToneMapSettingKey, software),
+	), nil
 }
 
 // resolveCompatToneMapRecipe classifies an HDR source and freezes the preferred
@@ -1081,14 +1094,15 @@ func (h *PlaybackHandler) releaseCompatSessionReservation(sessionID string) {
 	}
 }
 
-// allow4KVideoTranscode reads the allow_4k_transcode server setting,
-// defaulting to deny like the native playback handler.
+// allow4KVideoTranscode reads the allow_4k_transcode server setting like the
+// native playback handler: an unset row is the server default, and an
+// unreadable setting denies.
 func (h *PlaybackHandler) allow4KVideoTranscode(ctx context.Context) bool {
 	if h.SettingsRepo == nil {
 		return false
 	}
-	v, _ := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
-	return v == "true"
+	v, err := h.SettingsRepo.Get(ctx, config.Allow4KTranscodeSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.Allow4KTranscodeSettingKey, v)
 }
 
 // allowHEVCVideoEncoding reads opt-in HEVC encoding. Missing or unreadable
@@ -1097,8 +1111,8 @@ func (h *PlaybackHandler) allowHEVCVideoEncoding(ctx context.Context) bool {
 	if h.SettingsRepo == nil {
 		return false
 	}
-	v, _ := h.SettingsRepo.Get(ctx, config.PlaybackAllowHEVCEncodingSettingKey)
-	return strings.EqualFold(strings.TrimSpace(v), "true")
+	v, err := h.SettingsRepo.Get(ctx, config.PlaybackAllowHEVCEncodingSettingKey)
+	return err == nil && config.AdminSettingEnabled(config.PlaybackAllowHEVCEncodingSettingKey, v)
 }
 
 func is4KResolution(res string) bool {

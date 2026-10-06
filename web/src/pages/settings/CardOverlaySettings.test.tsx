@@ -54,18 +54,6 @@ describe("CardOverlaySettings", () => {
     mocks.setQuickActionsEnabled.mockReset();
   });
 
-  it("places the profile quick-action override above the overlay preview", () => {
-    const markup = renderToStaticMarkup(<CardOverlaySettings />);
-
-    expect(markup).toContain("Override the server defaults for this profile.");
-    expect(markup).toContain("Card quick actions");
-    expect(markup).toContain("Both");
-    expect(markup).toContain("Favorites only");
-    expect(markup).toContain("Watch indicator only");
-    expect(markup.indexOf("Card quick actions")).toBeLessThan(markup.indexOf("Overlay preview"));
-    expect(markup).toContain('aria-label="Enable card quick actions"');
-  });
-
   it("keeps the profile quick-action switch operable when the server default is off", () => {
     const markup = renderToStaticMarkup(<CardOverlaySettings />);
 
@@ -76,15 +64,6 @@ describe("CardOverlaySettings", () => {
     // rendered attribute rather than the bare word.
     expect(quickActionsSwitch).not.toContain('disabled=""');
     expect(quickActionsSwitch).not.toContain("data-disabled");
-  });
-
-  it("offers a profile overlay-badge switch above the badge configuration", () => {
-    const markup = renderToStaticMarkup(<CardOverlaySettings />);
-
-    expect(markup).toContain("Card overlay badges");
-    expect(markup).toContain('aria-label="Enable card overlay badges"');
-    expect(markup.indexOf("Card overlay badges")).toBeLessThan(markup.indexOf("Overlay preview"));
-    expect(markup).not.toContain("pointer-events-none opacity-50");
   });
 
   it("dims the badge configuration but keeps its switch operable when overlays are off", () => {

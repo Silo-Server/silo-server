@@ -263,8 +263,9 @@ func (h *CatalogResourceHandler) enrichItemDetail(ctx context.Context, v ItemVie
 			SeriesID:     detail.SeriesID,
 			SeasonNumber: detail.SeasonNumber,
 		}
-		playTargets := h.items.resolvePlayableTargetInputs(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)
-		detail.PlayContentID = playTargets[input.Key()]
+		target := h.items.resolvePlayableTargets(ctx, v, []catalog.PlayableTargetInput{input}, nil, v.Access)[input.Key()]
+		detail.PlayContentID = target.ContentID
+		detail.PlaySeasonNumber = target.SeasonNumber
 	}
 
 	switch detail.Type {

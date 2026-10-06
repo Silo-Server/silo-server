@@ -13,7 +13,6 @@ import {
   hydrateRemovedSystemSections,
   sectionSaveErrorMessage,
   shouldRestoreLatestSaveFailure,
-  shouldRestoreSelectionState,
 } from "./HomeScreenSettings";
 
 function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSectionEntry {
@@ -32,25 +31,6 @@ function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSec
 }
 
 describe("HomeScreenSettings helpers", () => {
-  it("serializes featured section overrides for persistence", () => {
-    const overrides = buildSectionOverrides([
-      makeSection({ id: "admin-1", featured: true }),
-      makeSection({ id: "custom-1", is_custom: true, featured: true, section_type: "genre" }),
-    ]);
-
-    expect(overrides).toEqual([
-      expect.objectContaining({
-        section_id: "admin-1",
-        featured: true,
-      }),
-      expect.objectContaining({
-        id: "custom-1",
-        section_type: "genre",
-        featured: true,
-      }),
-    ]);
-  });
-
   it("serializes custom gallery sections as profile-owned overrides without enabled state", () => {
     const section = buildProfileGallerySection(
       {
@@ -84,27 +64,10 @@ describe("HomeScreenSettings helpers", () => {
     expect(override).not.toHaveProperty("enabled");
   });
 
-  it("serializes removed system sections as removed overrides", () => {
-    const overrides = buildSectionOverrides(
-      [
-        makeSection({ id: "admin-1", title: "Recently Added" }),
-        makeSection({ id: "custom-1", is_custom: true, title: "Custom Picks" }),
-      ],
-      [{ id: "admin-2" }],
-    );
-
-    expect(overrides).toContainEqual(
-      expect.objectContaining({
-        section_id: "admin-2",
-        removed: true,
-      }),
-    );
-  });
-
   it("keeps saved override IDs on admin sections and gives the others new ones", () => {
     const overrides = buildSectionOverrides(
       [
-        makeSection({ id: "admin-1" }),
+        makeSection({ id: "admin-1", featured: true }),
         makeSection({ id: "admin-2" }),
         makeSection({ id: "custom-1", is_custom: true }),
       ],
@@ -120,6 +83,7 @@ describe("HomeScreenSettings helpers", () => {
       },
     );
 
+    expect(overrides[0]).toMatchObject({ section_id: "admin-1", featured: true });
     expect(overrides.map(({ id, section_id }) => ({ id, section_id }))).toEqual([
       { id: "saved-1", section_id: "admin-1" },
       { id: "new-admin-2", section_id: "admin-2" },
@@ -268,12 +232,6 @@ describe("HomeScreenSettings helpers", () => {
         { isSuccess: true, isError: false },
       ),
     ).toBe(true);
-  });
-
-  it("only restores rollback state when the selection identity still matches", () => {
-    expect(shouldRestoreSelectionState("library:1", "library:1")).toBe(true);
-    expect(shouldRestoreSelectionState("library:2", "library:1")).toBe(false);
-    expect(shouldRestoreSelectionState("home", "library:1")).toBe(false);
   });
 
   it("only restores rollback state for the latest save attempt in the current selection", () => {

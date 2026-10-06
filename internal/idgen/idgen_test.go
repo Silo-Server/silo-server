@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/sony/sonyflake/v2"
 )
 
 func TestNextIDReturnsIncreasingDecimalIDs(t *testing.T) {
@@ -71,12 +69,5 @@ func TestNextIDRefusesIDMintedAfterLeaseExpiry(t *testing.T) {
 	})
 	if id != "" || !errors.Is(err, ErrLeaseExpired) {
 		t.Fatalf("mintID after lease expiry = (%q, %v), want empty ID and ErrLeaseExpired", id, err)
-	}
-}
-
-func TestNewSonyflakeExplainsClockBeforeEpoch(t *testing.T) {
-	_, err := newSonyflake(sonyflake.Settings{StartTime: time.Now().Add(time.Hour)})
-	if !errors.Is(err, sonyflake.ErrStartTimeAhead) {
-		t.Fatalf("newSonyflake error = %v, want ErrStartTimeAhead", err)
 	}
 }

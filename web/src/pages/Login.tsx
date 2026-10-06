@@ -29,6 +29,8 @@ import { formatDeviceCode, spokenDeviceCode } from "@/lib/deviceCode";
 import {
   clearSignedOut,
   leaveForProvider,
+  networkIdentityName,
+  networkSignInRefusalText,
   oauthFailureText,
   oauthStartHref,
   wasSignedOut,
@@ -169,6 +171,13 @@ export default function Login() {
     () => providers.filter((entry) => entry.mode === "oauth" && entry.installation_id),
     [providers],
   );
+  // A network provider (such as Tailscale) is listed only when this browser
+  // reached the server through it, with the device owner's name.
+  const networkProviders = useMemo(
+    () => providers.filter((entry) => entry.mode === "network" && entry.installation_id),
+    [providers],
+  );
+  const [networkSigningIn, setNetworkSigningIn] = useState<string | null>(null);
 
   const oauthError =
     searchParams.get("error") === "oauth_failed"
@@ -194,11 +203,13 @@ export default function Login() {
     credentialProviders[0]?.id ||
     "";
 
-  // With local password sign-in off and no directory, only the OAuth
-  // provider can sign anyone in, so the password form is hidden. It stays
-  // when the provider list could not be read (no provider at all).
+  // With local password sign-in off and no directory, only the OAuth or
+  // network provider can sign anyone in, so the password form is hidden. It
+  // stays when the provider list could not be read (no provider at all).
   const passwordFormShown =
-    localBypass || credentialProviders.length > 0 || oauthProviders.length === 0;
+    localBypass ||
+    credentialProviders.length > 0 ||
+    (oauthProviders.length === 0 && networkProviders.length === 0);
   const startHref = (installationId: string) =>
     oauthStartHref(installationId, { next: redirectTarget, selectAccount: switchingAccount });
   // The only way in is one OAuth provider: go there directly, unless the
@@ -208,6 +219,7 @@ export default function Login() {
   const autoRedirectProvider =
     !passwordFormShown &&
     oauthProviders.length === 1 &&
+    networkProviders.length === 0 &&
     !searchParams.has("error") &&
     !switchingAccount &&
     !signedOutHere &&
@@ -369,6 +381,34 @@ export default function Login() {
     }
   }
 
+  async function handleNetworkSignIn(entry: (typeof networkProviders)[number]) {
+    setNetworkSigningIn(entry.id);
+    setLoginRefusal(null);
+    try {
+      const pair = await v2("POST /api/v2/auth/network/{id}/sign-in", {
+        path: { id: entry.installation_id ?? "" },
+        body: {},
+        retryAuthentication: false,
+      });
+      clearSignedOut();
+      const session = sessionFromTokenPair(pair);
+      completeLogin(session);
+      await navigateAfterLogin(session.user);
+    } catch (err) {
+      const refusal =
+        err instanceof V2ProblemError
+          ? networkSignInRefusalText(err.problemType, entry.display_name)
+          : null;
+      if (refusal) {
+        setLoginRefusal(refusal);
+      } else {
+        toast.error(err instanceof Error ? err.message : "Sign-in failed");
+      }
+    } finally {
+      setNetworkSigningIn(null);
+    }
+  }
+
   async function handleStartDeviceLogin() {
     setStartingDeviceLogin(true);
     try {
@@ -475,6 +515,42 @@ export default function Login() {
               Choose the account to sign in with. You may be asked which account to use at the
               sign-in provider.
             </p>
+          )}
+          {networkProviders.length > 0 && (
+            <div className="space-y-2">
+              {networkProviders.map((entry) => {
+                const owner = networkIdentityName(entry);
+                let label = `Continue with ${entry.display_name}`;
+                if (networkSigningIn === entry.id) label = "Signing in…";
+                else if (owner) label = `Continue as ${owner}`;
+                return (
+                  <Button
+                    key={entry.id}
+                    type="button"
+                    className="h-auto w-full justify-start gap-3 py-2"
+                    disabled={networkSigningIn !== null}
+                    onClick={() => void handleNetworkSignIn(entry)}
+                  >
+                    {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
+                    <span className="flex flex-col items-start text-left">
+                      <span>{label}</span>
+                      {owner && (
+                        <span className="text-xs font-normal opacity-80">
+                          via {entry.display_name}
+                        </span>
+                      )}
+                    </span>
+                  </Button>
+                );
+              })}
+              {(passwordFormShown || oauthProviders.length > 0) && (
+                <div className="text-muted-foreground flex items-center gap-2 pt-2 text-xs">
+                  <div className="bg-border h-px flex-1" />
+                  <span>or</span>
+                  <div className="bg-border h-px flex-1" />
+                </div>
+              )}
+            </div>
           )}
           {oauthProviders.length > 0 && (
             <div className="space-y-2">

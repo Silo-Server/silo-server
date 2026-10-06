@@ -166,7 +166,7 @@ func (c *extrasClassifier) dirHoldsMedia(dir string, depth int) bool {
 			}
 			continue
 		}
-		if mode.acceptsExt(strings.ToLower(filepath.Ext(entry.Name()))) {
+		if mode.acceptsPath(filepath.Join(dir, entry.Name())) {
 			return true
 		}
 	}
@@ -296,7 +296,7 @@ func (s *Scanner) processExtraFiles(
 		}
 
 		hints := s.gatherHints(candidate.Path)
-		probe, probeSource := s.probeFile(ctx, candidate.Path)
+		probe, probeSource, probeRejected := s.probeFile(ctx, candidate.Path)
 
 		mf := models.MediaFile{
 			MediaFolderID:  folder.ID,
@@ -308,6 +308,8 @@ func (s *Scanner) processExtraFiles(
 		}
 		if probe != nil {
 			applyProbeData(&mf, probe, probeSource)
+		} else if probeRejected {
+			markProbeRejected(&mf)
 		}
 		if mf.SubtitleTracks == nil {
 			mf.SubtitleTracks = []models.SubtitleTrack{}

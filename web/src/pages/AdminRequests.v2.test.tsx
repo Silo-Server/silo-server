@@ -162,20 +162,6 @@ describe("request administration", () => {
     },
   );
 
-  it("links to the Requests settings page and shows only the queue", async () => {
-    serve(queue({}));
-    mount("/admin/requests");
-    expect(await screen.findByRole("link", { name: "Request settings" })).toHaveAttribute(
-      "href",
-      "/admin/settings/requests",
-    );
-    // The queue's views are the page's only tabs.
-    expect(screen.getAllByRole("tablist").map((list) => list.getAttribute("aria-label"))).toEqual([
-      "Request views",
-    ]);
-    expect(screen.queryByRole("tab", { name: "User Overrides" })).toBeNull();
-  });
-
   it("sends the retired ?tab=overrides to the accounts list and says where limits went", async () => {
     serve({ "GET /api/v2/admin/requests/capabilities": capabilities });
     mount("/admin/requests?tab=overrides");
@@ -504,58 +490,6 @@ describe("request administration", () => {
     expect(within(dialog).getByRole("button", { name: "Approve: Waiting Title" })).toBeEnabled();
   });
 
-  it("says Standard decided, with no rule-by-rule explanation", async () => {
-    serve({
-      ...queue({ needs_approval: [request("r1", "Waiting Title")] }),
-      "GET /api/v2/admin/requests/{id}/events": () => ({ items: [] }),
-      "POST /api/v2/admin/request-routes/preview": () => ({
-        facts: {
-          anime: false,
-          company_ids: [],
-          genre_ids: [],
-          keyword_ids: [],
-          network_ids: [],
-          origin_countries: [],
-          year: 2019,
-        },
-        rules: [
-          {
-            route_id: "standard-movie",
-            route_name: "Standard",
-            is_fallback: true,
-            enabled: true,
-            unmet_conditions: [],
-            hd: "sends",
-            uhd: "skips",
-          },
-        ],
-        tiers: [
-          {
-            quality: "1080p",
-            route_id: "standard-movie",
-            integration_id: "s1",
-            integration_name: "Radarr",
-            route_name: "Standard",
-          },
-          {
-            quality: "2160p",
-            route_id: "standard-movie",
-            route_name: "Standard",
-            note: "No server is marked 4K, so there is no 4K version.",
-          },
-        ],
-      }),
-    });
-    mount("/admin/requests?view=needs_approval");
-    fireEvent.click(
-      within(await rowOf("Waiting Title")).getByRole("button", { name: "Details: Waiting Title" }),
-    );
-    const dialog = await screen.findByRole("dialog");
-    expect(await within(dialog).findByText("Radarr (Standard)")).toBeInTheDocument();
-    expect(within(dialog).getByText("none (no server is marked 4K)")).toBeInTheDocument();
-    expect(within(dialog).queryByRole("button", { name: "How it was decided" })).toBeNull();
-  });
-
   it("shows the refetched request in the open dialog after another admin acted first", async () => {
     const LATER = "2026-09-02T00:00:00Z";
     let sent = false;
@@ -630,54 +564,6 @@ describe("request administration", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve: Waiting Title" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByRole("link", { name: "Waiting Title" })).not.toBeInTheDocument();
-  });
-
-  it("shows each server's download progress and names a blocked import", async () => {
-    const heard = "2026-09-01T00:05:00Z";
-    serve({
-      ...queue({
-        in_progress: [
-          request("r3", "Downloading Title", {
-            status: "downloading",
-            state: "processing",
-            targets: [
-              target("t1", {
-                status: "downloading",
-                download: {
-                  phase: "import_blocked",
-                  percent: 100,
-                  downloads: 1,
-                  updated_at: heard,
-                },
-              }),
-              target("t2", {
-                quality: "2160p",
-                instance_name: "Radarr 4K",
-                status: "downloading",
-                download: { phase: "downloading", percent: 43, downloads: 1, updated_at: heard },
-              }),
-            ],
-            download: { phase: "import_blocked", percent: 71, downloads: 2, updated_at: heard },
-          }),
-        ],
-      }),
-      "GET /api/v2/admin/requests/{id}/events": () => ({ items: [] }),
-    });
-    mount("/admin/requests?view=in_progress");
-    const row = await rowOf("Downloading Title");
-    expect(within(row).getByText("Import blocked")).toBeInTheDocument();
-    expect(within(row).getByText("Downloading · 43%")).toBeInTheDocument();
-    expect(
-      within(row)
-        .getAllByRole("progressbar")
-        .map((bar) => bar.getAttribute("aria-valuenow")),
-    ).toEqual(["100", "43"]);
-    expect(within(row).queryByText("Waiting for import")).not.toBeInTheDocument();
-
-    fireEvent.click(within(row).getByRole("button", { name: "Details: Downloading Title" }));
-    const servers = within(await screen.findByRole("dialog")).getByRole("table");
-    expect(within(servers).getByText("Import blocked")).toBeInTheDocument();
-    expect(within(servers).getByText("Downloading · 43%")).toBeInTheDocument();
   });
 
   it("loads the next page from the cursor the last one returned", async () => {

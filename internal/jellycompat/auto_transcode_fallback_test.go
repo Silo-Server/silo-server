@@ -38,7 +38,7 @@ func writeCompatFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, l
 		"#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n" +
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\"\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -87,32 +87,6 @@ func newAutoCompatLocalHandler(t *testing.T, ffmpegPath string) (*PlaybackHandle
 	return handler, source
 }
 
-func TestEnsureTranscodeSessionAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
-	ffmpegPath, logPath := writeCompatFFmpegFailingOn(t, "-hwaccel cuda")
-	handler, source := newAutoCompatLocalHandler(t, ffmpegPath)
-
-	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
-	if err != nil {
-		t.Fatalf("ensureTranscodeSession: %v", err)
-	}
-	t.Cleanup(func() { _ = transcodeSession.Close() })
-
-	if opts := transcodeSession.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
-		t.Fatalf("session = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
-	}
-	if live := handler.tm.GetTranscodeSession("upstream-1"); live != transcodeSession {
-		t.Fatal("fallback session is not the registered runtime")
-	}
-	persisted, ok := handler.playbackStore.Get("play-1")
-	if !ok || persisted.Recipe == nil || !persisted.Recipe.SoftwareVideoDecode {
-		t.Fatalf("persisted recipe = %#v, want the executed CPU decode", persisted.Recipe)
-	}
-	invocations := readCompatFFmpegInvocations(t, logPath)
-	if len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
-		t.Fatalf("invocations = %q, want full hardware then CPU decode with NVENC", invocations)
-	}
-}
-
 // A reused output directory still holds an earlier generation's manifest and
 // segments; they must not make an exited full-hardware attempt look ready.
 func TestEnsureTranscodeSessionAutoIgnoresPreviousGenerationManifest(t *testing.T) {
@@ -144,10 +118,18 @@ func TestEnsureTranscodeSessionAutoIgnoresPreviousGenerationManifest(t *testing.
 	if !transcodeSession.IsRunning() {
 		t.Fatal("ensureTranscodeSession returned an exited process")
 	}
+	if live := handler.tm.GetTranscodeSession("upstream-1"); live != transcodeSession {
+		t.Fatal("fallback session is not the registered runtime")
+	}
+	persisted, ok := handler.playbackStore.Get("play-1")
+	if !ok || persisted.Recipe == nil || !persisted.Recipe.SoftwareVideoDecode {
+		t.Fatalf("persisted recipe = %#v, want the executed CPU decode", persisted.Recipe)
+	}
 	if opts := transcodeSession.Opts(); opts.HWAccel != "nvenc" || !opts.SoftwareVideoDecode {
 		t.Fatalf("session = %s software decode %v, want NVENC with CPU decode", opts.HWAccel, opts.SoftwareVideoDecode)
 	}
-	if invocations := readCompatFFmpegInvocations(t, logPath); len(invocations) != 2 {
+	invocations := readCompatFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
 		t.Fatalf("invocations = %q, want full hardware then CPU decode with NVENC", invocations)
 	}
 }

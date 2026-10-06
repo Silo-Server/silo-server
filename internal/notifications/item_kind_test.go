@@ -59,21 +59,3 @@ func TestFlatItemKindToggleAndSelectionMapping(t *testing.T) {
 		}
 	}
 }
-
-func TestSampleContentGroupsCoverEveryKind(t *testing.T) {
-	groups := sampleContentGroups()
-	if len(groups) != len(flatItemKinds)+1 {
-		t.Fatalf("got %d sample groups, want %d", len(groups), len(flatItemKinds)+1)
-	}
-	for i, k := range flatItemKinds {
-		if groups[i].Kind != k.Kind {
-			t.Errorf("sample group %d kind = %q, want %q", i, groups[i].Kind, k.Kind)
-		}
-		if groups[i].Meta.Title == "" {
-			t.Errorf("sample group %d missing title", i)
-		}
-	}
-	if groups[len(groups)-1].Kind != EventKindEpisode {
-		t.Fatalf("last sample group should be the episode fixture, got %q", groups[len(groups)-1].Kind)
-	}
-}

@@ -1282,6 +1282,8 @@ export interface EpisodeFile {
   audio_channels: number;
   container: string;
   file_size: number;
+  /** True when the server could not read the file (empty, corrupt, or truncated). */
+  unreadable?: boolean;
 }
 
 export interface EpisodeListItem {
@@ -2314,6 +2316,7 @@ export interface AutoscanSourceCreateInput {
   poll_interval_seconds?: number | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
+  label?: string;
 }
 
 export interface AutoscanConnectionTestInput {
@@ -2513,6 +2516,14 @@ export interface AdminUserEffectivePolicy {
   download_transcode_allowed: boolean;
   requests_allowed: boolean;
   permissions: string[];
+}
+
+// The built-in layer an ungrouped account resolves its unset policy fields to
+// (GET /api/v2/admin/users/policy-defaults).
+export type AdminPolicyDefaultLayer = Omit<AdminUserEffectivePolicy, "permissions">;
+export interface AdminPolicyDefaults {
+  admin: AdminPolicyDefaultLayer;
+  ungrouped: AdminPolicyDefaultLayer;
 }
 
 export interface AdminUser {
@@ -2931,7 +2942,9 @@ export type EventChannel =
   // useSettingValuesRealtime.
   | "user_settings"
   | "settings"
-  | "notifications";
+  | "notifications"
+  // Admin-only changes to the offline-download preparation queue.
+  | "download_preparations";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -3801,7 +3814,7 @@ export interface PluginCapability {
   config_schema?: PluginConfigSchema[];
   metadata?: Record<string, unknown>;
   /** How an auth_provider.v1 capability signs people in; absent for other types. */
-  sign_in_mode?: "oauth" | "credentials";
+  sign_in_mode?: "oauth" | "credentials" | "network";
   /** An installation's OAuth sign-in capability: the redirect URI to register at the provider. */
   callback_url?: string;
   /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */

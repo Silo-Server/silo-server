@@ -2,9 +2,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fixturePlanV3 } from "../protocol-v3.fixtures";
-import { derivePersistedSubtitleMode } from "../utils/subtitleMode";
 import type { UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
+import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { PlayerFileVersion, WatchPageProps } from "../types";
 import { WatchPage } from "./WatchPage";
 
@@ -96,11 +95,16 @@ function playbackSession(
     error: null,
     initialSubtitleErrorTitle: null,
     initialSubtitleError: null,
+    connectionStatus: "connected",
+    connectionErrorTitle: null,
+    connectionError: null,
     switchVersion: vi.fn(),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
     recoverFromFailure: vi.fn(),
+    recoverConnection: vi.fn(),
+    retryConnection: vi.fn(),
     invalidatePlan: vi.fn().mockResolvedValue(true),
     reanchorSeek: vi.fn().mockResolvedValue(true),
     refreshSubtitles: vi.fn(),
@@ -126,16 +130,6 @@ beforeEach(() => {
   videoPlayerMock.mockReset();
   trickplayRefetchMock.mockReset();
   toastErrorMock.mockReset();
-});
-
-describe("derivePersistedSubtitleMode", () => {
-  it("persists an enabled mode when a subtitle track is selected", () => {
-    expect(derivePersistedSubtitleMode(3)).toBe("always");
-  });
-
-  it("persists off when subtitles are disabled", () => {
-    expect(derivePersistedSubtitleMode(null)).toBe("off");
-  });
 });
 
 describe("WatchPage playback errors", () => {

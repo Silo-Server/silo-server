@@ -7,6 +7,7 @@ import {
 } from "@/components/UserPolicyFields";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
 
 import { DownloadsPolicyCard } from "./DownloadsPolicyCard";
 import type { AccessCardProps } from "./EditableCard";
@@ -24,15 +25,19 @@ export function AccessTab({
   user,
   editor,
   manageable,
+  policyManageable,
   available,
 }: {
   user: AdminUser;
   editor: AdminUserEditor | undefined;
   manageable: boolean;
+  /** Whether the viewer may change libraries, limits, downloads and requests. */
+  policyManageable: boolean;
   available: boolean;
 }) {
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
+  const defaults = useAdminPolicyDefaults().data;
   const groupId = effectiveAccessGroupID(user.role, user.access_group_id);
   const props: AccessCardProps = {
     user,
@@ -43,19 +48,31 @@ export function AccessTab({
     groups,
     libraries,
     ctx: inheritContextFor(user, groups),
-    hints: savedUserPolicyInheritHints(user, policyInheritHints(groupId, groups)),
+    hints: savedUserPolicyInheritHints(
+      user,
+      policyInheritHints(user.role, groupId, groups, defaults),
+    ),
   };
 
+  const policy = { ...props, manageable: policyManageable };
+
   return (
-    <div className="grid items-start gap-4 lg:grid-cols-2">
-      <div className="flex min-w-0 flex-col gap-4">
-        <SignInCard {...props} />
-        <LibraryAccessCard {...props} />
-        <DownloadsPolicyCard {...props} />
-      </div>
-      <div className="flex min-w-0 flex-col gap-4">
-        <PlaybackCard {...props} />
-        <RequestsCard {...props} />
+    <div className="space-y-4">
+      {manageable && !policyManageable ? (
+        <p role="note" className="text-muted-foreground text-sm">
+          Only the server owner can change an admin&apos;s access and limits.
+        </p>
+      ) : null}
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-4">
+          <SignInCard {...props} />
+          <LibraryAccessCard {...policy} />
+          <DownloadsPolicyCard {...policy} />
+        </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <PlaybackCard {...policy} />
+          <RequestsCard {...policy} />
+        </div>
       </div>
     </div>
   );

@@ -33,6 +33,12 @@ func (f *fakeNotificationDestinationCreate) CreateNotificationServerChannel(_ co
 	return &notifications.ServerChannel{ID: "created", Name: *in.Name, Type: "generic", URLHost: "example.test"}, "one-time-secret", f.err
 }
 func TestNotificationDestinationCreate(t *testing.T) {
+	fake := new(fakeNotificationDestinationCreate)
+	deps := pilotDeps(nil, nil)
+	deps.NotificationDestinationCreate = fake
+	h := NewHandler(deps)
+	deps.NotificationDestinationCreate = nil
+	missing := NewHandler(deps)
 	for _, tc := range []struct {
 		name, path, profile      string
 		headers                  map[string]string
@@ -42,10 +48,7 @@ func TestNotificationDestinationCreate(t *testing.T) {
 		{"channel", Prefix + "/admin/notifications/server-channels", "", bearer(adminToken), notifications.ErrServerChannelsDisabled, notifications.ErrServerChannelInvalid, notifications.ErrServerChannelLimit},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := new(fakeNotificationDestinationCreate)
-			deps := pilotDeps(nil, nil)
-			deps.NotificationDestinationCreate = fake
-			h := NewHandler(deps)
+			*fake = fakeNotificationDestinationCreate{}
 			body := `{"name":"test","url":"https://example.test/private-hook","type":"generic"}`
 			rec := do(t, h, http.MethodPost, tc.path, body, nil)
 			if rec.Code != 401 || fake.calls != 0 {
@@ -90,8 +93,7 @@ func TestNotificationDestinationCreate(t *testing.T) {
 					t.Fatal("non-admin created channel")
 				}
 			}
-			deps.NotificationDestinationCreate = nil
-			rec = do(t, NewHandler(deps), http.MethodPost, tc.path, body, tc.headers)
+			rec = do(t, missing, http.MethodPost, tc.path, body, tc.headers)
 			if rec.Code != 503 {
 				t.Fatalf("unavailable: %d", rec.Code)
 			}

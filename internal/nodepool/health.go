@@ -820,28 +820,6 @@ func (d capabilityDrift) regressed() bool {
 // them.
 const maxCapabilityDriftNoteBytes = 512
 
-// persistedNote renders this refetch's regression for the
-// stream_nodes.capability_drift column, or nil when this refetch lost nothing.
-// nil is not by itself a reason to clear a note the node already carries — see
-// resolveDriftNote, which owns that decision.
-func (d capabilityDrift) persistedNote() *string {
-	if !d.regressed() {
-		return nil
-	}
-	parts := make([]string, 0, 3)
-	if len(d.lostBackends) > 0 {
-		parts = append(parts, "verified hardware backends lost: "+strings.Join(d.lostBackends, ", "))
-	}
-	if len(d.lostDevices) > 0 {
-		parts = append(parts, "render devices gone: "+strings.Join(d.lostDevices, ", "))
-	}
-	if d.previousResolved != d.resolved {
-		parts = append(parts, "resolved backend "+d.previousResolved+" -> "+d.resolved)
-	}
-	note := truncateDriftNote(strings.Join(parts, "; "))
-	return &note
-}
-
 // truncateDriftNote bounds a note to maxCapabilityDriftNoteBytes without ever
 // cutting a rune in half.
 //

@@ -540,24 +540,6 @@ func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
 	}
 }
 
-// A stored node URL may carry a trailing slash — pasting a base URL is the usual
-// way an operator enters one, and everything here already treats the two forms
-// as the same worker. Concatenating a route onto it produces "//admin/…", which
-// no node's router has: the request 404s against a node that is running and
-// reachable, and the operator's action fails for a reason nothing reports.
-func TestNodeEndpointJoinsATrailingSlashBaseURL(t *testing.T) {
-	const want = "http://gpu-1:8082/admin/reprobe-capabilities"
-	for _, base := range []string{
-		"http://gpu-1:8082",
-		"http://gpu-1:8082/",
-		"http://gpu-1:8082///",
-	} {
-		if got := NodeEndpoint(base, "/admin/reprobe-capabilities"); got != want {
-			t.Errorf("NodeEndpoint(%q) = %q, want %q", base, got, want)
-		}
-	}
-}
-
 // The health check is the first thing that runs against a node, so a base URL
 // this could not address would leave the node permanently unhealthy.
 func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
@@ -570,7 +552,7 @@ func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
 	}))
 	defer node.Close()
 
-	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: node.URL + "/"})
+	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: node.URL + "///"})
 	if !healthy {
 		t.Fatal("a node stored with a trailing slash was reported unhealthy")
 	}
