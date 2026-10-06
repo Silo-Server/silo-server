@@ -265,28 +265,27 @@ change does; the rest should help them decide how closely to review.
 ### Show visible changes
 
 A pull request that changes what a user sees must show the change in its
-Evidence section. Reviewers should not have to build the branch to learn what
-it looks like. A change is visible when it alters any of these:
+Evidence section, so reviewers can see it without building the branch. In this
+repository that means the web app and web admin, and every client that renders
+server data. A change is visible when it alters any of these:
 
-- web or web admin UI: layout, styling, copy, navigation, focus, empty and
-  error states;
-- which items a client shows, or in what order: search results, home sections,
+- layout, styling, copy, navigation, focus, empty and error states;
+- which items a screen shows, or in what order: search results, home sections,
   recommendations, library browsing, collections, sorting, or filtering;
 - what an item shows: titles, artwork, descriptions, ratings, badges, episode
   grouping, or availability;
 - playback behavior a user notices, such as default audio or subtitle tracks,
-  markers, or resume position;
+  markers, controls, or resume position;
 - a native API or jellycompat response field that clients render.
 
 Provide evidence that fits the change:
 
-- **UI changes:** before-and-after screenshots of the same screen with the same
-  data, side by side. Add a short recording when motion, timing, focus, or a
-  multi-step flow matters.
-- **Server changes that alter what clients display:** before-and-after
-  screenshots of an affected client screen. When no client renders the change
-  yet, show before-and-after excerpts of the API response for the same request,
-  trimmed to the fields that changed, such as the ordered list of result titles.
+- **Changes to a screen:** before-and-after screenshots of the same screen with
+  the same data, one pair per affected surface. Add a short recording when
+  motion, timing, focus movement, or a multi-step flow matters.
+- **Server changes no client shows yet:** before-and-after excerpts of the API
+  response for the same request, trimmed to the fields that changed, such as the
+  ordered list of result titles.
 - Name the surface and the build or commit each capture came from.
 
 Capture against a test library or public-domain media where you can. Crop or

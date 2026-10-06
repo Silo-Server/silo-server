@@ -13,17 +13,18 @@ Related issue: #NNN
 stay open, or "N/A". An open issue is not required — the Problem section below must
 stand on its own. -->
 Validation tasks: #NNN C1
-<!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes
-(see "1.0 validation" in AGENTS.md), e.g. "unblocks #1144 C3; changes #1200 C1".
-Write "none" when no validation task is affected. -->
+<!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes,
+e.g. "unblocks #1144 C3; changes #1200 C1". Write "none" when no validation task is
+affected. -->
 
 A short plain-language summary: what goes wrong, who it affects, and what this
 change does about it. Details come after.
 
 ## Approach
 
-What changed and why this way. Mention an alternative only if a reviewer would ask
-about it. Do not walk through the diff.
+What changed and why this way, and which surfaces and repositories it affects.
+Mention an alternative only if a reviewer would ask about it. Do not walk through
+the diff.
 
 ## Validation
 
@@ -41,18 +42,19 @@ local paths, credentials, personal data, or private media details. -->
 
 Surface and build:
 <!-- Required when this change alters what a user sees: UI, or which items or what
-item details clients show, such as search results, home sections, recommendations,
+item details a screen shows, such as search results, home sections, recommendations,
 metadata, artwork, sorting, or filtering. See "Show visible changes" in
-CONTRIBUTING.md. Use before-and-after screenshots of the same screen and data, a short
-recording when motion or a flow matters, or before-and-after API response excerpts
-when no client shows the change yet. Crop or blur private details. A maintainer may
-link `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/` instead; that page
+CONTRIBUTING.md. Use before-and-after screenshots of the same screen and data for each
+affected surface, and a short recording when motion, timing, or focus matters. Crop or
+blur private details. A maintainer may link
+`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/` instead; that page
 requires Silo-Server organization sign-in. When nothing visible changes, replace this
 section's content with "Evidence: none, no user-visible change". -->
 
 ## Risks
 
-Migration, compatibility, security, or operational impact, or "None identified".
+Migration, compatibility, security, operational, or release impact, or "None
+identified".
 
 ## Checklist
 
