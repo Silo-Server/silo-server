@@ -22,10 +22,11 @@ func TestPersonKindAudiobookRoles(t *testing.T) {
 }
 
 func TestPersonKindCreator(t *testing.T) {
-	if got := PersonKindCreator.String(); got != "Creator" {
-		t.Errorf("PersonKindCreator.String() = %q, want %q", got, "Creator")
+	const creator = "Creator"
+	if got := PersonKindCreator.String(); got != creator {
+		t.Errorf("PersonKindCreator.String() = %q, want %q", got, creator)
 	}
-	for _, job := range []string{"Creator", "creator", " Creator "} {
+	for _, job := range []string{creator, "creator", " CREATOR "} {
 		if got := PersonKindFromJob(job); got != PersonKindCreator {
 			t.Errorf("PersonKindFromJob(%q) = %v, want PersonKindCreator", job, got)
 		}
