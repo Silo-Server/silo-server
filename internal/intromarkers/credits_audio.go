@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -78,12 +79,12 @@ const creditsFingerprintDetailNoAudio = "no_audio"
 
 // loadCreditsArtifacts reads the stored credits artifacts of candidates
 // under key in one query within the lookup bound.
-func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candidate, key ArtifactKey) (map[int]Artifact, error) {
+func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candidate, key mediaartifact.Key) (map[int]mediaartifact.Artifact, error) {
 	fileIDs := make([]int, 0, len(candidates))
 	for _, candidate := range candidates {
 		fileIDs = append(fileIDs, candidate.FileID)
 	}
-	var artifacts map[int]Artifact
+	var artifacts map[int]mediaartifact.Artifact
 	err := a.withLookupSlot(ctx, func() error {
 		var err error
 		artifacts, err = a.repo.LoadArtifacts(ctx, fileIDs, key)
@@ -94,11 +95,11 @@ func (a *Analyzer) loadCreditsArtifacts(ctx context.Context, candidates []Candid
 
 // creditsFingerprint interprets a candidate's stored credits artifact: the
 // cached fingerprint, or why there is none.
-func (a *Analyzer) creditsFingerprint(artifact *Artifact, candidate Candidate) (*Fingerprint, fingerprintLookup) {
+func (a *Analyzer) creditsFingerprint(artifact *mediaartifact.Artifact, candidate Candidate) (*Fingerprint, fingerprintLookup) {
 	switch artifact.State(tailWindow(candidate).identity(candidate), a.nodeName(), time.Now()) {
-	case ArtifactReady:
-	case ArtifactSkipped:
-		if artifact.Status == ArtifactFailed {
+	case mediaartifact.Ready:
+	case mediaartifact.Skipped:
+		if artifact.Status == mediaartifact.StatusFailed {
 			return nil, fingerprintDeferred
 		}
 		return nil, fingerprintUnusable
@@ -126,17 +127,17 @@ func (a *Analyzer) creditsFingerprint(artifact *Artifact, candidate Candidate) (
 
 // storeCreditsFingerprint caches a computed credits fingerprint.
 func (a *Analyzer) storeCreditsFingerprint(ctx context.Context, fp Fingerprint) error {
-	return a.repo.UpsertArtifact(ctx, Artifact{
+	return a.repo.UpsertArtifact(ctx, mediaartifact.Artifact{
 		MediaFileID: fp.MediaFileID,
-		ArtifactKey: creditsFingerprintKey(),
-		ArtifactIdentity: ArtifactIdentity{
+		Key:         creditsFingerprintKey(),
+		Identity: mediaartifact.Identity{
 			FileHash:           fp.FileHash,
 			FileSize:           fp.FileSize,
 			DurationSeconds:    fp.DurationSeconds,
 			WindowStartSeconds: fp.WindowStartSeconds,
 			WindowEndSeconds:   fp.WindowEndSeconds,
 		},
-		Status:                ArtifactComplete,
+		Status:                mediaartifact.StatusComplete,
 		PayloadFormat:         fp.FingerprintFormat,
 		SampleDurationSeconds: fp.SampleDurationSeconds,
 		ItemCount:             len(fp.Points),
@@ -147,24 +148,24 @@ func (a *Analyzer) storeCreditsFingerprint(ctx context.Context, fp Fingerprint) 
 // storeCreditsNoAudio records that the candidate's tail has no audio to
 // fingerprint, so it is not decoded again until the file changes.
 func (a *Analyzer) storeCreditsNoAudio(ctx context.Context, candidate Candidate) error {
-	return a.repo.UpsertArtifact(ctx, Artifact{
-		MediaFileID:      candidate.FileID,
-		ArtifactKey:      creditsFingerprintKey(),
-		ArtifactIdentity: tailWindow(candidate).identity(candidate),
-		Status:           ArtifactUnusable,
-		Detail:           creditsFingerprintDetailNoAudio,
+	return a.repo.UpsertArtifact(ctx, mediaartifact.Artifact{
+		MediaFileID: candidate.FileID,
+		Key:         creditsFingerprintKey(),
+		Identity:    tailWindow(candidate).identity(candidate),
+		Status:      mediaartifact.StatusUnusable,
+		Detail:      creditsFingerprintDetailNoAudio,
 	})
 }
 
 // recordCreditsFingerprintFailure records a failed tail extraction so this
 // server backs off before decoding the file again.
 func (a *Analyzer) recordCreditsFingerprintFailure(ctx context.Context, candidate Candidate, extractErr error) error {
-	return a.repo.RecordArtifactFailure(ctx, ArtifactFailure{
-		MediaFileID:      candidate.FileID,
-		ArtifactKey:      creditsFingerprintKey(),
-		ArtifactIdentity: tailWindow(candidate).identity(candidate),
-		RecordedBy:       a.nodeName(),
-		Error:            extractErr.Error(),
-		At:               time.Now().UTC(),
+	return a.repo.RecordArtifactFailure(ctx, mediaartifact.Failure{
+		MediaFileID: candidate.FileID,
+		Key:         creditsFingerprintKey(),
+		Identity:    tailWindow(candidate).identity(candidate),
+		RecordedBy:  a.nodeName(),
+		Error:       extractErr.Error(),
+		At:          time.Now().UTC(),
 	})
 }

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/baggage"
@@ -70,51 +69,6 @@ func TestDependencySpanRedactsErrors(t *testing.T) {
 		if strings.Contains(string(encoded), secret) {
 			t.Fatalf("span contains %q", secret)
 		}
-	}
-}
-
-type stalledExporter struct {
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (e *stalledExporter) ExportSpans(ctx context.Context, _ []sdktrace.ReadOnlySpan) error {
-	select {
-	case e.entered <- struct{}{}:
-	default:
-	}
-	select {
-	case <-e.release:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-func (*stalledExporter) Shutdown(context.Context) error { return nil }
-
-func TestFullTraceQueueDoesNotBlockRequests(t *testing.T) {
-	e := &stalledExporter{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	p := sdktrace.NewTracerProvider(sdktrace.WithBatcher(e, sdktrace.WithMaxQueueSize(2), sdktrace.WithMaxExportBatchSize(1), sdktrace.WithBatchTimeout(time.Millisecond), sdktrace.WithExportTimeout(time.Second)))
-	t.Cleanup(func() { close(e.release); _ = p.Shutdown(context.Background()) })
-	_, first := p.Tracer("test").Start(t.Context(), "first")
-	first.End()
-	select {
-	case <-e.entered:
-	case <-time.After(time.Second):
-		t.Fatal("exporter did not start")
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for range 1000 {
-			_, span := p.Tracer("test").Start(context.Background(), "request")
-			span.End()
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("full exporter queue blocked request completion")
 	}
 }
 

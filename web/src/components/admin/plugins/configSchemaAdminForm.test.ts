@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import type { PluginConfigSchema } from "@/api/types";
@@ -85,7 +87,7 @@ describe("adminFormForConfigSchema", () => {
         },
       ],
     };
-    expect(adminFormForConfigSchema(schema({ json_schema: "", admin_form: explicit }))).toBe(
+    expect(adminFormForConfigSchema(schema({ json_schema: "", admin_form: explicit }))).toEqual(
       explicit,
     );
   });

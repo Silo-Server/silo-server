@@ -115,6 +115,9 @@ func TestRefreshAllLibraryMetadataTaskRefreshesEveryLibraryInFullMode(t *testing
 	if err := task.Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
+	if released := task.lock.(*fakeClusterLock).released; released != 1 {
+		t.Fatalf("lock released %d times, want 1", released)
+	}
 	if len(runner.requests) != 2 {
 		t.Fatalf("requests = %+v, want both libraries", runner.requests)
 	}
@@ -266,19 +269,6 @@ type cancelingActiveLookup struct {
 func (c cancelingActiveLookup) GetActiveLibraryRefreshByLibraryID(ctx context.Context, _ int) (*models.AdminJob, error) {
 	c.cancel()
 	return nil, ctx.Err()
-}
-
-func TestRefreshAllLibraryMetadataTaskReleasesItsLock(t *testing.T) {
-	task := newTestRefreshAllTask(fakeEnabledFolders{folders: []*models.MediaFolder{{ID: 1, Name: "Movies"}}}, fakeActiveLibraryRefreshes{}, &fakeLibraryRefreshRunner{})
-	lock := &fakeClusterLock{acquired: true}
-	task.lock = lock
-
-	if err := task.Execute(context.Background(), &resultRecordingProgress{}); err != nil {
-		t.Fatalf("Execute() error = %v", err)
-	}
-	if lock.released != 1 {
-		t.Fatalf("released = %d, want 1", lock.released)
-	}
 }
 
 func TestRefreshAllLibraryMetadataTaskLockError(t *testing.T) {

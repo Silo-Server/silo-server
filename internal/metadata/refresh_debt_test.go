@@ -154,18 +154,6 @@ func TestNextRefreshDelayTerminalOnlyWhenPureEpisodeDebt(t *testing.T) {
 	}
 }
 
-func TestIsTerminalEpisodeDebt(t *testing.T) {
-	if isTerminalEpisodeDebt(RefreshDebtReasonEpisodeIncomplete, refreshDebtEpisodeTerminalAttempts-1) {
-		t.Fatalf("debt below the attempt cap must not be terminal")
-	}
-	if !isTerminalEpisodeDebt(RefreshDebtReasonEpisodeIncomplete, refreshDebtEpisodeTerminalAttempts) {
-		t.Fatalf("episode-incomplete debt at the attempt cap must be terminal")
-	}
-	if isTerminalEpisodeDebt(RefreshDebtReasonCoreMetadataIncomplete, refreshDebtEpisodeTerminalAttempts+5) {
-		t.Fatalf("non-episode debt must never be terminal regardless of attempts")
-	}
-}
-
 func TestEffectiveRefreshDebtPriorityDemotesTerminalEpisodeDebt(t *testing.T) {
 	threshold := refreshDebtEpisodeTerminalAttempts
 

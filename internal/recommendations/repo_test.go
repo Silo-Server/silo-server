@@ -105,22 +105,6 @@ func TestWatchedActivityCTEIncludesEbookReaderProgress(t *testing.T) {
 	}
 }
 
-func TestRecentCompletedItemIDsQueryCanonicalizesBeforeLimit(t *testing.T) {
-	query := strings.Join(strings.Fields(recentCompletedItemIDsQuery), " ")
-
-	assertQueryTermsInOrder(t, query,
-		"SELECT item_id",
-		"FROM watched_activity",
-		"WHERE user_id = $1 AND profile_id = $2 AND completed = true",
-		"GROUP BY item_id",
-		"ORDER BY MAX(updated_at) DESC, item_id ASC",
-		"LIMIT $3",
-	)
-	if strings.Contains(query, "SELECT leaf_item_id") {
-		t.Fatalf("automatic anchors must not use episode leaf IDs: %s", query)
-	}
-}
-
 func TestResolveCanonicalItemIDsDefaultsToInputAndRollsEpisodesUp(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := context.Background()

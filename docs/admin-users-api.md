@@ -7,6 +7,9 @@ profile is not a server administrator.
 
 `GET /api/v2/admin/users/capabilities` reports account management, guarded
 configuration, transactional default-profile creation, and access-group support.
+It also reports the account projections below that depend on optional services:
+`account_devices`, `watch_summary`, `account_downloads` (the downloads list, summary
+and series monitors) and `request_usage`. A read whose flag is false answers 503.
 Unsupported services return a capability or dependency Problem Details response.
 The existing paginated account list remains at `GET /api/v2/admin/users`.
 
@@ -22,6 +25,31 @@ revocation of affected direct and impersonation login sessions commit in one
 transaction. A failed write rolls back all three. Existing account writers also
 advance the revision. After a successful update (204), fetch the canonical editor
 again before editing further. Deletion returns 204.
+
+An update signs the account out everywhere (its login, impersonation and
+Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
+and its Jellyfin-compatible sessions) only when it sets a password or changes
+`enabled`. Access-group, permission and playback-quality changes keep the
+account signed in: they advance `access_policy_revision`, each request resolves
+the current policy, connected events sockets receive `access_changed` (see
+[realtime-api.md](realtime-api.md#access-changes)), and PIN-protected profiles
+must enter their PIN again. Library, stream-limit and download overrides never
+signed the account out and still do not.
+
+A role change also keeps the account signed in, but admin checks trust the role
+in the access token, so the token must be replaced. Every request that presents
+an access token minted before the change gets `401 token_refresh_required` (v1:
+`401 unauthorized`). The login session and its refresh token stay valid, and a
+refresh issues a token with the new role, so a demoted administrator loses admin
+access on its next request. Clients refresh and retry once and never sign out on
+this response. The same transaction ends every impersonation session the account
+started or that views as it: a demoted administrator may not view as anyone, and
+only the Owner may view as an administrator. Jellyfin- and
+Audiobookshelf-compatible sessions are kept, because neither carries the role:
+the Jellyfin surface reports every account as a non-administrator and resolves
+access per request.
+
+The same rules apply to the bridge `PUT /api/v1/admin/users/{id}`.
 
 Omitted update fields preserve their values. Nullable policy overrides accept
 `null` to restore inheritance. Explicit empty library and permission arrays,
@@ -51,21 +79,43 @@ requires starting a new listing. Account capabilities advertise
 An identity lookup does not reserve an identity or authorize a change. Conditional
 account updates and database uniqueness remain authoritative at write time.
 
+## Policy defaults
+
+An account's unset policy field takes its access group's value. Admin accounts
+never belong to a group: their unset fields resolve to full access, the access
+the Owner has, and an override on an admin account still restricts it. A
+regular account with no group uses the built-in no-group values, which match
+full access except that server-prepared downloads
+(`download_transcode_allowed`) are off.
+
+`GET /api/v2/admin/users/policy-defaults` returns both layers, `admin` and
+`ungrouped`, in the shape of `effective_policy` without `permissions`, so
+clients show where a default comes from without keeping their own copy. The
+values come from the server build. Account capabilities advertise
+`policy_defaults`. Existing `admin:users` keys may use this read.
+
 ## Passwords
 
 Account editor and list rows carry `password_login` and `password_change_required`.
-`password_login` is false when an external authentication provider manages the
-account's sign-in. Password actions do not apply to such an account, and clients
-hide them. `password_change_required` is true while the account holds a temporary
-password.
+`password_login` is true while the account can sign in with a local password: local
+password sign-in is on for it and it has a password. Linking an external sign-in
+identity turns it off unless the account is break-glass. Setting a password on
+update turns local password sign-in back on, so `password_login` is true afterwards;
+this is how an administrator recovers an account whose provider is gone, and
+clients keep the set-password action for accounts where it is false. Only the server
+Owner may set the password of its own account while `password_login` is false for it
+(403 `permission_denied`; v1 answers `owner_protected`), so an admin cannot turn its own password sign-in back on and
+keep its role through provider demotion. A password
+reset link needs `password_login` (see below). `password_change_required` is true
+while the account holds a temporary password.
 
 Create and update accept `require_password_change` to make the password in the same
 request temporary. At its next sign-in the account must choose a new password before
 its session can do anything else (see
 [temporary passwords](auth-api.md#temporary-passwords)). The flag is only valid
 alongside `password`; sending it alone returns `422 validation_failed` at
-`body.require_password_change`. An account without local password sign-in cannot
-hold a temporary password; updating one with the flag returns `409 conflict`. A
+`body.require_password_change`. Because the password write turns local password
+sign-in on, the flag also works for an account that had it off. A
 password sent without the flag is not temporary and clears a pending change. Setting a password still revokes the account's login
 sessions.
 
@@ -92,7 +142,7 @@ is described in [password reset links](auth-api.md#password-reset-links).
 | Condition | Result |
 |-----------|--------|
 | No such account | `404 not_found` |
-| External provider manages sign-in, account disabled, or no email address for `email` | `409 conflict` |
+| Account without local password sign-in (`password_login` false), account disabled, or no email address for `email` | `409 conflict` |
 | Email not configured for `email` | `409 capability_not_configured` |
 | No server public URL (`server.public_url`) | `409 capability_not_configured` |
 
@@ -122,6 +172,10 @@ they:
 - create an administrator, promote an account to administrator, or invite one;
 - update, delete, or issue a password reset for another administrator or the
   Owner;
+- change an access-policy override on their own account (libraries, playback
+  quality, stream, transcode and bitrate limits, the transcode, download and
+  request switches). An update that re-sends the stored values is not a change;
+  other fields of their own account stay editable;
 - create an API key for another administrator or the Owner, or change or revoke
   one of their keys.
 
@@ -166,6 +220,11 @@ administrator.
 returns 201 and Location. Update returns the new canonical representation and
 ETag; delete returns 204. Missing/stale guards return 428/412.
 
+`DELETE /api/v2/admin/access-groups/{id}` moves the group's members into the
+default group in the same transaction and advances their
+`access_policy_revision`. Members stay signed in and get the default group's
+access on their next request, as for a single account moved between groups.
+
 Group configuration changes advance a monotonic revision, including default-group
 changes. Canonical editor responses exclude changing membership counts; list
 responses include them. Group changes and account policy propagation share the
@@ -176,19 +235,73 @@ response replay; after an uncertain result, reload before starting another inten
 
 | Route below `/api/v2/admin` | Response |
 | --- | --- |
-| `GET /users/{id}/profiles` | Complete profile collection with string IDs and names |
+| `GET /users/{id}/profiles` | Complete profile collection with string IDs, names and `last_seen_at` |
 | `GET /users/{id}/api-keys` | Bounded metadata-only key collection; no stored credential |
-| `GET /users/{id}/ips` | Bounded IP history for one account |
+| `GET /users/{id}/ips` | Bounded IP history for one account, each address with its `location` |
 | `GET /ips?ip=...` | Bounded account history for one valid IP address |
 | `GET /users/{id}/settings/values` | Bounded setting-value collection and contract revision |
 | `PUT /users/{id}/settings/values/{key}` | Validated setting value |
 | `DELETE /users/{id}/settings/values/{key}` | 204 |
+| `GET /users/{id}/devices` | Complete device collection for one account (`listAdminUserDevices`) |
+| `GET /users/{id}/watch-summary` | Finalized play totals over recent days (`getAdminUserWatchSummary`) |
+| `GET /users/{id}/downloads` | Paginated managed device downloads (`listAdminUserDownloads`) |
+| `GET /users/{id}/downloads/summary` | Managed download totals (`getAdminUserDownloadSummary`) |
+| `GET /users/{id}/download-subscriptions` | Paginated series monitors (`listAdminUserDownloadSubscriptions`) |
+| `GET /request-users/{user_id}/usage` | Effective request policy and quota use (`getAdminRequestUserUsage`) |
+
+Every account projection answers 404 for an unknown account and 422 for a malformed
+identifier.
 
 Paginated reads accept `limit` (up to 200) and signed `cursor`; responses expose
 `items` and `page`. Cursors bind the actor/profile, target, filters, and page size.
 IP queries accept `days` from 1 to 365, defaulting to 30. Their cursor preserves a
 fixed observation window and deterministic last-seen ties. Newer events do not
 move earlier groups across that cursor. Addresses are returned without CIDR masks.
+Each address carries `location`, `local` or `remote`, classified from the address
+alone: private, loopback and link-local addresses are local, everything else is
+remote. Request logs do not record the network-access route, so a request that
+reached the server through a network-access provider from a private address reads
+as `local` here even though playback treats that path as remote.
+
+A profile's `last_seen_at` is the latest time any device registration reported the
+profile, and null when none has. The device collection lists every device the
+account's apps registered and every device that holds saved per-device settings,
+most recently seen first; `last_seen_at` is the latest registration (null for a
+device known only from saved settings), `last_updated` the latest of registration
+and saved-setting writes, and `override_count` the saved per-device settings across
+profiles. Each device lists its profiles with the same fields; `profile_name` is
+empty when the profile no longer exists.
+
+The watch summary accepts `days` from 1 to 365 (default 30) and an optional
+`profile_id`. It totals the finalized attempts that ended at or after `since` (now
+minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
+(null when none). Those are the attempts `listAdminPlaybackHistory` lists with the
+same `user_id`, `profile_id` and `ended_after` set to `since`.
+
+The request usage read reports the account's effective request policy as the
+request service resolves it: `requests_enabled` (the server switch), `allowed`
+(false when the account's switch, group or approval mode blocks it), `unlimited`,
+`used`, `max_requests`, `window_days`, `window_start`, `remaining` and
+`auto_approve`. An unlimited account is not counted, so `used` is 0.
+
+### Account downloads
+
+The downloads list and summary cover managed device rows only; ephemeral web
+downloads have no device and are excluded. The list returns every status, newest
+first, filtered by `profile_id` and `device_id` when given. Each row names the
+catalog title and type of its `content_id` (the movie, or the series of an episode)
+and carries `episode` with season, number and title when `episode_id` resolves to a
+catalog episode, otherwise null. The summary counts non-revoked rows in `total`,
+`completed`, `in_progress` (preparing, ready or downloading), `failed`, and `devices`,
+sums their `file_size` in `total_bytes`, counts `revoked` rows separately, and counts
+active series monitors. The monitor list reports each monitor's options with
+`on_device` and `in_progress` counts for its own device and profile and
+`removed_episodes`, the episodes the user deleted from the monitored series.
+
+The server only records what the apps report. An app that never reports a status
+leaves its rows at `ready`, and fetching a file does not change that status. Rows
+for a device that was wiped or lost the app stay until the device is removed. These
+reads never change a download or monitor; there is no administrator mutation.
 
 Administrator settings use explicit target identity query parameters: `scope`,
 `profile_id`, `client_family`, `device_id`, `library_id`, and `series_id` as required

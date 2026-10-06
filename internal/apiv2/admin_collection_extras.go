@@ -22,6 +22,7 @@ type AdminCollectionExtrasService interface {
 	SyncAdminCollection(context.Context, string) (*models.LibraryCollectionSyncRun, error)
 	ImportAdminMDBList(context.Context, handlers.AdminCollectionImportMDBList) (handlers.AdminCollectionImportResult, error)
 	ImportAdminTMDB(context.Context, handlers.AdminCollectionImportTMDB) (handlers.AdminCollectionImportResult, error)
+	ImportAdminTMDBList(context.Context, handlers.AdminCollectionImportTMDBList) (handlers.AdminCollectionImportResult, error)
 	ImportAdminTrakt(context.Context, handlers.AdminCollectionImportTrakt) (handlers.AdminCollectionImportResult, error)
 	ListAdminCollectionTemplates(context.Context) (templates.BundleCatalog, error)
 	AdminCollectionTemplateCatalog(context.Context) templates.Catalog
@@ -70,6 +71,10 @@ type AdminMDBListInput struct {
 }
 type AdminTMDBInput struct {
 	Body    AdminTMDBImport
+	RawBody []byte
+}
+type AdminTMDBListInput struct {
+	Body    AdminTMDBListImport
 	RawBody []byte
 }
 type AdminTraktInput struct {
@@ -136,6 +141,9 @@ func registerAdminCollectionExtras(reg *Registry) {
 	tmdb := adminCollectionOperation(http.MethodPost, "/admin/collections/import/tmdb", "importAdminTMDB", "Import a TMDB collection.", false)
 	tmdb.DefaultStatus = http.StatusCreated
 	Register(reg, tmdb, reg.importAdminTMDB)
+	tmdbList := adminCollectionOperation(http.MethodPost, "/admin/collections/import/tmdb-list", "importAdminTMDBList", "Import a public TMDB list as a collection.", false)
+	tmdbList.DefaultStatus = http.StatusCreated
+	Register(reg, tmdbList, reg.importAdminTMDBList)
 	trakt := adminCollectionOperation(http.MethodPost, "/admin/collections/import/trakt", "importAdminTrakt", "Import a Trakt collection.", false)
 	trakt.DefaultStatus = http.StatusCreated
 	Register(reg, trakt, reg.importAdminTrakt)
@@ -322,6 +330,24 @@ func (reg *Registry) importAdminTMDB(ctx context.Context, in *AdminTMDBInput) (*
 		return nil, p
 	}
 	v, e := s.ImportAdminTMDB(ctx, cmd)
+	if e != nil {
+		return nil, adminCollectionError(e)
+	}
+	return adminImportOutput(v), nil
+}
+func (reg *Registry) importAdminTMDBList(ctx context.Context, in *AdminTMDBListInput) (*AdminCollectionImportOutput, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	s, p := reg.adminCollectionExtras()
+	if p != nil {
+		return nil, p
+	}
+	cmd, p := in.Body.command()
+	if p != nil {
+		return nil, p
+	}
+	v, e := s.ImportAdminTMDBList(ctx, cmd)
 	if e != nil {
 		return nil, adminCollectionError(e)
 	}

@@ -87,3 +87,12 @@ a synchronous result, not a persisted job. The web sends each user-triggered che
 once and disables mutation retries; a lost response must not trigger automatic
 replay. This corrects the inventory's earlier assumption that every check was
 read-only. Demo mode blocks this operation.
+
+### HEVC encoding
+
+`playback.allow_hevc_encoding` is a boolean setting, default `false`. When
+`true`, compatible HLS playback routes may choose HEVC video encoding after
+server encoder validation. Clients without HEVC delivery support retain
+H.264 output. Changes apply to new playback decisions and do not rewrite an
+active session's frozen recipe. The Playback settings page exposes this policy
+as **Allow HEVC encoding**.

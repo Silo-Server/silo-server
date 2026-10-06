@@ -115,6 +115,13 @@ disagrees with the code is wrong. Any committed doc must not contain local absol
 filesystem paths or transient worktree IDs — use repository-relative paths and wording like
 "Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
+**Docs audience.** Docs in this repo are for people and agents changing the code:
+architecture, invariants, API contracts, development setup. Guides for installing, configuring,
+operating, or troubleshooting Silo belong in the user manual (`siloserver.org`, see Multi-repo).
+Do not add operator or user guides here. The one exception is `docs/update-to-1.0.md`, a draft
+that moves to the manual when 1.0 ships. When a change affects the manual, follow "Update the
+user manual" in CONTRIBUTING.md.
+
 **Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
 `make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
 
@@ -129,6 +136,7 @@ Sibling repos are usually checked out side-by-side in the same parent directory.
 - `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
   helpers, runtime bootstrap.
 - `silo-plugins` — central plugin catalog / repository manifest.
+- `siloserver.org` — project website and user manual.
 - First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
   their own repo.
 
@@ -144,6 +152,12 @@ done until each of these has been handled or ruled out:
   coordinated multi-repo changes over leaving a platform behind.
 - jellycompat parity was considered (does the Jellyfin surface need the same behavior?).
 - The relevant `docs/*-api.md` is updated when the contract changes.
+
+Separately, any change that leaves the user manual on siloserver.org wrong or incomplete (a
+setting, default, label, setup step, or feature behavior it describes) is not done until an
+issue is open on `Silo-Server/siloserver.org`.
+[Update the user manual](CONTRIBUTING.md#update-the-user-manual) covers when to open one and
+what goes in it.
 
 ## Building and verifying
 

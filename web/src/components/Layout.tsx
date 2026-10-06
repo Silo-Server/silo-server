@@ -116,7 +116,19 @@ export default function Layout({ children }: LayoutProps) {
     })();
   const isRecommendationsRoute = location.pathname === "/recommendations";
   const isCalendarRoute = location.pathname === "/calendar";
-  const isRequestDetailRoute = /^\/requests\/(movie|series)\//.test(location.pathname);
+  // The Requests hub, its Discover row pages, and its studio/network/genre
+  // browse pages lay out their own gutter so text rows line up with
+  // MediaCarousel's edge padding.
+  const isRequestsRoute =
+    /^\/requests\/?$/.test(location.pathname) ||
+    location.pathname.startsWith("/requests/browse/") ||
+    location.pathname.startsWith("/requests/discover/");
+  // A title outside the library gets the item page's treatment. The old
+  // /requests/movie/… and /requests/series/… links redirect there, so they
+  // keep it too rather than expanding the sidebar for one frame.
+  const isTitleRoute =
+    location.pathname.startsWith("/title/") ||
+    /^\/requests\/(movie|series)\//.test(location.pathname);
   // A watch-party room owns its own full-height layout; the hub does not.
   const isWatchPartyRoomRoute = /^\/rooms\/(?!join$)[^/]+$/.test(location.pathname);
   const needsNoPadding =
@@ -124,7 +136,8 @@ export default function Layout({ children }: LayoutProps) {
     isWatchPartyRoomRoute ||
     isLibraryRoute ||
     isItemRoute ||
-    isRequestDetailRoute ||
+    isRequestsRoute ||
+    isTitleRoute ||
     isSearchLandingRoute ||
     isRecommendationsRoute ||
     isCalendarRoute;
@@ -132,7 +145,7 @@ export default function Layout({ children }: LayoutProps) {
   // Cold item routes commit a lightweight shell while the sidebar collapses.
   // A detail already cached before navigation skips that gate and renders on
   // the destination's first frame.
-  const isDetailImmersion = isItemRoute || isPersonRoute;
+  const isDetailImmersion = isItemRoute || isPersonRoute || isTitleRoute;
   const targetDetailImmersion = isDetailImmersion;
   const visualDetailImmersion = useImmediateSidebarCollapse(targetDetailImmersion);
   const {

@@ -92,7 +92,8 @@ func (r *CatalogResolver) buildHistoryPreviewPagePlan(req CatalogRequest, access
 	}
 	if prefix := strings.ToLower(strings.TrimSpace(req.NamePrefix)); prefix != "" {
 		prefixArgs = append(prefixArgs, prefix)
-		searchConditions = append(searchConditions, fmt.Sprintf("(starts_with(lower(btrim(mi.title)), $%d) OR starts_with(lower(btrim(mi.sort_title)), $%d))", len(prefixArgs), len(prefixArgs)))
+		// Same key as sortTitlePrefixCondition, which the history facets use.
+		searchConditions = append(searchConditions, fmt.Sprintf("starts_with(%s, $%d)", sortTitleKeyExpr, len(prefixArgs)))
 	}
 
 	// Put history/search arguments before the existing plan's CTE, filter, and

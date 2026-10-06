@@ -8,7 +8,7 @@ import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks } from "@/pages/admin-policy/policyTestUtils";
 import { useAudiobookGroups } from "./audiobookGroups";
 import { useMetadataAIStatus } from "./metadataAI";
-import { usePersonSearch } from "./people";
+import { usePersonSearch } from "./personSearch";
 import { personKeys } from "./keys";
 
 describe("catalog query cancellation", () => {
@@ -29,7 +29,6 @@ describe("catalog query cancellation", () => {
       () => useSeriesEpisodes("series-1", 1, 3),
       "/api/v2/catalog/series/series-1/seasons",
     ],
-    ["people search", () => usePersonSearch("Frank"), "/api/v2/catalog/people"],
     ["metadata AI capability", () => useMetadataAIStatus(), "/api/v2/capabilities/metadata-ai"],
   ] as const)("aborts %s when the observer unmounts", async (_name, useRead, path) => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

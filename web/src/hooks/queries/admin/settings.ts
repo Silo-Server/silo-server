@@ -8,6 +8,8 @@ import {
   type SettingsBaseline,
 } from "@/api/v2/adminSettingsSnapshot";
 import { jellyfinCompatStatusKey } from "@/api/v2/jellyfinStatusCache";
+import { PASSWORD_RESET_CAPABILITY_KEY } from "@/hooks/queries/passwordReset";
+import { refreshAuthProviders } from "../authProviders";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   captureProfileRequestContext,
@@ -68,13 +70,13 @@ function useRetainedSettingsBaseline(
 
 export type CatalogSearchStatus = V2Result<"GET /api/v2/admin/catalog/search/status">;
 
-export function useAdminServerSettings() {
+export function useAdminServerSettings({ enabled = true }: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
   return useQuery({
     queryKey: profileContext
       ? adminSettingsKey(profileContext)
       : [...adminKeys.serverSettings(), null],
-    enabled: profileContext !== null,
+    enabled: enabled && profileContext !== null,
     queryFn: () => {
       if (!profileContext) throw new StaleApiRequestContextError();
       return readAdminSettings(profileContext);
@@ -207,12 +209,27 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ];
+      if (keys.includes("auth.local_password_login") || keys.includes("server.public_url")) {
+        invalidations.push(refreshAuthProviders(queryClient));
+      }
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
           // The user-facing Connect Apps card reads the same settings and
           // caches them for minutes, so it has to drop its copy too.
           queryClient.invalidateQueries({ queryKey: compatKeys.all }),
+        );
+      }
+      if (keys.includes("server.public_url")) {
+        // Invitation and reset links are built on the public URL, so the
+        // capability answers that gate them change with it.
+        invalidations.push(
+          queryClient.invalidateQueries({
+            queryKey: adminKeys.users(),
+            predicate: (query) => query.queryKey.at(-1) === "capabilities",
+          }),
+          // Self-service reset also needs the public URL.
+          queryClient.invalidateQueries({ queryKey: PASSWORD_RESET_CAPABILITY_KEY }),
         );
       }
       if (keys.some((key) => key.startsWith("catalog.search."))) {
@@ -308,6 +325,9 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ];
+      if (variables.key === "auth.local_password_login" || variables.key === "server.public_url") {
+        invalidations.push(refreshAuthProviders(queryClient));
+      }
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),

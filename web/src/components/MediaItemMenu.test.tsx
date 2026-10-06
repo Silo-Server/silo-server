@@ -5,7 +5,6 @@ import { MemoryRouter } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MediaItemMenu, { buildMediaItemMenuModel, MetadataActionDialogHost } from "./MediaItemMenu";
-import { mediaItemMenuTriggerClassName } from "./mediaItemMenuTrigger";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
@@ -210,42 +209,6 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).not.toContain("Match Item");
   });
 
-  it("shows a continue watching dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Continue Watching",
-    });
-
-    expect(
-      model.some(
-        (item) => item.kind === "action" && item.label === "Remove from Continue Watching",
-      ),
-    ).toBe(true);
-  });
-
-  it("shows a next up dismissal action when provided", () => {
-    const model = buildMediaItemMenuModel({
-      mediaType: "episode",
-      userState: {
-        played: false,
-        is_favorite: false,
-        in_watchlist: false,
-      },
-      isAdmin: false,
-      dismissLabel: "Remove from Next Up",
-    });
-
-    expect(
-      model.some((item) => item.kind === "action" && item.label === "Remove from Next Up"),
-    ).toBe(true);
-  });
-
   it("shows play from beginning for partially watched leaf items", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "episode",
@@ -381,20 +344,6 @@ describe("MediaItemMenu metadata dialogs", () => {
 });
 
 describe("MediaItemMenu trigger visibility", () => {
-  it("leaves reveal rules to the media-card CSS instead of utility classes", () => {
-    const className = mediaItemMenuTriggerClassName();
-
-    expect(className).toContain("media-card-action-trigger");
-    expect(className).not.toContain("pointer-fine:");
-    expect(className).not.toContain("opacity-");
-    expect(className).not.toContain("group-hover");
-    expect(className).not.toContain("group-focus-within");
-    expect(className).not.toContain("backdrop-blur");
-    expect(className).toContain("focus-visible:ring-2");
-    expect(className).toContain("size-6");
-    expect(className).toContain("sm:size-8");
-  });
-
   it("drops pointer focus when the trigger closes the menu so hover exit can hide it", async () => {
     render(
       <MemoryRouter>
@@ -409,6 +358,16 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "More actions" });
+    const className = trigger.className;
+    expect(className).toContain("media-card-action-trigger");
+    expect(className).not.toContain("pointer-fine:");
+    expect(className).not.toContain("opacity-");
+    expect(className).not.toContain("group-hover");
+    expect(className).not.toContain("group-focus-within");
+    expect(className).not.toContain("backdrop-blur");
+    expect(className).toContain("focus-visible:ring-2");
+    expect(className).toContain("size-6");
+    expect(className).toContain("sm:size-8");
     await userEvent.click(trigger);
     expect(screen.getByRole("menu")).toBeTruthy();
 
@@ -469,27 +428,6 @@ describe("MediaItemMenu trigger visibility", () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(trigger);
     });
-  });
-
-  it("renders a matching bottom-left favorite control for poster cards", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.className).toContain("media-card-action-trigger");
-    expect(button.className).toContain("cursor-pointer");
-    expect(button.className).not.toContain("cursor-wait");
-    expect(button.parentElement?.className).toContain("left-2.5");
   });
 
   it("shows matching eye state in the hover control and three-dot menu", async () => {
@@ -790,7 +728,13 @@ describe("MediaItemMenu trigger visibility", () => {
       </MemoryRouter>,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Add to favorites" }));
+    const button = screen.getByRole("button", { name: "Add to favorites" });
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.className).toContain("media-card-action-trigger");
+    expect(button.className).toContain("cursor-pointer");
+    expect(button.className).not.toContain("cursor-wait");
+    expect(button.parentElement?.className).toContain("left-2.5");
+    await userEvent.click(button);
 
     expect(mocks.toggleFavorite).toHaveBeenCalledTimes(1);
     expect(mocks.toggleFavorite).toHaveBeenCalledWith(false);
@@ -818,6 +762,11 @@ describe("MediaItemMenu trigger visibility", () => {
     );
 
     const button = screen.getByRole("button", { name: "Add to favorites" });
+    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
+    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
+    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
+    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
     fireEvent.pointerDown(button, { pointerId: 7, button: 0, clientX: 120, clientY: 240 });
     fireEvent.pointerUp(button, { pointerId: 7, button: 0, clientX: 128, clientY: 248 });
 
@@ -914,28 +863,6 @@ describe("MediaItemMenu trigger visibility", () => {
     fireEvent.pointerUp(button, { pointerId: 8, button: 0, clientX: 128, clientY: 240 });
 
     expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-  });
-
-  it("does not favorite when a swipe returns near its starting point", () => {
-    render(
-      <MemoryRouter>
-        <MediaItemMenu
-          contentId="movie-1"
-          mediaType="movie"
-          userState={{ played: false, is_favorite: false, in_watchlist: false }}
-          variant="poster"
-          quickActionMode="both"
-        />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Add to favorites" });
-    fireEvent.pointerDown(button, { pointerId: 9, button: 0, clientX: 120, clientY: 240 });
-    fireEvent.pointerMove(button, { pointerId: 9, clientX: 144, clientY: 240 });
-    fireEvent.pointerUp(button, { pointerId: 9, button: 0, clientX: 124, clientY: 240 });
-
-    expect(mocks.toggleFavorite).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Add to favorites" })).toBeTruthy();
   });
 
   it("keeps the poster heart in sync when favorite state changes through the menu", async () => {
@@ -1129,19 +1056,6 @@ describe("MediaItemMenu long-press action sheet", () => {
     document.documentElement.removeAttribute("data-fine-pointer");
   });
 
-  it("opens the sheet with the full action set after a touch hold", () => {
-    render(<LongPressCard />);
-
-    pressCard();
-    holdPastLongPress();
-
-    const sheet = screen.getByRole("dialog");
-    expect(within(sheet).getByText("Apex")).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
-    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
-  });
-
   it("ignores mouse presses so precise pointers keep the hover controls", () => {
     render(<LongPressCard />);
 
@@ -1197,9 +1111,12 @@ describe("MediaItemMenu long-press action sheet", () => {
 
     pressCard();
     holdPastLongPress();
-    fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Mark Watched" }),
-    );
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByText("Apex")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Mark Watched" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Favorites" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Add to Watchlist" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Mark Watched" }));
 
     expect(mocks.toggleWatched).toHaveBeenCalledWith(true);
     expect(screen.queryByRole("dialog")).toBeNull();

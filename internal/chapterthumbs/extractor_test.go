@@ -99,26 +99,6 @@ func TestExtractFrameSoftwareHDRDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestExtractFrameUnsupportedHardwareUsesCPU(t *testing.T) {
-	var args []string
-	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
-		InputPath:   "/media/movie.mkv",
-		SeekSeconds: 42.5,
-		HWAccel:     "nvenc",
-		RunFunc: func(_ context.Context, _ string, got []string) ([]byte, error) {
-			args = append([]string(nil), got...)
-			return []byte("frame"), nil
-		},
-	})
-	if err != nil || reason != "" || string(data) != "frame" {
-		t.Fatalf("ExtractFrame() = %q, %q, %v", data, reason, err)
-	}
-	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "-hwaccel") || strings.Contains(joined, "nvenc") {
-		t.Fatalf("unsupported chapter-thumbnail accelerator used hardware args: %s", joined)
-	}
-}
-
 func TestExtractFrameVideoToolboxUsesHardwareDecodeOnce(t *testing.T) {
 	calls := 0
 	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{

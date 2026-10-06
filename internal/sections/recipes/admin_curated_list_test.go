@@ -33,14 +33,3 @@ func TestAdminCuratedListRequiresItems(t *testing.T) {
 		t.Error("expected error for missing item_ids")
 	}
 }
-
-func TestAdminCuratedListPresetExists(t *testing.T) {
-	rec, _ := Get("admin_curated_list")
-	presets := rec.Definition().Presets
-	if len(presets) != 1 {
-		t.Fatalf("expected 1 preset, got %d", len(presets))
-	}
-	if presets[0].Key != "acl_blank" {
-		t.Errorf("preset key = %q want acl_blank", presets[0].Key)
-	}
-}

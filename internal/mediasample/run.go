@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -92,6 +93,15 @@ type Result struct {
 	Frames []FrameStats `json:"frames,omitempty"`
 	// Images holds the decoded images when the request asked for Images.
 	Images []Image `json:"images,omitempty"`
+	// Sheets holds the sprite sheets, in order, when the request asked for
+	// Sheets, and SheetFrames how their cells were filled.
+	Sheets      []Sheet     `json:"sheets,omitempty"`
+	SheetFrames SheetFrames `json:"sheet_frames,omitzero"`
+	// SheetTileHeight is the actual cell height, which UseInputAspect may
+	// change from the request after probing the input's display matrix.
+	SheetTileHeight int `json:"sheet_tile_height,omitzero"`
+	// Speech holds the speech levels when the request asked for them.
+	Speech *SpeechLevels `json:"speech,omitempty"`
 	// Decoder names the attempt that produced the result: "software", or
 	// "hardware:<accel>".
 	Decoder string `json:"decoder"`
@@ -126,9 +136,9 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 	if attempt.Hardware {
 		decoder = "hardware:" + r.HWAccel
 	}
-	// A hardware attempt reserves its device, and an image attempt settles
-	// its filters, before its timeout starts, so neither eats into the
-	// decode's time.
+	// A hardware attempt reserves its device, and an image or sheet attempt
+	// settles its filters, before its timeout starts, so neither eats into
+	// the decode's time.
 	hw, release, failure := r.reserveHardware(attempt)
 	if failure != nil {
 		failure.Decoder = decoder
@@ -144,13 +154,22 @@ func (r Runner) runAttempt(ctx context.Context, req Request, attempt Attempt, to
 		}
 		imageArgs = args
 	}
+	var sheetsGraph string
+	if req.Sheets != nil {
+		graph, failure := r.prepareSheets(ctx, req, attempt, toneMap)
+		if failure != nil {
+			failure.Decoder = decoder
+			return Result{}, failure
+		}
+		sheetsGraph = graph
+	}
 	attemptCtx := ctx
 	if attempt.TimeoutSeconds > 0 {
 		var cancel context.CancelFunc
 		attemptCtx, cancel = context.WithTimeout(ctx, time.Duration(attempt.TimeoutSeconds*float64(time.Second)))
 		defer cancel()
 	}
-	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder}
+	run := attemptRun{runner: r, ctx: ctx, attemptCtx: attemptCtx, attempt: attempt, hw: hw, decoder: decoder, sheetsGraph: sheetsGraph, toneMap: toneMap}
 	switch {
 	case req.At != nil:
 		return run.image(req, imageArgs)
@@ -195,24 +214,48 @@ type attemptRun struct {
 	attempt    Attempt
 	hw         hardwareDecode
 	decoder    string
+	// sheetsGraph is the video chain of a Sheets request.
+	sheetsGraph string
+	toneMap     *toneMapResolver
 }
 
-// samples runs a Samples request. It probes the input first (see probe.go),
-// then reads it through a concat list when its container seeks to keyframes,
-// and otherwise as one keyframes-only window whose keyframes it picks the
-// samples from.
+// samples runs a Samples request. Unless it reads through, it probes the
+// input first (see probe.go), then reads it through a concat list when its
+// container seeks to keyframes. Otherwise it reads one keyframes-only window
+// and picks the samples from its keyframes.
 func (a attemptRun) samples(req Request) (Result, *AttemptError) {
-	header := &inputHeaderParser{}
-	if _, failure := a.exec(req, probeArgs(req.Input), nil, false, header.line); failure != nil {
-		return Result{}, failure
-	}
-	if header.info.seeksToKeyframes() {
-		return a.decode(req, header.info.StartSeconds)
+	if !req.Samples.ReadThrough || (req.Sheets != nil && req.Sheets.UseInputAspect) {
+		header := &inputHeaderParser{}
+		if failure := a.exec(req, probeArgs(req.Input), nil, nil, header.line); failure != nil {
+			return Result{}, failure
+		}
+		if req.Sheets != nil && req.Sheets.UseInputAspect {
+			out := req.Sheets.forDisplayAspect(header.info.displayAspect())
+			if err := out.validate(); err != nil {
+				return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
+			}
+			req.Sheets = &out
+			graph, failure := a.runner.prepareSheets(a.attemptCtx, req, a.attempt, a.toneMap)
+			if failure != nil {
+				failure.Decoder = a.decoder
+				return Result{}, failure
+			}
+			a.sheetsGraph = graph
+		}
+		if !req.Samples.ReadThrough && header.info.seeksToKeyframes() {
+			if req.Sheets != nil {
+				return a.sheets(req, req.Samples.Seconds, header.info.StartSeconds)
+			}
+			return a.decode(req, header.info.StartSeconds)
+		}
 	}
 	window := sampledWindow(req.Samples.Seconds)
 	windowReq := req
 	windowReq.Samples = nil
 	windowReq.Window = &window
+	if req.Sheets != nil {
+		return a.sheets(windowReq, req.Samples.Seconds, 0)
+	}
 	result, failure := a.decode(windowReq, 0)
 	if failure != nil {
 		return Result{}, failure
@@ -243,14 +286,27 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 		}
 		handlers = append(handlers, stats.line)
 	}
-	stdout, failure := a.exec(req, args, stdinBytes, req.Audio != nil && req.Audio.Fingerprint, handlers...)
-	if failure != nil {
+	var stdout io.Writer
+	var fingerprint *bytes.Buffer
+	var speech *speechWriter
+	switch {
+	case req.speech() != nil:
+		speech = newSpeechWriter(req.Window.DurationSeconds)
+		stdout = speech
+	case req.Audio != nil && req.Audio.Fingerprint:
+		fingerprint = &bytes.Buffer{}
+		stdout = fingerprint
+	}
+	if failure := a.exec(req, args, stdinBytes, stdout, handlers...); failure != nil {
 		return Result{}, failure
 	}
 
 	result := Result{Decoder: a.decoder}
-	if stdout != nil {
-		result.Fingerprint = DecodeRawFingerprint(stdout.Bytes())
+	if fingerprint != nil {
+		result.Fingerprint = DecodeRawFingerprint(fingerprint.Bytes())
+	}
+	if speech != nil {
+		result.Speech = speech.result(req.Window.StartSeconds)
 	}
 	if silences != nil {
 		result.Silences = silences.result()
@@ -261,19 +317,50 @@ func (a attemptRun) decode(req Request, inputStart float64) (Result, *AttemptErr
 	return result, nil
 }
 
+// sheets runs a Sheets request for the sample times, reading req's list
+// (with inpoints offset by inputStart) or window, and tiles the frames.
+func (a attemptRun) sheets(req Request, times []float64, inputStart float64) (Result, *AttemptError) {
+	var packetTimingPath string
+	if req.Window != nil {
+		dir, err := os.MkdirTemp("", "silo-sheets-*")
+		if err != nil {
+			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("create packet timing directory: %w", err)}
+		}
+		defer func() { _ = os.RemoveAll(dir) }()
+		packetTimingPath = filepath.Join(dir, "packets.framecrc")
+	}
+	args, stdinBytes, err := buildSheetsArgs(req, a.attempt, a.hw, inputStart, a.sheetsGraph, packetTimingPath)
+	if err != nil {
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonArgs, Err: err}
+	}
+	offset := 0.0
+	if req.Window != nil {
+		offset = req.Window.StartSeconds
+	}
+	assembler := newSheetAssembler(*req.Sheets, times, req.Samples != nil, offset)
+	if failure := a.exec(req, args, stdinBytes, assembler, assembler.line); failure != nil {
+		return Result{}, failure
+	}
+	if packetTimingPath != "" {
+		if err := assembler.readPacketTiming(packetTimingPath); err != nil {
+			return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("read packet timing: %w", err)}
+		}
+	}
+	sheets, frames, failure := assembler.finish()
+	if failure != nil {
+		failure.Decoder = a.decoder
+		return Result{}, failure
+	}
+	return Result{Decoder: a.decoder, Sheets: sheets, SheetFrames: frames, SheetTileHeight: req.Sheets.TileHeight}, nil
+}
+
 // exec runs one ffmpeg process of the attempt with args, feeding it stdin
-// when that is not nil and routing its log to handlers. It returns the
-// process's stdout when captureStdout is set.
-func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureStdout bool, handlers ...func(string)) (*bytes.Buffer, *AttemptError) {
+// when that is not nil, writing its stdout to stdout when that is not nil,
+// and routing its log to handlers.
+func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, stdoutWriter io.Writer, handlers ...func(string)) *AttemptError {
 	var stdin io.Reader
 	if stdinBytes != nil {
 		stdin = bytes.NewReader(stdinBytes)
-	}
-	var stdout *bytes.Buffer
-	var stdoutWriter io.Writer
-	if captureStdout {
-		stdout = &bytes.Buffer{}
-		stdoutWriter = stdout
 	}
 	router := newStderrRouter(handlers...)
 	stderr, waitStderr := router.start()
@@ -312,7 +399,7 @@ func (a attemptRun) exec(req Request, args []string, stdinBytes []byte, captureS
 		case !replaced && state == nil:
 			failure.Reason = ReasonStart
 		}
-		return nil, failure
+		return failure
 	}
-	return stdout, nil
+	return nil
 }

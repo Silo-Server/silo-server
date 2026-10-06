@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -29,6 +28,7 @@ type AdminCollectionPreview = previewLibraryCollectionResponse
 type AdminCollectionPreviewRequest = previewCollectionRequest
 type AdminCollectionImportMDBList = importMDBListRequest
 type AdminCollectionImportTMDB = importTMDBRequest
+type AdminCollectionImportTMDBList = importTMDBListRequest
 type AdminCollectionImportTrakt = importTraktRequest
 type AdminCollectionImportResult = importCollectionResponse
 type AdminCollectionTemplateApply = applyTemplateBundleRequest
@@ -89,7 +89,7 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 	if err := eg.Wait(); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	collections := <-collectionsCh
+	collections := h.withViewerPosters(ctx, <-collectionsCh, AccessFilterFromContext(ctx, ""))
 	var groups []models.LibraryCollectionGroup
 	if groupsCh != nil {
 		groups = <-groupsCh
@@ -114,6 +114,9 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
+	}
+	if err := validateTMDBListSourceConfig(req.SourceConfig, req.SourceURL); err != nil {
+		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	if req.Slug == "" {
 		req.Slug = slugifyCollectionName(req.Title)
@@ -196,7 +199,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	h.refreshSmartCountAsync(collection.ID)
 
-	return h.libraryCollectionResponseOf(ctx, collection), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, collection)), nil
 }
 func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, req AdminCollectionCreate) (AdminCollection, error) {
 	return h.createAdminCollection(ctx, req, h.adminArtworkSources(ctx))
@@ -295,7 +298,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(queryDefinition) > 0 || req.CollectionType != nil {
 		h.refreshSmartCountAsync(collectionID)
 	}
-	return h.libraryCollectionResponseOf(ctx, updated), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
 }
 
 func adminCollectionLookupAPIError(err error) error {
@@ -322,6 +325,9 @@ func validateAdminCollectionSourceUpdate(existing *models.LibraryCollection, req
 	willBeTrakt := proposedType == adminCollectionTrakt || isTraktCollectionSourceConfig(proposedConfig)
 	if !wasTrakt && willBeTrakt {
 		return apiError(http.StatusBadRequest, "unsupported_source", "new Trakt collections are not supported")
+	}
+	if err := validateTMDBListSourceConfig(proposedConfig, proposedURL); err != nil {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
 	}
 	if wasTrakt {
 		activatesSchedule := req.SyncSchedule != nil && strings.TrimSpace(*req.SyncSchedule) != "" && (existing.SyncSchedule == nil || strings.TrimSpace(*existing.SyncSchedule) == "")
@@ -402,7 +408,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -419,7 +425,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -447,7 +453,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -464,12 +470,54 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
 func (h *LibraryCollectionHandler) ImportAdminTMDB(ctx context.Context, req AdminCollectionImportTMDB) (AdminCollectionImportResult, error) {
 	return h.importAdminTMDB(ctx, req, h.adminArtworkSources(ctx))
+}
+
+func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req AdminCollectionImportTMDBList, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {
+	var none AdminCollectionImportResult
+	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.URL) == "" {
+		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids, title, and url are required")
+	}
+	if req.Limit != nil && *req.Limit <= 0 {
+		return none, apiError(http.StatusBadRequest, "bad_request", "limit must be greater than 0")
+	}
+
+	collection, err := h.createTMDBListCollection(ctx, req)
+	if err != nil {
+		if validationErr, ok := errors.AsType[requestValidationError](err); ok {
+			return none, apiError(http.StatusBadRequest, "bad_request", validationErr.Error())
+		}
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
+	}
+
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
+	// uploaded poster and skips collage generation.
+	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+	}
+
+	run, err := h.service.SyncCollection(ctx, collection.ID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to sync TMDB list collection")
+	}
+
+	refreshed, err := h.repo.GetByID(ctx, collection.ID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
+	}
+
+	return importCollectionResponse{
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
+		SyncRun:    run,
+	}, nil
+}
+func (h *LibraryCollectionHandler) ImportAdminTMDBList(ctx context.Context, req AdminCollectionImportTMDBList) (AdminCollectionImportResult, error) {
+	return h.importAdminTMDBList(ctx, req, h.adminArtworkSources(ctx))
 }
 
 func (h *LibraryCollectionHandler) importAdminTrakt(ctx context.Context, req AdminCollectionImportTrakt, artwork adminCollectionArtwork) (AdminCollectionImportResult, error) {
@@ -547,9 +595,14 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 	if len(data) == 0 || len(data) > collectionImageMaxBytes {
 		return apiError(400, "bad_request", "Artwork must be nonempty and at most 10 MiB")
 	}
-	if _, err := h.repo.GetByID(ctx, id); err != nil {
+	oldPath, err := h.adminCollectionImagePath(ctx, id, kind)
+	if err != nil {
 		return err
 	}
+	// Revisioned keys (issue #1258) mean the replacement uploads to a new key
+	// that cannot collide with the current artwork, so upload and commit it
+	// first. A failed upload or update then leaves the last valid image
+	// untouched. The previous revision is cleaned up only after the commit.
 	path, hash, err := h.processCollectionImage(ctx, id, kind, data)
 	if err != nil {
 		return err
@@ -564,7 +617,11 @@ func (h *LibraryCollectionHandler) UploadAdminCollectionArtwork(ctx context.Cont
 		input.BackdropURL = &path
 		input.BackdropThumbhash = &hash
 	}
-	return h.repo.Update(ctx, input)
+	if err := h.repo.Update(ctx, input); err != nil {
+		return err
+	}
+	h.cleanUpReplacedCollectionImage(ctx, id, kind, oldPath)
+	return nil
 }
 func (h *LibraryCollectionHandler) SetAdminCollectionArtworkSource(ctx context.Context, id, kind, url string) error {
 	if _, err := h.repo.GetByID(ctx, id); err != nil {
@@ -599,10 +656,8 @@ func (h *LibraryCollectionHandler) DeleteAdminCollectionArtwork(ctx context.Cont
 	if err := h.repo.Update(ctx, input); err != nil {
 		return err
 	}
-	if kind == collectionImagePoster && h.service != nil && h.service.CollageGen != nil {
-		if err := h.GenerateCollectionPoster(ctx, id); err != nil {
-			slog.DebugContext(ctx, "Collection poster regeneration unavailable", "error", err)
-		}
+	if kind == collectionImagePoster && h.service != nil {
+		h.service.MaybeGenerateCollage(ctx, id)
 	}
 	return nil
 }

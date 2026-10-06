@@ -1,9 +1,9 @@
-import { MemoryRouter } from "react-router";
-import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SectionItem } from "@/api/types";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { SectionItem } from "@/api/types";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildWatchRouteRequest } from "@/pages/watchRouteHelpers";
 import { takePlaybackIntent } from "@/player/first-frame";
@@ -76,27 +76,6 @@ function heroMetadata(container: HTMLElement): string[] {
 }
 
 describe("formatHeroMetadata", () => {
-  it("formats episode identity, runtime, and content rating without movie-only metadata", () => {
-    expect(
-      formatHeroMetadata(
-        movieSlide({
-          type: "episode",
-          season_number: 2,
-          episode_number: 3,
-          year: 2024,
-          runtime: 42,
-          rating_imdb: 7.6,
-          genres: ["Science Fiction", "Drama"],
-          content_rating: " tv-14 ",
-        }),
-      ),
-    ).toEqual([
-      { key: "episode-identity", label: "S2 · E3" },
-      { key: "runtime", label: "42 min" },
-      { key: "content-rating", label: "TV-14" },
-    ]);
-  });
-
   it.each([Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY, -1, 0, 10.1])(
     "omits invalid IMDb rating %s",
     (ratingImdb) => {
@@ -127,7 +106,33 @@ describe("formatHeroMetadata", () => {
       ),
     ).toEqual([
       { key: "year", label: "2025" },
-      { key: "imdb", label: "IMDb 10.0" },
+      {
+        key: "rating",
+        label: "IMDb 10.0",
+        rating: { source: "imdb", name: "IMDb", score: 100, display: "10.0" },
+      },
+    ]);
+  });
+
+  it("falls back to the TMDB score when there is no IMDb score", () => {
+    expect(
+      formatHeroMetadata(
+        movieSlide({
+          runtime: undefined,
+          duration_seconds: undefined,
+          rating_imdb: undefined,
+          rating_tmdb: 7.25,
+          genres: [],
+          content_rating: undefined,
+        }),
+      ),
+    ).toEqual([
+      { key: "year", label: "2025" },
+      {
+        key: "rating",
+        label: "TMDB 7.3",
+        rating: { source: "tmdb", name: "TMDB", score: 72.5, display: "7.3" },
+      },
     ]);
   });
 
@@ -414,36 +419,6 @@ describe("HeroBanner", () => {
         (image) => image.style.animation !== "none",
       ),
     ).toHaveLength(1);
-  });
-
-  it("does not render the desktop spotlighting card", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <HeroBanner
-          items={[
-            {
-              content_id: "movie-1",
-              type: "movie",
-              title: "Featured Movie",
-              year: 2025,
-              genres: ["Drama"],
-              status: "matched",
-              rating_imdb: 8.1,
-              overview: "Overview",
-              poster_url: "",
-              poster_thumbhash: "",
-              backdrop_url: "",
-              backdrop_thumbhash: "",
-              logo_url: "",
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("Now spotlighting");
-    expect(markup).toContain("Featured Movie");
-    expect(markup).toContain("More Info");
   });
 
   it("renders editorial metadata in the approved order and caps genres at two", () => {

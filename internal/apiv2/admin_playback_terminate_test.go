@@ -108,19 +108,22 @@ func TestAdminTerminateCapabilityAndAbsence(t *testing.T) {
 	admin := with(bearer(adminToken), "X-Profile-Id", "p-primary")
 	deps := pilotDeps(nil, nil)
 	deps.AdminPlaybackCommands = &fakeAdminPlaybackCommands{available: true}
-	rec := do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
+	h := NewHandler(deps)
+	rec := do(t, h, http.MethodGet, capability, "", admin)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"actions":["pause","resume","stop","message"]`) || !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":false`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
-	deps.AdminPlaybackTerminate = &fakeAdminTerminate{available: false}
-	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
-	rec = do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
+	requireProblem(t, do(t, h, http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
+	f := &fakeAdminTerminate{available: false}
+	deps.AdminPlaybackTerminate = f
+	h = NewHandler(deps)
+	requireProblem(t, do(t, h, http.MethodPost, adminCommandRoot+"/terminate", `{}`, admin), TypeDependencyUnavailable)
+	rec = do(t, h, http.MethodGet, capability, "", admin)
 	if !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":false`) || strings.Contains(rec.Body.String(), `"terminate"`) {
 		t.Fatal(rec.Body.String())
 	}
-	deps.AdminPlaybackTerminate = &fakeAdminTerminate{available: true}
-	rec = do(t, NewHandler(deps), http.MethodGet, capability, "", admin)
+	f.available = true
+	rec = do(t, h, http.MethodGet, capability, "", admin)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"actions":["pause","resume","stop","message","terminate"]`) || !strings.Contains(rec.Body.String(), `"terminate_revokes_authority":true`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}

@@ -49,6 +49,15 @@ const (
 	TokenTypeApplePushDisplay = "apple_push_display"
 )
 
+// IsOwnLoginSession reports whether the claims come from the account's own
+// login session: not an API key, not a sessionless token and not an
+// impersonation session. Operations that act for the person themselves
+// (approving a device, linking or unlinking a sign-in, provider logout,
+// handing over ownership) admit only these.
+func (c *Claims) IsOwnLoginSession() bool {
+	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil
+}
+
 const PluginAccessCookieName = "silo_plugin_access"
 
 // JWTService handles JWT token generation and validation using HMAC-SHA256.

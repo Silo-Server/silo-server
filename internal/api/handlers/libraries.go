@@ -68,6 +68,37 @@ type LibraryHandler struct {
 	EventsHub             *evt.Hub
 	ScanRegistry          *evt.ScanRegistry
 	ScanQueue             libraryScanQueuer
+	// RealtimeMonitor, when set, reconciles real-time library monitoring
+	// right after a library create, update or delete handled on this node.
+	RealtimeMonitor libraryMonitorPoker
+	// Trickplay, when set, queues or removes seek previews right after a
+	// library's trickplay setting changes on this node.
+	Trickplay libraryTrickplayReconciler
+}
+
+// libraryTrickplayReconciler is the slice of *trickplay.Service the library
+// mutations use.
+type libraryTrickplayReconciler interface {
+	ReconcileSoon()
+}
+
+func (h *LibraryHandler) reconcileTrickplay() {
+	if h.Trickplay != nil {
+		h.Trickplay.ReconcileSoon()
+	}
+}
+
+// libraryMonitorPoker is the slice of *librarymonitor.Monitor the library
+// mutations use.
+type libraryMonitorPoker interface {
+	Poke()
+}
+
+// pokeRealtimeMonitor asks the monitor, if any, to reconcile now.
+func (h *LibraryHandler) pokeRealtimeMonitor() {
+	if h.RealtimeMonitor != nil {
+		h.RealtimeMonitor.Poke()
+	}
 }
 
 // pluginInstallationLister provides access to plugin installations and capabilities
@@ -184,6 +215,11 @@ type createLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh; omitted = default (all provider kinds).
 	TrailerKinds []string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 createLibrary operation; the
+	// frozen /api/v1 body never carries it. nil means on.
+	RealtimeMonitoring *bool `json:"-"`
+	// TrickplayEnabled is set only by the v2 createLibrary operation.
+	TrickplayEnabled bool `json:"-"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -199,6 +235,18 @@ type updateLibraryRequest struct {
 	// TrailerKinds is the allow-list of remote video kinds fetched during
 	// metadata refresh (ExtraKind values); empty array disables remote videos.
 	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
+	// RealtimeMonitoring is set only by the v2 updateLibrary operation; the
+	// frozen /api/v1 body never carries it, so v1 updates leave it unchanged.
+	RealtimeMonitoring *bool `json:"-"`
+	// TrickplayEnabled is set only by the v2 updateLibrary operation.
+	TrickplayEnabled *bool `json:"-"`
+}
+
+// affectsTrickplay reports whether the update can change which of the
+// library's files get seek previews: the setting itself, the library type,
+// or whether the library is enabled.
+func (r updateLibraryRequest) affectsTrickplay() bool {
+	return r.TrickplayEnabled != nil || r.Type != nil || r.Enabled != nil
 }
 
 // scanRequest represents the JSON body for POST /scan.
@@ -248,6 +296,13 @@ type libraryResponse struct {
 	ScanWarningCode            *string    `json:"scan_warning_code,omitempty"`
 	ScanWarningMessage         *string    `json:"scan_warning_message,omitempty"`
 	ScanWarningAt              *time.Time `json:"scan_warning_at,omitempty"`
+	// RealtimeMonitoring is read by the v2 library view only; the frozen
+	// /api/v1 response does not carry it.
+	RealtimeMonitoring bool `json:"-"`
+	// TrickplayEnabled and TrickplaySupported are read by the v2 library
+	// view only.
+	TrickplayEnabled   bool `json:"-"`
+	TrickplaySupported bool `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -387,6 +442,8 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ScanWarningCode:            f.ScanWarningCode,
 		ScanWarningMessage:         f.ScanWarningMessage,
 		ScanWarningAt:              f.ScanWarningAt,
+		RealtimeMonitoring:         f.RealtimeMonitoring,
+		TrickplayEnabled:           f.TrickplayEnabled,
 	}
 }
 
@@ -395,6 +452,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 func (h *LibraryHandler) toLibraryResponseWithPoster(ctx context.Context, f *models.MediaFolder) libraryResponse {
 	resp := toLibraryResponse(f)
 	resp.ChapterThumbnailsSupported = h.ArtworkStore != nil
+	resp.TrickplaySupported = h.ArtworkStore != nil
 	if f.PosterPath != "" && h.ArtworkResolver != nil {
 		resp.PosterURL = h.ArtworkResolver.ResolveURLs(ctx, []string{f.PosterPath})[f.PosterPath].URL
 	}
@@ -693,7 +751,6 @@ func (h *LibraryHandler) runFolderScanAsync(scanID string, folder *models.MediaF
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -751,7 +808,6 @@ func (h *LibraryHandler) runSubtreeScanAsync(scanID string, folder *models.Media
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -797,7 +853,6 @@ func (h *LibraryHandler) runFileScanAsync(scanID string, folder *models.MediaFol
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 		)
 	}()
 }
@@ -907,9 +962,6 @@ func scanRunResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		resp.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New

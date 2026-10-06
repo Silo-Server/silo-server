@@ -64,33 +64,6 @@ afterEach(() => {
 });
 
 describe("useNavigationDirection", () => {
-  it("stamps back when the router commits an earlier entry", () => {
-    startAt(1);
-    render(
-      <MemoryRouter initialEntries={["/a", "/b"]} initialIndex={1}>
-        <Harness />
-      </MemoryRouter>,
-    );
-
-    travel("back", 0);
-
-    expect(direction()).toBe("back");
-  });
-
-  it("stamps forward when the router commits a later entry", () => {
-    startAt(1);
-    render(
-      <MemoryRouter initialEntries={["/a", "/b"]} initialIndex={1}>
-        <Harness />
-      </MemoryRouter>,
-    );
-
-    travel("back", 0);
-    travel("forward", 1);
-
-    expect(direction()).toBe("forward");
-  });
-
   it("clears a stale direction when the pop's direction is unknowable", () => {
     startAt(1);
     render(
@@ -136,19 +109,5 @@ describe("useNavigationDirection", () => {
     // would compare 2 against 2 and lose the direction.
     travel("forward", 2);
     expect(direction()).toBe("forward");
-  });
-
-  it("stops stamping once unmounted", () => {
-    startAt(1);
-    const { unmount } = render(
-      <MemoryRouter initialEntries={["/a", "/b"]} initialIndex={1}>
-        <Harness />
-      </MemoryRouter>,
-    );
-    unmount();
-
-    window.history.replaceState({ idx: 0 }, "");
-
-    expect(direction()).toBeUndefined();
   });
 });

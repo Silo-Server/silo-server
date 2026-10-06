@@ -15,6 +15,8 @@ export function ChoiceCard({
   badge,
   selected,
   onSelect,
+  disabled,
+  describedBy,
 }: {
   title: string;
   description?: string;
@@ -23,15 +25,25 @@ export function ChoiceCard({
   badge?: string;
   selected: boolean;
   onSelect: () => void;
+  /**
+   * Unavailable: stays focusable, so a screen reader still reaches it and the
+   * reason `describedBy` names, but does nothing.
+   */
+  disabled?: boolean;
+  describedBy?: string;
 }) {
   return (
     <button
       type="button"
       aria-pressed={selected}
-      onClick={onSelect}
+      aria-disabled={disabled || undefined}
+      aria-describedby={describedBy}
+      onClick={disabled ? undefined : onSelect}
       className={cn(
-        "rounded-lg border p-3 text-left transition-colors",
-        selected ? "border-primary bg-accent" : "border-border hover:bg-accent/50",
+        "rounded-lg border p-3 text-left transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60",
+        selected
+          ? "border-primary bg-accent"
+          : "border-border [&:not([aria-disabled])]:hover:bg-accent/50",
       )}
     >
       <span className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
@@ -52,21 +64,29 @@ export function ChoiceCard({
   );
 }
 
+export interface Step {
+  label: string;
+  /** Answered: the operator has filled it in, or moved on past an optional one. */
+  done: boolean;
+}
+
 /**
  * Numbered progress indicator for the Add-source flow. Steps are supplied by
  * the caller because their number varies per source: a webhook-only watcher
  * needing no credentials genuinely has fewer questions than a pollable arr.
+ * The first unanswered step is the current one.
  */
-export function StepTrail({ steps, currentIndex }: { steps: string[]; currentIndex: number }) {
+export function StepTrail({ steps }: { steps: Step[] }) {
   if (steps.length < 2) return null;
+  const currentIndex = steps.findIndex((step) => !step.done);
 
   return (
     <ol className="flex flex-wrap items-center gap-x-2 gap-y-1">
       {steps.map((step, index) => {
-        const done = index < currentIndex;
+        const done = step.done;
         const active = index === currentIndex;
         return (
-          <li key={step} className="flex items-center gap-2">
+          <li key={step.label} className="flex items-center gap-2">
             {index > 0 && <span className="bg-border hidden h-px w-6 sm:block" aria-hidden />}
             <span
               className={cn(
@@ -84,7 +104,8 @@ export function StepTrail({ steps, currentIndex }: { steps: string[]; currentInd
               >
                 {done ? "✓" : index + 1}
               </span>
-              {step}
+              {step.label}
+              {done && <span className="sr-only">(done)</span>}
             </span>
           </li>
         );

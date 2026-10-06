@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import RecipeConfigDrawer from "./RecipeConfigDrawer";
 
 vi.mock("@/api/client", () => ({
@@ -13,6 +13,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
     { id: 1, name: "Movies" },
     { id: 2, name: "Shows" },
   ]),
+}));
+
+vi.mock("@/hooks/queries/libraries", () => ({
+  useAvailableUserLibraries: () => ({
+    data: [
+      { id: 1, name: "Movies" },
+      { id: 2, name: "Shows" },
+    ],
+  }),
 }));
 
 vi.mock("@/hooks/queries/useAllUserCollections", () => ({
@@ -38,12 +47,6 @@ const def = {
 const preset = def.presets[0]!;
 
 describe("RecipeConfigDrawer", () => {
-  it("renders title prefilled with preset display_name", () => {
-    render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={() => {}} />);
-    const title = screen.getByLabelText(/title/i) as HTMLInputElement;
-    expect(title.value).toBe("Recently Added");
-  });
-
   it("calls onAdd with title, params, and limit", async () => {
     const onAdd = vi.fn();
     render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={onAdd} />);
@@ -51,6 +54,40 @@ describe("RecipeConfigDrawer", () => {
     expect(onAdd).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Recently Added", item_limit: 20, config: {} }),
     );
+  });
+
+  it("filters a Recently Added row to the chosen libraries", async () => {
+    const onAdd = vi.fn();
+    render(
+      <RecipeConfigDrawer
+        def={def}
+        preset={preset}
+        showBulkApply={false}
+        onCancel={() => {}}
+        onAdd={onAdd}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Libraries" }));
+    await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Shows" }));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: /add section/i }));
+    expect(onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ config: { filter_library_ids: [2] } }),
+    );
+  });
+
+  it("hides the library picker for a section on a library page", () => {
+    render(
+      <RecipeConfigDrawer
+        def={def}
+        preset={preset}
+        libraryScoped
+        onCancel={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(screen.queryByText("Libraries")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Libraries" })).toBeNull();
   });
 
   it("requires a collection before submitting collection presets", async () => {

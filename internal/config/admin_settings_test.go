@@ -2,9 +2,14 @@
 package config
 
 import (
+	"context"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
@@ -54,23 +59,6 @@ func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T)
 				}
 			}
 		})
-	}
-}
-
-func TestEffectiveAdminSettingsUsesLegacyS3FallbacksBeforeDefaults(t *testing.T) {
-	effective := EffectiveAdminSettings(map[string]string{
-		"s3.operational_path_style": "false",
-		"s3.operational_token_ttl":  "3600",
-	})
-
-	if got := effective["s3.public_path_style"]; got != "false" {
-		t.Fatalf("s3.public_path_style = %q, want legacy false", got)
-	}
-	if got := effective["s3.private_path_style"]; got != "false" {
-		t.Fatalf("s3.private_path_style = %q, want legacy false", got)
-	}
-	if got := effective["s3.public_token_ttl"]; got != "3600" {
-		t.Fatalf("s3.public_token_ttl = %q, want legacy 3600", got)
 	}
 }
 
@@ -202,25 +190,40 @@ func TestAdminSettingDefaultsAlignWithConfigRuntimeDefaults(t *testing.T) {
 	}
 }
 
-func TestChapterThumbnailSoftwareToneMapDefaultsDisabled(t *testing.T) {
+// TestPlaybackTranscodeDefaults pins the transcode capability defaults and
+// checks that a runtime reader of an unset row sees the same value as the
+// Admin UI.
+func TestPlaybackTranscodeDefaults(t *testing.T) {
 	effective := EffectiveAdminSettings(nil)
-	if got := effective[chapterThumbnailSoftwareToneMapKey]; got != "false" {
-		t.Fatalf("software tone-map default = %q, want false", got)
+	for key, want := range map[string]bool{
+		Allow4KTranscodeSettingKey:                  true,
+		PlaybackAllowHEVCEncodingSettingKey:         false,
+		PlaybackTranscodeHardwareToneMapSettingKey:  true,
+		PlaybackTranscodeSoftwareToneMapSettingKey:  true,
+		ChapterThumbnailSoftwareToneMapSettingKey:   true,
+		playback.TranscodeThrottleEnabledSettingKey: true,
+	} {
+		if got := effective[key]; got != strconv.FormatBool(want) {
+			t.Errorf("%s default = %q, want %t", key, got, want)
+		}
+		if got := AdminSettingEnabled(key, ""); got != want {
+			t.Errorf("AdminSettingEnabled(%s, unset) = %t, want %t", key, got, want)
+		}
+		if got := AdminSettingEnabled(key, " "+strconv.FormatBool(!want)+" "); got == want {
+			t.Errorf("AdminSettingEnabled(%s, stored %t) ignored the stored value", key, !want)
+		}
+	}
+	if got := playback.ConfiguredTranscodeThrottleSeconds(t.Context(), mapSettings{}); got != playback.DefaultTranscodeThrottleSeconds {
+		t.Errorf("throttle with no stored settings = %d, want %d", got, playback.DefaultTranscodeThrottleSeconds)
+	}
+	if got := playback.ConfiguredTranscodeThrottleSeconds(t.Context(), mapSettings{playback.TranscodeThrottleEnabledSettingKey: "false"}); got != 0 {
+		t.Errorf("throttle explicitly disabled = %d, want 0", got)
 	}
 }
 
-// TestTranscodeToneMapPoliciesDefaultDisabled verifies tone mapping remains opt-in.
-func TestTranscodeToneMapPoliciesDefaultDisabled(t *testing.T) {
-	effective := EffectiveAdminSettings(nil)
-	for _, key := range []string{
-		PlaybackTranscodeHardwareToneMapSettingKey,
-		PlaybackTranscodeSoftwareToneMapSettingKey,
-	} {
-		if got := effective[key]; got != "false" {
-			t.Fatalf("%s default = %q, want false", key, got)
-		}
-	}
-}
+type mapSettings map[string]string
+
+func (m mapSettings) Get(_ context.Context, key string) (string, error) { return m[key], nil }
 
 func normalizeEffectiveRuntimeDefaults(cfg *Config) {
 	if cfg.S3.Public.URLAuth == "" {
@@ -253,7 +256,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 	}{
 		{key: "database.max_connections", value: "0"},
 		{key: "metadata.cache_images", value: "maybe"},
-		{key: chapterThumbnailSoftwareToneMapKey, value: "maybe"},
+		{key: ChapterThumbnailSoftwareToneMapSettingKey, value: "maybe"},
 		{key: PlaybackTranscodeHardwareToneMapSettingKey, value: "maybe"},
 		{key: PlaybackTranscodeSoftwareToneMapSettingKey, value: "maybe"},
 		{key: "auth.access_token_expiry", value: "forever"},
@@ -268,6 +271,7 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "scanner.max_concurrent_libraries", value: "0"},
 		{key: "scanner.max_concurrent_scoped", value: "-1"},
 		{key: "scanner.empty_trash_after_scan", value: "sometimes"},
+		{key: "scanner.realtime_monitoring", value: "sometimes"},
 		{key: "scanner.file_removal_grace", value: "a while"},
 		{key: "matcher.enable_tv_series_root_queue", value: "yes please"},
 		{key: "matcher.enable_tv_series_group_queue", value: "yes please"},
@@ -491,6 +495,7 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		"scanner.max_concurrent_scoped":          "2",
 		"scanner.file_removal_grace":             "24h",
 		"scanner.empty_trash_after_scan":         "true",
+		"scanner.realtime_monitoring":            "true",
 		"matcher.enable_tv_series_root_queue":    "true",
 		"matcher.enable_tv_series_group_queue":   "false",
 		"opslog.capture_level":                   "info",
@@ -502,6 +507,36 @@ func TestHiddenTierDefaultsAreExposed(t *testing.T) {
 		}
 		if _, err := NormalizeAdminSetting(key, value); err != nil {
 			t.Errorf("default for %q is rejected by NormalizeAdminSetting: %v", key, err)
+		}
+	}
+}
+
+func TestHEVCEncodingSettingDefaultAndValidation(t *testing.T) {
+	if got := EffectiveAdminSettings(nil)[PlaybackAllowHEVCEncodingSettingKey]; got != "false" {
+		t.Fatalf("HEVC default=%q", got)
+	}
+	for _, raw := range []string{"true", "false"} {
+		got, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, raw)
+		if err != nil || got != raw {
+			t.Fatalf("normalize %q: %q %v", raw, got, err)
+		}
+	}
+	if _, err := NormalizeAdminSetting(PlaybackAllowHEVCEncodingSettingKey, "invalid"); err == nil {
+		t.Fatal("invalid HEVC boolean accepted")
+	}
+}
+
+func TestAuthProviderRecheckInterval(t *testing.T) {
+	for raw, want := range map[string]time.Duration{
+		"":      12 * time.Hour,
+		"bogus": 12 * time.Hour,
+		"-1h":   12 * time.Hour,
+		"30m":   30 * time.Minute,
+		"2d":    48 * time.Hour,
+		" 6h ":  6 * time.Hour,
+	} {
+		if got := AuthProviderRecheckInterval(raw); got != want {
+			t.Errorf("AuthProviderRecheckInterval(%q) = %v, want %v", raw, got, want)
 		}
 	}
 }

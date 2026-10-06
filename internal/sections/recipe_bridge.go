@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
@@ -70,9 +69,4 @@ func convertItemMeta(in map[string]SectionItemMeta) map[string]recipes.SectionIt
 		}
 	}
 	return out
-}
-
-// AccessFilterFromContext is a convenience for tests/callers that need to build a context.
-func AccessFilterFromContext(rc recipes.ResolverContext) catalog.AccessFilter {
-	return rc.Filter
 }

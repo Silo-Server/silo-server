@@ -92,6 +92,7 @@ type Service struct {
 	sessions  sessionStarter
 	mail      mail.Sender
 	settings  mail.SettingReader
+	brand     *mail.BrandLoader
 	publicURL string
 	ttl       time.Duration
 	now       func() time.Time
@@ -105,13 +106,15 @@ type Service struct {
 }
 
 // NewService wires the reset link service. publicURL is the link-base
-// fallback when server.public_url is unset; may be empty.
+// fallback when server.public_url is unset; may be empty. brand styles the
+// email; nil sends Silo's default branding.
 func NewService(
 	repo *Repository,
 	users userDirectory,
 	sessions sessionStarter,
 	mailSender mail.Sender,
 	settings mail.SettingReader,
+	brand *mail.BrandLoader,
 	publicURL string,
 ) *Service {
 	return &Service{
@@ -120,6 +123,7 @@ func NewService(
 		sessions:  sessions,
 		mail:      mailSender,
 		settings:  settings,
+		brand:     brand,
 		publicURL: publicURL,
 		ttl:       DefaultTTL,
 		now:       time.Now,
@@ -215,12 +219,14 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 		result.URL = resetURL
 		return result, nil
 	}
-	content := composeResetEmail(false, user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
+	brand := s.brand.Load(ctx)
+	content := composeResetEmail(brand, false, user.Username, s.serverName(ctx), resetURL, expiresAt, s.now())
 	err = s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   brand.InlineImages(),
 	})
 	if err != nil {
 		return result, fmt.Errorf("reset link stored; email delivery failed or is uncertain: %w", err)
@@ -310,12 +316,14 @@ func (s *Service) sendRequested(ctx context.Context, login string) error {
 	if err != nil || !stored {
 		return err
 	}
-	content := composeResetEmail(true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
+	brand := s.brand.Load(ctx)
+	content := composeResetEmail(brand, true, user.Username, s.serverName(ctx), linkBase+"/reset-password/"+token, expiresAt, s.now())
 	if err := s.mail.Send(ctx, mail.Message{
 		To:       []string{user.Email},
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   brand.InlineImages(),
 	}); err != nil {
 		// A link that certainly was not sent is withdrawn, so the requester
 		// can ask again now rather than after the cooldown. When delivery is
