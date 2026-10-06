@@ -32,6 +32,7 @@ const (
 
 const (
 	ffmpegFlagHideBanner = "-hide_banner"
+	pixelFormatYUV420P   = "yuv420p"
 	ffmpegFlagLogLevel   = "-loglevel"
 	ffmpegLogLevelError  = "error"
 	// smokeEncodeSource is the synthetic one-frame input every hardware smoke
@@ -1020,12 +1021,16 @@ func ffmpegSupportsBackend(backend, ffmpegPath, device string) (bool, string) {
 // retried once its short negative TTL expires, so a driver or binary repaired
 // underneath a running server is picked up without a restart.
 func ffmpegSupportsBackendContext(ctx context.Context, backend, ffmpegPath, device string) (bool, string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	probe, ok := hwBackendProbeFor(backend)
 	if !ok {
 		return false, "unsupported hardware backend " + backend
+	}
+	return cachedHardwareProbeContext(ctx, backend, ffmpegPath, device, probe)
+}
+
+func cachedHardwareProbeContext(ctx context.Context, backend, ffmpegPath, device string, probe hwBackendProbe) (bool, string) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	ffmpegPath = normalizeFFmpegPath(ffmpegPath)
 	// The flight below outlives an abandoned caller, so every test-mutable seam
@@ -1390,10 +1395,8 @@ func probeFFmpegVideoToolboxContext(ctx context.Context, ffmpegPath string, comm
 
 	result := hardwareProbeResult{available: true, h264Available: true}
 	if ffmpegOutputHasToken(output, "hevc_videotoolbox") {
-		// Probe the 10-bit session the HEVC transcode path actually creates:
-		// hevc passes the source bit depth through (p010 for HDR10), so an
-		// 8-bit-only encoder must not advertise HEVC availability.
-		hevcOutput, hevcErr := smoke("hevc_videotoolbox", "-vf", "format=p010le")
+		// The negotiated HEVC recipe emits Main 8-bit SDR after conversion.
+		hevcOutput, hevcErr := smoke("hevc_videotoolbox", "-pix_fmt", pixelFormatYUV420P, "-profile:v", hevcMainProfileV3)
 		result.hevcAvailable = hevcErr == nil
 		if hevcErr != nil {
 			result.reason = "hevc_videotoolbox smoke encode failed: " + FormatFFmpegProbeFailure(hevcErr, hevcOutput)

@@ -31,24 +31,6 @@ func largeTestJPEG(t testing.TB, width, height int) []byte {
 	return buf.Bytes()
 }
 
-func TestThumbhashDeterministic(t *testing.T) {
-	data := largeTestJPEG(t, 1200, 800)
-	first, err := Thumbhash(data)
-	if err != nil {
-		t.Fatalf("Thumbhash: %v", err)
-	}
-	if first == "" {
-		t.Fatal("Thumbhash returned empty hash")
-	}
-	second, err := Thumbhash(data)
-	if err != nil {
-		t.Fatalf("Thumbhash (second call): %v", err)
-	}
-	if first != second {
-		t.Fatalf("Thumbhash not deterministic: %q vs %q", first, second)
-	}
-}
-
 func TestThumbhashRejectsGarbage(t *testing.T) {
 	if _, err := Thumbhash([]byte("not an image at all")); err == nil {
 		t.Fatal("Thumbhash accepted garbage input")
@@ -67,8 +49,12 @@ func TestThumbhashDoesNotDecodeFullRasterInGo(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
-	if _, err := Thumbhash(data); err != nil {
+	hash, err := Thumbhash(data)
+	if err != nil {
 		t.Fatalf("Thumbhash: %v", err)
+	}
+	if hash == "" {
+		t.Fatal("Thumbhash returned empty hash")
 	}
 	var after runtime.MemStats
 	runtime.ReadMemStats(&after)

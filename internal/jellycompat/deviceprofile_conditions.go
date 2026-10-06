@@ -13,6 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
+const codecProfileTargetVideo = "video"
+
 type codecProfileCompatibility struct {
 	VideoSupported bool
 	AudioSupported bool
@@ -100,7 +102,68 @@ func (p DeviceProfile) hlsRemuxCodecProfileCompatibility(version catalog.FileVer
 	if tag != "" {
 		values["videocodectag"] = conditionValue{text: tag}
 	}
-	return p.codecProfileCompatibilityWithValues(version, audioStreamIndex, values, "mp4", true)
+	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, "mp4", true,
+		func(conditions []ProfileCondition, values conditionValues) bool {
+			return hlsRemuxConditionsMatch(conditions, values, version)
+		})
+}
+
+func hlsRemuxConditionsMatch(conditions []ProfileCondition, values conditionValues, version catalog.FileVersion) bool {
+	for _, condition := range conditions {
+		if conditionMatches(condition, values) || hlsRemuxDV8HDR10BaseLayerConditionMatches(condition, version) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// hlsRemuxDV8HDR10BaseLayerConditionMatches recognizes the precise device
+// declaration used by Jellyfin clients that can decode a DV8.1 HDR10-base
+// stream in an HLS fMP4 remux. It deliberately never treats the source as
+// HDR10: the client must name both DOVI and HDR10 in one positive range
+// condition, and every negative or unrelated condition remains exact.
+func hlsRemuxDV8HDR10BaseLayerConditionMatches(condition ProfileCondition, version catalog.FileVersion) bool {
+	if !isPositiveVideoRangeCondition(condition) || !hlsRemuxDV8HDR10BaseLayerEligible(version) {
+		return false
+	}
+	return stringInConditionSet("DOVI", condition.Value) && stringInConditionSet("HDR10", condition.Value)
+}
+
+func isPositiveVideoRangeCondition(condition ProfileCondition) bool {
+	if normalizeConditionToken(condition.Property) != "videorangetype" {
+		return false
+	}
+	switch normalizeConditionToken(condition.Condition) {
+	case "equals", "equalsany", "incollection":
+		return true
+	default:
+		return false
+	}
+}
+
+func hlsRemuxDV8HDR10BaseLayerEligible(version catalog.FileVersion) bool {
+	video := compatPrimaryVideoTrack(version)
+	codec := strings.ToLower(strings.TrimSpace(video.Codec))
+	if codec == "" {
+		codec = strings.ToLower(strings.TrimSpace(version.CodecVideo))
+	}
+	if codec != compatVideoCodecHEVC && codec != compatVideoCodecH265 ||
+		video.DVProfile != 8 || video.DVBLCompatID != 1 ||
+		!video.DVConfigPresent || !video.DVBLCompatIDPresent || !video.DVBLPresent ||
+		video.DVELPresent ||
+		!strings.EqualFold(compatVideoRangeType(video, version.HDR), "DOVIWithHDR10") {
+		return false
+	}
+
+	// Match native planning: legacy tracks with no EL field are single-layer
+	// only when no EL is present; an explicit unknown, MEL, or FEL fails closed.
+	switch strings.ToLower(strings.TrimSpace(video.DVEnhancementLayer)) {
+	case "", compatClientNone:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p DeviceProfile) codecProfileCompatibilityWithValues(
@@ -110,9 +173,20 @@ func (p DeviceProfile) codecProfileCompatibilityWithValues(
 	container string,
 	useSubContainer bool,
 ) codecProfileCompatibility {
+	return p.codecProfileCompatibilityWithMatcher(version, audioStreamIndex, values, container, useSubContainer, conditionsMatch)
+}
+
+func (p DeviceProfile) codecProfileCompatibilityWithMatcher(
+	version catalog.FileVersion,
+	audioStreamIndex *int,
+	values conditionValues,
+	container string,
+	useSubContainer bool,
+	matchConditions func([]ProfileCondition, conditionValues) bool,
+) codecProfileCompatibility {
 	compat := codecProfileCompatibility{VideoSupported: true, AudioSupported: true}
 	for _, profile := range p.ContainerProfiles {
-		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) && !conditionsMatch(profile.Conditions, values) {
+		if matchesVideoType(profile.Type) && matchesCSV(profile.Container, container) && !matchConditions(profile.Conditions, values) {
 			compat.VideoSupported = false
 			compat.AudioSupported = false
 		}
@@ -129,7 +203,11 @@ func (p DeviceProfile) codecProfileCompatibilityWithValues(
 		if !conditionsMatch(profile.ApplyConditions, values) {
 			continue
 		}
-		if conditionsMatch(profile.Conditions, values) {
+		conditionsMatchProfile := conditionsMatch
+		if target == codecProfileTargetVideo {
+			conditionsMatchProfile = matchConditions
+		}
+		if conditionsMatchProfile(profile.Conditions, values) {
 			continue
 		}
 

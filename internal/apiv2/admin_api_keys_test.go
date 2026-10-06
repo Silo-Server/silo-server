@@ -185,7 +185,7 @@ func TestAdminAPIKeyValidatorsBindAuthority(t *testing.T) {
 }
 
 func TestAdminAPIKeyAuthenticationPolicy(t *testing.T) {
-	for _, credential := range []struct {
+	credentials := []struct {
 		name    string
 		user    int
 		scopes  []string
@@ -194,13 +194,19 @@ func TestAdminAPIKeyAuthenticationPolicy(t *testing.T) {
 		{"unscoped administrator", 2, nil, true},
 		{"scoped administrator", 2, []string{auth.ScopeAdminUsers}, false},
 		{"ordinary account", 1, nil, false},
-	} {
+	}
+	f := fixtureAdminAPIKeys()
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAPIKeys = f
+	keys := make(map[string]*models.APIKey, len(credentials))
+	for i, credential := range credentials {
+		keys["sa_"+strings.ReplaceAll(credential.name, " ", "_")] = &models.APIKey{ID: int64(i + 1), UserID: credential.user, Scopes: credential.scopes}
+	}
+	deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: keys}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
+	h := NewHandler(deps)
+	for _, credential := range credentials {
 		t.Run(credential.name, func(t *testing.T) {
-			f := fixtureAdminAPIKeys()
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAPIKeys = f
-			deps.Auth = apimw.NewAuthMiddleware(nil, nil, fakeAPIKeys{keys: map[string]*models.APIKey{apiKeyToken: {ID: 9, UserID: credential.user, Scopes: credential.scopes}}}, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
-			h := NewHandler(deps)
+			*f = *fixtureAdminAPIKeys()
 			for _, op := range []struct {
 				method, path, body string
 				status             int
@@ -212,7 +218,7 @@ func TestAdminAPIKeyAuthenticationPolicy(t *testing.T) {
 				{http.MethodPut, adminAPIKeyPath + "/7/tier", `{"rate_tier":"elevated"}`, 200},
 				{http.MethodDelete, adminAPIKeyPath + "/7", "", 204},
 			} {
-				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer(apiKeyToken), "If-Match", "*"))
+				got := do(t, h, op.method, Prefix+op.path, op.body, with(bearer("sa_"+strings.ReplaceAll(credential.name, " ", "_")), "If-Match", "*"))
 				if credential.allowed {
 					if got.Code != op.status {
 						t.Fatalf("%s %s: %d %s", op.method, op.path, got.Code, got.Body.String())
@@ -229,21 +235,23 @@ func TestAdminAPIKeyAuthenticationPolicy(t *testing.T) {
 }
 
 func TestAdminAPIKeyCreationRejectsExplicitNulls(t *testing.T) {
+	f := fixtureAdminAPIKeys()
+	h := adminAPIKeyHandler(f)
 	for _, body := range []string{
 		`{"label":"Review","user_id":null}`,
 		`{"label":"Review","scopes":null}`,
 		`{"label":"Review","scopes":[null]}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			f := fixtureAdminAPIKeys()
-			requireProblem(t, do(t, adminAPIKeyHandler(f), http.MethodPost, Prefix+adminAPIKeyPath, body, actingRequestAdmin), TypeValidationFailed)
+			*f = *fixtureAdminAPIKeys()
+			requireProblem(t, do(t, h, http.MethodPost, Prefix+adminAPIKeyPath, body, actingRequestAdmin), TypeValidationFailed)
 			if f.writes != 0 {
 				t.Fatal("explicit null reached creation service")
 			}
 		})
 	}
-	f := fixtureAdminAPIKeys()
-	response := do(t, adminAPIKeyHandler(f), http.MethodPost, Prefix+adminAPIKeyPath, `{"label":"Review"}`, actingRequestAdmin)
+	*f = *fixtureAdminAPIKeys()
+	response := do(t, h, http.MethodPost, Prefix+adminAPIKeyPath, `{"label":"Review"}`, actingRequestAdmin)
 	if response.Code != http.StatusCreated || f.writes != 1 || f.createUser != 2 {
 		t.Fatal("omission defaults changed", response.Code, response.Body.String())
 	}

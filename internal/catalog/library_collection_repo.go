@@ -1395,39 +1395,6 @@ func (r *LibraryCollectionRepository) UpdateNextSyncAt(ctx context.Context, id s
 	return nil
 }
 
-// ListItemPosterPaths returns up to limit non-empty poster_path values for
-// items in the given collection, ordered by position. Paths may be bare S3
-// keys, plugin-prefixed URIs, or HTTP URLs — the caller is responsible for
-// resolving them via PresignImageURL.
-func (r *LibraryCollectionRepository) ListItemPosterPaths(ctx context.Context, collectionID string, limit int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT mi.poster_path
-		FROM library_collection_items lci
-		JOIN media_items mi ON mi.content_id = lci.media_item_id
-		WHERE lci.collection_id = $1
-		  AND mi.poster_path <> ''
-		ORDER BY lci.position ASC, lci.source_rank ASC
-		LIMIT $2
-	`, collectionID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("listing item poster paths: %w", err)
-	}
-	defer rows.Close()
-
-	var paths []string
-	for rows.Next() {
-		var path string
-		if err := rows.Scan(&path); err != nil {
-			return nil, fmt.Errorf("scanning poster path: %w", err)
-		}
-		paths = append(paths, path)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating poster paths: %w", err)
-	}
-	return paths, nil
-}
-
 func int32SliceToInts(values []int32) []int {
 	if len(values) == 0 {
 		return nil

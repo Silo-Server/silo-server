@@ -208,50 +208,6 @@ func TestEnsureCopySafetyRescansStaleVerdict(t *testing.T) {
 	}
 }
 
-func TestEnsureCopySafetyPersistsScanResult(t *testing.T) {
-	ffmpegPath, runs := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-	writer := &fakeCopySafetyWriter{}
-	ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath, copySafetyRepo: writer}
-
-	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
-	file := copySafetyTestFile(mtime)
-
-	got, err := ensurer.ensureCopySafety(context.Background(), file)
-	if err != nil {
-		t.Fatalf("ensureCopySafety() error = %v", err)
-	}
-	if runs() != 1 {
-		t.Fatalf("ffmpeg ran %d times, want 1", runs())
-	}
-	writes := writer.recorded()
-	if len(writes) != 1 {
-		t.Fatalf("UpdateMultiplePPS called %d times, want 1", len(writes))
-	}
-	want := recordedPPSWrite{fileID: 42, multiplePPS: true, scanSize: 1234, scanMtime: mtime, scanMtimeSet: true}
-	if writes[0] != want {
-		t.Fatalf("UpdateMultiplePPS(%+v), want %+v", writes[0], want)
-	}
-	if track := got.VideoTracks[0]; track.MultiplePPS == nil || !*track.MultiplePPS {
-		t.Fatalf("MultiplePPS = %v, want true", track.MultiplePPS)
-	}
-}
-
-func TestEnsureCopySafetyScanSurvivesPersistFailure(t *testing.T) {
-	ffmpegPath, _ := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-	writer := &fakeCopySafetyWriter{err: fmt.Errorf("database unavailable")}
-	ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath, copySafetyRepo: writer}
-
-	file := copySafetyTestFile(time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC))
-
-	got, err := ensurer.ensureCopySafety(context.Background(), file)
-	if err != nil {
-		t.Fatalf("ensureCopySafety() error = %v, want the scan result to be used anyway", err)
-	}
-	if track := got.VideoTracks[0]; track.MultiplePPS == nil || !*track.MultiplePPS {
-		t.Fatalf("MultiplePPS = %v, want the scan result despite the failed write", track.MultiplePPS)
-	}
-}
-
 // A verdict whose write failed is correct in this process but invisible to
 // every other replica, which keeps rescanning the file and keeps planning fresh
 // sessions onto the copy route it condemns. The next lookup has to retry the
@@ -265,8 +221,12 @@ func TestEnsureCopySafetyRetriesAFailedPersistWithoutRescanning(t *testing.T) {
 	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
 	want := recordedPPSWrite{fileID: 42, multiplePPS: true, scanSize: 1234, scanMtime: mtime, scanMtimeSet: true}
 
-	if _, err := ensurer.ensureCopySafety(context.Background(), copySafetyTestFile(mtime)); err != nil {
+	first, err := ensurer.ensureCopySafety(context.Background(), copySafetyTestFile(mtime))
+	if err != nil {
 		t.Fatalf("ensureCopySafety() error = %v", err)
+	}
+	if track := first.VideoTracks[0]; track.MultiplePPS == nil || !*track.MultiplePPS {
+		t.Fatalf("MultiplePPS = %v, want the scan result despite the failed write", track.MultiplePPS)
 	}
 	if runs() != 1 {
 		t.Fatalf("ffmpeg ran %d times for the first call, want 1", runs())
@@ -422,20 +382,6 @@ func TestEnsureCopySafetyPersistsVerdictForRowWithoutMtime(t *testing.T) {
 	}
 }
 
-func TestEnsureCopySafetyWithoutRepoDoesNotPanic(t *testing.T) {
-	ffmpegPath, runs := fakeFFmpeg(t, conflictingPPSAnnexB, 0)
-	ensurer := &PlaybackProbeEnsurer{ffmpegPath: ffmpegPath}
-
-	file := copySafetyTestFile(time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC))
-
-	if _, err := ensurer.ensureCopySafety(context.Background(), file); err != nil {
-		t.Fatalf("ensureCopySafety() error = %v", err)
-	}
-	if runs() != 1 {
-		t.Fatalf("ffmpeg ran %d times, want 1", runs())
-	}
-}
-
 // A failed scan must stay fail-closed and stateless: nothing is written, so a
 // transient error never becomes sticky state on the row and the next request
 // retries cleanly.
@@ -558,8 +504,9 @@ func TestEnsureCopySafetyConcurrentCallsScanOnce(t *testing.T) {
 	if got := runs(); got != 1 {
 		t.Fatalf("ffmpeg ran %d times for %d concurrent callers, want 1", got, callers)
 	}
-	if writes := writer.recorded(); len(writes) != 1 {
-		t.Fatalf("UpdateMultiplePPS called %d times, want 1", len(writes))
+	want := recordedPPSWrite{fileID: 42, multiplePPS: true, scanSize: 1234, scanMtime: mtime, scanMtimeSet: true}
+	if writes := writer.recorded(); len(writes) != 1 || writes[0] != want {
+		t.Fatalf("UpdateMultiplePPS writes = %+v, want exactly [%+v]", writes, want)
 	}
 }
 

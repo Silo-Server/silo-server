@@ -63,6 +63,9 @@ func (m *mockSubtitleRepo) UpdateDownloadedSubtitle(_ context.Context, id int, u
 			if update.ContentSHA256 != "" {
 				sub.ContentSHA256 = update.ContentSHA256
 			}
+			if update.Timing != nil {
+				sub.Timing = *update.Timing
+			}
 			sub.Revision++
 			copy := *sub
 			return &copy, nil
@@ -177,41 +180,12 @@ func TestManagerProviderNames(t *testing.T) {
 	}
 }
 
-func TestManagerUploadStoresSubtitle(t *testing.T) {
-	repo := newMockSubtitleRepo()
-	s3 := newMockBlobStore()
-	manager := NewManager(repo, s3)
-
-	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
-	sub, err := manager.Upload(context.Background(), UploadRequest{
-		MediaFileID: 42,
-		Language:    "en",
-		Filename:    "custom.en.srt",
-		Data:        data,
-	})
-	if err != nil {
-		t.Fatalf("Upload() error = %v", err)
-	}
-	if sub.Provider != ProviderUpload {
-		t.Fatalf("provider = %q, want %q", sub.Provider, ProviderUpload)
-	}
-	if sub.Format != FormatSRT {
-		t.Fatalf("format = %q, want srt", sub.Format)
-	}
-	if repo.inserts != 1 {
-		t.Fatalf("inserts = %d, want 1", repo.inserts)
-	}
-	if s3.puts != 1 {
-		t.Fatalf("puts = %d, want 1", s3.puts)
-	}
-}
-
 func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 	repo := newMockSubtitleRepo()
 	s3 := newMockBlobStore()
 	manager := NewManager(repo, s3)
 
-	data := []byte("duplicate content")
+	data := []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
 	first, err := manager.Upload(context.Background(), UploadRequest{
 		MediaFileID: 7,
 		Language:    "en",
@@ -220,6 +194,10 @@ func TestManagerUploadDedupesIdenticalContent(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("first Upload() error = %v", err)
+	}
+
+	if first.Provider != ProviderUpload || first.Format != FormatSRT {
+		t.Fatalf("uploaded provider=%q format=%q, want upload srt", first.Provider, first.Format)
 	}
 
 	second, err := manager.Upload(context.Background(), UploadRequest{

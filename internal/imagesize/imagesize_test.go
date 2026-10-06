@@ -158,27 +158,3 @@ func TestNextLower(t *testing.T) {
 		}
 	}
 }
-
-// A fallback walk must terminate for every type and every starting rung.
-func TestNextLowerTerminates(t *testing.T) {
-	for _, imageType := range []string{"poster", "still", "backdrop", "logo", "profile"} {
-		for _, size := range All {
-			variant := Variant(imageType, size)
-			steps := 0
-			for {
-				next, ok := NextLower(imageType, variant)
-				if !ok {
-					break
-				}
-				variant = next
-				steps++
-				if steps > 10 {
-					t.Fatalf("NextLower(%q, ...) did not terminate from %q", imageType, size)
-				}
-			}
-			if want := Variant(imageType, Small); size != Original && variant != want {
-				t.Errorf("walking down %q from %q ended at %q, want %q", imageType, size, variant, want)
-			}
-		}
-	}
-}

@@ -68,8 +68,8 @@ func registerDirectDownloads(reg *Registry) {
 			content = map[string]*huma.MediaType{directMediaBinary: {Schema: &huma.Schema{Type: huma.TypeString, Format: directBinaryFormat}}, directMultipart: {Schema: &huma.Schema{Type: huma.TypeString, Format: directBinaryFormat}}}
 		}
 		if route.method == http.MethodGet {
-			for _, extension := range []string{".mp4", ".mkv", ".webm", ".avi", ".mov", ".ts", ".flv", ".wmv", ".m4a", ".mp3", ".flac", ".ogg", ".wav", ".aac"} {
-				content[playback.MimeFromExtension(extension)] = &huma.MediaType{Schema: &huma.Schema{Type: huma.TypeString, Format: directBinaryFormat}}
+			for _, mime := range playback.MediaMIMETypes() {
+				content[mime] = &huma.MediaType{Schema: &huma.Schema{Type: huma.TypeString, Format: directBinaryFormat}}
 			}
 		}
 		headers := map[string]*huma.Param{}

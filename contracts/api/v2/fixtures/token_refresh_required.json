@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/token_refresh_required",
+  "title": "Token refresh required",
+  "status": 401,
+  "detail": "The account's role changed; refresh the session and retry the request.",
+  "instance": "urn:silo:request:0000000000000000000002a7"
+}

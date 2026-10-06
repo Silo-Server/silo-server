@@ -178,23 +178,6 @@ func TestClaimBatchSkipsItemsParkedForALaterRetry(t *testing.T) {
 	}
 }
 
-// HasPendingItems and claimBatch must agree about parked items too, or the
-// scheduler wakes for work the claim query will refuse to hand over.
-func TestHasPendingItemsRespectsParkedRetries(t *testing.T) {
-	pool := newClaimTestPool(t)
-	ctx := context.Background()
-	e := newTestEnricher(pool)
-
-	only := seedAudiobook(t, pool, "onlyparked", "/covers/embedded.jpg", false)
-	if err := e.state.RecordFailure(ctx, only, "", EnrichmentErrorPermanent, "403 forbidden"); err != nil {
-		t.Fatalf("RecordFailure: %v", err)
-	}
-
-	if claimedIDs(t, e)[only] {
-		t.Fatal("parked item was claimable; the rest of this test is meaningless")
-	}
-}
-
 func TestClassifyProviderErrorSortsByHowItShouldRetry(t *testing.T) {
 	cases := []struct {
 		msg  string

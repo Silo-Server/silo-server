@@ -1,5 +1,6 @@
 import { getDefaultQuerySortOrder, normalizeQuerySortField } from "@/lib/querySortOptions";
 import type { SchemaOption } from "@/components/admin/plugins/schemaFormUtils";
+import type { components as V2Components } from "@/api/v2/schema";
 
 // Auth
 export interface LoginRequest {
@@ -794,6 +795,9 @@ export interface BrowseItem {
   studios?: string[];
   networks?: string[];
   content_rating: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;
@@ -914,6 +918,8 @@ export interface FileVersion {
   recap?: TimeRange | null;
   preview?: TimeRange | null;
   marker_segments?: MarkerOccurrence[];
+  /** Seek-bar previews are published for this file (read them with getWatchTrickplay). */
+  trickplay_available?: boolean;
 }
 
 export interface PlaybackVariantPart {
@@ -1112,6 +1118,13 @@ export interface ItemExtra {
   file_id?: number;
 }
 
+/**
+ * One external rating as the server builds it for a title page: IMDb and
+ * TMDB, plus the sources an administrator turned on. `display` is already
+ * formatted on the source's own scale ("8.5", "93%").
+ */
+export type DisplayRating = V2Components["schemas"]["CatalogRating"];
+
 export interface ItemDetail {
   themes?: {
     owner_id: string;
@@ -1151,6 +1164,8 @@ export interface ItemDetail {
   rating_tmdb: number | null;
   rating_rt_critic: number | null;
   rating_rt_audience: number | null;
+  /** The external ratings the title page shows, chosen and formatted by the server. */
+  ratings: DisplayRating[];
   imdb_id: string;
   tmdb_id: string;
   tvdb_id: string;
@@ -1267,6 +1282,8 @@ export interface EpisodeFile {
   audio_channels: number;
   container: string;
   file_size: number;
+  /** True when the server could not read the file (empty, corrupt, or truncated). */
+  unreadable?: boolean;
 }
 
 export interface EpisodeListItem {
@@ -1795,11 +1812,6 @@ export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFie
   url: string;
 }
 
-export interface ImportUserTraktCollectionRequest extends UserImportSharedFields {
-  preset: ImportTraktCollectionRequest["preset"];
-  media_type: ImportTraktCollectionRequest["media_type"];
-}
-
 // A completed sync always has a non-empty status; the empty-string variant in
 // UserCollectionSyncStatus only appears on un-synced rows.
 export type UserCollectionSyncResultStatus = Exclude<UserCollectionSyncStatus, "">;
@@ -1824,6 +1836,16 @@ export type RequestSearchMediaType = RequestMediaType | "all";
 export type MediaRequestStatus = "pending" | "approved" | "queued" | "downloading" | "completed";
 export type MediaRequestOutcome = "active" | "declined" | "cancelled" | "failed";
 export type RequestAvailability = "missing" | "available";
+/** The one request state the server derives for users (v2 `state`). */
+export type RequestUserState =
+  | "pending"
+  | "approved"
+  | "processing"
+  | "partially_available"
+  | "available"
+  | "declined"
+  | "cancelled"
+  | "failed";
 export type RequestLimitMode = "inherit" | "custom" | "unlimited" | "blocked";
 export type RequestApprovalMode = "inherit" | "manual" | "auto" | "blocked";
 
@@ -1832,6 +1854,36 @@ export interface RequestState {
   requestable: boolean;
   reason?: string;
   request_id?: string;
+  /** The viewer is notified when the title becomes available: they requested or follow it. */
+  following?: boolean;
+  /** The viewing profile made the active request, so there is nothing to follow. */
+  requested_by_viewer?: boolean;
+  /** User-facing state of the active request. */
+  state?: RequestUserState;
+  /** How far the active request's downloads are. Only the title detail carries it. */
+  download?: RequestDownload;
+}
+
+/**
+ * How far a request's downloads are, while its download server reports them:
+ * for one server on a target, summed over its servers on a request.
+ */
+export interface RequestDownload {
+  /**
+   * queued, downloading, paused, stalled, importing or import_blocked. The
+   * server may add phases; read one this client does not know as downloading.
+   */
+  phase: string;
+  /** Rounded down; absent while the size is unknown. */
+  percent?: number;
+  bytes_total?: number;
+  bytes_left?: number;
+  /** Absent when the download server cannot tell. */
+  estimated_completion_at?: string;
+  /** Distinct downloads in flight; a season pack counts once. */
+  downloads: number;
+  /** When the server last heard from the download server. */
+  updated_at: string;
 }
 
 export interface RequestMediaResult {
@@ -1848,6 +1900,12 @@ export interface RequestMediaResult {
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /**
+   * The title is on the viewer's watchlist, as an entry for a title the
+   * library doesn't have or as its library item. Absent from servers without
+   * watchlist titles.
+   */
+  in_watchlist?: boolean;
 }
 
 export interface RequestMediaPage {
@@ -1894,14 +1952,47 @@ export interface RequestMediaDetail {
   director?: string;
   creators?: string[];
   recommendations?: RequestMediaResult[];
+  /** Series: the regular seasons with library availability and request coverage. */
+  seasons?: RequestMediaSeason[];
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /** The title is on the viewer's watchlist; see RequestMediaResult.in_watchlist. */
+  in_watchlist?: boolean;
+}
+
+/** One regular season of a series, as the request detail reports it. */
+export interface RequestMediaSeason {
+  season_number: number;
+  name?: string;
+  /** YYYY-MM-DD; absent until TMDB dates the season. */
+  air_date?: string;
+  /** Episodes TMDB lists for the season, aired or not. */
+  episode_count: number;
+  poster_path?: string;
+  /** Whether every aired episode is in the library. */
+  availability: "missing" | "partial" | "available";
+  /** The title's active request covers this season. */
+  requested: boolean;
+}
+
+/** How far one requested season is, once the series is in the library. */
+export interface RequestSeasonProgress {
+  season_number: number;
+  /** Aired episodes by the library's own metadata; 0 when it has no air dates yet. */
+  episodes_aired: number;
+  episodes_available: number;
 }
 
 export interface RequestDiscoverySection extends RequestMediaPage {
   key: string;
   title: string;
+  /**
+   * The page to ask for next when a rating-restricted viewer's page read
+   * several TMDB pages (page + 1 would repeat them). Absent when page + 1
+   * applies, or when a restricted viewer has reached the end.
+   */
+  next_page?: number;
 }
 
 export interface RequestDiscoveryResponse {
@@ -1954,24 +2045,31 @@ export interface CreateMediaRequestInput {
   overview?: string;
   poster_path?: string;
   backdrop_path?: string;
+  /** Series only: the seasons to request. Omitted: every aired season not yet in the library. */
+  seasons?: number[];
 }
 
+/** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
 export interface RequestTarget {
   id: number;
   request_id: string;
   integration_id?: string;
   integration_kind?: string;
   instance_name?: string;
+  /** The routing rule that sent this target to its server, as named when it was sent. */
+  route_name?: string;
   quality: "1080p" | "2160p";
   is_anime: boolean;
   external_id?: string;
   external_status?: string;
   status: MediaRequestStatus | "failed";
   last_error?: string;
+  download?: RequestDownload;
   created_at: string;
   updated_at: string;
 }
 
+/** integration_kind, external_id, external_status and last_error reach admins only. */
 export interface MediaRequest {
   id: string;
   provider: string;
@@ -1986,15 +2084,30 @@ export interface MediaRequest {
   backdrop_path?: string;
   status: MediaRequestStatus;
   outcome: MediaRequestOutcome;
+  /** The one state to show users; derived by the server from status, outcome and library presence. */
+  state?: RequestUserState;
+  /** Why the request was declined or cancelled, when a reason was given. */
+  outcome_reason?: string;
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
   is_anime?: boolean;
+  /** Series: the requested seasons; empty means the whole series. */
+  seasons?: number[];
+  /** Series season requests: each requested season's episodes, once the series is in the library. */
+  season_progress?: RequestSeasonProgress[];
   targets?: RequestTarget[];
+  /** Over every server of the request: the phase that needs the most attention, the latest estimate. */
+  download?: RequestDownload;
   integration_kind?: string;
   external_id?: string;
   external_status?: string;
   library_content_id?: string;
   last_error?: string;
+  /**
+   * What created the request: direct (the Request button) or watchlist
+   * (adding the title to a watchlist). The server may add values.
+   */
+  source?: string;
   created_at: string;
   updated_at: string;
   approved_at?: string;
@@ -2017,6 +2130,12 @@ export interface RequestSettings {
   global_window_days: number;
   global_auto_approval_enabled: boolean;
   force_dual_quality: boolean;
+  /**
+   * Adding a title the library doesn't have to a watchlist also requests it.
+   * Absent from servers that predate it; left out of an update, the stored
+   * value is kept.
+   */
+  watchlist_requests?: boolean;
   updated_at: string;
 }
 
@@ -2197,6 +2316,7 @@ export interface AutoscanSourceCreateInput {
   poll_interval_seconds?: number | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
+  label?: string;
 }
 
 export interface AutoscanConnectionTestInput {
@@ -2398,6 +2518,14 @@ export interface AdminUserEffectivePolicy {
   permissions: string[];
 }
 
+// The built-in layer an ungrouped account resolves its unset policy fields to
+// (GET /api/v2/admin/users/policy-defaults).
+export type AdminPolicyDefaultLayer = Omit<AdminUserEffectivePolicy, "permissions">;
+export interface AdminPolicyDefaults {
+  admin: AdminPolicyDefaultLayer;
+  ungrouped: AdminPolicyDefaultLayer;
+}
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -2424,6 +2552,11 @@ export interface AdminUser {
   password_change_required: boolean;
   /** The server Owner: only the Owner may change this account. */
   is_owner: boolean;
+  /**
+   * A break-glass admin keeps local password sign-in while the server turns
+   * it off (auth.local_password_login).
+   */
+  break_glass: boolean;
   effective_policy: AdminUserEffectivePolicy;
   created_at: string;
   updated_at: string;
@@ -2466,6 +2599,8 @@ export interface UpdateUserRequest {
   password?: string;
   /** Only with password: make it temporary, replaced at the next sign-in. */
   require_password_change?: boolean;
+  /** Admin accounts only; only the server Owner may set or clear it. */
+  break_glass?: boolean;
   role?: string;
   permissions?: string[];
   enabled?: boolean;
@@ -2807,7 +2942,9 @@ export type EventChannel =
   // useSettingValuesRealtime.
   | "user_settings"
   | "settings"
-  | "notifications";
+  | "notifications"
+  // Admin-only changes to the offline-download preparation queue.
+  | "download_preparations";
 
 export interface NotificationReasonFlags {
   // episode.available reasons
@@ -2823,6 +2960,8 @@ export interface NotificationReasonFlags {
   title?: string;
   year?: number;
   reason?: string;
+  /** request.fulfilled sent to a profile that followed the title, not requested it. */
+  follower?: boolean;
 }
 
 export interface AppNotification {
@@ -3082,12 +3221,22 @@ export interface EventsErrorMessage {
   message: string;
 }
 
+/**
+ * The access the connection was opened under changed (access group,
+ * permissions, playback quality, role, or profile verification). The server
+ * closes the socket right after it with EVENTS_ACCESS_CHANGED_CLOSE_CODE.
+ */
+export interface EventsAccessChangedMessage {
+  type: "access_changed";
+}
+
 export type EventsStreamMessage =
   | EventsHelloMessage
   | EventsSubscribedMessage
   | EventsSnapshotMessage
   | EventsEventMessage
-  | EventsErrorMessage;
+  | EventsErrorMessage
+  | EventsAccessChangedMessage;
 
 export type AdminLogStreamMessage =
   | AdminLogSnapshotMessage
@@ -3204,8 +3353,17 @@ export interface Library {
   chapter_thumbnails_enabled: boolean;
   chapter_thumbnails_supported: boolean;
   intro_detection_enabled: boolean;
+  /** Generate seek-bar previews for the library's video files. Absent from servers without seek previews. */
+  trickplay_enabled?: boolean;
+  /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
+  trickplay_supported?: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
+  /**
+   * The library's own real-time monitoring switch. It only takes effect while
+   * the server-wide scanner.realtime_monitoring setting is on.
+   */
+  realtime_monitoring: boolean;
   sort_order: number;
   poster_url?: string;
   last_scanned_at: string | null;
@@ -3344,7 +3502,49 @@ export interface CreateLibraryRequest {
   auto_translate_metadata?: boolean;
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
+  /** Sent only when it changes, so a server without seek previews never sees it. */
+  trickplay_enabled?: boolean;
   trailer_kinds?: string[];
+  /** Omitted on create means on. */
+  realtime_monitoring?: boolean;
+}
+
+/**
+ * Effective real-time monitoring state of one library, from
+ * getLibraryRealtimeMonitoring. The first four states are derived from
+ * settings and report freshness; the rest come from a server node's report.
+ */
+export type LibraryRealtimeMonitoringState =
+  | "server_disabled"
+  | "library_disabled"
+  | "monitoring_off"
+  | "not_reporting"
+  | "starting"
+  | "monitoring"
+  | "unsupported_filesystem"
+  | "unsupported_platform"
+  | "limit_reached"
+  | "root_unavailable"
+  | "error";
+
+export interface LibraryRealtimeMonitoringEntry {
+  library_id: number;
+  /** The library's own switch. */
+  enabled: boolean;
+  state: LibraryRealtimeMonitoringState;
+  /** "inotify", "fanotify", or empty. */
+  backend: string;
+  detail: string;
+  directories: number;
+  /** Present only with a fresh node report. */
+  node_id?: string;
+  updated_at?: string;
+}
+
+export interface LibraryRealtimeMonitoring {
+  /** The server-wide scanner.realtime_monitoring setting. */
+  server_enabled: boolean;
+  libraries: LibraryRealtimeMonitoringEntry[];
 }
 
 export interface ScanRequest {
@@ -3613,6 +3813,12 @@ export interface PluginCapability {
   subscriptions?: string[];
   config_schema?: PluginConfigSchema[];
   metadata?: Record<string, unknown>;
+  /** How an auth_provider.v1 capability signs people in; absent for other types. */
+  sign_in_mode?: "oauth" | "credentials" | "network";
+  /** An installation's OAuth sign-in capability: the redirect URI to register at the provider. */
+  callback_url?: string;
+  /** An installation's OAuth sign-in capability: the post-logout redirect URI to register. */
+  post_logout_redirect_url?: string;
 }
 
 export interface PluginRoute {
@@ -3645,6 +3851,10 @@ export interface PluginAuthBinding {
   display_order: number;
   auto_provision: boolean;
   default_login: boolean;
+  /** Redirect URI to register at an OAuth (OIDC) provider; empty for LDAP or without a public URL. */
+  callback_url?: string;
+  /** Post-logout redirect URI to register for provider logout; empty like callback_url. */
+  post_logout_redirect_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -3837,10 +4047,10 @@ export interface NodeDetectedBackend {
 
 /**
  * A node's stored hardware capability report — the body its /hw-capabilities
- * endpoint served. The payload also carries the node's transformation and
- * tone-map advertisements, which no admin surface reads yet.
+ * endpoint served, including its extraction and tone-map advertisements.
  */
 export interface NodeCapabilities {
+  transport_features?: string[];
   /** Backend that would actually be used: nvenc, qsv, vaapi, or none. */
   resolved?: string;
   render_devices?: string[] | null;
@@ -4163,6 +4373,9 @@ export interface SectionItem {
   studios?: string[];
   networks?: string[];
   content_rating?: string;
+  /** Display-only advisory age; see ItemDetail.advisory_age. */
+  advisory_age?: number | null;
+  advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
   rating_imdb: number | null;

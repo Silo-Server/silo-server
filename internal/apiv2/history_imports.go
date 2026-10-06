@@ -28,6 +28,20 @@ type HistoryImportService interface {
 	LoginEmbyConnect(context.Context, int, historyimport.LoginConnectInput) (*historyimport.ConnectSessionLoginResult, error)
 }
 
+// profileScopedHistoryImports enforces which of the account's profiles the
+// acting profile may import into and see runs for (#1336): the primary
+// profile or an admin acts for every profile, any other profile only for
+// itself. The v1 run handlers use the same authorization rule.
+type profileScopedHistoryImports interface {
+	ListImportRunsPageAs(context.Context, handlers.HistoryImportActor, *historyimport.RunKey, int) ([]historyimport.Run, bool, error)
+	CreateImportRunAs(context.Context, handlers.HistoryImportActor, historyimport.CreateRunInput) (*historyimport.Run, error)
+	GetImportRunAs(context.Context, handlers.HistoryImportActor, string) (*historyimport.Run, error)
+}
+
+func historyImportActor(ctx context.Context, userID int) handlers.HistoryImportActor {
+	return handlers.HistoryImportActor{UserID: userID, ProfileID: profileFrom(ctx), VerifyProfile: verifyHouseholdProfile(ctx)}
+}
+
 // The history-imports domain: pulling a profile's watch history from an
 // Emby, Jellyfin, or Plex server. Every operation is account level (the
 // target profile is named in the run request), so the class is profile
@@ -337,9 +351,11 @@ func (reg *Registry) listHistoryImportRuns(ctx context.Context, cursors *Cursors
 	}
 	scope := CursorScope{
 		OperationID: opListHistoryImportRuns,
-		Security:    strconv.Itoa(userID),
-		Sort:        "-created_at,-id",
-		Tiebreaker:  "id",
+		// The acting profile is part of the scope: which runs a page holds
+		// depends on it, so a cursor must not carry across profiles.
+		Security:   strconv.Itoa(userID) + ":" + profileFrom(ctx),
+		Sort:       loginSessionCursorSort,
+		Tiebreaker: "id",
 	}
 	var after *historyimport.RunKey
 	if in.Cursor != "" {
@@ -349,7 +365,14 @@ func (reg *Registry) listHistoryImportRuns(ctx context.Context, cursors *Cursors
 		}
 		after = &historyimport.RunKey{CreatedAt: pos.CreatedAt, ID: pos.ID}
 	}
-	runs, hasMore, err := svc.ListImportRunsPage(ctx, userID, after, in.Limit)
+	var runs []historyimport.Run
+	var hasMore bool
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		runs, hasMore, err = scoped.ListImportRunsPageAs(ctx, historyImportActor(ctx, userID), after, in.Limit)
+	} else {
+		runs, hasMore, err = svc.ListImportRunsPage(ctx, userID, after, in.Limit)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}
@@ -381,7 +404,13 @@ func (reg *Registry) createHistoryImportRun(ctx context.Context, in *HistoryImpo
 	if p != nil {
 		return nil, p
 	}
-	run, err := svc.CreateImportRun(ctx, userID, input)
+	var run *historyimport.Run
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		run, err = scoped.CreateImportRunAs(ctx, historyImportActor(ctx, userID), input)
+	} else {
+		run, err = svc.CreateImportRun(ctx, userID, input)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}
@@ -401,7 +430,13 @@ func (reg *Registry) getHistoryImportRun(ctx context.Context, in *HistoryImportR
 	if p != nil {
 		return nil, p
 	}
-	run, err := svc.GetImportRun(ctx, userID, in.ID)
+	var run *historyimport.Run
+	var err error
+	if scoped, ok := svc.(profileScopedHistoryImports); ok {
+		run, err = scoped.GetImportRunAs(ctx, historyImportActor(ctx, userID), in.ID)
+	} else {
+		run, err = svc.GetImportRun(ctx, userID, in.ID)
+	}
 	if err != nil {
 		return nil, historyImportProblem(err)
 	}

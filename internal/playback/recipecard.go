@@ -105,6 +105,7 @@ type RecipeCard struct {
 	SegmentDuration            int                    `json:"segment_duration"`
 	StartSegmentNumber         int                    `json:"start_segment_number"`
 	HWAccel                    string                 `json:"hw_accel,omitempty"`
+	EncoderHWAccel             string                 `json:"encoder_hw_accel,omitempty"`
 	HWDevice                   string                 `json:"hw_device,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in,omitempty"`
@@ -119,6 +120,15 @@ type RecipeCard struct {
 const playMethodCopyFMP4V1 PlayMethod = streamtoken.PlayMethodCopyFMP4Transcode
 
 var ErrCopyFMP4RecipeVersionMismatch = errors.New("copy-fmp4 recipe version mismatch")
+
+// EffectiveEncoderHWAccel preserves older cards that recorded only one
+// backend, while new cards distinguish CPU encoding from GPU tone mapping.
+func (c RecipeCard) EffectiveEncoderHWAccel() string {
+	if c.EncoderHWAccel != "" {
+		return c.EncoderHWAccel
+	}
+	return c.HWAccel
+}
 
 // IsTranscodeRecipe reports whether a card is a legacy/current transcode or a
 // versioned copy-fMP4 transcode. The versioned method is deliberately distinct
@@ -199,6 +209,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		SegmentDuration:            opts.SegmentDuration,
 		StartSegmentNumber:         opts.StartSegmentNumber,
 		HWAccel:                    opts.HWAccel,
+		EncoderHWAccel:             opts.EffectiveEncoderHWAccel(),
 		HWDevice:                   opts.HWDevice,
 		SubtitleTrackIndex:         opts.SubtitleTrackIndex,
 		SubtitleBurnIn:             opts.SubtitleBurnIn,
@@ -301,6 +312,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		StartSegmentNumber:         c.StartSegmentNumber,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    c.HWAccel,
+		EncoderHWAccel:             c.EncoderHWAccel,
 		HWDevice:                   c.HWDevice,
 		SubtitleTrackIndex:         c.SubtitleTrackIndex,
 		SubtitleBurnIn:             c.SubtitleBurnIn,

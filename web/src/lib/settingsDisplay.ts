@@ -3,6 +3,7 @@ import {
   type SettingDefinition,
   type SettingKey,
 } from "@/lib/settingsContract";
+import { formatBitrateKbps } from "@/lib/bitrateOptions";
 import { languageOptionsFor, type SettingOption } from "@/lib/languageOptions";
 
 /**
@@ -100,6 +101,12 @@ export function formatSettingValue(key: string, value: string | null | undefined
     const fallback = value ?? defaultValueToString(definition);
     const match = definition.values.find((member) => String(member.value) === fallback);
     return match ? match.label || String(match.value) : fallback || "Unset";
+  }
+  if (definition.unit === "kbps") {
+    // A bandwidth cap reads in Mbps like its select; no value means no cap.
+    const raw = value || defaultValueToString(definition);
+    const kbps = Number(raw);
+    return raw && Number.isFinite(kbps) ? formatBitrateKbps(kbps) : "No limit";
   }
   if (definition.unit) {
     return `${value ?? defaultValueToString(definition) ?? "0"} ${definition.unit}`;

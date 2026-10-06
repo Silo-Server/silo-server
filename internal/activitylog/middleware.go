@@ -84,6 +84,16 @@ func GetPlaybackLogContext(ctx context.Context) *PlaybackLogContext {
 // It stores a mutable LogContext in the request context that downstream auth
 // middleware can populate with user info.
 func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
+	return NewFilteredMiddleware(w, nodeID, nil)
+}
+
+// NewFilteredMiddleware is NewMiddleware for a router that also serves requests
+// the activity log should not record. skipRoute receives the matched chi route
+// pattern after the handler returns and drops the entry when it reports true;
+// matching the pattern rather than the raw path keeps the filter independent
+// of any path rewriting the router does. A nil skipRoute records every request
+// NewMiddleware would.
+func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern string) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
@@ -129,6 +139,9 @@ func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
 				if route := routeCtx.RoutePattern(); route != "" {
 					pathPattern = route
 				}
+			}
+			if skipRoute != nil && skipRoute(pathPattern) {
+				return
 			}
 			path = RedactSecretPathParams(r, path)
 

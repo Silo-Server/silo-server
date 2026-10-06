@@ -116,6 +116,9 @@ func TestEmailOutboxRetainsMessageAndReplay(t *testing.T) {
 	if len(message.To) != 1 || message.To[0] != in.Address || len(match) != 2 || hashEmailToken(match[1]) != hash || !strings.Contains(message.HTMLBody, match[1]) {
 		t.Fatal("stored message does not match pending link")
 	}
+	if len(message.Inline) != 1 || len(message.Inline[0].Data) == 0 || !strings.Contains(message.HTMLBody, "cid:"+message.Inline[0].ContentID) {
+		t.Fatal("stored message does not carry the header logo it references")
+	}
 	if strings.Contains(encrypted, in.Address) || strings.Contains(encrypted, match[1]) {
 		t.Fatal("plaintext persisted")
 	}

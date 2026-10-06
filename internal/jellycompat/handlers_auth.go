@@ -163,6 +163,7 @@ func (h *AuthHandler) HandleAuthenticateByName(w http.ResponseWriter, r *http.Re
 		writeError(w, status, code, message)
 		return
 	}
+	attributeActivity(r, session)
 
 	user, err := h.resolvedUserDTO(r.Context(), session)
 	if err != nil {

@@ -82,6 +82,9 @@ each item's original-language audio, as native clients do.
 
 Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
 viewer's effective subtitle mode and language, including downloaded subtitles.
+In `Always` mode, a track the viewer picked for the series in a Silo client
+(its source, language, codec, label, forced and hearing-impaired traits) wins
+when the file has one that matches; otherwise the language rules apply.
 The detail-page selection therefore carries into playback instead of sending
 an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit
@@ -93,10 +96,14 @@ is the audio track Silo selects for the viewer (audio language preference,
 original language, and the series' remembered track), falling back to the
 file's default track. `DefaultSubtitleStreamIndex` follows Jellyfin 12.1's
 `MediaStreamSelector` for the effective subtitle mode and language, judged
-against the starting audio track: external files (including downloaded
-subtitles) sort first, and an unset subtitle language matches any language.
-Silo's per-series remembered subtitle track is not applied, and an explicit
-`SubtitleStreamIndex` in the request still wins.
+against the starting audio track, with one change: Jellyfin sorts external files
+first, while Silo ranks them by Jellyfin's remaining rules and uses the source
+only to break ties, preferring embedded tracks over external and downloaded
+files. A file's default-flagged track therefore beats an external file in
+`Default` mode, and an external file is still chosen when nothing embedded is
+flagged. An unset subtitle language matches any language.
+In `Always` mode, Silo's per-series remembered subtitle track is applied first,
+as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
 
 ## Browse and response fields
 
@@ -125,8 +132,35 @@ ISO 639-2 codes such as `eng` match the stored canonical codes.
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
 its owning series and takes precedence over the path series and numeric season.
-Episode SQL queries default to 24 rows and cap each page at 1,000. Clients should
-page using `TotalRecordCount` and `StartIndex`.
+When `Limit` is omitted, episode listings on this route and series/season
+`/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
+requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
+count. Longer lists still require paging using `TotalRecordCount` and
+`StartIndex`. Other `/Items` browsing retains the 24-row default.
+
+`/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
+the episodes of episode-scoped smart collections) in collection order unless
+`SortBy` is sent. Members get the same detail fields, such as `MediaSources` and
+`Path`, as they do when listed from their library. Episode-scoped smart
+collections honor `SortBy` over their own members; catalog and user-state
+filters on them are not supported yet and return no episodes.
+
+A BoxSet with an uploaded or template poster shows it to everyone. Otherwise
+its `Primary` image is a collage of the first members the viewer can access, so
+the image and its tag differ by viewer. A collage tag is 32 hex digits: the
+collage's key followed by its signature. `GET /Items/{boxSetId}/Images/Primary`
+accepts a signed collage tag without authentication and serves the collage the
+tag names. An untagged request authorized by its session gets that viewer's
+collage. When no collage is built yet, the BoxSet shows the generated title
+poster and the collage is built in the background for the next request.
+
+`Recursive=true` together with `Filters=IsNotFolder`, or with an
+`IncludeItemTypes` that names `Episode` but not `Series` or `Season`, returns the
+collection's playable leaves for Play all and Shuffle: movies and episodes, with
+member series expanded to the episodes that have a live file in a library the
+profile may access. Regular seasons come first, then specials. `SortBy=Random`
+shuffles the leaves; other sorts keep collection order. Other recursive
+requests list the members.
 
 `EnableImages=false`, `EnableImageTypes`, `ImageTypeLimit`, and
 `EnableUserData=false` control item response presentation. Fields requiring
@@ -155,10 +189,18 @@ request disables Primary images.
 | `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
 | `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
-These changes do not implement every advanced query option. Random and compound
-sorts, full `IsMissing` semantics, multiple person-ID predicates, populated tag
-facets, and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain
-outside this subset.
+`/Library/VirtualFolders` reports `LibraryOptions.EnableRealtimeMonitor` from
+Silo's configuration: `true` only while both the server-wide
+`scanner.realtime_monitoring` setting and the library's own
+`realtime_monitoring` switch are on. The server setting is read live, so a
+change shows on the next request. This applies to both the viewer response and
+the admin API-key response that autoscan tools read. Jellyfin clients cannot
+change either switch through this surface.
+
+These changes do not implement every advanced query option. Compound sorts,
+full `IsMissing` semantics, multiple person-ID predicates, populated tag facets,
+and the `Tags`, `StudioIds`, and `HasSubtitles` item filters remain outside this
+subset.
 
 ## Playback negotiation and media
 
@@ -190,6 +232,23 @@ unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
+
+Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
+member on single-item reads and on list reads that request the field and
+already take the detail path (`Chapters` or `MediaSources` among the
+fields, as Jellyfin Web and Findroid request). It is keyed by media source
+id, then by width as a string, with `Interval` in milliseconds; a version
+without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
+proxies a sheet (Roku does not follow image redirects) with an `ETag` and
+`private, no-cache`, requiring revalidation after a source switch or
+regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
+playlist with the caller's token on each sheet URL. Both pick the version
+from `mediaSourceId`, else from a media-source id in the item position, else
+the version this token is playing for the item (Swiftfin and Findroid send
+no `mediaSourceId`), else the default version, and serve only versions the
+account can see. The selected playback file is persisted in compat session
+state, so previews follow that source across API replicas and restarts.
+An index past the last sheet answers `404`.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
@@ -257,6 +316,13 @@ layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 variant, listed before the `hvc1` fallback. MPEG-TS remuxes keep the single
 variant. Audio and subtitle streams carry `LocalizedLanguage`, and audio
 streams carry `LocalizedOriginal`, in English.
+
+HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
+layer can use HLS fMP4 remux when a positive video-range condition names both
+`DOVI` and `HDR10`. The source retains its `DOVIWithHDR10` metadata and Dolby
+Vision bitstream. Explicit exclusions and all other codec, audio, sample-entry,
+resolution, and level constraints remain enforced. HDR10-only clients do not
+gain this Dolby Vision-preserving route. Original-file direct play is unchanged.
 
 When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
 an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
@@ -338,6 +404,18 @@ retain immediate, generation-scoped teardown.
 ID-less static requests reject ambiguous matches and failed durable identity
 lookups rather than selecting another session. Durable identity checks remain
 fresh on every request; full session payloads use the normal per-session cache.
+
+A play ends at the first Stopped report carrying its per-play identifier or
+`DELETE /Videos/ActiveEncodings`; for ID-less players and clients that never
+stop, idle cleanup ends it. Silo then records the play the way it records native
+playback: a watch-history row with source `playback` once the position passes the
+minimum resume threshold, completed past the watched threshold, and an admin
+playback-history row. Each play is recorded once across retried stops, API
+replicas, and idle cleanup; a later copy of the session that saw more of the play
+completes the row and updates the admin row's watched time. The play's resume
+point comes from the client's reports, not from the stop. A play torn down before any position report, such as
+a start that failed to route, is not recorded. Mark-played requests keep writing
+`jellycompat` history rows.
 
 `POST /Sessions/Playing/Ping` touches the caller-owned playback activity without
 changing position or paused state. The native session owner consumes persisted
@@ -426,3 +504,18 @@ Themes do not create playback sessions or update watched state.
 
 See [local theme songs](catalog-api.md#local-theme-songs-v2) for file conventions,
 ownership, inheritance, and routing.
+
+## HEVC video encoding
+
+`playback.allow_hevc_encoding` enables HEVC output for negotiated HLS
+transcoding profiles that explicitly accept HEVC in fragmented MP4. The selected
+codec is preserved in the playback source, FFmpeg recipe, and restart recovery.
+Encoded HEVC playlists and segments use `/Videos/{id}/hevc-v1/...`; older
+API instances reject these routes during rolling upgrades instead of serving
+H.264 bytes for the negotiated HEVC stream.
+H.264 remains the fallback when the setting is disabled or the client profile
+cannot accept HEVC output, or no executor allowed by routing policy supports
+the complete HEVC recipe. Required audio conversion and tone mapping must be
+available on that same executor. Negotiation reads workers' stored capability
+reports; execution checks the selected worker again. Existing HEVC direct-play
+and remux routes are unchanged.

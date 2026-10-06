@@ -132,7 +132,8 @@ const (
 )
 
 // requestScheme must run before Middleware replaces the transport peer address.
-// Proxies must preserve Host and overwrite X-Forwarded-Proto, never append it.
+// Proxies must preserve Host (or name the client's host in X-Forwarded-Host)
+// and overwrite X-Forwarded-Proto, never append it.
 // On a WebSocket upgrade, Traefik sends "wss" or "ws" instead of "https" or
 // "http"; those name the same transport security and are accepted there only.
 func (r *Resolver) requestScheme(req *http.Request) string {
@@ -140,18 +141,7 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 	if req.TLS != nil {
 		scheme = "https"
 	}
-	host, _, err := net.SplitHostPort(req.RemoteAddr)
-	if err != nil {
-		host = req.RemoteAddr
-	}
-	peer := net.ParseIP(host)
-	if peer == nil || r == nil {
-		return scheme
-	}
-	r.mu.RLock()
-	trusted := r.isTrusted(peer)
-	r.mu.RUnlock()
-	if !trusted {
+	if !r.peerTrusted(req) {
 		return scheme
 	}
 	values := req.Header.Values("X-Forwarded-Proto")
@@ -174,6 +164,40 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// requestHost is the single X-Forwarded-Host value a trusted proxy sent, or
+// the Host header. A list, several headers or a value that is not a bare
+// host[:port] is ambiguous and falls back to Host. Like requestScheme it must
+// run before Middleware replaces the transport peer address.
+func (r *Resolver) requestHost(req *http.Request) string {
+	if !r.peerTrusted(req) {
+		return req.Host
+	}
+	values := req.Header.Values("X-Forwarded-Host")
+	if len(values) != 1 {
+		return req.Host
+	}
+	host := strings.TrimSpace(values[0])
+	if host == "" || strings.ContainsAny(host, ",/?#@ \t") {
+		return req.Host
+	}
+	return host
+}
+
+// peerTrusted reports whether the transport peer of req is a trusted proxy.
+func (r *Resolver) peerTrusted(req *http.Request) bool {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		host = req.RemoteAddr
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.isTrusted(peer)
 }
 
 // isWebSocketUpgrade reports whether req asks to upgrade to WebSocket: a

@@ -28,7 +28,16 @@ var (
 	// endingChapterPattern matches "Ending", which in a movie is as likely
 	// the story's ending as its credits.
 	endingChapterPattern = regexp.MustCompile(`(?i)(^|\s)ending(\s|:|$)`)
+	// namedCreditsPattern matches titles that name the credits outright,
+	// unlike "Ending" or "Outro", which can also name the story's final scene.
+	namedCreditsPattern = regexp.MustCompile(`(?i)(^|\s)(credits?|end\s+titles?)(\s|:|$)`)
 )
+
+// maximumAmbiguousCreditsChapterSeconds bounds a chapter that counts as
+// credits only by the word "Ending" or "Outro". An anime ending runs about 90
+// seconds; a longer chapter with such a title is usually the story's final
+// scene.
+const maximumAmbiguousCreditsChapterSeconds = 180.0
 
 // creditsChapterGapSeconds is the most time between two credits chapters that
 // still makes them adjacent. A wider gap is an unchaptered interval that the
@@ -49,7 +58,13 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 	limits := creditsLimitsFor(isMovie)
 	sorted := append([]models.MediaChapter(nil), chapters...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].StartSeconds < sorted[j].StartSeconds })
-	isCredits := func(i int) bool { return isCreditsChapterTitle(sorted[i].Title, isMovie) }
+	isCredits := func(i int) bool {
+		title := sorted[i].Title
+		if !isCreditsChapterTitle(title, isMovie) {
+			return false
+		}
+		return !ambiguousCreditsTitle(title) || chapterSpan(sorted, i, duration) <= maximumAmbiguousCreditsChapterSeconds
+	}
 
 	last := len(sorted) - 1
 	for last >= 0 && !isCredits(last) {
@@ -88,6 +103,28 @@ func DetectChapterCredits(chapters []models.MediaChapter, duration float64, isMo
 		Confidence: creditsChapterConfidence,
 		Algorithm:  CreditsChapterAlgorithm,
 	}, true
+}
+
+// chapterSpan is how long chapter i of sorted plays: until the next chapter
+// starts, or until its own end, which falls back to the end of a file of the
+// given duration.
+func chapterSpan(sorted []models.MediaChapter, i int, duration float64) float64 {
+	chapter := sorted[i]
+	end := chapter.EndSeconds
+	if i+1 < len(sorted) && sorted[i+1].StartSeconds > chapter.StartSeconds {
+		end = sorted[i+1].StartSeconds
+	}
+	if end <= 0 || end > duration {
+		end = duration
+	}
+	return end - chapter.StartSeconds
+}
+
+// ambiguousCreditsTitle reports whether a credits chapter title names the
+// credits only by "Ending" or "Outro". Anime "ED" tags are not ambiguous.
+func ambiguousCreditsTitle(title string) bool {
+	title = strings.TrimSpace(title)
+	return !explicitEDChapterPattern.MatchString(title) && !namedCreditsPattern.MatchString(title)
 }
 
 // isCreditsChapterTitle reports whether a chapter title names end credits.

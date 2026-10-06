@@ -468,6 +468,61 @@ func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard Grou
 	return tx.Commit(ctx)
 }
 
+// DeleteMovingMembers deletes a group as DeleteConditional does, but first
+// moves its members into the default group in the same transaction, so a
+// regular account never falls back to having no group. Each moved account's
+// access_policy_revision is bumped, as for other group changes; members stay
+// signed in and pick up the default group's policy on their next request. If
+// no default group exists the members are left to the foreign key, as
+// DeleteConditional does.
+func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard GroupPrecondition) error {
+	if !guard.valid() {
+		return ErrGroupInvalidPrecondition
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning access group delete: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err = lockGroupWriters(ctx, tx); err != nil {
+		return err
+	}
+	row, err := lockGroup(ctx, tx, id, guard)
+	if err != nil {
+		return err
+	}
+	if row.IsDefault {
+		return ErrDefaultGroupRequired
+	}
+	if err = moveGroupMembersToDefault(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// moveGroupMembersToDefault reassigns every member of group id to the default
+// group. It moves none when there is no default group other than id.
+func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) error {
+	var defaultID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM access_groups WHERE is_default AND id <> $1`, id).Scan(&defaultID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("finding the default access group: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET access_group_id = $1, access_policy_revision = access_policy_revision + 1
+		WHERE access_group_id = $2`, defaultID, id); err != nil {
+		return fmt.Errorf("moving access group members to the default group: %w", err)
+	}
+	return nil
+}
+
 // GetPolicyForUser returns the access-group policy for a user, or nil when
 // the user has no group.
 func (s *GroupStore) GetPolicyForUser(ctx context.Context, userID int) (*GroupPolicy, error) {

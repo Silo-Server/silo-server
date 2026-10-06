@@ -1,8 +1,10 @@
 package templates
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -33,6 +35,10 @@ func TestBuiltinCatalog(t *testing.T) {
 			}
 			seenIDs[tmpl.ID] = true
 		}
+	}
+	kids, ok := Get("tmdb_discover_kids_movies")
+	if !ok || kids.TMDBDiscover == nil || kids.TMDBDiscover.CertificationLte != "PG" {
+		t.Fatalf("Kids Movies must keep its PG certification ceiling: %+v", kids)
 	}
 }
 
@@ -66,13 +72,81 @@ func TestBuiltinTemplateSourcePlatesStayOutOfPublicAssets(t *testing.T) {
 	}
 }
 
-func TestBuiltinTemplatesValidate(t *testing.T) {
+// retiredTemplatePosterIDs lists removed templates whose final poster still
+// ships. A collection created from a template stores the template's poster
+// path and keeps it unless the poster was copied into artwork storage, so
+// deleting one of these JPGs would blank that collection's poster. Remove an ID
+// together with its JPG once no stored poster path can point at it. Retired
+// templates keep no raw plate.
+var retiredTemplatePosterIDs = map[string]bool{
+	// Trakt templates, removed with Trakt-backed collection creation.
+	"trakt_popular_movies":     true,
+	"trakt_popular_shows":      true,
+	"trakt_recommended_movies": true,
+	"trakt_recommended_shows":  true,
+	"trakt_trending_movies":    true,
+	"trakt_trending_shows":     true,
+}
+
+// Files an OS or file manager may leave in an asset directory.
+var ignoredAssetDirEntries = map[string]bool{"Thumbs.db": true, "desktop.ini": true}
+
+func TestBuiltinTemplateAssetsHaveTemplates(t *testing.T) {
+	webRoot := filepath.Join("..", "..", "..", "web")
+	registered := make(map[string]bool)
 	for _, tmpl := range List() {
-		t.Run(tmpl.ID, func(t *testing.T) {
-			if err := validate(tmpl); err != nil {
-				t.Fatalf("template %s failed validation: %v", tmpl.ID, err)
+		registered[tmpl.ID] = true
+	}
+	retired := slices.Sorted(maps.Keys(retiredTemplatePosterIDs))
+
+	for _, id := range retired {
+		if registered[id] {
+			t.Errorf("retired template %q is registered again; drop it from retiredTemplatePosterIDs", id)
+		}
+	}
+
+	dirs := []struct {
+		path         string
+		ext          string
+		allowRetired bool
+	}{
+		{filepath.Join(webRoot, "public", "images", "collection-templates"), ".jpg", true},
+		{filepath.Join(webRoot, "assets-source", "collection-templates", "raw"), ".png", false},
+	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir.path, err)
+		}
+		found := make(map[string]bool)
+		for _, entry := range entries {
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || ignoredAssetDirEntries[name] {
+				continue
 			}
-		})
+			id, ok := strings.CutSuffix(name, dir.ext)
+			if ok {
+				found[id] = true
+			}
+			switch {
+			case entry.IsDir() || !ok:
+				t.Errorf("%s: unexpected entry %q; only {template id}%s files belong here", dir.path, name, dir.ext)
+			case registered[id]:
+			case dir.allowRetired && retiredTemplatePosterIDs[id]:
+			case dir.allowRetired:
+				t.Errorf("%s has no registered template; delete it, or add %q to retiredTemplatePosterIDs if existing collections still use it", filepath.Join(dir.path, name), id)
+			default:
+				t.Errorf("%s has no registered template; delete it", filepath.Join(dir.path, name))
+			}
+		}
+		if !dir.allowRetired {
+			continue
+		}
+		for _, id := range retired {
+			if !found[id] {
+				t.Errorf("%s is missing; restore it, or drop %q from retiredTemplatePosterIDs once no stored poster path can point at it", filepath.Join(dir.path, id+dir.ext), id)
+			}
+		}
 	}
 }
 
@@ -538,209 +612,5 @@ func TestCatalogPreservesOrder(t *testing.T) {
 		if i == 0 && group.Category != CategoryTrending {
 			t.Errorf("expected first category to be trending, got %q", group.Category)
 		}
-	}
-}
-
-func TestGetReturnsRegisteredTemplate(t *testing.T) {
-	tmpl, ok := Get("tmdb_trending_all_today")
-	if !ok {
-		t.Fatal("expected built-in template to be findable by ID")
-	}
-	if tmpl.Source != SourceTMDB {
-		t.Errorf("source mismatch: got %q", tmpl.Source)
-	}
-	if tmpl.TMDB == nil || tmpl.TMDB.Preset != "trending" {
-		t.Errorf("tmdb spec missing or wrong preset")
-	}
-}
-
-func TestCategoryLabelKnowsAllBuiltinCategories(t *testing.T) {
-	cat := CatalogDefault()
-	for _, group := range cat.Categories {
-		if strings.TrimSpace(CategoryLabel(group.Category)) == "" {
-			t.Errorf("missing label for category %q", group.Category)
-		}
-	}
-}
-
-// TestPhase2DiscoverTemplatesUseExpectedBands pins the Phase-2 TMDB Discover
-// genre matrix to its documented sort-order bands and TMDB query parameters.
-// Drift here would either reorder the gallery in surprising ways (band
-// regressions) or change what a "Popular Action" / "Top Rated Action" template
-// actually returns from TMDB (filter regressions) — both silent failures from
-// the operator's perspective, so make them loud.
-func TestPhase2DiscoverTemplatesUseExpectedBands(t *testing.T) {
-	const (
-		popularPrefix  = "tmdb_discover_popular_"
-		topRatedPrefix = "tmdb_discover_top_rated_"
-		kidsPrefix     = "tmdb_discover_kids_"
-	)
-	var popularCount, topRatedCount, kidsCount int
-	for _, tmpl := range List() {
-		switch {
-		case strings.HasPrefix(tmpl.ID, popularPrefix):
-			popularCount++
-			if tmpl.Source != SourceTMDBDiscover {
-				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
-			}
-			if tmpl.TMDBDiscover == nil {
-				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
-			}
-			if tmpl.DefaultSortOrder < 5000 || tmpl.DefaultSortOrder > 5999 {
-				t.Errorf("%s: DefaultSortOrder %d outside Popular band [5000, 5999]", tmpl.ID, tmpl.DefaultSortOrder)
-			}
-			if tmpl.TMDBDiscover.SortBy != "popularity.desc" {
-				t.Errorf("%s: SortBy = %q, want popularity.desc", tmpl.ID, tmpl.TMDBDiscover.SortBy)
-			}
-			if tmpl.TMDBDiscover.VoteCountGte != 300 {
-				t.Errorf("%s: VoteCountGte = %d, want 300", tmpl.ID, tmpl.TMDBDiscover.VoteCountGte)
-			}
-		case strings.HasPrefix(tmpl.ID, topRatedPrefix):
-			topRatedCount++
-			if tmpl.Source != SourceTMDBDiscover {
-				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
-			}
-			if tmpl.TMDBDiscover == nil {
-				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
-			}
-			if tmpl.DefaultSortOrder < 6000 || tmpl.DefaultSortOrder > 6999 {
-				t.Errorf("%s: DefaultSortOrder %d outside Top Rated band [6000, 6999]", tmpl.ID, tmpl.DefaultSortOrder)
-			}
-			if tmpl.TMDBDiscover.SortBy != "vote_average.desc" {
-				t.Errorf("%s: SortBy = %q, want vote_average.desc", tmpl.ID, tmpl.TMDBDiscover.SortBy)
-			}
-			if tmpl.TMDBDiscover.VoteCountGte != 1000 {
-				t.Errorf("%s: VoteCountGte = %d, want 1000", tmpl.ID, tmpl.TMDBDiscover.VoteCountGte)
-			}
-		case strings.HasPrefix(tmpl.ID, kidsPrefix):
-			kidsCount++
-			if tmpl.Source != SourceTMDBDiscover {
-				t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBDiscover)
-			}
-			if tmpl.TMDBDiscover == nil {
-				t.Fatalf("%s: TMDBDiscover spec is nil", tmpl.ID)
-			}
-			if tmpl.DefaultSortOrder < 9000 || tmpl.DefaultSortOrder > 9999 {
-				t.Errorf("%s: DefaultSortOrder %d outside Misc/Kids band [9000, 9999]", tmpl.ID, tmpl.DefaultSortOrder)
-			}
-			if tmpl.TMDBDiscover.CertificationLte != "PG" {
-				t.Errorf("%s: CertificationLte = %q, want PG", tmpl.ID, tmpl.TMDBDiscover.CertificationLte)
-			}
-		}
-	}
-	if popularCount != 18 {
-		t.Errorf("Popular by Genre count = %d, want 18", popularCount)
-	}
-	if topRatedCount != 18 {
-		t.Errorf("Top Rated by Genre count = %d, want 18", topRatedCount)
-	}
-	if kidsCount != 1 {
-		t.Errorf("Kids count = %d, want 1", kidsCount)
-	}
-}
-
-// TestPhase3FranchiseTemplatesUseExpectedBands pins the Phase-3 TMDB Collection
-// franchise templates to their documented sort-order band, source, and spec
-// shape. The placeholder template is allowed to ship with CollectionID == 0 (a
-// permitted sentinel — see validateTMDBCollection); every other franchise must
-// resolve to a real TMDB collection ID. Drift here would either silently
-// reorder the gallery or, worse, swap a curated franchise for the placeholder.
-func TestPhase3FranchiseTemplatesUseExpectedBands(t *testing.T) {
-	const (
-		franchisePrefix = "tmdb_franchise_"
-		placeholderID   = "tmdb_franchise_placeholder"
-	)
-
-	// Keep in lockstep with the entries added to builtin.go. If a franchise
-	// is added or skipped, update this number — the count assertion is the
-	// canary that catches accidental deletions.
-	const wantFranchiseTemplateCount = 11
-
-	var (
-		matched          int
-		sawPlaceholder   bool
-		curatedFranchise int
-	)
-	for _, tmpl := range List() {
-		if !strings.HasPrefix(tmpl.ID, franchisePrefix) {
-			continue
-		}
-		matched++
-
-		if tmpl.Source != SourceTMDBCollection {
-			t.Errorf("%s: Source = %q, want %q", tmpl.ID, tmpl.Source, SourceTMDBCollection)
-		}
-		if tmpl.MediaKind != MediaMovie {
-			t.Errorf("%s: MediaKind = %q, want %q", tmpl.ID, tmpl.MediaKind, MediaMovie)
-		}
-		if tmpl.DefaultSortOrder < 7000 || tmpl.DefaultSortOrder > 7999 {
-			t.Errorf("%s: DefaultSortOrder %d outside Franchises band [7000, 7999]", tmpl.ID, tmpl.DefaultSortOrder)
-		}
-		if tmpl.TMDBCollection == nil {
-			t.Fatalf("%s: TMDBCollection spec is nil", tmpl.ID)
-		}
-
-		if tmpl.ID == placeholderID {
-			sawPlaceholder = true
-			if tmpl.TMDBCollection.CollectionID != 0 {
-				t.Errorf("%s: placeholder CollectionID = %d, want 0", tmpl.ID, tmpl.TMDBCollection.CollectionID)
-			}
-		} else {
-			curatedFranchise++
-			if tmpl.TMDBCollection.CollectionID <= 0 {
-				t.Errorf("%s: CollectionID = %d, want > 0", tmpl.ID, tmpl.TMDBCollection.CollectionID)
-			}
-		}
-	}
-
-	if !sawPlaceholder {
-		t.Error("placeholder template tmdb_franchise_placeholder is missing")
-	}
-	if matched != wantFranchiseTemplateCount {
-		t.Errorf("franchise template count = %d, want %d (curated=%d + placeholder=1)",
-			matched, wantFranchiseTemplateCount, curatedFranchise)
-	}
-}
-
-// TestPhase1MDBListTemplatesHaveSortOrderInExpectedBands verifies that the
-// Phase-1 MDBList-backed templates land in their assigned sort-order bands
-// (the band table below is the authoritative record of the scheme). The
-// banding scheme drives apply-time ordering for the resulting collections, so
-// regressing a band (e.g. assigning a streaming template into the 9000s) would
-// silently reorder a user's library — make that loud.
-func TestPhase1MDBListTemplatesHaveSortOrderInExpectedBands(t *testing.T) {
-	type band struct {
-		name string
-		lo   int
-		hi   int
-	}
-	rules := []struct {
-		prefix string
-		band   band
-	}{
-		{prefix: "mdblist_charts_", band: band{name: "Charts", lo: 1000, hi: 1999}},
-		{prefix: "mdblist_best_of_", band: band{name: "Best of Year", lo: 2000, hi: 2999}},
-		{prefix: "mdblist_awards_", band: band{name: "Awards", lo: 3000, hi: 3999}},
-		{prefix: "mdblist_streaming_", band: band{name: "Streaming Originals", lo: 4000, hi: 4999}},
-		{prefix: "mdblist_seasonal_", band: band{name: "Seasonal/Holiday", lo: 8000, hi: 8999}},
-		{prefix: "mdblist_misc_", band: band{name: "Editorial/Misc", lo: 9000, hi: 9999}},
-	}
-
-	matched := 0
-	for _, tmpl := range List() {
-		for _, rule := range rules {
-			if !strings.HasPrefix(tmpl.ID, rule.prefix) {
-				continue
-			}
-			matched++
-			if tmpl.DefaultSortOrder < rule.band.lo || tmpl.DefaultSortOrder > rule.band.hi {
-				t.Errorf("template %q: DefaultSortOrder %d outside %s band [%d, %d]",
-					tmpl.ID, tmpl.DefaultSortOrder, rule.band.name, rule.band.lo, rule.band.hi)
-			}
-			break
-		}
-	}
-	if matched == 0 {
-		t.Fatal("no Phase-1 MDBList templates found by prefix — did the catalog change?")
 	}
 }

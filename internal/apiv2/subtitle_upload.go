@@ -94,7 +94,7 @@ func registerSubtitleUploads(reg *Registry) {
 		if row == nil {
 			return nil, NewProblem(TypeInternalError, "Subtitle upload returned no result.")
 		}
-		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: storedSubtitleView(*row)}}, nil
+		return &SubtitleDownloadOutput{Body: SubtitleDownloadResult{Subtitle: reg.storedSubtitleWithSync(ctx, *row)}}, nil
 	})
 	detect := op("/subtitles/detect-language", "detectSubtitleLanguage")
 	detect.RetrySafety = RetrySafetyNaturalIdempotent

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Provider reads metadata from NFO sidecar files.
@@ -14,7 +16,17 @@ type Provider struct{}
 
 func NewProvider() *Provider { return &Provider{} }
 
-func (p *Provider) Slug() string       { return "nfo" }
+func (p *Provider) Slug() string { return "nfo" }
+
+// RatingSources declares the Rotten Tomatoes scores the provider reads from
+// local .nfo files into the rt_critic and rt_audience rating columns, so an
+// administrator can choose to show them.
+func (p *Provider) RatingSources() []models.RatingSourceDefinition {
+	return []models.RatingSourceDefinition{
+		{Source: models.RatingSourceRTCritic, Name: "RT", Label: "Rotten Tomatoes critics", Scale: 100, Percent: true},
+		{Source: models.RatingSourceRTAudience, Name: "RT Audience", Label: "Rotten Tomatoes audience", Scale: 100, Percent: true},
+	}
+}
 func (p *Provider) Name() string       { return "NFO Files" }
 func (p *Provider) ForTypes() []string { return []string{typeMovie, typeSeries} }
 

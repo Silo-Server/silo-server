@@ -530,6 +530,63 @@ func (r *ItemRepository) InsertIfAbsent(ctx context.Context, item *models.MediaI
 	return inserted, nil
 }
 
+// SetStatusUnlessMatched sets an item's status and leaves a matched item
+// untouched. It reports whether a row changed, and returns ErrItemNotFound when
+// no item has contentID. The condition is part of the UPDATE, so a match
+// another writer stores at the same time is kept; reading the item and then
+// calling Upsert would write the stale copy over it.
+func (r *ItemRepository) SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error) {
+	if r.searchIndexEvents.disabledByActiveProvider() {
+		return r.setStatusUnlessMatched(ctx, r.pool, contentID, status)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin media item status tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	changed, err := r.setStatusUnlessMatched(ctx, tx, contentID, status)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit media item status tx: %w", err)
+	}
+	return changed, nil
+}
+
+// setStatusUnlessMatched's outer SELECT reads the snapshot taken before the
+// UPDATE, so it finds an item the UPDATE changed as well as one it skipped.
+func (r *ItemRepository) setStatusUnlessMatched(ctx context.Context, querier itemStatusQuerier, contentID, status string) (bool, error) {
+	var exists, changed bool
+	err := querier.QueryRow(ctx, `
+		WITH updated AS (
+			UPDATE media_items
+			SET status = $2, updated_at = NOW()
+			WHERE content_id = $1 AND lower(trim(status)) <> 'matched'
+			RETURNING content_id
+		)
+		SELECT EXISTS (SELECT 1 FROM media_items WHERE content_id = $1), EXISTS (SELECT 1 FROM updated)`, contentID, status).Scan(&exists, &changed)
+	if err != nil {
+		return false, fmt.Errorf("setting media item status: %w", err)
+	}
+	if !exists {
+		return false, ErrItemNotFound
+	}
+	if !changed {
+		return false, nil
+	}
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, querier, contentID); err != nil {
+		return false, fmt.Errorf("enqueueing catalog search upsert: %w", err)
+	}
+	return true, nil
+}
+
+type itemStatusQuerier interface {
+	itemExecer
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *models.MediaItem) error {
 	_, err := r.writeItem(ctx, execer, item, true)
 	return err
@@ -790,15 +847,66 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
 	args := []any{contentIDs}
 	argIdx := 2
 
-	var conditions []string
-	appendLibraryAccessConditions("mi.content_id", access, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", AccessFilter{MaturityLimits: access.MaturityLimits, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-	for _, c := range conditions {
+	for _, c := range itemAccessConditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 
 	sql += " ORDER BY mi.content_id ASC"
 	return sql, args
+}
+
+// itemAccessConditions are the predicates over media_items mi that decide
+// whether the viewer may see an item addressed by ID: library access, the
+// maturity limits, and excluded media types.
+func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []string {
+	var conditions []string
+	appendLibraryAccessConditions("mi.content_id", access, &conditions, args, argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: access.MaturityLimits, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, args, argIdx)
+	return conditions
+}
+
+// CountVisiblePersonalCollectionMembers counts, per collection, the members of
+// the account's hand-picked or imported personal collections that the viewer
+// can see, as their catalog view counts them. It ignores smart definitions and
+// display filters; CountPersonalCollections handles those collections.
+// Collections with no visible members are absent from the result. It reads the
+// Postgres user store's membership table, so callers must not use it for
+// collections kept elsewhere.
+func (r *ItemRepository) CountVisiblePersonalCollectionMembers(ctx context.Context, userID int, collectionIDs []string, access AccessFilter) (map[string]int, error) {
+	counts := make(map[string]int, len(collectionIDs))
+	if len(collectionIDs) == 0 || (access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0) {
+		return counts, nil
+	}
+	sql, args := buildCountVisiblePersonalCollectionMembersSQL(userID, collectionIDs, access)
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("counting visible personal collection members: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scanning personal collection member count: %w", err)
+		}
+		counts[id] = n
+	}
+	return counts, rows.Err()
+}
+
+func buildCountVisiblePersonalCollectionMembersSQL(userID int, collectionIDs []string, access AccessFilter) (string, []any) {
+	sql := `SELECT upci.collection_id, COUNT(*)
+            FROM user_personal_collection_items upci
+            JOIN media_items mi ON mi.content_id = upci.media_item_id
+            WHERE upci.user_id = $1 AND upci.collection_id = ANY($2) AND upci.sub_item_id = ''`
+	args := []any{userID, collectionIDs}
+	argIdx := 3
+	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+		sql += "\n            AND " + c
+	}
+	// The catalog view never lists manga chapters as items.
+	sql += "\n            AND " + MangaChapterExclusionWhere("mi")
+	return sql + "\n            GROUP BY upci.collection_id", args
 }
 
 // GetOriginalLanguage returns the original_language for a media item by content ID.
@@ -1201,12 +1309,19 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	return page, total, hi < total, !fuzzyTruncated, nil
 }
 
+// searchBlockHasExactTitle mirrors exact_title_match for a block's titles,
+// including yearSuffixedTitleSQL for non-episode items.
 func searchBlockHasExactTitle(items []*models.MediaItem, normalizedTitle string) bool {
 	if normalizedTitle == "" {
 		return false
 	}
 	for _, item := range items {
-		if item != nil && normalizeTitleForComparison(item.Title) == normalizedTitle {
+		if item == nil {
+			continue
+		}
+		title := normalizeTitleForComparison(item.Title)
+		if title == normalizedTitle ||
+			(item.Type != recentTVTypeEpisode && item.Year > 0 && title == normalizedTitle+" "+strconv.Itoa(item.Year)) {
 			return true
 		}
 	}
@@ -1532,7 +1647,7 @@ type searchQuerier interface {
 // independently of the caller's page size and to hand the fuzzy fallback the
 // complete block without a second FTS query.
 func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, []*models.MediaItem, error) {
-	rows, err := q.Query(ctx, dataSQL, args...)
+	rows, err := q.Query(ctx, dataSQL, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, 0, false, nil, fmt.Errorf("searching media items: %w", err)
 	}
@@ -1563,7 +1678,7 @@ func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, d
 	if len(items) == 0 && offset > 0 {
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
-		if err := q.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		if err := q.QueryRow(ctx, countSQL, searchPlanArgs(countArgs)...).Scan(&total); err != nil {
 			return nil, 0, false, nil, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
 		hasMore = total > offset+len(items)

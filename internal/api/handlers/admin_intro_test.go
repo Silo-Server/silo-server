@@ -340,7 +340,7 @@ func TestAdminIntroRedetectRejectsEpisodeWithoutMediaFiles(t *testing.T) {
 		fakeIntroEligibility{result: &intromarkers.MarkerItemEligibility{
 			ItemID:                "ep1",
 			HasMediaFiles:         false,
-			IntroDetectionEnabled: false,
+			IntroDetectionEnabled: true,
 		}},
 		context.Background(),
 		nil,

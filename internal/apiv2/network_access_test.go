@@ -281,6 +281,18 @@ func TestAdminNetworkAccessConnectDisconnect(t *testing.T) {
 		t.Fatal(rec.Code, rec.Body.String(), f.hosts)
 	}
 
+	// Explicit null must not widen a malformed selector to every host.
+	for _, tc := range []struct{ body, location string }{
+		{`{"hosts":null}`, "body.hosts"},
+		{`null`, "body"},
+	} {
+		before := len(f.connects)
+		p := requireProblem(t, do(t, h, http.MethodPost, connect, tc.body, bearer(adminToken)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || len(f.connects) != before {
+			t.Fatalf("null selector %s: problem=%+v, calls=%d", tc.body, p, len(f.connects))
+		}
+	}
+
 	// An unknown host and an empty host list are validation failures that
 	// name body.hosts.
 	p := requireProblem(t, do(t, h, http.MethodPost, connect, `{"hosts":["node:99"]}`, bearer(adminToken)), TypeValidationFailed)
@@ -333,51 +345,15 @@ func TestNetworkAccessStatusOfDefaultsState(t *testing.T) {
 	}
 }
 
-// An explicit null selector must not be read as "every host".
-func TestNetworkAccessCommandRejectsExplicitNullHosts(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := newFakeNetworkAccess()
-	deps.NetworkAccess = f
-	h := newTestHandler(t, deps)
-	connect := Prefix + "/admin/network-access/stub/connect"
-	p := requireProblem(t, do(t, h, http.MethodPost, connect, `{"hosts":null}`, bearer(adminToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body.hosts" {
-		t.Fatalf("problem = %+v", p)
-	}
-	if len(f.connects) != 0 {
-		t.Fatal("null hosts reached the service")
-	}
-}
-
-// A literal null body is malformed, not "omitted": it must not fan out to
-// every host.
-func TestNetworkAccessCommandRejectsNullBody(t *testing.T) {
-	deps := pilotDeps(nil, nil)
-	f := newFakeNetworkAccess()
-	deps.NetworkAccess = f
-	h := newTestHandler(t, deps)
-	connect := Prefix + "/admin/network-access/stub/connect"
-	p := requireProblem(t, do(t, h, http.MethodPost, connect, `null`, bearer(adminToken)), TypeValidationFailed)
-	if len(p.Errors) != 1 || p.Errors[0].Location != "body" {
-		t.Fatalf("problem = %+v", p)
-	}
-	if len(f.connects) != 0 {
-		t.Fatal("null body reached the service")
-	}
-	// An omitted body still means every host.
-	if rec := do(t, h, http.MethodPost, connect, "", bearer(adminToken)); rec.Code != http.StatusAccepted || len(f.connects) != 1 {
-		t.Fatalf("omitted body: %d, connects=%d", rec.Code, len(f.connects))
-	}
-}
-
 func TestNetworkAccessCommandChunkedBody(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := newFakeNetworkAccess()
+	deps.NetworkAccess = f
+	h := newTestHandler(t, deps)
 	for _, action := range []string{"connect", "disconnect"} {
 		for _, body := range []string{"", "null", "{}", `{"hosts":null}`, `{"hosts":["api"]}`} {
 			t.Run(action+"/"+body, func(t *testing.T) {
-				deps := pilotDeps(nil, nil)
-				f := newFakeNetworkAccess()
-				deps.NetworkAccess = f
-				h := newTestHandler(t, deps)
+				*f = *newFakeNetworkAccess()
 				req := httptest.NewRequest(http.MethodPost, Prefix+"/admin/network-access/stub/"+action, strings.NewReader(body))
 				req.ContentLength = -1
 				req.TransferEncoding = []string{"chunked"}

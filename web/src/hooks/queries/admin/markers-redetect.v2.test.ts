@@ -5,7 +5,7 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { useRedetectEpisodeIntro, useRedetectItemMarkers } from "../items";
-import { setAccessToken, setProfileId } from "@/api/client";
+import { setAccessToken, setProfileId, setRefreshToken } from "@/api/client";
 import { useAdminMarkerCapabilities, useMarkerDetectionKinds } from "./markers";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 beforeEach(installPolicyStorageMocks);
@@ -32,6 +32,8 @@ function setup(response: (path: string) => Response) {
   };
 }
 it("does not refresh or replay re-detection after401", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const { calls, wrapper } = setup(
     () =>
       new Response(

@@ -63,9 +63,10 @@ func realAPIKeyHandler() (http.Handler, *scopeCatalogStore) {
 // The v2 scope catalog is what clients read from the scope-discovery endpoint,
 // so every scope it advertises has to be creatable.
 func TestV2APIKeyCreateAcceptsEveryAdvertisedScope(t *testing.T) {
+	h, store := realAPIKeyHandler()
 	for _, scope := range auth.APIKeyScopeCatalog() {
 		for _, path := range []string{"/api-keys", adminAPIKeyPath} {
-			h, store := realAPIKeyHandler()
+			*store = scopeCatalogStore{}
 			body := `{"label":"Tool","scopes":["` + scope.Name + `"]}`
 			created := do(t, h, http.MethodPost, Prefix+path, body, bearer(adminToken))
 			if created.Code != 201 {
@@ -82,8 +83,9 @@ func TestV2APIKeyCreateAcceptsEveryAdvertisedScope(t *testing.T) {
 }
 
 func TestV2APIKeyCreateReportsUnknownScope(t *testing.T) {
+	h, store := realAPIKeyHandler()
 	for _, path := range []string{"/api-keys", adminAPIKeyPath} {
-		h, store := realAPIKeyHandler()
+		*store = scopeCatalogStore{}
 		rec := do(t, h, http.MethodPost, Prefix+path, `{"label":"Tool","scopes":["admin:everything"]}`, bearer(adminToken))
 		requireProblem(t, rec, TypeValidationFailed)
 		if store.created {

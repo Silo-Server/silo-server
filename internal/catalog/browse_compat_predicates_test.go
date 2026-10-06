@@ -6,48 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/access"
 )
-
-func TestPlayedOnlyBrowseBindsEveryParameter(t *testing.T) {
-	for _, played := range []bool{true, false} {
-		plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{Type: "movie", UserID: 7, ProfileID: "child", IsPlayed: new(played), Limit: 1})
-		if err != nil || empty {
-			t.Fatalf("build: empty=%v err=%v", empty, err)
-		}
-		sql, args := plan.pagedSQL(false)
-		for i := range args {
-			if !regexp.MustCompile(fmt.Sprintf(`\$%d\b`, i+1)).MatchString(sql) {
-				t.Fatalf("played=%v parameter $%d has no SQL reference: %s", played, i+1, sql)
-			}
-		}
-	}
-}
-
-func TestBrowseCombinedPredicatesPreserveProfileAndAccess(t *testing.T) {
-	filters := BrowseFilters{Type: "movie", Genres: []string{"Drama", "Comedy"}, Years: []int{2020, 2024}, SearchTerm: "100%", UserID: 7, ProfileID: "child", IsFavorite: true, IsPlayed: new(false), IsResumable: true, LibraryIDs: []int{3}, DisabledLibraryIDs: []int{9}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}, Limit: 1, Offset: 2}
-	plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(filters)
-	if err != nil || empty {
-		t.Fatalf("build plan: empty=%v err=%v", empty, err)
-	}
-	sql, args := plan.pagedSQL(false)
-	for _, predicate := range []string{"mi.genres &&", "mi.year = ANY", "mi.title ILIKE", "user_favorites", "user_watch_progress", "profile_id", "NOT EXISTS", "content_rating_age", "media_folder_id", "LIMIT", "OFFSET"} {
-		if !strings.Contains(sql, predicate) {
-			t.Errorf("missing %q in %s", predicate, sql)
-		}
-	}
-	hasProfile, hasLiteral := false, false
-	for _, arg := range args {
-		if str, ok := arg.(string); ok {
-			hasProfile = hasProfile || str == "child"
-			hasLiteral = hasLiteral || str == `%100\%%`
-		}
-	}
-	if !hasProfile || !hasLiteral {
-		t.Fatalf("missing bound profile or literal search pattern: %v", args)
-	}
-}
 
 func TestBrowseUserStateWithoutProfileFailsClosed(t *testing.T) {
 	plan, empty, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{Type: "movie", UserID: 7, IsFavorite: true})
@@ -122,6 +81,7 @@ func TestBrowseLanguagePredicateJoinsEpisodeFiles(t *testing.T) {
 func TestBrowseJellyfinGridFiltersBindEveryParameter(t *testing.T) {
 	filters := BrowseFilters{
 		Type:                    "movie",
+		SearchTerm:              "100%",
 		NameLessThan:            "M",
 		NameStartsWithOrGreater: "C",
 		ExcludeContentIDs:       []string{"movie-9"},
@@ -137,6 +97,9 @@ func TestBrowseJellyfinGridFiltersBindEveryParameter(t *testing.T) {
 		t.Fatalf("build plan: empty=%v err=%v", empty, err)
 	}
 	sql, args := plan.pagedSQL(false)
+	if !slices.Contains(args, any(`%100\%%`)) {
+		t.Fatalf("literal search wildcard was not escaped: %v", args)
+	}
 	for _, predicate := range []string{
 		sortTitleKeyExpr + " < LOWER(", sortTitleKeyExpr + " >= LOWER(",
 		"NOT (mi.content_id = ANY(", "mi.studios &&", "mi.content_rating = ANY(", "mi.rating_imdb >=",

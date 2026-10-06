@@ -8,20 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getLibraryCollectionsOk from "../../../../contracts/api/v2/fixtures/get_library_collections_ok.json";
 import getLibraryLayoutOk from "../../../../contracts/api/v2/fixtures/get_library_layout_ok.json";
-import listLibrarySectionsOk from "../../../../contracts/api/v2/fixtures/list_library_sections_ok.json";
-import listLibraryUserCollectionsOk from "../../../../contracts/api/v2/fixtures/list_library_user_collections_ok.json";
 
 import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
 import {
-  flattenLibraryCollections,
   getLibraryCollectionList,
   useLibraryCollectionItems,
   useLibraryCollections,
-  useLibraryUserCollections,
 } from "./libraryCollections";
-import { useLibraryLayout, useLibrarySections } from "./sections";
+import { useLibraryLayout } from "./sections";
 
 function createWrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -72,23 +68,6 @@ describe("library viewer reads", () => {
         c.library_ids.map(Number),
       ]),
     );
-    expect(flattenLibraryCollections(tab).map((c) => c.id)).toEqual([
-      ...getLibraryCollectionsOk.groups.flatMap((g) => g.collections.map((c) => c.id)),
-      ...(getLibraryCollectionsOk.ungrouped?.collections.map((c) => c.id) ?? []),
-    ]);
-  });
-
-  it("lists a library's user collections from the items envelope", async () => {
-    stubFetch(() => jsonResponse(listLibraryUserCollectionsOk));
-
-    const { result } = renderHook(() => useLibraryUserCollections(1), {
-      wrapper: createWrapper(),
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(result.current.data?.map((c) => [c.id, c.name, c.creator_profile_id])).toEqual(
-      listLibraryUserCollectionsOk.items.map((c) => [c.id, c.name, c.creator_profile_id]),
-    );
   });
 
   it("reads a bounded v2 collection teaser with the active profile", async () => {
@@ -109,27 +88,16 @@ describe("library viewer reads", () => {
     expect(result.current.data?.has_more).toBe(false);
   });
 
-  it("loads the library layout and sections", async () => {
-    const fetchMock = stubFetch((url) =>
-      url.pathname.endsWith("/layout")
-        ? jsonResponse(getLibraryLayoutOk)
-        : jsonResponse(listLibrarySectionsOk),
-    );
+  it("loads the library layout", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(getLibraryLayoutOk));
 
     const layout = renderHook(() => useLibraryLayout(1), { wrapper: createWrapper() });
-    const sections = renderHook(() => useLibrarySections(1), { wrapper: createWrapper() });
     await waitFor(() => expect(layout.result.current.isSuccess).toBe(true));
-    await waitFor(() => expect(sections.result.current.isSuccess).toBe(true));
 
     const requested = fetchMock.mock.calls.map((call) => String(call[0])).sort();
-    expect(requested).toEqual(["/api/v2/library/1/layout", "/api/v2/library/1/sections"]);
+    expect(requested).toEqual(["/api/v2/library/1/layout"]);
     expect(layout.result.current.data?.sections.map((s) => s.id)).toEqual(
       getLibraryLayoutOk.sections.map((s) => s.id),
     );
-    const [section] = sections.result.current.data?.sections ?? [];
-    expect(section?.id).toBe("continue_watching");
-    expect(section?.total_count).toBe(1);
-    expect(section?.items[0]?.title).toBe("Heat");
-    expect(section?.items[0]?.position_seconds).toBe(1200.5);
   });
 });

@@ -82,6 +82,7 @@ describe("syncRunFinished", () => {
     ({ id, status }) as WatchProviderSyncRun;
 
   it("fires when a watched run leaves queued or running", () => {
+    expect(syncRunFinished(undefined, run("a", "success"))).toBe(false);
     expect(syncRunFinished(run("a", "running"), run("a", "success"))).toBe(true);
     expect(syncRunFinished(run("a", "queued"), run("a", "warning"))).toBe(true);
     expect(syncRunFinished(run("a", "queued"), run("a", "running"))).toBe(false);
@@ -93,9 +94,5 @@ describe("syncRunFinished", () => {
     expect(syncRunFinished(run("a", "success"), run("b", "success"))).toBe(true);
     expect(syncRunFinished(run("a", "running"), run("b", "failed"))).toBe(true);
     expect(syncRunFinished(run("a", "success"), run("b", "running"))).toBe(false);
-  });
-
-  it("does not fire on the first read", () => {
-    expect(syncRunFinished(undefined, run("a", "success"))).toBe(false);
   });
 });

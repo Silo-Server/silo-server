@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -184,7 +185,7 @@ func (reg *Registry) getPersonalCollection(ctx context.Context, in *PersonalColl
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
-	return &PersonalCollectionOutput{ETag: collectionEditorTag(ctx, "collection", string(in.ID), v.Revision).String(), Body: personalCollectionOf(v.Collection)}, nil
+	return &PersonalCollectionOutput{ETag: personalCollectionEditorTag(ctx, string(in.ID), v).String(), Body: personalCollectionOf(v.Collection)}, nil
 }
 func (reg *Registry) updatePersonalCollection(ctx context.Context, in *PersonalCollectionUpdateInput) (*PersonalCollectionOutput, error) {
 	s, p := reg.collectionLifecycle()
@@ -355,7 +356,28 @@ func (reg *Registry) listPersonalCollectionTemplates(_ context.Context, _ *struc
 	if !ok {
 		return nil, unavailable("collection templates")
 	}
-	return &PersonalCollectionTemplatesOutput{Body: s.CollectionTemplates()}, nil
+	return &PersonalCollectionTemplatesOutput{Body: importableCollectionTemplates(s.CollectionTemplates())}, nil
+}
+
+// importableCollectionTemplates keeps the templates a personal collection can
+// be created from. The shared catalog also lists TMDB Discover and franchise
+// templates, which only admin template bundles can apply; a category left
+// with no templates is dropped.
+func importableCollectionTemplates(catalog templates.Catalog) templates.Catalog {
+	out := templates.Catalog{Categories: make([]templates.CategoryGroup, 0, len(catalog.Categories))}
+	for _, group := range catalog.Categories {
+		kept := make([]templates.Template, 0, len(group.Templates))
+		for _, template := range group.Templates {
+			if slices.Contains(importableCollectionSources[:], string(template.Source)) {
+				kept = append(kept, template)
+			}
+		}
+		if len(kept) > 0 {
+			group.Templates = kept
+			out.Categories = append(out.Categories, group)
+		}
+	}
+	return out
 }
 func (reg *Registry) syncPersonalCollection(ctx context.Context, in *PersonalCollectionIDInput) (*PersonalCollectionSyncOutput, error) {
 	s, ok := reg.deps.CollectionImports.(personalCollectionImportLifecycle)

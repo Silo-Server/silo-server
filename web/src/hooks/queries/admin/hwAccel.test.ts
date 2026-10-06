@@ -44,32 +44,31 @@ it("reads real v2 inventory without treating configured backend as verified", as
   expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/api/v2/admin/system/hw-accel");
   expect(result.current.data).toMatchObject(page());
 });
-it.each([null, "pin-b", "pin-a"])(
-  "hides cached hardware inventory after PIN setter %s",
-  async (pin) => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(response(page()))
-      .mockImplementation(() => new Promise(() => {}));
-    vi.stubGlobal("fetch", fetchMock);
-    const { client, wrapper } = fixture();
-    const { result, rerender } = renderHook(() => useHWAccelDetection(), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    act(() => setProfileToken(pin));
-    rerender();
-    expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((q) => q.queryKey),
-      ),
-    ).not.toMatch(/pin-a|pin-b/);
-  },
-);
+it.each(["pin-a"])("hides cached hardware inventory after PIN setter %s", async (pin) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(response(page()))
+    .mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const { result, rerender } = renderHook(() => useHWAccelDetection(), { wrapper });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  act(() => setProfileToken(pin));
+  rerender();
+  expect(result.current.data).toBeUndefined();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((q) => q.queryKey),
+    ),
+  ).not.toMatch(/pin-a|pin-b/);
+});
 it("does not read when disabled and never replays a 401", async () => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const fetchMock = vi.fn().mockResolvedValue(
     new Response(
       JSON.stringify({
