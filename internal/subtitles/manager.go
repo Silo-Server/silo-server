@@ -276,6 +276,9 @@ type SubtitleMetadataPatch struct {
 	Language        *string
 	ReleaseName     *string
 	HearingImpaired *bool
+	// Timing replaces the stored timing correction. It must pass
+	// ValidateTiming, and the subtitle format must support retiming.
+	Timing *Timing
 }
 
 // SubtitleRevisionConflict reports the current row after a guarded write loses a race.
@@ -358,6 +361,15 @@ func (m *Manager) UpdateDownloadedSubtitleWithRevision(ctx context.Context, id i
 		return nil, ErrSubtitleNotFound
 	}
 	update := SubtitleMetadataUpdate{HearingImpaired: patch.HearingImpaired, ExpectedRevision: revision}
+	if patch.Timing != nil {
+		if err := ValidateTiming(*patch.Timing); err != nil {
+			return nil, err
+		}
+		if !SupportsRetime(sub.Format) {
+			return nil, fmt.Errorf("%w: %q", ErrTimingUnsupported, sub.Format)
+		}
+		update.Timing = new(patch.Timing.Normalized())
+	}
 	if patch.Language != nil {
 		language, err := NormalizeLanguageCode(*patch.Language)
 		if err != nil {

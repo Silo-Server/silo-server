@@ -17,10 +17,7 @@ export function buildCollectionPreviewRequest(
   };
 }
 
-export function previewFingerprint(
-  scope: "user" | "admin",
-  request: CollectionPreviewRequest,
-): string {
+function previewFingerprint(scope: "user" | "admin", request: CollectionPreviewRequest): string {
   return JSON.stringify({
     scope,
     limit: request.limit ?? 12,

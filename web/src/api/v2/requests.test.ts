@@ -43,6 +43,7 @@ describe("request v2 adapters keep download progress", () => {
       tmdb_id: 949,
       title: "Heat",
       availability: "missing",
+      in_watchlist: false,
       cast: [],
       creators: [],
       genres: [],

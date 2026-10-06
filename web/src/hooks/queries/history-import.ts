@@ -3,7 +3,6 @@ import type {
   CreateHistoryImportRunRequest,
   EmbyConnectLoginRequest,
   EmbyConnectLoginResponse,
-  PlexCheckResponse,
   PlexPinResponse,
 } from "@/api/types";
 import { v2, V2ProblemError, type V2Body } from "@/api/v2/request";
@@ -140,22 +139,6 @@ export function useCreatePlexPin() {
     mutationFn: (): Promise<PlexPinResponse> => v2("POST /api/v2/history-imports/plex/auth/pin"),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to start Plex sign-in");
-    },
-  });
-}
-
-export function useCheckPlexPin(sessionId?: string) {
-  return useQuery({
-    queryKey: historyImportKeys.plexCheck(sessionId),
-    queryFn: (): Promise<PlexCheckResponse> =>
-      v2("POST /api/v2/history-imports/plex/auth/check", { body: { session_id: sessionId! } }),
-    enabled: !!sessionId,
-    retry: false,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (query.state.error) return false;
-      if (!data) return 2_000;
-      return data.authenticated ? false : 2_000;
     },
   });
 }

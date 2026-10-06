@@ -147,6 +147,10 @@ func TestHealthOmitsFilesystemPaths(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	server.handleHealth(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
 
+	if got := server.metrics.Snapshot().System.Disks[0].Path; got != "/transcode" {
+		t.Fatalf("sampler snapshot path = %q after a health response, want it intact", got)
+	}
+
 	if body := recorder.Body.String(); strings.Contains(body, "/transcode") {
 		t.Fatalf("health body discloses a filesystem path: %s", body)
 	}
@@ -172,20 +176,5 @@ func TestHealthOmitsFilesystemPaths(t *testing.T) {
 	}
 	if disk.Role != nodemetrics.ScratchDiskRole || !disk.Scratch || disk.UsedGB != 210 {
 		t.Fatalf("disk = %+v, want the scratch role and its fill kept", disk)
-	}
-}
-
-// Redacting for /health must not reach the sampler's own snapshot: /status is
-// bearer-authed and the admin resources endpoint is admin-authed, and both are
-// meant to show operators where a mount actually is.
-func TestStatusKeepsFilesystemPaths(t *testing.T) {
-	server := newTestServer(t)
-	server.metrics = newFakeSampler()
-
-	recorder := httptest.NewRecorder()
-	server.handleHealth(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
-
-	if got := server.metrics.Snapshot().System.Disks[0].Path; got != "/transcode" {
-		t.Fatalf("sampler snapshot path = %q after a health response, want it intact", got)
 	}
 }

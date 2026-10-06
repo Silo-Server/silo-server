@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
@@ -13,6 +13,9 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useAdminDownloadPreparations } from "@/hooks/queries/admin/downloadPreparations";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import AdminDownloadPreparationsPanel from "@/pages/AdminDownloadPreparationsPanel";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -67,6 +70,29 @@ type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 
+type ActivityView = "streams" | "preparations";
+const PREPARATIONS_VIEW = "preparations";
+
+function activityViewFromParam(value: string | null): ActivityView {
+  return value === PREPARATIONS_VIEW ? "preparations" : "streams";
+}
+
+function formatPreparationSummary(counts: {
+  running: number;
+  queued: number;
+  retrying: number;
+  paused: number;
+}): string {
+  const parts = [];
+  if (counts.running > 0) {
+    parts.push(`${counts.running} download${counts.running !== 1 ? "s" : ""} preparing`);
+  }
+  if (counts.queued > 0) parts.push(`${counts.queued} queued`);
+  if (counts.retrying > 0) parts.push(`${counts.retrying} retrying`);
+  if (counts.paused > 0) parts.push(`${counts.paused} paused`);
+  return parts.join(", ");
+}
+
 function routeSortValue(session: AdminSession): string {
   return getSessionRouteNodes(session)
     .map((node) => `${node.label} ${node.name}`)
@@ -75,6 +101,19 @@ function routeSortValue(session: AdminSession): string {
 
 export default function AdminActivity() {
   const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
+  const preparations = useAdminDownloadPreparations();
+  const refetchPreparations = preparations.refetch;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = activityViewFromParam(searchParams.get("view"));
+  const setView = (next: string) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === PREPARATIONS_VIEW) {
+      params.set("view", PREPARATIONS_VIEW);
+    } else {
+      params.delete("view");
+    }
+    setSearchParams(params, { replace: true });
+  };
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
   const error = undefined;
@@ -101,7 +140,7 @@ export default function AdminActivity() {
         setIsManualRefreshPending(true);
       }
       try {
-        await refresh();
+        await Promise.all([refresh(), refetchPreparations()]);
       } finally {
         if (manual) {
           const startedAt = manualRefreshStartedAtRef.current;
@@ -117,7 +156,7 @@ export default function AdminActivity() {
         }
       }
     },
-    [refresh],
+    [refresh, refetchPreparations],
   );
 
   useEffect(() => {
@@ -252,9 +291,14 @@ export default function AdminActivity() {
             )}
           </div>
           <p className="page-subtitle text-sm sm:text-base">
-            {sessions.length === 0
-              ? "No active streams"
-              : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`}
+            {[
+              sessions.length === 0
+                ? "No active streams"
+                : `${sessions.length} active stream${sessions.length !== 1 ? "s" : ""} across ${routeNodes.length} node${routeNodes.length !== 1 ? "s" : ""}`,
+              preparations.data ? formatPreparationSummary(preparations.data.counts) : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -279,291 +323,336 @@ export default function AdminActivity() {
         </div>
       </div>
 
-      {/* IP Lookup */}
-      <details
-        ref={ipLookupRef}
-        open={ipLookupOpen}
-        onToggle={(event) => setIPLookupOpen(event.currentTarget.open)}
-        className="surface-panel rounded-2xl border-0"
-      >
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium select-none">
-          IP Lookup
-        </summary>
-        <div className="px-4 pb-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setActiveIP(ipSearch.trim());
-            }}
-            className="flex items-center gap-2"
-          >
-            <Input
-              type="text"
-              placeholder="IP lookup (e.g. 203.0.113.50)"
-              value={ipSearch}
-              onChange={(e) => setIPSearch(e.target.value)}
-              className="max-w-xs font-mono text-sm"
+      <Tabs value={view} onValueChange={setView} className="gap-5 lg:gap-6">
+        <TabsList variant="line" className="border-border w-full justify-start border-b">
+          <TabsTrigger value="streams" className="flex-none">
+            Streams
+            <TabCount count={sessions.length} />
+          </TabsTrigger>
+          <TabsTrigger value="preparations" className="flex-none">
+            Download preparation
+            <TabCount
+              count={
+                preparations.data
+                  ? preparations.data.counts.running +
+                    preparations.data.counts.queued +
+                    preparations.data.counts.retrying
+                  : 0
+              }
             />
-            <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
-              <Search className="mr-1 h-3.5 w-3.5" />
-              Lookup
-            </Button>
-          </form>
-          {activeIP && (
-            <div className="mt-3">
-              {ipLoading ? (
-                <p className="text-muted-foreground text-sm">Searching...</p>
-              ) : ipHistory.isError && ipUsers.length === 0 ? (
-                <p role="alert">
-                  Could not load IP history.{" "}
-                  <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
-                </p>
-              ) : ipUsers.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  No users found for {activeIP} in the last 30 days.
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>User</TableHead>
-                      <TableHead>First Seen</TableHead>
-                      <TableHead>Last Seen</TableHead>
-                      <TableHead className="text-right">Requests</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ipUsers.map((entry: IPUserEntry) => (
-                      <TableRow key={entry.user_id}>
-                        <TableCell>
-                          <Link
-                            to={`/admin/users/${entry.user_id}`}
-                            className="text-primary font-medium hover:underline"
-                          >
-                            {entry.username || `User #${entry.user_id}`}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {formatDateTime(entry.first_seen)}
-                        </TableCell>
-                        <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
-                        <TableCell className="text-right">
-                          {entry.request_count.toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-              {ipHistory.isError && ipUsers.length > 0 && (
-                <p role="alert">
-                  Could not load more history.{" "}
-                  <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
-                </p>
-              )}
-              {ipHistory.hasNextPage && (
-                <Button
-                  disabled={ipHistory.isFetchingNextPage}
-                  onClick={() => void ipHistory.fetchNextPage()}
-                >
-                  Load more
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="streams" className="space-y-5 lg:space-y-6">
+          {/* IP Lookup */}
+          <details
+            ref={ipLookupRef}
+            open={ipLookupOpen}
+            onToggle={(event) => setIPLookupOpen(event.currentTarget.open)}
+            className="surface-panel rounded-2xl border-0"
+          >
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium select-none">
+              IP Lookup
+            </summary>
+            <div className="px-4 pb-4">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setActiveIP(ipSearch.trim());
+                }}
+                className="flex items-center gap-2"
+              >
+                <Input
+                  type="text"
+                  placeholder="IP lookup (e.g. 203.0.113.50)"
+                  value={ipSearch}
+                  onChange={(e) => setIPSearch(e.target.value)}
+                  className="max-w-xs font-mono text-sm"
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
+                  <Search className="mr-1 h-3.5 w-3.5" />
+                  Lookup
                 </Button>
+              </form>
+              {activeIP && (
+                <div className="mt-3">
+                  {ipLoading ? (
+                    <p className="text-muted-foreground text-sm">Searching...</p>
+                  ) : ipHistory.isError && ipUsers.length === 0 ? (
+                    <p role="alert">
+                      Could not load IP history.{" "}
+                      <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
+                    </p>
+                  ) : ipUsers.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      No users found for {activeIP} in the last 30 days.
+                    </p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>User</TableHead>
+                          <TableHead>First Seen</TableHead>
+                          <TableHead>Last Seen</TableHead>
+                          <TableHead className="text-right">Requests</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ipUsers.map((entry: IPUserEntry) => (
+                          <TableRow key={entry.user_id}>
+                            <TableCell>
+                              <Link
+                                to={`/admin/users/${entry.user_id}`}
+                                className="text-primary font-medium hover:underline"
+                              >
+                                {entry.username || `User #${entry.user_id}`}
+                              </Link>
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {formatDateTime(entry.first_seen)}
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              {formatDateTime(entry.last_seen)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {entry.request_count.toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  {ipHistory.isError && ipUsers.length > 0 && (
+                    <p role="alert">
+                      Could not load more history.{" "}
+                      <Button onClick={() => void ipHistory.restart()}>Reload history</Button>
+                    </p>
+                  )}
+                  {ipHistory.hasNextPage && (
+                    <Button
+                      disabled={ipHistory.isFetchingNextPage}
+                      onClick={() => void ipHistory.fetchNextPage()}
+                    >
+                      Load more
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </details>
+
+          {/* Summary strip */}
+          {sessions.length > 0 && (
+            <div className="surface-panel rounded-2xl border-0 p-4">
+              {/* Method distribution bar */}
+              <div className="mb-3">
+                <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
+                  Playback Method
+                </div>
+                <div
+                  role="img"
+                  aria-label="Playback method distribution"
+                  className="flex h-1.5 overflow-hidden rounded-full"
+                >
+                  {Object.entries(methods)
+                    .sort(([a], [b]) => compareActivityMethods(a, b))
+                    .map(([method, count]) => (
+                      <div
+                        key={method}
+                        title={`${activityMethodMeta(method).label}: ${count}`}
+                        className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
+                        style={{ width: `${(count / sessions.length) * 100}%` }}
+                      />
+                    ))}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {Object.entries(methods)
+                    .sort(([a], [b]) => compareActivityMethods(a, b))
+                    .map(([method, count]) => (
+                      <button
+                        key={method}
+                        type="button"
+                        title={activityMethodMeta(method).description}
+                        aria-label={`${activityMethodMeta(method).label} ${count}`}
+                        aria-pressed={methodFilter === method}
+                        onClick={() => setMethodFilter(methodFilter === method ? null : method)}
+                        className={`flex items-center gap-1.5 text-[11px] transition-opacity ${
+                          methodFilter && methodFilter !== method ? "opacity-30" : ""
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
+                        />
+                        <span className="font-medium">{activityMethodMeta(method).label}</span>
+                        <span className="text-muted-foreground tabular-nums">{count}</span>
+                      </button>
+                    ))}
+                </div>
+              </div>
+
+              {/* Node breakdown */}
+              {routeNodes.length > 1 && (
+                <div className="border-border border-t pt-3">
+                  <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
+                    By Routing Node
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[...routeNodes]
+                      .sort((a, b) => b.count - a.count)
+                      .map((node) => (
+                        <button
+                          key={node.key}
+                          onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
+                          className={`bg-surface border-border hover:border-primary/20 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                            nodeFilter === node.key
+                              ? "border-primary/40 bg-primary/10 text-primary"
+                              : nodeFilter
+                                ? "opacity-30"
+                                : ""
+                          }`}
+                        >
+                          <span className="text-muted-foreground mr-1">{node.label}</span>
+                          {node.name}
+                          <span className="text-muted-foreground ml-1.5 tabular-nums">
+                            {node.count}
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
-        </div>
-      </details>
 
-      {/* Summary strip */}
-      {sessions.length > 0 && (
-        <div className="surface-panel rounded-2xl border-0 p-4">
-          {/* Method distribution bar */}
-          <div className="mb-3">
-            <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-              Playback Method
+          {/* Search + filters */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
+              <Input
+                placeholder="Filter by user, media, client, or node..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-8 pl-9 text-[13px]"
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
-            <div
-              role="img"
-              aria-label="Playback method distribution"
-              className="flex h-1.5 overflow-hidden rounded-full"
-            >
-              {Object.entries(methods)
-                .sort(([a], [b]) => compareActivityMethods(a, b))
-                .map(([method, count]) => (
-                  <div
-                    key={method}
-                    title={`${activityMethodMeta(method).label}: ${count}`}
-                    className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
-                    style={{ width: `${(count / sessions.length) * 100}%` }}
+            <div className="flex gap-1">
+              {(["movie", "series"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+                  className={`rounded-md border px-2.5 py-1.5 text-[11px] font-medium capitalize transition-all ${
+                    typeFilter === t
+                      ? "border-primary/40 bg-primary/10 text-primary"
+                      : "border-border bg-surface text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "movie" ? "Movies" : "Series"}
+                </button>
+              ))}
+            </div>
+            {activeFilters > 0 && (
+              <button
+                onClick={() => {
+                  setMethodFilter(null);
+                  setNodeFilter(null);
+                  setTypeFilter(null);
+                }}
+                className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px]"
+              >
+                <X className="h-3 w-3" />
+                Clear filters
+              </button>
+            )}
+          </div>
+
+          {/* Filter status */}
+          {(search || activeFilters > 0) && (
+            <div className="text-muted-foreground text-[11px]">
+              Showing {filtered.length} of {sessions.length} streams
+            </div>
+          )}
+
+          {/* Stream table */}
+          {filtered.length === 0 ? (
+            <EmptyState hasData={sessions.length > 0} />
+          ) : (
+            <div className="bg-card border-border overflow-hidden rounded-lg border">
+              {/* Table header */}
+              <div className="border-border bg-surface/50 hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 border-b px-3 py-2.5 sm:grid">
+                <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
+                  User
+                </SortHeader>
+                <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
+                  Stream
+                </SortHeader>
+                <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
+                  Playback
+                </SortHeader>
+                <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
+                  Route
+                </SortHeader>
+                <SortHeader
+                  field="started"
+                  current={sortField}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  className="justify-end"
+                >
+                  Time
+                </SortHeader>
+                <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
+                  Actions
+                </div>
+              </div>
+
+              {/* Rows */}
+              <div className="max-h-[calc(100vh-420px)] overflow-y-auto">
+                {filtered.map((session, i) => (
+                  <StreamRow
+                    key={session.session_id}
+                    session={session}
+                    even={i % 2 === 0}
+                    onIPLookup={runIPLookup}
                   />
                 ))}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {Object.entries(methods)
-                .sort(([a], [b]) => compareActivityMethods(a, b))
-                .map(([method, count]) => (
-                  <button
-                    key={method}
-                    type="button"
-                    title={activityMethodMeta(method).description}
-                    aria-label={`${activityMethodMeta(method).label} ${count}`}
-                    aria-pressed={methodFilter === method}
-                    onClick={() => setMethodFilter(methodFilter === method ? null : method)}
-                    className={`flex items-center gap-1.5 text-[11px] transition-opacity ${
-                      methodFilter && methodFilter !== method ? "opacity-30" : ""
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
-                    />
-                    <span className="font-medium">{activityMethodMeta(method).label}</span>
-                    <span className="text-muted-foreground tabular-nums">{count}</span>
-                  </button>
-                ))}
-            </div>
-          </div>
-
-          {/* Node breakdown */}
-          {routeNodes.length > 1 && (
-            <div className="border-border border-t pt-3">
-              <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-                By Routing Node
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {[...routeNodes]
-                  .sort((a, b) => b.count - a.count)
-                  .map((node) => (
-                    <button
-                      key={node.key}
-                      onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
-                      className={`bg-surface border-border hover:border-primary/20 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-all ${
-                        nodeFilter === node.key
-                          ? "border-primary/40 bg-primary/10 text-primary"
-                          : nodeFilter
-                            ? "opacity-30"
-                            : ""
-                      }`}
-                    >
-                      <span className="text-muted-foreground mr-1">{node.label}</span>
-                      {node.name}
-                      <span className="text-muted-foreground ml-1.5 tabular-nums">
-                        {node.count}
-                      </span>
-                    </button>
-                  ))}
               </div>
             </div>
           )}
-        </div>
-      )}
+        </TabsContent>
 
-      {/* Search + filters */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
-          <Input
-            placeholder="Filter by user, media, client, or node..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-9 text-[13px]"
+        <TabsContent value="preparations">
+          <AdminDownloadPreparationsPanel
+            list={preparations.data}
+            isLoading={preparations.isLoading}
+            isError={preparations.isError}
           />
-          {search && (
-            <button
-              onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex gap-1">
-          {(["movie", "series"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTypeFilter(typeFilter === t ? null : t)}
-              className={`rounded-md border px-2.5 py-1.5 text-[11px] font-medium capitalize transition-all ${
-                typeFilter === t
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border bg-surface text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t === "movie" ? "Movies" : "Series"}
-            </button>
-          ))}
-        </div>
-        {activeFilters > 0 && (
-          <button
-            onClick={() => {
-              setMethodFilter(null);
-              setNodeFilter(null);
-              setTypeFilter(null);
-            }}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px]"
-          >
-            <X className="h-3 w-3" />
-            Clear filters
-          </button>
-        )}
-      </div>
-
-      {/* Filter status */}
-      {(search || activeFilters > 0) && (
-        <div className="text-muted-foreground text-[11px]">
-          Showing {filtered.length} of {sessions.length} streams
-        </div>
-      )}
-
-      {/* Stream table */}
-      {filtered.length === 0 ? (
-        <EmptyState hasData={sessions.length > 0} />
-      ) : (
-        <div className="bg-card border-border overflow-hidden rounded-lg border">
-          {/* Table header */}
-          <div className="border-border bg-surface/50 hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 border-b px-3 py-2.5 sm:grid">
-            <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
-              User
-            </SortHeader>
-            <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Stream
-            </SortHeader>
-            <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Playback
-            </SortHeader>
-            <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
-              Route
-            </SortHeader>
-            <SortHeader
-              field="started"
-              current={sortField}
-              dir={sortDir}
-              onClick={toggleSort}
-              className="justify-end"
-            >
-              Time
-            </SortHeader>
-            <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
-              Actions
-            </div>
-          </div>
-
-          {/* Rows */}
-          <div className="max-h-[calc(100vh-420px)] overflow-y-auto">
-            {filtered.map((session, i) => (
-              <StreamRow
-                key={session.session_id}
-                session={session}
-                even={i % 2 === 0}
-                onIPLookup={runIPLookup}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
 
 // --- Sub-components ---
+
+function TabCount({ count }: { count: number }) {
+  return (
+    <span
+      className={`rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tabular-nums ${
+        count > 0 ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"
+      }`}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
 
 function StreamRow({
   session,

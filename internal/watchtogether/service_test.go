@@ -368,44 +368,6 @@ func TestGuestPlayPausePolicyStillRejectsGuestSeek(t *testing.T) {
 	}
 }
 
-func TestGuestDriftTriggersCorrection(t *testing.T) {
-	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
-	repo := &stubRepo{room: baseRoom(now)}
-	conn := &recordingConn{}
-	service := newServiceForTest(
-		now,
-		repo,
-		&stubSessions{session: &playback.Session{
-			ID:          "session-1",
-			UserID:      8,
-			ProfileID:   "guest",
-			MediaFileID: 42,
-		}},
-		&stubFiles{file: &models.MediaFile{ID: 42, ContentID: "movie-1"}},
-		nil,
-	)
-	service.rooms[repo.room.ID].members[buildMemberKey(8, "guest")] = &memberState{
-		userID:     8,
-		profileID:  "guest",
-		sessionID:  "session-1",
-		connection: conn,
-	}
-
-	reg := registrationFor(repo.room.ID, 8, "guest", conn)
-	_, err := service.HandleStateReportForConnection(context.Background(), reg, 8, "guest", StateReport{
-		SessionID:       "session-1",
-		PositionSeconds: 2,
-		IsPaused:        false,
-	})
-	if err != nil {
-		t.Fatalf("HandleStateReportForConnection() error = %v", err)
-	}
-
-	if len(conn.payloads) == 0 {
-		t.Fatal("expected correction commands to be dispatched")
-	}
-}
-
 func TestGuestDriftCorrectionIsCoalescedAndRearmed(t *testing.T) {
 	now := time.Date(2026, 4, 9, 12, 0, 20, 0, time.UTC)
 	current := now

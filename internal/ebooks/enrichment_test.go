@@ -3,11 +3,11 @@ package ebooks
 import (
 	"context"
 	"errors"
-	"fmt"
+
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
+
 	"testing"
 	"time"
 
@@ -18,12 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-func TestEbookContentType(t *testing.T) {
-	if got := ebookContentType(); got != "ebook" {
-		t.Fatalf("ebookContentType() = %q, want ebook", got)
-	}
-}
 
 func TestNewEnricherPreservesNilProviderIDRepository(t *testing.T) {
 	e := NewEnricher(nil, nil, nil, nil, nil, nil)
@@ -77,110 +71,6 @@ func TestEbookEnrichWorkersFromEnv(t *testing.T) {
 	t.Setenv("SILO_EBOOK_ENRICH_WORKERS", "9999")
 	if got := ebookEnrichWorkers(); got != maxEnrichWorkers {
 		t.Fatalf("ebookEnrichWorkers() capped = %d, want %d", got, maxEnrichWorkers)
-	}
-}
-
-func TestEnricherRunFansOut(t *testing.T) {
-	const wantWorkers = 4
-	const itemCount = 16
-
-	items := make([]enrichmentItemRow, itemCount)
-	for i := range items {
-		items[i] = enrichmentItemRow{ContentID: "test", Title: "t"}
-	}
-
-	var inFlight int32
-	var maxInFlight int32
-	var signaled int32
-	var wg sync.WaitGroup
-	wg.Add(wantWorkers)
-	gate := make(chan struct{})
-
-	enrich := func(ctx context.Context, item enrichmentItemRow) error {
-		cur := atomic.AddInt32(&inFlight, 1)
-		defer atomic.AddInt32(&inFlight, -1)
-		for {
-			prev := atomic.LoadInt32(&maxInFlight)
-			if cur <= prev || atomic.CompareAndSwapInt32(&maxInFlight, prev, cur) {
-				break
-			}
-		}
-		if atomic.AddInt32(&signaled, 1) <= wantWorkers {
-			wg.Done()
-		}
-		select {
-		case <-gate:
-		case <-time.After(2 * time.Second):
-		}
-		return nil
-	}
-
-	go func() {
-		wg.Wait()
-		close(gate)
-	}()
-
-	e := &Enricher{workers: wantWorkers, batchSize: itemCount}
-	e.runBatch(context.Background(), items, enrich, nil)
-
-	if got := atomic.LoadInt32(&maxInFlight); got < wantWorkers {
-		t.Errorf("max in-flight = %d, want >= %d", got, wantWorkers)
-	}
-}
-
-func TestRunBatchRecordsFailuresForFailedItemsOnly(t *testing.T) {
-	items := []enrichmentItemRow{
-		{ContentID: "ok-1"},
-		{ContentID: "bad-1"},
-		{ContentID: "ok-2"},
-		{ContentID: "bad-2"},
-	}
-
-	enrich := func(_ context.Context, item enrichmentItemRow) error {
-		if strings.HasPrefix(item.ContentID, "bad") {
-			return errors.New("provider exploded")
-		}
-		return nil
-	}
-
-	var mu sync.Mutex
-	var recorded []string
-	record := func(_ context.Context, item enrichmentItemRow) {
-		mu.Lock()
-		defer mu.Unlock()
-		recorded = append(recorded, item.ContentID)
-	}
-
-	e := &Enricher{workers: 2, batchSize: len(items)}
-	enriched := e.runBatch(context.Background(), items, enrich, record)
-
-	if enriched != 2 {
-		t.Fatalf("enriched = %d, want 2", enriched)
-	}
-	sort.Strings(recorded)
-	if strings.Join(recorded, ",") != "bad-1,bad-2" {
-		t.Fatalf("recorded failures = %v, want exactly the failing items", recorded)
-	}
-}
-
-func TestRunBatchSkipsFailureRecordingOnCancellation(t *testing.T) {
-	items := []enrichmentItemRow{{ContentID: "cancelled-1"}}
-
-	enrich := func(context.Context, enrichmentItemRow) error {
-		return fmt.Errorf("search aborted: %w", context.Canceled)
-	}
-
-	var recorded int32
-	record := func(context.Context, enrichmentItemRow) {
-		atomic.AddInt32(&recorded, 1)
-	}
-
-	e := &Enricher{workers: 1, batchSize: len(items)}
-	if enriched := e.runBatch(context.Background(), items, enrich, record); enriched != 0 {
-		t.Fatalf("enriched = %d, want 0", enriched)
-	}
-	if got := atomic.LoadInt32(&recorded); got != 0 {
-		t.Fatalf("failure recordings = %d, want 0: cancellation must not count against the cap", got)
 	}
 }
 
@@ -549,17 +439,17 @@ func TestEnrichItemSkipsItemWithoutLibraryFolder(t *testing.T) {
 	// race can claim an item before its folder link exists. The item must be
 	// skipped (retried next sweep), never stamped or counted as a failure.
 	e := &Enricher{}
-	err := e.enrichItem(context.Background(), enrichmentItemRow{ContentID: "no-folder", Title: "t"})
-	if !errors.Is(err, errEnrichmentSkipped) {
-		t.Fatalf("enrichItem error = %v, want errEnrichmentSkipped", err)
+	outcome, err := e.enrichClaimedItem(context.Background(), enrichmentItemRow{ContentID: "no-folder", Title: "t"})
+	if err != nil || outcome != EnrichmentOutcomeSkipped {
+		t.Fatalf("enrichClaimedItem = %q, %v, want skipped without error", outcome, err)
 	}
 }
 
 func TestEnrichWithProvidersSkipsWhenNoProvidersConfigured(t *testing.T) {
 	e := &Enricher{}
-	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7}, nil)
-	if !errors.Is(err, errEnrichmentSkipped) {
-		t.Fatalf("enrichWithProviders error = %v, want errEnrichmentSkipped", err)
+	outcome, err := e.enrichWithProvidersOutcome(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7}, nil)
+	if err != nil || outcome != EnrichmentOutcomeSkipped {
+		t.Fatalf("enrichWithProvidersOutcome = %q, %v, want skipped without error", outcome, err)
 	}
 }
 
@@ -615,29 +505,24 @@ func TestEnrichWithProvidersReturnsFailureWhenAllProvidersError(t *testing.T) {
 	}
 
 	e := &Enricher{}
-	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
+	_, err := e.enrichWithProvidersOutcome(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
 	if err == nil {
 		t.Fatal("enrichWithProviders = nil, want error so the failure cap engages instead of stamping")
-	}
-	if errors.Is(err, errEnrichmentSkipped) {
-		t.Fatalf("enrichWithProviders error = %v, want a recordable failure, not a skip", err)
 	}
 	if !errors.Is(err, providerErr) {
 		t.Fatalf("enrichWithProviders error = %v, want wrapped provider error", err)
 	}
 }
 
-func TestEnrichWithProvidersStampsWhenProvidersAnswerWithNoMatch(t *testing.T) {
-	// Providers reachable, genuinely nothing found: nil means the no-match
-	// path ran and the item was stamped so it is not re-claimed every sweep.
+func TestEnrichWithProvidersReturnsNoMatchOutcome(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeEbookMetadataProvider{slug: "p1"},
 	}
 
 	e := &Enricher{}
-	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
-	if err != nil {
-		t.Fatalf("enrichWithProviders = %v, want nil for a genuine no-match", err)
+	outcome, err := e.enrichWithProvidersOutcome(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7, Title: "t"}, providers)
+	if err != nil || outcome != EnrichmentOutcomeNoMatch {
+		t.Fatalf("enrichWithProvidersOutcome = %q, %v, want no_match without error", outcome, err)
 	}
 }
 
@@ -649,7 +534,7 @@ func TestEnrichWithProvidersReturnsContextErrorOverProviderFailure(t *testing.T)
 	}
 
 	e := &Enricher{}
-	err := e.enrichWithProviders(ctx, enrichmentItemRow{ContentID: "c1", FolderID: 7}, providers)
+	_, err := e.enrichWithProvidersOutcome(ctx, enrichmentItemRow{ContentID: "c1", FolderID: 7}, providers)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("enrichWithProviders error = %v, want context.Canceled so cancellation never counts against the cap", err)
 	}
@@ -843,27 +728,6 @@ func TestCollectEbookMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
 	}
 	if _, exists := ids["bookinfo"]; exists {
 		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
-	}
-}
-
-func TestRunBatchDoesNotRecordFailuresForSkippedItems(t *testing.T) {
-	items := []enrichmentItemRow{{ContentID: "skipped-1"}}
-
-	enrich := func(context.Context, enrichmentItemRow) error {
-		return fmt.Errorf("%w: no providers", errEnrichmentSkipped)
-	}
-
-	var recorded int32
-	record := func(context.Context, enrichmentItemRow) {
-		atomic.AddInt32(&recorded, 1)
-	}
-
-	e := &Enricher{workers: 1, batchSize: len(items)}
-	if enriched := e.runBatch(context.Background(), items, enrich, record); enriched != 0 {
-		t.Fatalf("enriched = %d, want 0", enriched)
-	}
-	if got := atomic.LoadInt32(&recorded); got != 0 {
-		t.Fatalf("failure recordings = %d, want 0: skips must not count against the cap", got)
 	}
 }
 

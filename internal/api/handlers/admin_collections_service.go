@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -90,7 +89,7 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 	if err := eg.Wait(); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
-	collections := <-collectionsCh
+	collections := h.withViewerPosters(ctx, <-collectionsCh, AccessFilterFromContext(ctx, ""))
 	var groups []models.LibraryCollectionGroup
 	if groupsCh != nil {
 		groups = <-groupsCh
@@ -200,7 +199,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	}
 	h.refreshSmartCountAsync(collection.ID)
 
-	return h.libraryCollectionResponseOf(ctx, collection), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, collection)), nil
 }
 func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, req AdminCollectionCreate) (AdminCollection, error) {
 	return h.createAdminCollection(ctx, req, h.adminArtworkSources(ctx))
@@ -299,7 +298,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(queryDefinition) > 0 || req.CollectionType != nil {
 		h.refreshSmartCountAsync(collectionID)
 	}
-	return h.libraryCollectionResponseOf(ctx, updated), nil
+	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
 }
 
 func adminCollectionLookupAPIError(err error) error {
@@ -409,7 +408,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -426,7 +425,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -454,7 +453,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -471,7 +470,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -496,7 +495,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
-	// Process admin artwork before sync so maybeGenerateCollage sees the
+	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
@@ -513,7 +512,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 	}
 
 	return importCollectionResponse{
-		Collection: h.libraryCollectionResponseOf(ctx, refreshed),
+		Collection: h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, refreshed)),
 		SyncRun:    run,
 	}, nil
 }
@@ -657,10 +656,8 @@ func (h *LibraryCollectionHandler) DeleteAdminCollectionArtwork(ctx context.Cont
 	if err := h.repo.Update(ctx, input); err != nil {
 		return err
 	}
-	if kind == collectionImagePoster && h.service != nil && h.service.CollageGen != nil {
-		if err := h.GenerateCollectionPoster(ctx, id); err != nil {
-			slog.DebugContext(ctx, "Collection poster regeneration unavailable", "error", err)
-		}
+	if kind == collectionImagePoster && h.service != nil {
+		h.service.MaybeGenerateCollage(ctx, id)
 	}
 	return nil
 }

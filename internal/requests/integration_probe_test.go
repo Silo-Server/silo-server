@@ -116,18 +116,21 @@ func TestLoadIntegrationOptionsChecksKeyAndPassesAddressThrough(t *testing.T) {
 
 func TestNormalizeIntegrationBaseURL(t *testing.T) {
 	for _, bad := range []string{"", "ftp://10.0.0.5", "http://", "http://user:pw@10.0.0.5:8989", "http://10.0.0.5:8989/?a=1", "http://10.0.0.5:8989/#x"} {
-		if got, err := normalizeIntegrationBaseURL(bad); err == nil {
-			t.Errorf("normalizeIntegrationBaseURL(%q) = %q, want an error", bad, got)
+		_, err := NormalizeIntegrationBaseURL(bad)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || ve.FieldErrors["base_url"] != integrationAddressMessage {
+			t.Errorf("NormalizeIntegrationBaseURL(%q) error = %v, want base_url field error", bad, err)
 		}
 	}
 	for in, want := range map[string]string{
 		"10.0.0.5:8989":              "http://10.0.0.5:8989",
+		"10.0.0.5:8989/":             "http://10.0.0.5:8989",
 		"sonarr.lan":                 "http://sonarr.lan",
 		"https://sonarr.lan/sonarr/": "https://sonarr.lan/sonarr",
 		"HTTP://sonarr.lan:8989":     "http://sonarr.lan:8989",
 		"  http://[::1]:8989  ":      "http://[::1]:8989",
 	} {
-		got, err := normalizeIntegrationBaseURL(in)
+		got, err := NormalizeIntegrationBaseURL(in)
 		if err != nil || got != want {
 			t.Errorf("normalizeIntegrationBaseURL(%q) = %q, %v; want %q", in, got, err, want)
 		}
@@ -166,16 +169,5 @@ func TestSaveIntegrationLeavesBaseURLToTheCaller(t *testing.T) {
 	}
 	if router.validateCalls != 2 {
 		t.Fatalf("plugin Validate calls = %d, want 2", router.validateCalls)
-	}
-}
-
-func TestNormalizeIntegrationBaseURLRefusesAsFieldError(t *testing.T) {
-	if got, err := NormalizeIntegrationBaseURL("10.0.0.5:8989/"); err != nil || got != "http://10.0.0.5:8989" {
-		t.Fatalf("NormalizeIntegrationBaseURL = %q, %v", got, err)
-	}
-	_, err := NormalizeIntegrationBaseURL("ftp://10.0.0.5")
-	var ve *ValidationError
-	if !errors.As(err, &ve) || ve.FieldErrors["base_url"] != integrationAddressMessage {
-		t.Fatalf("err = %v, want base_url field error", err)
 	}
 }

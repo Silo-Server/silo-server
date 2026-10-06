@@ -14,6 +14,10 @@ A request row carries two fields:
 - `status`: `pending → approved → queued → downloading → completed`.
 - `outcome`: `active`, or the terminal `declined`, `cancelled`, `failed`.
 
+It also records its `source`: `direct` when someone requested the title, or
+`watchlist` when a watchlist add made the request (see
+[Watchlist requests](#watchlist-requests)). The source never changes.
+
 Once a request is submitted, it fans out into one `media_request_targets` row per
 quality. Each target change recomputes the request's status and outcome in the
 same transaction (`aggregateStatus`), so after submission the targets own the
@@ -331,6 +335,45 @@ Request state carries `following` (the viewer requested or follows the title)
 and `requested_by_viewer` (the viewing profile made the request, so there is
 nothing to follow); `GET /requests/status` advertises `follow_supported`.
 
+## Watchlist requests
+
+Adding a movie or series the library doesn't have to a watchlist
+([External watchlist titles](external-watchlist.md)) can also request it, so the
+fulfilled notification tells the profile when it arrives. This happens only
+when requests are on, the server's `request_settings.watchlist_requests` is on
+(default on), the profile's `requests.watchlist_auto_request` setting is on
+(default on), and the account may request (`RequestCapabilityAllowed`). A
+profile setting that cannot be read counts as off. `WatchlistRequestsEnabled`
+answers that question, and `GET /requests/status` reports it as
+`watchlist_requests`.
+
+`RequestFromWatchlist` runs after the watchlist entry is saved:
+
+- No open request for the title: it creates one as the viewer, with
+  `source = 'watchlist'`, through the normal `CreateRequest`, so limits,
+  auto-approve, routing and the default seasons of a series all apply.
+- Another profile's open request: it follows that request. An
+  `ErrAlreadyRequested` race re-reads the open request and follows it.
+- The viewer's own open request: nothing.
+
+A refused request (request limit, blocked account, requests off for the
+account, title already available) is logged, and the returned state reports it
+with `requestable: false` and the reason. The call never fails because of it,
+so the entry stays on the watchlist. Repeating the add is a no-op once the
+request or follow exists.
+
+Removing the title from the watchlist calls `WithdrawWatchlistRequest`. It
+cancels the viewer's open request only when that request's source is
+`watchlist` and nothing has been sent for it yet (`guardWithdrawable`, pending,
+or approved with no target sent, checked under the row lock), with the outcome
+reason "Removed from the watchlist". It then removes the profile's follows on
+the title. A request someone made directly, or one already sent to a download
+server, is left alone.
+
+`WatchlistRequestStates` gives the watchlist page each title's request state
+from the stored IDs, without a TMDB call, and the download progress of the
+page's titles from one read of their targets.
+
 ## Without a router
 
 Requests do not need Sonarr, Radarr or any other router plugin. When no
@@ -503,7 +546,8 @@ still refuses a failed request). A closed request stays closed: a target that
 reports later updates only itself. A request's
 history is its `media_request_events` rows. Target updates record the
 request's status or outcome only when it changes, so neither a reconcile pass
-nor a second target repeats an entry.
+nor a second target repeats an entry. The queue shows a request with source
+`watchlist` as "via watchlist".
 
 ## Who can request
 

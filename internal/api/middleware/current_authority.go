@@ -45,11 +45,13 @@ func (am *AuthMiddleware) RevalidateCurrent(ctx context.Context, bearer string, 
 		if err != nil || current == nil || current.TokenType != auth.TokenTypeAccess || current.UserID != expected.UserID || current.SessionID != expected.SessionID {
 			return ErrCurrentCredentialInvalid
 		}
-		valid, err := am.sessionValidator.IsValid(ctx, current.SessionID)
+		// The bounded operations that recheck here do not depend on the
+		// account role, so only the session itself must still be active.
+		_, active, err := am.sessionValidator.ActiveSessionRole(ctx, current.SessionID)
 		if err != nil {
 			return err
 		}
-		if !valid {
+		if !active {
 			return ErrCurrentCredentialInvalid
 		}
 	}

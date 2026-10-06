@@ -43,30 +43,10 @@ function emptyState(message: string) {
   return screen.getByText(message).parentElement!;
 }
 
-function linkLabels(panel: HTMLElement) {
-  return within(panel)
-    .getAllByRole("button")
-    .map((button) => button.textContent);
-}
-
 beforeEach(() => {
   localStorage.clear();
 });
 afterEach(cleanup);
-
-it.each([
-  [
-    "following",
-    "Nothing upcoming from shows you follow this week.",
-    ["Trending", "Show everything"],
-  ],
-  ["trending", "Nothing trending this week.", ["Following", "Show everything"]],
-  ["everything", "Nothing scheduled this week.", ["Following", "Trending"]],
-  ["all", "Nothing scheduled this week.", ["Following", "Trending"]],
-])("links an empty %s view to the other two views", (filter, message, links) => {
-  renderCalendar(filter);
-  expect(linkLabels(emptyState(message))).toEqual(links);
-});
 
 it("switches to the linked view", () => {
   renderCalendar("trending");

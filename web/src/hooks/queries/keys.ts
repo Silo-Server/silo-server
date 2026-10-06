@@ -51,6 +51,7 @@ export const itemKeys = {
     ["items", "detail", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
+  watchTrickplay: (id: string, fileId: number) => ["items", "watchTrickplay", id, fileId] as const,
   markers: (id: string) => ["items", "markers", id] as const,
   browse: (params: BrowseParams) => ["items", "browse", params] as const,
   infiniteBrowse: (params: InfiniteBrowseParams) => ["items", "infiniteBrowse", params] as const,
@@ -103,6 +104,8 @@ export const watchlistKeys = {
   all: ["watchlist"] as const,
   list: () => ["watchlist", "list"] as const,
   check: (itemId: string) => ["watchlist", "check", itemId] as const,
+  /** Watchlist entries for titles the library doesn't have yet. */
+  titles: () => ["watchlist", "titles"] as const,
 };
 
 export const historyKeys = {
@@ -343,6 +346,8 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  // Outside users(): saving an account does not change the server defaults.
+  policyDefaults: () => ["admin", "policyDefaults"] as const,
   accessGroups: () => ["admin", "accessGroups"] as const,
   accessGroup: (id: number) => ["admin", "accessGroups", id] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
@@ -362,6 +367,8 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRealtimeMonitoring: () => ["admin", "libraries", "realtimeMonitoring"] as const,
   libraryCapabilities: () => ["admin", "libraries", "capabilities"] as const,
+  trickplayLibraries: () => ["admin", "trickplay", "libraries"] as const,
+  itemTrickplay: (itemId: string) => ["admin", "trickplay", "items", itemId] as const,
   libraryRoots: (libraryId?: number, state?: string, search?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all", search ?? ""] as const,
   libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
@@ -383,6 +390,7 @@ export const adminKeys = {
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
+  downloadPreparations: () => ["admin", "downloadPreparations"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
@@ -497,6 +505,8 @@ export const adminKeys = {
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
   markerCapabilities: () => ["admin", "markerCapabilities"] as const,
+  ratingSources: () => ["admin", "ratingSources"] as const,
+  ratingSourceCapabilities: () => ["admin", "ratingSourceCapabilities"] as const,
   markerProviders: () => ["admin", "markerProviders"] as const,
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>

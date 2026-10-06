@@ -1,7 +1,7 @@
 import type { FileVersion, LeafItemUserData, PlaybackVariant } from "@/api/types";
 import { mapAudioLabel } from "@/lib/mediaFormat";
 
-export const RESOLUTION_RANK: Record<string, number> = {
+const RESOLUTION_RANK: Record<string, number> = {
   "4k": 4,
   "2160p": 4,
   "1440p": 3,
@@ -10,7 +10,7 @@ export const RESOLUTION_RANK: Record<string, number> = {
   "480p": 0,
 };
 
-export const AUDIO_RANK: Record<string, number> = {
+const AUDIO_RANK: Record<string, number> = {
   atmos: 6,
   truehd: 5,
   "dts-hd": 4,
@@ -26,7 +26,7 @@ export function resolutionScore(res: string): number {
   return RESOLUTION_RANK[res.toLowerCase()] ?? -1;
 }
 
-export function audioScore(codec: string): number {
+function audioScore(codec: string): number {
   const lower = codec.toLowerCase();
   for (const [key, score] of Object.entries(AUDIO_RANK)) {
     if (lower.includes(key)) return score;

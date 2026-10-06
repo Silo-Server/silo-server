@@ -177,19 +177,6 @@ describe("CollectionTemplateGallery", () => {
     vi.clearAllMocks();
   });
 
-  it("loads and displays templates grouped by category", async () => {
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
-    // Section labels render once in headings; pills render once each as well.
-    expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Popular").length).toBeGreaterThan(0);
-    expect(screen.getByText("Core Defaults")).toBeInTheDocument();
-  });
-
   it("filters templates by search across title and description", async () => {
     const user = userEvent.setup();
     renderGallery();
@@ -203,33 +190,6 @@ describe("CollectionTemplateGallery", () => {
     expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
   });
 
-  it("opens the config form when a template card is selected", async () => {
-    const user = userEvent.setup();
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Trending Movies This Week"));
-    // The drawer renders the explicit submit button.
-    expect(screen.getByRole("button", { name: /Create Collection/i })).toBeInTheDocument();
-  });
-
-  it("does not preselect an ineligible initial library for TV templates", async () => {
-    const user = userEvent.setup();
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Trakt Popular Shows"));
-
-    expect(screen.getByRole("button", { name: /TV Shows/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Movies$/i })).not.toBeInTheDocument();
-  });
-
   it("dispatches to the TMDB import endpoint when submitting a TMDB template", async () => {
     const user = userEvent.setup();
     renderGallery();
@@ -237,6 +197,11 @@ describe("CollectionTemplateGallery", () => {
     await waitFor(() => {
       expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
     });
+
+    expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
+    expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Popular").length).toBeGreaterThan(0);
+    expect(screen.getByText("Core Defaults")).toBeInTheDocument();
 
     fetchMock.mockImplementation((path: string) => {
       if (path === "GET /api/v2/admin/collections/templates")
@@ -252,6 +217,7 @@ describe("CollectionTemplateGallery", () => {
     });
 
     await user.click(screen.getByText("Trending Movies This Week"));
+    expect(screen.getByRole("button", { name: /Create Collection/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
@@ -282,6 +248,8 @@ describe("CollectionTemplateGallery", () => {
     });
 
     await user.click(screen.getByText("Trakt Popular Shows"));
+    expect(screen.getByRole("button", { name: /TV Shows/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Movies$/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {

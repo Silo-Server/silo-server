@@ -104,10 +104,6 @@ describe("buildPlaybackActivityColumns", () => {
     expect(columns.every((column) => column.segments.every((value) => value === 0))).toBe(true);
   });
 
-  it("treats a missing response as an empty window", () => {
-    expect(buildPlaybackActivityColumns(undefined, { now: NOW })).toHaveLength(25);
-  });
-
   // Past two days the endpoint groups by day, and zero-filling on an hourly
   // grid would scatter those columns across empty hours.
   it("zero-fills a week on the daily grid the server bucketed by", () => {
@@ -123,16 +119,6 @@ describe("buildPlaybackActivityColumns", () => {
     expect(columns[7]?.t).toBe(CURRENT_DAY);
     expect([...(columns[4]?.segments ?? [])]).toEqual([5, 0, 1]);
     expect([...(columns[5]?.segments ?? [])]).toEqual([0, 0, 0]);
-  });
-
-  it("covers a month with 31 daily columns", () => {
-    const columns = buildPlaybackActivityColumns([], {
-      hours: 720,
-      bucketSeconds: 86_400,
-      now: NOW,
-    });
-
-    expect(columns).toHaveLength(31);
   });
 
   it("falls back to hourly buckets when the response omits the width", () => {

@@ -119,12 +119,17 @@ export function useLibraryRealtimeMonitoring() {
   });
 }
 
-/** Library feature detection; `realtime_monitoring` says the server offers the status above. */
-export function useLibraryCapabilities() {
+/**
+ * Library feature detection: `realtime_monitoring` says the server offers the
+ * status above, `trickplay` that it makes seek previews.
+ */
+export function useLibraryCapabilities(enabled = true) {
   return useQuery({
     queryKey: adminKeys.libraryCapabilities(),
     queryFn: ({ signal }) => v2("GET /api/v2/libraries/capabilities", { signal }),
     staleTime: Infinity,
+    retry: false,
+    enabled,
   });
 }
 
@@ -344,31 +349,17 @@ export function flattenStaleMediaIDs(
   return data?.pages.flatMap((page) => page.staleIDs) ?? [];
 }
 
-export function useRematchStaleMediaID() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (contentId: string) =>
-      v2("POST /api/v2/libraries/stale-ids/{content_id}/rematch", {
-        path: { content_id: contentId },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() });
-      toast.success("Re-match started");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Re-match failed");
-    },
-  });
-}
-
 export function useCreateLibrary() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateLibraryRequest): Promise<Library> =>
       v2("POST /api/v2/libraries", { body: libraryCreateToV2(body) }).then(libraryFromV2),
-    onSuccess: () => {
+    onSuccess: (_created, body) => {
       toast.success("Library created");
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+      if (body.trickplay_enabled !== undefined) {
+        queryClient.invalidateQueries({ queryKey: adminKeys.trickplayLibraries() });
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -387,9 +378,12 @@ export function useUpdateLibrary() {
       body: V2Body<"PATCH /api/v2/libraries/{id}">;
     }): Promise<Library> =>
       v2("PATCH /api/v2/libraries/{id}", { path: { id: String(id) }, body }).then(libraryFromV2),
-    onSuccess: () => {
+    onSuccess: (_updated, { body }) => {
       toast.success("Library updated");
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
+      if (body.trickplay_enabled !== undefined || body.enabled !== undefined) {
+        queryClient.invalidateQueries({ queryKey: adminKeys.trickplayLibraries() });
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -582,24 +576,6 @@ export function useRetryLibraryMetadataMatchQueue() {
       toast.error(
         err instanceof Error ? err.message : "Failed to rebuild metadata matcher backlog",
       );
-    },
-  });
-}
-
-export function useCancelLibraryMetadataMatchQueue() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) =>
-      v2("POST /api/v2/libraries/{id}/metadata-match-queue/cancel", {
-        path: { id: String(id) },
-      }),
-    onSuccess: (_data, id) => {
-      toast.success("Metadata matcher backlog cancelled");
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueStatuses() });
-      queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to cancel metadata matcher backlog");
     },
   });
 }

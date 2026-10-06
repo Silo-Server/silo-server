@@ -39,7 +39,7 @@ let client: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
   client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false }, mutations: { retry: 3, retryDelay: 0 } },
   });
   mocks.api.mockResolvedValue({ jobs: [] });
 });

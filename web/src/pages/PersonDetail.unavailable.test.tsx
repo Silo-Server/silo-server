@@ -51,19 +51,6 @@ function renderPerson(prefetched?: { id: string; name: string }) {
   );
 }
 
-it("gives a missing person a page with a way home and a Not found title", async () => {
-  vi.mocked(getPerson).mockRejectedValue(personProblem(404));
-
-  renderPerson();
-
-  expect(
-    await screen.findByRole("heading", { level: 1, name: "This person isn't available" }),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
-  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
-  expect(document.title).toContain("Not found");
-});
-
 it("offers a retry rather than calling a failed read missing", async () => {
   vi.mocked(getPerson).mockRejectedValueOnce(personProblem(500)).mockResolvedValue({
     id: "7",
@@ -88,6 +75,8 @@ it("replaces a prefetched person when the view read finds them gone", async () =
   expect(
     await screen.findByRole("heading", { level: 1, name: "This person isn't available" }),
   ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/");
+  expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   expect(screen.queryByText("Prefetched Actor")).not.toBeInTheDocument();
   expect(document.title).toContain("Not found");
 });

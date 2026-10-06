@@ -10,9 +10,10 @@ import (
 
 func sampleCapabilityInfo() HWAccelInfo {
 	return HWAccelInfo{
-		Resolved:      "nvenc",
-		BootID:        "5b2c1f0e-1111-4a2b-9c3d-2f6e7a8b9c0d",
-		RenderDevices: []string{"/dev/dri/renderD128", "/dev/dri/renderD129"},
+		Resolved:                  "nvenc",
+		ProbeRequestTimeoutMillis: 111_000,
+		BootID:                    "5b2c1f0e-1111-4a2b-9c3d-2f6e7a8b9c0d",
+		RenderDevices:             []string{"/dev/dri/renderD128", "/dev/dri/renderD129"},
 		RenderDeviceDetails: []RenderDeviceInfo{
 			{Path: "/dev/dri/renderD128", PCIAddress: "0000:03:00.0", GPUUUID: "GPU-aaa", Description: "NVIDIA GPU (0x2204)"},
 			{Path: "/dev/dri/renderD129", PCIAddress: "0000:04:00.0", Description: "Intel GPU (0x9a49)"},
@@ -70,22 +71,6 @@ func TestComputeCapabilityHashIgnoresPerCallerMetadata(t *testing.T) {
 	}
 }
 
-// The advertised probe budget does move it, though it describes the report
-// rather than the hardware. The control plane sizes real deadlines from the
-// stored copy, so a node upgraded to a build that needs longer — changing
-// nothing else about itself — has to reach the sweep, or the API keeps
-// canceling that node's re-probes against a budget it has outgrown.
-func TestComputeCapabilityHashTracksTheAdvertisedProbeBudget(t *testing.T) {
-	info := sampleCapabilityInfo()
-	info.ProbeRequestTimeoutMillis = 111_000
-	before := ComputeCapabilityHash(info)
-
-	info.ProbeRequestTimeoutMillis = 136_000
-	if got := ComputeCapabilityHash(info); got == before {
-		t.Fatal("a node that raised its advertised probe budget hashed identically; the sweep would never refetch it")
-	}
-}
-
 func TestComputeCapabilityHashIsPrefixedSHA256(t *testing.T) {
 	hash := ComputeCapabilityHash(sampleCapabilityInfo())
 	if !strings.HasPrefix(hash, "sha256:") {
@@ -104,6 +89,7 @@ func TestComputeCapabilityHashDetectsRealChanges(t *testing.T) {
 		name   string
 		mutate func(*HWAccelInfo)
 	}{
+		{"advertised probe budget", func(i *HWAccelInfo) { i.ProbeRequestTimeoutMillis = 136_000 }},
 		{"resolved backend", func(i *HWAccelInfo) { i.Resolved = "vaapi" }},
 		{"boot id", func(i *HWAccelInfo) { i.BootID = "0000ffff-2222-4a2b-9c3d-2f6e7a8b9c0d" }},
 		{"render device removed", func(i *HWAccelInfo) {

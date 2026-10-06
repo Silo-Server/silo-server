@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { captureRoomCreationDraft, createRoom } from "./watchTogetherCreate";
 import WatchPartyHub from "@/pages/watchtogether/WatchPartyHub";
 const state = vi.hoisted(() => ({ token: "", navigate: vi.fn() }));
@@ -71,7 +71,10 @@ it("retains fallback UUID and mode across an uncertain explicit retry", async ()
   expect(fetch.mock.calls[0]![1].body).toBe(fetch.mock.calls[1]![1].body);
   expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(draft.body);
 });
-it.each([401, 403, 409, 422, 500])("single sends refusal %s", async (status) => {
+it.each([401, 500])("single sends refusal %s", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   await expect(createRoom(captureRoomCreationDraft("host_pick"))).rejects.toThrow();

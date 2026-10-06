@@ -323,6 +323,7 @@ type SessionManager struct {
 	activeGrace          time.Duration
 	pausedGrace          time.Duration
 	expireHooks          []func(*Session)
+	finishHooks          []func(context.Context, *Session)
 	compatActivityReader SessionActivityReader
 	compatExpiryClaimer  SessionExpiryClaimer
 	// transportStops holds the stop channels of media transports this replica
@@ -460,6 +461,17 @@ func (m *SessionManager) AddExpirationHook(fn func(*Session)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.expireHooks = append(m.expireHooks, fn)
+}
+
+// AddFinishHook registers a callback that runs after FinishSession removes a
+// session. The hook executes outside the manager lock.
+func (m *SessionManager) AddFinishHook(fn func(context.Context, *Session)) {
+	if fn == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.finishHooks = append(m.finishHooks, fn)
 }
 
 func normalizeClientMetadataValue(value string, maxLen int) string {
@@ -1393,40 +1405,6 @@ func (m *SessionManager) SetTranscodeRoute(sessionID string, route TranscodeRout
 	return nil
 }
 
-// SetEffectiveMediaFileID updates the currently delivered source file while
-// preserving the originally requested file selection.
-func (m *SessionManager) SetEffectiveMediaFileID(sessionID string, fileID int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	if fileID > 0 {
-		s.MediaFileID = fileID
-	}
-	s.streamRevision++
-	m.touchSessionLocked(s)
-	return nil
-}
-
-// SetWebSocket marks whether a WebSocket liveness connection is active for a session.
-func (m *SessionManager) SetWebSocket(sessionID string, connected bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	s.HasWebSocket = connected
-	m.touchSessionLocked(s)
-	return nil
-}
-
 // SetRealtimeConnection marks whether a realtime control connection is active for a session.
 func (m *SessionManager) SetRealtimeConnection(sessionID string, connected bool) error {
 	m.mu.Lock()
@@ -1629,6 +1607,29 @@ func (m *SessionManager) StopSession(sessionID string) error {
 
 	delete(m.sessions, sessionID)
 	m.stopTransportsLocked(sessionID)
+	return nil
+}
+
+// FinishSession is StopSession for a play that has ended, as opposed to a
+// session replaced mid-play. The finish hooks run only when this call removed
+// the session, so a retried stop, or one that loses to stale cleanup, runs
+// them at most once per local copy.
+func (m *SessionManager) FinishSession(ctx context.Context, sessionID string) error {
+	m.mu.Lock()
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		m.mu.Unlock()
+		return ErrSessionNotFound
+	}
+	finished := *s
+	delete(m.sessions, sessionID)
+	m.stopTransportsLocked(sessionID)
+	hooks := append([]func(context.Context, *Session){}, m.finishHooks...)
+	m.mu.Unlock()
+
+	for _, hook := range hooks {
+		hook(ctx, &finished)
+	}
 	return nil
 }
 

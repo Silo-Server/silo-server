@@ -70,6 +70,7 @@ describe("SectionEditorDrawer library picker", () => {
     async (sectionType) => {
       const onSave = vi.fn();
       renderAdmin("home", onSave, sectionType);
+      expect(screen.getByRole("button", { name: "Libraries" }).textContent).toContain("TV");
       await userEvent.click(screen.getByRole("button", { name: "Libraries" }));
       await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Movies" }));
       await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "TV" }));
@@ -89,11 +90,6 @@ describe("SectionEditorDrawer library picker", () => {
       );
     },
   );
-
-  it("offers every server library to an admin editing a home row", () => {
-    renderAdmin("home");
-    expect(screen.getByRole("button", { name: "Libraries" }).textContent).toContain("TV");
-  });
 
   it("hides the picker on an admin library page", () => {
     renderAdmin("library");

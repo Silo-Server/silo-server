@@ -24,7 +24,7 @@ type prepareProtocolPathAuthority struct{}
 func (prepareProtocolPathAuthority) Allowed(context.Context, string) (bool, error) { return true, nil }
 
 func TestWorkerDownloadPreparationProtocol(t *testing.T) {
-	document, err := GenerateOpenAPI()
+	document, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
