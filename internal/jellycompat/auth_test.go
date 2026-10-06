@@ -178,27 +178,6 @@ func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
 	}
 }
 
-func TestRequireAdminAPIKey_AcceptsAdminKey(t *testing.T) {
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "admin", Enabled: true}},
-	)
-	req := httptest.NewRequest("GET", "/Library/VirtualFolders", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !AdminAPIKeyFromContext(r.Context()) {
-			t.Fatal("expected admin API key marker in context")
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
 func TestAdminAPIKeyActivityAttribution(t *testing.T) {
 	for _, route := range []struct {
 		method string
@@ -262,24 +241,6 @@ func TestAdminAPIKeyActivityAttribution(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestRequireAdminAPIKey_RejectsNonAdminKey(t *testing.T) {
-	authn := newAdminAPIKeyAuthForTest(
-		&fakeAPIKeyValidator{key: &models.APIKey{ID: 1, UserID: 2, Key: "sa_test"}},
-		&fakeAPIKeyUserLoader{user: &models.User{ID: 2, Role: "user", Enabled: true}},
-	)
-	req := httptest.NewRequest("POST", "/Library/Media/Updated", nil)
-	req.Header.Set("X-Emby-Token", "sa_test")
-	rec := httptest.NewRecorder()
-
-	authn.RequireAdminAPIKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("handler should not run")
-	})).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

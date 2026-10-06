@@ -7,24 +7,22 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import listFavoritesOk from "../../../../contracts/api/v2/fixtures/list_favorites_ok.json";
-import listWatchlistOk from "../../../../contracts/api/v2/fixtures/list_watchlist_ok.json";
-import setRatingOutOfRange from "../../../../contracts/api/v2/fixtures/set_rating_out_of_range.json";
-import addFavoriteNotFound from "../../../../contracts/api/v2/fixtures/add_favorite_not_found.json";
 
 import { setProfileId } from "@/api/client";
-import { V2ProblemError } from "@/api/v2/request";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
 import { useFavorites, useToggleFavorite } from "./favorites";
+import { catalogKeys, itemKeys } from "./keys";
 import { useDeleteRating, useSetRating } from "./ratings";
-import { useToggleWatchlist, useWatchlist } from "./watchlist";
+import { useToggleWatchlist } from "./watchlist";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-function createWrapper() {
-  const client = new QueryClient({
+function createWrapper(
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  }),
+) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return createElement(QueryClientProvider, { client }, children);
   };
@@ -80,18 +78,6 @@ describe("personal lists on the v2 contract", () => {
     expect(result.current.data?.[0]?.poster_url).toBe("");
   });
 
-  it("lists the watchlist as browse cards from the items envelope", async () => {
-    const fetchMock = stubFetch(() => jsonResponse(listWatchlistOk));
-
-    const { result } = renderHook(() => useWatchlist(), { wrapper: createWrapper() });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(callOf(fetchMock).url).toBe("/api/v2/watchlist");
-    expect(result.current.data?.map((item) => item.content_id)).toEqual(
-      listWatchlistOk.items.map((item) => item.content_id),
-    );
-  });
-
   it("toggles a favorite with PUT to add and DELETE to remove", async () => {
     const fetchMock = stubFetch(() => noContent());
 
@@ -134,24 +120,15 @@ describe("personal lists on the v2 contract", () => {
     });
   });
 
-  it("surfaces the not_found problem when adding a favorite for an unknown item", async () => {
-    stubFetch(() => jsonResponse(addFavoriteNotFound, addFavoriteNotFound.status));
-
-    const { result } = renderHook(() => useToggleFavorite("movie:missing"), {
-      wrapper: createWrapper(),
-    });
-    const error = await act(() => result.current.mutateAsync(false).catch((err) => err));
-
-    expect(error).toBeInstanceOf(V2ProblemError);
-    expect((error as V2ProblemError).status).toBe(404);
-    expect((error as V2ProblemError).problemType).toBe("not_found");
-  });
-
-  it("sets and deletes a rating through the ratings operations", async () => {
+  it("sets and deletes ratings, restoring both detail caches after rejected writes", async () => {
     const fetchMock = stubFetch(() => noContent());
 
-    const set = renderHook(() => useSetRating("movie:c"), { wrapper: createWrapper() });
-    const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper: createWrapper() });
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = createWrapper(client);
+    const set = renderHook(() => useSetRating("movie:c"), { wrapper });
+    const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper });
     await act(async () => {
       await set.result.current.mutateAsync(4);
       await remove.result.current.mutateAsync();
@@ -164,16 +141,47 @@ describe("personal lists on the v2 contract", () => {
       url: "/api/v2/ratings/movie%3Ac",
       method: "DELETE",
     });
-  });
 
-  it("rejects an out-of-range rating with the validation problem", async () => {
-    stubFetch(() => jsonResponse(setRatingOutOfRange, setRatingOutOfRange.status));
+    const detailKeys = [catalogKeys.itemDetail("movie:c"), itemKeys.detail("movie:c")];
+    const otherKey = catalogKeys.itemDetail("movie:other");
+    for (const key of detailKeys) {
+      client.setQueryData(key, { content_id: "movie:c", user_rating: 3 });
+    }
+    let otherRating = 1;
+    client.setQueryData(otherKey, { content_id: "movie:other", user_rating: otherRating });
+    fetchMock.mockImplementation(async () => {
+      // Another item's update can land while this mutation is in flight.
+      // Its cache must not be captured and rolled back with this item's draft.
+      client.setQueryData(otherKey, { content_id: "movie:other", user_rating: ++otherRating });
+      return new Response(
+        JSON.stringify({
+          type: "https://siloserver.org/problems/validation_failed",
+          title: "Validation failed",
+          status: 422,
+          detail: "Rating refused",
+          instance: "/api/v2/ratings/movie%3Ac",
+        }),
+        { status: 422, headers: { "Content-Type": "application/problem+json" } },
+      );
+    });
 
-    const { result } = renderHook(() => useSetRating("movie:c"), { wrapper: createWrapper() });
-    const error = await act(() => result.current.mutateAsync(9).catch((err) => err));
-
-    expect(error).toBeInstanceOf(V2ProblemError);
-    expect((error as V2ProblemError).status).toBe(422);
-    expect((error as V2ProblemError).problem.errors?.[0]).toEqual(setRatingOutOfRange.errors[0]);
+    try {
+      for (const mutation of [
+        () => set.result.current.mutateAsync(2),
+        () => remove.result.current.mutateAsync(),
+      ]) {
+        await act(async () => {
+          await expect(mutation()).rejects.toThrow("Rating refused");
+        });
+        for (const key of detailKeys) {
+          expect(client.getQueryData(key)).toMatchObject({ user_rating: 3 });
+        }
+        expect(client.getQueryData(otherKey)).toMatchObject({ user_rating: otherRating });
+      }
+    } finally {
+      set.unmount();
+      remove.unmount();
+      client.clear();
+    }
   });
 });

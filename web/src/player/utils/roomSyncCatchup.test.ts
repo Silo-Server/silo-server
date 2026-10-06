@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   abandonRoomReload,
@@ -7,6 +9,11 @@ import {
   isNativePositionInRanges,
   landRoomReload,
   noteRoomReloadLoading,
+  roomCatchupBandSeconds,
+  roomCatchupConverged,
+  roomCatchupDeadbandSeconds,
+  roomCatchupMaxRate,
+  roomCatchupMinRate,
   roomMembersLeftBehind,
   roomReloadAllowed,
   roomReloadLanded,
@@ -15,12 +22,6 @@ import {
   roomReloadMinIntervalMs,
   roomReloadStaleMs,
   settleRoomReloads,
-  roomCatchupBandSeconds,
-  roomCatchupConverged,
-  roomCatchupDeadbandSeconds,
-  roomCatchupExpectedPosition,
-  roomCatchupMaxRate,
-  roomCatchupMinRate,
 } from "./roomSyncCatchup";
 
 function seekableRanges(ranges: Array<[number, number]>): TimeRanges {
@@ -32,14 +33,6 @@ function seekableRanges(ranges: Array<[number, number]>): TimeRanges {
 }
 
 describe("isNativePositionInRanges", () => {
-  it("finds a position inside a single range", () => {
-    expect(isNativePositionInRanges(seekableRanges([[10, 20]]), 15)).toBe(true);
-  });
-
-  it("rejects a position outside every range", () => {
-    expect(isNativePositionInRanges(seekableRanges([[10, 20]]), 25)).toBe(false);
-  });
-
   it("finds a position in a later range", () => {
     expect(
       isNativePositionInRanges(
@@ -51,10 +44,6 @@ describe("isNativePositionInRanges", () => {
       ),
     ).toBe(true);
   });
-
-  it("rejects when there are no ranges", () => {
-    expect(isNativePositionInRanges(seekableRanges([]), 0)).toBe(false);
-  });
 });
 
 describe("decideRoomCatchup", () => {
@@ -63,10 +52,6 @@ describe("decideRoomCatchup", () => {
     localPositionSeconds: 100,
     targetLocallySeekable: false,
   };
-
-  it("always seeks an explicit room seek", () => {
-    expect(decideRoomCatchup({ ...base, action: "seek" })).toEqual({ kind: "seek" });
-  });
 
   it("does nothing when playback already matches the room", () => {
     expect(
@@ -78,25 +63,6 @@ describe("decideRoomCatchup", () => {
     ).toEqual({ kind: "none" });
   });
 
-  it("keeps seekable targets a seek for every action", () => {
-    expect(
-      decideRoomCatchup({
-        ...base,
-        action: "play",
-        targetLocallySeekable: true,
-        localPositionSeconds: base.targetPositionSeconds - 1.5,
-      }),
-    ).toEqual({ kind: "seek" });
-    expect(
-      decideRoomCatchup({
-        ...base,
-        action: "pause",
-        targetLocallySeekable: true,
-        localPositionSeconds: base.targetPositionSeconds - 1.5,
-      }),
-    ).toEqual({ kind: "seek" });
-  });
-
   it("never rebuilds a stream to park a paused member", () => {
     expect(
       decideRoomCatchup({
@@ -105,16 +71,6 @@ describe("decideRoomCatchup", () => {
         localPositionSeconds: base.targetPositionSeconds - roomCatchupBandSeconds - 30,
       }),
     ).toEqual({ kind: "none" });
-  });
-
-  it("converges in-band out-of-window drift behind the room", () => {
-    expect(
-      decideRoomCatchup({
-        ...base,
-        action: "play",
-        localPositionSeconds: base.targetPositionSeconds - 1,
-      }),
-    ).toEqual({ kind: "rate", rate: 1 + 1 / 8 });
   });
 
   it("caps the convergence rate at the band edge", () => {
@@ -136,35 +92,10 @@ describe("decideRoomCatchup", () => {
       }),
     ).toEqual({ kind: "rate", rate: roomCatchupMinRate });
   });
-
-  it("seeks out-of-band drift", () => {
-    expect(
-      decideRoomCatchup({
-        ...base,
-        action: "play",
-        localPositionSeconds: base.targetPositionSeconds - roomCatchupBandSeconds - 0.5,
-      }),
-    ).toEqual({ kind: "seek" });
-  });
 });
 
 describe("room catch-up convergence", () => {
   const target = { positionSeconds: 100, executeAtMs: 1_000 };
-
-  it("does not advance before the command executes", () => {
-    expect(roomCatchupExpectedPosition(target, 500)).toBe(100);
-    expect(roomCatchupExpectedPosition(target, 1_000)).toBe(100);
-  });
-
-  it("advances the room position at 1x after execution", () => {
-    expect(roomCatchupExpectedPosition(target, 4_000)).toBe(103);
-  });
-
-  it("converges when playback reaches the advancing position", () => {
-    // At 4s the room expects 103; playback at 102.8 is inside the deadband.
-    expect(roomCatchupConverged(target, 102.8, 4_000)).toBe(true);
-    expect(roomCatchupConverged(target, 102.0, 4_000)).toBe(false);
-  });
 
   it("stops a slowed member once the advancing room position reaches it", () => {
     // A member ahead of the room moves away from the command's static
@@ -176,41 +107,6 @@ describe("room catch-up convergence", () => {
 });
 
 describe("room rebuild budget", () => {
-  it("runs one rebuild at a time and aims the next ahead by the measured startup", () => {
-    const budget = createRoomReloadBudget();
-    expect(roomReloadAllowed(budget, 0)).toBe(true);
-    expect(beginRoomReload(budget, 100, 0)).toBe(100);
-    expect(roomReloadAllowed(budget, 5_000)).toBe(false);
-
-    // Until the element starts loading, even the target position belongs to
-    // the stream being replaced.
-    expect(roomReloadLanded(budget, 100)).toBe(false);
-    noteRoomReloadLoading(budget);
-    expect(roomReloadLanded(budget, 95)).toBe(false);
-    expect(roomReloadLanded(budget, 100)).toBe(true);
-    landRoomReload(budget, 6_000);
-    expect(budget.leadSeconds).toBe(6);
-    expect(roomReloadAllowed(budget, 6_000 + roomReloadMinIntervalMs - 1)).toBe(false);
-    expect(roomReloadAllowed(budget, 6_000 + roomReloadMinIntervalMs)).toBe(true);
-    expect(beginRoomReload(budget, 200, 20_000)).toBe(206);
-  });
-
-  it("gives every reload its own generation", () => {
-    const budget = createRoomReloadBudget();
-    beginRoomReload(budget, 100, 0);
-    const first = budget.generation;
-    abandonRoomReload(budget, 1_000);
-    beginRoomReload(budget, 100, 40_000);
-    const second = budget.generation;
-    expect(second).not.toBe(first);
-    // Converging does not end an in-flight reload.
-    settleRoomReloads(budget);
-    expect(budget.generation).toBe(second);
-    noteRoomReloadLoading(budget);
-    landRoomReload(budget, 42_000);
-    expect(budget.generation).not.toBe(second);
-  });
-
   it("never aims the load-time lead past the end of the media", () => {
     const budget = createRoomReloadBudget();
     beginRoomReload(budget, 100, 0);

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
@@ -440,4 +442,45 @@ func (f *fakePersonalCollections) PersonalCollectionGroupEditor(_ context.Contex
 }
 func (f *fakePersonalCollections) PersonalCollectionItemsOrderEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionOrderView, error) {
 	return handlers.PersonalCollectionOrderView{OrderedIDs: []string{}, Revision: 1}, f.err
+}
+
+// The personal template gallery offered TMDB Discover and franchise templates
+// that can't become personal collections, so Create did nothing (#1640).
+func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
+	full := templates.CatalogDefault()
+	want := map[templates.Source]int{}
+	hasExcludedSource := false
+	for _, group := range full.Categories {
+		for _, template := range group.Templates {
+			if slices.Contains(importableCollectionSources[:], string(template.Source)) {
+				want[template.Source]++
+			} else {
+				hasExcludedSource = true
+			}
+		}
+	}
+	if len(want) == 0 || !hasExcludedSource {
+		t.Fatal("built-in catalog must contain both importable and excluded sources")
+	}
+	got := importableCollectionTemplates(full)
+
+	kept := map[templates.Source]int{}
+	for _, group := range got.Categories {
+		if len(group.Templates) == 0 {
+			t.Errorf("category %q kept with no templates", group.Category)
+		}
+		for _, template := range group.Templates {
+			kept[template.Source]++
+		}
+	}
+	for source := range kept {
+		if !slices.Contains(importableCollectionSources[:], string(source)) {
+			t.Errorf("catalog keeps %d templates with source %q, which personal collections can't import", kept[source], source)
+		}
+	}
+	for source, count := range want {
+		if kept[source] != count {
+			t.Errorf("kept %d templates with importable source %q, want %d", kept[source], source, count)
+		}
+	}
 }

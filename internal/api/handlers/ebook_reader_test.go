@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -99,14 +100,12 @@ func (s *fakeEbookReaderConfigStore) Upsert(_ context.Context, config EbookReade
 }
 
 type fakeEbookReaderAnnotationStore struct {
-	items      []EbookReaderAnnotation
-	existing   *EbookReaderAnnotation
-	created    *EbookReaderAnnotation
-	updated    *EbookReaderAnnotation
-	mergedFrom *EbookReaderAnnotation
-	mergeCalls int
-	deleted    string
-	err        error
+	items    []EbookReaderAnnotation
+	existing *EbookReaderAnnotation
+	created  *EbookReaderAnnotation
+	updated  *EbookReaderAnnotation
+	deleted  string
+	err      error
 }
 
 func (s *fakeEbookReaderAnnotationStore) List(context.Context, int, string, string) ([]EbookReaderAnnotation, error) {
@@ -139,8 +138,6 @@ func (s *fakeEbookReaderAnnotationStore) Update(
 		return nil, nil
 	}
 	existing := *s.existing
-	s.mergedFrom = &existing
-	s.mergeCalls++
 	merged, err := merge(existing)
 	if err != nil {
 		return nil, err
@@ -307,7 +304,7 @@ func TestEbookReaderRecognizesReadestFormats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			container := name
 			if name == "book.fb2.zip" {
-				container = "fbz"
+				container = ""
 			}
 			file := &models.MediaFile{FilePath: "/library/" + name, Container: container}
 			if rejected[name] {
@@ -342,17 +339,6 @@ func TestEbookReaderRejectsPlainText(t *testing.T) {
 	}
 	if got := ebookMimeType(file.FilePath, file.Container); got == "text/plain; charset=utf-8" {
 		t.Fatal("plain text should not have an ebook reader MIME type")
-	}
-}
-
-func TestEbookReaderRecognizesFBZFromCompoundFilenameWithoutContainer(t *testing.T) {
-	file := &models.MediaFile{
-		FilePath: "/library/book.fb2.zip",
-		BaseType: "ebook",
-	}
-
-	if !isEbookFile(file) {
-		t.Fatal("expected .fb2.zip path to be treated as an ebook reader format")
 	}
 }
 
@@ -708,7 +694,7 @@ func patchEbookReaderAnnotation(t *testing.T, store *fakeEbookReaderAnnotationSt
 	handler.AnnotationStore = store
 
 	req := newEbookReaderAuthRequest(http.MethodPatch, "/ebooks/ebook-1/annotations/ann-1")
-	req.Body = ioNopCloser{strings.NewReader(body)}
+	req.Body = io.NopCloser(strings.NewReader(body))
 	req = withEbookReaderAnnotationRouteParams(req, "ebook-1", "ann-1")
 
 	rr := httptest.NewRecorder()
@@ -717,7 +703,8 @@ func patchEbookReaderAnnotation(t *testing.T, store *fakeEbookReaderAnnotationSt
 }
 
 func TestEbookReaderPatchKeepsAbsentFields(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
+	original := existingEbookReaderAnnotation()
+	store := &fakeEbookReaderAnnotationStore{existing: original}
 
 	rr := patchEbookReaderAnnotation(t, store, `{"note":"updated","color":"#bfdbfe"}`)
 
@@ -726,6 +713,9 @@ func TestEbookReaderPatchKeepsAbsentFields(t *testing.T) {
 	}
 	if store.updated == nil || store.updated.ID != "ann-1" || store.updated.Note != "updated" || store.updated.Color != "#bfdbfe" {
 		t.Fatalf("updated = %+v", store.updated)
+	}
+	if !store.updated.UpdatedAt.After(original.UpdatedAt) {
+		t.Fatalf("updated_at %v did not advance past %v", store.updated.UpdatedAt, original.UpdatedAt)
 	}
 	if string(store.updated.Metadata) != `{"chapter":"one"}` {
 		t.Fatalf("metadata should be preserved when absent, got %s", store.updated.Metadata)
@@ -785,33 +775,6 @@ func TestEbookReaderPatchAllowsKindChangeWithRequiredFields(t *testing.T) {
 	}
 }
 
-func TestEbookReaderPatchMergesOntoRowReadInsideStoreUpdate(t *testing.T) {
-	store := &fakeEbookReaderAnnotationStore{existing: existingEbookReaderAnnotation()}
-
-	rr := patchEbookReaderAnnotation(t, store, `{"note":"merged note"}`)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-	// The handler must not pre-read and merge outside the store: the merge
-	// runs exactly once, on the row handed over by the (locked) store read.
-	if store.mergeCalls != 1 {
-		t.Fatalf("merge calls = %d, want 1", store.mergeCalls)
-	}
-	if store.mergedFrom == nil || store.mergedFrom.Note != "original note" {
-		t.Fatalf("merge input = %+v, want the stored row", store.mergedFrom)
-	}
-	if store.updated == nil || store.updated.Note != "merged note" {
-		t.Fatalf("written row = %+v, want merged note", store.updated)
-	}
-	if store.updated.CFIRange != store.mergedFrom.CFIRange || store.updated.Kind != store.mergedFrom.Kind {
-		t.Fatalf("written row %+v must keep unpatched fields from merge input %+v", store.updated, store.mergedFrom)
-	}
-	if !store.updated.UpdatedAt.After(store.mergedFrom.UpdatedAt) {
-		t.Fatalf("updated_at %v must advance past %v", store.updated.UpdatedAt, store.mergedFrom.UpdatedAt)
-	}
-}
-
 func TestEbookReaderPatchReturnsNotFoundForMissingAnnotation(t *testing.T) {
 	store := &fakeEbookReaderAnnotationStore{}
 
@@ -832,7 +795,7 @@ func TestEbookReaderRejectsOversizedProgressBody(t *testing.T) {
 
 	body := `{"file_id":42,"location":"` + strings.Repeat("x", int(ebookReaderProgressMaxBodySize)) + `","progress":0.5}`
 	req := newEbookReaderAuthRequest(http.MethodPut, "/ebooks/ebook-1/progress")
-	req.Body = ioNopCloser{strings.NewReader(body)}
+	req.Body = io.NopCloser(strings.NewReader(body))
 	req = withEbookReaderContentRouteParam(req, "ebook-1")
 
 	rr := httptest.NewRecorder()
@@ -893,9 +856,3 @@ func TestEbookReaderDeletesAnnotation(t *testing.T) {
 		t.Fatalf("deleted = %q", store.deleted)
 	}
 }
-
-type ioNopCloser struct {
-	*strings.Reader
-}
-
-func (c ioNopCloser) Close() error { return nil }

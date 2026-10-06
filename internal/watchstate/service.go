@@ -2,6 +2,7 @@ package watchstate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,6 +38,9 @@ type PlaybackStopResult struct {
 	Completed             bool
 	SkippedBelowMinResume bool
 	HistoryID             string
+	// AlreadyRecorded reports a RecordPlaybackStopOnce call whose play was
+	// already in watch history, so it wrote nothing.
+	AlreadyRecorded bool
 }
 
 type ManualMarkResult struct {
@@ -141,6 +145,75 @@ func (s *Service) RecordPlaybackStop(
 	result.HistoryID = historyID
 	if entry.Completed {
 		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
+	return result, nil
+}
+
+// RecordPlaybackStopOnce records a play that more than one stop may report,
+// such as copies of one session on several replicas, in watch history once.
+// historyID names the play's row: the first stop that can record the play
+// writes it, and a later stop changes nothing (AlreadyRecorded) unless it
+// completes a row stored incomplete. A stop below the minimum resume
+// threshold, or one whose write fails, leaves the row to the next stop.
+//
+// It writes no resume progress. The caller's client reports progress as the
+// play goes, and a stale copy's stop would only move that point back. The
+// version hints are written only by the stop that records the play, after the
+// row, so a stale copy cannot replace a newer play's hints; a failed hints
+// write is returned but does not undo the record.
+func (s *Service) RecordPlaybackStopOnce(
+	ctx context.Context,
+	userID int,
+	profileID, targetID string,
+	duration, position float64,
+	watchedAt time.Time,
+	hints userstore.VersionHints,
+	thresholds userstore.ProgressThresholds,
+	historyID string,
+) (PlaybackStopResult, error) {
+	result := PlaybackStopResult{
+		MediaItemID:          targetID,
+		DurationSeconds:      duration,
+		FinalPositionSeconds: position,
+	}
+	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+		result.SkippedBelowMinResume = true
+		return result, nil
+	}
+	store, err := s.storeForUser(ctx, userID)
+	if err != nil {
+		return result, err
+	}
+	if watchedAt.IsZero() {
+		watchedAt = time.Now().UTC()
+	}
+	entry := userstore.WatchHistoryEntry{
+		ID:              historyID,
+		ProfileID:       profileID,
+		MediaItemID:     targetID,
+		WatchedAt:       formatWatchedAt(watchedAt),
+		DurationSeconds: duration,
+		Completed:       duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct),
+		Source:          userstore.WatchHistorySourcePlayback,
+	}
+	s.applyStableIdentity(ctx, &entry)
+	entry, err = userstore.AddVisibleHistory(ctx, store, entry)
+	if errors.Is(err, userstore.ErrHistoryEntryExists) {
+		result.AlreadyRecorded = true
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Completed = entry.Completed
+	result.HistoryID = historyID
+	if entry.Completed {
+		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
+	if hints.FileID > 0 {
+		if err := store.UpdateProgressHints(ctx, profileID, targetID, hints); err != nil {
+			return result, err
+		}
 	}
 	return result, nil
 }
@@ -525,23 +598,6 @@ func (s *Service) recordMarkUnwatchedBatch(
 		return err
 	}
 	return store.RemoveHistoryItems(ctx, profileID, targetIDs, time.Now().UTC())
-}
-
-// buildMarkPlayedBatchSQL returns the upsert that marks every media_item_id in
-// the unnest($3) array as completed for a given (user, profile). Extracted into
-// a helper so a SQL-shape unit test can pin the structure without standing up
-// Postgres.
-func buildMarkPlayedBatchSQL() (string, []any) {
-	return `
-        INSERT INTO user_watch_progress
-            (user_id, profile_id, media_item_id, completed, position_seconds, duration_seconds, updated_at)
-        SELECT $1, $2, mid, TRUE, 0, 0, $4
-        FROM unnest($3::text[]) AS mid
-        ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
-        SET completed = TRUE,
-            updated_at = EXCLUDED.updated_at
-        WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
-           OR user_watch_progress.updated_at < EXCLUDED.updated_at`, nil
 }
 
 func (s *Service) addImportedHistoryIfMissing(

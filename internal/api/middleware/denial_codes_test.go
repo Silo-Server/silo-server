@@ -83,6 +83,9 @@ func TestDenialCodesAreStable(t *testing.T) {
 		{"invalid session", func(w http.ResponseWriter) {
 			writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 		}, http.StatusUnauthorized, "unauthorized", ReasonSessionInvalid},
+		{"token refresh required", func(w http.ResponseWriter) {
+			writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
+		}, http.StatusUnauthorized, "unauthorized", ReasonTokenRefreshRequired},
 		{"forbidden", func(w http.ResponseWriter) {
 			writeForbidden(w, "Admin access required")
 		}, http.StatusForbidden, "forbidden", ""},

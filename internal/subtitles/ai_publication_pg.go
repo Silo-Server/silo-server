@@ -35,17 +35,14 @@ func (r *PgRepository) PublishAISubtitle(ctx context.Context, candidate *Downloa
 			legacyID = legacy.ID
 			legacyKey = legacy.S3Key
 		}
-		var sub DownloadedSubtitle
-		err := tx.QueryRow(ctx, `SELECT id,media_file_id,provider,language,format,release_name,s3_key,
-   score,hearing_impaired,downloaded_by,created_at,COALESCE(content_sha256,''),revision
+		sub, err := scanDownloadedSubtitle(tx.QueryRow(ctx, `SELECT `+downloadedSubtitleColumns+`
    FROM downloaded_subtitles WHERE media_file_id=$1 AND provider=$2 AND language=$3 AND format=$4
    AND (content_sha256=$5 OR (content_sha256 IS NULL AND id=$6 AND s3_key=$7))
-   ORDER BY id LIMIT 1 FOR SHARE`, candidate.MediaFileID, candidate.Provider, candidate.Language, candidate.Format, candidate.ContentSHA256, legacyID, legacyKey).Scan(
-			&sub.ID, &sub.MediaFileID, &sub.Provider, &sub.Language, &sub.Format, &sub.ReleaseName, &sub.S3Key, &sub.Score, &sub.HearingImpaired, &sub.DownloadedBy, &sub.CreatedAt, &sub.ContentSHA256, &sub.Revision)
+   ORDER BY id LIMIT 1 FOR SHARE`, candidate.MediaFileID, candidate.Provider, candidate.Language, candidate.Format, candidate.ContentSHA256, legacyID, legacyKey))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
-		return &sub, err
+		return sub, err
 	}
 	sub, err := lookup()
 	if err != nil {
@@ -54,8 +51,8 @@ func (r *PgRepository) PublishAISubtitle(ctx context.Context, candidate *Downloa
 	if sub == nil {
 		err = tx.QueryRow(ctx, `INSERT INTO downloaded_subtitles
    (media_file_id,provider,language,format,release_name,s3_key,score,hearing_impaired,downloaded_by,content_sha256)
-   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING id,created_at,revision`,
-			candidate.MediaFileID, candidate.Provider, candidate.Language, candidate.Format, candidate.ReleaseName, candidate.S3Key, candidate.Score, candidate.HearingImpaired, candidate.DownloadedBy, candidate.ContentSHA256).Scan(&candidate.ID, &candidate.CreatedAt, &candidate.Revision)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING id,created_at,revision,timing_offset_ms,timing_scale`,
+			candidate.MediaFileID, candidate.Provider, candidate.Language, candidate.Format, candidate.ReleaseName, candidate.S3Key, candidate.Score, candidate.HearingImpaired, candidate.DownloadedBy, candidate.ContentSHA256).Scan(&candidate.ID, &candidate.CreatedAt, &candidate.Revision, &candidate.Timing.OffsetMS, &candidate.Timing.Scale)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// A competing job can win content identity while we wait at INSERT.
 			// Read in a new statement snapshot and lock its row against deletion.

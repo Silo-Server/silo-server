@@ -19,7 +19,11 @@ describe("FilterEasyMode", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     expect(onChange).toHaveBeenCalled();
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1];
-    expect(lastCall?.[0].groups[0].rules[0].field).toBe("genre");
+    expect(lastCall?.[0].groups[0].rules[0]).toEqual({
+      field: "genre",
+      op: "contains",
+      value: "Drama",
+    });
   });
 
   it("removes a chip", async () => {

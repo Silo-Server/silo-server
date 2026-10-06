@@ -210,53 +210,6 @@ describe("SectionRow", () => {
     expect(markup).not.toContain("aspect-video");
   });
 
-  it("routes supported section view-all actions to browse destinations", () => {
-    const queryClient = new QueryClient();
-    const section: ResolvedSection = {
-      id: "recently-added",
-      section_type: "recently_added",
-      title: "Recently Added",
-      featured: false,
-      item_limit: 1,
-      total_count: 3,
-      is_custom: false,
-      customized: false,
-      items: [
-        {
-          content_id: "movie-1",
-          type: "movie",
-          title: "Alien",
-          year: 1979,
-          genres: [],
-          status: "matched",
-          rating_imdb: null,
-          overview: "",
-          poster_url: "",
-          poster_thumbhash: "",
-          backdrop_url: "",
-          backdrop_thumbhash: "",
-          logo_url: "",
-        },
-      ],
-    };
-
-    renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <SectionRow section={section} libraryId={7} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(latestCarouselProps?.onViewAll).toBeTypeOf("function");
-
-    latestCarouselProps?.onViewAll?.();
-
-    expect(mockNavigate).toHaveBeenCalledWith(
-      "/catalog?source=section&scope=library&section_id=recently-added&library_id=7&title=Recently+Added",
-    );
-  });
-
   it("routes supported home section view-all actions to home browse destinations", () => {
     const queryClient = new QueryClient();
     const section: ResolvedSection = {
@@ -386,5 +339,10 @@ describe("SectionRow", () => {
 
     expect(supportedMarkup).toContain("Pin to sidebar");
     expect(latestCarouselProps?.onViewAll).toBeTypeOf("function");
+
+    latestCarouselProps?.onViewAll?.();
+    expect(mockNavigate).toHaveBeenCalledWith(
+      "/catalog?source=section&scope=library&section_id=recently-added&library_id=7&title=Recently+Added",
+    );
   });
 });

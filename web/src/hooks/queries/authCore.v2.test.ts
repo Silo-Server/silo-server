@@ -187,15 +187,15 @@ describe("device pairing", () => {
       .mockResolvedValueOnce(json({ status: "approved" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const details = await v2("GET /api/v2/auth/device", { query: { code: "ABCD-1234" } });
+    const details = await v2("GET /api/v2/auth/device", { query: { code: "4821-7730" } });
     expect(details.status).toBe("pending");
-    expect(details.match_code).toBe("42");
+    expect(details.match_code).toBe("warm pony");
 
-    await v2("POST /api/v2/auth/device/approve", { body: { code: "ABCD-1234" } });
+    await v2("POST /api/v2/auth/device/approve", { body: { code: "4821-7730" } });
     const [lookup, approve] = calls(fetchMock);
-    expect(lookup?.url).toBe("/api/v2/auth/device?code=ABCD-1234");
+    expect(lookup?.url).toBe("/api/v2/auth/device?code=4821-7730");
     expect(approve?.url).toBe("/api/v2/auth/device/approve");
-    expect(JSON.parse(String(approve?.init.body))).toEqual({ code: "ABCD-1234" });
+    expect(JSON.parse(String(approve?.init.body))).toEqual({ code: "4821-7730" });
   });
 });
 

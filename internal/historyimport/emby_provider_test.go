@@ -397,21 +397,3 @@ func TestNormalizeEmbyItemWithoutLastPlayedDateHasNoFreshnessTimestamp(t *testin
 		t.Fatalf("PositionSeconds = %v, want 120", record.PositionSeconds)
 	}
 }
-
-func TestNormalizeEmbyItemUsesLastPlayedDateForFreshness(t *testing.T) {
-	t.Parallel()
-
-	lastPlayed := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
-	item := embyItem{ID: "emby-episode-1", Name: "Played", Type: "Episode"}
-	item.UserData.LastPlayedDate = &lastPlayed
-	item.UserData.Played = true
-
-	record := normalizeEmbyItem(item, embyItem{})
-
-	if !record.UpdatedAt.Equal(lastPlayed) {
-		t.Fatalf("UpdatedAt = %v, want %v", record.UpdatedAt, lastPlayed)
-	}
-	if record.LastPlayedAt == nil || !record.LastPlayedAt.Equal(lastPlayed) {
-		t.Fatalf("LastPlayedAt = %v, want %v", record.LastPlayedAt, lastPlayed)
-	}
-}

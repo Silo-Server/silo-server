@@ -26,10 +26,19 @@ func TestArtworkNestedKeyBytesAndRanges(t *testing.T) {
 	}
 	signer := artworkurl.NewSigner("test-secret", time.Hour)
 	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
-	u, _ := signer.Sign(key, time.Now())
+	u, expires := signer.Sign(key, time.Now())
 	got := do(t, h, http.MethodGet, u, "", nil)
 	if got.Code != 200 || got.Body.String() != "0123456789" {
 		t.Fatalf("GET: %d %s", got.Code, got.Body.String())
+	}
+	var maxAge int64
+	cache := got.Header().Get("Cache-Control")
+	if _, err := fmt.Sscanf(cache, "private, max-age=%d, immutable", &maxAge); err != nil {
+		t.Fatalf("cache = %q", cache)
+	}
+	// Allow a few seconds around the UTC issuance-window boundary.
+	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600-5 || maxAge > remaining+1 {
+		t.Fatalf("max-age = %d, URL remaining lifetime = %ds", maxAge, remaining)
 	}
 	head := do(t, h, http.MethodHead, u, "", nil)
 	if head.Code != 200 || head.Body.Len() != 0 || head.Header().Get("Content-Length") != "10" {
@@ -149,33 +158,6 @@ func TestArtworkMutableCachePolicy(t *testing.T) {
 	cache := got.Header().Get("Cache-Control")
 	if got.Code != http.StatusOK || cache != "private, no-cache" {
 		t.Fatalf("status = %d, cache = %q", got.Code, cache)
-	}
-}
-
-// A revisioned URL holds for its UTC day, so its bytes may stay cached until
-// the URL expires.
-func TestArtworkRevisionedCachePolicy(t *testing.T) {
-	store, err := blobstore.NewFilesystem(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := "nested/w500.rev.webp"
-	if err := store.Put(t.Context(), key, []byte("image")); err != nil {
-		t.Fatal(err)
-	}
-	signer := artworkurl.NewSigner("test-secret", time.Hour)
-	h := NewHandler(Dependencies{ArtworkStore: store, ArtworkSigner: signer})
-	u, expires := signer.Sign(key, time.Now())
-	got := do(t, h, http.MethodGet, u, "", nil)
-	var maxAge int64
-	cache := got.Header().Get("Cache-Control")
-	if _, err := fmt.Sscanf(cache, "private, max-age=%d, immutable", &maxAge); err != nil || got.Code != http.StatusOK {
-		t.Fatalf("status = %d, cache = %q", got.Code, cache)
-	}
-	// A few seconds of slack covers a run that crosses midnight UTC between
-	// signing and serving, when the URL has only the TTL left.
-	if remaining := int64(time.Until(expires).Seconds()); maxAge < 3600-5 || maxAge > remaining+1 {
-		t.Fatalf("max-age = %d, URL remaining lifetime = %ds", maxAge, remaining)
 	}
 }
 

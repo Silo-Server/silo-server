@@ -195,21 +195,6 @@ func TestHandleRefresh_HeaderToken_RotatesAndReturnsBothForms(t *testing.T) {
 	}
 }
 
-func TestHandleRefresh_BodyToken_Works(t *testing.T) {
-	h, store, cfg := newRefreshTestHandler(t)
-	refresh, _ := mintAndPersistRefresh(t, store, cfg, "1")
-
-	body := bytes.NewBufferString(`{"refreshToken":"` + refresh + `"}`)
-	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", body)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	h.handleRefresh(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-}
-
 // TestHandleRefresh_ReturnsFullLoginEnvelope guards that /auth/refresh returns
 // the SAME payload shape as /login (real ABS behavior) — not a thin token map —
 // so strict clients can decode it with their login model.

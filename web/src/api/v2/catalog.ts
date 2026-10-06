@@ -61,6 +61,8 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     studios: item.studios,
     networks: item.networks,
     content_rating: item.content_rating ?? "",
+    advisory_age: item.advisory_age ?? null,
+    advisory_source: item.advisory_source ?? "",
     status: item.status as CatalogCardItem["status"],
     show_status: item.show_status,
     rating_imdb: item.rating_imdb ?? null,
@@ -277,6 +279,7 @@ export function catalogItemDetailFromV2(item: CatalogItemDetailV2): ItemDetail {
     rating_tmdb: item.rating_tmdb ?? null,
     rating_rt_critic: item.rating_rt_critic ?? null,
     rating_rt_audience: item.rating_rt_audience ?? null,
+    ratings: item.ratings,
     imdb_id: item.imdb_id ?? "",
     tmdb_id: item.tmdb_id ?? "",
     tvdb_id: item.tvdb_id ?? "",
@@ -341,6 +344,7 @@ function episodeFileFromV2(file: EpisodeFileV2): EpisodeFile {
     audio_channels: file.audio_channels ?? 0,
     container: file.container ?? "",
     file_size: file.file_size,
+    ...(file.unreadable ? { unreadable: true } : {}),
   };
 }
 

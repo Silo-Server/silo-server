@@ -27,6 +27,9 @@ type ServerConfig struct {
 	LogFormat string `yaml:"log_format"`
 	LogQuiet  string `yaml:"log_quiet"`
 	PublicURL string `yaml:"public_url"`
+	// LANDiscovery advertises the API server on the local network with
+	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
+	LANDiscovery bool `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.
@@ -186,12 +189,16 @@ type PlaybackConfig struct {
 	// identical paths on every node; devices absent on a node fall out of
 	// that node's rotation. The admin hw-accel endpoint reports each node's
 	// inventory so the UI can flag divergence.
-	HWDevice                     string                `yaml:"hw_device"`
-	ChapterThumbnailWorkers      int                   `yaml:"chapter_thumbnail_workers"`
-	ChapterThumbnailExecution    string                `yaml:"chapter_thumbnail_execution"`
-	ChapterThumbnailNodeCapacity int                   `yaml:"chapter_thumbnail_node_capacity"`
-	TranscodeEnabled             bool                  `yaml:"transcode_enabled"`
-	Routing                      PlaybackRoutingPolicy `yaml:"-"`
+	HWDevice                     string `yaml:"hw_device"`
+	ChapterThumbnailWorkers      int    `yaml:"chapter_thumbnail_workers"`
+	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
+	ChapterThumbnailNodeCapacity int    `yaml:"chapter_thumbnail_node_capacity"`
+	// SubtitleSyncNodeCapacity is how many media sampling runs (subtitle sync
+	// speech decoding) one transcode node admits at once, across every API
+	// server that sends it work (subtitles.sync_node_capacity).
+	SubtitleSyncNodeCapacity int                   `yaml:"-"`
+	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
+	Routing                  PlaybackRoutingPolicy `yaml:"-"`
 }
 
 // RedisConfig holds Redis connection settings.
@@ -342,6 +349,11 @@ type DownloadConfig struct {
 	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
 	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
 	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
+
+	// Playback transcode switches that also govern converted downloads, read
+	// from their playback setting keys so both surfaces follow one toggle.
+	Allow4KTranscode  bool `yaml:"-"` // allow_4k_transcode: 4K sources may be converted
+	AllowHEVCEncoding bool `yaml:"-"` // playback.allow_hevc_encoding: HEVC output when the device decodes it
 }
 
 // PolicyConfig holds embedded policy engine settings.
@@ -539,6 +551,7 @@ func setDefaults() *configRaw {
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",
 			ChapterThumbnailNodeCapacity: 1,
+			SubtitleSyncNodeCapacity:     1,
 			TranscodeEnabled:             true,
 		},
 		RateLimit: RateLimitConfig{

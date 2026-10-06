@@ -22,9 +22,10 @@ import (
 // and drift-free.
 //
 // Progress writes queue only on state *transitions* (a row appearing, the
-// in-progress flag flipping, completion crossing, rows being cleared):
-// progress sync ticks fire continuously during playback on a busy server, and
-// recomputing interest on every tick would be a pointless hot write path.
+// in-progress flag flipping, completion crossing, rows being cleared) and on
+// the first write of a new watch session: progress sync ticks fire
+// continuously during playback on a busy server, and recomputing interest on
+// every tick would be a pointless hot write path.
 func WrapUserStoreProvider(inner userstore.UserStoreProvider, system *System) userstore.UserStoreProvider {
 	if inner == nil || system == nil {
 		return inner
@@ -285,17 +286,30 @@ type progressState struct {
 	exists     bool
 	inProgress bool
 	completed  bool
+	// updatedAt is the stored row's stamp, zero when unknown. It is not part
+	// of the transition comparison.
+	updatedAt time.Time
 }
+
+// progressSessionGap separates watch sessions. A progress write that lands
+// more than this long after the stored row's stamp, by its own stamp or by
+// the clock, queues a recompute even without a state transition: resuming
+// playback, or a late import, lifts a Home removal (an active series drop,
+// or a Continue Watching dismissal held for the old progress stamp), while
+// playback ticks within one session stay free.
+const progressSessionGap = 10 * time.Minute
 
 func (s *interestTrackingStore) currentProgressState(ctx context.Context, profileID, mediaItemID string) progressState {
 	entry, err := s.GetProgress(ctx, profileID, mediaItemID)
 	if err != nil || entry == nil {
 		return progressState{}
 	}
+	updatedAt, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
 	return progressState{
 		exists:     true,
 		inProgress: !entry.Completed && entry.PositionSeconds > 0,
 		completed:  entry.Completed,
+		updatedAt:  updatedAt,
 	}
 }
 
@@ -308,8 +322,17 @@ func progressStateFromValues(position, duration float64, thresholds userstore.Pr
 	}
 }
 
-func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string, before, after progressState) {
-	if before != after {
+// queueOnTransition queues a recompute when a write changes the row's state,
+// when it starts a new watch session (see progressSessionGap), or when it is
+// the row's first write since the profile last changed Home on this node: a
+// resume right after a removal lifts it at once, before the removal's
+// deferred recompute runs. writtenAt is the stamp the write records.
+func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string, before, after progressState, writtenAt time.Time) {
+	resumed := before.exists && !before.updatedAt.IsZero() &&
+		(writtenAt.Sub(before.updatedAt) > progressSessionGap || time.Since(before.updatedAt) > progressSessionGap ||
+			s.updater.changedHomeSince(s.userID, profileID, before.updatedAt))
+	before.updatedAt, after.updatedAt = time.Time{}, time.Time{}
+	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 }
@@ -348,6 +371,17 @@ func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, m
 	return err
 }
 
+// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
+// and Plex imports, and promotion of a watchlisted title that has since
+// reached the library, all write through it.
+func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err == nil && inserted {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return inserted, err
+}
+
 func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {
 	err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
 	if err == nil {
@@ -356,13 +390,32 @@ func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profile
 	return err
 }
 
-// --- Progress: queue on transitions only.
+// --- Home dismissals: a card removed from Continue Watching or Next Up stops
+// that surface's interest reason (see homeHides).
+
+func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismissal userstore.HomeItemDismissal) error {
+	err := s.UserStore.UpsertHomeDismissal(ctx, dismissal)
+	if err == nil {
+		s.updater.queueHomeChange(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
+	}
+	return err
+}
+
+func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error {
+	err := s.UserStore.DeleteHomeDismissal(ctx, profileID, surface, mediaItemID)
+	if err == nil {
+		s.updater.queueHomeChange(s.userID, profileID, mediaItemID)
+	}
+	return err
+}
+
+// --- Progress: queue on transitions and new watch sessions only.
 
 func (s *interestTrackingStore) UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.UpdateProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds))
+		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds), time.Now())
 	}
 	return err
 }
@@ -371,17 +424,24 @@ func (s *interestTrackingStore) SetProgress(ctx context.Context, profileID, medi
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgress(ctx, profileID, mediaItemID, position, duration, thresholds)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds))
+		s.queueOnTransition(profileID, mediaItemID, before, progressStateFromValues(position, duration, thresholds), time.Now())
 	}
 	return err
+}
+
+// timestampedAfter is the state a timestamped write leaves. Both stores keep
+// completion sticky on these writes, so a rewatch tick with completed=false
+// leaves a completed row completed.
+func timestampedAfter(before progressState, position float64, completed bool) progressState {
+	completed = completed || before.completed
+	return progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
 }
 
 func (s *interestTrackingStore) SetProgressAt(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) error {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.SetProgressAt(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return err
 }
@@ -400,8 +460,7 @@ func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileI
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
 	if err == nil && applied {
-		after := progressState{exists: true, inProgress: !completed && position > 0, completed: completed}
-		s.queueOnTransition(profileID, mediaItemID, before, after)
+		s.queueOnTransition(profileID, mediaItemID, before, timestampedAfter(before, position, completed), updatedAt)
 	}
 	return applied, err
 }
@@ -410,7 +469,7 @@ func (s *interestTrackingStore) MarkWatched(ctx context.Context, profileID, medi
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	err := s.UserStore.MarkWatched(ctx, profileID, mediaItemID, duration)
 	if err == nil {
-		s.queueOnTransition(profileID, mediaItemID, before, progressState{exists: true, completed: true})
+		s.queueOnTransition(profileID, mediaItemID, before, progressState{exists: true, completed: true}, time.Now())
 	}
 	return err
 }

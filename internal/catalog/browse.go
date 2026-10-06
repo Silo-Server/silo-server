@@ -40,7 +40,7 @@ type BrowseFilters struct {
 	Genres             []string // any matching genre
 	Years              []int    // exact release years
 	SearchTerm         string   // case-insensitive literal title substring
-	NamePrefix         string   // case-insensitive prefix filter on sort_title/title
+	NamePrefix         string   // case-insensitive prefix filter on the sort_title order key
 	ContentIDs         []string // optional allowlist of exact content IDs
 	LibraryID          int      // filter by specific library
 	LibraryIDs         []int    // accessible library IDs (nil = all)
@@ -475,16 +475,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	}
 
 	if prefix := strings.TrimSpace(filters.NamePrefix); prefix != "" {
-		// Dual-column OR so titles without a curated sort_title still match.
-		// First arm matches the idx_media_items_sort_key expression
-		// (LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title))) so the
-		// anchored LIKE is sargable; second arm uses idx_media_items_search_exact_title
-		// (LOWER(title)). Both arms are equivalent when sort_title is empty,
-		// which is harmless — the planner can BitmapOr the two index scans.
-		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			argIdx, argIdx,
-		))
+		conditions = append(conditions, sortTitlePrefixCondition(argIdx))
 		args = append(args, likePrefixPattern(prefix))
 		argIdx++
 	}
@@ -681,12 +672,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		}
 	}
 	if prefix := strings.TrimSpace(filters.NamePrefix); prefix != "" {
-		// Same dual-column shape as filterWhereClauseForSource's primary
-		// browse path — see comment there for index-alignment rationale.
-		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			argIdx, argIdx,
-		))
+		conditions = append(conditions, sortTitlePrefixCondition(argIdx))
 		args = append(args, likePrefixPattern(prefix))
 		argIdx++
 	}
@@ -1536,6 +1522,14 @@ func browseGroupByColumns(alias string) string {
 // the browse path and the query_executor preview path.
 func likePrefixPattern(prefix string) string {
 	return escapePrefixForLike(prefix) + "%"
+}
+
+// sortTitlePrefixCondition matches a name_prefix (alphabetical jump) against
+// sortTitleKeyExpr, the key title sorting orders by, which falls back to title
+// when sort_title is empty. Matching the raw title too would list "The Hobbit"
+// (sort_title "Hobbit, The") under both T and H.
+func sortTitlePrefixCondition(argIdx int) string {
+	return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", sortTitleKeyExpr, argIdx)
 }
 
 // scanBrowseItems scans rows returned by the browse query, which include an

@@ -116,8 +116,11 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
       },
       {
         label: "Requests",
-        description: "User media requests and request handling.",
-        keywords: ["requested media", "approvals", "overseerr"],
+        description: "Review, approve, and decline media requests.",
+        // Servers, routing, and the request limit itself live on the Requests
+        // settings page, which the command palette lists with its own keywords.
+        // A group's or an account's own limit lives with the group or account.
+        keywords: ["requested media", "approvals", "request queue", "decline"],
         icon: Send,
         href: "/admin/requests",
       },
@@ -168,8 +171,17 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
       },
       {
         label: "Access Groups",
-        description: "Shared access defaults: libraries, downloads, streams, permissions.",
-        keywords: ["groups", "roles", "permissions", "library access", "downloads", "limits"],
+        description:
+          "Shared access defaults: libraries, downloads, streams, requests, permissions.",
+        keywords: [
+          "groups",
+          "roles",
+          "permissions",
+          "library access",
+          "downloads",
+          "limits",
+          "request limits",
+        ],
         icon: UsersRound,
         href: "/admin/access-groups",
       },

@@ -66,12 +66,42 @@ options keep their zero values and unknown JSON keys are ignored. The request
 must pass node bearer authentication and approved-input-path authority before
 extraction can acquire the GPU admission gate. There is no native API alias.
 
+`POST /trickplay/extract` on the transcode listener takes a
+`mediasample.Request` whose only output is `Sheets` of `Samples`, and answers
+the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
+`sheets.use_input_aspect` uses the execution probe's display geometry and
+returns its actual cell height as `sheet_tile_height`. It passes node
+bearer authentication and approved-input-path authority first, runs one
+request at a time (a second answers `503` with reason `node_busy`), runs at
+idle priority, and decodes on the node's own hardware: it drops hardware
+attempts its accelerator cannot run. It takes the GPU admission gate before
+resolving the hardware backend, which can run probes, and holds it for the
+whole run, software attempts included, so an admin re-probe is refused until
+the run ends. Failures use `trickplay.ExtractError` JSON;
+a `422` carries the sampling cause and whether it is `permanent` (a cause in
+the file itself). Nodes advertise the endpoint as the
+`trickplay_extract_v1` transport feature. It has no replay receipt and is
+classified `non_retryable`; the API server keeps the work's lease and moves
+it to another node or back to the queue.
+
+When display geometry is requested, a response without `sheet_tile_height`
+is treated as an unavailable worker. This lets an API server try another
+node or its configured local fallback while an earlier worker is updated.
+
 The extractor's 400, 422 and 503 failures use `RemoteExtractErrorResponse` JSON.
 Bearer refusal uses plain-text 401; input-path refusal can instead use plain-text
 400, and unavailable worker configuration or input authority uses plain-text 503.
 The description retains both media types for the shared statuses. Extraction
 has no durable request identity or replay receipt and is classified
 `non_retryable`; no new retry behavior is added to the existing worker client.
+
+`POST /media-samples/run` on the transcode listener takes a
+`mediasample.Request` and returns its `mediasample.Result` as JSON (see
+[media sampling](media-sampling.md#remote-runs)). It requires the node bearer
+and approved-input-path authority, refuses hardware attempts with `400`, and
+reports a failed run as `422` with a `mediasample.RemoteFailure`. Sampling only
+reads the file, so the operation is classified `natural_idempotent`; a repeated
+request decodes again. Subtitle sync is its caller.
 
 Prepared artifacts retain GET, HEAD and DELETE at
 `/downloads/artifacts/{artifact_id}` on the transcode listener. The node bearer
@@ -135,6 +165,20 @@ Preparation follows request cancellation, but a lost response or cancellation
 does not establish that no bytes or receipt were published. This command is
 classified non-retryable; it supplies no durable cross-node admission or replay
 guarantee. These descriptions change no worker client, scheduler or runtime.
+
+The request's optional `log_session_id` (`download-prepare-<artifact id>`) labels
+the node's FFmpeg log lines with the durable job, so every attempt of one artifact
+reads as one stream in the operational logs. The node accepts only that shape and
+otherwise logs nothing; the field never affects bytes, so the execution fingerprint
+excludes it.
+
+`GET /downloads/prepare/{artifact_id}/progress` reads the in-memory progress of a
+prepare attempt running on the node: `encoded_seconds`, `duration_seconds`, and
+`speed` from FFmpeg's `-progress` stream. It requires node bearer authorization.
+An id with no encode in flight answers `running: false`, never 404, so the API
+treats 404 as a node that predates the operation and reports the attempt as unable
+to report progress. Readings are not durable and say nothing about a completed
+artifact; the API polls this operation only while its own prepare request is open.
 
 Proxy download GET and HEAD retain `/downloads/file/{token}`. Public outer
 middleware still requires a valid, expiring download token; playback tokens are

@@ -290,6 +290,69 @@ The operations are non-retryable. The web re-detection actions disable mutation
 retries and authentication replay. No native administrator caller or matching
 Jellyfin action exists; playback marker reads remain separate.
 
+## Seek preview administration
+
+These operations require acting-administrator authorization: an administrator
+account and, when `X-Profile-Id` is present, its primary household profile.
+Discover the feature through `GET /api/v2/libraries/capabilities`
+(`getLibraryCapabilities`), whose `trickplay: true` covers the library setting
+and these administration operations. Library `trickplay_supported` separately
+reports whether public asset storage is configured.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /api/v2/admin/items/{id}/trickplay` | `200` with `files`, ordered by file ID |
+| `POST /api/v2/admin/items/{id}/trickplay/regenerate` | `202` with `requeued`, the number of files queued ahead of the backlog |
+| `GET /api/v2/admin/trickplay/libraries` | `200` with `items`, ordered by library ID |
+
+The item ID can name a movie, episode, or series; a series includes all its
+episode files. Each represented episode of a multi-episode file resolves that
+file, including when it is missing. File and library IDs are opaque strings.
+The arrays are complete lists, never null, without pagination.
+
+Each file reports `state`, `servable`, and `failures`, with optional
+`last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
+and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
+unsupported type, or one with previews turned off; `unusable` for an ineligible
+file or a permanent sampling failure; otherwise it reflects `pending`,
+`running`, or `ready`. An eligible file with
+no queue row yet reports `pending`. `servable` independently reports whether
+the current store has a published revision matching the file: previous sheets
+can remain available after a failed or unusable regeneration. Turning previews
+off or disabling the library suppresses availability immediately. Published
+timestamps are canonical UTC instants; widths are pixels, intervals are
+milliseconds, and storage sizes are bytes.
+
+Regeneration queues eligible video files in enabled, opted-in libraries and
+clears their failure backoff. Missing, unprobed, zero-duration, and audio-only
+files are skipped. Running files finish their current attempt. A successful
+response may report `requeued: 0` when no eligible file needs queuing; `202`
+acknowledges persisted queue changes rather than completed extraction. Previous
+published sheets keep serving until replacements publish. There is no
+administrator job resource or replay receipt. Repeating the request after work
+finishes queues another generation, so it is non-retryable; clients must disable
+automatic mutation retries and authentication replay.
+
+The library listing includes enabled video libraries with previews turned on.
+Each entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
+and `sheet_bytes`. Pending counts include failure backoff and eligible files
+not yet reconciled into the queue. A tracked file that becomes missing,
+unprobed, zero-duration, or audio-only counts as `unusable` regardless of its
+persisted queue state. Ineligible files that have never entered the queue do
+not contribute to these counts. Status reads do not alter queue rows. Storage
+sums the retained published sheets; generation counts do not replace each
+file's `servable` value.
+
+The item operations return `404` `not_found` when no associated media file
+exists. Regeneration returns `409` `capability_disabled` when none belongs to an
+enabled, opted-in video library. All three return `503` `dependency_unavailable`
+when the service is unconfigured, and `500` `internal_error` on an unexpected service
+failure, using the common Problem response. Ordinary profiles receive `403`
+`permission_denied`; authentication failures use the common `401` problems.
+Web administration uses these operations. Apple, Android, and Jellyfin have
+no corresponding administration callers; their playback preview reads are
+separate.
+
 ## Marker edit history
 
 Acting administrators can read recent edits through `GET /api/v2/admin/markers/history`,
@@ -418,7 +481,11 @@ messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
-optional `provider_id`. It preserves target validation before remote work,
+optional `provider_id`. An HTTP(S) `original_url` may name a public or
+local-network address; link-local, cloud metadata and other blocked addresses
+are refused (see
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)).
+It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication
 failure. Success returns the stored path, thumbhash and available revision/display

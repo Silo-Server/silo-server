@@ -43,7 +43,7 @@ export default function CrewList({ crew }: CrewListProps) {
       <dl className="glass-subtle grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 rounded-xl px-5 py-4 text-sm">
         {entries.map(({ job, people }) => (
           <div key={job} className="contents">
-            <dt className="text-muted-foreground text-[13px] font-medium">{job}</dt>
+            <dt className="text-muted-foreground text-[0.8125rem] font-medium">{job}</dt>
             <dd className="text-foreground/85 truncate">
               {people.map((p, i) => (
                 <span key={p.name}>

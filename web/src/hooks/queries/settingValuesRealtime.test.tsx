@@ -84,12 +84,6 @@ describe("useSettingValuesRealtime", () => {
     storage.set(storage.KEYS.PROFILE_ID, "profile-1");
   });
 
-  it("subscribes the user_settings channel", () => {
-    const { wrapper } = createHarness();
-    render(<Subscriber />, { wrapper });
-    expect(subscriptions.map((entry) => entry.channel)).toContain("user_settings");
-  });
-
   it.each(["profile-1", "profile-2"])(
     "refreshes Home only for its active profile (%s)",
     async (profileId) => {
@@ -194,7 +188,8 @@ describe("useSettingValuesRealtime", () => {
 
   it("costs one invalidation pass per event without a manual refetch", () => {
     const { queryClient, wrapper } = createHarness();
-    seedEffective(queryClient, "dark");
+    const effectiveKey = seedEffective(queryClient, "dark");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     render(<Subscriber />, { wrapper });
     const handlers = subscriptions.find((entry) => entry.channel === "user_settings")?.handlers;
 
@@ -205,6 +200,8 @@ describe("useSettingValuesRealtime", () => {
       handlers?.onEvent?.(changedFrame({ key, scope: "profile", profile_id: "profile-1" }));
     }
 
+    expect(invalidate.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(queryClient.getQueryState(effectiveKey)?.isInvalidated).toBe(true);
     expect(v2Mock).not.toHaveBeenCalled();
   });
 });

@@ -85,10 +85,18 @@ func TestCatalogPresenceKeepsLookupTMDBCompatibility(t *testing.T) {
 
 func TestNewCatalogPresenceIgnoresNilRepositories(t *testing.T) {
 	presence := NewCatalogPresence(nil, nil)
-	if presence.items != nil {
-		t.Fatalf("items = %#v, want nil", presence.items)
+	candidates := []PresenceCandidate{{TMDBID: 42}}
+	if matches, err := presence.Lookup(t.Context(), MediaTypeSeries, candidates); err != nil || len(matches) != 0 {
+		t.Fatalf("lookup without repositories = %+v, %v", matches, err)
 	}
-	if presence.tmdbBackfill != nil {
-		t.Fatalf("tmdbBackfill = %#v, want nil", presence.tmdbBackfill)
+	if seasons, err := presence.SeasonAvailability(t.Context(), []string{"series-42"}); err != nil || len(seasons) != 0 {
+		t.Fatalf("seasons without repositories = %+v, %v", seasons, err)
+	}
+	presence.items = &fakePresenceLookup{rows: []catalog.ExternalIDMatchRow{{
+		QueryTMDBID: "42", MediaID: "series-42", MatchedProvider: "tvdb",
+	}}}
+	matches, err := presence.Lookup(t.Context(), MediaTypeSeries, candidates)
+	if err != nil || !matches[42].Available || matches[42].ContentID != "series-42" {
+		t.Fatalf("lookup without backfill repository = %+v, %v", matches, err)
 	}
 }

@@ -107,8 +107,8 @@
           ],
           "notes": "Errors are text/plain via http.Error, not the JSON envelope. Flagged for the section PR.",
           "v2_expectation": {
-            "kind": "same",
-            "summary": "Both transports refuse the browser handshake with the identical plain-text status before any plugin is contacted: an unparseable or non-positive install_id is 400 and an installation no auth plugin serves is 502 auth plugin unavailable. V2 additionally marks the raw handshake no-store. No oauth_session row is written.",
+            "kind": "intentional_difference",
+            "summary": "V1 refuses an installation no auth plugin serves with 502 plain text. V2 sends the browser to the login page instead, 302 to /login?error=oauth_failed&reason=provider_unavailable with no body, so the page explains the outage and does not send the browser to the provider again; an absolute next is ignored. V2 marks the raw handshake no-store. No oauth_session row is written.",
             "recorded_in": "internal/scenariocatalog/executor/oauth_refusals_pairing_test.go",
             "operation_id": "initOAuthLogin",
             "method": "POST",
@@ -116,22 +116,21 @@
               "path": "/api/v2/auth/oauth/42/init"
             },
             "expect": {
-              "status": 502,
-              "body_kind": "text",
-              "body": [
-                {
-                  "pointer": "",
-                  "op": "equals",
-                  "value": "auth plugin unavailable\n"
-                }
-              ],
+              "status": 302,
               "headers": [
+                {
+                  "name": "Location",
+                  "op": "equals",
+                  "value": "/login?error=oauth_failed&reason=provider_unavailable"
+                },
                 {
                   "name": "Cache-Control",
                   "op": "equals",
                   "value": "no-store"
                 }
-              ]
+              ],
+              "body": [],
+              "body_kind": "empty"
             }
           }
         },
@@ -160,8 +159,8 @@
             "database"
           ],
           "v2_expectation": {
-            "kind": "same",
-            "summary": "Both transports refuse the browser handshake with the identical plain-text status before any plugin is contacted: an unparseable or non-positive install_id is 400 and an installation no auth plugin serves is 502 auth plugin unavailable. V2 additionally marks the raw handshake no-store. No oauth_session row is written.",
+            "kind": "intentional_difference",
+            "summary": "V1 refuses an installation no auth plugin serves with 502 plain text. V2 sends the browser to the login page instead, 302 to /login?error=oauth_failed&reason=provider_unavailable with no body, so the page explains the outage and does not send the browser to the provider again; an absolute next is ignored. V2 marks the raw handshake no-store. No oauth_session row is written.",
             "recorded_in": "internal/scenariocatalog/executor/oauth_refusals_pairing_test.go",
             "operation_id": "initOAuthLogin",
             "method": "POST",
@@ -169,12 +168,12 @@
               "path": "/api/v2/auth/oauth/42/init"
             },
             "expect": {
-              "status": 502,
+              "status": 302,
               "headers": [
                 {
-                  "name": "X-Content-Type-Options",
+                  "name": "Location",
                   "op": "equals",
-                  "value": "nosniff"
+                  "value": "/login?error=oauth_failed&reason=provider_unavailable"
                 },
                 {
                   "name": "Cache-Control",
@@ -182,14 +181,8 @@
                   "value": "no-store"
                 }
               ],
-              "body": [
-                {
-                  "pointer": "",
-                  "op": "type",
-                  "value": "string"
-                }
-              ],
-              "body_kind": "text"
+              "body": [],
+              "body_kind": "empty"
             }
           }
         },
@@ -218,8 +211,8 @@
           ],
           "notes": "302 + Location and the state-cookie/next handling need a plugin-backed fixture in the section PR.",
           "v2_expectation": {
-            "kind": "same",
-            "summary": "Both transports refuse the browser handshake with the identical plain-text status before any plugin is contacted: an unparseable or non-positive install_id is 400 and an installation no auth plugin serves is 502 auth plugin unavailable. V2 additionally marks the raw handshake no-store. No oauth_session row is written.",
+            "kind": "intentional_difference",
+            "summary": "V1 refuses an installation no auth plugin serves with 502 plain text. V2 sends the browser to the login page instead, 302 to /login?error=oauth_failed&reason=provider_unavailable with no body, so the page explains the outage and does not send the browser to the provider again; an absolute next is ignored. V2 marks the raw handshake no-store. No oauth_session row is written.",
             "recorded_in": "internal/scenariocatalog/executor/oauth_refusals_pairing_test.go",
             "operation_id": "initOAuthLogin",
             "method": "POST",
@@ -227,11 +220,12 @@
               "path": "/api/v2/auth/oauth/42/init"
             },
             "expect": {
-              "status": 502,
+              "status": 302,
               "headers": [
                 {
                   "name": "Location",
-                  "op": "absent"
+                  "op": "equals",
+                  "value": "/login?error=oauth_failed&reason=provider_unavailable"
                 },
                 {
                   "name": "Cache-Control",
@@ -239,14 +233,8 @@
                   "value": "no-store"
                 }
               ],
-              "body": [
-                {
-                  "pointer": "",
-                  "op": "type",
-                  "value": "string"
-                }
-              ],
-              "body_kind": "text"
+              "body": [],
+              "body_kind": "empty"
             }
           }
         },
@@ -317,8 +305,8 @@
             "database"
           ],
           "v2_expectation": {
-            "kind": "same",
-            "summary": "Both transports refuse the browser handshake with the identical plain-text status before any plugin is contacted: an unparseable or non-positive install_id is 400 and an installation no auth plugin serves is 502 auth plugin unavailable. V2 additionally marks the raw handshake no-store. No oauth_session row is written.",
+            "kind": "intentional_difference",
+            "summary": "V1 refuses an installation no auth plugin serves with 502 plain text. V2 sends the browser to the login page instead, 302 to /login?error=oauth_failed&reason=provider_unavailable with no body, so the page explains the outage and does not send the browser to the provider again; an absolute next is ignored. V2 marks the raw handshake no-store. No oauth_session row is written.",
             "recorded_in": "internal/scenariocatalog/executor/oauth_refusals_pairing_test.go",
             "operation_id": "initOAuthLogin",
             "method": "POST",
@@ -329,22 +317,21 @@
               }
             },
             "expect": {
-              "status": 502,
+              "status": 302,
               "headers": [
+                {
+                  "name": "Location",
+                  "op": "equals",
+                  "value": "/login?error=oauth_failed&reason=provider_unavailable"
+                },
                 {
                   "name": "Cache-Control",
                   "op": "equals",
                   "value": "no-store"
                 }
               ],
-              "body": [
-                {
-                  "pointer": "",
-                  "op": "type",
-                  "value": "string"
-                }
-              ],
-              "body_kind": "text"
+              "body": [],
+              "body_kind": "empty"
             }
           }
         },
@@ -373,8 +360,8 @@
             "database"
           ],
           "v2_expectation": {
-            "kind": "same",
-            "summary": "Both transports refuse the browser handshake with the identical plain-text status before any plugin is contacted: an unparseable or non-positive install_id is 400 and an installation no auth plugin serves is 502 auth plugin unavailable. V2 additionally marks the raw handshake no-store. No oauth_session row is written.",
+            "kind": "intentional_difference",
+            "summary": "V1 refuses an installation no auth plugin serves with 502 plain text. V2 sends the browser to the login page instead, 302 to /login?error=oauth_failed&reason=provider_unavailable with no body, so the page explains the outage and does not send the browser to the provider again; an absolute next is ignored. V2 marks the raw handshake no-store. No oauth_session row is written.",
             "recorded_in": "internal/scenariocatalog/executor/oauth_refusals_pairing_test.go",
             "operation_id": "initOAuthLogin",
             "method": "POST",
@@ -382,22 +369,21 @@
               "path": "/api/v2/auth/oauth/42/init"
             },
             "expect": {
-              "status": 502,
-              "body_kind": "text",
-              "body": [
-                {
-                  "pointer": "",
-                  "op": "type",
-                  "value": "string"
-                }
-              ],
+              "status": 302,
               "headers": [
+                {
+                  "name": "Location",
+                  "op": "equals",
+                  "value": "/login?error=oauth_failed&reason=provider_unavailable"
+                },
                 {
                   "name": "Cache-Control",
                   "op": "equals",
                   "value": "no-store"
                 }
-              ]
+              ],
+              "body": [],
+              "body_kind": "empty"
             }
           }
         }

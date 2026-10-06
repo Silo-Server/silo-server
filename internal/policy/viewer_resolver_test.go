@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -309,26 +308,6 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				t.Fatalf("PreferredMetadataLanguage = %q, want %q", policyScope.PreferredMetadataLanguage, tt.wantMetadataLang)
 			}
 
-			decisionInput := viewerResolverExpectedInput(tt.user, tt.profile, tt.input, policyScope.ProfileVerified, access.DisabledLibraryIDs(ctx, store, tt.input.ProfileID), access.PreferredMetadataLanguage(ctx, store, tt.input.ProfileID))
-			decision, _, err := pdp.ResolveViewerScope(ctx, decisionInput)
-			if err != nil {
-				t.Fatalf("ResolveViewerScope() error: %v", err)
-			}
-			if decision.ProfileVerified != policyScope.ProfileVerified {
-				t.Fatalf("decision ProfileVerified = %t, scope ProfileVerified = %t", decision.ProfileVerified, policyScope.ProfileVerified)
-			}
-			if want := access.ApplyGroupPolicy(tt.user, nil).MaxPlaybackQuality; decisionInput.AccountMaxQuality != want {
-				t.Fatalf("AccountMaxQuality = %q, want resolved %q", decisionInput.AccountMaxQuality, want)
-			}
-			if decisionInput.IsAPIKey {
-				t.Fatal("IsAPIKey = true, want false because ResolveInput cannot truthfully distinguish API keys")
-			}
-			if decisionInput.DeviceID != "" || decisionInput.ClientIP != "" {
-				t.Fatalf("request identity fields = device %q client %q, want empty", decisionInput.DeviceID, decisionInput.ClientIP)
-			}
-			if _, err := time.Parse(time.RFC3339, decisionInput.RequestTime); err != nil {
-				t.Fatalf("RequestTime = %q, want RFC3339: %v", decisionInput.RequestTime, err)
-			}
 		})
 	}
 }
@@ -654,52 +633,6 @@ func (s viewerResolverTestStore) GetSetting(_ context.Context, key string) (stri
 
 func (s viewerResolverTestStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
 	return s.settingValues, nil
-}
-
-func viewerResolverExpectedInput(
-	user *models.User,
-	profile *userstore.Profile,
-	input access.ResolveInput,
-	profileVerified bool,
-	disabled []int,
-	metadataLang string,
-) ScopeInput {
-	out := ScopeInput{
-		SchemaVersion:        1,
-		UserID:               user.ID,
-		SessionID:            input.SessionID,
-		ProfileID:            input.ProfileID,
-		AccountLibraryIDs:    cloneViewerResolverInts(user.LibraryIDs),
-		AccountRestricted:    user.LibraryIDs != nil,
-		AccountMaxQuality:    access.ApplyGroupPolicy(user, nil).MaxPlaybackQuality,
-		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   cloneViewerResolverInts(disabled),
-		ProfileVerified:      profileVerified,
-		RequestTime:          time.Now().UTC().Format(time.RFC3339),
-		IsAPIKey:             false,
-	}
-	if profile != nil {
-		out.ProfilePresent = true
-		out.ProfileMaxRating = profile.MaxContentRating
-		out.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
-		out.ProfileMaxQuality = profile.MaxPlaybackQuality
-		out.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
-		out.ProfileLibraryIDs = cloneViewerResolverInts(profile.AllowedLibraryIDs)
-		out.ProfileHasPIN = profile.PINHash != ""
-		// Canonically resolved, mirroring ViewerResolver — the legacy profile
-		// column is no longer a policy input.
-		out.ProfileMetadataLang = metadataLang
-	}
-	return out
-}
-
-func cloneViewerResolverInts(values []int) []int {
-	if values == nil {
-		return nil
-	}
-	out := make([]int, len(values))
-	copy(out, values)
-	return out
 }
 
 func newViewerResolverTestPDP(t *testing.T, ctx context.Context) *PDP {

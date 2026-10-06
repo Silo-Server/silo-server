@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -79,6 +80,7 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 	pair, user, err := h.service.Accept(
 		r.Context(),
 		chi.URLParam(r, "token"),
+		"",
 		req.Password,
 		r.UserAgent(),
 		clientip.FromContext(r.Context()),
@@ -89,6 +91,11 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusNotFound, "not_found", "This invitation is invalid or has expired")
 		case errors.Is(err, invitations.ErrNotClaimable):
 			writeError(w, http.StatusConflict, "already_used", "This invitation has already been used")
+		case errors.Is(err, auth.ErrLocalLoginDisabled):
+			writeError(w, http.StatusForbidden, "local_login_disabled", "Password sign-in is turned off on this server; sign in with the server's sign-in provider")
+		case errors.Is(err, invitations.ErrEmailRequired):
+			// Link invitations are claimed through /api/v2, which accepts an address.
+			writeError(w, http.StatusBadRequest, "email_required", "This invitation needs an email address; update the app to accept it")
 		default:
 			writeError(w, http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 		}
@@ -105,8 +112,8 @@ type InvitationAcceptanceView struct {
 	Tokens   *TokenPairView
 }
 
-func (h *InvitationHandler) AcceptInvitation(ctx context.Context, token, password, device, ip string) (InvitationAcceptanceView, error) {
-	pair, user, err := h.service.Accept(ctx, token, password, device, ip)
+func (h *InvitationHandler) AcceptInvitation(ctx context.Context, token, email, password, device, ip string) (InvitationAcceptanceView, error) {
+	pair, user, err := h.service.Accept(ctx, token, email, password, device, ip)
 	if user == nil {
 		return InvitationAcceptanceView{}, err
 	}
@@ -117,6 +124,9 @@ func (h *InvitationHandler) AcceptInvitation(ctx context.Context, token, passwor
 	return view, err
 }
 func (h *InvitationHandler) SupportsDefaultProfile() bool { return h.service.SupportsDefaultProfile() }
+func (h *InvitationHandler) EmailDeliveryAvailable(ctx context.Context) bool {
+	return h.service.EmailDeliveryAvailable(ctx)
+}
 func (h *InvitationHandler) Lookup(ctx context.Context, token string) (*invitations.LookupResult, error) {
 	return h.service.Lookup(ctx, token)
 }
@@ -129,8 +139,8 @@ func (h *InvitationHandler) ListPage(ctx context.Context, after *invitations.Pag
 func (h *InvitationHandler) Send(ctx context.Context, input invitations.SendInput) (*invitations.SendResult, error) {
 	return h.service.Send(ctx, input)
 }
-func (h *InvitationHandler) Resend(ctx context.Context, id, by int64) (*invitations.SendResult, error) {
-	return h.service.Resend(ctx, id, by)
+func (h *InvitationHandler) Resend(ctx context.Context, id, by int64, delivery invitations.Delivery) (*invitations.SendResult, error) {
+	return h.service.Resend(ctx, id, by, delivery)
 }
 func (h *InvitationHandler) Revoke(ctx context.Context, id int64) error {
 	return h.service.Revoke(ctx, id)

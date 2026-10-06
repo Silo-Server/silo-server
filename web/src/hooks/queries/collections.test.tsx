@@ -111,27 +111,46 @@ describe("useSetCollectionSortPreference", () => {
     const first = deferred<unknown>();
     apiWithProfileRequestContextMock.mockReturnValueOnce(first.promise).mockResolvedValue({});
 
-    const { result } = renderSortPreferenceHook();
+    const { result, queryClient } = renderSortPreferenceHook();
+    const writes: Promise<void>[] = [];
     const chooser = profileAuth("profile-1");
 
     act(() => {
-      void result.current({
-        collection_kind: "watchlist",
-        field: "title",
-        order: "asc",
-        profileAuth: chooser,
-      });
-      void result.current({
-        collection_kind: "favorites",
-        field: "runtime",
-        order: "desc",
-        profileAuth: chooser,
-      });
+      writes.push(
+        result.current({
+          collection_kind: "watchlist",
+          field: "title",
+          order: "asc",
+          profileAuth: chooser,
+        }),
+      );
+      writes.push(
+        result.current({
+          collection_kind: "favorites",
+          field: "runtime",
+          order: "desc",
+          profileAuth: chooser,
+        }),
+      );
     });
 
     await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledTimes(1));
     first.resolve({});
     await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      await Promise.all(writes);
+    });
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
+    const cached = JSON.stringify([
+      queryClient.getMutationCache().getAll(),
+      queryClient
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.state),
+    ]);
+    expect(cached).not.toContain("access-token-secret");
+    expect(cached).not.toContain("pin-token-secret");
 
     for (const call of apiWithProfileRequestContextMock.mock.calls) {
       expect(call[0]).toBe("PUT /api/v2/collections/sort-preference");
@@ -144,30 +163,6 @@ describe("useSetCollectionSortPreference", () => {
   // The snapshot carries the bearer access token and the profile PIN token.
   // Routing these writes through a TanStack mutation would strand both in the
   // mutation cache after the request settles, which api/client.ts forbids.
-  it("keeps the profile snapshot out of cached client state", async () => {
-    apiWithProfileRequestContextMock.mockResolvedValue({});
-    const { result, queryClient } = renderSortPreferenceHook();
-
-    await act(async () => {
-      await result.current({
-        collection_kind: "favorites",
-        field: "title",
-        order: "asc",
-        profileAuth: profileAuth("profile-1"),
-      });
-    });
-
-    expect(queryClient.getMutationCache().getAll()).toHaveLength(0);
-    const cached = JSON.stringify([
-      queryClient.getMutationCache().getAll(),
-      queryClient
-        .getQueryCache()
-        .getAll()
-        .map((query) => query.state),
-    ]);
-    expect(cached).not.toContain("access-token-secret");
-    expect(cached).not.toContain("pin-token-secret");
-  });
 
   it("does not invalidate another profile's catalog after a profile switch", async () => {
     apiWithProfileRequestContextMock.mockResolvedValue({});
@@ -192,7 +187,7 @@ describe("useSetCollectionSortPreference", () => {
 
 describe("guarded collection editing", () => {
   it("sends the observed version once and keeps a 412 from becoming an automatic overwrite", async () => {
-    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}>{children}</QueryClientProvider>

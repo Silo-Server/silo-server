@@ -8,14 +8,13 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 func TestCachedEditorialCandidatesReusesCandidateListForSameScope(t *testing.T) {
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -51,7 +50,7 @@ func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 
 	now := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
 	f := &Fetcher{
-		Clock: recipes.FixedClock(now),
+		Clock: fixedClock(now),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -69,7 +68,7 @@ func TestCachedEditorialCandidatesSeparatesAccessScopeAndExpires(t *testing.T) {
 		t.Fatalf("different filter cachedEditorialCandidates: %v", err)
 	}
 
-	f.Clock = recipes.FixedClock(now.Add(2 * time.Hour))
+	f.Clock = fixedClock(now.Add(2 * time.Hour))
 	if _, err := f.cachedEditorialCandidates(context.Background(), "actor", nil, nil, filter, time.Hour, loader); err != nil {
 		t.Fatalf("expired cachedEditorialCandidates: %v", err)
 	}
@@ -83,7 +82,7 @@ func TestCachedEditorialCandidatesSeparatesNilAndEmptyLibraryScope(t *testing.T)
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	calls := 0
 	loader := func(context.Context, string, *int, []int, catalog.AccessFilter) ([]string, error) {
@@ -107,7 +106,7 @@ func TestCachedEditorialCandidatesCoalescesConcurrentMisses(t *testing.T) {
 	t.Parallel()
 
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
 	}
 	var (
 		mu    sync.Mutex

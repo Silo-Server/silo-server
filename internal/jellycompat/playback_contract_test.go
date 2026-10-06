@@ -209,6 +209,23 @@ func TestSubtitleTimingRequestTransformsOutput(t *testing.T) {
 	}
 }
 
+func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
+	const srt = "1\n00:00:01,000 --> 00:00:02,000\nماذا حدث للتو؟ -\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n...لأنه بالنسبة إليهم\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\nلقد انفجر -\n"
+	for _, format := range []string{"srt", "vtt"} {
+		r := httptest.NewRequest("GET", "/subtitle", nil)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("routeFormat", format)
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+		rr := httptest.NewRecorder()
+		(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte(srt))
+		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
+			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
+		}
+	}
+}
+
 func TestBitmapSubtitleInventoryAndUnsupportedBurnIn(t *testing.T) {
 	version := catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264"}}, SubtitleTracks: []catalog.VersionSubtitleTrack{{Index: 1, Codec: "hdmv_pgs_subtitle"}}}
 	streams := buildMediaStreams("item", "source", version)
@@ -224,27 +241,6 @@ func TestBitmapSubtitleInventoryAndUnsupportedBurnIn(t *testing.T) {
 	applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "hdmv_pgs_subtitle", Method: "Encode"}}}, false)
 	if source.SupportsDirectPlay || source.SupportsTranscoding {
 		t.Fatalf("unsupported burn-in=%+v", source)
-	}
-}
-
-func TestRemoteTranscodeRetainsNegotiatedCeilings(t *testing.T) {
-	var received transcodenode.TranscodeStartRequest
-	node := fakeTranscodeNode(t, &received)
-	h, _, store := newRemoteTranscodeHandler(t, node.URL, &stubRecipeNodeStore{})
-	source := testRemoteTranscodeSource()
-	source.TargetBitrateKbps = 3608
-	source.TargetResolution = "720p"
-	source.TargetAudioChannels = 1
-	store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
-	if err := h.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatal(err)
-	}
-	if received.TargetBitrateKbps != 3608 || received.TargetResolution != "720p" || received.TargetAudioChannels != 1 {
-		t.Fatalf("request=%+v", received)
-	}
-	persisted, ok := store.Get("play-1")
-	if !ok || persisted.Recipe == nil || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetAudioChannels != 1 {
-		t.Fatalf("persisted=%+v", persisted)
 	}
 }
 
@@ -305,11 +301,11 @@ func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	if err := remote.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
 		t.Fatal(err)
 	}
-	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" {
+	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" || received.TargetBitrateKbps != 3608 || received.TargetAudioChannels != 1 {
 		t.Fatalf("remote=%+v", received)
 	}
 	persisted, _ := remoteStore.Get("play-1")
-	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" {
+	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetAudioChannels != 1 {
 		t.Fatalf("recipe=%+v", persisted.Recipe)
 	}
 }

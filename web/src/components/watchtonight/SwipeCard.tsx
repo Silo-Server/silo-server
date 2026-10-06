@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
-import { Check, Info, Play, Star, X } from "lucide-react";
+import { Check, Info, Play, X } from "lucide-react";
 import type { SwipeCard as SwipeCardType } from "@/hooks/queries/recommendations";
 import { Badge } from "@/components/ui/badge";
+import { RatingEntry } from "@/components/ratings/RatingEntry";
+import { primaryCardRating } from "@/components/ratings/ratings";
 import { cn } from "@/lib/utils";
 
 const sourceLabels: Record<string, string> = {
@@ -40,7 +42,7 @@ export default function SwipeCard({ card, isTop, onAccept, onReject }: SwipeCard
       ? ((card.position_seconds ?? 0) / (card.duration_seconds ?? 1)) * 100
       : 0;
 
-  const rating = card.rating_imdb ?? card.rating_tmdb;
+  const rating = primaryCardRating(card);
   const badgeLabel = sourceLabels[source];
 
   function handleDragEnd(_: unknown, info: PanInfo) {
@@ -162,12 +164,7 @@ export default function SwipeCard({ card, isTop, onAccept, onReject }: SwipeCard
               {card.year > 0 && (
                 <span className="text-sm font-medium text-white/70">{card.year}</span>
               )}
-              {rating != null && (
-                <span className="flex items-center gap-0.5 text-sm font-medium text-yellow-400">
-                  <Star className="h-3.5 w-3.5" fill="currentColor" />
-                  {rating.toFixed(1)}
-                </span>
-              )}
+              {rating && <RatingEntry rating={rating} size="sm" className="text-white/90" />}
               {card.runtime != null && card.runtime > 0 && (
                 <span className="text-sm text-white/60">
                   {card.runtime >= 60
@@ -264,12 +261,7 @@ export default function SwipeCard({ card, isTop, onAccept, onReject }: SwipeCard
             )}
 
             <div className="flex flex-wrap gap-3 text-sm">
-              {rating != null && (
-                <span className="flex items-center gap-1 text-yellow-400">
-                  <Star className="h-3.5 w-3.5" fill="currentColor" />
-                  {rating.toFixed(1)}
-                </span>
-              )}
+              {rating && <RatingEntry rating={rating} size="sm" className="text-foreground" />}
               {card.runtime != null && card.runtime > 0 && (
                 <span className="text-muted-foreground">
                   {card.runtime >= 60

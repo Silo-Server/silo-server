@@ -12,7 +12,6 @@ import type {
   ImportUserMDBListCollectionRequest,
   ImportUserTMDBCollectionRequest,
   ImportUserTMDBListCollectionRequest,
-  ImportUserTraktCollectionRequest,
 } from "@/api/types";
 import { TEMPLATE_STALE_TIME, type CollectionTemplateCatalog } from "@/lib/collectionTemplates";
 import { invalidateUserCollectionQueries } from "./collectionSurfaceRefresh";
@@ -97,23 +96,6 @@ export function useImportUserTMDBListCollection() {
       ),
     onSuccess: (result) => {
       toast.success(importToastMessage("TMDB list", result.sync?.status));
-      void invalidateUserCollectionQueries(queryClient);
-    },
-    onError: (error) => {
-      toast.error(error instanceof Error ? error.message : "Import failed");
-    },
-  });
-}
-
-export function useImportUserTraktCollection() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: ImportUserTraktCollectionRequest) =>
-      v2("POST /api/v2/collections/import/trakt", {
-        body: { ...importBodyToV2(body), preset: body.preset ?? "" },
-      }).then(importFromV2),
-    onSuccess: (result) => {
-      toast.success(importToastMessage("Trakt collection", result.sync?.status));
       void invalidateUserCollectionQueries(queryClient);
     },
     onError: (error) => {

@@ -96,8 +96,12 @@ is the audio track Silo selects for the viewer (audio language preference,
 original language, and the series' remembered track), falling back to the
 file's default track. `DefaultSubtitleStreamIndex` follows Jellyfin 12.1's
 `MediaStreamSelector` for the effective subtitle mode and language, judged
-against the starting audio track: external files (including downloaded
-subtitles) sort first, and an unset subtitle language matches any language.
+against the starting audio track, with one change: Jellyfin sorts external files
+first, while Silo ranks them by Jellyfin's remaining rules and uses the source
+only to break ties, preferring embedded tracks over external and downloaded
+files. A file's default-flagged track therefore beats an external file in
+`Default` mode, and an external file is still chosen when nothing embedded is
+flagged. An unset subtitle language matches any language.
 In `Always` mode, Silo's per-series remembered subtitle track is applied first,
 as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
 
@@ -128,8 +132,11 @@ ISO 639-2 codes such as `eng` match the stored canonical codes.
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
 its owning series and takes precedence over the path series and numeric season.
-Episode SQL queries default to 24 rows and cap each page at 1,000. Clients should
-page using `TotalRecordCount` and `StartIndex`.
+When `Limit` is omitted, episode listings on this route and series/season
+`/Items?ParentId=` requests use a 1,000-row page. Explicit limits retain their
+requested page size, subject to the 1,000-row cap; `Limit=0` requests only the
+count. Longer lists still require paging using `TotalRecordCount` and
+`StartIndex`. Other `/Items` browsing retains the 24-row default.
 
 `/Items?ParentId={boxSetId}` lists a collection's members (movies, series, and
 the episodes of episode-scoped smart collections) in collection order unless
@@ -137,6 +144,15 @@ the episodes of episode-scoped smart collections) in collection order unless
 `Path`, as they do when listed from their library. Episode-scoped smart
 collections honor `SortBy` over their own members; catalog and user-state
 filters on them are not supported yet and return no episodes.
+
+A BoxSet with an uploaded or template poster shows it to everyone. Otherwise
+its `Primary` image is a collage of the first members the viewer can access, so
+the image and its tag differ by viewer. A collage tag is 32 hex digits: the
+collage's key followed by its signature. `GET /Items/{boxSetId}/Images/Primary`
+accepts a signed collage tag without authentication and serves the collage the
+tag names. An untagged request authorized by its session gets that viewer's
+collage. When no collage is built yet, the BoxSet shows the generated title
+poster and the collage is built in the background for the next request.
 
 `Recursive=true` together with `Filters=IsNotFolder`, or with an
 `IncludeItemTypes` that names `Episode` but not `Series` or `Season`, returns the
@@ -216,6 +232,23 @@ unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
+
+Items whose library generates seek-bar previews carry Jellyfin's `Trickplay`
+member on single-item reads and on list reads that request the field and
+already take the detail path (`Chapters` or `MediaSources` among the
+fields, as Jellyfin Web and Findroid request). It is keyed by media source
+id, then by width as a string, with `Interval` in milliseconds; a version
+without previews is absent. `GET /Videos/{itemId}/Trickplay/{width}/{index}.jpg`
+proxies a sheet (Roku does not follow image redirects) with an `ETag` and
+`private, no-cache`, requiring revalidation after a source switch or
+regeneration, and `…/tiles.m3u8` writes Jellyfin's HLS image
+playlist with the caller's token on each sheet URL. Both pick the version
+from `mediaSourceId`, else from a media-source id in the item position, else
+the version this token is playing for the item (Swiftfin and Findroid send
+no `mediaSourceId`), else the default version, and serve only versions the
+account can see. The selected playback file is persisted in compat session
+state, so previews follow that source across API replicas and restarts.
+An index past the last sheet answers `404`.
 
 The managed Jellyfin Web build opts into `SiloSeekReanchor=true` on
 `PlaybackInfo`. For a copied-video HLS source, the response echoes
@@ -371,6 +404,18 @@ retain immediate, generation-scoped teardown.
 ID-less static requests reject ambiguous matches and failed durable identity
 lookups rather than selecting another session. Durable identity checks remain
 fresh on every request; full session payloads use the normal per-session cache.
+
+A play ends at the first Stopped report carrying its per-play identifier or
+`DELETE /Videos/ActiveEncodings`; for ID-less players and clients that never
+stop, idle cleanup ends it. Silo then records the play the way it records native
+playback: a watch-history row with source `playback` once the position passes the
+minimum resume threshold, completed past the watched threshold, and an admin
+playback-history row. Each play is recorded once across retried stops, API
+replicas, and idle cleanup; a later copy of the session that saw more of the play
+completes the row and updates the admin row's watched time. The play's resume
+point comes from the client's reports, not from the stop. A play torn down before any position report, such as
+a start that failed to route, is not recorded. Mark-played requests keep writing
+`jellycompat` history rows.
 
 `POST /Sessions/Playing/Ping` touches the caller-owned playback activity without
 changing position or paused state. The native session owner consumes persisted

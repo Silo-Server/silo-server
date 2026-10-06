@@ -113,6 +113,11 @@ const (
 	// node that approves theme files as progressive AAC inputs.
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
+	// A transcode node that executes the multi-track prepared-download layout
+	// (PreparedTracksRecipeVersion).
+	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
+	// A transcode node that makes trickplay sheets (POST /trickplay/extract).
+	TransportFeatureTrickplayExtractV1 = "trickplay_extract_v1"
 )
 
 // Degradation warning codes reported by playback plans.
@@ -284,6 +289,16 @@ const (
 	TerminalHDRTranscodeUnsupportedV3    = "hdr_transcode_unsupported"
 	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
 )
+
+// TerminalSourceUnreadableV3 reports that ffprobe rejected the effective file
+// (zero-byte, corrupt, truncated) and no stream metadata exists for it. Unlike
+// source_metadata_incomplete, which covers a file that has not been probed
+// yet, retrying cannot help until the file is replaced and rescanned.
+const TerminalSourceUnreadableV3 = "source_unreadable"
+
+// TerminalSourceUnreadableMessageV3 is the planner message for
+// TerminalSourceUnreadableV3.
+const TerminalSourceUnreadableMessageV3 = "The source file could not be read; it appears to be empty or damaged."
 
 // TerminalBitratePolicyUnavailableV3 reports that no route fits the
 // administrator's local or remote per-stream bitrate limit for this version.

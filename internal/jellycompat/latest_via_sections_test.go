@@ -148,8 +148,7 @@ func (s *seriesEpisodeSource) GetByIDs(context.Context, []string) ([]*models.Epi
 }
 
 // completedProgressStore reports a configured set of episode ids as completed.
-// It reuses progressCountingStore's exhaustive panic-stubs for the rest of the
-// UserStore surface so any unexpected call is caught.
+// Its embedded store catches unexpected calls to the remaining UserStore methods.
 type completedProgressStore struct {
 	*progressCountingStore
 	completed map[string]bool
