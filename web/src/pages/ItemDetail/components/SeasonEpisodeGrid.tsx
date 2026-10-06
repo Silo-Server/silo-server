@@ -4,6 +4,7 @@ import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import UnreadableFileBadge, { episodeFilesUnreadable } from "@/components/UnreadableFileBadge";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
@@ -165,6 +166,7 @@ function SeasonEpisodeCard({
       >
         <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
           <span>Episode {episode.episode_number}</span>
+          {episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
           {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
         </div>
         <p className="text-foreground truncate text-sm font-semibold">{episodeTitle}</p>

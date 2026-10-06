@@ -39,6 +39,8 @@ export interface PlayerFileVersion {
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
   marker_segments?: PlayerMarkerSegment[];
+  /** Seek-bar previews are published for this file. */
+  trickplay_available?: boolean;
 }
 
 export interface PlayerPlaybackVariantPart {
@@ -129,6 +131,8 @@ export interface PlayerSubtitleInfo {
   source?: "external" | "embedded" | "downloaded";
   forced?: boolean;
   hearing_impaired?: boolean;
+  /** Names the track to the subtitle sync operations; absent when it can't be synced. */
+  sync_key?: string;
   url: string;
   /**
    * Optional endpoint returning base64-encoded container font attachments for

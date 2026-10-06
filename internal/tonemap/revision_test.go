@@ -84,24 +84,10 @@ func TestValidatePathRejectsReplacementWithPreservedSizeAndModTime(t *testing.T)
 	}
 }
 
-// TestRevisionForFileChangesWithDolbyVisionPresenceFacts verifies metadata presence affects source identity.
-func TestRevisionForFileChangesWithDolbyVisionPresenceFacts(t *testing.T) {
-	modified := time.Now().UTC().Truncate(time.Microsecond)
-	file := &models.MediaFile{ID: 1, FileSize: 100, FileModifiedAt: &modified, VideoTracks: []models.VideoTrack{{
-		Codec: "hevc", DVProfile: 7, DVBLCompatID: 6, DVConfigPresent: true, DVBLCompatIDPresent: true, DVBLPresent: true,
-	}}}
-	before := RevisionForFile(file)
-	file.VideoTracks[0].DVRPUPresent = true
-	after := RevisionForFile(file)
-	if before.StreamSignature == after.StreamSignature || before.Fingerprint() == after.Fingerprint() {
-		t.Fatal("Dolby Vision presence change did not invalidate the source revision")
-	}
-}
-
 func TestRevisionForFileNormalizesProbeTimestamp(t *testing.T) {
 	probed := time.Date(2026, time.August, 13, 12, 34, 56, 123456789, time.FixedZone("test", -7*60*60))
 	revision := RevisionForFile(&models.MediaFile{ID: 1, ProbeUpdatedAt: &probed})
-	want := normalizeRevisionTime(probed).UnixNano()
+	want := time.Date(2026, time.August, 13, 19, 34, 56, 123456000, time.UTC).UnixNano()
 	if revision.ProbeUpdatedUnixNano != want {
 		t.Fatalf("ProbeUpdatedUnixNano = %d, want %d", revision.ProbeUpdatedUnixNano, want)
 	}

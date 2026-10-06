@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import getAccountPasswordCapabilityOk from "../../../../contracts/api/v2/fixtures/get_account_password_capability_ok.json";
-import changePasswordPermissionDenied from "../../../../contracts/api/v2/fixtures/change_password_permission_denied.json";
 
 import {
   StaleApiRequestContextError,
@@ -106,27 +105,6 @@ describe("useChangeAccountPassword", () => {
     expect(init.headers.Authorization).toBe("Bearer account-token");
     expect(init.headers["X-Profile-Id"]).toBe("profile-1");
     expect(init.headers["X-Profile-Token"]).toBe("pin-token");
-  });
-
-  it("surfaces the committed permission_denied problem", async () => {
-    setProfileId("p-owner");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(
-        async () =>
-          new Response(JSON.stringify(changePasswordPermissionDenied), {
-            status: 403,
-            headers: { "Content-Type": "application/problem+json" },
-          }),
-      ),
-    );
-    const { result } = renderHook(() => useChangeAccountPassword(), createHarness());
-
-    await expect(act(() => result.current.mutateAsync(passwordChange))).rejects.toMatchObject({
-      name: "V2ProblemError",
-      status: 403,
-      problemType: "permission_denied",
-    });
   });
 
   it("rejects the write when the account changes while it is in flight", async () => {

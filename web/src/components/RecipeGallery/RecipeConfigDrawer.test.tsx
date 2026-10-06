@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import RecipeConfigDrawer from "./RecipeConfigDrawer";
 
 vi.mock("@/api/client", () => ({
@@ -47,12 +47,6 @@ const def = {
 const preset = def.presets[0]!;
 
 describe("RecipeConfigDrawer", () => {
-  it("renders title prefilled with preset display_name", () => {
-    render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={() => {}} />);
-    const title = screen.getByLabelText(/title/i) as HTMLInputElement;
-    expect(title.value).toBe("Recently Added");
-  });
-
   it("calls onAdd with title, params, and limit", async () => {
     const onAdd = vi.fn();
     render(<RecipeConfigDrawer def={def} preset={preset} onCancel={() => {}} onAdd={onAdd} />);

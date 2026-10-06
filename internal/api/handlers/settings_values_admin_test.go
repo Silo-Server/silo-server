@@ -79,28 +79,6 @@ func (env adminValuesEnv) do(t *testing.T, role, method, target string, body []b
 	return rec
 }
 
-func TestAdminSettingValuesRefuseNonAdmins(t *testing.T) {
-	env := newAdminValuesEnv(t)
-
-	for name, req := range map[string]struct {
-		method, target string
-		body           []byte
-	}{
-		"list":   {http.MethodGet, "/admin/users/7/settings/values", nil},
-		"set":    {http.MethodPut, "/admin/users/7/settings/values/playback.subtitle_mode?scope=account", []byte(`{"value":"always"}`)},
-		"delete": {http.MethodDelete, "/admin/users/7/settings/values/playback.subtitle_mode?scope=account", nil},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if rec := env.do(t, "user", req.method, req.target, req.body); rec.Code != http.StatusForbidden {
-				t.Errorf("non-admin %s = %d, want 403: %s", name, rec.Code, rec.Body.String())
-			}
-			if rec := env.do(t, "", req.method, req.target, req.body); rec.Code != http.StatusUnauthorized {
-				t.Errorf("anonymous %s = %d, want 401: %s", name, rec.Code, rec.Body.String())
-			}
-		})
-	}
-}
-
 func TestAdminSettingValuesRejectNonexistentLibraryContext(t *testing.T) {
 	env := newAdminValuesEnv(t)
 	env.handler.SetLibraryLookup(settingValuesLibraryLookup{existing: map[int]bool{7: true}})

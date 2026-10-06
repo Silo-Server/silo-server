@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 // Section catalog-items: the profile-scoped catalog browse, facet documents,
@@ -345,6 +346,7 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
+	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise"`
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
@@ -368,7 +370,8 @@ type CatalogItemDetail struct {
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`
-	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series, in display order; absent when no provider reported any"`
+	RatingSources                   []CatalogRatingSource                `json:"rating_sources,omitempty" doc:"Per-source ratings on a 0-100 scale for movies and series; absent when there are none. Only the sources clients show, in the same order as ratings, except for a viewer who curates the item's metadata, who gets every stored source. Title pages render ratings, not this list."`
+	Ratings                         []CatalogRating                      `json:"ratings" doc:"The external ratings a title page shows, in display order: IMDb and TMDB, plus the sources an administrator turned on. Render every entry as its name and display text. Empty, never null"`
 	Extras                          []catalogpkg.ItemExtraInfo           `json:"extras,omitempty"`
 	FolderPaths                     []string                             `json:"folder_paths,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Subtitles                       []catalogpkg.SubtitleInfo            `json:"subtitles" doc:"Empty, never null"`
@@ -391,9 +394,52 @@ type CatalogItemDetail struct {
 
 // CatalogRatingSource is one source's rating of an item.
 type CatalogRatingSource struct {
-	Source string  `json:"source" doc:"Rating source: imdb, tmdb, rt_critic, rt_audience, metacritic, metacritic_user, letterboxd, trakt, rogerebert, myanimelist, or mdblist. Clients should ignore names they do not recognize."`
+	Source string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients should ignore names they do not recognize."`
 	Score  float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
 	Votes  *int64  `json:"votes,omitempty" minimum:"0" doc:"Number of votes behind the score, when the source reports it"`
+}
+
+// CatalogRating is one external rating as a title page shows it.
+type CatalogRating struct {
+	Source  string  `json:"source" doc:"Rating source: imdb, tmdb, or a name a metadata plugin declared, such as rt_critic. Clients may use it to pick a source's mark and should fall back to name for one they do not recognize." example:"imdb"`
+	Name    string  `json:"name" doc:"The source's name as a plain-text mark, shown next to the score" example:"IMDb"`
+	Score   float64 `json:"score" minimum:"0" maximum:"100" doc:"Score on a 0-100 scale"`
+	Display string  `json:"display" doc:"The score on the source's own scale, formatted for display" example:"8.5"`
+}
+
+// catalogRatingsOf builds the title page's ratings from the stored columns
+// and per-source rows, keeping only the sources sel shows.
+func catalogRatingsOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) []CatalogRating {
+	item := ratingsources.Item{IMDB: d.RatingIMDB, TMDB: d.RatingTMDB, RTCritic: d.RatingRTCritic, RTAudience: d.RatingRTAudience}
+	if len(d.RatingSources) > 0 {
+		item.Sources = make(map[string]float64, len(d.RatingSources))
+		for _, source := range d.RatingSources {
+			item.Sources[source.Source] = source.Score
+		}
+	}
+	built := ratingsources.Build(item, sel)
+	out := make([]CatalogRating, 0, len(built))
+	for _, r := range built {
+		out = append(out, CatalogRating{Source: r.Source, Name: r.Name, Score: r.Score, Display: r.Display})
+	}
+	return out
+}
+
+// shownRatingSources keeps the per-source rows of the sources sel shows, in
+// the order of ratings. A stored row of any other source, such as one a plugin
+// reported before it stopped declaring the source, is left out.
+func shownRatingSources(sources []catalogpkg.ItemRatingSourceInfo, sel ratingsources.Selection) []catalogpkg.ItemRatingSourceInfo {
+	byName := make(map[string]catalogpkg.ItemRatingSourceInfo, len(sources))
+	names := make([]string, 0, len(sources))
+	for _, source := range sources {
+		byName[source.Source] = source
+		names = append(names, source.Source)
+	}
+	var out []catalogpkg.ItemRatingSourceInfo
+	for _, name := range sel.Sources(names) {
+		out = append(out, byName[name])
+	}
+	return out
 }
 
 func catalogRatingSourcesOf(sources []catalogpkg.ItemRatingSourceInfo) []CatalogRatingSource {
@@ -444,6 +490,7 @@ type EpisodeFile struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully."`
 }
 
 // Episode is one episode row of a season listing.
@@ -555,6 +602,7 @@ func registerCatalogItems(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/series/{id}/seasons/{num}/episodes", "listSeasonEpisodes", "catalog",
 		"The episodes of one season of a series by number.")), reg.listSeasonEpisodes)
 	registerCatalogActions(reg)
+	registerRatingsCapability(reg)
 }
 
 // --- helpers ---
@@ -622,6 +670,12 @@ func (reg *Registry) versionsScopedToLibrary(ctx context.Context) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(value), "true")
+}
+
+// ratingSelection is the set of external rating sources the administrator
+// shows (IMDb and TMDB always).
+func (reg *Registry) ratingSelection(ctx context.Context) ratingsources.Selection {
+	return reg.deps.RatingSources.Selection(ctx)
 }
 
 // positive parses a canonical decimal ID that must name a positive integer.
@@ -733,6 +787,24 @@ func (in *CatalogBrowseInput) catalogValues() (url.Values, *Problem) {
 	return v, nil
 }
 
+// ratingSortSources maps each sort field that orders by a rating an
+// administrator can hide to that rating's source.
+var ratingSortSources = map[string]string{
+	"rating_rt_critic":   models.RatingSourceRTCritic,
+	"rating_rt_audience": models.RatingSourceRTAudience,
+}
+
+// dropHiddenRatingSort removes an explicit sort by a rating clients are not
+// shown, so the browse orders as if no sort was asked for (the saved or
+// default order, reported as effective_sort) instead of ranking titles by a
+// score their cards leave out.
+func dropHiddenRatingSort(values url.Values, sel ratingsources.Selection) {
+	if source, ok := ratingSortSources[values.Get("sort")]; ok && !sel.Shows(source) {
+		values.Del("sort")
+		values.Del("order")
+	}
+}
+
 // catalogSortFields is the sort allowlist: every field the query executor
 // sorts by, personalized ones included, since the browse always has a
 // profile.
@@ -796,6 +868,8 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	if p != nil {
 		return nil, p
 	}
+	sel := reg.ratingSelection(ctx)
+	dropHiddenRatingSort(values, sel)
 	req, p := parseCatalogRequest(values)
 	if p != nil {
 		return nil, p
@@ -872,7 +946,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	}
 	items := make([]CatalogItem, 0, len(view.Items))
 	for _, item := range view.Items {
-		items = append(items, catalogItemOfListing(item))
+		items = append(items, catalogItemOfListing(item, sel))
 	}
 	window, err := cursors.Encode(scope, catalogBrowsePosition{Snapshot: view.Snapshot, Sort: req.ResolvedSort, After: view.CursorScope})
 	if err != nil {
@@ -1041,7 +1115,7 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemInput) (
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	out := catalogItemDetailOf(detail)
+	out := catalogItemDetailOf(detail, reg.ratingSelection(ctx))
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
 		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
 		if err != nil {
@@ -1219,11 +1293,11 @@ func playbackVariantsOf(vs []catalogpkg.PlaybackVariant) []PlaybackVariant {
 	return out
 }
 
-// catalogItemDetailOf renders the detail document; the card members come
-// from the same detail, so a detail never disagrees with its own card. The
-// detail service does not load keywords, the original language, or the
-// match status, so those card members are empty here as they are in v1.
-func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
+// catalogItemCardOf renders the card members of a detail, with every stored
+// rating. The detail service does not load keywords, the original language,
+// or the match status, so those card members are empty here as they are in
+// v1.
+func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 	card := CatalogItem{
 		ContentID: d.ContentID, PlayContentID: d.PlayContentID, Type: d.Type, Title: d.Title,
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
@@ -1241,13 +1315,28 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail) CatalogItemDetail {
 	for _, f := range d.WorkFormats {
 		card.WorkFormats = append(card.WorkFormats, CatalogWorkFormat{Type: f.Type, ContentID: f.ContentID, LibraryID: idOfPositive(f.LibraryID)})
 	}
+	return card
+}
+
+// catalogItemDetailOf renders the detail document; the card members come
+// from the same detail, so a detail never disagrees with its own card. A
+// viewer who curates the item's metadata gets every stored rating, for the
+// metadata editor; everyone else gets only the ratings sel shows, as on
+// cards.
+func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) CatalogItemDetail {
+	card := catalogItemCardOf(d)
+	ratingSources := d.RatingSources
+	if !d.ViewerCurates {
+		card = withShownRatings(card, sel)
+		ratingSources = shownRatingSources(ratingSources, sel)
+	}
 	out := CatalogItemDetail{
-		CatalogItem: card,
-		SortTitle:   d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
+		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
+		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
-		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(d.RatingSources), Extras: d.Extras,
+		Versions: fileVersionsOf(d.Versions), PlaybackVariants: playbackVariantsOf(d.PlaybackVariants), Videos: d.Videos, RatingSources: catalogRatingSourcesOf(ratingSources), Ratings: catalogRatingsOf(d, sel), Extras: d.Extras,
 		FolderPaths: d.FolderPaths, Subtitles: NonNil(d.Subtitles), Intro: d.Intro, Credits: d.Credits, Recap: d.Recap, Preview: d.Preview,
 		EffectiveVersionResolution: d.EffectiveVersionResolution,
 		EffectiveVersionHDR:        d.EffectiveVersionHDR, EffectiveVersionCodecVideo: d.EffectiveVersionCodecVideo, EffectiveVersionEditionKey: d.EffectiveVersionEditionKey,
@@ -1284,7 +1373,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
-				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize})
+				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
 		}
 		out = append(out, ep)
 	}

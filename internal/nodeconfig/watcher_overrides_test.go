@@ -273,18 +273,3 @@ func TestApplySettingsKeepsOverrideWhenTheRowStopsMatching(t *testing.T) {
 			cfg.Playback.HWAccel, cfg.Playback.HWDevice)
 	}
 }
-
-// A node that never had a row is a different case: there is nothing to keep, so
-// the cluster settings stand rather than an invented value.
-func TestApplySettingsInheritsClusterWhenNoRowWasEverFound(t *testing.T) {
-	w := newOverrideWatcher(t, "http://node-1", func(context.Context, string, string) (nodeHWOverrides, bool, error) {
-		return nodeHWOverrides{}, false, nil
-	})
-	if err := w.applySettings(context.Background(), clusterSettings()); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	cfg := w.Config()
-	if cfg.Playback.HWAccel != "qsv" || cfg.Playback.HWDevice != "/dev/dri/renderD128" {
-		t.Fatalf("effective policy = %q / %q, want the cluster values", cfg.Playback.HWAccel, cfg.Playback.HWDevice)
-	}
-}

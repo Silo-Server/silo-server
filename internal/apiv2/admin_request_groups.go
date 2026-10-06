@@ -14,8 +14,6 @@ const (
 	opUpdateAdminRequestGroupLimit = "updateAdminRequestGroupLimit"
 )
 
-var adminRequestGroupOperationIDs = []string{opGetAdminRequestGroupLimit, opUpdateAdminRequestGroupLimit}
-
 // adminRequestGroups is the access-group slice of the request service.
 type adminRequestGroups interface {
 	GetGroupLimit(context.Context, mediarequests.Viewer, int64) (*mediarequests.GroupLimit, error)

@@ -30,9 +30,14 @@ func (f fakeTokens) ValidateToken(tok string) (*auth.Claims, error) {
 	return nil, errors.New("bad token")
 }
 
-type fakeSessions struct{ valid map[string]bool }
+// fakeSessions maps each active login session to its account's current role;
+// a session it does not list is revoked or expired.
+type fakeSessions struct{ roles map[string]string }
 
-func (f fakeSessions) IsValid(_ context.Context, id string) (bool, error) { return f.valid[id], nil }
+func (f fakeSessions) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+	role, ok := f.roles[id]
+	return role, ok, nil
+}
 
 type fakeUsers struct{ users map[int]*models.User }
 
@@ -96,6 +101,9 @@ const (
 	// temporaryPasswordToken is member 1's session opened with a temporary
 	// password: it may only change the password.
 	temporaryPasswordToken = "tok-temporary-password"
+	// demotedToken is member 1's session token minted while the account was
+	// an admin: the session is valid but the role changed since.
+	demotedToken = "tok-demoted"
 )
 
 type fakeAPIKeys struct{ keys map[string]*models.APIKey }
@@ -117,9 +125,10 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		expiredToken:           {UserID: 1, Role: "user", SessionID: "s-gone", TokenType: auth.TokenTypeAccess},
 		impersonatedToken:      {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
 		temporaryPasswordToken: {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, PasswordChangeRequired: true},
+		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]bool{"s1": true, "s2": true, "s3": true, "s4": true}}, keys, fakeUsers{users})
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user"}}, keys, fakeUsers{users})
 }
 
 func parityDeps(demo bool) Dependencies {
@@ -176,6 +185,10 @@ func TestMiddlewareParity(t *testing.T) {
 		{"authenticated: no credential", ClassAuthenticated, nil, TypeAuthenticationRequired, false},
 		{"authenticated: bad token", ClassAuthenticated, bearer("nope"), TypeInvalidToken, false},
 		{"authenticated: expired session", ClassAuthenticated, bearer(expiredToken), TypeSessionExpired, false},
+		// The session is valid but the account's role changed after the
+		// token was minted; the client refreshes instead of signing out.
+		{"authenticated: role changed", ClassAuthenticated, bearer(demotedToken), TypeTokenRefreshRequired, false},
+		{"acting admin: role changed", ClassActingAdmin, with(bearer(demotedToken), "X-Profile-Id", "p-owner"), TypeTokenRefreshRequired, false},
 		{"authenticated: ok", ClassAuthenticated, bearer(memberToken), ProblemType{}, true},
 		{"profile: missing header", ClassProfileScoped, bearer(memberToken), TypeValidationFailed, false},
 		{"profile: wrong account", ClassProfileScoped, with(bearer(memberToken), "X-Profile-Id", "p-other"), TypeNotFound, false},

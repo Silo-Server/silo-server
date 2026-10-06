@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, RotateCcw } from "lucide-react";
 import { Link } from "react-router";
 
@@ -11,6 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import {
+  useAdminRatingSourceCapabilities,
+  useAdminRatingSources,
+} from "@/hooks/queries/admin/ratingSources";
+import {
   useCatalogSearchStatus,
   useCheckAdminSettingsConnection,
 } from "@/hooks/queries/admin/settings";
@@ -18,6 +23,14 @@ import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import {
+  EXTRA_RATING_SOURCES_KEY,
+  groupRatingSourcesByPlugin,
+  parseRatingSources,
+  saveAndRefreshRatings,
+  toggleRatingSource,
+  undeclaredRatingSources,
+} from "./ratingSources";
 import { SaveBar } from "./SaveBar";
 import { SearchStatusPanel } from "./SearchStatusPanel";
 import { SettingField, SettingFieldStatus } from "./SettingField";
@@ -26,6 +39,8 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 const ARTWORK_KEYS = ["metadata.cache_images"];
 
 const BROWSING_KEYS = ["catalog.scope_versions_to_library", "access.unrated_content"];
+
+const RATINGS_KEYS = [EXTRA_RATING_SOURCES_KEY];
 
 // A top-level toggle in the Scanning group, outside the collapsed worker
 // tuning, and applied live without a restart.
@@ -72,6 +87,7 @@ const SEARCH_KEYS = ["catalog.search.provider", ...MEILI_KEYS];
 const KEYS = [
   ...ARTWORK_KEYS,
   ...BROWSING_KEYS,
+  ...RATINGS_KEYS,
   ...SCANNING_GROUP_KEYS,
   ...MARKER_KEYS,
   ...SEARCH_KEYS,
@@ -89,6 +105,15 @@ export default function LibraryMetadataSettings() {
   // An older API node saves the detection kind switches but ignores them, so
   // they are offered only where the server says it honors them.
   const { data: markerCapabilities } = useAdminMarkerCapabilities();
+  // An older API node has no rating source list, so the Ratings group shows
+  // only where the server says it has one.
+  const { data: ratingSourceCapabilities } = useAdminRatingSourceCapabilities();
+  const pluginRatingSources = ratingSourceCapabilities?.plugin_declared_sources === true;
+  const ratingSources = useAdminRatingSources(pluginRatingSources);
+  const queryClient = useQueryClient();
+
+  // A saved rating choice also refreshes cached title pages and cards.
+  const handleSave = () => saveAndRefreshRatings(form, queryClient);
   const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const anyDirty = (keys: string[]) => keys.some((key) => form.isDirty(key));
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
@@ -125,6 +150,24 @@ export default function LibraryMetadataSettings() {
     }
   }
 
+  const extraRatingSources = parseRatingSources(form.getValue(EXTRA_RATING_SOURCES_KEY));
+  const ratingSourceGroups = groupRatingSourcesByPlugin(ratingSources.data?.items ?? []);
+  // Listed from the saved value too, so a switch turned off stays on the page
+  // until the change is saved.
+  const undeclaredSources = ratingSources.isSuccess
+    ? undeclaredRatingSources(
+        [
+          ...parseRatingSources(form.getPersistedValue(EXTRA_RATING_SOURCES_KEY)),
+          ...extraRatingSources,
+        ],
+        ratingSources.data.items,
+      )
+    : [];
+  const setRatingSource = (source: string, on: boolean) =>
+    form.setValue(
+      EXTRA_RATING_SOURCES_KEY,
+      toggleRatingSource(form.getValue(EXTRA_RATING_SOURCES_KEY), source, on),
+    );
   const markerMode = form.getValue("markers.mode") || "both";
   const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
@@ -188,6 +231,61 @@ export default function LibraryMetadataSettings() {
             restartRequired={restartKeys.has("access.unrated_content")}
           />
         </FieldGroup>
+
+        {pluginRatingSources && (
+          <FieldGroup
+            label="Ratings"
+            description="IMDb and TMDB scores always show. Metadata providers can add other ratings; turn one on to show its scores on title pages in every app. A title page shows at most three ratings, in this order, so a rating turned on shows only where fewer than three come before it. Rotten Tomatoes scores also show on poster badges. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
+            restartAll={allRestart(RATINGS_KEYS)}
+          >
+            {ratingSources.isError && (
+              <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
+            )}
+            {ratingSources.isSuccess &&
+              ratingSourceGroups.length === 0 &&
+              undeclaredSources.length === 0 && (
+                <SettingFieldStatus tone="muted">
+                  No metadata plugin adds ratings.
+                </SettingFieldStatus>
+              )}
+            {ratingSourceGroups.map(({ provider, sources }) => (
+              <div key={provider} role="group" aria-label={`From ${provider}`}>
+                <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
+                {sources.map(({ source, label }) => (
+                  <SettingField
+                    key={source}
+                    label={label}
+                    type="toggle"
+                    value={String(extraRatingSources.includes(source))}
+                    onChange={(value) => setRatingSource(source, value === "true")}
+                    restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                  />
+                ))}
+              </div>
+            ))}
+            {undeclaredSources.length > 0 && (
+              <div role="group" aria-label="Not added by an enabled plugin">
+                <p className="text-muted-foreground pt-2 text-xs font-semibold">
+                  Not added by an enabled plugin
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  These show nothing until an enabled plugin adds them again. Turn them off so they
+                  do not come back on their own.
+                </p>
+                {undeclaredSources.map((source) => (
+                  <SettingField
+                    key={source}
+                    label={source}
+                    type="toggle"
+                    value={String(extraRatingSources.includes(source))}
+                    onChange={(value) => setRatingSource(source, value === "true")}
+                    restartRequired={restartKeys.has(EXTRA_RATING_SOURCES_KEY)}
+                  />
+                ))}
+              </div>
+            )}
+          </FieldGroup>
+        )}
 
         <FieldGroup
           label="Scanning"
@@ -529,7 +627,7 @@ export default function LibraryMetadataSettings() {
 
       <SaveBar
         dirtyCount={form.dirtyCount}
-        onSave={form.save}
+        onSave={handleSave}
         onDiscard={form.discard}
         isSaving={form.isSaving}
       />

@@ -38,9 +38,13 @@ type User struct {
 	AccessGroupID              *int64
 	// IsOwner marks the server Owner: the account that claimed the server at
 	// first-run setup. Only the Owner may change its own account.
-	IsOwner   bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	IsOwner bool
+	// BreakGlass marks a local admin account that keeps password sign-in
+	// when the server turns local passwords off (auth.local_password_login).
+	// Only admin accounts may hold it.
+	BreakGlass bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // CreateUserInput contains the fields required to create a new user.
@@ -126,4 +130,7 @@ type UpdateUserInput struct {
 	DownloadTranscodeAllowed   Optional[bool]
 	RequestsAllowed            Optional[bool]
 	AccessGroupID              Optional[int64]
+	// BreakGlass sets or clears the break-glass flag. A role change away
+	// from admin always clears it.
+	BreakGlass *bool
 }

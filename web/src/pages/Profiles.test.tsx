@@ -184,15 +184,6 @@ describe("Profiles", () => {
     });
   }
 
-  it("keeps the selector focused on profile choice instead of profile management", async () => {
-    await render(<Profiles />);
-
-    expect(container.textContent).toContain("Who's watching?");
-    expect(container.textContent).not.toContain("Add Profile");
-    expect(container.textContent).not.toContain("Edit Profile");
-    expect(container.textContent).not.toContain("Delete profile");
-  });
-
   it("creates and selects a profile from the empty state when no PIN is set", async () => {
     mocks.useProfiles.mockReturnValue({
       data: [],

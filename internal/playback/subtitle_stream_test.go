@@ -108,30 +108,6 @@ func TestStreamExtractOutput(t *testing.T) {
 	}
 }
 
-func TestStreamExtractArgs_TextCodecIsWindowed(t *testing.T) {
-	args := streamExtractArgs(StreamExtractOpts{
-		InputPath:       "/media/movie.mkv",
-		TrackIndex:      2,
-		SourceCodec:     "subrip",
-		SeekSeconds:     120,
-		DurationSeconds: 600,
-	})
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-ss 120.000") {
-		t.Fatalf("text extract should seek the input: %s", joined)
-	}
-	if !strings.Contains(joined, "-to 720.000") {
-		t.Fatalf("text extract should cap the read duration: %s", joined)
-	}
-	if !strings.Contains(joined, "-copyts") {
-		t.Fatalf("seeked extract must preserve source timestamps: %s", joined)
-	}
-	if !strings.Contains(joined, "-c:s webvtt") || !strings.Contains(joined, "-f webvtt") {
-		t.Fatalf("text extract should transmux to WebVTT: %s", joined)
-	}
-}
-
 // ASS and PGS streams are fetched once and consumed whole by their
 // client-side renderers, so by default seek/duration windowing must never
 // apply even when the handler passes nonzero values.

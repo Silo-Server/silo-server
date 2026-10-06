@@ -90,6 +90,9 @@ type ProcessResult struct {
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
 	Decision  *MatchDecision
+	// Pinned reports that automatic matching skipped an item an admin split
+	// left unmatched on purpose. It is a completed outcome, not a failure.
+	Pinned bool
 }
 
 // MatchDecision is a bounded, persistence-safe explanation of an automatic
@@ -360,6 +363,9 @@ type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// SeasonNumber is present only for an exact season artwork gallery. A
+	// pointer distinguishes Specials (0) from an item-level request.
+	SeasonNumber *int
 	// Local sidecar context (additive; empty for purely remote providers).
 	// RepresentativeFilePath is the group's representative media file,
 	// AllGroupFilePaths are every file in the content group, and
@@ -380,6 +386,7 @@ type RemoteImage struct {
 	Height       int
 	Rating       float64 // Vote average for ordering
 	IncludesText *bool   // nil when the provider does not report text presence
+	SeasonNumber *int    // present only when the provider confirms exact season scope
 }
 
 // ImageType classifies image purpose.

@@ -259,7 +259,7 @@ describe("series page request budget and play target", () => {
     installServer({
       seasons: twoSeasonsInProgress,
       seriesPlayContentId: "s2e2",
-      progressPage: ["s2e2"],
+      progressPage: Array.from({ length: 20 }, (_, index) => `other-${index + 1}`),
     });
 
     await openSeriesPage();
@@ -279,26 +279,6 @@ describe("series page request budget and play target", () => {
       `GET /api/v2/recommendations/similar/{item_id} ${SERIES_ID}`,
       "GET /api/v2/catalog/items/{id}/episodes season-2",
     ]);
-  });
-
-  it("resumes when more than 20 other titles are in progress", async () => {
-    // The first progress page is full of other shows, so this series' resume
-    // point is not on it. The server's play target still finds it.
-    installServer({
-      seasons: twoSeasonsInProgress,
-      seriesPlayContentId: "s2e2",
-      progressPage: Array.from({ length: 20 }, (_, index) => `other-${index + 1}`),
-    });
-
-    await openSeriesPage();
-
-    expect(playButton()).toEqual({ href: "/watch/s2e2", label: "Resume" });
-    // Detail, theme settings, seasons and similar titles, plus the target
-    // season's episodes for Watch Together. Nothing scales with the profile's history.
-    expect(requestLog()).toHaveLength(5);
-    expect(requestLog().filter((request) => request.startsWith("GET /api/v2/progress"))).toEqual(
-      [],
-    );
   });
 
   it("starts again from episode 1 once the whole series is watched", async () => {

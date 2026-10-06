@@ -88,53 +88,7 @@ for (const [action, useHook] of [
     expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
     expect(result.current.variables?.name).toBe("Synthetic");
   });
-  it(`${action} refuses a queued command after PIN replacement`, async () => {
-    onlineManager.setOnline(false);
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(result.current.isPaused).toBe(true));
-    act(() => {
-      setProfileToken("pin-b");
-      onlineManager.setOnline(true);
-    });
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-  it.each([401, "network"])(`${action} does not replay %s under global retry3`, async (failure) => {
-    const fetchMock =
-      failure === "network"
-        ? vi.fn().mockRejectedValue(new Error("private"))
-        : vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 401 })));
-    vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(useHook, fixture());
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(fetchMock).toHaveBeenCalledOnce();
-  });
-  it(`${action} fences late node observation and invalidation`, async () => {
-    let finish!: (r: Response) => void;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        () =>
-          new Promise<Response>((resolve) => {
-            finish = resolve;
-          }),
-      ),
-    );
-    const { client, wrapper } = fixture();
-    const invalidate = vi.spyOn(client, "invalidateQueries");
-    const { result } = renderHook(useHook, { wrapper });
-    act(() => result.current.mutate(node));
-    await waitFor(() => expect(finish).toBeTypeOf("function"));
-    act(() => setProfileId("b"));
-    await act(async () => finish(reply(observation(action))));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(invalidate).not.toHaveBeenCalled();
-    expect(result.current.data).toBeUndefined();
-  });
+
   it(`actual node row ${action} action dispatches once and waits for response`, async () => {
     let finish!: (r: Response) => void;
     const writes: string[] = [];
@@ -185,3 +139,53 @@ it.each([null, "pin-b"])(
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   },
 );
+
+it(`check refuses a queued command after PIN replacement`, async () => {
+  onlineManager.setOnline(false);
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useCheckNodeHealth, fixture());
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(result.current.isPaused).toBe(true));
+  act(() => {
+    setProfileToken("pin-b");
+    onlineManager.setOnline(true);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it.each([401, "network"])(`check does not replay %s under global retry3`, async (failure) => {
+  const fetchMock =
+    failure === "network"
+      ? vi.fn().mockRejectedValue(new Error("private"))
+      : vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 401 })));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result } = renderHook(useCheckNodeHealth, fixture());
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(fetchMock).toHaveBeenCalledOnce();
+});
+
+it(`check fences late node observation and invalidation`, async () => {
+  let finish!: (r: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  const { client, wrapper } = fixture();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  const { result } = renderHook(useCheckNodeHealth, { wrapper });
+  act(() => result.current.mutate(node));
+  await waitFor(() => expect(finish).toBeTypeOf("function"));
+  act(() => setProfileId("b"));
+  await act(async () => finish(reply(observation("check"))));
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(invalidate).not.toHaveBeenCalled();
+  expect(result.current.data).toBeUndefined();
+});

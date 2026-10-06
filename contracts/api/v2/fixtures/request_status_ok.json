@@ -1,5 +1,5 @@
 {
-  "revision": "dc6458db8af9354952b69baa1805dcb12a4cee23a40517a0dea2c3f02e441bb2",
+  "revision": "fb0dfe10f9b39bc2dee8429d9de0d4ccdb81f95d14d391b885bdabf233665f48",
   "state": "available",
   "allowed": true,
   "requests_enabled": true,
@@ -7,5 +7,7 @@
   "follow_supported": true,
   "season_requests_supported": true,
   "missing_seasons_requestable": false,
-  "download_progress_supported": true
+  "download_progress_supported": true,
+  "watchlist_titles_supported": false,
+  "watchlist_requests": false
 }

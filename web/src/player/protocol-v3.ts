@@ -495,6 +495,12 @@ export interface SubtitleInventoryItemV3 {
   delivery: SubtitleDeliveryV3;
   url?: string;
   font_bundle_url?: string;
+  /**
+   * Names the track to the subtitle sync operations
+   * (`/api/v2/subtitles/{media_file_id}/sync/{key}`). Present on external and
+   * downloaded tracks whose timing the server can correct.
+   */
+  sync_key?: string;
 }
 
 export interface SubtitleDecisionV3 {

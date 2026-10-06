@@ -37,6 +37,7 @@ import {
 } from "@/components/realtimeEventsContext";
 import {
   createCatalogInvalidationScheduler,
+  invalidateAccessDependentState,
   invalidateCatalogState,
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
@@ -44,6 +45,12 @@ import {
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
+import {
+  adminDownloadPreparationsKey,
+  applyDownloadPreparationProgress,
+  isDownloadPreparationProgressEvent,
+  type AdminDownloadPreparationList,
+} from "@/api/v2/adminDownloadPreparations";
 import { adminStatsKey } from "@/hooks/queries/admin/stats";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -99,6 +106,12 @@ const REQUEST_STATE_QUERIES: QueryFilters[] = [
 function isRequestNotification(notification: Pick<AppNotification, "type">) {
   return notification.type?.startsWith("request.") ?? false;
 }
+
+/**
+ * Close code the server ends the events socket with after an access_changed
+ * frame. The client refetches access-dependent data and reconnects at once.
+ */
+export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
 
 function buildEventsUrl(location: Pick<Location, "protocol" | "host">) {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -424,7 +437,7 @@ function handleUserStateEvent(
 
 export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { user, profile } = useAuth();
+  const { user, profile, refreshAccount } = useAuth();
   const actingAdmin = useIsActingAdmin();
   const pageActivity = usePageActivity();
   const location = useLocation();
@@ -554,12 +567,32 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /** Patches a progress reading into the cached list; false when a re-read is needed. */
+  function applyDownloadPreparationProgressToCache(
+    authority: ProfileRequestContextSnapshot | null,
+    event: Parameters<typeof applyDownloadPreparationProgress>[1],
+  ) {
+    const key = adminDownloadPreparationsKey(authority);
+    const cached = queryClient.getQueryData<AdminDownloadPreparationList>(key);
+    if (!cached) return true; // nothing is showing the list; nothing to refresh
+    const next = applyDownloadPreparationProgress(cached, event);
+    if (!next) return false;
+    queryClient.setQueryData(key, next);
+    return true;
+  }
+
   function handleSnapshot(
     message: EventsSnapshotMessage,
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
+    refreshDownloadPreparations: () => void,
   ) {
     switch (message.channel) {
+      case "download_preparations":
+        // The channel sends no snapshot body; a (re)subscription means events
+        // may have been missed, so re-read the list.
+        refreshDownloadPreparations();
+        break;
       case "jobs":
         if (Array.isArray(message.data)) {
           hydrateAdminJobSnapshot(queryClient, message.data as AdminJob[]);
@@ -662,8 +695,19 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     realtimeAuthority: ProfileRequestContextSnapshot | null,
     refreshSessions: () => void,
     refreshQueries: (...filters: QueryFilters[]) => void,
+    refreshDownloadPreparations: () => void,
   ) {
     switch (message.channel) {
+      case "download_preparations":
+        if (
+          message.event === "download_preparation.progress" &&
+          isDownloadPreparationProgressEvent(message.data) &&
+          applyDownloadPreparationProgressToCache(realtimeAuthority, message.data)
+        ) {
+          break;
+        }
+        refreshDownloadPreparations();
+        break;
       case "catalog":
         {
           const isItemChange = CATALOG_ITEM_CHANGED_EVENTS.has(message.event);
@@ -769,11 +813,16 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       type: "active",
       predicate: (query) => !isDashboardQueryKey(query.queryKey),
     });
+    // The account record is not a query. An access change made while the
+    // socket was down never sends access_changed: the reconnect's ticket
+    // already carries the new access.
+    void refreshAccount().catch(() => {});
   }, [
     authenticatedUserID,
     isForegroundPlaybackRoute,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
+    refreshAccount,
   ]);
 
   useEffect(() => {
@@ -799,6 +848,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         { queryKey: adminSessionsKey(authority), exact: true },
         { queryKey: adminStatsKey(authority), exact: true },
       );
+    };
+    const refreshDownloadPreparations = () => {
+      if (!authority.profileId) return;
+      adminRefresh.schedule({ queryKey: adminDownloadPreparationsKey(authority), exact: true });
     };
     let closedByEffect = false;
     let activeSocket: WebSocket | null = null;
@@ -862,6 +915,19 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
       activeSocket = socket;
       socketRef.current = socket;
+      // The server sends access_changed and then closes with
+      // EVENTS_ACCESS_CHANGED_CLOSE_CODE; whichever arrives first refreshes.
+      let accessChangeHandled = false;
+      const handleAccessChanged = () => {
+        if (accessChangeHandled) return;
+        accessChangeHandled = true;
+        invalidateAccessDependentState(queryClient, {
+          allowDashboardRefetch: allowDashboardRealtimeUpdatesRef.current,
+        });
+        void refreshAccount().catch(() => {});
+        // The new access applies to the next ticket, so reconnect at once.
+        nextReconnectDelayRef.current = 0;
+      };
 
       socket.onopen = () => {
         if (closedByEffect || socketRef.current !== socket || !authorityActive()) {
@@ -913,10 +979,24 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
             return;
           }
           case "snapshot":
-            handleSnapshot(message, refreshSessions, adminRefresh.schedule);
+            handleSnapshot(
+              message,
+              refreshSessions,
+              adminRefresh.schedule,
+              refreshDownloadPreparations,
+            );
             return;
           case "event":
-            handleEvent(message, authority, refreshSessions, adminRefresh.schedule);
+            handleEvent(
+              message,
+              authority,
+              refreshSessions,
+              adminRefresh.schedule,
+              refreshDownloadPreparations,
+            );
+            return;
+          case "access_changed":
+            handleAccessChanged();
             return;
           case "error":
             return;
@@ -930,9 +1010,16 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         setConnectionState("disconnected");
       };
 
-      socket.onclose = () => {
+      socket.onclose = (event: CloseEvent) => {
         if (socketRef.current !== socket) {
           return;
+        }
+        if (
+          event.code === EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
+          !closedByEffect &&
+          authorityActive()
+        ) {
+          handleAccessChanged();
         }
         socketRef.current = null;
         activeSocket = null;
@@ -978,6 +1065,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
     renderedAuthority?.profileToken,
     pageActivity.canApplyRealtimeUpdates,
     queryClient,
+    refreshAccount,
     sendSubscribe,
   ]);
 

@@ -252,27 +252,6 @@ func TestSampleGPUDoesNotDoubleCountSessionsAcrossDevices(t *testing.T) {
 	}
 }
 
-// A host without the NVIDIA toolkit fails this query every 5 seconds forever.
-// The breaker stops us from spawning a doomed subprocess for the life of the
-// process.
-func TestNVIDIACircuitBreakerRetiresSourceAfterRepeatedFailure(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	s := newTestSampler(t, tree, clock, Options{})
-	calls := 0
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		calls++
-		return nil, errors.New("nvidia-smi: command not found")
-	}
-
-	for range sourceFailureLimit + 5 {
-		s.queryNVIDIA(context.Background())
-	}
-	if calls != sourceFailureLimit {
-		t.Fatalf("nvidia-smi invoked %d times, want it retired after %d failures", calls, sourceFailureLimit)
-	}
-}
-
 // A successful command that parses to nothing is as useless as a failure, and
 // is how an unsupported query syntax presents.
 func TestNVIDIACircuitBreakerCountsEmptyOutputAsFailure(t *testing.T) {

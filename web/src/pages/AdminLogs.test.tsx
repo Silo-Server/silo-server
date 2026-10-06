@@ -66,12 +66,18 @@ afterEach(() => {
 
 describe("admin log history", () => {
   it("starts from a fresh snapshot, pages with server cursors, and returns to live logs", async () => {
-    mount();
+    mount("/admin/logs?q=needle&level=error&component=scanner");
+    await waitFor(() =>
+      expect(latestAppStreamParams()).toMatchObject({
+        level: "error",
+        component: "scanner",
+      }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Browse log history" }));
     expect(await screen.findByText("Log 2")).toBeTruthy();
     expect(vi.mocked(v2).mock.calls[0]).toMatchObject([
       "GET /api/v2/admin/logs/app",
-      { query: { q: "needle", cursor: undefined } },
+      { query: { q: "needle", level: "error", component: "scanner", cursor: undefined } },
     ]);
     expect(vi.mocked(useAdminLogStream).mock.calls.at(-2)?.[2]).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Older" }));
@@ -154,23 +160,6 @@ describe("admin log level and component filters", () => {
     if (!Element.prototype.scrollIntoView) {
       Element.prototype.scrollIntoView = () => undefined;
     }
-  });
-
-  it("passes level and component from the URL into the live stream and history query", async () => {
-    mount("/admin/logs?level=error&component=scanner");
-    await waitFor(() =>
-      expect(latestAppStreamParams()).toMatchObject({
-        level: "error",
-        component: "scanner",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Browse log history" }));
-    await waitFor(() =>
-      expect(vi.mocked(v2).mock.calls.at(-1)).toMatchObject([
-        "GET /api/v2/admin/logs/app",
-        { query: { level: "error", component: "scanner", cursor: undefined } },
-      ]),
-    );
   });
 
   it("treats a reserved all URL value as no level or component filter", async () => {

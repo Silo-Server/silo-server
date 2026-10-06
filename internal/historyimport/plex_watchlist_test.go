@@ -87,7 +87,7 @@ func TestFetchWatchlistPaginatesDiscoverAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
 	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "account-token-1")
 	if err != nil {
@@ -142,7 +142,7 @@ func TestFetchWatchlistResolvesGuidsViaItemMetadata(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
 	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
@@ -189,7 +189,7 @@ func TestFetchWatchlistWarnsWhenDetailHasNoProviderID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
 	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
@@ -221,7 +221,7 @@ func TestFetchWatchlistWarnsWhenGuidResolutionFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
 	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
@@ -245,7 +245,7 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
 	items, _, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {

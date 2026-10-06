@@ -13,16 +13,19 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
-type fakeSessionValidator struct{ valid map[string]bool }
+// fakeSessionValidator maps each active session to the current role of its
+// account; a session it does not list is revoked or expired.
+type fakeSessionValidator struct{ roles map[string]string }
 
-func (f *fakeSessionValidator) IsValid(_ context.Context, id string) (bool, error) {
-	return f.valid[id], nil
+func (f *fakeSessionValidator) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+	role, ok := f.roles[id]
+	return role, ok, nil
 }
 
 func TestRequireApplePushDisplayAuth(t *testing.T) {
 	jwt := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
 	var lastLog *activitylog.LogContext
-	sessions := &fakeSessionValidator{valid: map[string]bool{"sess-live": true}}
+	sessions := &fakeSessionValidator{roles: map[string]string{"sess-live": "user"}}
 	am := NewAuthMiddleware(jwt, sessions, nil, nil)
 
 	var gotProfile string
@@ -76,6 +79,15 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Minted while the account was an admin; it has been demoted since.
+	demoted, _, err := jwt.GenerateApplePushDisplayToken(42, "admin", "sess-live", "profile-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleAccess, err := jwt.GenerateAccessToken(42, "admin", "sess-live")
+	if err != nil {
+		t.Fatal(err)
+	}
 	access, err := jwt.GenerateAccessToken(42, "user", "sess-live")
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +108,8 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 		{"display token with revoked session", revoked, "", http.StatusUnauthorized, ""},
 		{"display token for a deleted profile", deletedProfile, "", http.StatusNotFound, ""},
 		{"display token skips the PIN proof", pinnedProfile, "", http.StatusNoContent, "profile-pin"},
+		{"display token from before a role change carries the current role", demoted, "", http.StatusNoContent, "profile-1"},
+		{"access token from before a role change must be refreshed", staleAccess, "profile-2", http.StatusUnauthorized, ""},
 		{"access token for a PIN profile still needs proof", access, "profile-pin", http.StatusForbidden, ""},
 		{"access token still works through fallback chain", access, "profile-2", http.StatusNoContent, "profile-2"},
 		{"access token without profile header hits fallback 400", access, "", http.StatusBadRequest, ""},
@@ -126,7 +140,7 @@ func TestRequireApplePushDisplayAuth(t *testing.T) {
 			if gotProfile != tt.wantProfile {
 				t.Fatalf("profile = %q, want %q", gotProfile, tt.wantProfile)
 			}
-			if tt.wantStatus == http.StatusNoContent && (gotClaims == nil || gotClaims.UserID != 42) {
+			if tt.wantStatus == http.StatusNoContent && (gotClaims == nil || gotClaims.UserID != 42 || gotClaims.Role != "user") {
 				t.Fatalf("claims = %+v", gotClaims)
 			}
 			if tt.wantStatus == http.StatusNoContent && afterAuthSawClaims != 1 {

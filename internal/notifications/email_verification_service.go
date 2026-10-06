@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -29,6 +30,7 @@ type EmailVerificationService struct {
 	cipher   *secret.Cipher
 	profile  func(context.Context, int, string) *userstore.Profile
 	linkBase func(context.Context) string
+	brand    *mail.BrandLoader
 	dispatch emailVerificationDispatch
 }
 
@@ -66,7 +68,7 @@ func (s *EmailVerificationService) QueueEmailVerification(ctx context.Context, u
 	if err != nil || (parsed.Scheme != emailVerificationHTTPScheme && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		base = ""
 	}
-	receipt, err := s.store.QueueVerification(ctx, EmailVerificationIntent{ID: id, UserID: user, ProfileID: profile, Address: address, ProfileName: current.Name, LinkBase: base}, s.cipher)
+	receipt, err := s.store.QueueVerification(ctx, EmailVerificationIntent{ID: id, UserID: user, ProfileID: profile, Address: address, ProfileName: current.Name, LinkBase: base, Brand: s.brand.Load(ctx)}, s.cipher)
 	if err == nil && receipt.Current && s.dispatch != nil {
 		// A replay nudges too: it is harmless, and the row may still be queued.
 		s.dispatch.Nudge()

@@ -200,8 +200,9 @@ describe("AdminAccessGroups", () => {
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
+    toastSuccess.mockClear();
     const user = userEvent.setup();
-    renderPage();
+    const router = renderPage();
 
     expect(await screen.findByText("Kids")).toBeInTheDocument();
     expect(screen.getByText("3 members")).toBeInTheDocument();
@@ -231,23 +232,16 @@ describe("AdminAccessGroups", () => {
     });
     // The request limit was not edited, so nothing wrote it.
     expect(writes.map((write) => write.url)).toEqual(["/api/v2/admin/access-groups/1"]);
-  });
-
-  it("summarizes the group's own request approval and limit on its card", async () => {
-    group = { ...GROUP, requests_allowed: true };
-    groupLimit = {
-      ...INHERIT_LIMIT,
-      limit_mode: "custom",
-      max_requests: 3,
-      window_days: 7,
-      approval_mode: "manual",
-    };
-    renderPage();
-    expect(await screen.findByText("Admin approves · 3 per 7 days")).toBeInTheDocument();
-    expect(screen.getByText("Requests on")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
   it("saves only the request approval and limit when no group field changed", async () => {
+    group = { ...GROUP, requests_allowed: true };
     toastSuccess.mockClear();
     const user = userEvent.setup();
     const router = renderPage("/admin/access-groups/1");
@@ -283,6 +277,8 @@ describe("AdminAccessGroups", () => {
       ifMatch: '"limit-initial"',
       body: { limit_mode: "custom", max_requests: 3, window_days: 14, approval_mode: "manual" },
     });
+    expect(await screen.findByText("Admin approves · 3 per 14 days")).toBeInTheDocument();
+    expect(screen.getByText("Requests on")).toBeInTheDocument();
   });
 
   it("saves a group's limit of zero and says it only stops new requests", async () => {
@@ -369,24 +365,6 @@ describe("AdminAccessGroups", () => {
     expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
     expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
     adminUsers.data = [];
-  });
-
-  it("returns to the group list with a confirmation after saving", async () => {
-    toastSuccess.mockClear();
-    const router = renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
-    expect(putBody).toMatchObject({ download_allowed: true });
-    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
-
-    // The save replaced the group's entry, so Back doesn't reopen the editor.
-    await router.navigate(-1);
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
   it("stays in the editor with the error when a save fails", async () => {
@@ -550,24 +528,18 @@ describe("AdminAccessGroups", () => {
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
   });
 
-  it("opens the group editor when loaded from a group URL", async () => {
+  it("locks demotion and deletion for the default group", async () => {
     const router = renderPage("/admin/access-groups/1");
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
-    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
-    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-  });
-
-  it("locks demotion and deletion for the default group", async () => {
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
 
     // The server rejects demoting or deleting the default group, so the
     // editor disables both paths and explains the promote-another-group flow.
     expect(await screen.findByRole("switch", { name: "Default for new users" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /delete group/i })).toBeDisabled();
     expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
   it("says a deleted group's members move to the default group", async () => {
@@ -589,7 +561,7 @@ describe("AdminAccessGroups", () => {
     const dialog = await screen.findByRole("alertdialog");
     await waitFor(() =>
       expect(dialog).toHaveTextContent(
-        "3 members will move to the default group, Everyone, and be signed out",
+        "3 members will move to the default group, Everyone, and get its access right away, without being signed out",
       ),
     );
     expect(dialog).not.toHaveTextContent("no group");
@@ -615,7 +587,7 @@ describe("AdminAccessGroups", () => {
     const dialog = await screen.findByRole("alertdialog");
     await waitFor(() =>
       expect(dialog).toHaveTextContent(
-        "Any members (none when this list last loaded) will move to the default group, Everyone, and be signed out",
+        "Any members (none when this list last loaded) will move to the default group, Everyone, and get its access right away, without being signed out",
       ),
     );
     expect(dialog).not.toHaveTextContent("This group has no members");
@@ -638,25 +610,19 @@ describe("AdminAccessGroups", () => {
     });
   });
 
-  it("opens a non-preset limit as a custom Mbps value", async () => {
+  it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
+    const user = userEvent.setup();
     group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    expect(await screen.findByLabelText("Max remote stream bitrate in Mbps")).toHaveValue("4.5");
+    const limit = await screen.findByLabelText("Max remote stream bitrate in Mbps");
+    expect(limit).toHaveValue("4.5");
     expect(screen.getByRole("combobox", { name: "Max remote stream bitrate" })).toHaveTextContent(
       "Custom",
     );
     expect(screen.getByRole("combobox", { name: "Max local stream bitrate" })).toHaveTextContent(
       "Unlimited",
     );
-  });
-
-  it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
-    const user = userEvent.setup();
-    group = { ...GROUP, max_remote_stream_bitrate_kbps: 4000 };
-    renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    const limit = await screen.findByLabelText("Max remote stream bitrate in Mbps");
     const save = screen.getByRole("button", { name: "Save changes" });
 
     // A cleared box is an unsaved edit, never a silent 0 (unlimited).
