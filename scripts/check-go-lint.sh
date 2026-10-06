@@ -75,12 +75,29 @@ if [[ -n "$unformatted" ]]; then
 	failed=1
 fi
 
+# worktree_differs reports whether, in a package the commit touches, a Go
+# file in the working tree differs from the index: an unstaged edit, a
+# staged deletion restored on disk, or an untracked file. golangci-lint
+# reads the working tree, so any of these makes it lint something other
+# than the commit.
+worktree_differs() {
+	local dirs=$'\n' file
+	while IFS= read -r -d '' file; do
+		dirs+="$(dirname "$file")"$'\n'
+	done < <(git diff --cached --name-only -z -- '*.go')
+	while IFS= read -r -d '' file; do
+		if [[ "$dirs" == *$'\n'"$(dirname "$file")"$'\n'* ]]; then
+			return 0
+		fi
+	done < <(git diff --name-only -z -- '*.go'; git ls-files -z --others --exclude-standard -- '*.go')
+	return 1
+}
+
 if command -v golangci-lint >/dev/null 2>&1; then
-	if [[ "$cached" -eq 1 && ${#go_files[@]} -gt 0 ]] && ! git diff --quiet -- "${go_files[@]}"; then
-		# golangci-lint reads the working tree. With unstaged edits to a staged
-		# file it would lint something other than the commit, passing a broken
-		# commit or blocking a good one, so refuse rather than guess.
-		printf '%s\n' "Staged Go files also have unstaged changes; the lint gate cannot check the commit as staged." >&2
+	if [[ "$cached" -eq 1 ]] && worktree_differs; then
+		# With the working tree differing from the commit, lint would pass a
+		# broken commit or block a good one, so refuse rather than guess.
+		printf '%s\n' "Go files in the packages this commit touches differ from what is staged; the lint gate cannot check the commit as staged." >&2
 		printf '%s\n' "Stage or stash them (git stash --keep-index) and commit again." >&2
 		failed=1
 	elif ! git rev-parse --verify --quiet "${BASE_REF:-origin/main}" >/dev/null; then

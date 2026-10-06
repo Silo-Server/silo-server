@@ -22,11 +22,13 @@ cd "$repo_root"
 merge_base=$(git merge-base "$base_ref" HEAD)
 
 # Directories holding a changed .go file, relative to the repository root.
+# NUL-delimited, so a path git would quote (an accented directory, say) is
+# read literally and still matches go list.
 changed_dirs=$(
 	{
-		git diff --name-only "$merge_base" -- '*.go'
-		git ls-files --others --exclude-standard -- '*.go'
-	} | while IFS= read -r file; do dirname "$file"; done | sort -u
+		git diff --name-only -z "$merge_base" -- '*.go'
+		git ls-files -z --others --exclude-standard -- '*.go'
+	} | while IFS= read -r -d '' file; do dirname "$file"; done | sort -u
 )
 
 # Keep the directories go list reports as packages of this module, which
