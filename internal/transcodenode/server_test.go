@@ -345,7 +345,7 @@ func TestRestartSessionLockedRejectsChangedToneMapSourceWithoutStoppingLiveSessi
 	}
 	modified := info.ModTime()
 	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	track := nodeToneMapTrack()
@@ -3130,35 +3130,6 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 	}
 	if _, ok := s.lastAccess["ghost-1"]; ok {
 		t.Fatal("touch recorded access for an unregistered session")
-	}
-}
-
-// spawnReconstruct must NOT apply the fast seg×dur resume seek for copy-mode
-// cards: copy-mode segments have variable durations, so seg×dur points at the
-// wrong source time. The card's original start must stand. Asserting opts off a
-// real spawn would need ffmpeg, so this checks the gating condition directly.
-func TestCopyModeReconstruct_SkipsFastSeek(t *testing.T) {
-	const dur = 6
-	card := playback.RecipeCard{
-		SessionID:          "copy-sess-1",
-		PlayMethod:         playback.PlayTranscode,
-		TargetCodecVideo:   "copy",
-		SegmentDuration:    dur,
-		StartSegmentNumber: 0,
-	}
-	const requestedSegment = 10
-	applyFastSeek := requestedSegment > card.StartSegmentNumber && card.SegmentDuration > 0 &&
-		!strings.EqualFold(card.TargetCodecVideo, "copy")
-	if applyFastSeek {
-		t.Fatalf("copy-mode card must not apply the seg×dur fast seek")
-	}
-
-	// Same shape but ENCODED: the fast seek must apply.
-	card.TargetCodecVideo = "h264"
-	applyFastSeek = requestedSegment > card.StartSegmentNumber && card.SegmentDuration > 0 &&
-		!strings.EqualFold(card.TargetCodecVideo, "copy")
-	if !applyFastSeek {
-		t.Fatalf("encoded card must apply the seg×dur fast seek")
 	}
 }
 

@@ -1405,40 +1405,6 @@ func (m *SessionManager) SetTranscodeRoute(sessionID string, route TranscodeRout
 	return nil
 }
 
-// SetEffectiveMediaFileID updates the currently delivered source file while
-// preserving the originally requested file selection.
-func (m *SessionManager) SetEffectiveMediaFileID(sessionID string, fileID int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	if fileID > 0 {
-		s.MediaFileID = fileID
-	}
-	s.streamRevision++
-	m.touchSessionLocked(s)
-	return nil
-}
-
-// SetWebSocket marks whether a WebSocket liveness connection is active for a session.
-func (m *SessionManager) SetWebSocket(sessionID string, connected bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	s, ok := m.sessions[sessionID]
-	if !ok {
-		return ErrSessionNotFound
-	}
-
-	s.HasWebSocket = connected
-	m.touchSessionLocked(s)
-	return nil
-}
-
 // SetRealtimeConnection marks whether a realtime control connection is active for a session.
 func (m *SessionManager) SetRealtimeConnection(sessionID string, connected bool) error {
 	m.mu.Lock()

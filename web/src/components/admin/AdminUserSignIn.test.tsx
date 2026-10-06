@@ -180,6 +180,7 @@ describe("AdminUserSignIn identities", () => {
     mount();
     const list = await screen.findByRole("list", { name: "Connected identities" });
     const row = within(list).getByRole("listitem");
+    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
     expect(row).toHaveTextContent("Company SSO · alice · alice@idp.example.test");
     expect(row).toHaveTextContent("Subject: https://id.example.test/realms/silo|8f14e45f");
     expect(row).toHaveTextContent("Last provider check: Active at the provider");
@@ -461,11 +462,6 @@ describe("AdminUserSignIn password and break-glass", () => {
     expect(
       await screen.findByText(/once password sign-in is on for the server/),
     ).toBeInTheDocument();
-  });
-
-  it("shows no break-glass control for a regular account", () => {
-    mount();
-    expect(screen.queryByRole("switch", { name: "Break-glass account" })).toBeNull();
   });
 
   it("lets the owner make an admin break-glass", async () => {

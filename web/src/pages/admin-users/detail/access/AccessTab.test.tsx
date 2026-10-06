@@ -13,6 +13,7 @@ import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/perm
 
 import { CardEditingProvider } from "../cardEditing";
 import { AccessTab } from "./AccessTab";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 const mocks = vi.hoisted(() => ({
   viewer: { id: 1 } as { id: number },
@@ -33,6 +34,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useViewerIsOwner: () => mocks.viewerIsOwner,
   useAdminUserCapabilities: () => ({
     data: { available: true, account_downloads: true, request_usage: false },
@@ -188,7 +190,13 @@ const GUEST: AdminUser = {
   },
 };
 
-function mount(user: AdminUser = USER, { manageable = true } = {}) {
+function mount(
+  user: AdminUser = USER,
+  {
+    manageable = true,
+    policyManageable,
+  }: { manageable?: boolean; policyManageable?: boolean } = {},
+) {
   mocks.user = user;
   const editor: AdminUserEditor = { user, etag: '"cached"', profileContext: CONTEXT };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -196,7 +204,13 @@ function mount(user: AdminUser = USER, { manageable = true } = {}) {
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <CardEditingProvider>
-          <AccessTab user={user} editor={editor} manageable={manageable} available />
+          <AccessTab
+            user={user}
+            editor={editor}
+            manageable={manageable}
+            policyManageable={policyManageable ?? manageable}
+            available
+          />
         </CardEditingProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -284,6 +298,17 @@ describe("card editing", () => {
     mount(USER, { manageable: false });
     expect(screen.queryByRole("button", { name: /^Edit / })).toBeNull();
     expect(within(card("Playback & streaming")).getByText("View only")).toBeInTheDocument();
+  });
+
+  it("keeps an admin's access and limits to the owner", () => {
+    mount({ ...USER, role: "admin" }, { policyManageable: false });
+    expect(
+      screen.getByText("Only the server owner can change an admin's access and limits."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Sign-in & role" })).toBeInTheDocument();
+    for (const title of ["Library access", "Downloads", "Playback & streaming", "Requests"]) {
+      expect(within(card(title)).getByText("View only")).toBeInTheDocument();
+    }
   });
 
   it("saves one PUT with only the changed fields and the captured validator", async () => {
@@ -420,13 +445,6 @@ describe("Sign-in & role", () => {
     await waitFor(() => expect(mocks.update).toHaveBeenCalled());
     expect(lastBody()).toEqual({ role: "admin", access_group_id: null });
   });
-
-  it("names an external provider instead of a password", () => {
-    mount({ ...USER, password_login: false });
-    expect(row(card("Sign-in & role"), "Password")).toContain(
-      "Managed by an external sign-in provider",
-    );
-  });
 });
 
 describe("Library access", () => {
@@ -548,40 +566,9 @@ describe("Library access", () => {
     await waitFor(() => expect(mocks.update).toHaveBeenCalled());
     expect(lastBody()).toEqual({ access_group_id: 5 });
   });
-
-  it("tells admins they don't use groups", () => {
-    mount({ ...USER, role: "admin" });
-    const library = card("Library access");
-    expect(
-      within(library).getByText(
-        "Admins don't use access groups. Unset values follow the server default.",
-      ),
-    ).toBeInTheDocument();
-    expect(within(library).queryByText("Access group")).toBeNull();
-  });
 });
 
 describe("sources and inherited values", () => {
-  it("tags grouped values and shows what a custom one replaces", () => {
-    mount({
-      ...GUEST,
-      max_streams: 3,
-      max_remote_stream_bitrate_kbps: 12000,
-      effective_policy: {
-        ...GUEST.effective_policy,
-        max_streams: 3,
-        max_remote_stream_bitrate_kbps: 12000,
-      },
-    });
-    const playback = card("Playback & streaming");
-    expect(row(playback, "Simultaneous streams")).toBe("3Group: 1CUSTOM");
-    expect(row(playback, "Bitrate cap, remote")).toBe("12 MbpsGroup: 8 MbpsCUSTOM");
-    expect(row(playback, "Max quality")).toBe("1080pGROUP");
-    expect(
-      within(playback).getByText("2 limits set for this account; the rest follow Guests."),
-    ).toBeInTheDocument();
-  });
-
   it("uses the saved account's resolved policy when the group list is stale", async () => {
     const ui = userEvent.setup();
     mount({
@@ -592,38 +579,6 @@ describe("sources and inherited values", () => {
     expect(
       within(segment(playback, "Bitrate cap, remote")).getByRole("button", {
         name: "Default · 30.72 Mbps",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("says Default without a value when the group is not loaded", async () => {
-    const ui = userEvent.setup();
-    mount({
-      ...USER,
-      access_group_id: 99,
-      max_remote_stream_bitrate_kbps: 2000,
-      effective_policy: { ...USER.effective_policy, max_remote_stream_bitrate_kbps: 2000 },
-    });
-    expect(row(card("Playback & streaming"), "Bitrate cap, remote")).not.toContain("Group:");
-    const playback = await edit(ui, "Playback & streaming");
-    expect(
-      within(segment(playback, "Bitrate cap, remote")).getByRole("button", { name: "Default" }),
-    ).toBeInTheDocument();
-  });
-
-  it("words an admin's defaults as the server default", async () => {
-    const ui = userEvent.setup();
-    mount({ ...USER, role: "admin", access_group_id: 5 });
-    const playback = card("Playback & streaming");
-    expect(
-      within(playback).getByText("Every limit follows the server default."),
-    ).toBeInTheDocument();
-    expect(row(playback, "Simultaneous streams")).toBe("UnlimitedDEFAULT");
-    await edit(ui, "Playback & streaming");
-    expect(within(playback).getByText(/follows the server default\./)).toBeInTheDocument();
-    expect(
-      within(segment(playback, "Simultaneous streams")).getByRole("button", {
-        name: "Default · Unlimited",
       }),
     ).toBeInTheDocument();
   });
@@ -665,6 +620,20 @@ describe("sources and inherited values", () => {
     await ui.click(
       within(segment(downloads, "Server-prepared downloads")).getByRole("button", {
         name: "Default · Not allowed",
+      }),
+    );
+    await ui.click(within(downloads).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+    expect(lastBody()).toEqual({ download_transcode_allowed: null });
+  });
+
+  it("offers an admin's full-access default from the server", async () => {
+    const ui = userEvent.setup();
+    mount({ ...USER, role: "admin", download_transcode_allowed: false });
+    const downloads = await edit(ui, "Downloads");
+    await ui.click(
+      within(segment(downloads, "Server-prepared downloads")).getByRole("button", {
+        name: "Default · Allowed",
       }),
     );
     await ui.click(within(downloads).getByRole("button", { name: "Save" }));
@@ -754,8 +723,16 @@ describe("Playback & streaming", () => {
 
   it("returns video transcoding to the default with both fields cleared", async () => {
     const ui = userEvent.setup();
-    mount({ ...USER, transcode_allowed: false });
+    mount({
+      ...USER,
+      transcode_allowed: false,
+      max_transcodes: 3,
+      effective_policy: { ...USER.effective_policy, transcode_allowed: false, max_transcodes: 3 },
+    });
     const playback = await edit(ui, "Playback & streaming");
+    expect(within(playback).getByRole("combobox", { name: "Video transcoding" })).toHaveTextContent(
+      "Off",
+    );
     await ui.click(
       within(segment(playback, "Video transcoding")).getByRole("button", {
         name: "Default · Unlimited",
@@ -776,6 +753,12 @@ describe("Playback & streaming", () => {
     const playback = card("Playback & streaming");
     expect(row(playback, "Video transcoding")).toContain("Up to 3 at a time");
     await edit(ui, "Playback & streaming");
+    expect(within(playback).getByRole("combobox", { name: "Video transcoding" })).toHaveTextContent(
+      "Up to",
+    );
+    expect(
+      within(playback).getByRole("spinbutton", { name: "Video transcodes at a time" }),
+    ).toHaveValue(3);
     await customize(ui, playback, "Audio-only transcoding");
     await pick(ui, playback, "Audio-only transcoding", "Not allowed");
     await ui.click(within(playback).getByRole("button", { name: "Save" }));

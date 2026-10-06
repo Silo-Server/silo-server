@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "id": "art-paused",
+      "outcome": "applied"
+    },
+    {
+      "id": "art-queued",
+      "outcome": "unchanged"
+    }
+  ]
+}

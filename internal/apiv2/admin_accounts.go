@@ -64,6 +64,7 @@ type AdminAccountCapabilitiesOutputBody struct {
 	WatchSummary         bool `json:"watch_summary" doc:"Whether getAdminUserWatchSummary can total an account's finalized plays"`
 	AccountDownloads     bool `json:"account_downloads" doc:"Whether listAdminUserDownloads, getAdminUserDownloadSummary and listAdminUserDownloadSubscriptions are available"`
 	RequestUsage         bool `json:"request_usage" doc:"Whether getAdminRequestUserUsage can report an account's request quota use"`
+	PolicyDefaults       bool `json:"policy_defaults" doc:"Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override"`
 }
 
 type AdminAccountPolicyInput struct {
@@ -248,6 +249,7 @@ func registerAdminAccounts(reg *Registry) {
 		out.Body.WatchSummary = reg.deps.AdminWatchSummary != nil
 		out.Body.AccountDownloads = reg.deps.AdminAccountDownloads != nil
 		out.Body.RequestUsage = reg.deps.AdminRequestUsage != nil
+		out.Body.PolicyDefaults = true
 		if resets := reg.deps.PasswordResets; resets != nil {
 			caps := resets.PasswordResetCapabilities(ctx)
 			out.Body.PasswordResetLink, out.Body.PasswordResetEmail = caps.Link, caps.Email

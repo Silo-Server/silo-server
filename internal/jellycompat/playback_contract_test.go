@@ -244,27 +244,6 @@ func TestBitmapSubtitleInventoryAndUnsupportedBurnIn(t *testing.T) {
 	}
 }
 
-func TestRemoteTranscodeRetainsNegotiatedCeilings(t *testing.T) {
-	var received transcodenode.TranscodeStartRequest
-	node := fakeTranscodeNode(t, &received)
-	h, _, store := newRemoteTranscodeHandler(t, node.URL, &stubRecipeNodeStore{})
-	source := testRemoteTranscodeSource()
-	source.TargetBitrateKbps = 3608
-	source.TargetResolution = "720p"
-	source.TargetAudioChannels = 1
-	store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
-	if err := h.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatal(err)
-	}
-	if received.TargetBitrateKbps != 3608 || received.TargetResolution != "720p" || received.TargetAudioChannels != 1 {
-		t.Fatalf("request=%+v", received)
-	}
-	persisted, ok := store.Get("play-1")
-	if !ok || persisted.Recipe == nil || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetAudioChannels != 1 {
-		t.Fatalf("persisted=%+v", persisted)
-	}
-}
-
 func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	version := testCompatVersion()
 	version.SubtitleTracks = []catalog.VersionSubtitleTrack{{Index: 3, Codec: "hdmv_pgs_subtitle"}}
@@ -322,11 +301,11 @@ func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	if err := remote.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
 		t.Fatal(err)
 	}
-	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" {
+	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" || received.TargetBitrateKbps != 3608 || received.TargetAudioChannels != 1 {
 		t.Fatalf("remote=%+v", received)
 	}
 	persisted, _ := remoteStore.Get("play-1")
-	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" {
+	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetAudioChannels != 1 {
 		t.Fatalf("recipe=%+v", persisted.Recipe)
 	}
 }

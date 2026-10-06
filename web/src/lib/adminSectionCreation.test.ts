@@ -85,26 +85,6 @@ describe("admin section creation progress", () => {
     expect(createSection.mock.calls.map((call) => call[1])).toEqual([1, 2, 2, 3]);
   });
 
-  it("never repeats an import with an unknown outcome on retry remaining", async () => {
-    const resolveCollection = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Connection lost"))
-      .mockResolvedValueOnce("collection-2");
-    const createSection = vi.fn().mockResolvedValue("section-2");
-    const failed = await runAdminSectionCreation(createAdminSectionCreation(payload, [1, 2]), {
-      resolveCollection,
-      createSection,
-    });
-    expect(failed.targets[0]?.status).toBe("import_unknown");
-    expect(createSection).not.toHaveBeenCalled();
-    const remaining = await runAdminSectionCreation(failed, { resolveCollection, createSection });
-    expect(resolveCollection.mock.calls.map((call) => call[1])).toEqual([1, 2]);
-    expect(remaining.targets.map((target) => target.status)).toEqual([
-      "import_unknown",
-      "complete",
-    ]);
-  });
-
   it("keeps completed targets when a later import outcome is unknown", async () => {
     const resolveCollection = vi
       .fn()

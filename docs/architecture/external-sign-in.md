@@ -186,9 +186,14 @@ routed to their provider there.
 
 ## One provider, no restart
 
-- At most one auth binding is enabled at a time; enabling a second is refused
-  with `provider_already_enabled` (checked under an advisory lock). The
-  built-in local provider always exists.
+- At most one primary auth binding (OIDC, LDAP) is enabled at a time, plus at
+  most one network identity binding ([Network identity](#network-identity));
+  enabling a second of the same kind is refused with
+  `provider_already_enabled` (checked under an advisory lock), and so is a
+  second binding from the same installation, because identities and account
+  rechecks are keyed by installation. A binding's kind is read from its
+  capability's stored `auth_modes`, so it cannot drift from what the plugin
+  declares. The built-in local provider always exists.
 - The provider registry is rebuilt from the bindings on this node after a
   plugin lifecycle change or a binding write, and on every other node when the
   admin channel announces `plugins_changed` or `auth_providers_changed`. A
@@ -481,6 +486,96 @@ keep their sign-in meaning, except that a disabled directory account is
 the login rate-limit budget. `getExternalSignInCapabilities` reports it as
 `credentials_linking`. An administrator can also link any identity by its
 subject (`createAdminUserIdentity`), and email auto-match links on sign-in.
+
+## Network identity
+
+A network access provider plugin ([network-access.md](network-access.md))
+already knows who owns the device behind every request it proxies: Tailscale
+answers that with WhoIs. When the plugin also declares an `auth_provider.v1`
+capability with the `network` auth mode, people on its overlay sign in with
+no password and no browser, which is what makes a TV sign in with one button.
+The host side is `internal/auth/network_sign_in.go`; the plugin contract is
+the SDK's `NetworkIdentityAuth`.
+
+- **Where the peer comes from.** The plugin stamps `X-Silo-Ingress-Peer`
+  (the overlay peer's IP) next to its ingress token. `netaccess.Middleware`
+  strips the header from every request and records the peer on the access
+  path only when the token is valid, so a LAN or public client cannot name
+  one. The path also records the installation whose token it was.
+- **Who the peer is.** The host never decides that itself. It asks the
+  plugin (`AuthenticatePeer`) about the peer of the request in hand, and only
+  when the request came through that installation's own listener; any other
+  request is `network_identity_required`. The plugin answers like
+  `Authenticate`: a stable subject for the person (Tailscale: control host
+  and user ID), names, and `managed_role` when the overlay's policy sets the
+  Silo role, or a denial (an unknown or tagged device, one its policy leaves
+  out).
+- **Sign-in** (`signInWithNetworkIdentity`,
+  `POST /auth/network/{id}/sign-in`) runs the answer through the account
+  resolution order above with the binding's `auto_provision`, then opens a
+  login session vouched for by the identity under the same account, identity
+  and installation locks as an OAuth completion
+  (`Service.OpenIdentitySession`). The body is an empty JSON object: the
+  media-type rule then refuses a cross-site form post, so a page someone
+  visits cannot sign their device in.
+- **Discovery.** `listAuthProviders` lists a network provider only to a
+  request from its own overlay whose peer the plugin vouches for, with
+  `network_sign_in_path` and the owner's name for a "Continue as" label.
+  Answers about a peer (identity or refusal) are cached for 30 seconds per
+  provider instance and peer; a binding or plugin configuration change builds
+  a new instance, so a changed rule applies at once. Discovery waits at most
+  2 seconds for the plugin, and concurrent lookups for one peer share one
+  call; a plugin that cannot answer in time is left out and not cached.
+  Sign-in
+  and linking always ask again. A network provider is never the default
+  provider, never counts toward `password_login`, and never receives a
+  password: login and Jellyfin routing skip it, a login that names it fails
+  as wrong credentials, and the frozen v1 provider list leaves it out.
+- **Linking** (`linkAccountIdentityWithNetwork`,
+  `POST /account/identities/link-network`) works like directory linking: the
+  account re-enters its local password, then the peer's identity is linked as
+  a linking flow. The owner of an existing account uses it, because a first
+  network sign-in would otherwise meet `email_in_use`.
+- **Re-check** is the ordinary provider re-check: the plugin answers
+  `CheckAccount` from its own view of the overlay (Tailscale: the person
+  still has an untagged device in the node's peer list, and still holds a
+  required grant). A person removed from the overlay cannot reach its
+  listener at all; a server that also has a public URL ends their sessions at
+  the next re-check.
+- **The primary provider comes first.** One network binding may be on beside
+  the one OIDC or LDAP binding, and an account can hold an identity at each.
+  When it does, the primary provider is the account's authority
+  (`primaryAuthorityOf`). The network identity's `managed_role` is ignored at
+  sign-in, linking and re-check. A refusal from the network provider ends only
+  the sessions opened through the network identity (as for a break-glass
+  account), and a network provider that cannot re-check removes nothing,
+  keeping the account's API keys and the sessions the primary provider vouches
+  for. While the primary provider's latest answer refuses the account, network
+  sign-in is `not_permitted`, so the overlay cannot undo the primary
+  provider's deprovisioning. A refresh of a network session re-checks only
+  the network identity, so the scheduled pass re-checks the primary identity
+  of an account with live network sessions. Otherwise the two providers would each apply their
+  own role and sign the account out at every change.
+- **No email matching.** The host drops `email_verified` from a network
+  provider's answer, so a network identity never links to an account by email
+  auto-match: whoever uses a device is its owner, which proves nothing about
+  an email address.
+- **Trust.** Anyone who controls a device signed in to the overlay as a
+  person can sign in to Silo as that person, with that person's role, within
+  what the overlay's policy allows them, and can link that person's identity
+  to their own account. Everyone using a shared TV signs in as whoever signed
+  that TV in to the overlay; profiles separate viewers. The same holds for
+  anyone whose traffic reaches the node through a person's device: a reverse
+  proxy, Tailscale Serve, or a router that masquerades its LAN into the
+  overlay makes everyone behind it that device's owner. The Tailscale plugin
+  names no peer for a request carrying forwarding headers, but a plain TCP
+  forwarder adds none, so relays must be tagged devices, which never sign in.
+  Subjects are scoped to the control plane, not the tailnet: moving the Silo
+  node to another tailnet gives everyone new user IDs, so re-checks of the
+  old identities answer not found.
+
+`getExternalSignInCapabilities` reports both operations as
+`network_sign_in`.
 
 ### Provider logout
 

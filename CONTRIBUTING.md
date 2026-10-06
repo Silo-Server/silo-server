@@ -116,6 +116,7 @@ make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
+make verify-case-collisions
 ```
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
@@ -125,26 +126,32 @@ and manual runs keep the full gate. The `CI result` job rejects failed, canceled
 missing, or unexpectedly skipped work; only jobs excluded by the selection may
 skip. Selection tools come from the trusted reusable workflow's main branch.
 
-The full Go suite owns the ledger, scenario, offline-route, spec, and fixture
-assertions. The contract job retains generator freshness checks and the semantic
-API comparison. Its `CONTRACT_GO_TESTS=0` flag avoids repeating assertions; local
-verify targets remain complete by default. `Go integration` runs the existing
-PostgreSQL 17 race tests separately from the unit suite and the pgvector database
-used by `Go DB pins`. Its database is also separate from the truncating scenario
-executor's database.
+`Go test` runs the full Go suite, which owns the ledger, scenario,
+offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
+after lint: the generator freshness checks and the semantic API comparison. The
+contract checks pass `CONTRACT_GO_TESTS=0` to avoid repeating the suite's
+assertions; local verify targets remain complete by default. `Go integration`
+runs its race tests against two databases of its own: a PostgreSQL 17 database
+for the Watch Party, history import, and marker claim migration tests, and a
+migrated pgvector database for the tests that need the full schema. `Go DB pins`
+and `Go DB external auth` each start a separate pgvector database, and the unit
+suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
+scenario executor, which truncates its database, gets none of these databases.
 
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a
 stale artifact or fixture tree.
 
 `make test-go` has no database, so every DB-backed test in it skips. The
-`Go DB pins` CI job covers the query-budget pins listed in
+`Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
-and runs `make test-db-pins`, which fails when a listed test is missing,
-skipped or failing. A test that pins a statement count or query plan belongs in
-that list, added in the same change. Run it yourself when you change database
-or query code or add a pin. It needs a disposable, migrated database; with the
-PostgreSQL service from [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
+and runs `make test-db-pins`, which checks those budgets and then the database
+contracts in `scripts/ci/db-contracts.txt`. Both lists fail when a named test is
+missing, skipped or failing. A test that pins a statement count or query plan
+belongs in the budget list, added in the same change. Run this target when you
+change database or query code or add a pin. It needs a disposable, migrated
+database; with the PostgreSQL service from
+[DEVELOPMENT.md](DEVELOPMENT.md#local-development)
 running under the Compose defaults:
 
 ```sh
@@ -154,6 +161,14 @@ DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only
 make test-db-pins
 ```
+
+When retiring a duplicate test, name the surviving test that exercises the
+production behavior. Preserve unique assertions there before deleting the
+duplicate. If that keeper needs Postgres, it must run in CI: query budgets
+belong in `scripts/ci/db-pins.txt`; other database contracts belong in
+`scripts/ci/db-contracts.txt`. `make test-db-pins` is the CI entry point for both
+lists. To run only the database contracts, use `make test-db-contracts` against
+the same disposable, migrated database.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
@@ -224,8 +239,9 @@ when none applies. Either way, the Problem section has to stand on its own. Keep
 limited to the stated problem. Keep the description proportional to the change;
 omit session history, full logs, and private report links other than a
 maintainer's `Evidence:` line. Follow the
-[public-content and media rules](AGENTS.md#pull-requests). Screenshots and recordings
-are not routine PR requirements; attach them only when explicitly requested.
+[public-content and media rules](AGENTS.md#pull-requests), and include evidence
+for every change users can see, as [Show visible changes](#show-visible-changes)
+describes.
 
 ### Write the description
 
@@ -249,6 +265,39 @@ change does; the rest should help them decide how closely to review.
   subtle change can take more. There is no word limit, so do not count words
   or trim to a target. Long supporting evidence, such as tables or
   measurements, can go in a `<details>` block after the summary.
+
+### Show visible changes
+
+A pull request that changes what a user sees must show the change in its
+Evidence section, so reviewers can see it without building the branch. In this
+repository that means the web app and web admin, and every client that renders
+server data. A change is visible when it alters any of these:
+
+- layout, styling, copy, navigation, focus, empty and error states;
+- which items a screen shows, or in what order: search results, home sections,
+  recommendations, library browsing, collections, sorting, or filtering;
+- what an item shows: titles, artwork, descriptions, ratings, badges, episode
+  grouping, or availability;
+- playback behavior a user notices, such as default audio or subtitle tracks,
+  markers, controls, or resume position;
+- a native API or jellycompat response field that clients render.
+
+Provide evidence that fits the change:
+
+- **Changes to a screen:** before-and-after screenshots of the same screen with
+  the same data, one pair per affected surface. Add a short recording when
+  motion, timing, focus movement, or a multi-step flow matters.
+- **Server changes no client shows yet:** before-and-after excerpts of the API
+  response for the same request, trimmed to the fields that changed, such as the
+  ordered list of result titles.
+- Name the surface and the build or commit each capture came from.
+
+Capture against a test library or public-domain media where you can. Crop or
+blur hostnames, URLs, account names, and personal library contents. When the
+evidence cannot be made public, a maintainer may link an
+`evidence.siloserver.org` page instead. If you could not capture evidence,
+say why; the reviewer decides whether the pull request can merge without it.
+Changes users cannot see write `Evidence: none, no user-visible change`.
 
 ## Review expectations
 

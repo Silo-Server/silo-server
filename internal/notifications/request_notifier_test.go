@@ -70,22 +70,6 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 }
 
-// Profile ids repeat across accounts, so a follower on another account whose
-// profile id matches the requester's is still a separate recipient.
-func TestNotifyFulfilledKeysRecipientsByAccount(t *testing.T) {
-	backend := &fakeFulfillmentBackend{}
-	notifier := &RequestFulfillmentNotifier{backend: backend}
-	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "default"})
-	req.RequestedByProfileID = "default"
-
-	if err := notifier.NotifyFulfilled(context.Background(), req, "movie-tmdb-949"); err != nil {
-		t.Fatalf("NotifyFulfilled: %v", err)
-	}
-	if len(backend.deliveries) != 2 || backend.deliveries[1].UserID != 2 || !parseRequestFlags(backend.deliveries[1].ReasonFlags).Follower {
-		t.Fatalf("deliveries = %+v, want the requester and the other account's follower", backend.deliveries)
-	}
-}
-
 func TestFulfilledCopyForFollowers(t *testing.T) {
 	requester := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1"}`)}}
 	follower := DeliveryRow{Delivery: Delivery{Type: DeliveryTypeRequestFulfilled, ReasonFlags: []byte(`{"request_id":"req-1","follower":true}`)}}

@@ -56,6 +56,10 @@ func pluginConfigurationHandler(f *fakePluginConfiguration) (http.Handler, Depen
 // The seam's typed errors map to one problem each on every mutation, and
 // no refusal reaches the seam.
 func TestAdminPluginMutationRefusals(t *testing.T) {
+	f := &fakePluginConfiguration{probeSuccess: true}
+	h, deps := pluginConfigurationHandler(f)
+	deps.AdminPluginConfiguration = nil
+	missing := NewHandler(deps)
 	for _, tc := range []struct{ name, method, path, body string }{
 		{"config", "PUT", "/config", `{"key":"account","value":{"region":"us"}}`},
 		{"probe", "POST", "/config/test", `{"key":"account","value":{}}`},
@@ -63,8 +67,7 @@ func TestAdminPluginMutationRefusals(t *testing.T) {
 		{"task", "PUT", "/task-bindings/sync", `{"enabled":true,"trigger":{"type":"startup"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := &fakePluginConfiguration{probeSuccess: true}
-			h, deps := pluginConfigurationHandler(f)
+			*f = fakePluginConfiguration{probeSuccess: true}
 			path := Prefix + "/admin/plugins/installations/7" + tc.path
 			requireProblem(t, do(t, h, tc.method, path, tc.body, nil), TypeAuthenticationRequired)
 			requireProblem(t, do(t, h, tc.method, path, tc.body, bearer(memberToken)), TypePermissionDenied)
@@ -85,8 +88,7 @@ func TestAdminPluginMutationRefusals(t *testing.T) {
 			}
 			f.err = &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Plugin service not configured"}
 			requireProblem(t, do(t, h, tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
-			deps.AdminPluginConfiguration = nil
-			requireProblem(t, do(t, NewHandler(deps), tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, tc.method, path, tc.body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }

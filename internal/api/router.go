@@ -78,6 +78,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/shuffle"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -114,6 +115,10 @@ type ArtworkDelivery struct {
 
 type Dependencies struct {
 	Config *config.Config
+	// SubtitlePlaySync receives subtitles a player is served, so one never
+	// synced is aligned the first time it is played. The routes here connect
+	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
+	SubtitlePlaySync *subtitles.PlaySyncHook
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig func() *config.Config
@@ -735,6 +740,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var itemsHandler *handlers.ItemsHandler
 	var catalogResourceHandler *handlers.CatalogResourceHandler
 	var catalogHandler *handlers.CatalogHandler
+	var shuffleService *shuffle.Service
 	var literaryWorkHandler *handlers.LiteraryWorkHandler
 	var peopleHandler *handlers.PeopleHandler
 	var itemRepo *catalog.ItemRepository
@@ -905,14 +911,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		catalogResourceHandler = handlers.NewCatalogResourceHandler(itemsHandler)
 		catalogResourceHandler.SetWatchlistPromoter(watchlistTitles)
-		catalogHandler = handlers.NewCatalogHandler(
-			catalog.NewCatalogResolver(browseRepo, itemRepo).
-				WithEpisodeRepository(episodeRepo).
-				WithUserStoreProvider(deps.UserStoreProvider).
-				WithSearchProvider(catalogSearchService.Provider()).
-				WithWatchlistPromoter(watchlistTitles),
-			itemsHandler,
-		)
+		catalogResolver := catalog.NewCatalogResolver(browseRepo, itemRepo).
+			WithEpisodeRepository(episodeRepo).
+			WithUserStoreProvider(deps.UserStoreProvider).
+			WithSearchProvider(catalogSearchService.Provider()).
+			WithWatchlistPromoter(watchlistTitles)
+		catalogHandler = handlers.NewCatalogHandler(catalogResolver, itemsHandler)
+		shuffleService = shuffle.NewService(deps.DB, catalogResolver)
 		catalogHandler.SetWorkSummaryProvider(literaryRepo)
 
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
@@ -1409,13 +1414,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		subtitleAINotifier = playback.NewSubtitleReadyNotifier(deps.SessionMgr, realtimeHub, subtitleInventoryResolver)
 		if subtitleAINotifier != nil && deps.EventBus != nil {
-			publish := func(ctx context.Context, payload string) error {
-				return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: cache.EventSubtitleTimingChanged, Payload: payload})
+			// The bus carries each message under the realtime event it becomes.
+			publish := func(ctx context.Context, event playback.RealtimeEventName, payload string) error {
+				return deps.EventBus.Publish(ctx, cache.ChannelPlayback, cache.Event{Type: string(event), Payload: payload})
 			}
-			subscribe := func(ctx context.Context, handler func(string)) error {
+			subscribe := func(ctx context.Context, handler func(playback.RealtimeEventName, string)) error {
 				return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
-					if event.Type == cache.EventSubtitleTimingChanged {
-						handler(event.Payload)
+					switch event.Type {
+					case cache.EventSubtitleTimingChanged, cache.EventSubtitleSyncUpdated:
+						handler(playback.RealtimeEventName(event.Type), event.Payload)
 					}
 				})
 			}
@@ -1424,7 +1431,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				busCtx = context.Background()
 			}
 			if err := subtitleAINotifier.UseEventBus(busCtx, publish, subscribe); err != nil {
-				slog.Warn("subscribe subtitle timing changes failed", "component", "api", "error", err)
+				slog.Warn("subscribe subtitle timing changes and sync updates failed", "component", "api", "error", err)
 			}
 		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
@@ -1466,6 +1473,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if streamHandler != nil && subtitleRepo != nil && subtitleBlobs != nil {
 		streamHandler.SubtitleRepo = subtitleRepo
 		streamHandler.SubtitleBlobs = subtitleBlobs
+	}
+	if streamHandler != nil && subtitleRepo != nil {
+		streamHandler.ExternalTimings = subtitleRepo
+	}
+	if streamHandler != nil && deps.SubtitlePlaySync != nil {
+		streamHandler.PlaySync = deps.SubtitlePlaySync
 	}
 	if streamHandler != nil && deps.Config != nil {
 		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
@@ -1698,7 +1711,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
 		if deps.FileRepo != nil && settingsRepo != nil {
-			subtitleSearchHandler.SetSyncService(newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier))
+			syncService := newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier)
+			subtitleSearchHandler.SetSyncService(syncService, subtitleRepo)
+			if deps.SubtitlePlaySync != nil {
+				deps.SubtitlePlaySync.Set(syncService)
+			}
 		}
 	}
 
@@ -1750,6 +1767,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			slog.Default(),
 			aiSem,
 		)
+		aiService.SetExternalTimings(subtitleRepo)
 		aiService.Recover()
 		if deps.OnConfigChange != nil {
 			deps.OnConfigChange(func(_, updated *config.Config) {
@@ -2092,6 +2110,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 				subtitleSource = subtitleManager
 			}
 			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+			if subtitleRepo != nil {
+				downloadSvc.SetExternalTimings(subtitleRepo)
+			}
+			if deps.Blobs.Assets != nil {
+				downloadSvc.SetArtworkStore(deps.Blobs.Assets, deps.ArtworkSigner, deps.ArtworkRepair)
+			}
 		}
 		if streamHandler != nil {
 			downloadSvc.SetSubtitleCache(streamHandler.SubtitleCache)
@@ -2476,6 +2500,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			v2deps.AdminWatchSummary = adminHandler
 		}
 		v2deps.AdminPlaybackSessions = adminHandler
+		if deps.DB != nil && deps.ArtifactManager != nil {
+			v2deps.AdminDownloadPreparations = downloads.NewPreparationReader(deps.DB, profileNamesByUser(deps.UserStoreProvider))
+			v2deps.AdminDownloadPreparationControls = deps.ArtifactManager
+		}
 		if adminPlaybackControlHandler != nil {
 			v2deps.AdminPlaybackCommands = adminPlaybackControlHandler
 			v2deps.AdminPlaybackTerminate = adminPlaybackControlHandler
@@ -2752,6 +2780,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if catalogResourceHandler != nil {
 		v2deps.CatalogItems = catalogResourceHandler
+	}
+	if shuffleService != nil {
+		v2deps.Shuffles = shuffleService
 	}
 	if itemsHandler != nil {
 		v2deps.CatalogTrailers = itemsHandler
@@ -5092,4 +5123,29 @@ func v2Dependencies(
 		out.CursorSecret = []byte(deps.Config.Auth.JWTSecret)
 	}
 	return out
+}
+
+// profileNamesByUser resolves an account's profile names through its user
+// store; nil when there is no store provider.
+func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNamesFunc {
+	if stores == nil {
+		return nil
+	}
+	return func(ctx context.Context, userID int) (map[string]string, error) {
+		store, err := stores.ForUser(ctx, userID)
+		if err != nil || store == nil {
+			return nil, err
+		}
+		profiles, err := store.ListProfiles(ctx)
+		if err != nil {
+			return nil, err
+		}
+		names := make(map[string]string, len(profiles))
+		for _, profile := range profiles {
+			if name := strings.TrimSpace(profile.Name); name != "" {
+				names[profile.ID] = name
+			}
+		}
+		return names, nil
+	}
 }

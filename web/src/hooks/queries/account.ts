@@ -99,6 +99,29 @@ export function useLinkAccountIdentityWithCredentials() {
 }
 
 /**
+ * Links the network identity of this device (such as its Tailscale login)
+ * after the local password is confirmed. Works only while the browser reached
+ * the server through that provider (network_identity_required otherwise).
+ */
+export function useLinkAccountIdentityWithNetwork() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: async (body: V2Body<"POST /api/v2/account/identities/link-network">) => {
+      const session = captureSessionIdentity();
+      const result = await v2("POST /api/v2/account/identities/link-network", {
+        body,
+        profileContext: captureProfileRequestContext() ?? undefined,
+        retryAuthentication: false,
+      });
+      requireIdentityMutationSession(session);
+      return result;
+    },
+    onSuccess: () => invalidateSignInState(queryClient),
+  });
+}
+
+/**
  * Starts linking an OAuth provider in this browser: confirms the local
  * password for a link ticket, then trades the ticket for the provider URL
  * (and the flow's browser-binding cookie). The flow comes back to next with

@@ -29,6 +29,7 @@ import {
   RefreshCw,
   Scissors,
   RotateCcw,
+  Shuffle,
   Tags,
   UsersRound,
   Hand,
@@ -118,7 +119,7 @@ function PrimaryActionButton({ action }: { action: ActionBarPrimaryAction }) {
       onClick={action.onClick}
       disabled={inert}
       aria-busy={action.pending || undefined}
-      className={`${interactiveClass} relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide`}
+      className={`${interactiveClass} relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide`}
     >
       {Icon && (
         <Icon
@@ -226,6 +227,8 @@ export interface ActionBarProps {
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
   onRequestSeasons?: () => void;
+  /** Shuffles this series' or season's episodes. */
+  onShuffle?: () => void;
   rating?: number | null;
   onRatingChange?: (rating: number | null) => void;
   qualityPreference?: string | null;
@@ -286,6 +289,7 @@ export default function ActionBar({
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
+  onShuffle,
   rating,
   onRatingChange,
   audioSelectionMode = "auto",
@@ -564,7 +568,12 @@ export default function ActionBar({
     items[nextIndex]?.focus({ preventScroll: true });
   };
   const hasOverflowActions = Boolean(
-    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles || onRequestSeasons,
+    restartHref ||
+    onShuffle ||
+    onToggleWatchlist ||
+    onDownload ||
+    onSearchSubtitles ||
+    onRequestSeasons,
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectMarkers));
   const hasMetadataActions = Boolean(
@@ -622,7 +631,7 @@ export default function ActionBar({
           showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -631,7 +640,7 @@ export default function ActionBar({
           ) : selectedVersion ? (
             <Button
               onClick={() => handleSelectedVersionPlay(false)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -640,7 +649,7 @@ export default function ActionBar({
           ) : (
             <Button
               onClick={() => startPlaybackFromHref(playHref)}
-              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md`}
+              className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
             >
               <Play className="size-[18px] fill-current" />
               {playText}
@@ -650,7 +659,7 @@ export default function ActionBar({
         ) : (
           <Button
             disabled
-            className="h-11 gap-2.5 rounded-full px-8 text-[15px] font-bold tracking-wide"
+            className="h-11 gap-2.5 rounded-full px-8 text-[0.9375rem] font-bold tracking-wide"
           >
             <Play className="size-[18px] fill-current" />
             {playLabel}
@@ -667,7 +676,7 @@ export default function ActionBar({
               disabled={action.pending}
               aria-busy={action.pending || undefined}
               aria-pressed={action.pressed}
-              className={`${responsivePrimaryActionClass} h-11 rounded-full px-5 text-[14px] font-semibold enabled:cursor-pointer`}
+              className={`${responsivePrimaryActionClass} h-11 rounded-full px-5 text-[0.875rem] font-semibold enabled:cursor-pointer`}
             >
               {Icon && (
                 <Icon
@@ -685,7 +694,7 @@ export default function ActionBar({
             key={link.href}
             asChild
             variant="glass"
-            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[13px] font-semibold tracking-wide`}
+            className={`${staticGlassActionClass} h-11 cursor-pointer rounded-full px-4 text-[0.8125rem] font-semibold tracking-wide`}
           >
             <a href={link.href} target="_blank" rel="noreferrer">
               {link.label}
@@ -700,7 +709,7 @@ export default function ActionBar({
             variant="glass"
             onClick={onToggleWatched}
             disabled={isUpdatingWatched}
-            className={`${responsivePrimaryActionClass} h-11 min-w-[161px] rounded-full px-5 text-[14px] font-semibold enabled:cursor-pointer`}
+            className={`${responsivePrimaryActionClass} h-11 min-w-[161px] rounded-full px-5 text-[0.875rem] font-semibold enabled:cursor-pointer`}
           >
             <Check className="size-[18px]" />
             {compactMobile ? (
@@ -795,6 +804,12 @@ export default function ActionBar({
                   )}
                 </div>
               )}
+              {onShuffle && (
+                <DetailOverflowMenuItem closeMenu={closeOverflowMenu} onAction={onShuffle}>
+                  <Shuffle className="size-4" />
+                  Shuffle
+                </DetailOverflowMenuItem>
+              )}
               {restartHref && (
                 <DetailOverflowMenuItem
                   closeMenu={closeOverflowMenu}
@@ -842,7 +857,7 @@ export default function ActionBar({
                   <div role="separator" className="bg-border -mx-1 my-1 h-px" />
                   <div
                     role="presentation"
-                    className="text-muted-foreground flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[10px] font-semibold tracking-[0.16em] uppercase"
+                    className="text-muted-foreground flex items-center gap-1.5 px-2 pt-1 pb-0.5 text-[0.625rem] font-semibold tracking-[0.16em] uppercase"
                   >
                     {watchTogether.liveRoom ? (
                       <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-400" />

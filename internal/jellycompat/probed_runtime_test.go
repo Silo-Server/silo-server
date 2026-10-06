@@ -11,31 +11,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestRuntimeTicks(t *testing.T) {
-	tests := []struct {
-		name            string
-		durationSeconds int
-		runtimeMinutes  int
-		want            int64
-	}{
-		{name: "probe only", durationSeconds: 3600, want: secondsToTicks(3600)},
-		{name: "runtime only", runtimeMinutes: 60, want: minutesToTicks(60)},
-		{name: "neither", want: 0},
-		{name: "probe wins", durationSeconds: 120, runtimeMinutes: 90, want: secondsToTicks(120)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := runtimeTicks(tt.durationSeconds, tt.runtimeMinutes); got != tt.want {
-				t.Fatalf("runtimeTicks(%d, %d) = %d, want %d", tt.durationSeconds, tt.runtimeMinutes, got, tt.want)
-			}
-		})
-	}
-
-	if secondsToTicks(3600) != minutesToTicks(60) {
-		t.Fatalf("unit mismatch: 3600 seconds = %d ticks, 60 minutes = %d ticks", secondsToTicks(3600), minutesToTicks(60))
-	}
-}
-
 func TestItemFromListRuntimeResolution(t *testing.T) {
 	m := newMapper(NewResourceIDCodec(), &config.Config{})
 	dto := m.itemFromList(upstreamListItem{
@@ -70,10 +45,10 @@ func TestEpisodeFromUpstreamRuntimeResolution(t *testing.T) {
 		runtimeMinutes  int
 		want            int64
 	}{
-		{name: "probe only", durationSeconds: 1800, want: secondsToTicks(1800)},
-		{name: "runtime only", runtimeMinutes: 30, want: minutesToTicks(30)},
+		{name: "probe only", durationSeconds: 1800, want: 18_000_000_000},
+		{name: "runtime only", runtimeMinutes: 30, want: 18_000_000_000},
 		{name: "neither", want: 0},
-		{name: "probe wins", durationSeconds: 1800, runtimeMinutes: 45, want: secondsToTicks(1800)},
+		{name: "probe wins", durationSeconds: 1800, runtimeMinutes: 45, want: 18_000_000_000},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -29,6 +29,9 @@ func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
 	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
 		t.Fatalf("profile 7 remux must strip DV RPUs from the base layer, args=%v", strings.Join(args, " "))
 	}
+	if argsContainPair(args, "-tag:v", "hvc1") || argsContainPair(args, "-tag:v", "dvh1") || argsContainPair(args, "-strict", "unofficial") {
+		t.Fatalf("legacy strip consumers must keep hev1 labeling without DV signaling, args=%v", strings.Join(args, " "))
+	}
 }
 
 func TestBuildRemuxArgsExcludesAttachedPictures(t *testing.T) {
@@ -146,45 +149,9 @@ func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 		if argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
 			t.Fatalf("profile %d remux must not strip DV RPUs, args=%v", profile, strings.Join(args, " "))
 		}
-	}
-}
-
-// The DV sample entry is an explicit opt-in for the v3 preserve recipe:
-// Media3 keys decoder selection from it, but legacy web/jellycompat consumers
-// rely on the pre-v3 hev1 labeling their demuxers accept.
-func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
-	for _, profile := range []int{5, 8} {
-		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, true, false)
-		if !argsContainPair(args, "-tag:v", "dvh1") {
-			t.Fatalf("preserved profile %d must retain a DV sample entry, args=%v", profile, strings.Join(args, " "))
+		if argsContainPair(args, "-tag:v", "dvh1") || argsContainPair(args, "-strict", "unofficial") {
+			t.Fatalf("legacy profile %d remux must keep hev1 labeling, args=%v", profile, strings.Join(args, " "))
 		}
-		// Without -strict unofficial FFmpeg drops the dvvC configuration record
-		// and the output is an untagged HEVC stream no DV decoder will select.
-		if !argsContainPair(args, "-strict", "unofficial") {
-			t.Fatalf("preserved profile %d must allow the dvvC box, args=%v", profile, strings.Join(args, " "))
-		}
-		legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile, false, false)
-		if argsContainPair(legacy, "-tag:v", "dvh1") || argsContainPair(legacy, "-strict", "unofficial") {
-			t.Fatalf("legacy profile %d remux must keep hev1 labeling, args=%v", profile, strings.Join(legacy, " "))
-		}
-	}
-}
-
-// The explicit v3 strip recipe labels its HDR10 output hvc1 — the sample entry
-// the web probe collected evidence for — while the legacy/auto strip keeps
-// ffmpeg's default hev1 for pre-v3 consumers. Neither carries a DOVI record,
-// so neither needs the -strict relaxation.
-func TestBuildRemuxArgsTagsStrippedHDR10OnlyWhenRequested(t *testing.T) {
-	tagged := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, true, false)
-	if !argsContainPair(tagged, "-bsf:v", "dovi_rpu=strip=1") || !argsContainPair(tagged, "-tag:v", "hvc1") {
-		t.Fatalf("explicit strip must emit an hvc1-labeled HDR10 stream, args=%v", strings.Join(tagged, " "))
-	}
-	if argsContainPair(tagged, "-tag:v", "dvh1") || argsContainPair(tagged, "-strict", "unofficial") {
-		t.Fatalf("stripped output must not carry DV signaling, args=%v", strings.Join(tagged, " "))
-	}
-	legacy := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7, false, false)
-	if argsContainPair(legacy, "-tag:v", "hvc1") || argsContainPair(legacy, "-tag:v", "dvh1") {
-		t.Fatalf("legacy strip consumers must keep hev1 labeling, args=%v", strings.Join(legacy, " "))
 	}
 }
 
@@ -192,16 +159,16 @@ func TestBuildRemuxArgsTagsStrippedHDR10OnlyWhenRequested(t *testing.T) {
 // explicit preserve recipe must fail fast instead of emitting a stream with
 // dangling RPUs and no enhancement layer.
 func TestStartRemuxRejectsPreservedProfile7(t *testing.T) {
-	if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, 7, RemuxDVPreserveV3, ""); err == nil {
-		t.Fatal("preserve mode accepted a profile 7 source")
+	if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, 7, RemuxDVPreserveV3, filepath.Join(t.TempDir(), "missing-ffmpeg")); err == nil || !strings.Contains(err.Error(), "Dolby Vision profile 7 cannot be preserved in a progressive remux") {
+		t.Fatalf("preserve profile 7 error = %v, want the unsupported-profile rejection", err)
 	}
 }
 
 // An unknown mode must fail for every profile, not only Profile 7 sources.
 func TestStartRemuxRejectsUnknownModeForAllProfiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 7, 8} {
-		if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, profile, RemuxDVMode("bogus"), ""); err == nil {
-			t.Fatalf("unknown remux DV mode accepted for profile %d", profile)
+		if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, profile, RemuxDVMode("bogus"), filepath.Join(t.TempDir(), "missing-ffmpeg")); err == nil || !strings.Contains(err.Error(), "unknown remux Dolby Vision mode") {
+			t.Fatalf("unknown remux DV mode error for profile %d = %v, want the invalid-mode rejection", profile, err)
 		}
 	}
 }

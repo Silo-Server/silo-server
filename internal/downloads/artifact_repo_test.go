@@ -768,7 +768,7 @@ func TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue(t *testing.T) {
 		downloads: NewRepository(pool),
 		preparer:  preparer,
 	}
-	manager.recover(ctx)
+	manager.recoverReadyArtifacts(ctx)
 
 	got, err := repo.GetByID(ctx, row.ID)
 	if err != nil {

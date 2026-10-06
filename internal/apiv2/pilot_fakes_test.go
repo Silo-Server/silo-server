@@ -116,14 +116,9 @@ type fakeProgressQuery struct {
 	Limit     int
 }
 
-// fakeProgress stands in for handlers.ProgressHandler.ListProgressPage: a
-// keyset store over entries plus the library filter (libraries maps
-// media_item_id to its library; a nil map leaves the filter a no-op, a
-// non-nil one puts unknown ids in no library), applied the way the real seam
-// does — fetch, filter, re-fetch until limit+1 matches.
+// fakeProgress supplies pages for transport tests and records the query.
 type fakeProgress struct {
-	entries   []userstore.WatchProgress
-	libraries map[string]int
+	entries []userstore.WatchProgress
 	// calls records each query so a test can assert the window and filter
 	// the handler asked for.
 	calls []fakeProgressQuery
@@ -157,21 +152,7 @@ func (f *fakeProgress) ListProgressPage(_ context.Context, _ int, profileID stri
 	if f.err != nil {
 		return nil, false, f.err
 	}
-	want := limit + 1
-	var matches []userstore.WatchProgress
-	for len(matches) < want {
-		batch := f.page(profileID, status, after, want)
-		for _, e := range batch {
-			if libraryID == 0 || f.libraries == nil || f.libraries[e.MediaItemID] == libraryID {
-				matches = append(matches, e)
-			}
-		}
-		if len(batch) < want {
-			break
-		}
-		last := batch[len(batch)-1]
-		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
-	}
+	matches := f.page(profileID, status, after, limit+1)
 	if len(matches) > limit {
 		return matches[:limit], true, nil
 	}
@@ -1206,6 +1187,12 @@ type fakeSessionService struct {
 	localLoginOff bool
 	// lastLogin is the input the most recent Login received.
 	lastLogin handlers.LoginInput
+	// networkPeer makes discovery list the network provider (installation
+	// 5), as for a request that came through that provider's overlay.
+	// NetworkSignIn signs laura in at installation 5 and answers installation
+	// 7 as a request from off the overlay; lastNetwork is its last input.
+	networkPeer bool
+	lastNetwork handlers.NetworkSignInInput
 }
 
 func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
@@ -1251,13 +1238,35 @@ func (f *fakeSessionService) EndImpersonation(_ context.Context, claims *auth.Cl
 
 func (f *fakeSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
 	sso := auth.LoginProviderInfo{ID: "plugin-3", DisplayName: "Example SSO", Mode: auth.ProviderModeOAuth, IconURL: "https://plugins.example.test/icon.svg", InstallationID: 3}
+	var discovery auth.ProviderDiscovery
 	if f.localLoginOff {
 		sso.Default = true
-		return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}, nil
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{sso}}
+	} else {
+		discovery = auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
+			{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
+		}, PasswordLogin: true}
 	}
-	return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{
-		{ID: "local", DisplayName: "Silo account", Mode: auth.ProviderModeCredentials, Default: true}, sso,
-	}, PasswordLogin: true}, nil
+	if f.networkPeer {
+		discovery.Providers = append(discovery.Providers, auth.LoginProviderInfo{
+			ID: "plugin:5:tailscale", DisplayName: "Tailscale", Mode: auth.ProviderModeNetwork, InstallationID: 5,
+			NetworkIdentity: &auth.NetworkIdentityPreview{DisplayName: "Laura Example", Username: "laura@example.test"},
+		})
+	}
+	return discovery, nil
+}
+
+func (f *fakeSessionService) NetworkSignIn(_ context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error) {
+	f.lastNetwork = in
+	switch in.InstallationID {
+	case 5:
+	case 7:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 403, Code: "network_identity_required", Message: "Open this server through the provider's network address to sign in this way"}
+	default:
+		return handlers.TokenPairView{}, &handlers.APIError{Status: 404, Code: "not_found", Message: "No enabled network sign-in provider has this installation"}
+	}
+	return handlers.TokenPairView{AccessToken: "acc", RefreshToken: "ref", ExpiresIn: 3600,
+		User: handlers.UserView{ID: 1, Username: "laura", Email: "laura@example.test", Role: "user", Permissions: []string{"marker_edit"}, DownloadAllowed: true}}, nil
 }
 
 func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.RefreshedTokensView, error) {

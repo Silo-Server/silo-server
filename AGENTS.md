@@ -295,18 +295,22 @@ authorization to open a PR does not authorize publishing private evidence.
 
 The one private link allowed is a maintainer's evidence page on
 `evidence.siloserver.org`, which only Silo-Server organization members can open
-after GitHub sign-in. Put it on one line at the end of a PR body's Validation
-section or a validation hand-off comment:
+after GitHub sign-in. Put it on one line in a PR body's Evidence section or a
+validation hand-off comment:
 `Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/`. Link the page;
 never attach or embed its media.
 
 - Keep one concern per pull request. Split changes that solve independent
   problems or can be reviewed and shipped separately.
-- Do not capture screenshots or record videos just to prepare a PR. Attach media
-  only when the user explicitly requests it. Verify UI behavior as needed without
-  turning verification into a media deliverable. Do not explain omitted media.
-- When the user requests PR media, check it for private information and upload it
-  to GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
+- Every pull request that changes what a user sees must include evidence, as
+  [Show visible changes](CONTRIBUTING.md#show-visible-changes) defines. That
+  covers UI and UX changes and changes to which items appear or what they show,
+  such as search results, home sections, recommendations, sorting, filtering,
+  metadata, or artwork. Use before-and-after captures of the same screen with the
+  same data, and a short recording when motion, timing, or focus matters. Write
+  `Evidence: none, no user-visible change` only when that is true.
+- Check evidence media for private information before posting, and upload it to
+  GitHub. Never commit PR-only assets such as `.github/pr-assets/`.
 - Put a `Closes #NNN` line in the body for every issue the pull request fully
   resolves (`Closes Silo-Server/<repo>#NNN` across repositories), so GitHub closes
   it on merge to `main`. `Related issue:` does not close anything; use it for the

@@ -714,6 +714,11 @@
         "font_bundle_url": {
           "type": "string",
           "description": "Attachment bundle needed to render an embedded ASS/SSA track with its authored typesetting."
+        },
+        "sync_key": {
+          "type": "string",
+          "description": "Names the track to the subtitle sync operations (/api/v2/subtitles/{media_file_id}/sync/{key}). Present on external and downloaded SRT, WebVTT, ASS, and SSA tracks; stable across sessions and inventory order.",
+          "pattern": "^(stored-[1-9][0-9]*|external-[0-9a-f]{64})$"
         }
       },
       "additionalProperties": true

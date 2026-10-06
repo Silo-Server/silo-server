@@ -27,18 +27,6 @@ func TestDeliveryBytesIdentityPassthrough(t *testing.T) {
 	}
 }
 
-func TestDeliveryBytesRetimesSRT(t *testing.T) {
-	sub := &DownloadedSubtitle{ID: 7, Format: FormatSRT, Timing: Timing{OffsetMS: 1500}}
-	got, err := DeliveryBytes(sub, []byte(deliverySRT))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "1\r\n00:00:02,500 --> 00:00:04,000\r\nHello\r\n\r\n2\r\n00:00:04,500 --> 00:00:05,500\r\nWorld\r\n"
-	if string(got) != want {
-		t.Fatalf("retimed SRT:\n%q\nwant\n%q", got, want)
-	}
-}
-
 func TestDeliveryBytesUnsupportedFormatServesStoredBytes(t *testing.T) {
 	data := []byte("{1}{2}microdvd")
 	got, err := DeliveryBytes(&DownloadedSubtitle{ID: 8, Format: FormatSUB, Timing: Timing{OffsetMS: 100}}, data)

@@ -44,6 +44,9 @@ describe("ImageSelectorTab", () => {
     const onImageApplied = vi.fn();
 
     render(<ImageSelectorTab item={item(itemType)} enabled onImageApplied={onImageApplied} />);
+    const notice = screen.queryByText(/check for plugin updates and update TMDB and TVDB/i);
+    if (itemType === "season") expect(notice).toBeInTheDocument();
+    else expect(notice).not.toBeInTheDocument();
     const tab = { poster: "Posters", backdrop: "Backdrops", logo: "Logos" }[type];
     fireEvent.click(screen.getByRole("button", { name: tab }));
     fireEvent.click(screen.getByRole("button", { name: "TMDB" }));
@@ -83,35 +86,5 @@ describe("ImageSelectorTab", () => {
     );
 
     expect(onApplyPendingChange).toHaveBeenCalledWith(true);
-  });
-
-  it("tells season editors to update metadata plugins when galleries are incomplete", () => {
-    mocks.useItemImages.mockReturnValue({
-      data: { images: [], current: {} },
-      isLoading: false,
-      isError: false,
-    });
-    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: false });
-
-    render(<ImageSelectorTab item={item("season")} enabled />);
-
-    expect(
-      screen.getByText(/check for plugin updates and update TMDB and TVDB/i),
-    ).toBeInTheDocument();
-  });
-
-  it("does not show the season plugin notice for series images", () => {
-    mocks.useItemImages.mockReturnValue({
-      data: { images: [], current: {} },
-      isLoading: false,
-      isError: false,
-    });
-    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: false });
-
-    render(<ImageSelectorTab item={item("series")} enabled />);
-
-    expect(
-      screen.queryByText(/check for plugin updates and update TMDB and TVDB/i),
-    ).not.toBeInTheDocument();
   });
 });

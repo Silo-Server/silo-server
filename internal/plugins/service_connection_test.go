@@ -27,43 +27,6 @@ type putGlobalConfigCall struct {
 	value          map[string]any
 }
 
-func TestPreserveStoredSecretsKeepsRedactedBlankAndAcceptsReplacement(t *testing.T) {
-	store := &fakeServiceConfigStore{configsByInstallation: map[int][]*RuntimeConfig{
-		7: {
-			{InstallationID: 7, Key: "account", Value: map[string]any{"api_key": "saved", "region": "old"}},
-		},
-	}}
-	service := &Service{configs: store}
-
-	merged, err := service.preserveStoredSecrets(
-		context.Background(),
-		7,
-		"account",
-		map[string]any{"api_key": "", "region": "new"},
-		[][]string{{"api_key"}},
-	)
-	if err != nil {
-		t.Fatalf("preserveStoredSecrets: %v", err)
-	}
-	if merged["api_key"] != "saved" || merged["region"] != "new" {
-		t.Fatalf("merged = %#v", merged)
-	}
-
-	replaced, err := service.preserveStoredSecrets(
-		context.Background(),
-		7,
-		"account",
-		map[string]any{"api_key": "clawrouter-e2e-secret"},
-		[][]string{{"api_key"}},
-	)
-	if err != nil {
-		t.Fatalf("preserveStoredSecrets replacement: %v", err)
-	}
-	if replaced["api_key"] != "clawrouter-e2e-secret" {
-		t.Fatalf("replacement = %#v", replaced)
-	}
-}
-
 func TestPreserveStoredSecretsMergesNestedObjectsWithoutMutatingInputs(t *testing.T) {
 	savedConnection := map[string]any{
 		"credentials": map[string]any{
@@ -631,28 +594,16 @@ func (f *fakeServiceConfigStore) CompareAndSwapGlobalConfig(
 }
 
 func TestServiceTestGlobalConfigUsesMergedDraftAndStopsTemporaryInstance(t *testing.T) {
-	originalProbe := runPluginConnectionCheck
-	t.Cleanup(func() {
-		runPluginConnectionCheck = originalProbe
-	})
-
-	probeCalls := 0
-	runPluginConnectionCheck = func(
-		_ context.Context,
-		client pluginClient,
-		manifest *pluginv1.PluginManifest,
-	) error {
-		probeCalls++
-		if client == nil {
-			t.Fatal("probe client = nil, want started client")
-		}
-		if manifest.GetPluginId() != "silo.metadb" {
-			t.Fatalf("manifest plugin id = %q, want silo.metadb", manifest.GetPluginId())
-		}
-		return nil
-	}
-
 	manifest := connectionTestManifest(t, "silo.metadb", "0.0.36")
+	metadata, err := structpb.NewStruct(map[string]any{
+		"default_priority": map[string]any{"audiobook": 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest.Capabilities = []*pluginv1.CapabilityDescriptor{{
+		Type: "metadata_provider.v1", Id: "audiobook-metadata", DisplayName: "Audiobook Metadata", Metadata: metadata,
+	}}
 	manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{"api_key":{"type":"string","format":"password"}},"required":["api_key"],"additionalProperties":false}`
 	installPath := writeInstalledPluginManifest(t, manifest)
 	host := &fakeServiceHost{
@@ -695,9 +646,6 @@ func TestServiceTestGlobalConfigUsesMergedDraftAndStopsTemporaryInstance(t *test
 		t.Fatalf("TestGlobalConfig() returned error: %v", err)
 	}
 
-	if probeCalls != 1 {
-		t.Fatalf("probe calls = %d, want 1", probeCalls)
-	}
 	if len(host.started) != 1 {
 		t.Fatalf("start calls = %d, want 1", len(host.started))
 	}
@@ -727,7 +675,27 @@ func TestServiceTestGlobalConfigUsesMergedDraftAndStopsTemporaryInstance(t *test
 		t.Fatalf("secondary enabled = %#v, want true", got)
 	}
 
-	err := service.TestGlobalConfigWithClears(
+	if err := service.TestGlobalConfig(context.Background(), 42, "connection", map[string]any{
+		"api_key": "second",
+	}); err != nil {
+		t.Fatalf("second TestGlobalConfig() returned error: %v", err)
+	}
+	if len(host.started) != 2 || len(host.stopped) != 2 {
+		t.Fatalf("temporary instances: starts=%d stops=%d, want 2 each", len(host.started), len(host.stopped))
+	}
+	if host.started[0].InstallationID == host.started[1].InstallationID {
+		t.Fatalf("temporary installation ids matched: %d", host.started[0].InstallationID)
+	}
+	for i, request := range host.started {
+		if request.InstallationID >= 0 || host.stopped[i] != request.InstallationID {
+			t.Fatalf("temporary instance %d: start=%d stop=%d", i, request.InstallationID, host.stopped[i])
+		}
+	}
+	if calls := host.startResult.(*fakePluginClient).metadataProviderCalls; calls != 0 {
+		t.Fatalf("audiobook-only metadata provider calls = %d, want 0", calls)
+	}
+
+	err = service.TestGlobalConfigWithClears(
 		context.Background(),
 		42,
 		"connection",
@@ -738,37 +706,8 @@ func TestServiceTestGlobalConfigUsesMergedDraftAndStopsTemporaryInstance(t *test
 	if !errors.As(err, &connectionErr) {
 		t.Fatalf("cleared required secret error = %v, want ConnectionTestError", err)
 	}
-	if probeCalls != 1 || len(host.started) != 1 {
-		t.Fatalf("invalid cleared config reached probe: probes=%d starts=%d", probeCalls, len(host.started))
-	}
-}
-
-func TestRunPluginConnectionCheckSkipsMovieProbeForAudiobookOnlyProvider(t *testing.T) {
-	metadata, err := structpb.NewStruct(map[string]any{
-		"default_priority": map[string]any{
-			"audiobook": 2,
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewStruct() error = %v", err)
-	}
-
-	manifest := connectionTestManifest(t, "silo.audiobook-metadata", "0.1.2")
-	manifest.Capabilities = []*pluginv1.CapabilityDescriptor{
-		{
-			Type:        "metadata_provider.v1",
-			Id:          "audiobook-metadata",
-			DisplayName: "Audiobook Metadata",
-			Metadata:    metadata,
-		},
-	}
-	client := &fakePluginClient{manifest: manifest}
-
-	if err := runPluginConnectionCheck(context.Background(), client, manifest); err != nil {
-		t.Fatalf("runPluginConnectionCheck() error = %v", err)
-	}
-	if client.metadataProviderCalls != 0 {
-		t.Fatalf("metadata provider calls = %d, want 0", client.metadataProviderCalls)
+	if len(host.started) != 2 || len(host.stopped) != 2 {
+		t.Fatalf("invalid cleared config started an instance: starts=%d stops=%d", len(host.started), len(host.stopped))
 	}
 }
 
@@ -817,23 +756,12 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 }
 
 func TestServiceTestGlobalConfigStopsTemporaryInstanceOnProbeFailure(t *testing.T) {
-	originalProbe := runPluginConnectionCheck
-	t.Cleanup(func() {
-		runPluginConnectionCheck = originalProbe
-	})
-
-	runPluginConnectionCheck = func(
-		_ context.Context,
-		_ pluginClient,
-		_ *pluginv1.PluginManifest,
-	) error {
-		return &ConnectionTestError{Message: "probe failed"}
-	}
+	probeErr := errors.New("metadata provider unavailable")
 
 	manifest := connectionTestManifest(t, "silo.metadb", "0.0.36")
 	installPath := writeInstalledPluginManifest(t, manifest)
 	host := &fakeServiceHost{
-		startResult: &fakePluginClient{manifest: manifest},
+		startResult: &fakePluginClient{manifest: manifest, metadataProviderErr: probeErr},
 	}
 	service := &Service{
 		installations: newFakeServiceInstallationStore(&Installation{
@@ -849,8 +777,8 @@ func TestServiceTestGlobalConfigStopsTemporaryInstanceOnProbeFailure(t *testing.
 	err := service.TestGlobalConfig(context.Background(), 19, "connection", map[string]any{
 		"api_key": "draft",
 	})
-	if err == nil {
-		t.Fatal("TestGlobalConfig() returned nil error, want probe failure")
+	if !errors.Is(err, probeErr) {
+		t.Fatalf("TestGlobalConfig() error = %v, want %v", err, probeErr)
 	}
 	if len(host.started) != 1 {
 		t.Fatalf("start calls = %d, want 1", len(host.started))
@@ -860,55 +788,6 @@ func TestServiceTestGlobalConfigStopsTemporaryInstanceOnProbeFailure(t *testing.
 	}
 	if host.stopped[0] != host.started[0].InstallationID {
 		t.Fatalf("stopped installation id = %d, want %d", host.stopped[0], host.started[0].InstallationID)
-	}
-}
-
-func TestServiceTestGlobalConfigUsesUniqueTemporaryInstallationIDs(t *testing.T) {
-	originalProbe := runPluginConnectionCheck
-	t.Cleanup(func() {
-		runPluginConnectionCheck = originalProbe
-	})
-
-	runPluginConnectionCheck = func(
-		_ context.Context,
-		_ pluginClient,
-		_ *pluginv1.PluginManifest,
-	) error {
-		return nil
-	}
-
-	manifest := connectionTestManifest(t, "silo.metadb", "0.0.36")
-	installPath := writeInstalledPluginManifest(t, manifest)
-	host := &fakeServiceHost{
-		startResult: &fakePluginClient{manifest: manifest},
-	}
-	service := &Service{
-		installations: newFakeServiceInstallationStore(&Installation{
-			ID:          5,
-			PluginID:    manifest.GetPluginId(),
-			Version:     manifest.GetVersion(),
-			InstallPath: installPath,
-			Enabled:     true,
-		}),
-		host: host,
-	}
-
-	if err := service.TestGlobalConfig(context.Background(), 5, "connection", map[string]any{
-		"api_key": "first",
-	}); err != nil {
-		t.Fatalf("first TestGlobalConfig() returned error: %v", err)
-	}
-	if err := service.TestGlobalConfig(context.Background(), 5, "connection", map[string]any{
-		"api_key": "second",
-	}); err != nil {
-		t.Fatalf("second TestGlobalConfig() returned error: %v", err)
-	}
-
-	if len(host.started) != 2 {
-		t.Fatalf("start calls = %d, want 2", len(host.started))
-	}
-	if host.started[0].InstallationID == host.started[1].InstallationID {
-		t.Fatalf("temporary installation ids matched: %d", host.started[0].InstallationID)
 	}
 }
 

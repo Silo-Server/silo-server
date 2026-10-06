@@ -136,6 +136,7 @@ type MediaFile struct {
 	MultiplePPSScanMtime *time.Time `json:"-"`
 	ProbeSource          string     // arrs, local
 	ProbeUpdatedAt       *time.Time
+	ProbeFailedAt        *time.Time // last local ffprobe rejected the file; cleared by a successful probe (see ProbeRejected)
 	MatchAttemptedAt     *time.Time
 	MissingSince         *time.Time
 	FirstSeenScanRunID   string
@@ -314,6 +315,20 @@ func (f *MediaFile) AudioOnlyProbeFacts() AudioOnlyProbeFacts {
 // audio evidence keep genuine MJPEG video from being normalized away.
 func (f *MediaFile) HasLegacyAttachedPictureVideo() bool {
 	return f.AudioOnlyProbeFacts().HasLegacyAttachedPictureVideo()
+}
+
+// ProbeRejected reports whether ffprobe rejected this file and no usable
+// stream metadata exists for it: no successful probe has been recorded and
+// nothing describes a video or audio stream. Such a file cannot be played until
+// it is replaced, as opposed to a file that has simply not been probed yet.
+// Rows that still carry stream metadata from an earlier probe or an import are
+// not rejected, so a transient probe failure never hides a known-good source.
+func (f *MediaFile) ProbeRejected() bool {
+	if f == nil || f.ProbeFailedAt == nil || f.ProbeUpdatedAt != nil {
+		return false
+	}
+	return strings.TrimSpace(f.CodecVideo) == "" && strings.TrimSpace(f.CodecAudio) == "" &&
+		len(f.VideoTracks) == 0 && len(f.AudioTracks) == 0
 }
 
 // IsAudioOnly reports whether a probed file carries no playable video stream —

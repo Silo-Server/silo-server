@@ -76,6 +76,7 @@ type EventConsumerClient struct {
 type AuthProviderClient struct {
 	client  pluginv1.AuthProviderClient
 	checks  pluginv1.AuthProviderChecksClient
+	network pluginv1.NetworkIdentityAuthClient
 	timeout time.Duration
 }
 
@@ -217,6 +218,7 @@ func (c *Client) AuthProvider(capabilityID string) (*AuthProviderClient, error) 
 	return &AuthProviderClient{
 		client:  c.rpc.AuthProvider(),
 		checks:  c.rpc.AuthProviderChecks(),
+		network: c.rpc.NetworkIdentityAuth(),
 		timeout: DefaultAuthTimeout,
 	}, nil
 }
@@ -440,6 +442,15 @@ func (c *AuthProviderClient) CheckAccount(ctx context.Context, req *pluginv1.Che
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.checks.CheckAccount(callCtx, req)
+}
+
+// AuthenticatePeer asks a network provider who the overlay peer of a request
+// it proxied is. Plugins without the "network" auth mode answer
+// codes.Unimplemented.
+func (c *AuthProviderClient) AuthenticatePeer(ctx context.Context, req *pluginv1.AuthenticatePeerRequest) (*pluginv1.AuthenticateResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.network.AuthenticatePeer(callCtx, req)
 }
 
 // EndSessionUrl asks the plugin for the provider logout URL. Plugins built

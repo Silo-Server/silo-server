@@ -1769,7 +1769,10 @@ failures preserve webhook status while omitting the URL. Successful reveals emit
 the v2 delivery path using the existing token and configured public base.
 
 Source timestamps use UTC milliseconds. Path rewrites remain an array; connection
-identity and stored source configuration retain their existing meanings. The web
+identity and stored source configuration retain their existing meanings.
+`webhook_last_received_at` counts provider Test events and deliveries the source
+accepted; a delivery dropped because the source or Autoscan was disabled does not
+update it (see [Autoscan delivery API](autoscan-delivery-api.md)). The web
 collects at most 100 pages of 100 sources, rejects missing/repeated continuations
 or overflow, and discards source URLs decoded after an authority change. Reads do
 not create sources, rotate tokens, dispatch events or update external providers.
@@ -1878,6 +1881,48 @@ canonical flag and its ETag. The profile-facing flag reader keeps its existing
 disabled default on read failure; the write fails closed without an atomic store.
 No first-party or internal writer is recorded, so no new UI or native flow is added.
 The bridge writer and profile section enforcement remain unchanged.
+
+### Offline-download preparation
+
+`GET /api/v2/admin/downloads/preparations` lists the server-side remux and
+transcode jobs that turn library files into offline downloads. Items come in
+this order: running jobs, jobs waiting to retry, the queue in claim order (with
+a 1-based `queue_position`), paused jobs in claim order (with `paused_at`), and
+jobs that failed in the last 24 hours, newest first. `limit` (1–500, default
+200) caps the items; `counts` (`running`, `queued`, `retrying`, `paused`,
+`failed_recent`) always covers every listed job, so a client can tell when items
+were cut. Each item carries its source and output
+recipe, the worker of the current or last attempt (`server` with the API node
+id, or `node` with the transcode node id and name), attempt counts, the last
+error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
+`speed`, `updated_at`) of a running job, `progress_unavailable` when the worker
+cannot report progress, the `log_session_id` its FFmpeg output is logged under,
+and the download rows waiting on it with their account, profile, and device.
+
+`POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
+take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
+distinct id in request order. `outcome` is `applied`, `unchanged` (already in
+the requested state), `not_found` (no such job is being prepared: it finished,
+was canceled, or never existed), or `not_applicable` (pausing or resuming a
+failed job). Pause keeps a job's queue position but no worker claims it until
+it is resumed; a running encode stops and restarts from the beginning on resume,
+and the stopped attempt does not count against the job. Its waiting downloads
+stay `preparing`. Resume returns the job to the queue, or to a retry backoff
+that has not elapsed. Cancel removes running, queued, retrying, paused, and
+failed jobs; every download still waiting on a canceled job becomes `failed`
+with `error_message` `Canceled by an administrator`. A job that finished
+preparing is never touched. The three operations are idempotent.
+
+`GET /api/v2/admin/downloads/preparations/capabilities` reports availability,
+the realtime channel (`download_preparations`), the failure window in seconds,
+and `controls` when pause, resume, and cancel are available. The admin-only channel publishes `download_preparation.changed`
+(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, is
+requeued, paused, resumed, or canceled, and when a user adds or removes a
+download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+five seconds per running job. The subscription snapshot is `null`; re-read the
+list after subscribing. See
+[preparation progress](downloads-api.md#preparation-progress-admin) for how the
+server records it.
 
 ### Sequenced administrator playback commands (v2)
 
@@ -2413,6 +2458,21 @@ no retry is performed. Missing writer503, invalid422 and masked uncertain500 rem
 separate. There is no revision precondition or replay identity. Reload and reconcile
 uncertain persistence before another explicit submission.
 
+debounce_seconds is the window in which autoscan drops repeat reports of a path.
+A report is dropped only when the same reported path in the same library was
+claimed within the window and still looks as it did at that claim: still missing,
+or a regular file with the same size, modification time and, on Unix, inode. A
+deleted file, or one whose size, modification time or inode changed, queues a
+scan. A rewrite that keeps the size and inode within the filesystem's timestamp
+resolution, or that a network mount's attribute cache hides, can still be
+dropped, as can a same-size, same-time replacement on filesystems that derive
+inode numbers from the path. Reports of existing directories are never dropped.
+Repeats do not extend the window, and 0 disables it. Claims live in Redis and
+are shared by all nodes; on mounts where each node assigns its own inode numbers
+(some FUSE and SMB setups), a repeat handled by a different node does not match
+and scans again. Without Redis, or when a Redis call fails, every report is
+processed.
+
 The web enable switch and advanced form capture body and authority, disable retry
 and authentication replay, and invalidate the canonical reader only for the active
 authority. Reschedule warnings distinguish stored settings from runtime outcome.
@@ -2502,10 +2562,17 @@ Update is last-write-wins with no revision/ordering receipt; optional webhook re
 can observe current state. Neither promises execution, scheduling, provider changes
 or durable job completion. The existing webhook setup operation remains separate.
 
-Actual Add/row edit/toggle callers capture copied body and draft authority before
-queueing, disable retry/authentication replay and fence late receipt/callback/cache effects.
-Row drafts retained across PIN replacement cannot submit under the new authority.
-Creation does not close or advance a newer dialog draft after an older acknowledgement.
+The web Add and Edit dialog and the list's enabled switch capture a copied, complete
+body and draft authority before queueing, disable retry/authentication replay and
+fence late receipt/callback/cache effects. A dialog draft retained across PIN
+replacement cannot submit under the new authority. Creation does not advance a dialog
+that was closed after the request was sent, and the dialog cannot be dismissed while
+its request is pending. Edit and the switch send a complete body from the cached source,
+so they wait while a write or source-list read for that source is in flight, and a
+successful update's readback replaces the cached source. A 422 is reported as a definite refusal, not as an uncertain
+outcome. The message is the problem's detail, or the first field detail when the
+detail says "see errors". The server refuses an invalid source with one fixed detail
+that does not name the setting.
 
 ### Autoscan source webhook lifecycle (v2)
 
@@ -2557,9 +2624,14 @@ worker409, and private start failures500. The operation is `non_retryable`: a re
 after the process task finishes can invoke providers again. After a lost response,
 inspect task/activity state before an explicit new command. No job Location is supplied.
 
-The existing poll honors autoscan enabled state and per-source interval floors, skips
-webhook sources, and records per-source provider/enqueue failures in activity without
-necessarily failing the overall task. A successful start does not promise provider
+A run started this way (or through `runAdminTask` for `autoscan_poll`) polls
+every enabled polling source immediately: per-source and default poll intervals apply
+only to scheduled runs. It still does nothing while Autoscan is disabled, skips
+disabled and webhook sources and any source whose poll is already running, and
+records per-source provider/enqueue failures in activity without necessarily failing
+the overall task. The frozen v1 entry points keep the interval behavior:
+`POST /api/v1/admin/autoscan/trigger` and `POST /api/v1/admin/tasks/{key}/run` still
+skip sources polled within their interval. A successful start does not promise provider
 success, new scan runs or completed downstream work. The web Run-now button captures
 profile authority before queueing, disables retries/auth replay, stays pending until
 acknowledgement and fences late feedback/invalidation under a changed authority.

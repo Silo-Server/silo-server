@@ -8,7 +8,6 @@ import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/set
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import {
   buildLibraryPlaybackMutations,
-  buildLibraryPlaybackSummaryFromState,
   createLibraryPlaybackEditorState,
 } from "./libraryPlaybackPreferences";
 
@@ -139,23 +138,6 @@ describe("library playback editor state", () => {
       ).subtitleLanguage,
     ).toBe("none");
     expect(createLibraryPlaybackEditorState({}).subtitleLanguage).toBe("inherit");
-  });
-
-  it("summarizes an untouched library as using profile defaults", () => {
-    expect(buildLibraryPlaybackSummaryFromState(createLibraryPlaybackEditorState({}))).toBe(
-      "Uses profile defaults",
-    );
-  });
-
-  it("summarizes only the overridden playback fields", () => {
-    expect(
-      buildLibraryPlaybackSummaryFromState({
-        audioLanguage: "ja",
-        subtitleLanguage: "en",
-        subtitleMode: "always",
-        showForcedSubtitles: "off",
-      }),
-    ).toBe("Audio: Japanese • Subtitles: English • Behavior: Always on • Forced subtitles: Off");
   });
 });
 

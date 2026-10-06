@@ -71,6 +71,7 @@ type metadataItemRepo interface {
 	GetByExternalID(ctx context.Context, tmdbID, imdbID, tvdbID, itemType string) (*models.MediaItem, error)
 	GetByTitleYearType(ctx context.Context, title string, year int, itemType string) (*models.MediaItem, error)
 	Upsert(ctx context.Context, item *models.MediaItem) error
+	SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error)
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
@@ -246,7 +247,7 @@ type metadataContentFileLister interface {
 type metadataServiceHooks struct {
 	process                   func(ctx context.Context, req ProcessRequest) (*ProcessResult, error)
 	createOrFindSkeleton      func(ctx context.Context, file *models.MediaFile, folderID int) (*skeletonResult, error)
-	updateItemStatus          func(ctx context.Context, contentID, status string) error
+	updateItemStatus          func(ctx context.Context, contentID, status string) (bool, error)
 	linkSeriesFilesToEpisodes func(ctx context.Context, seriesID string)
 	ensureSeriesEpisodeLinks  func(ctx context.Context, seriesID string) error
 	bulkEnrichmentTargets     func(ctx context.Context) ([]bulkEnrichmentTarget, error)
@@ -6144,6 +6145,49 @@ func applyFolderIDHints(res *skeletonResult, hints *naming.FolderIDHints) {
 	}
 }
 
+// groupOverrideProviderIDs returns the provider IDs an operator's group
+// override forces, or nil when it forces none.
+func groupOverrideProviderIDs(override *models.MediaGroupOverride) *naming.FolderIDHints {
+	if override == nil {
+		return nil
+	}
+	return mergeFolderIDHints(nil, &naming.FolderIDHints{
+		TmdbID: override.ForcedTmdbID,
+		ImdbID: override.ForcedImdbID,
+		TvdbID: override.ForcedTvdbID,
+	})
+}
+
+// applyGroupOverride forces an operator's group override onto a skeleton.
+// The override settles the group's identity, so an ambiguous skeleton becomes
+// matchable again; any other status is the item's own and is kept.
+func applyGroupOverride(res *skeletonResult, override *models.MediaGroupOverride) {
+	if res == nil || override == nil {
+		return
+	}
+	if override.ForcedType != "" {
+		res.Type = override.ForcedType
+	}
+	if override.ForcedTitle != "" {
+		res.Title = override.ForcedTitle
+	}
+	if override.ForcedYear > 0 {
+		res.Year = override.ForcedYear
+	}
+	if override.ForcedTmdbID != "" {
+		res.TmdbID = override.ForcedTmdbID
+	}
+	if override.ForcedImdbID != "" {
+		res.ImdbID = override.ForcedImdbID
+	}
+	if override.ForcedTvdbID != "" {
+		res.TvdbID = override.ForcedTvdbID
+	}
+	if res.ItemStatus == "ambiguous" { //nolint:goconst // Item statuses are literals throughout this package.
+		res.ItemStatus = "pending" //nolint:goconst // queueStatePending is a test-local constant.
+	}
+}
+
 func providerIDsFromSkeletonResult(res *skeletonResult) map[string]string {
 	if res == nil {
 		return nil
@@ -6346,7 +6390,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			}
 		}
 	}
-	hasGroupOverride := false
+	var groupOverride *models.MediaGroupOverride
 	if s.groupOverrideRepo != nil && contentGroupKey != "" {
 		override, err := s.groupOverrideRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
@@ -6357,26 +6401,8 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 				"error", err,
 			)
 		} else if override != nil {
-			hasGroupOverride = true
-			if override.ForcedType != "" {
-				res.Type = override.ForcedType
-			}
-			if override.ForcedTitle != "" {
-				res.Title = override.ForcedTitle
-			}
-			if override.ForcedYear > 0 {
-				res.Year = override.ForcedYear
-			}
-			if override.ForcedTmdbID != "" {
-				res.TmdbID = override.ForcedTmdbID
-			}
-			if override.ForcedImdbID != "" {
-				res.ImdbID = override.ForcedImdbID
-			}
-			if override.ForcedTvdbID != "" {
-				res.TvdbID = override.ForcedTvdbID
-			}
-			res.ItemStatus = "pending"
+			groupOverride = override
+			applyGroupOverride(res, override)
 		}
 	}
 	if res.Type == "" {
@@ -6412,6 +6438,11 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if folderIDs == nil && contentRootPath != "" && contentRootPath != observedRootPath {
 		folderIDs = naming.ParseFolderIDs(skeletonFolderAnchorName(contentRootPath, libraryRoots))
 	}
+	// A heuristic folder ID is a guess, so an operator's forced ID for the same
+	// provider beats it, as it does when the match worker reuses a linked item.
+	if folderIDs != nil {
+		folderIDs = mergeFolderIDHints(folderIDs, groupOverrideProviderIDs(groupOverride))
+	}
 
 	effectiveExternalIDs := folderIDs
 	if trustedIDs != nil {
@@ -6433,7 +6464,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// subsequent claim relink unrelated files. Let a scan rebuild that grouping
 	// before any catalog writes; operator overrides and explicit IDs establish
 	// identity independently of how the filename currently parses.
-	if !hasGroupOverride && scannedGroupIdentityChanged(scannedIdentity, file, effectiveExternalIDs, libraryRoots...) {
+	if groupOverride == nil && scannedGroupIdentityChanged(scannedIdentity, file, effectiveExternalIDs, libraryRoots...) {
 		return nil, errors.New("filename identity changed since the last scan; rescan the library to update file grouping")
 	}
 	if effectiveExternalIDs != nil {
@@ -6481,7 +6512,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			res.ItemStatus = "pending"
 		}
 	}
-	if effectiveExternalIDs == nil && !splitPinned {
+	if effectiveExternalIDs == nil && !splitPinned && !s.movieRootHasTaggedFile(ctx, folderID, observedRootPath, res.Type) {
 		// Record for admin diagnostics only — no longer bail out.
 		s.recordSkippedRoot(ctx, folderID, observedRootPath, skippedReasonMissingFolderIDs, file.FilePath)
 	}
@@ -6569,7 +6600,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// still form one resolved scanner group; reuse the series item another
 	// episode created instead of adding a provisional item per episode.
 	flatSeriesGroup := res.Type == "series" && contentGroupKey != "" && filepath.Clean(observedRootPath) == filepath.Clean(file.FilePath) &&
-		(hasGroupOverride || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved))
+		(groupOverride != nil || (scannedIdentity != nil && scannedIdentity.State == scannedGroupStateResolved))
 	if flatSeriesGroup {
 		existingContentID, err := s.seriesContentIDForGroup(ctx, folderID, groupKeyVersion, contentGroupKey, file.ID)
 		if err != nil {
@@ -6758,6 +6789,24 @@ func (s *MetadataService) folderTypeForSkeleton(ctx context.Context, folderID in
 	return folder.Type, nil
 }
 
+// movieRootHasTaggedFile reports whether another file of a movie root carries a
+// provider tag in its own name. A scan counts such a root as tagged, so an
+// untagged sibling version must not flag it again.
+func (s *MetadataService) movieRootHasTaggedFile(ctx context.Context, folderID int, observedRootPath, contentType string) bool {
+	if s == nil || s.fileRepo == nil || contentType != matchContentTypeMovie {
+		return false
+	}
+	files, err := s.fileRepo.ListByObservedRootPath(ctx, folderID, observedRootPath)
+	if err != nil {
+		slog.WarnContext(ctx, "metadata: failed to list root files for skipped-root check", "component", "metadata",
+			"folder_id", folderID,
+			"root_path", observedRootPath,
+			"error", err)
+		return false
+	}
+	return naming.AnyFileNameHasProviderTag(files)
+}
+
 // recordSkippedRoot records the root of file for admin diagnostics in
 // skipped_media_roots. Failures are logged and swallowed: diagnostics must
 // never block skeleton creation.
@@ -6892,32 +6941,29 @@ func (s *MetadataService) claimGroupAndRelink(
 	return s.groupClaimRepo.ClaimAndRelinkFiles(ctx, folderID, groupKeyVersion, contentGroupKey, contentID)
 }
 
-// updateItemStatus sets the status field on a media_items row.
-func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, status string) error {
+// updateItemStatus sets the status field on a media_items row that is not
+// matched, and reports whether the row changed. Neither a failed enrichment
+// retry nor an override settled a moment too late invalidates an accepted
+// catalog match: a matched item keeps its status, metadata, and ownership while
+// the queue records the retry failure. The repository checks that inside the
+// UPDATE, so a match stored while this runs is kept too. A missing item is an
+// error.
+func (s *MetadataService) updateItemStatus(ctx context.Context, contentID, status string) (bool, error) {
 	if s != nil && s.hooks.updateItemStatus != nil {
 		return s.hooks.updateItemStatus(ctx, contentID, status)
 	}
 	if s == nil || s.itemRepo == nil {
-		return fmt.Errorf("metadata item repository is not configured")
+		return false, fmt.Errorf("metadata item repository is not configured")
 	}
 	if strings.TrimSpace(contentID) == "" {
-		return fmt.Errorf("content id is required to update item status")
+		return false, fmt.Errorf("content id is required to update item status")
 	}
 
-	existing, err := s.itemRepo.GetByID(ctx, contentID)
+	changed, err := s.itemRepo.SetStatusUnlessMatched(ctx, contentID, status)
 	if err != nil {
-		return fmt.Errorf("loading item %s before status update: %w", contentID, err)
+		return false, fmt.Errorf("setting item %s to status %s: %w", contentID, status, err)
 	}
-	// A failed enrichment retry does not invalidate an accepted catalog match.
-	// Keep its metadata and ownership while the queue records the retry failure.
-	if status == "unmatched" && existing.Status == "matched" { //nolint:goconst // unmatchedStatus is a test-local constant.
-		return nil
-	}
-	existing.Status = status
-	if err := s.itemRepo.Upsert(ctx, existing); err != nil {
-		return fmt.Errorf("upserting item %s with status %s: %w", contentID, status, err)
-	}
-	return nil
+	return changed, nil
 }
 
 // upsertLibraryMembership creates a library membership for the given item

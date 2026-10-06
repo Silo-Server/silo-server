@@ -137,19 +137,6 @@ it("shows what the approver is approving and signs the TV in", async () => {
   ]);
 });
 
-it("follows an approval until the TV collects it", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  lookups = [pending, { ...pending, status: "approved" }, { ...pending, status: "consumed" }];
-  mount("/activate?code=48217730");
-  await screen.findByText("Sign in Living room TV?");
-  fireEvent.click(screen.getByRole("button", { name: "Sign in TV" }));
-  await screen.findByText("Done. Your TV is signing in.");
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(3000);
-  });
-  await screen.findByText("Your TV is signed in.");
-});
-
 it("follows an approval whose reload failed", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   lookups = [pending, new Error("offline") as never, { ...pending, status: "consumed" }];
@@ -267,8 +254,10 @@ it("declines with Not now", async () => {
 
 it("asks a signed-out approver to sign in and keeps the code", async () => {
   auth.user = null;
+  lookups = [{ ...pending, server_id: "3f2a9d5e-6b1c" }];
   mount("/activate?code=48217730");
   const link = await screen.findByRole("link", { name: "Sign in to approve" });
+  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
   expect(link.getAttribute("href")).toBe("/login?redirect=%2Factivate%3Fcode%3D48217730");
   expect(screen.queryByRole("button", { name: "Sign in TV" })).toBeNull();
 });
@@ -285,14 +274,6 @@ it("offers a phone the Silo app for a signed-out approval", async () => {
     `silo://device?server=3f2a9d5e-6b1c&url=${encodeURIComponent(window.location.origin)}&code=48217730`,
   );
   expect(screen.getByRole("link", { name: "Sign in to approve" })).toBeTruthy();
-});
-
-it("offers no app link on a computer", async () => {
-  auth.user = null;
-  lookups = [{ ...pending, server_id: "3f2a9d5e-6b1c" }];
-  mount("/activate?code=48217730");
-  await screen.findByRole("link", { name: "Sign in to approve" });
-  expect(screen.queryByRole("link", { name: "Open in the Silo app" })).toBeNull();
 });
 
 it("tells an admin viewing as someone to stop before approving", async () => {

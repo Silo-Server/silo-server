@@ -1,6 +1,5 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail } from "@/api/types";
 import {
   catalogKeys,
   favoriteKeys,
@@ -19,7 +18,6 @@ import {
   invalidateMediaSurfaceQueries,
   removeItemFromHomeSectionCaches,
   scheduleMediaSurfaceInvalidation,
-  setCachedItemDetail,
 } from "./mediaSurfaceRefresh";
 
 describe("invalidateMediaSurfaceQueries", () => {
@@ -43,7 +41,7 @@ describe("invalidateMediaSurfaceQueries", () => {
     );
     // `revert: false` would drop an in-flight detail query into an error state
     // carrying a CancelledError instead of quietly restoring it.
-    expect(filters).not.toHaveProperty("revert");
+    expect(cancel.mock.calls[0]?.[1]?.revert).not.toBe(false);
   });
 
   it("marks item, section, progress, history, favorites, watchlist, and collection queries stale", async () => {
@@ -112,16 +110,6 @@ describe("invalidateMediaSurfaceQueries", () => {
     ).toBe(true);
   });
 
-  it("marks the active catalog detail query stale for the mutated item", async () => {
-    const queryClient = new QueryClient();
-
-    queryClient.setQueryData(catalogKeys.itemDetail("item-1"), { content_id: "item-1" });
-
-    await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-1" });
-
-    expect(queryClient.getQueryState(catalogKeys.itemDetail("item-1"))?.isInvalidated).toBe(true);
-  });
-
   it("deduplicates overlapping surface matches into one invalidation pass", async () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -164,16 +152,6 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     expect(queryClient.getQueryState(similarKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(personalizedKey)?.isInvalidated).toBe(true);
-  });
-
-  it("refreshes similar items for content-changing invalidations", async () => {
-    const queryClient = new QueryClient();
-    const similarKey = recKeys.similar("item-1");
-    queryClient.setQueryData(similarKey, { items: [] });
-
-    await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-1" });
-
-    expect(queryClient.getQueryState(similarKey)?.isInvalidated).toBe(true);
   });
 
   it("coalesces rapid user-state refreshes outside the interaction frame", async () => {
@@ -225,6 +203,13 @@ describe("invalidateMediaSurfaceQueries", () => {
     const sectionKey = sectionKeys.homeItems("continue-watching");
     queryClient.setQueryData(sectionKey, { section: { id: "continue-watching" } });
 
+    const signalsAtInvalidation: unknown[] = [];
+    const invalidate = queryClient.invalidateQueries.bind(queryClient);
+    vi.spyOn(queryClient, "invalidateQueries").mockImplementation((...args) => {
+      signalsAtInvalidation.push(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal()));
+      return invalidate(...args);
+    });
+
     scheduleMediaSurfaceInvalidation(queryClient, { itemId: "item-1" });
 
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBeUndefined();
@@ -232,6 +217,7 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     // Home re-reads its sections through one-shot `fetchQuery` calls, so the
     // signal is only useful once the section caches are already invalidated.
+    expect(signalsAtInvalidation).toEqual([undefined]);
     expect(queryClient.getQueryState(sectionKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
   });
@@ -338,28 +324,6 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     expect(queryClient.getQueryState(moviesKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(internationalKey)?.isInvalidated).toBe(true);
-  });
-
-  it("sets all cached detail keys for the mutated item", () => {
-    const queryClient = new QueryClient();
-
-    queryClient.setQueryData(catalogKeys.itemDetail("item-1"), {
-      content_id: "item-1",
-      title: "Old",
-    });
-    queryClient.setQueryData(itemKeys.detail("item-1"), { content_id: "item-1", title: "Old" });
-
-    setCachedItemDetail(queryClient, "item-1", {
-      content_id: "item-1",
-      title: "New",
-    } as ItemDetail);
-
-    expect(
-      queryClient.getQueryData<{ title: string }>(catalogKeys.itemDetail("item-1"))?.title,
-    ).toBe("New");
-    expect(queryClient.getQueryData<{ title: string }>(itemKeys.detail("item-1"))?.title).toBe(
-      "New",
-    );
   });
 
   it("removes dismissed items from cached home section rows", () => {

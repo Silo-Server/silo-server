@@ -12,7 +12,7 @@ import {
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken, setProfileId, setProfileToken } from "@/api/client";
 import type { AutoscanSource } from "@/api/types";
-import { WebhookEndpointSection } from "./SourcesPanel";
+import { WebhookEndpointSection } from "./WebhookEndpoint";
 vi.mock("@/hooks/queries/admin/libraries", () => ({ useAdminLibraries: () => ({ data: [] }) }));
 const source: AutoscanSource = {
   id: "source-a",
@@ -36,16 +36,11 @@ function mount(initial = source) {
   });
   const view = (row: AutoscanSource) => (
     <QueryClientProvider client={client}>
-      <WebhookEndpointSection
-        source={row}
-        provider="auto"
-        onProviderChange={() => {}}
-        isSaving={false}
-      />
+      <WebhookEndpointSection source={row} />
     </QueryClientProvider>
   );
   const mounted = render(view(initial));
-  return { rerender: (row: AutoscanSource) => mounted.rerender(view(row)) };
+  return { client, rerender: (row: AutoscanSource) => mounted.rerender(view(row)) };
 }
 beforeEach(() => {
   localStorage.clear();
@@ -128,6 +123,44 @@ it("uncertain rotation hides old secret and disables copying and replacement", a
   );
   expect(screen.getByRole("button", { name: "Copy webhook URL" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Rotate webhook URL" })).toBeDisabled();
+});
+it("a failed rotation stays hidden through a failed re-read and recovers on a successful one", async () => {
+  const reply = (body: unknown) =>
+    new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  const current = { ...source, webhook_url: "/api/v2/autoscan/webhooks/current-synthetic" };
+  let readsFail = true;
+  const fetchMock = vi.fn((_url: unknown, init: RequestInit) => {
+    if (init.method === "POST") return Promise.reject(new Error("private-secret"));
+    if (readsFail) return Promise.resolve(new Response(null, { status: 500 }));
+    return Promise.resolve(reply({ items: [current], page: { has_more: false } }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const view = mount();
+  fireEvent.click(screen.getByRole("button", { name: "Rotate webhook URL" }));
+  fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
+  // The view that submitted the rotation asks for a re-read, and it fails.
+  await waitFor(() =>
+    expect(fetchMock.mock.calls.some(([, init]) => init.method !== "POST")).toBe(true),
+  );
+  const sources = () =>
+    view.client.getQueryCache().findAll({ queryKey: ["admin", "autoscan", "sources"] });
+  await waitFor(() => expect(sources()[0]?.state.status).toBe("error"));
+  expect(screen.getByLabelText("Webhook delivery URL")).toHaveValue(
+    "Reload this page before using or replacing this URL",
+  );
+  expect(screen.getByRole("button", { name: "Copy webhook URL" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Rotate webhook URL" })).toBeDisabled();
+
+  // A later successful read settles it, and the parent passes the fresh row.
+  readsFail = false;
+  await act(() => view.client.invalidateQueries({ queryKey: ["admin", "autoscan", "sources"] }));
+  await waitFor(() => expect(sources()[0]?.state.status).toBe("success"));
+  view.rerender((sources()[0]!.state.data as AutoscanSource[])[0]!);
+  expect(screen.getByLabelText("Webhook delivery URL")).toHaveValue(
+    `${window.location.origin}/api/v2/autoscan/webhooks/current-synthetic`,
+  );
+  expect(screen.getByRole("button", { name: "Copy webhook URL" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Rotate webhook URL" })).toBeEnabled();
 });
 it("confirmation opened under an old PIN cannot send or reveal the old secret", async () => {
   const fetchMock = vi.fn();

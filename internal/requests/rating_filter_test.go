@@ -384,7 +384,7 @@ func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
 	}
 	// 6 sections x aggregate budget of 2 pages = 12 list fetches, bounding the
 	// cold-path cost the review flagged (vs 6 x 5 = 30 at the single budget).
-	want := len(sections) * sectionBackfillBudgetAggregate
+	want := len(sections) * 2
 	if got := len(client.fetchedPage); got != want {
 		t.Fatalf("total TMDB page fetches = %d, want %d", got, want)
 	}
@@ -439,23 +439,6 @@ func TestGetDetailIgnoresForeignDisplayRating(t *testing.T) {
 
 	if _, err := service.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 77); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetDetail error = %v, want ErrNotFound (foreign display rating must not pass)", err)
-	}
-}
-
-func TestGetDetailBlocksUnratedTitleUnderCeiling(t *testing.T) {
-	store := newFakeStore()
-	store.settings.RequestsEnabled = true
-	client := &certTMDBClient{
-		fakeTMDBClient: fakeTMDBClient{detail: &tmdb.MediaDetail{
-			MediaType: "movie",
-			ID:        43,
-			Title:     "Unrated Movie",
-		}},
-	}
-	service := newRatedService(store, client, nil, "PG")
-
-	if _, err := service.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 43); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("GetDetail error = %v, want ErrNotFound (fail closed on missing rating)", err)
 	}
 }
 

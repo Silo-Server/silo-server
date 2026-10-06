@@ -1,5 +1,7 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
-import { compactDeviceCode, formatDeviceCode, spokenDeviceCode } from "./deviceCode";
+import { formatDeviceCode, spokenDeviceCode } from "./deviceCode";
 
 describe("device codes", () => {
   it("groups the code 4+4, upper-cased, keeping only its characters", () => {
@@ -7,10 +9,6 @@ describe("device codes", () => {
     expect(formatDeviceCode("ab-cd 12")).toBe("ABCD 12");
     expect(formatDeviceCode("abc")).toBe("ABC");
     expect(formatDeviceCode("ABCD12345678")).toBe("ABCD 1234");
-  });
-
-  it("compacts a grouped code", () => {
-    expect(compactDeviceCode("ABCD 1234")).toBe("ABCD1234");
   });
 
   it("spells the code one character at a time", () => {

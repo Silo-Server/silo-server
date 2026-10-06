@@ -53,13 +53,13 @@ export function CollectionPosterCard({
               <span className="line-clamp-3 font-medium">{collection.title}</span>
             </div>
           )}
-          <span className="bg-background/60 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[11px] font-bold backdrop-blur-sm">
+          <span className="bg-background/60 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
             {collection.item_count}
           </span>
         </div>
         {cardPresentation.caption !== "artwork" ? (
           <div className="px-0.5 pt-2.5">
-            <div className="truncate text-[13px] font-semibold">{collection.title}</div>
+            <div className="truncate text-[0.8125rem] font-semibold">{collection.title}</div>
             {cardPresentation.caption === "title_metadata" && isUserCollection ? (
               <div className="text-muted-foreground text-xs">User collection</div>
             ) : null}

@@ -48,7 +48,7 @@ type ItemsHandler struct {
 	images           *ImageCache
 	nextUpRepo       *catalog.NextUpRepository
 	browseRepo       *catalog.BrowseRepository
-	personRepo       *catalog.PersonRepository
+	personRepo       itemPersonRepository
 	detailSvc        *catalog.DetailService
 	durationSrc      probedDurationSource
 	itemRepo         itemRepoForBatchLoader
@@ -97,7 +97,6 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		images:       images,
 		nextUpRepo:   nextUpRepo,
 		browseRepo:   browseRepo,
-		personRepo:   personRepo,
 		detailSvc:    detailSvc,
 		durationSrc:  detailSvc,
 		itemRepo:     itemRepo,
@@ -111,7 +110,17 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 	if seasonRepo != nil {
 		h.seasonRepo = seasonRepo
 	}
+	if personRepo != nil {
+		h.personRepo = personRepo
+	}
 	return h
+}
+
+// itemPersonRepository is what GET /Items/{id} needs to answer a person.
+type itemPersonRepository interface {
+	GetVisible(ctx context.Context, id int64, filter catalog.AccessFilter) (*models.Person, error)
+	EnsureAccessible(ctx context.Context, id int64, filter catalog.AccessFilter) error
+	CountItemsByType(ctx context.Context, personID int64) (map[string]int, error)
 }
 
 // HandleViews serves GET /Users/{userId}/Views.
@@ -486,7 +495,10 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	person, err := h.personRepo.Get(r.Context(), personID)
+	// A person whose credits are all on titles the viewer cannot see reads as
+	// unknown, matching native person detail.
+	access := h.resolveAccessFilter(r.Context(), session)
+	person, err := h.personRepo.GetVisible(r.Context(), personID, access)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
@@ -547,7 +559,7 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 	if photoURL != "" {
 		// The signed tag authorizes anonymous image GETs, so mint it only for a
 		// viewer with a visible credit; the image route refuses everyone else.
-		err := h.personRepo.EnsureAccessible(r.Context(), personID, h.resolveAccessFilter(r.Context(), session))
+		err := h.personRepo.EnsureAccessible(r.Context(), personID, access)
 		switch {
 		case err == nil:
 			dto.ImageTags = map[string]string{compatImagePrimary: personPrimaryImageTag(h.mapper.imageTagSigner, routeID, person.PhotoPath, person.PhotoThumbhash)}

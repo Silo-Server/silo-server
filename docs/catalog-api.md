@@ -38,6 +38,17 @@ its existing alphabetical, unscoped search.
 as a view: when the person's metadata is incomplete or stale and no provider lookup
 ran recently, the server queues a background refresh.
 
+Person detail and `POST /api/v2/catalog/people/{id}/refresh` (`refreshPerson`)
+apply the same visibility rule as a v2 people search without `media_scope`: the
+viewer must be able to see at least one of the person's credits. Otherwise both
+answer `404`, exactly as for an unknown ID, so these routes do not return the
+name, biography, or photo of someone who appears only in titles the viewer cannot
+see. The v1 bridge routes `GET /api/v1/people/{id}` and
+`POST /api/v1/people/{id}/refresh`, and the Jellyfin-compatible `GET /Items/{id}`
+for a person, follow the same rule. The v1 bridge search `GET /api/v1/people?q=`
+lists only people the viewer can see this way and keeps its alphabetical order
+without exact-name ranking. The admin person routes are not filtered.
+
 Clients that warm a cache speculatively, such as web prefetching the cast of an
 open item, pass `prefetch=true`. A prefetch returns the same person but does not
 queue a refresh; missing metadata is left to the server's background sweep. Read
@@ -120,6 +131,20 @@ without `library_id` is unaffected, and so is `getWatchDetail`, watch-together
 selection, and the Jellyfin compatibility surface: an item always plays from its
 full accessible version list. No client change is needed: the setting only
 changes what an existing `library_id` request returns.
+
+## Episode files
+
+Each episode in `listSeasonEpisodes` and `listCatalogItemEpisodes` lists its
+accessible files with their quality facts. `unreadable` is present and `true`
+on a file the server could not read: ffprobe rejected it as empty, corrupt, or
+truncated, and no successful probe exists. Starting playback of that file
+falls back to another version of the episode the viewer may play; when there
+is none, it answers the terminal reason `source_unreadable` (see
+[Playback API](playback-api.md#start)). The field is cleared once the file is
+replaced and a scan or playback attempt probes it successfully. The web client
+marks an episode only when every one of its files is unreadable, since any
+readable version still plays. `/api/v1` episode listings do not carry the
+field.
 
 ## Section quality badges
 
@@ -307,6 +332,16 @@ while preserving metadata, viewer rollups, play targets and the `items` envelope
 Invalid booleans return `422 validation_failed`. The parameter does not apply
 to single-season or episode operations. Clients can use the capability to
 select text-only season lists; callers that omit it keep their existing behavior.
+
+## Play target season
+
+A v2 item detail whose `play_content_id` names an episode also carries
+`play_season_number`, that episode's season (`0` for specials). A client that
+opens a series or season on its play target can request that season's episode
+list without fetching the episode first. The season comes from the same query
+that chose the target. The field is absent when there is no play target or the
+target is not an episode; a client that finds it absent fetches the episode as
+before. Cards do not carry it, and the frozen v1 detail does not expose it.
 
 ## Collection membership titles
 

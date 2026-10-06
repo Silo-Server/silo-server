@@ -600,23 +600,6 @@ func (s *Service) recordMarkUnwatchedBatch(
 	return store.RemoveHistoryItems(ctx, profileID, targetIDs, time.Now().UTC())
 }
 
-// buildMarkPlayedBatchSQL returns the upsert that marks every media_item_id in
-// the unnest($3) array as completed for a given (user, profile). Extracted into
-// a helper so a SQL-shape unit test can pin the structure without standing up
-// Postgres.
-func buildMarkPlayedBatchSQL() (string, []any) {
-	return `
-        INSERT INTO user_watch_progress
-            (user_id, profile_id, media_item_id, completed, position_seconds, duration_seconds, updated_at)
-        SELECT $1, $2, mid, TRUE, 0, 0, $4
-        FROM unnest($3::text[]) AS mid
-        ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
-        SET completed = TRUE,
-            updated_at = EXCLUDED.updated_at
-        WHERE user_watch_progress.completed IS DISTINCT FROM TRUE
-           OR user_watch_progress.updated_at < EXCLUDED.updated_at`, nil
-}
-
 func (s *Service) addImportedHistoryIfMissing(
 	ctx context.Context,
 	store userstore.UserStore,

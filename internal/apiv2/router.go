@@ -79,155 +79,157 @@ type Dependencies struct {
 	// is fully registered. It cannot mutate or recover the sealed router.
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
 
-	DirectDownloads                 *DirectDownloadHandlers
-	ViewerSubtitleDelete            ViewerSubtitleDeleteService
-	OrderedApplePush                OrderedApplePushService
-	NotificationEmailVerification   NotificationEmailVerificationService
-	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
-	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
-	WatchTogetherSocket             WatchTogetherSocketService
-	WatchTogetherCreate             WatchTogetherCreateService
-	AdminAutoscanEvents             AdminAutoscanEventsService
-	AdminAutoscanScans              AdminAutoscanScansService
-	WatchTogetherSuggestionPromote  WatchTogetherSuggestionPromoteService
-	WatchTogetherSuggestionCreate   WatchTogetherSuggestionCreateService
-	AdminAutoscanConnectionDeletes  AdminAutoscanConnectionDeleteService
-	AdminAutoscanConnectionUpdate   AdminAutoscanConnectionUpdateService
-	AdminAutoscanConnectionCreation AdminAutoscanConnectionCreationService
-	AdminAutoscanRewrites           AdminAutoscanRewritesService
-	AdminAutoscanAvailableSources   AdminAutoscanAvailableSourcesService
-	AdminAuditLogs                  AdminAuditLogsService
-	ExternalSignIn                  ExternalSignInService
-	AdminOperationalLogs            AdminOperationalLogsService
-	AdminJellyfinCompatSettings     AdminJellyfinCompatSettingsService
-	OrderedAndroidPush              OrderedAndroidPushService
-	WatchTogetherSuggestionDelete   WatchTogetherSuggestionDeleteService
-	WatchTogetherClose              WatchTogetherCloseService
-	WatchTogetherRoomRead           WatchTogetherRoomReadService
-	WatchTogetherPolicy             WatchTogetherPolicyService
-	WatchTogetherJoin               WatchTogetherJoinService
-	WatchTogetherSelection          WatchTogetherSelectionService
-	WatchTogetherSourceFallback     WatchTogetherSourceFallbackService
-	WatchTogetherStage              WatchTogetherStageService
-	WatchTogetherStart              WatchTogetherStartService
-	WatchTogetherStop               WatchTogetherStopService
-	WatchTogetherSelectionMode      WatchTogetherSelectionModeService
-	WatchTogetherMemberState        WatchTogetherMemberStateService
-	WatchTogetherPicker             WatchTogetherPickerService
-	WatchTogetherCapability         WatchTogetherCapabilityService
-	WatchTogetherSuggestions        WatchTogetherSuggestionService
-	AdminSectionSettingsWrite       AdminSectionSettingsWriteService
-	AdminDashboardStats             AdminDashboardStatsService
-	AdminHardwareAcceleration       AdminHardwareAccelerationService
-	AdminDashboardLayout            AdminDashboardLayoutService
-	AdminDashboardLayoutResets      AdminDashboardLayoutResetService
-	AdminDashboardLayoutSaves       AdminDashboardLayoutSaveService
-	ScanControls                    ScanControlService
-	AuthProviderIconPublic          AuthProviderIconPublic
-	AdminPlaybackSessions           AdminPlaybackSessionService
-	AdminNodeSessions               AdminNodeSessionService
-	AdminPlaybackCommands           AdminPlaybackCommandService
-	AdminPlaybackTerminate          AdminPlaybackTerminateService
-	AdminAutoscanConnections        AdminAutoscanConnectionsService
-	AdminAutoscanInspection         AdminAutoscanInspectionService
-	AdminAutoscanSources            AdminAutoscanSourcesService
-	AutoscanDelivery                AutoscanDeliveryService
-	Onboarding                      OnboardingService
-	DownloadCreation                DownloadCreationService
-	AdminJellyfinCompatStatus       AdminJellyfinCompatStatusService
-	AdminSettingRead                AdminSettingReadService
-	AdminJellyfinCompatWeb          AdminJellyfinCompatWebService
-	AdminRateLimitsWrite            AdminRateLimitWriteService
-	AdminRateLimits                 AdminRateLimitReadService
-	DownloadSubscriptionMutations   DownloadSubscriptionMutationService
-	DownloadSubscriptionSync        DownloadSubscriptionSyncService
-	DiagnosticsChunks               DiagnosticsChunksService
-	DiagnosticsIngress              DiagnosticsIngressService
-	EventsSocket                    EventsSocketService
-	AdminLogsSocket                 AdminLogsSocketService
-	PlaybackControlSocket           PlaybackControlSocketService
-	EventsCapability                EventsCapabilityService
-	NetworkAccess                   NetworkAccessService
-	ServerIdentity                  ServerIdentityService
-	ServerConnections               ServerConnections
-	NotificationDestinationCreate   NotificationDestinationCreateService
-	AdminUnmatchedFiles             AdminUnmatchedFilesService
-	AdminCatalogImages              AdminCatalogImagesService
-	AdminCatalogMatch               AdminCatalogMatchService
-	AdminCatalogSplit               AdminCatalogSplitService
-	AdminMarkerContributions        AdminMarkerContributionsService
-	AdminMarkerProviders            AdminMarkerProvidersService
-	AdminMarkerHistory              AdminMarkerHistoryService
-	AdminEpisodeMarkers             AdminEpisodeMarkersService
-	DownloadSubscriptions           DownloadSubscriptionService
-	DownloadManifests               DownloadManifestService
-	DownloadDelivery                DownloadDeliveryService
-	Downloads                       DownloadRegistryService
-	DownloadProxyDelivery           func() bool
-	WebhookReceiver                 WebhookReceiverService
-	SubtitleAIReads                 SubtitleAIReadService
-	NotificationDiscordLinks        NotificationDiscordLinkService
-	NotificationEmailLinks          NotificationEmailLinkService
-	NotificationDestinationTests    NotificationDestinationTestService
-	AdminDevices                    AdminDeviceService
-	UserLibraries                   UserLibraryService
-	EbookAnnotations                EbookAnnotationService
-	AdminNotificationDiscord        AdminNotificationDiscordService
-	NotificationDestinations        NotificationDestinationService
-	EbookFiles                      EbookFileService
-	EbookConfig                     EbookConfigService
-	EbookProgress                   EbookProgressService
-	AdminItemMetadata               AdminItemMetadataService
-	AdminMetadataTranslation        AdminMetadataTranslationService
-	AdminPeople                     AdminPeopleService
-	AdminDiagnosticDownloads        AdminDiagnosticDownloadService
-	AdminJobArtifacts               AdminJobArtifactService
-	AdminJobArtifactSigner          *artworkurl.Signer
-	AdminDiagnosticReads            AdminDiagnosticReadsService
-	AdminDashboardInsights          AdminDashboardInsightsService
-	AdminNodesRead                  AdminNodesReadService
-	AdminNodeCommands               AdminNodeCommandsService
-	AdminNodeReload                 AdminNodeReloadService
-	AdminNodeConfiguration          AdminNodeConfigurationService
-	AdminServerStatus               AdminServerStatusService
-	AdminServerRestart              AdminServerRestartService
-	AdminBrandingAssets             AdminBrandingAssetService
-	AdminEmailTests                 AdminEmailTestService
-	AdminSourceWebhookLifecycle     AdminAutoscanWebhookLifecycleService
-	AdminAutoscanSettingsUpdates    AdminAutoscanSettingsUpdateService
-	AdminDiagnosticDeletes          AdminDiagnosticDeleteService
-	AdminAutoscanConnectionTests    AdminAutoscanConnectionTestService
-	AdminPluginRepositoryCreation   AdminPluginRepositoryCreationService
-	AdminPluginRepositoryUpdates    AdminPluginRepositoryUpdateService
-	AdminPluginRepositoryDeletes    AdminPluginRepositoryDeleteService
-	AdminPluginInventory            AdminPluginInventoryService
-	AdminPluginConfiguration        AdminPluginConfigurationService
-	AdminPluginLifecycle            AdminPluginLifecycleService
-	AdminPluginUploads              AdminPluginUploadService
-	AdminTelemetryParity            AdminTelemetryParityService
-	AdminPluginRepositories         AdminPluginRepositoriesService
-	AdminPluginCatalogSettings      AdminPluginCatalogSettingsService
-	AdminRecommendations            AdminRecommendationsService
-	AdminLiteraryWorks              AdminLiteraryWorkService
-	NotificationChannels            NotificationChannelService
-	NotificationRelay               NotificationRelayService
-	AdminNotificationPush           AdminNotificationPushService
-	NotificationInbox               NotificationInboxService
-	CompatConnectInfo               CompatConnectInfoService
-	AdminCatalogTransfer            AdminCatalogTransferService
-	AdminCatalogSearch              AdminCatalogSearchService
-	AdminSettingsChecks             AdminSettingsCheckService
-	AdminSettingsInspection         AdminSettingsInspectionService
-	AdminResourceSampler            AdminResourceSampler
-	AdminTaskJobs                   AdminTaskJobsService
-	AdminStorageTransition          AdminStorageTransitionService
-	AdminCatalogSources             AdminCatalogSourcesService
-	AdminFilesystem                 AdminFilesystemService
-	AdminTaskMetrics                AdminTaskMetricsService
-	AdminTasks                      AdminTaskService
-	AdminTaskHistory                AdminTaskHistoryService
-	Devices                         DeviceLoginService
-	Sessions                        SessionService
+	DirectDownloads                  *DirectDownloadHandlers
+	ViewerSubtitleDelete             ViewerSubtitleDeleteService
+	OrderedApplePush                 OrderedApplePushService
+	NotificationEmailVerification    NotificationEmailVerificationService
+	AdminAutoscanSourceDeletes       AdminAutoscanSourceDeleteService
+	AdminAutoscanSourceWrites        AdminAutoscanSourceWriteService
+	WatchTogetherSocket              WatchTogetherSocketService
+	WatchTogetherCreate              WatchTogetherCreateService
+	AdminAutoscanEvents              AdminAutoscanEventsService
+	AdminAutoscanScans               AdminAutoscanScansService
+	WatchTogetherSuggestionPromote   WatchTogetherSuggestionPromoteService
+	WatchTogetherSuggestionCreate    WatchTogetherSuggestionCreateService
+	AdminAutoscanConnectionDeletes   AdminAutoscanConnectionDeleteService
+	AdminAutoscanConnectionUpdate    AdminAutoscanConnectionUpdateService
+	AdminAutoscanConnectionCreation  AdminAutoscanConnectionCreationService
+	AdminAutoscanRewrites            AdminAutoscanRewritesService
+	AdminAutoscanAvailableSources    AdminAutoscanAvailableSourcesService
+	AdminAuditLogs                   AdminAuditLogsService
+	ExternalSignIn                   ExternalSignInService
+	AdminOperationalLogs             AdminOperationalLogsService
+	AdminJellyfinCompatSettings      AdminJellyfinCompatSettingsService
+	OrderedAndroidPush               OrderedAndroidPushService
+	WatchTogetherSuggestionDelete    WatchTogetherSuggestionDeleteService
+	WatchTogetherClose               WatchTogetherCloseService
+	WatchTogetherRoomRead            WatchTogetherRoomReadService
+	WatchTogetherPolicy              WatchTogetherPolicyService
+	WatchTogetherJoin                WatchTogetherJoinService
+	WatchTogetherSelection           WatchTogetherSelectionService
+	WatchTogetherSourceFallback      WatchTogetherSourceFallbackService
+	WatchTogetherStage               WatchTogetherStageService
+	WatchTogetherStart               WatchTogetherStartService
+	WatchTogetherStop                WatchTogetherStopService
+	WatchTogetherSelectionMode       WatchTogetherSelectionModeService
+	WatchTogetherMemberState         WatchTogetherMemberStateService
+	WatchTogetherPicker              WatchTogetherPickerService
+	WatchTogetherCapability          WatchTogetherCapabilityService
+	WatchTogetherSuggestions         WatchTogetherSuggestionService
+	AdminSectionSettingsWrite        AdminSectionSettingsWriteService
+	AdminDashboardStats              AdminDashboardStatsService
+	AdminHardwareAcceleration        AdminHardwareAccelerationService
+	AdminDashboardLayout             AdminDashboardLayoutService
+	AdminDashboardLayoutResets       AdminDashboardLayoutResetService
+	AdminDashboardLayoutSaves        AdminDashboardLayoutSaveService
+	ScanControls                     ScanControlService
+	AuthProviderIconPublic           AuthProviderIconPublic
+	AdminPlaybackSessions            AdminPlaybackSessionService
+	AdminDownloadPreparations        AdminDownloadPreparationService
+	AdminDownloadPreparationControls AdminDownloadPreparationControlService
+	AdminNodeSessions                AdminNodeSessionService
+	AdminPlaybackCommands            AdminPlaybackCommandService
+	AdminPlaybackTerminate           AdminPlaybackTerminateService
+	AdminAutoscanConnections         AdminAutoscanConnectionsService
+	AdminAutoscanInspection          AdminAutoscanInspectionService
+	AdminAutoscanSources             AdminAutoscanSourcesService
+	AutoscanDelivery                 AutoscanDeliveryService
+	Onboarding                       OnboardingService
+	DownloadCreation                 DownloadCreationService
+	AdminJellyfinCompatStatus        AdminJellyfinCompatStatusService
+	AdminSettingRead                 AdminSettingReadService
+	AdminJellyfinCompatWeb           AdminJellyfinCompatWebService
+	AdminRateLimitsWrite             AdminRateLimitWriteService
+	AdminRateLimits                  AdminRateLimitReadService
+	DownloadSubscriptionMutations    DownloadSubscriptionMutationService
+	DownloadSubscriptionSync         DownloadSubscriptionSyncService
+	DiagnosticsChunks                DiagnosticsChunksService
+	DiagnosticsIngress               DiagnosticsIngressService
+	EventsSocket                     EventsSocketService
+	AdminLogsSocket                  AdminLogsSocketService
+	PlaybackControlSocket            PlaybackControlSocketService
+	EventsCapability                 EventsCapabilityService
+	NetworkAccess                    NetworkAccessService
+	ServerIdentity                   ServerIdentityService
+	ServerConnections                ServerConnections
+	NotificationDestinationCreate    NotificationDestinationCreateService
+	AdminUnmatchedFiles              AdminUnmatchedFilesService
+	AdminCatalogImages               AdminCatalogImagesService
+	AdminCatalogMatch                AdminCatalogMatchService
+	AdminCatalogSplit                AdminCatalogSplitService
+	AdminMarkerContributions         AdminMarkerContributionsService
+	AdminMarkerProviders             AdminMarkerProvidersService
+	AdminMarkerHistory               AdminMarkerHistoryService
+	AdminEpisodeMarkers              AdminEpisodeMarkersService
+	DownloadSubscriptions            DownloadSubscriptionService
+	DownloadManifests                DownloadManifestService
+	DownloadDelivery                 DownloadDeliveryService
+	Downloads                        DownloadRegistryService
+	DownloadProxyDelivery            func() bool
+	WebhookReceiver                  WebhookReceiverService
+	SubtitleAIReads                  SubtitleAIReadService
+	NotificationDiscordLinks         NotificationDiscordLinkService
+	NotificationEmailLinks           NotificationEmailLinkService
+	NotificationDestinationTests     NotificationDestinationTestService
+	AdminDevices                     AdminDeviceService
+	UserLibraries                    UserLibraryService
+	EbookAnnotations                 EbookAnnotationService
+	AdminNotificationDiscord         AdminNotificationDiscordService
+	NotificationDestinations         NotificationDestinationService
+	EbookFiles                       EbookFileService
+	EbookConfig                      EbookConfigService
+	EbookProgress                    EbookProgressService
+	AdminItemMetadata                AdminItemMetadataService
+	AdminMetadataTranslation         AdminMetadataTranslationService
+	AdminPeople                      AdminPeopleService
+	AdminDiagnosticDownloads         AdminDiagnosticDownloadService
+	AdminJobArtifacts                AdminJobArtifactService
+	AdminJobArtifactSigner           *artworkurl.Signer
+	AdminDiagnosticReads             AdminDiagnosticReadsService
+	AdminDashboardInsights           AdminDashboardInsightsService
+	AdminNodesRead                   AdminNodesReadService
+	AdminNodeCommands                AdminNodeCommandsService
+	AdminNodeReload                  AdminNodeReloadService
+	AdminNodeConfiguration           AdminNodeConfigurationService
+	AdminServerStatus                AdminServerStatusService
+	AdminServerRestart               AdminServerRestartService
+	AdminBrandingAssets              AdminBrandingAssetService
+	AdminEmailTests                  AdminEmailTestService
+	AdminSourceWebhookLifecycle      AdminAutoscanWebhookLifecycleService
+	AdminAutoscanSettingsUpdates     AdminAutoscanSettingsUpdateService
+	AdminDiagnosticDeletes           AdminDiagnosticDeleteService
+	AdminAutoscanConnectionTests     AdminAutoscanConnectionTestService
+	AdminPluginRepositoryCreation    AdminPluginRepositoryCreationService
+	AdminPluginRepositoryUpdates     AdminPluginRepositoryUpdateService
+	AdminPluginRepositoryDeletes     AdminPluginRepositoryDeleteService
+	AdminPluginInventory             AdminPluginInventoryService
+	AdminPluginConfiguration         AdminPluginConfigurationService
+	AdminPluginLifecycle             AdminPluginLifecycleService
+	AdminPluginUploads               AdminPluginUploadService
+	AdminTelemetryParity             AdminTelemetryParityService
+	AdminPluginRepositories          AdminPluginRepositoriesService
+	AdminPluginCatalogSettings       AdminPluginCatalogSettingsService
+	AdminRecommendations             AdminRecommendationsService
+	AdminLiteraryWorks               AdminLiteraryWorkService
+	NotificationChannels             NotificationChannelService
+	NotificationRelay                NotificationRelayService
+	AdminNotificationPush            AdminNotificationPushService
+	NotificationInbox                NotificationInboxService
+	CompatConnectInfo                CompatConnectInfoService
+	AdminCatalogTransfer             AdminCatalogTransferService
+	AdminCatalogSearch               AdminCatalogSearchService
+	AdminSettingsChecks              AdminSettingsCheckService
+	AdminSettingsInspection          AdminSettingsInspectionService
+	AdminResourceSampler             AdminResourceSampler
+	AdminTaskJobs                    AdminTaskJobsService
+	AdminStorageTransition           AdminStorageTransitionService
+	AdminCatalogSources              AdminCatalogSourcesService
+	AdminFilesystem                  AdminFilesystemService
+	AdminTaskMetrics                 AdminTaskMetricsService
+	AdminTasks                       AdminTaskService
+	AdminTaskHistory                 AdminTaskHistoryService
+	Devices                          DeviceLoginService
+	Sessions                         SessionService
 	// PluginLaunch mints the plugin access cookie token (*handlers.AuthHandler).
 	PluginLaunch          PluginLaunchService
 	OAuth                 OAuthService
@@ -428,6 +430,8 @@ type Dependencies struct {
 	// CatalogTrailers answers the trailer capability and refresh action
 	// (*handlers.ItemsHandler).
 	CatalogTrailers CatalogTrailerService
+	// Shuffles starts and advances shuffles (*shuffle.Service).
+	Shuffles ShuffleAPI
 	// MetadataAI answers the metadata AI capability and the on-view
 	// translation action (*handlers.MetadataAIHandler).
 	MetadataAI MetadataAIService
@@ -1107,8 +1111,8 @@ type MetadataAIService interface {
 // operations use.
 type PeopleService interface {
 	SearchPeopleScoped(ctx context.Context, query string, limit int, mediaScope string, filter mediacatalog.AccessFilter) ([]handlers.PersonView, error)
-	Person(ctx context.Context, id int64, queueRefresh bool) (handlers.PersonView, error)
-	RefreshPerson(ctx context.Context, userID int, id int64) error
+	Person(ctx context.Context, id int64, queueRefresh bool, filter mediacatalog.AccessFilter) (handlers.PersonView, error)
+	RefreshPerson(ctx context.Context, userID int, id int64, filter mediacatalog.AccessFilter) error
 }
 
 // LiteraryWorkService is the slice of *handlers.LiteraryWorkHandler the work
@@ -1162,6 +1166,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 	TypeLastSignInMethod.ID:        TypeLastSignInMethod,
 	TypeProviderUnavailable.ID:     TypeProviderUnavailable,
 	TypeAlreadyLinked.ID:           TypeAlreadyLinked,
+	TypeNetworkIdentityRequired.ID: TypeNetworkIdentityRequired,
 }
 
 // OAuthService is the slice of *auth.OAuthHandler the OAuth operations use:
@@ -1201,6 +1206,9 @@ type SessionService interface {
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)
 	Signup(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
+	// NetworkSignIn signs in the overlay peer of the request through a
+	// network identity provider.
+	NetworkSignIn(ctx context.Context, in handlers.NetworkSignInInput) (handlers.TokenPairView, error)
 }
 
 // DeviceLoginService is the slice of *handlers.AuthHandler the device-pairing

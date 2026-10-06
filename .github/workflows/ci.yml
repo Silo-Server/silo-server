@@ -9,9 +9,11 @@ on:
       # here first; the merge commits need the same gate as main.
       - apiv2
   workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -24,13 +26,17 @@ env:
   # and go.mod tracks Go closely enough that this repo is regularly ahead.
   GOLANGCI_LINT_VERSION: v2.12.2
 
-# The default token is read-write. Nothing here needs to write, and a token
-# that cannot push is one fewer thing a compromised dependency can reach.
+# The default token is read-write. Only the cache prune job writes, and only
+# to the Actions cache; every other job keeps a read-only token, which is one
+# fewer thing a compromised dependency can reach.
 permissions:
   contents: read
 
 jobs:
   ci:
+    permissions:
+      actions: write
+      contents: read
     uses: Silo-Server/silo-server/.github/workflows/trusted-linux-ci.yml@main
     with:
       self_hosted: false

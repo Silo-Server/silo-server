@@ -346,6 +346,7 @@ type PlaybackVariantPart struct {
 type CatalogItemDetail struct {
 	Themes *ThemeSongSet `json:"themes,omitempty"`
 	CatalogItem
+	PlaySeasonNumber                *int                                 `json:"play_season_number,omitempty" doc:"The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise"`
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
@@ -489,6 +490,7 @@ type EpisodeFile struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	Unreadable    bool   `json:"unreadable,omitempty" doc:"Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully."`
 }
 
 // Episode is one episode row of a season listing.
@@ -1329,8 +1331,8 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 		ratingSources = shownRatingSources(ratingSources, sel)
 	}
 	out := CatalogItemDetail{
-		CatalogItem: card,
-		SortTitle:   d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
+		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
+		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline, PendingTranslationLanguage: d.PendingTranslationLanguage,
 		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		FirstAirDate: d.FirstAirDate, AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,
 		AirDate: d.AirDate, IsSpecials: d.IsSpecials, UserData: watchRollupOf(d.SeasonUserData), UserRating: d.UserRating,
@@ -1371,7 +1373,7 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 			UserData: watchRollupOf(e.UserData), OverlaySummary: catalogOverlayOf(e.OverlaySummary)}
 		for _, f := range e.Files {
 			ep.Files = append(ep.Files, EpisodeFile{FileID: IDFromInt(int64(f.FileID)), Resolution: f.Resolution, CodecVideo: f.CodecVideo, HDR: f.HDR,
-				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize})
+				AudioChannels: f.AudioChannels, Container: f.Container, FileSize: f.FileSize, Unreadable: f.Unreadable})
 		}
 		out = append(out, ep)
 	}
