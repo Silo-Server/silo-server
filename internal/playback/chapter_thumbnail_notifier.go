@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 )
 
@@ -57,8 +56,7 @@ func (n *ChapterThumbnailNotifier) ChapterThumbnailReady(
 		return
 	}
 
-	key := strings.Replace(thumbnailPath, "/original.", "/w300.", 1)
-	thumbnailURL, err := n.presign(ctx, key, n.ttl)
+	thumbnailURL, err := n.presign(ctx, thumbnailPath, n.ttl)
 	if err != nil {
 		slog.WarnContext(ctx,
 			"failed to presign chapter thumbnail for realtime event", "component", "playback",

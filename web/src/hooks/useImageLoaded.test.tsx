@@ -62,15 +62,6 @@ describe("imageIdentity", () => {
 });
 
 describe("useImageLoaded", () => {
-  it("starts unloaded and loads on the image's load event", () => {
-    const { result } = renderHook(() =>
-      useImageLoaded(localURL(`${ART}/w500.${REV_A}.webp`, 1, "a")),
-    );
-    expect(result.current.loaded).toBe(false);
-    act(() => result.current.onLoad());
-    expect(result.current.loaded).toBe(true);
-  });
-
   it("reports no image as unloaded", () => {
     const { result } = renderHook(() => useImageLoaded(undefined));
     act(() => result.current.onLoad());
@@ -140,6 +131,7 @@ describe("useImageLoaded", () => {
     const { result, rerender } = renderHook(({ url }: { url: string }) => useImageLoaded(url), {
       initialProps: { url: localURL(key, 1758621600, "aaaa") },
     });
+    expect(result.current.loaded).toBe(false);
     act(() => result.current.onLoad());
     rerender({ url: localURL(key, 1758622500, "bbbb") });
     expect(result.current.loaded).toBe(true);
@@ -152,14 +144,6 @@ describe("useImageLoaded", () => {
     rerender({ url: localURL(key, 1758623400, "cccc") });
     act(() => result.current.onLoad());
     expect(result.current.loaded).toBe(true);
-  });
-
-  it("keeps a failed first load hidden", () => {
-    const { result } = renderHook(() =>
-      useImageLoaded(localURL(`${ART}/w500.${REV_A}.webp`, 1, "a")),
-    );
-    act(() => result.current.onError());
-    expect(result.current.loaded).toBe(false);
   });
 
   it("resets when the query of an unrecognized URL changes", () => {

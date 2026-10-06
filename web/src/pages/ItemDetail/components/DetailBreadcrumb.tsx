@@ -28,13 +28,13 @@ export default function DetailBreadcrumb({ segments }: DetailBreadcrumbProps) {
                 <ViewTransitionLink
                   to={segment.href}
                   up
-                  className="text-muted-foreground hover:text-foreground text-[13px] transition-colors"
+                  className="text-muted-foreground hover:text-foreground text-[0.8125rem] transition-colors"
                 >
                   {segment.label}
                 </ViewTransitionLink>
               ) : (
                 <span
-                  className="text-muted-foreground/60 text-[13px]"
+                  className="text-muted-foreground/60 text-[0.8125rem]"
                   {...(isLast ? { "aria-current": "page" as const } : {})}
                 >
                   {segment.label}

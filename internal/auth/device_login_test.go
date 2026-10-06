@@ -71,6 +71,7 @@ func TestValidateDeviceLoginDecisionTerminalStates(t *testing.T) {
 		{status: DeviceLoginStatusApproved},
 		{status: DeviceLoginStatusDenied, want: ErrDeviceLoginDenied},
 		{status: DeviceLoginStatusConsumed, want: ErrDeviceLoginConsumed},
+		{status: DeviceLoginStatusCanceled, want: ErrDeviceLoginCanceled},
 		{status: "unexpected", want: ErrDeviceLoginConflict},
 	}
 	for _, tt := range tests {

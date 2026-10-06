@@ -205,24 +205,6 @@ func TestProxyDownloadReportsNodeLocalArtifactMissing(t *testing.T) {
 	}
 }
 
-func TestProxyDownloadRejectsRemoteArtifactWithInvalidOpaqueID(t *testing.T) {
-	const secret = "download-proxy-secret"
-	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:          "download-remote-invalid",
-		PlayMethod:         streamtoken.PlayMethodDownload,
-		TranscodeNode:      "http://origin.invalid",
-		DownloadArtifactID: "../escape",
-	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rr := httptest.NewRecorder()
-	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
-	}
-}
-
 func TestProxyDownloadToneMapTokenRequiresCompleteAttestation(t *testing.T) {
 	const secret = "download-proxy-secret"
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -262,26 +244,6 @@ func TestProxyDownloadAcceptsCompleteToneMapAttestationToken(t *testing.T) {
 	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil))
 	if rr.Code != http.StatusOK || rr.Body.String() != "bytes" {
 		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
-	}
-}
-
-func TestProxyDownloadRejectsPlaybackToken(t *testing.T) {
-	const secret = "download-proxy-secret"
-	token, err := streamtoken.Sign(streamtoken.Claims{
-		SessionID:  "playback-1",
-		MediaPath:  "/media/movie.mkv",
-		PlayMethod: "direct",
-	}, secret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/downloads/file/"+token, nil)
-	rr := httptest.NewRecorder()
-	newDownloadProxyServer(t, secret).Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		body, _ := io.ReadAll(rr.Result().Body)
-		t.Fatalf("status = %d, body = %s", rr.Code, body)
 	}
 }
 

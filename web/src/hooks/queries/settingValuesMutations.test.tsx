@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { deviceKeys, settingsKeys } from "./keys";
+import { deviceKeys, mediaSurfaceKeys, sectionKeys, settingsKeys } from "./keys";
 import { useClearSettingValue, useSetSettingValue } from "./settingValues";
 
 const v2Mock = vi.hoisted(() => vi.fn());
@@ -27,6 +27,72 @@ function createHarness() {
 describe("typed setting mutations", () => {
   beforeEach(() => {
     v2Mock.mockReset();
+  });
+
+  it.each([true, false])(
+    "refreshes Home after an unmounted preference save (%s)",
+    async (value) => {
+      let resolveRequest!: (value: object) => void;
+      v2Mock.mockReturnValueOnce(
+        new Promise<object>((resolve) => {
+          resolveRequest = resolve;
+        }),
+      );
+      const { queryClient, wrapper } = createHarness();
+      const homeKey = sectionKeys.homeItems("recent");
+      queryClient.setQueryData(homeKey, { section: { items: [{ content_id: "watched" }] } });
+      queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+      const { result, unmount } = renderHook(() => useSetSettingValue(), { wrapper });
+
+      let save!: Promise<unknown>;
+      act(() => {
+        save = result.current.mutateAsync({
+          key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+          value,
+          identity: { scope: "profile" },
+        });
+      });
+      await waitFor(() => expect(v2Mock).toHaveBeenCalled());
+      unmount();
+      resolveRequest({});
+      await save;
+
+      expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+    },
+  );
+
+  it("refreshes Home when the preference is cleared", async () => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const homeKey = sectionKeys.homeItems("recent");
+    queryClient.setQueryData(homeKey, { section: { items: [] } });
+    const { result } = renderHook(() => useClearSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+  });
+
+  it("keeps Home cached after an unrelated setting changes", async () => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const homeKey = sectionKeys.homeItems("recent");
+    queryClient.setQueryData(homeKey, { section: { items: [] } });
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_THEME,
+        value: "dark",
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBeUndefined();
   });
 
   it("does not invalidate effective settings after a definitive rejected write", async () => {

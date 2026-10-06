@@ -149,6 +149,9 @@ func TestStreamDenyWritesMarkerWithTokenLifetime(t *testing.T) {
 	if !deny.Denied(t.Context(), "sid-1") {
 		t.Fatal("denied session reported as allowed")
 	}
+	if gets, sets := client.counts(); gets != 0 || sets != 1 {
+		t.Fatalf("gets = %d, sets = %d; want the deny to prime the cache with no lookup", gets, sets)
+	}
 	if deny.Denied(t.Context(), "sid-2") {
 		t.Fatal("unrelated session reported as denied")
 	}
@@ -186,17 +189,6 @@ func TestStreamDenyCachesLookupsPerSession(t *testing.T) {
 	}
 	if gets, _ := client.counts(); gets != 3 {
 		t.Fatalf("gets = %d, want a lookup for the second session", gets)
-	}
-}
-
-func TestStreamDenyLocalDenyIsVisibleWithoutLookup(t *testing.T) {
-	deny, client, _, _ := newTestStreamDeny(t)
-	deny.Deny(t.Context(), "sid-1")
-	if !deny.Denied(t.Context(), "sid-1") {
-		t.Fatal("local deny not visible")
-	}
-	if gets, sets := client.counts(); gets != 0 || sets != 1 {
-		t.Fatalf("gets = %d, sets = %d; want the deny to prime the cache with no lookup", gets, sets)
 	}
 }
 

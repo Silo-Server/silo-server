@@ -43,20 +43,29 @@ func ResetPasswordInTransaction(ctx context.Context, tx pgx.Tx, userID int, newP
 // purpose and survive; see docs/architecture/password-resets.md. Callers run
 // the OnUserSessionsRevoked hook after commit for Jellyfin-compatible sessions.
 func RevokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userID int) error {
+	return RevokeSignInsForUsersInTransaction(ctx, tx, []int{userID})
+}
+
+// RevokeSignInsForUsersInTransaction is RevokeSignInsInTransaction for several
+// accounts at once, in a fixed number of statements however many there are.
+func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
-		WHERE (user_id = $1 OR impersonator_user_id = $1) AND revoked_at IS NULL`, userID); err != nil {
+		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE abs_sessions SET revoked_at = NOW()
-		WHERE user_id = $1 AND revoked_at IS NULL`, userID); err != nil {
+		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE device_login_requests SET status = $2, updated_at = NOW()
-		WHERE approved_by_user_id = $1 AND status = $3`,
-		userID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
+		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
+		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
 	}
 	return nil

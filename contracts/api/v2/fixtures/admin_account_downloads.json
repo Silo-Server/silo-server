@@ -1,0 +1,33 @@
+{
+  "items": [
+    {
+      "id": "dl-2",
+      "profile_id": "p-owner",
+      "device_id": "device-tv",
+      "content_id": "series-1",
+      "episode_id": "episode-2-4",
+      "batch_id": "batch-1",
+      "title": "Synthetic Series",
+      "media_type": "series",
+      "episode": {
+        "season_number": 2,
+        "episode_number": 4,
+        "title": "Synthetic Episode"
+      },
+      "status": "completed",
+      "quality": "original",
+      "effective_quality": "original",
+      "delivery_format": "original",
+      "target_bitrate_kbps": 0,
+      "file_size": 1500000000,
+      "created_at": "2026-01-02T03:04:05.678Z",
+      "updated_at": "2026-01-02T03:04:05.678Z",
+      "completed_at": "2026-01-02T02:04:05.678Z",
+      "status_event_at": "2026-01-02T02:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7IkNyZWF0ZWRBdCI6IjIwMjYtMDEtMDJUMDM6MDQ6MDUuNjc4WiIsIklEIjoiZGwtMiJ9fQ.l4rY4_KbtCHoKpXVB_NyMgFVy9mbdBIgXHwtNY9iCd4",
+    "has_more": true
+  }
+}

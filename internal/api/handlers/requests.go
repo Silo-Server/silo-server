@@ -47,6 +47,9 @@ type RequestService interface {
 	BrowseStudio(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
 	BrowseNetwork(ctx context.Context, viewer mediarequests.Viewer, slug, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
 	BrowseGenre(ctx context.Context, viewer mediarequests.Viewer, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	// Follow and Unfollow back the v2 follow operations; v1 has no follow route.
+	Follow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (mediarequests.RequestState, error)
+	Unfollow(ctx context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) error
 }
 
 type RequestsHandler struct {
@@ -235,7 +238,20 @@ func (h *RequestsHandler) HandleGetDetail(w http.ResponseWriter, r *http.Request
 		writeRequestServiceError(w, err)
 		return
 	}
+	wholeSeriesRequestState(detail)
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// wholeSeriesRequestState keeps v1 on the rule from before season requests,
+// which v1 can neither name nor show: a series in the library is not
+// requestable, even with seasons missing. An active request still wins, as it
+// does for every title.
+func wholeSeriesRequestState(detail *mediarequests.MediaDetail) {
+	if detail == nil || detail.MediaType != mediarequests.MediaTypeSeries ||
+		detail.Availability != mediarequests.AvailabilityAvailable || detail.Request.Status != "" {
+		return
+	}
+	detail.Request = mediarequests.RequestState{Requestable: false, Reason: "already_available"}
 }
 
 func (h *RequestsHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +264,7 @@ func (h *RequestsHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	input.WholeSeries = true
 	req, err := h.service.CreateRequest(r.Context(), viewer, input)
 	if err != nil {
 		writeRequestServiceError(w, err)
@@ -494,6 +511,14 @@ func (h *RequestsHandler) HandleLoadIntegrationOptions(w http.ResponseWriter, r 
 	}
 	options, err := h.service.LoadIntegrationOptions(r.Context(), viewer, integration)
 	if err != nil {
+		// v1 is frozen: the host's classified probe answers are a v2 feature,
+		// so this route keeps answering those with its original 500. A
+		// validation error the router returned itself keeps its v1 400.
+		var probe *mediarequests.ProbeValidationError
+		if errors.As(err, &probe) {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Request operation failed")
+			return
+		}
 		writeRequestServiceError(w, err)
 		return
 	}

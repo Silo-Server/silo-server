@@ -130,11 +130,9 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	}
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		whereParts = append(whereParts, fmt.Sprintf(
-			"(ece.sort_key LIKE $%d ESCAPE '\\' OR LOWER(ece.title) LIKE $%d ESCAPE '\\')",
-			argIdx,
-			argIdx,
-		))
+		// sort_key is the lowered episode title (or "episode N"), the key
+		// the list sorts by, so it alone decides the letter.
+		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
 	}
@@ -288,11 +286,9 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 	}
 
 	if prefix := strings.TrimSpace(access.NamePrefix); prefix != "" {
-		whereParts = append(whereParts, fmt.Sprintf(
-			"(ece.sort_key LIKE $%d ESCAPE '\\' OR LOWER(ece.title) LIKE $%d ESCAPE '\\')",
-			argIdx,
-			argIdx,
-		))
+		// sort_key is the lowered episode title (or "episode N"), the key
+		// the list sorts by, so it alone decides the letter.
+		whereParts = append(whereParts, fmt.Sprintf("ece.sort_key LIKE $%d ESCAPE '\\'", argIdx))
 		args = append(args, escapePrefixForLike(prefix)+"%")
 		argIdx++
 	}

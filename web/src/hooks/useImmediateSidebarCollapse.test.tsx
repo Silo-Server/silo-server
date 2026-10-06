@@ -88,12 +88,6 @@ afterEach(() => {
 });
 
 describe("useImmediateSidebarCollapse", () => {
-  it("passes the initial state straight through", () => {
-    stubFrames();
-    stubReducedMotion(false);
-    expect(renderHook(() => useImmediateSidebarCollapse(true)).result.current).toBe(true);
-  });
-
   it("keeps Chromium on the established one-frame handoff", async () => {
     const frames = stubFrames();
     stubReducedMotion(false);

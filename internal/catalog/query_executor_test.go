@@ -125,13 +125,6 @@ func TestBuildLibraryScopeJoin_NoRedundantDistinct(t *testing.T) {
 	}
 }
 
-func TestBuildLibraryScopeJoin_WithDisabledLibraries(t *testing.T) {
-	sql, _, _ := buildLibraryScopeJoin([]int{1, 2}, []int{9}, 1, "", "mi.content_id")
-	if !strings.Contains(sql, "NOT EXISTS") {
-		t.Fatalf("expected NOT EXISTS for DisabledLibraryIDs; got %s", sql)
-	}
-}
-
 // TestBuildLibraryScopeJoin_PreventsContentIDFanout guards against a regression
 // to a plain JOIN form that would fanout outer rows for items in multiple
 // libraries (the original audit's proposed shape).

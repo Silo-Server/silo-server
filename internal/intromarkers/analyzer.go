@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -30,7 +31,7 @@ type Analyzer struct {
 	movieSampler movieTailSampler
 	// hardware is where the tail samplers decode keyframes; SetHardwareDecode
 	// updates it. Nil when the samplers are replaced.
-	hardware *hardwareDecoder
+	hardware *mediasample.HardwareResolver
 	// movieBudget bounds how long a scheduled run starts new movies; zero
 	// means movieCreditsRunBudget. now, when set, replaces time.Now for it.
 	movieBudget time.Duration
@@ -88,13 +89,14 @@ type introRepository interface {
 	LoadSilenceRefinementAttempt(ctx context.Context, fileID int) (*SilenceRefinementAttempt, error)
 	UpsertSilenceRefinementAttempt(ctx context.Context, attempt SilenceRefinementAttempt) error
 	PatchMarker(ctx context.Context, patch MarkerPatch) (bool, error)
+	WithdrawMarker(ctx context.Context, withdrawal MarkerWithdrawal) (bool, error)
 	LoadSeasonState(ctx context.Context, state SeasonState, analysisHash string) (*SeasonState, error)
 	UpsertSeasonState(ctx context.Context, state SeasonState, analysisHash string) error
 	LoadFingerprint(ctx context.Context, candidate Candidate, cfg Config) (*Fingerprint, error)
 	UpsertFingerprint(ctx context.Context, fp Fingerprint) error
-	LoadArtifacts(ctx context.Context, fileIDs []int, key ArtifactKey) (map[int]Artifact, error)
-	UpsertArtifact(ctx context.Context, a Artifact) error
-	RecordArtifactFailure(ctx context.Context, failure ArtifactFailure) error
+	LoadArtifacts(ctx context.Context, fileIDs []int, key mediaartifact.Key) (map[int]mediaartifact.Artifact, error)
+	UpsertArtifact(ctx context.Context, a mediaartifact.Artifact) error
+	RecordArtifactFailure(ctx context.Context, failure mediaartifact.Failure) error
 }
 
 type fingerprintExtractor interface {
@@ -136,7 +138,7 @@ func NewAnalyzer(repo *Repository, config Config, logger *slog.Logger) *Analyzer
 // settings to the next credits tail pass without a restart.
 func (a *Analyzer) SetHardwareDecode(accel, device string) {
 	if a.hardware != nil {
-		a.hardware.set(accel, device)
+		a.hardware.Set(accel, device)
 	}
 }
 
@@ -402,8 +404,11 @@ func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, re
 			return summary, err
 		}
 	}
+	var withdrawnCredits map[int]struct{}
 	if kinds.Credits {
-		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		var chapterSummary RunSummary
+		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
+		mergeRunSummary(&summary, chapterSummary)
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
@@ -444,7 +449,7 @@ func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, re
 	}
 	summary.ChromaprintSupported = true
 
-	groupSummary := a.analyzeGroups(ctx, jobs, analyzeGroupOptions{persistState: true, creditsTail: creditsTail}, func(done int) {
+	groupSummary := a.analyzeGroups(ctx, jobs, analyzeGroupOptions{persistState: true, creditsTail: creditsTail, unsettledFileIDs: withdrawnCredits}, func(done int) {
 		report(40+float64(done)/float64(len(jobs))*55, fmt.Sprintf("Analyzed season group %d/%d", done, len(jobs)))
 	})
 	mergeRunSummary(&summary, groupSummary)
@@ -473,6 +478,16 @@ func (k EpisodeMarkerKinds) Any() bool { return k.Intro || k.Credits }
 // And returns the kinds both k and other select.
 func (k EpisodeMarkerKinds) And(other EpisodeMarkerKinds) EpisodeMarkerKinds {
 	return EpisodeMarkerKinds{Intro: k.Intro && other.Intro, Credits: k.Credits && other.Credits}
+}
+
+// Or returns the kinds either k or other selects.
+func (k EpisodeMarkerKinds) Or(other EpisodeMarkerKinds) EpisodeMarkerKinds {
+	return EpisodeMarkerKinds{Intro: k.Intro || other.Intro, Credits: k.Credits || other.Credits}
+}
+
+// Without returns the kinds k selects that other does not.
+func (k EpisodeMarkerKinds) Without(other EpisodeMarkerKinds) EpisodeMarkerKinds {
+	return EpisodeMarkerKinds{Intro: k.Intro && !other.Intro, Credits: k.Credits && !other.Credits}
 }
 
 // markerKinds lists the kinds k selects, intro first.
@@ -575,8 +590,11 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 		}
 		jobKinds = append(jobKinds, kindIntro)
 	}
+	var withdrawnCredits map[int]struct{}
 	if kinds.Credits {
-		mergeRunSummary(&summary, a.processCreditsChapters(ctx, candidates))
+		var chapterSummary RunSummary
+		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
+		mergeRunSummary(&summary, chapterSummary)
 		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
@@ -617,9 +635,10 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 			return summary, err
 		}
 		groupSummary, err := a.analyzeJob(ctx, job, analyzeGroupOptions{
-			force:        job.kind == kindIntro || forceCredits,
-			patchFileIDs: job.patchFileIDs,
-			creditsTail:  creditsTail,
+			force:            job.kind == kindIntro || forceCredits,
+			patchFileIDs:     job.patchFileIDs,
+			creditsTail:      creditsTail,
+			unsettledFileIDs: withdrawnCredits,
 		})
 		mergeRunSummary(&summary, groupSummary)
 		if err != nil {
@@ -882,7 +901,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 		attempt.Status = silenceAttemptFailed
 		attempt.LastError = refineErr.Error()
 		attempt.FailureCount = 1
-		retryAfter := attempt.AttemptedAt.Add(retryDelay(1))
+		retryAfter := attempt.AttemptedAt.Add(mediaartifact.RetryDelay(1))
 		// Backoff escalates only for this server's own consecutive failures; a
 		// failure recorded elsewhere may come from that server's environment.
 		if previous != nil && previous.Status == silenceAttemptFailed && previous.RecordedBy == attempt.RecordedBy &&
@@ -894,7 +913,7 @@ func (a *Analyzer) recordSilenceAttempt(ctx context.Context, candidate Candidate
 				retryAfter = *previous.RetryAfter
 			} else {
 				attempt.FailureCount = previous.FailureCount + 1
-				retryAfter = attempt.AttemptedAt.Add(retryDelay(attempt.FailureCount))
+				retryAfter = attempt.AttemptedAt.Add(mediaartifact.RetryDelay(attempt.FailureCount))
 			}
 		}
 		attempt.RetryAfter = &retryAfter
@@ -1068,6 +1087,20 @@ type analyzeGroupOptions struct {
 	persistState bool
 	// creditsTail runs the credits tail pass; see Analyzer.creditsTailReady.
 	creditsTail bool
+	// unsettledFileIDs are files whose chapter credits were just withdrawn.
+	// A credits group holding one is analyzed again even when its stored
+	// analysis still stands, so audio or video can replace them.
+	unsettledFileIDs map[int]struct{}
+}
+
+// anyCandidateIn reports whether any candidate's file is in fileIDs.
+func anyCandidateIn(candidates []Candidate, fileIDs map[int]struct{}) bool {
+	for _, candidate := range candidates {
+		if _, ok := fileIDs[candidate.FileID]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // minimumGroupEpisodes is how many episodes a season group of kind needs to
@@ -1477,6 +1510,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.CreditsGroupsSkipped += src.CreditsGroupsSkipped
 	dst.CreditsChapterMarkersWritten += src.CreditsChapterMarkersWritten
 	dst.CreditsVersionMarkersCopied += src.CreditsVersionMarkersCopied
+	dst.CreditsChapterMarkersWithdrawn += src.CreditsChapterMarkersWithdrawn
 	dst.CreditsFingerprintsComputed += src.CreditsFingerprintsComputed
 	dst.CreditsFingerprintCacheHits += src.CreditsFingerprintCacheHits
 	dst.CreditsFingerprintErrors += src.CreditsFingerprintErrors

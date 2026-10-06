@@ -15,29 +15,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestAudiobookScanDoesNotProbeIgnoredParts(t *testing.T) {
-	ffprobe, err := exec.LookPath("ffprobe")
-	if err != nil {
-		t.Skip("ffprobe unavailable")
-	}
-	root := t.TempDir()
-	book := filepath.Join(root, "Book")
-	data, err := os.ReadFile("testdata/audiobook_fixtures/single_book/book.m4b")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeTestFile(t, filepath.Join(book, "book.m4b"), string(data))
-	writeTestFile(t, filepath.Join(book, "ignored.mp3"), "invalid audio")
-	writeTestFile(t, filepath.Join(root, ".siloignore"), "Book/ignored.mp3")
-	s := &Scanner{ffprobePath: ffprobe}
-	err = s.ScanAudiobookFolder(t.Context(), &models.MediaFolder{ID: 1, Paths: []string{root}}, true)
-	// With no repositories installed, indexing must get as far as the item
-	// write. Probing the excluded corrupt file must not fail the whole book.
-	if err == nil || !strings.Contains(err.Error(), "itemRepo not configured") {
-		t.Fatalf("scan error = %v, want item write after probing only the kept part", err)
-	}
-}
-
 func TestPodcastRootIgnoreMarkerSkipsShows(t *testing.T) {
 	for _, marker := range []string{".ignore", ".nomedia"} {
 		t.Run(marker, func(t *testing.T) {

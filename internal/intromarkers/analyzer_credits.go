@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -12,16 +13,24 @@ import (
 // processCreditsChapters writes credits from authored chapters and copies
 // them to other versions of the same episode. Chapter credits are
 // authoritative. It needs no ffmpeg, so every run checks every file; a file
-// whose stored marker already matches is not written again.
-func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Candidate) RunSummary {
+// whose stored marker already matches is not written again. It withdraws
+// chapter credits a file's chapters no longer produce and returns the IDs of
+// those files, whose season groups must be analyzed again to replace them.
+func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Candidate) (RunSummary, map[int]struct{}) {
 	summary := RunSummary{}
 	sources := map[string][]chapterSourceMarker{}
 	var unresolved []Candidate
+	withdrawn := map[int]struct{}{}
+	withdraw := func(candidate Candidate) {
+		if a.withdrawChapterCredits(ctx, candidate, &summary) {
+			withdrawn[candidate.FileID] = struct{}{}
+		}
+	}
 
 	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			summary.Errors = append(summary.Errors, err.Error())
-			return summary
+			return summary, withdrawn
 		}
 		owned := candidate.ownsMarker(kindCredits)
 		segment, ok := DetectChapterCredits(candidate.Chapters, candidate.DurationSeconds, false)
@@ -42,22 +51,56 @@ func (a *Analyzer) processCreditsChapters(ctx context.Context, candidates []Cand
 	for _, candidate := range unresolved {
 		if err := ctx.Err(); err != nil {
 			summary.Errors = append(summary.Errors, err.Error())
-			return summary
+			return summary, withdrawn
 		}
 		source, ok := closestCreditsSource(sources[candidate.EpisodeID], candidate)
 		if !ok {
+			withdraw(candidate)
 			continue
 		}
 		segment, ok := copyCreditsToVersion(source, candidate)
 		if !ok {
 			summary.CreditsRejected++
+			withdraw(candidate)
 			continue
 		}
 		if a.patchCredits(ctx, candidate, segment, &summary) {
 			summary.CreditsVersionMarkersCopied++
 		}
 	}
-	return summary
+	return summary, withdrawn
+}
+
+// chapterCreditsAlgorithms are the credits results placed from chapters: a
+// file's own, and a copy from another version of its episode.
+var chapterCreditsAlgorithms = []string{CreditsChapterAlgorithm, CreditsVersionCopyAlgorithm}
+
+// withdrawChapterCredits clears a file's credits when local analysis placed
+// them from chapters that no longer produce them, as after a change to the
+// chapter title rules or a remux, and reports whether it did. A chapter
+// result outranks every audio and video result, so left in place it would
+// keep its stale range for good.
+func (a *Analyzer) withdrawChapterCredits(ctx context.Context, candidate Candidate, summary *RunSummary) bool {
+	stored := candidate.marker(kindCredits)
+	if !stored.present() || stored.Algorithm == nil || !slices.Contains(chapterCreditsAlgorithms, *stored.Algorithm) ||
+		candidate.effectiveSource(kindCredits) != models.MarkerSourceScanner {
+		return false
+	}
+	withdrawn, err := a.repo.WithdrawMarker(ctx, MarkerWithdrawal{
+		Kind:         kindCredits,
+		ExpectedFile: candidate.expectedFile(),
+		FileID:       candidate.FileID,
+		Algorithm:    *stored.Algorithm,
+	})
+	if err != nil {
+		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+		a.logger.WarnContext(ctx, "credits chapter marker withdrawal failed", "file_id", candidate.FileID, "algorithm", *stored.Algorithm, "error", err)
+		return false
+	}
+	if withdrawn {
+		summary.CreditsChapterMarkersWithdrawn++
+	}
+	return withdrawn
 }
 
 // closestCreditsSource returns the chapter source whose duration is closest
@@ -117,7 +160,7 @@ func (a *Analyzer) analyzeCreditsGroup(ctx context.Context, group candidateGroup
 		FileCount:        len(group.Candidates),
 	}
 	analysisHash := CreditsAnalysisConfigHash(opts.creditsTail)
-	if !opts.force {
+	if !opts.force && !anyCandidateIn(group.Candidates, opts.unsettledFileIDs) {
 		// A run without tail passes also keeps off a group a tail-capable
 		// run settled: its audio-only result could replace the audio and
 		// video credits written there, and that run would not come back.

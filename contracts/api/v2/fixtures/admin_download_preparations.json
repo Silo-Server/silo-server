@@ -1,0 +1,196 @@
+{
+  "counts": {
+    "running": 1,
+    "queued": 1,
+    "retrying": 0,
+    "paused": 1,
+    "failed_recent": 1
+  },
+  "items": [
+    {
+      "id": "art-running",
+      "state": "running",
+      "format": "transcode",
+      "log_session_id": "download-prepare-art-running",
+      "media_file_id": "42",
+      "content_id": "movie:dune-2",
+      "media_title": "Dune: Part Two",
+      "media_type": "movie",
+      "source": {
+        "container": "mkv",
+        "video_codec": "hevc",
+        "resolution": "2160p",
+        "hdr": true,
+        "audio_tracks": [
+          {
+            "codec": "truehd",
+            "channels": 8,
+            "language": "eng"
+          },
+          {
+            "codec": "aac",
+            "channels": 2
+          }
+        ],
+        "file_size": 61800000000,
+        "duration_seconds": 9972,
+        "bitrate_kbps": 58000
+      },
+      "output": {
+        "container": "mp4",
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "resolution": "1080p",
+        "bitrate_kbps": 10000,
+        "tone_map_mode": "software",
+        "tone_map_source_kind": "hdr10",
+        "all_audio_tracks": true
+      },
+      "worker": {
+        "kind": "node",
+        "node_id": "9",
+        "name": "gpu-01"
+      },
+      "attempts": 1,
+      "max_attempts": 3,
+      "created_at": "2026-01-02T03:04:05.123Z",
+      "started_at": "2026-01-02T03:04:05.123Z",
+      "progress": {
+        "encoded_seconds": 4686,
+        "duration_seconds": 9972,
+        "speed": 3.4,
+        "updated_at": "2026-01-02T03:09:05.123Z"
+      },
+      "progress_unavailable": false,
+      "requesters": [
+        {
+          "user_id": "7",
+          "username": "alex",
+          "profile_id": "p1",
+          "profile_name": "Alex",
+          "device_id": "d1",
+          "device_name": "iPhone",
+          "device_platform": "ios",
+          "status": "preparing"
+        }
+      ]
+    },
+    {
+      "id": "art-queued",
+      "state": "queued",
+      "format": "remux",
+      "queue_position": 1,
+      "log_session_id": "download-prepare-art-queued",
+      "media_file_id": "43",
+      "content_id": "series:severance",
+      "episode_id": "episode:severance-s02e01",
+      "media_title": "Severance",
+      "media_type": "series",
+      "series_name": "Severance",
+      "episode_name": "Hello, Ms. Cobel",
+      "season_number": 2,
+      "episode_number": 1,
+      "source": {
+        "hdr": false,
+        "audio_tracks": [],
+        "file_size": 0,
+        "duration_seconds": 0
+      },
+      "output": {
+        "container": "mp4",
+        "video_codec": "copy",
+        "audio_codec": "copy",
+        "all_audio_tracks": false
+      },
+      "attempts": 0,
+      "max_attempts": 3,
+      "created_at": "2026-01-02T03:04:05.123Z",
+      "progress_unavailable": false,
+      "requesters": [
+        {
+          "user_id": "7",
+          "username": "alex",
+          "profile_id": "p1",
+          "status": "preparing"
+        }
+      ]
+    },
+    {
+      "id": "art-paused",
+      "state": "paused",
+      "format": "transcode",
+      "log_session_id": "download-prepare-art-paused",
+      "media_file_id": "45",
+      "content_id": "movie:heat-1995",
+      "media_title": "Heat",
+      "media_type": "movie",
+      "source": {
+        "hdr": false,
+        "audio_tracks": [],
+        "file_size": 0,
+        "duration_seconds": 0
+      },
+      "output": {
+        "container": "mp4",
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "resolution": "720p",
+        "bitrate_kbps": 2000,
+        "all_audio_tracks": false
+      },
+      "attempts": 0,
+      "max_attempts": 3,
+      "created_at": "2026-01-02T03:04:05.123Z",
+      "paused_at": "2026-01-02T03:09:05.123Z",
+      "progress_unavailable": false,
+      "requesters": [
+        {
+          "user_id": "8",
+          "username": "jordan",
+          "profile_id": "p2",
+          "status": "preparing"
+        }
+      ]
+    },
+    {
+      "id": "art-failed",
+      "state": "failed",
+      "format": "transcode",
+      "log_session_id": "download-prepare-art-failed",
+      "media_file_id": "44",
+      "media_title": "Oppenheimer",
+      "media_type": "movie",
+      "source": {
+        "hdr": false,
+        "audio_tracks": [],
+        "file_size": 0,
+        "duration_seconds": 0
+      },
+      "output": {
+        "container": "mp4",
+        "video_codec": "h264",
+        "audio_codec": "aac",
+        "all_audio_tracks": false
+      },
+      "worker": {
+        "kind": "server",
+        "name": "api-1"
+      },
+      "attempts": 3,
+      "max_attempts": 3,
+      "error": "ffmpeg: No space left on device",
+      "created_at": "2026-01-02T03:04:05.123Z",
+      "started_at": "2026-01-02T03:04:05.123Z",
+      "failed_at": "2026-01-02T03:09:05.123Z",
+      "progress_unavailable": false,
+      "requesters": [
+        {
+          "user_id": "8",
+          "username": "jordan",
+          "profile_id": "p2",
+          "status": "failed"
+        }
+      ]
+    }
+  ]
+}

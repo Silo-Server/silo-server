@@ -168,6 +168,24 @@ type CatalogResolver struct {
 	// instead of the default queryExecutorForScope. Tests inject a stub here
 	// to observe how many times the executor is asked for a result page.
 	previewExecutorForScope func(scope string, snapshot *time.Time) previewExecutor
+	watchlistPromoter       WatchlistPromoter
+}
+
+// WatchlistPromoter moves a profile's watchlist entries for titles the
+// library does not have yet onto the library watchlist once it has them, so a
+// watchlist read shows arrivals. *watchlist.Titles implements it; a failure
+// is its to log, and the read goes on.
+type WatchlistPromoter interface {
+	PromoteWatchlist(ctx context.Context, access AccessFilter)
+}
+
+// WithWatchlistPromoter makes watchlist-source reads promote first.
+func (r *CatalogResolver) WithWatchlistPromoter(p WatchlistPromoter) *CatalogResolver {
+	if r == nil {
+		return nil
+	}
+	r.watchlistPromoter = p
+	return r
 }
 
 func NewCatalogResolver(browseRepo *BrowseRepository, itemRepo *ItemRepository) *CatalogResolver {
@@ -829,6 +847,9 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 }
 
 func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	if req.Source == CatalogSourceWatchlist && r.watchlistPromoter != nil {
+		r.watchlistPromoter.PromoteWatchlist(ctx, access)
+	}
 	if req.CursorPaging {
 		return r.resolvePersonalCursor(ctx, req, access)
 	}
@@ -2566,6 +2587,9 @@ func filterCatalogSearchItems(items []*models.MediaItem, raw string) []*models.M
 	return filtered
 }
 
+// filterCatalogNamePrefix is the in-memory form of sortTitlePrefixCondition:
+// it matches the sort title, falling back to title when sort_title is empty,
+// so offset and cursor pages agree on which letter an item belongs to.
 func filterCatalogNamePrefix(items []*models.MediaItem, raw string) []*models.MediaItem {
 	prefix := strings.ToLower(strings.TrimSpace(raw))
 	if prefix == "" {
@@ -2577,9 +2601,12 @@ func filterCatalogNamePrefix(items []*models.MediaItem, raw string) []*models.Me
 		if item == nil {
 			continue
 		}
-		title := strings.ToLower(strings.TrimSpace(item.Title))
-		sortTitle := strings.ToLower(strings.TrimSpace(item.SortTitle))
-		if strings.HasPrefix(title, prefix) || (sortTitle != "" && strings.HasPrefix(sortTitle, prefix)) {
+		// Trim spaces only, as SQL BTRIM does in sortTitleKeyExpr.
+		key := strings.Trim(item.SortTitle, " ")
+		if key == "" {
+			key = item.Title
+		}
+		if strings.HasPrefix(strings.ToLower(key), prefix) {
 			filtered = append(filtered, item)
 		}
 	}

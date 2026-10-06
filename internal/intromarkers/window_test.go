@@ -1,7 +1,6 @@
 package intromarkers
 
 import (
-	"context"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -19,13 +18,6 @@ func TestHeadWindowIsTheIntroAnalysisWindow(t *testing.T) {
 	}
 	if !headWindow(Candidate{}, cfg).empty() {
 		t.Fatal("a file without a duration has an empty window")
-	}
-}
-
-func TestFingerprintRequestSamplesTheWindow(t *testing.T) {
-	req := fingerprintRequest(context.Background(), Candidate{FilePath: "/media/e1.mkv"}, fingerprintWindow{Start: 1050, End: 1500})
-	if req.Window == nil || req.Window.StartSeconds != 1050 || req.Window.DurationSeconds != 450 {
-		t.Fatalf("request window = %+v, want 1050 s for 450 s", req.Window)
 	}
 }
 

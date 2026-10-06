@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 func TestPersonKindAudiobookRoles(t *testing.T) {
@@ -126,5 +127,27 @@ func TestMediaFileIsAudioOnly(t *testing.T) {
 				t.Fatalf("IsAudioOnly() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestMediaFileProbeRejected(t *testing.T) {
+	failedAt := time.Now().UTC()
+	probedAt := failedAt.Add(-time.Hour)
+	cases := []struct {
+		name string
+		file *MediaFile
+		want bool
+	}{
+		{name: "nil", file: nil},
+		{name: "never probed", file: &MediaFile{}},
+		{name: "rejected", file: &MediaFile{ProbeFailedAt: &failedAt}, want: true},
+		{name: "rejected after an earlier successful probe", file: &MediaFile{ProbeFailedAt: &failedAt, ProbeUpdatedAt: &probedAt}},
+		{name: "rejected with imported codec facts", file: &MediaFile{ProbeFailedAt: &failedAt, CodecVideo: "h264"}},
+		{name: "rejected with audio tracks", file: &MediaFile{ProbeFailedAt: &failedAt, AudioTracks: []AudioTrack{{Codec: "aac"}}}},
+	}
+	for _, tc := range cases {
+		if got := tc.file.ProbeRejected(); got != tc.want {
+			t.Errorf("%s: ProbeRejected() = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

@@ -33,5 +33,6 @@ func (h *SubtitleSearchHandler) downloadAuthorizedSubtitle(ctx context.Context, 
 		slog.ErrorContext(ctx, "subtitle download failed", "component", "api", "provider", req.ProviderName, "subtitle_id", req.SubtitleID, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "download_error", "Failed to download subtitle")
 	}
+	h.requestAutoSync(ctx, sub)
 	return sub, nil
 }

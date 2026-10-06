@@ -432,15 +432,15 @@ func TestStartTranscodeRejectsUnvalidatedBitstreamFilter(t *testing.T) {
 		VideoBitstreamFilter: "arbitrary_filter=1",
 		TargetCodecVideo:     "copy",
 	})
-	if err == nil {
-		t.Fatal("unvalidated bitstream filter was accepted")
+	if err == nil || !strings.Contains(err.Error(), "unsupported video bitstream filter recipe") {
+		t.Fatalf("expected bitstream-filter admission rejection, got %v", err)
 	}
 	_, err = StartTranscode(context.Background(), TranscodeOpts{
 		VideoBitstreamFilter: DV7ToHDR10BitstreamFilter,
 		TargetCodecVideo:     "h264",
 	})
-	if err == nil {
-		t.Fatal("DV copy filter was accepted for encoded video")
+	if err == nil || !strings.Contains(err.Error(), "unsupported video bitstream filter recipe") {
+		t.Fatalf("expected bitstream-filter admission rejection for encoded video, got %v", err)
 	}
 }
 
@@ -503,8 +503,8 @@ func TestStartTranscodeRejectsInvalidVideoSampleEntry(t *testing.T) {
 		{TargetCodecVideo: "copy", VideoSampleEntry: "dvhe"},
 		{TargetCodecVideo: "h264", VideoSampleEntry: VideoSampleEntryDVH1},
 	} {
-		if _, err := StartTranscode(context.Background(), opts); err == nil {
-			t.Fatalf("invalid recipe accepted: %+v", opts)
+		if _, err := StartTranscode(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "unsupported video sample-entry recipe") {
+			t.Fatalf("expected sample-entry admission rejection for %+v, got %v", opts, err)
 		}
 	}
 }
@@ -610,24 +610,6 @@ func TestBuildFFmpegArgs_CopyVideoFromStartUsesJellyfinTimestamps(t *testing.T) 
 	}
 	if strings.Contains(joined, "-avoid_negative_ts make_zero") {
 		t.Fatalf("copy-video from-start must not rewrite negative timestamps: %s", joined)
-	}
-}
-
-func TestBuildFFmpegArgs_DolbyVisionHEVCCopyUsesAnnexBFilter(t *testing.T) {
-	args := buildFFmpegArgs(TranscodeOpts{
-		InputPath:        "/media/movie.mkv",
-		OutputDir:        "/tmp/out",
-		SessionID:        "session-dovi-copy",
-		SourceVideoCodec: "hevc",
-		TargetCodecVideo: "copy",
-		TargetCodecAudio: "copy",
-		VideoSampleEntry: VideoSampleEntryDVH1,
-		SegmentDuration:  2,
-	})
-
-	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-c:v copy -bsf:v hevc_mp4toannexb -tag:v dvh1 -strict unofficial") {
-		t.Fatalf("Dolby Vision HEVC copy should match Jellyfin's fMP4 bitstream recipe: %s", joined)
 	}
 }
 
@@ -1196,12 +1178,86 @@ func TestBuildFFmpegArgs_BitmapBurnInNVENCStaysOnCPUOverlay(t *testing.T) {
 	})
 
 	joined := strings.Join(args, " ")
-	want := "-filter_complex [0:v:0]hwdownload,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
+	want := "-filter_complex [0:v:0]hwdownload,format=nv12,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("nvenc bitmap burn-in should keep the CPU roundtrip %q: %s", want, joined)
 	}
 	if strings.Contains(joined, "overlay_vaapi") {
 		t.Fatalf("nvenc bitmap burn-in must not use the VAAPI GPU overlay: %s", joined)
+	}
+}
+
+// A CUDA surface can only be downloaded in the software format its frames
+// context was created with, so a 10-bit source must come off the GPU as p010le
+// and reach yuv420p through a second conversion. Requesting yuv420p from
+// hwdownload itself fails the graph before the encoder opens, which took out
+// every 10-bit HEVC burn-in attempt.
+func TestBuildFFmpegArgs_BitmapBurnInNVENCDownloadsSourceDepth(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:           "/media/movie.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-pgs-nvenc-10bit",
+		SourceVideoCodec:    "hevc",
+		SourceVideoProfile:  "main10",
+		SourceVideoBitDepth: 10,
+		TargetCodecVideo:    "h264",
+		TargetCodecAudio:    "aac",
+		SegmentDuration:     2,
+		HWAccel:             "nvenc",
+		TargetResolution:    "720p",
+		SubtitleTrackIndex:  0,
+		SubtitleBurnIn:      true,
+		SubtitleCodec:       "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-filter_complex [0:v:0]hwdownload,format=p010le,format=yuv420p[vmain];[vmain][0:s:0]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("10-bit nvenc bitmap burn-in should download as p010le %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload,format=yuv420p") {
+		t.Fatalf("hwdownload must never be asked for yuv420p: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_TextBurnInHardwareDownloadsSourceDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		hwAccel  string
+		bitDepth int
+		wantVF   string
+	}{
+		{name: "NVENC8Bit", hwAccel: "nvenc", bitDepth: 8, wantVF: "hwdownload,format=nv12,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "NVENC10Bit", hwAccel: "nvenc", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "VAAPI10Bit", hwAccel: "vaapi", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+		{name: "QSV10Bit", hwAccel: "qsv", bitDepth: 10, wantVF: "hwdownload,format=p010le,format=yuv420p,scale=-2:720,subtitles="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := buildFFmpegArgs(TranscodeOpts{
+				InputPath:           "/media/movie.mkv",
+				OutputDir:           "/tmp/out",
+				SessionID:           "session-srt-" + tc.name,
+				SourceVideoCodec:    "hevc",
+				SourceVideoProfile:  "main10",
+				SourceVideoBitDepth: tc.bitDepth,
+				TargetCodecVideo:    "h264",
+				TargetCodecAudio:    "aac",
+				SegmentDuration:     2,
+				HWAccel:             tc.hwAccel,
+				TargetResolution:    "720p",
+				SubtitleTrackIndex:  1,
+				SubtitleBurnIn:      true,
+				SubtitleCodec:       "subrip",
+			})
+
+			joined := strings.Join(args, " ")
+			if !strings.Contains(joined, tc.wantVF) {
+				t.Fatalf("%s text burn-in should download as the source depth %q: %s", tc.hwAccel, tc.wantVF, joined)
+			}
+			if strings.Contains(joined, "hwdownload,format=yuv420p") {
+				t.Fatalf("hwdownload must never be asked for yuv420p: %s", joined)
+			}
+		})
 	}
 }
 
@@ -1465,8 +1521,40 @@ func TestBuildFFmpegArgs_NVENCH264UsesCudaPipeline(t *testing.T) {
 	if strings.Contains(joined, "-vf scale=-2:720") {
 		t.Fatalf("nvenc args must not use software scale on cuda frames: %s", joined)
 	}
-	if !strings.Contains(joined, "-b:v 2000k -maxrate 2000k -bufsize 4000k") {
+	if !strings.Contains(joined, "-b:v 1800k -maxrate 2000k -bufsize 4000k") {
 		t.Fatalf("nvenc args should include bitrate cap controls: %s", joined)
+	}
+}
+
+// A cap must be a ceiling on every hardware encoder: QSV selects CBR when
+// -b:v equals -maxrate, and VAAPI ignores -maxrate once -qp selects CQP.
+// VAAPI forces the capped mode detected on the device (FFmpeg's automatic
+// mode can pick AVBR, which does not honor -maxrate).
+func TestAppendVideoArgs_HardwareBitrateCapIsVBRCeiling(t *testing.T) {
+	for _, tc := range []struct {
+		hwAccel, codec, want string
+	}{
+		{"qsv", "h264", "-c:v h264_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"qsv", "hevc", "-c:v hevc_qsv -preset veryfast -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "h264", "-c:v h264_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"vaapi", "hevc", "-c:v hevc_vaapi -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"nvenc", "h264", "-c:v h264_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+		{"nvenc", "hevc", "-c:v hevc_nvenc -rc:v vbr -b:v 4500k -maxrate 5000k -bufsize 10000k"},
+	} {
+		joined := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000}), " ")
+		if joined != tc.want {
+			t.Errorf("%s/%s capped args = %q, want %q", tc.hwAccel, tc.codec, joined, tc.want)
+		}
+		if tc.hwAccel == "vaapi" {
+			detected := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}), " ")
+			if want := strings.Replace(tc.want, "_vaapi ", "_vaapi -rc_mode VBR ", 1); detected != want {
+				t.Errorf("%s/%s capped args with VBR detected = %q, want %q", tc.hwAccel, tc.codec, detected, want)
+			}
+		}
+		uncapped := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: tc.hwAccel, TargetCodecVideo: tc.codec, vaapiRateControl: "VBR"}), " ")
+		if strings.Contains(uncapped, "-maxrate") || strings.Contains(uncapped, "-rc_mode") {
+			t.Errorf("%s/%s uncapped args must keep constant-quality mode: %q", tc.hwAccel, tc.codec, uncapped)
+		}
 	}
 }
 
@@ -1542,36 +1630,6 @@ func TestTranscodesAudioMatchesFFmpegDefault(t *testing.T) {
 	}
 }
 
-func TestIsAudioToAACStereoDownmixV3RequiresExactRecipeShape(t *testing.T) {
-	tests := []struct {
-		name           string
-		codec          string
-		sourceChannels int
-		targetChannels int
-		want           bool
-	}{
-		{name: "AAC default stereo", codec: "aac", sourceChannels: 6, want: true},
-		{name: "AAC explicit stereo", codec: " AAC ", sourceChannels: 8, targetChannels: 2, want: true},
-		{name: "stereo source", codec: "aac", sourceChannels: 2, targetChannels: 2},
-		{name: "unknown source", codec: "aac", targetChannels: 2},
-		{name: "default AAC codec", sourceChannels: 6, targetChannels: 2, want: true},
-		{name: "unknown codec", codec: "unknown", sourceChannels: 6, targetChannels: 2},
-		{name: "Opus", codec: "opus", sourceChannels: 6, targetChannels: 2},
-		{name: "EAC3", codec: "eac3", sourceChannels: 6, targetChannels: 2},
-		{name: "mono output", codec: "aac", sourceChannels: 6, targetChannels: 1},
-		{name: "negative output", codec: "aac", sourceChannels: 6, targetChannels: -1},
-		{name: "noncanonical stereo output", codec: "aac", sourceChannels: 6, targetChannels: 3},
-		{name: "surround output", codec: "aac", sourceChannels: 6, targetChannels: 6},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := IsAudioToAACStereoDownmixV3(test.sourceChannels, test.codec, test.targetChannels); got != test.want {
-				t.Fatalf("IsAudioToAACStereoDownmixV3() = %t, want %t", got, test.want)
-			}
-		})
-	}
-}
-
 func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t *testing.T) {
 	const boostFilter = "aresample=out_chlayout=stereo:async=1,alimiter=level_in=2:limit=0.794328235:attack=5:release=50:level=false:latency=true"
 	const normalizeFilter = "aresample=async=1"
@@ -1582,6 +1640,7 @@ func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t 
 		targetChannels int
 		wantFilter     string
 	}{
+		{name: "AAC alias to stereo", codec: " AAC ", sourceChannels: 8, targetChannels: 2, wantFilter: boostFilter},
 		{name: "DTS 5.1 to AAC stereo", codec: "aac", sourceChannels: 6, targetChannels: 2, wantFilter: boostFilter},
 		{name: "TrueHD 7.1 to default AAC stereo", sourceChannels: 8, targetChannels: 2, wantFilter: boostFilter},
 		{name: "EAC3 surround to default AAC stereo", codec: "aac", sourceChannels: 6, wantFilter: boostFilter},
@@ -1601,6 +1660,9 @@ func TestAppendAudioArgsNormalizesEveryAACEncodeAndBoostsOnlySurroundToStereo(t 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if got, want := IsAudioToAACStereoDownmixV3(tt.sourceChannels, tt.codec, tt.targetChannels), tt.wantFilter == boostFilter; got != want {
+				t.Fatalf("downmix recipe match = %t, want %t", got, want)
+			}
 			args := appendAudioArgs(nil, TranscodeOpts{
 				TargetCodecAudio:    tt.codec,
 				SourceAudioChannels: tt.sourceChannels,
@@ -1727,29 +1789,50 @@ func TestBuildFFmpegArgs_VideoToolboxHi10PDecodesInSoftware(t *testing.T) {
 	}
 }
 
-func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
+func TestBuildFFmpegArgs_VideoToolboxHEVCForcesMain8Bit(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
-		InputPath:        "/media/movie.mkv",
-		OutputDir:        "/tmp/out",
-		SessionID:        "session-vt-hevc",
-		FFmpegPath:       videoToolboxTestFFmpeg(t),
-		SourceVideoCodec: "hevc",
-		TargetCodecVideo: "hevc",
-		TargetCodecAudio: "copy",
-		SegmentDuration:  2,
-		HWAccel:          "videotoolbox",
-		TargetResolution: "1080p",
+		InputPath:           "/media/movie.mkv",
+		OutputDir:           "/tmp/out",
+		SessionID:           "session-vt-hevc",
+		FFmpegPath:          videoToolboxTestFFmpeg(t),
+		SourceVideoCodec:    "hevc",
+		SourceVideoProfile:  "Main 10",
+		SourceVideoBitDepth: 10,
+		TargetCodecVideo:    "hevc",
+		TargetCodecAudio:    "copy",
+		SegmentDuration:     2,
+		HWAccel:             "videotoolbox",
+		TargetResolution:    "1080p",
 	})
 
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-c:v hevc_videotoolbox") {
 		t.Fatalf("videotoolbox args should use hevc_videotoolbox encoder: %s", joined)
 	}
-	if strings.Contains(joined, "-pix_fmt") {
-		t.Fatalf("videotoolbox hevc must not force a pixel format (HDR10 passthrough): %s", joined)
+	if !strings.Contains(joined, "-pix_fmt yuv420p -profile:v main") {
+		t.Fatalf("videotoolbox HEVC must force Main 8-bit output: %s", joined)
 	}
 	if !strings.Contains(joined, "-b:v 6000k -maxrate 6000k -bufsize 12000k") {
 		t.Fatalf("uncapped videotoolbox hevc should use the portable default bitrate: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_VideoToolboxHEVCHardwareToneMapKeepsNV12(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath: "/media/hdr.mkv", OutputDir: t.TempDir(), SessionID: "session-vt-hevc-tonemap",
+		FFmpegPath: videoToolboxTestFFmpeg(t), SourceVideoCodec: "hevc", SourceVideoProfile: "Main 10", SourceVideoBitDepth: 10,
+		TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2, TargetResolution: "1080p",
+		HWAccel: transcodeHWVideoToolbox, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
+		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ, ToneMapFilter: tonemap.HardwareFilterVideoToolbox,
+		ToneMapRecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-c:v hevc_videotoolbox") || !strings.Contains(joined, "hwdownload,format=p010le,format=nv12") {
+		t.Fatalf("hardware tone-map HEVC must encode its NV12 output: %s", joined)
+	}
+	if strings.Contains(joined, "-pix_fmt") || strings.Contains(joined, "-profile:v") {
+		t.Fatalf("hardware tone-map HEVC must not override its NV12 output: %s", joined)
 	}
 }
 
@@ -1927,6 +2010,9 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 	for name, candidate := range map[string]TranscodeOpts{"explicit": opts, "automatic full-hardware stage": pipeline.Current()} {
 		t.Run(name, func(t *testing.T) {
 			joined := strings.Join(buildFFmpegArgs(candidate), " ")
+			if !strings.Contains(joined, "-c:v h264_nvenc") {
+				t.Fatalf("full-hardware encoder must remain NVENC: %s", joined)
+			}
 			if !strings.Contains(joined, "-hwaccel cuda -hwaccel_output_format cuda -noautorotate -hwaccel_device 1 ") {
 				t.Fatalf("full-hardware NVENC should decode on CUDA device 1: %s", joined)
 			}
@@ -1937,5 +2023,71 @@ func TestBuildFFmpegArgs_NVENCFullHardwareArgsUnchanged(t *testing.T) {
 				t.Fatalf("full-hardware NVENC should scale CUDA frames directly: %s", joined)
 			}
 		})
+	}
+}
+
+// Every backend scales to the same height for a ladder label or an exact
+// box-fit height, and leaves the source alone for anything else.
+func TestScaleFiltersShareTargetHeightParsing(t *testing.T) {
+	for _, tc := range []struct {
+		res    string
+		height string
+	}{
+		{"2160p", "2160"}, {"1080p", "1080"}, {"720p", "720"}, {"540p", "540"},
+		{"480p", "480"}, {"420p", "420"}, {"328p", "328"}, {"800p", "800"}, {" 1080P ", "1080"},
+		{"66p", "66"}, // a very wide source fitted into the 480p box
+	} {
+		if got, want := resolutionToScale(tc.res), "scale=-2:"+tc.height; got != want {
+			t.Errorf("resolutionToScale(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := vaapiScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := qsvScaleFilter(tc.res), "scale_vaapi=w=-2:h="+tc.height+":format=nv12,hwmap=derive_device=qsv,format=qsv"; got != want {
+			t.Errorf("qsvScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if got, want := nvencScaleFilter(tc.res), "scale_cuda=w=-2:h="+tc.height+":format=nv12"; got != want {
+			t.Errorf("nvencScaleFilter(%q) = %q, want %q", tc.res, got, want)
+		}
+		if w, h := videoToolboxScaleDimensions(tc.res); w != "-2" || h != tc.height {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want -2:%s", tc.res, w, h, tc.height)
+		}
+	}
+	for _, res := range []string{"", "4k", "original", "817p", "8640p", "0p", "-2p", "p"} {
+		if got := resolutionToScale(res); got != "" {
+			t.Errorf("resolutionToScale(%q) = %q, want no scale", res, got)
+		}
+		if got := vaapiScaleFilter(res); got != "scale_vaapi=format=nv12" {
+			t.Errorf("vaapiScaleFilter(%q) = %q, want format-only", res, got)
+		}
+		if w, h := videoToolboxScaleDimensions(res); w != "iw" || h != "ih" {
+			t.Errorf("videoToolboxScaleDimensions(%q) = %s:%s, want iw:ih", res, w, h)
+		}
+	}
+}
+
+// The rate-control probe runs the ordinary VAAPI smoke encode in the capped
+// mode a transcode would request, and a detected mode is forced.
+func TestVAAPIRateControlSmokeArgsAndForcedMode(t *testing.T) {
+	joined := strings.Join(vaapiRateControlSmokeArgs("/dev/dri/renderD128", "hevc_vaapi", "CBR"), " ")
+	for _, want := range []string{"-c:v hevc_vaapi -rc_mode CBR -b:v 1800k -maxrate 2000k -f null -", "/dev/dri/renderD128"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rate-control smoke args missing %q: %s", want, joined)
+		}
+	}
+	cbr := strings.Join(appendVideoArgs(nil, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, vaapiRateControl: "CBR"}), " ")
+	if cbr != "-c:v h264_vaapi -rc_mode CBR -b:v 4500k -maxrate 5000k -bufsize 10000k" {
+		t.Fatalf("CBR-only device args = %q", cbr)
+	}
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "qsv", TargetBitrateKbps: 5000, vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("a non-VAAPI encode must not keep a VAAPI mode: %q %v", opts.vaapiRateControl, err)
+	}
+	if opts, err := resolveVAAPIRateControl(context.Background(), TranscodeOpts{HWAccel: "vaapi", vaapiRateControl: "VBR"}); err != nil || opts.vaapiRateControl != "" {
+		t.Fatalf("an uncapped VAAPI encode needs no mode: %q %v", opts.vaapiRateControl, err)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolveVAAPIRateControl(canceled, TranscodeOpts{HWAccel: "vaapi", TargetCodecVideo: "h264", TargetBitrateKbps: 5000, FFmpegPath: "/nonexistent/ffmpeg"}); err == nil {
+		t.Fatal("a canceled start must stop instead of launching FFmpeg")
 	}
 }

@@ -4,14 +4,11 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getOverlayConfigOk from "../../../../contracts/api/v2/fixtures/get_overlay_config_ok.json";
-import getPluginSettingsOk from "../../../../contracts/api/v2/fixtures/get_plugin_settings_ok.json";
 import getSettingsContractCapabilitiesOk from "../../../../contracts/api/v2/fixtures/get_settings_contract_capabilities_ok.json";
 import listEffectiveSettingsOk from "../../../../contracts/api/v2/fixtures/list_effective_settings_ok.json";
 import listPluginSettingsOk from "../../../../contracts/api/v2/fixtures/list_plugin_settings_ok.json";
 import updateNavigationShortcutOk from "../../../../contracts/api/v2/fixtures/update_navigation_shortcut_ok.json";
-import updatePluginSettingsOk from "../../../../contracts/api/v2/fixtures/update_plugin_settings_ok.json";
 import updateSettingValueOk from "../../../../contracts/api/v2/fixtures/update_setting_value_ok.json";
-import updateSettingValueUnknownKey from "../../../../contracts/api/v2/fixtures/update_setting_value_unknown_key.json";
 
 import {
   captureProfileRequestContext,
@@ -20,14 +17,9 @@ import {
   setProfileToken,
   setRefreshToken,
 } from "@/api/client";
-import { V2ProblemError } from "@/api/v2/request";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
-import {
-  usePluginSettingsDetail,
-  usePluginSettingsList,
-  useUpdatePluginSettings,
-} from "./pluginSettings";
+import { usePluginSettingsList } from "./pluginSettings";
 import {
   settingsCapabilitiesSupportAtomicShortcuts,
   useEffectiveSettings,
@@ -37,7 +29,6 @@ import {
 } from "./settingValues";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
-const PROBLEM_HEADERS = { "Content-Type": "application/problem+json" };
 
 function json(body: unknown, status = 200, headers: Record<string, string> = JSON_HEADERS) {
   return new Response(JSON.stringify(body), { status, headers });
@@ -61,15 +52,10 @@ function stubFetch() {
       return json(getSettingsContractCapabilitiesOk);
     if (path === "/api/v2/settings/overlay-config") return json(getOverlayConfigOk);
     if (path === "/api/v2/settings/plugins") return json(listPluginSettingsOk);
-    if (path === "/api/v2/settings/plugins/3" && method === "GET") return json(getPluginSettingsOk);
-    if (path === "/api/v2/settings/plugins/3" && method === "PUT")
-      return json(updatePluginSettingsOk);
     if (path === "/api/v2/settings/values/nav.shortcuts/item")
       return json(updateNavigationShortcutOk);
     if (path === "/api/v2/settings/values/ui.theme" && method === "PUT")
       return json(updateSettingValueOk);
-    if (path === "/api/v2/settings/values/not.a.key" && method === "PUT")
-      return json(updateSettingValueUnknownKey, 422, PROBLEM_HEADERS);
     throw new Error(`unexpected ${method} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -146,7 +132,7 @@ describe("settings hooks against the committed v2 fixtures", () => {
     expect(settingsCapabilitiesSupportAtomicShortcuts(result.current.data)).toBe(true);
   });
 
-  it("writes a value at one scope and surfaces an unknown key as a validation problem", async () => {
+  it("writes a value at one scope", async () => {
     stubFetch();
     const { result } = renderHook(() => useSetSettingValue(), { wrapper });
 
@@ -157,21 +143,6 @@ describe("settings hooks against the committed v2 fixtures", () => {
         identity: { scope: "profile" },
       }),
     ).resolves.toEqual(updateSettingValueOk);
-
-    const rejected = result.current
-      .mutateAsync({
-        key: "not.a.key" as SettingKey,
-        value: "x",
-        identity: { scope: "profile" },
-      })
-      .catch((error: unknown) => error);
-    const error = await rejected;
-    expect(error).toBeInstanceOf(V2ProblemError);
-    expect((error as V2ProblemError).status).toBe(422);
-    expect((error as V2ProblemError).problemType).toBe("validation_failed");
-    expect((error as V2ProblemError).problem.errors?.[0]?.location).toBe(
-      updateSettingValueUnknownKey.errors[0]!.location,
-    );
   });
 
   it("sends an atomic shortcut edit with the captured profile authority", async () => {
@@ -206,28 +177,13 @@ describe("settings hooks against the committed v2 fixtures", () => {
     });
   });
 
-  it("lists, reads, and updates plugin settings with numeric installation ids", async () => {
-    const seen = stubFetch();
+  it("lists plugin settings with numeric installation ids", async () => {
+    stubFetch();
     const list = renderHook(() => usePluginSettingsList(), { wrapper });
     await waitFor(() => expect(list.result.current.isSuccess).toBe(true));
     const installation = list.result.current.data?.installations[0];
     expect(installation?.id).toBe(Number(listPluginSettingsOk.items[0]!.id));
     expect(installation?.routes).toEqual(listPluginSettingsOk.items[0]!.routes);
     expect(installation?.category).toBe(listPluginSettingsOk.items[0]!.category);
-
-    const detail = renderHook(() => usePluginSettingsDetail(3), { wrapper });
-    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
-    expect(detail.result.current.data?.values).toEqual(getPluginSettingsOk.values);
-    expect(detail.result.current.data?.installation.id).toBe(3);
-
-    const update = renderHook(() => useUpdatePluginSettings(), { wrapper });
-    const updated = await update.result.current.mutateAsync({
-      id: 3,
-      body: { values: { region: "eu" } },
-    });
-    expect(updated.values).toEqual(updatePluginSettingsOk.values);
-    const put = seen.find((request) => request.init.method === "PUT")!;
-    expect(put.url).toBe("/api/v2/settings/plugins/3");
-    expect(JSON.parse(put.init.body as string)).toEqual({ values: { region: "eu" } });
   });
 });

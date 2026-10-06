@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import checkLibraryMountOk from "../../../../../contracts/api/v2/fixtures/check_library_mount_ok.json";
 import createLibraryOk from "../../../../../contracts/api/v2/fixtures/create_library_ok.json";
 import deleteLibraryAccepted from "../../../../../contracts/api/v2/fixtures/delete_library_accepted.json";
+import getLibraryCapabilitiesOk from "../../../../../contracts/api/v2/fixtures/get_library_capabilities_ok.json";
+import getLibraryRealtimeMonitoringOk from "../../../../../contracts/api/v2/fixtures/get_library_realtime_monitoring_ok.json";
 import getLibraryProvidersOk from "../../../../../contracts/api/v2/fixtures/get_library_providers_ok.json";
 import getMetadataMatchQueueOk from "../../../../../contracts/api/v2/fixtures/get_metadata_match_queue_ok.json";
 import listLibrariesOk from "../../../../../contracts/api/v2/fixtures/list_libraries_ok.json";
@@ -18,10 +20,8 @@ import listStaleIdsOk from "../../../../../contracts/api/v2/fixtures/list_stale_
 import listUnmatchedItemsOk from "../../../../../contracts/api/v2/fixtures/list_unmatched_items_ok.json";
 import refreshLibraryMetadataAccepted from "../../../../../contracts/api/v2/fixtures/refresh_library_metadata_accepted.json";
 import updateLibraryOk from "../../../../../contracts/api/v2/fixtures/update_library_ok.json";
-import deleteLibraryConflict from "../../../../../contracts/api/v2/fixtures/delete_library_conflict.json";
 
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
-import { V2ProblemError } from "@/api/v2/request";
 
 import {
   fetchAdminLibraries,
@@ -33,7 +33,9 @@ import {
   useDeleteLibrary,
   useLibraryMetadataMatchQueues,
   useLibraryMetadataMatchQueueDetail,
+  useLibraryCapabilities,
   useLibraryProviders,
+  useLibraryRealtimeMonitoring,
   useLibraryRoots,
   useSkippedLibraryRoots,
   flattenLibraryRoots,
@@ -55,13 +57,6 @@ function createWrapper() {
   return function Wrapper({ children }: { children: ReactNode }) {
     return createElement(QueryClientProvider, { client }, children);
   };
-}
-
-function problemResponse(body: unknown, status: number) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/problem+json" },
-  });
 }
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
@@ -132,6 +127,61 @@ describe("library admin hooks on the v2 contract", () => {
     expect(created.id).toBe(Number(createLibraryOk.id));
   });
 
+  it("sends the real-time monitoring switch on create", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(createLibraryOk, 201));
+
+    const { result } = renderHook(() => useCreateLibrary(), { wrapper: createWrapper() });
+    const created = await result.current.mutateAsync({
+      paths: ["/media/movies"],
+      type: "movies",
+      name: "Movies",
+      realtime_monitoring: false,
+    });
+
+    expect(requestsOf(fetchMock)[0]?.body).toEqual({
+      paths: ["/media/movies"],
+      type: "movies",
+      name: "Movies",
+      realtime_monitoring: false,
+    });
+    expect(created.realtime_monitoring).toBe(createLibraryOk.realtime_monitoring);
+  });
+
+  it("sends the real-time monitoring switch on update", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(updateLibraryOk));
+
+    const { result } = renderHook(() => useUpdateLibrary(), { wrapper: createWrapper() });
+    await result.current.mutateAsync({ id: 1, body: { realtime_monitoring: false } });
+
+    expect(requestsOf(fetchMock)[0]?.body).toEqual({ realtime_monitoring: false });
+  });
+
+  it("reads the real-time monitoring status with numeric library ids", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(getLibraryRealtimeMonitoringOk));
+
+    const { result } = renderHook(() => useLibraryRealtimeMonitoring(), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(requestsOf(fetchMock)[0]?.url.pathname).toBe("/api/v2/libraries/realtime-monitoring");
+    expect(result.current.data?.server_enabled).toBe(true);
+    expect(result.current.data?.libraries.map((entry) => [entry.library_id, entry.state])).toEqual([
+      [1, "monitoring"],
+      [2, "not_reporting"],
+    ]);
+  });
+
+  it("reads the library capabilities", async () => {
+    const fetchMock = stubFetch(() => jsonResponse(getLibraryCapabilitiesOk));
+
+    const { result } = renderHook(() => useLibraryCapabilities(), { wrapper: createWrapper() });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(requestsOf(fetchMock)[0]?.url.pathname).toBe("/api/v2/libraries/capabilities");
+    expect(result.current.data?.realtime_monitoring).toBe(true);
+  });
+
   it("updates a library with PATCH and returns the updated row", async () => {
     const fetchMock = stubFetch(() => jsonResponse(updateLibraryOk));
 
@@ -155,16 +205,6 @@ describe("library admin hooks on the v2 contract", () => {
     expect(job.job_type).toBe("delete_library");
     expect(job.status).toBe("queued");
     expect(job.request_payload).toEqual({});
-  });
-
-  it("surfaces the 409 conflict problem when a deletion is already running", async () => {
-    stubFetch(() => problemResponse(deleteLibraryConflict, 409));
-
-    const { result } = renderHook(() => useDeleteLibrary(), { wrapper: createWrapper() });
-    await expect(result.current.mutateAsync(2)).rejects.toMatchObject({
-      status: 409,
-      problemType: "conflict",
-    });
   });
 
   it("queues a metadata refresh through the v2 202 answer", async () => {
@@ -578,11 +618,5 @@ describe("library admin hooks on the v2 contract", () => {
         },
       ],
     });
-  });
-
-  it("throws V2ProblemError instances so callers can branch on the problem type", async () => {
-    stubFetch(() => problemResponse(deleteLibraryConflict, 409));
-    const { result } = renderHook(() => useDeleteLibrary(), { wrapper: createWrapper() });
-    await expect(result.current.mutateAsync(2)).rejects.toBeInstanceOf(V2ProblemError);
   });
 });

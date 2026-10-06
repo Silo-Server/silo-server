@@ -18,9 +18,19 @@ func (s *Service) RequestCapabilityAllowed(ctx context.Context, viewer Viewer) (
 		}
 		return false, err
 	}
-	limit, err := s.store.GetUserLimit(ctx, viewer.UserID)
+	blocked, err := s.userLimitBlocked(ctx, viewer.UserID)
 	if err != nil {
 		return false, err
 	}
-	return limit == nil || (limit.LimitMode != LimitModeBlocked && limit.ApprovalMode != ApprovalModeBlocked), nil
+	return !blocked, nil
+}
+
+// userLimitBlocked reports whether the account's request limit or approval
+// mode is set to blocked.
+func (s *Service) userLimitBlocked(ctx context.Context, userID int) (bool, error) {
+	limit, err := s.store.GetUserLimit(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return limit != nil && (limit.LimitMode == LimitModeBlocked || limit.ApprovalMode == ApprovalModeBlocked), nil
 }

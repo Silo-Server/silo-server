@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 )
 
@@ -199,6 +200,9 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 		}
 		return summary
 	}
+	// Chapter credits the chapters no longer produce give way to the tail
+	// pass below.
+	a.withdrawChapterCredits(ctx, candidate, &summary)
 	if !tailReady {
 		return summary
 	}
@@ -264,7 +268,7 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 		summary.Errors = append(summary.Errors, err.Error())
 		return nil, false
 	}
-	var stored *Artifact
+	var stored *mediaartifact.Artifact
 	if artifact, ok := artifacts[candidate.FileID]; ok {
 		stored = &artifact
 	}
@@ -273,10 +277,10 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	case tail != nil:
 		summary.CreditsTailCacheHits++
 		return tail, false
-	case state == ArtifactSkipped && stored.Status != ArtifactFailed:
+	case state == mediaartifact.Skipped && stored.Status != mediaartifact.StatusFailed:
 		summary.CreditsTailUnusable++
 		return nil, false
-	case state == ArtifactSkipped:
+	case state == mediaartifact.Skipped:
 		return nil, false
 	}
 	release, err := a.ffmpegAcquirer()(ctx)

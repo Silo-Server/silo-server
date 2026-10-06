@@ -68,6 +68,14 @@ WHERE status = 'error'
 
 -- Keep one active claim per provider target: the most authoritative outcome,
 -- then the newest. Every row stays for audit.
+--
+-- The payload index is still in place here, and a claim moves between rows
+-- that share a payload when the same episode was submitted from two files.
+-- Release the losing claims before granting the winning ones: one statement
+-- that does both is refused with a duplicate key error whenever it reaches
+-- the winner first, which depends on the rows' physical order. The release
+-- and the grant rank the same rows the same way; neither touches updated_at,
+-- which the ranking reads.
 WITH ranked AS (
     SELECT id,
            ROW_NUMBER() OVER (
@@ -87,10 +95,51 @@ WITH ranked AS (
       AND target_key IS NOT NULL
 )
 UPDATE public.marker_contributions AS contribution
-SET claim_active = (ranked.row_number = 1)
+SET claim_active = false
 FROM ranked
 WHERE contribution.id = ranked.id
-  AND contribution.claim_active IS DISTINCT FROM (ranked.row_number = 1);
+  AND ranked.row_number > 1
+  AND contribution.claim_active;
+
+-- A row that kept a NULL key claims nothing, but while the payload index
+-- remains its active flag blocks the keyed row with the same payload.
+UPDATE public.marker_contributions AS stale
+SET claim_active = false
+WHERE stale.claim_active
+  AND stale.target_key IS NULL
+  AND EXISTS (
+      SELECT 1
+      FROM public.marker_contributions keyed
+      WHERE keyed.provider = stale.provider
+        AND keyed.segment_kind = stale.segment_kind
+        AND keyed.content_hash = stale.content_hash
+        AND keyed.target_key IS NOT NULL
+  );
+
+WITH ranked AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY provider, segment_kind, target_key
+               ORDER BY CASE status
+                            WHEN 'accepted' THEN 0
+                            WHEN 'pending' THEN 1
+                            WHEN 'rejected' THEN 2
+                            WHEN 'conflict' THEN 3
+                            WHEN 'invalid' THEN 4
+                            ELSE 5
+                        END,
+                        updated_at DESC, submitted_at DESC, id
+           ) AS row_number
+    FROM public.marker_contributions
+    WHERE status <> 'error'
+      AND target_key IS NOT NULL
+)
+UPDATE public.marker_contributions AS contribution
+SET claim_active = true
+FROM ranked
+WHERE contribution.id = ranked.id
+  AND ranked.row_number = 1
+  AND NOT contribution.claim_active;
 
 -- Remove an INVALID remnant before retrying an interrupted concurrent build.
 -- +goose StatementBegin

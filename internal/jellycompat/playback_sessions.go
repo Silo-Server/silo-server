@@ -45,15 +45,25 @@ type PlaybackSession struct {
 	// when it differs from ours (Static=true direct play skips PlaybackInfo,
 	// so the client never learns the server id). Playback reports carrying
 	// that id resolve to this session directly instead of by ambiguous route.
-	ClientPlaySessionID        string
-	UserID                     string
-	InitialSeekSeconds         float64
-	MediaSources               []PlaybackMediaSource
+	ClientPlaySessionID string
+	UserID              string
+	InitialSeekSeconds  float64
+	MediaSources        []PlaybackMediaSource
+	// UpstreamMediaFileID survives API restarts so previews can follow the
+	// selected source without consulting a process-local native session.
+	UpstreamMediaFileID        int
 	UpstreamSessionID          string
 	UpstreamPlayMethod         string
 	TranscodeStarted           bool
 	ProgressPersistenceKnown   bool
 	DisableProgressPersistence bool
+	// ResumeScrobble* record the start scrobble sent when UpstreamSessionID
+	// began, while a client report may still correct its position (#1712):
+	// the upstream session it was sent for, the position it carried, and when.
+	// Queueing a correction, pause, or resume clears ResumeScrobbleUpstreamID.
+	ResumeScrobbleUpstreamID string
+	ResumeScrobblePosition   float64
+	ResumeScrobbleSentAt     time.Time
 	// Terminal hides a play session from stream and progress routing after
 	// ActiveEncodings cleanup while retaining the authenticated mapping long
 	// enough for a later Stopped report to publish its authoritative position.
@@ -101,12 +111,15 @@ type PlaybackMediaSource struct {
 	TargetBitrateKbps        int
 	TargetResolution         string
 	TargetAudioChannels      int
-	ID                       string
-	FileID                   int
-	Version                  catalog.FileVersion
-	SupportsDirectPlay       bool
-	SupportsDirectStream     bool
-	SupportsTranscoding      bool
+	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
+	// Empty values are legacy H.264 sessions.
+	TargetVideoCodec     string
+	ID                   string
+	FileID               int
+	Version              catalog.FileVersion
+	SupportsDirectPlay   bool
+	SupportsDirectStream bool
+	SupportsTranscoding  bool
 	// HLSRemux selects HLS with video copy. TranscodeAudio remains the
 	// independent audio-encode decision, so a compatible audio codec can stay
 	// bit-for-bit copied. HLSRemuxMPEGTS overrides the normal fMP4 packaging for

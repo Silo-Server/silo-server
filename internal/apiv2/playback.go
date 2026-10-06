@@ -128,14 +128,32 @@ type PlaybackDecision struct {
 type PlaybackRequestHeaders struct {
 	UserAgent       string `header:"User-Agent"`
 	DeviceID        string `header:"X-Device-ID"`
-	ClientName      string `header:"X-Client-Name"`
+	ClientName      string `header:"X-Client-Name" doc:"App name; when non-blank, the X-Client-* headers supply the whole client identity and X-Silo-Client* is ignored"`
 	ClientVersion   string `header:"X-Client-Version"`
 	ClientBuild     string `header:"X-Client-Build"`
 	ClientChannel   string `header:"X-Client-Channel"`
 	ClientModel     string `header:"X-Client-Model"`
 	ClientPlatform  string `header:"X-Client-Platform"`
 	ClientOSVersion string `header:"X-Client-OS-Version"`
+	SiloClient      string `header:"X-Silo-Client" doc:"App name the first-party clients send on every request; when non-blank and X-Client-Name is absent or blank, the X-Silo-Client* headers supply the client identity" example:"Silo Android TV"`
+	SiloVersion     string `header:"X-Silo-Client-Version" doc:"Marketing version paired with X-Silo-Client" example:"1.0.0"`
+	SiloBuild       string `header:"X-Silo-Client-Build" doc:"Opaque build identifier paired with X-Silo-Client" example:"5"`
+	SiloChannel     string `header:"X-Silo-Client-Channel" doc:"Opaque distribution channel paired with X-Silo-Client" example:"release"`
 }
+
+// clientInfo resolves the caller's app identity from one header set, never a
+// mix of both. X-Client-Name is the declared v2 header, so a caller that sends
+// it keeps its X-Client-* values; the first-party apps and the web player send
+// only X-Silo-Client*, the app identity headers the v1 bridge reads. Values are
+// clamped here, where the request is read, like the bridge does.
+func (h PlaybackRequestHeaders) clientInfo() playback.ClientInfo {
+	info := playback.ClientInfo{Name: h.ClientName, Version: h.ClientVersion, Build: h.ClientBuild, Channel: h.ClientChannel}
+	if strings.TrimSpace(h.ClientName) == "" && strings.TrimSpace(h.SiloClient) != "" {
+		info = playback.ClientInfo{Name: h.SiloClient, Version: h.SiloVersion, Build: h.SiloBuild, Channel: h.SiloChannel}
+	}
+	return info.Normalized()
+}
+
 type PlaybackStartInput struct {
 	PlaybackRequestHeaders
 	Body PlaybackStartBody
@@ -415,7 +433,8 @@ func (reg *Registry) playbackCaller(ctx context.Context, headers PlaybackRequest
 	if !playbackUUID(string(installation)) {
 		return handlers.PlaybackCaller{}, validationProblem("body.installation_id", "invalid", "Expected the installation identifier from capabilities.")
 	}
-	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, UserAgent: headers.UserAgent, ClientName: headers.ClientName, ClientVersion: headers.ClientVersion, ClientBuild: headers.ClientBuild, ClientChannel: headers.ClientChannel, SiloClientName: observedClientName(ctx), DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
+	client := headers.clientInfo()
+	return handlers.PlaybackCaller{UserID: userID, ProfileID: profileID, InstallationID: string(installation), DeviceID: headers.DeviceID, UserAgent: headers.UserAgent, ClientName: client.Name, ClientVersion: client.Version, ClientBuild: client.Build, ClientChannel: client.Channel, DeviceName: headers.ClientModel, Platform: headers.ClientPlatform, RemoteAddr: clientip.FromContext(ctx)}, nil
 }
 
 // playbackProblem maps a service error onto the shared problem catalog: the

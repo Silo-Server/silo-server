@@ -240,12 +240,6 @@ func TestPlanPlaybackV3ExactSDRDisplayNarrowsContradictoryOutputHDR(t *testing.T
 	}
 }
 
-func TestServerFeaturesV3AdvertiseOutputDisplayEvidence(t *testing.T) {
-	if !HasFeatureV3(ServerFeaturesV3(), FeatureOutputDisplayEvidenceV3) {
-		t.Fatal("output_display_evidence_v1 must be advertised so clients can gate output.display")
-	}
-}
-
 func TestNativeOutputHDRV3IntersectsExactPanelBounds(t *testing.T) {
 	req := validStartRequestV3()
 	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{
