@@ -126,11 +126,16 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 	ffmpeg, _ := requireFFmpeg(t)
 	// Regular 2s keyframes on a timeline that starts at 0.28s land exactly
 	// on every target, which float error in the planner must not skip.
+	// A second audio track FFmpeg doesn't select runs 10s past the video, so
+	// the container's duration does too; the plan must still end with the
+	// video.
 	regular := filepath.Join(t.TempDir(), "regular.mkv")
 	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-t", "10", "-c:v", "libx264", "-preset", "ultrafast",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25:duration=10",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=10",
+		"-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=20",
+		"-map", "0", "-map", "1", "-map", "2",
+		"-c:v", "libx264", "-preset", "ultrafast",
 		"-g", "50", "-sc_threshold", "0", "-bf", "0",
 		"-c:a", "aac", "-output_ts_offset", "0.28", regular).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
@@ -173,6 +178,7 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	if len(planned) != len(written) {
 		t.Fatalf("planned %d segments %v, FFmpeg wrote %d %v", len(planned), planned, len(written), written)
 	}
+	var plannedTotal, writtenTotal float64
 	for i := range written {
 		tolerance := 0.002
 		if i == len(written)-1 {
@@ -184,13 +190,10 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 			t.Fatalf("segment %d: planned %.3fs, FFmpeg wrote %.3fs (planned %v, written %v)",
 				i, planned[i], written[i], planned, written)
 		}
-	}
-	// Per-segment tolerances could hide drift that adds up.
-	var plannedTotal, writtenTotal float64
-	for i := range written {
 		plannedTotal += planned[i]
 		writtenTotal += written[i]
 	}
+	// Per-segment tolerances could hide drift that adds up.
 	if math.Abs(plannedTotal-writtenTotal) > 0.041 {
 		t.Fatalf("planned %.3fs in all, FFmpeg wrote %.3fs", plannedTotal, writtenTotal)
 	}

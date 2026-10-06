@@ -204,6 +204,42 @@ func TestReadMatroskaInfoAfterClustersThroughSeekHead(t *testing.T) {
 	}
 }
 
+// Tracks may come after the clusters too, found through the seek head.
+func TestReadMatroskaTracksAfterClustersThroughSeekHead(t *testing.T) {
+	seekHead := func(cuesPos, tracksPos uint64) []byte {
+		return el(idSeekHead,
+			el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, cuesPos)),
+			el(idSeek, uintEl(idSeekID, idTracks), uintEl(idSeekPosition, tracksPos)))
+	}
+	posA := uint64(len(seekHead(0, 0)) + len(info))
+	posB := posA + uint64(len(clusterA))
+	cues := cuesFor(layout{}, posA, posB)
+	cuesPos := posB + uint64(len(clusterB))
+	tracksPos := cuesPos + uint64(len(cues))
+	segment := el(idSegment, seekHead(cuesPos, tracksPos), info, clusterA, clusterB, cues, tracks)
+	got, err := read(slices.Concat(ebmlHeader, segment))
+	wantIndex(t, got, err)
+}
+
+// A malformed cue point makes the index incomplete, even when the points read
+// before it happen to cover every keyframe: here the broken one is the last,
+// a duplicate.
+func TestReadMatroskaRejectsMalformedCues(t *testing.T) {
+	seekHead := func(pos uint64) []byte {
+		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
+	}
+	posA := uint64(len(seekHead(0)) + len(info) + len(tracks))
+	posB := posA + uint64(len(clusterA))
+	cues := cuesFor(layout{}, posA, posB)
+	payload := cues[12:] // past the Cues ID and its 8-byte size
+	malformed := el(idCues, payload[:len(payload)-3])
+	segment := el(idSegment, seekHead(posB+uint64(len(clusterB))), info, tracks, clusterA, clusterB, malformed)
+	_, err := read(slices.Concat(ebmlHeader, segment))
+	if !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("err = %v, want ErrNoIndex", err)
+	}
+}
+
 func TestReadMatroskaUnknownSizeSegment(t *testing.T) {
 	got, err := read(file(layout{unknownSize: true}))
 	wantIndex(t, got, err)
