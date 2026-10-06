@@ -89,14 +89,24 @@ const PlayingNextScreen = lazy(() =>
   importPlayingNextScreen().then((module) => ({ default: module.PlayingNextScreen })),
 );
 
-let playingNextScreenPrefetched = false;
+// A shuffle's post-roll wraps the same screen; it loads only during shuffles.
+const importShufflePlayingNext = () => import("./ShufflePlayingNext");
+const ShufflePlayingNext = lazy(importShufflePlayingNext);
 
-function prefetchPlayingNextScreen() {
-  if (playingNextScreenPrefetched) return;
-  playingNextScreenPrefetched = true;
+let playingNextScreenPrefetched = false;
+let shufflePlayingNextPrefetched = false;
+
+function prefetchPlayingNextScreen(shuffled: boolean) {
   // Nothing to report here: post-roll imports the chunk again when it renders,
   // and its error boundary handles a failure.
-  importPlayingNextScreen().catch(() => undefined);
+  if (!playingNextScreenPrefetched) {
+    playingNextScreenPrefetched = true;
+    importPlayingNextScreen().catch(() => undefined);
+  }
+  if (shuffled && !shufflePlayingNextPrefetched) {
+    shufflePlayingNextPrefetched = true;
+    importShufflePlayingNext().catch(() => undefined);
+  }
 }
 
 function normalizeWatchPlaybackRequest(
@@ -132,6 +142,15 @@ function buildPlaybackSubtitle(
   }
 
   return undefined;
+}
+
+/**
+ * Whether playback of fileId (or, with none chosen, of the first part) has a
+ * later part still to play.
+ */
+function hasLaterPart(item: WatchDetail | undefined, fileId?: number): boolean {
+  if (fileId) return findNextPlaybackPartFileId(item, fileId) != null;
+  return (item?.playback_variants ?? []).some((variant) => (variant.parts?.length ?? 0) > 1);
 }
 
 function findNextPlaybackPartFileId(
@@ -789,8 +808,13 @@ function WatchPlaybackHostContent() {
     [activeRequest, controller, navigate],
   );
 
+  // -- Shuffle: the server picks what plays next --
+  const shuffleId = activeRequest?.shuffleId;
+
   // -- Series episodes for next-episode navigation --
-  const seriesId = activeItem?.series_id;
+  // A shuffle replaces the series order, so it loads none and the player
+  // offers no sequential next or previous episode.
+  const seriesId = shuffleId ? undefined : activeItem?.series_id;
   const currentSeason = activeItem?.season_number ?? 0;
   const { episodes: seriesEpisodes } = useSeriesEpisodes(
     seriesId,
@@ -828,10 +852,19 @@ function WatchPlaybackHostContent() {
   useEffect(() => {
     modeRef.current = state.mode;
   }, [state.mode]);
-  const seriesIdRef = useRef(activeItem?.series_id);
+  // Series episodes and shuffled items reach post-roll; other playback ends
+  // on the detail page.
+  const hasPostRollRef = useRef(false);
+  const shuffledRef = useRef(false);
+  // A shuffled item with a later part plays that part before the shuffle
+  // moves on, so its post-roll waits for the last part.
+  const awaitsLaterPartRef = useRef(false);
   useEffect(() => {
-    seriesIdRef.current = activeItem?.series_id;
-  }, [activeItem?.series_id]);
+    hasPostRollRef.current = Boolean(activeItem?.series_id || shuffleId);
+    shuffledRef.current = Boolean(shuffleId);
+    awaitsLaterPartRef.current =
+      Boolean(shuffleId) && hasLaterPart(activeItem ?? undefined, activeRequest?.fileId);
+  }, [activeItem, activeRequest?.fileId, shuffleId]);
 
   // Reset post-roll tracking when the playback session changes.
   useEffect(() => {
@@ -864,6 +897,7 @@ function WatchPlaybackHostContent() {
             libraryId: activeRequest.libraryId,
             roomId: activeRequest.roomId,
             roomToken: activeRequest.roomToken,
+            shuffleId: activeRequest.shuffleId,
             returnHref: activeRequest.returnHref,
           },
           "automatic",
@@ -879,8 +913,9 @@ function WatchPlaybackHostContent() {
       }
 
       // Movies (no series_id) exit straight to the detail page — there's no
-      // post-roll experience to fall through into.
-      if (!activeItem?.series_id) {
+      // post-roll experience to fall through into — unless a shuffle picks
+      // what plays next.
+      if (!activeItem?.series_id && !activeRequest?.shuffleId) {
         if (activeRequest) {
           stopPlayback();
           navigate(buildWatchItemHref(activeRequest), { up: true });
@@ -908,7 +943,14 @@ function WatchPlaybackHostContent() {
   const handlePostRollClose = useCallback(() => {
     if (activeRequest) {
       stopPlayback();
-      navigate(buildWatchItemHref(activeRequest), { up: true });
+      // A shuffle returns to the library, series, or collection it started
+      // from rather than to whichever item happened to play last.
+      navigate(
+        activeRequest.shuffleId
+          ? buildPlaybackReturnHref(activeRequest)
+          : buildWatchItemHref(activeRequest),
+        { up: true },
+      );
     }
   }, [activeRequest, stopPlayback, navigate]);
 
@@ -925,9 +967,12 @@ function WatchPlaybackHostContent() {
       if (!requestKeyValue) return;
       updatePlaybackSnapshot(requestKeyValue, snapshot);
 
-      // Only series episodes reach post-roll. Waiting until the episode plays
-      // keeps the screen's download out of the way of the first frame.
-      if (seriesIdRef.current && snapshot.playing) prefetchPlayingNextScreen();
+      // Only series episodes and shuffles reach post-roll. Waiting until the
+      // item plays keeps the screen's download out of the way of the first
+      // frame.
+      if (hasPostRollRef.current && snapshot.playing) {
+        prefetchPlayingNextScreen(shuffledRef.current);
+      }
 
       // Enter post-roll early when approaching end of a series episode.
       // Fires regardless of whether a next episode exists so the end-of-
@@ -939,7 +984,8 @@ function WatchPlaybackHostContent() {
       if (
         !postRollEnteredRef.current &&
         !inRoom &&
-        seriesIdRef.current &&
+        hasPostRollRef.current &&
+        !awaitsLaterPartRef.current &&
         modeRef.current === "foreground" &&
         snapshot.duration > 0 &&
         snapshot.currentTime > 0 &&
@@ -1101,20 +1147,32 @@ function WatchPlaybackHostContent() {
       {isPostRoll && (
         <LocalErrorBoundary onError={handlePostRollUnavailable}>
           <Suspense fallback={null}>
-            <PlayingNextScreen
-              seriesId={activeItem.series_id}
-              seriesTitle={activeItem.series_title}
-              nextEpisode={nextEpisodeRef ?? undefined}
-              continueWatchingItems={continueWatchingItems}
-              videoEnded={postRollVideoEnded}
-              onPlayNow={
-                nextEpisodeRef
-                  ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
-                  : undefined
-              }
-              onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
-              onClose={handlePostRollClose}
-            />
+            {activeRequest.shuffleId ? (
+              <ShufflePlayingNext
+                request={activeRequest}
+                shuffleId={activeRequest.shuffleId}
+                seriesId={activeItem.series_id}
+                continueWatchingItems={continueWatchingItems}
+                videoEnded={postRollVideoEnded}
+                onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
+                onClose={handlePostRollClose}
+              />
+            ) : (
+              <PlayingNextScreen
+                seriesId={activeItem.series_id}
+                seriesTitle={activeItem.series_title}
+                nextEpisode={nextEpisodeRef ?? undefined}
+                continueWatchingItems={continueWatchingItems}
+                videoEnded={postRollVideoEnded}
+                onPlayNow={
+                  nextEpisodeRef
+                    ? (trigger) => handleNavigateEpisode(nextEpisodeRef.contentId, trigger)
+                    : undefined
+                }
+                onPlayItem={(contentId: string) => handleNavigateEpisode(contentId, "viewer")}
+                onClose={handlePostRollClose}
+              />
+            )}
           </Suspense>
         </LocalErrorBoundary>
       )}

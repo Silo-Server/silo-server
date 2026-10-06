@@ -430,6 +430,8 @@ type Dependencies struct {
 	// CatalogTrailers answers the trailer capability and refresh action
 	// (*handlers.ItemsHandler).
 	CatalogTrailers CatalogTrailerService
+	// Shuffles starts and advances shuffles (*shuffle.Service).
+	Shuffles ShuffleAPI
 	// MetadataAI answers the metadata AI capability and the on-view
 	// translation action (*handlers.MetadataAIHandler).
 	MetadataAI MetadataAIService

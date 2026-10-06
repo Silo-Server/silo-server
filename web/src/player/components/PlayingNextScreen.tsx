@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
 import type { EpisodeRef, PlaybackStartTrigger } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
@@ -20,6 +20,15 @@ interface PlayingNextScreenProps {
   onPlayNow?: (trigger: PlaybackStartTrigger) => void;
   onPlayItem: (contentId: string) => void;
   onClose: () => void;
+  /**
+   * Set while a shuffle plays: the next item is a random pick from the
+   * scope this labels, and the viewer can pick another or stop shuffling.
+   */
+  shuffle?: {
+    scopeLabel: string;
+    onStop: () => void;
+    onReshuffle: () => void;
+  };
 }
 
 const COUNTDOWN_SECONDS = 10;
@@ -33,6 +42,7 @@ export function PlayingNextScreen({
   onPlayNow,
   onPlayItem,
   onClose,
+  shuffle,
 }: PlayingNextScreenProps) {
   useDateTimeFormat();
   // -- Auto-play setting --
@@ -46,14 +56,24 @@ export function PlayingNextScreen({
 
   // -- Countdown (only starts after video has ended) --
   const [secondsRemaining, setSecondsRemaining] = useState(COUNTDOWN_SECONDS);
+  // A different next item, such as a shuffle's Pick Another, gets the full
+  // countdown rather than whatever was left of the previous one.
+  const [countdownFor, setCountdownFor] = useState(nextEpisode?.contentId);
+  if (countdownFor !== nextEpisode?.contentId) {
+    setCountdownFor(nextEpisode?.contentId);
+    setSecondsRemaining(COUNTDOWN_SECONDS);
+  }
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The countdown keys on the next item's ID: parents may rebuild an equal
+  // nextEpisode object on every render, which must not restart the interval.
+  const nextEpisodeId = nextEpisode?.contentId ?? null;
   const onPlayNowRef = useRef(onPlayNow);
   useEffect(() => {
     onPlayNowRef.current = onPlayNow;
   }, [onPlayNow]);
 
   useEffect(() => {
-    if (!videoEnded || !autoplay || !nextEpisode) {
+    if (!videoEnded || !autoplay || nextEpisodeId === null) {
       if (countdownRef.current) {
         clearInterval(countdownRef.current);
         countdownRef.current = null;
@@ -76,7 +96,7 @@ export function PlayingNextScreen({
     return () => {
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
-  }, [videoEnded, autoplay, nextEpisode]);
+  }, [videoEnded, autoplay, nextEpisodeId]);
 
   // -- Keyboard shortcuts --
   useEffect(() => {
@@ -85,6 +105,11 @@ export function PlayingNextScreen({
         e.preventDefault();
         onClose();
       } else if (e.key === "Enter" && onPlayNow) {
+        // Enter on a focused control, such as Pick Another or Stop
+        // shuffling, belongs to that control, not to Play Now.
+        if (e.target instanceof Element && e.target.closest("button, a, input, select, textarea")) {
+          return;
+        }
         e.preventDefault();
         onPlayNow("viewer");
       }
@@ -158,9 +183,15 @@ export function PlayingNextScreen({
           className="my-auto flex w-full flex-col items-center"
           style={{ maxWidth: "min(92vw, 820px)" }}
         >
+          {shuffle && (
+            <div className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/75 ring-1 ring-white/10 backdrop-blur-sm sm:text-xs">
+              <Shuffle className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">Shuffling {shuffle.scopeLabel}</span>
+            </div>
+          )}
           {/* Label */}
           <div className="mb-2.5 text-[10px] font-semibold tracking-[0.25em] text-white/40 uppercase sm:mb-3 sm:text-[11px]">
-            {nextEpisode ? "Playing Next" : "Finished"}
+            {nextEpisode ? (shuffle ? "Up Next at Random" : "Playing Next") : "Finished"}
           </div>
 
           {nextEpisode ? (
@@ -193,16 +224,22 @@ export function PlayingNextScreen({
 
               {/* Episode metadata - centered */}
               <div className="flex flex-col items-center gap-1 text-center">
-                {seriesTitle && (
-                  <div className="text-base font-bold text-white sm:text-lg">{seriesTitle}</div>
+                {(seriesTitle || nextEpisode.episodeNumber <= 0) && (
+                  <div className="text-base font-bold text-white sm:text-lg">
+                    {/* A movie has no series line; its own title heads the card. */}
+                    {seriesTitle || nextEpisode.title}
+                  </div>
                 )}
-                <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
-                  <span className="text-xs font-medium text-white/60 sm:text-sm">
-                    S{nextEpisode.seasonNumber}:E{nextEpisode.episodeNumber}
-                  </span>
-                  <span className="hidden text-sm text-white/25 sm:inline">&mdash;</span>
-                  <span className="text-sm font-semibold sm:text-base">{nextEpisode.title}</span>
-                </div>
+                {/* A shuffled movie has no season or episode number. */}
+                {nextEpisode.episodeNumber > 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
+                    <span className="text-xs font-medium text-white/60 sm:text-sm">
+                      S{nextEpisode.seasonNumber}:E{nextEpisode.episodeNumber}
+                    </span>
+                    <span className="hidden text-sm text-white/25 sm:inline">&mdash;</span>
+                    <span className="text-sm font-semibold sm:text-base">{nextEpisode.title}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-2 text-[11px] text-white/40 sm:text-xs">
                   {nextEpisode.airDate && (
                     <span>
@@ -243,6 +280,17 @@ export function PlayingNextScreen({
                   Play Now
                 </button>
 
+                {shuffle && (
+                  <button
+                    onClick={shuffle.onReshuffle}
+                    type="button"
+                    className="flex items-center gap-2 rounded-full bg-white/10 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/10 transition-colors hover:bg-white/20 sm:px-6 sm:py-3"
+                  >
+                    <Shuffle className="h-4 w-4" />
+                    Pick Another
+                  </button>
+                )}
+
                 {videoEnded && autoplay && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.8 }}
@@ -276,14 +324,28 @@ export function PlayingNextScreen({
                 )}
               </motion.div>
 
-              {/* Auto-play toggle */}
-              <button
-                onClick={toggleAutoplay}
-                type="button"
-                className="mt-2 text-xs text-white/30 transition-colors hover:text-white/60 sm:mt-2.5"
-              >
-                Auto-play is {autoplay ? "on" : "off"}
-              </button>
+              <div className="mt-2 flex items-center gap-2 text-xs text-white/30 sm:mt-2.5">
+                {/* Auto-play toggle */}
+                <button
+                  onClick={toggleAutoplay}
+                  type="button"
+                  className="transition-colors hover:text-white/60"
+                >
+                  Auto-play is {autoplay ? "on" : "off"}
+                </button>
+                {shuffle && (
+                  <>
+                    <span aria-hidden="true">&middot;</span>
+                    <button
+                      onClick={shuffle.onStop}
+                      type="button"
+                      className="transition-colors hover:text-white/60"
+                    >
+                      Stop shuffling
+                    </button>
+                  </>
+                )}
+              </div>
             </>
           ) : (
             <>

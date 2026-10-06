@@ -269,6 +269,64 @@ The realtime control socket (`/api/v2/playback/sessions/{session_id}/control/ws`
 is documented in the [realtime API](realtime-api.md); ownership is the session's
 account and profile.
 
+## Shuffle
+
+A shuffle plays random movies and episodes from one scope until the profile
+stops. The server picks every item, so any client or API process can continue
+a shuffle another one started.
+
+| Operation | Method and path | Success |
+| --- | --- | --- |
+| `getShuffleCapability` | GET `/api/v2/shuffles/capabilities` | 200 capability state and `scope_kinds` |
+| `createShuffle` | POST `/api/v2/shuffles` | 201 shuffle, `Location` |
+| `getShuffle` | GET `/api/v2/shuffles/{shuffle_id}` | 200 shuffle |
+| `advanceShuffle` | POST `/api/v2/shuffles/{shuffle_id}/advance` | 200 shuffle |
+| `skipShuffleItem` | POST `/api/v2/shuffles/{shuffle_id}/skip` | 200 shuffle |
+| `deleteShuffle` | DELETE `/api/v2/shuffles/{shuffle_id}` | 204 |
+
+`createShuffle` takes `{scope: {kind, id}}`. `kind` is `library` (a library
+ID; movie, TV, and mixed libraries), `series` or `season` (a content ID,
+including the `<series>-S<number>` IDs of seasons without stored metadata), or
+`library_collection` or `user_collection` (a collection ID). A collection plays
+its movies, its series' episodes, and any episodes it lists itself. Specials
+play like any other episode.
+A scope the profile cannot see is `404`. A library with no movies or episodes,
+or a scope with nothing the profile can play, is `409 conflict`.
+
+A shuffle is `{id, scope: {kind, id, title, parent_title?}, current, next,
+created_at, updated_at}`. `current` and `next` are catalog item cards; `next`
+equals `current` only when one item can play. `title` names the scope when the
+shuffle started, and `parent_title` is a season's series title.
+
+Picks never repeat an item until every playable item in the scope has played.
+The next cycle never starts with the item that just played. Each pick
+re-applies the profile's library access, file access, playback quality ceiling,
+and parental limits. An item needs a present file in an enabled library.
+
+Play `current`. When it ends, call `advanceShuffle` with `from_content_id` set
+to the item that played: `next` becomes `current` and a new `next` is picked.
+`skipShuffleItem` with `next_content_id` replaces the announced `next` with
+another pick. The skipped item never played, so it stays in the cycle and can
+come up later; when it is the only item the cycle has not played, it stays
+`next`. Advance and skip act only while the named item still holds that
+position, so a retry after a lost response returns the same shuffle unchanged.
+A retried `createShuffle` starts a second shuffle; the first is never read
+again.
+
+If the announced `next` can no longer play when the shuffle is read or moves
+on, because its file went missing or the profile lost access, another pick
+replaces it. When nothing in the scope can play any more, `getShuffle` answers
+`409 conflict`. A shuffle belongs to the profile that started it, and every
+operation re-checks that the profile can still see its scope; another
+profile's shuffle, or one whose scope the profile lost, is `404`. There is no
+separate expiry job: whenever a new shuffle is created, shuffles untouched for
+seven days are deleted.
+
+The web client carries the shuffle in the watch URL as `?shuffle=<id>` and
+plays every pick from the beginning, ignoring saved progress. While a shuffle
+is set, the post-roll screen shows `next` instead of the next episode, and the
+player offers no sequential next or previous episode.
+
 ## v1 bridge
 
 `/api/v1/playback/start`, `/{session_id}/progress`, `DELETE /{session_id}`,

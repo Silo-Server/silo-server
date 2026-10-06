@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   recommendedMounts: 0,
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
     data: [{ id: 7, name: "Movies", type: "movie", sort_order: 0 }],
