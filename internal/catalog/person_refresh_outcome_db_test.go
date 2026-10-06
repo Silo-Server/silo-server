@@ -2,12 +2,14 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -38,6 +40,18 @@ func seedRefreshPerson(t *testing.T, pool *pgxpool.Pool, label string) int64 {
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM people WHERE id = $1`, id) })
 	return id
+}
+
+// identityOf reads the provider ids a lookup of person id would ask about.
+func identityOf(t *testing.T, pool *pgxpool.Pool, id int64) PersonIdentity {
+	t.Helper()
+	var identity PersonIdentity
+	if err := pool.QueryRow(context.Background(),
+		`SELECT tmdb_id, imdb_id, tvdb_id FROM people WHERE id = $1`, id,
+	).Scan(&identity.TmdbID, &identity.ImdbID, &identity.TvdbID); err != nil {
+		t.Fatalf("read person %d ids: %v", id, err)
+	}
+	return identity
 }
 
 type refreshState struct {
@@ -137,7 +151,7 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireDueIn(t, "attempt lease", readRefreshState(t, pool, answered), PersonRefreshAttemptLease)
-	if err := repo.RecordRefreshOutcome(ctx, answered, PersonRefreshAnswered); err != nil {
+	if err := repo.RecordRefreshOutcome(ctx, answered, identityOf(t, pool, answered), PersonRefreshAnswered); err != nil {
 		t.Fatal(err)
 	}
 	state := readRefreshState(t, pool, answered)
@@ -148,7 +162,7 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 
 	failed := seedRefreshPerson(t, pool, "failed")
 	for attempt, want := range []time.Duration{time.Hour, 2 * time.Hour, 4 * time.Hour} {
-		if err := repo.RecordRefreshOutcome(ctx, failed, PersonRefreshFailed); err != nil {
+		if err := repo.RecordRefreshOutcome(ctx, failed, identityOf(t, pool, failed), PersonRefreshFailed); err != nil {
 			t.Fatal(err)
 		}
 		requireDueIn(t, fmt.Sprintf("failure %d", attempt+1), readRefreshState(t, pool, failed), want)
@@ -156,12 +170,12 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE people SET metadata_refresh_failures = 40 WHERE id = $1`, failed); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.RecordRefreshOutcome(ctx, failed, PersonRefreshFailed); err != nil {
+	if err := repo.RecordRefreshOutcome(ctx, failed, identityOf(t, pool, failed), PersonRefreshFailed); err != nil {
 		t.Fatal(err)
 	}
 	requireDueIn(t, "capped failure", readRefreshState(t, pool, failed), PersonRefreshRetryAfter)
 	// An answer resets the count.
-	if err := repo.RecordRefreshOutcome(ctx, failed, PersonRefreshAnswered); err != nil {
+	if err := repo.RecordRefreshOutcome(ctx, failed, identityOf(t, pool, failed), PersonRefreshAnswered); err != nil {
 		t.Fatal(err)
 	}
 	if state := readRefreshState(t, pool, failed); state.failures != 0 {
@@ -170,12 +184,12 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 
 	missing := seedRefreshPerson(t, pool, "missing")
 	for attempt := 1; attempt < PersonRefreshNotFoundAttempts; attempt++ {
-		if err := repo.RecordRefreshOutcome(ctx, missing, PersonRefreshNotFound); err != nil {
+		if err := repo.RecordRefreshOutcome(ctx, missing, identityOf(t, pool, missing), PersonRefreshNotFound); err != nil {
 			t.Fatal(err)
 		}
 		requireDueIn(t, fmt.Sprintf("not found %d", attempt), readRefreshState(t, pool, missing), PersonRefreshRetryAfter)
 	}
-	if err := repo.RecordRefreshOutcome(ctx, missing, PersonRefreshNotFound); err != nil {
+	if err := repo.RecordRefreshOutcome(ctx, missing, identityOf(t, pool, missing), PersonRefreshNotFound); err != nil {
 		t.Fatal(err)
 	}
 	if state := readRefreshState(t, pool, missing); state.dueIn != nil {
@@ -185,7 +199,7 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 	// Failures don't count toward giving up: only not-found lookups in a row do.
 	flaky := seedRefreshPerson(t, pool, "flaky")
 	for _, outcome := range []PersonRefreshOutcome{PersonRefreshFailed, PersonRefreshFailed, PersonRefreshNotFound} {
-		if err := repo.RecordRefreshOutcome(ctx, flaky, outcome); err != nil {
+		if err := repo.RecordRefreshOutcome(ctx, flaky, identityOf(t, pool, flaky), outcome); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,12 +208,12 @@ func TestPersonRefreshOutcomeSchedulesNextLookupPostgres(t *testing.T) {
 		t.Fatalf("not-found streak after two failures = %d, want 1", state.failures)
 	}
 	requireDueIn(t, "not found after failures", state, PersonRefreshRetryAfter)
-	if err := repo.RecordRefreshOutcome(ctx, flaky, PersonRefreshFailed); err != nil {
+	if err := repo.RecordRefreshOutcome(ctx, flaky, identityOf(t, pool, flaky), PersonRefreshFailed); err != nil {
 		t.Fatal(err)
 	}
 	requireDueIn(t, "failure after not found", readRefreshState(t, pool, flaky), PersonRefreshFailureBackoff)
 
-	if err := repo.RecordRefreshOutcome(ctx, answered, PersonRefreshOutcome("bogus")); err == nil {
+	if err := repo.RecordRefreshOutcome(ctx, answered, identityOf(t, pool, answered), PersonRefreshOutcome("bogus")); err == nil {
 		t.Fatal("unknown outcome was accepted")
 	}
 }
@@ -306,9 +320,10 @@ func TestRecordRefreshOutcomeConcurrentWritesBothCountPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	identity := identityOf(t, pool, id)
 	errs := make(chan error, 2)
 	for range 2 {
-		go func() { errs <- repo.RecordRefreshOutcome(ctx, id, PersonRefreshFailed) }()
+		go func() { errs <- repo.RecordRefreshOutcome(ctx, id, identity, PersonRefreshFailed) }()
 	}
 	// Both writes must be waiting on the lock before it is released.
 	deadline := time.Now().Add(10 * time.Second)
@@ -451,9 +466,15 @@ func TestPersonIDChangeResetsRefreshOutcomePostgres(t *testing.T) {
 		t.Fatalf("an update keeping the ids changed the outcome: %+v", state)
 	}
 
+	staleIdentity := identityOf(t, pool, id)
 	person.TmdbID += "-corrected"
 	if err := repo.Update(ctx, *person); err != nil {
 		t.Fatal(err)
+	}
+	// A lookup that started under the old id finishes after the correction:
+	// its outcome is about the old identity and isn't recorded.
+	if err := repo.RecordRefreshOutcome(ctx, id, staleIdentity, PersonRefreshNotFound); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("stale outcome err = %v, want pgx.ErrNoRows", err)
 	}
 	state := readRefreshState(t, pool, id)
 	if state.outcome != nil || state.failures != 0 || state.dueIn == nil || *state.dueIn > time.Minute {
@@ -465,5 +486,31 @@ func TestPersonIDChangeResetsRefreshOutcomePostgres(t *testing.T) {
 	}
 	if !slices.Contains(ids, id) {
 		t.Fatal("the person with a corrected id is not a candidate")
+	}
+}
+
+// An outcome repairs a missing attempt time, so a person whose attempt mark
+// failed isn't taken for one never looked up (#1606).
+func TestRecordRefreshOutcomeStampsMissingAttemptPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "unmarked")
+
+	if err := repo.RecordRefreshOutcome(ctx, id, identityOf(t, pool, id), PersonRefreshAnswered); err != nil {
+		t.Fatal(err)
+	}
+	var stamped bool
+	if err := pool.QueryRow(ctx, `SELECT metadata_refresh_attempted_at IS NOT NULL FROM people WHERE id = $1`, id).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if !stamped {
+		t.Fatal("the outcome left the attempt time empty")
+	}
+	ids, err := repo.ClaimRefreshCandidates(ctx, 100_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(ids, id) {
+		t.Fatal("an answered person is a never-looked-up candidate again")
 	}
 }

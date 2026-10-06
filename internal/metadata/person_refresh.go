@@ -28,7 +28,7 @@ type personRefreshRepo interface {
 	Update(ctx context.Context, person models.Person) error
 	MarkRefreshAttempt(ctx context.Context, id int64) error
 	StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error)
-	RecordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) error
+	RecordRefreshOutcome(ctx context.Context, id int64, identity catalog.PersonIdentity, outcome catalog.PersonRefreshOutcome) error
 	ClaimRefreshCandidates(ctx context.Context, limit int) ([]int64, error)
 }
 
@@ -217,7 +217,7 @@ func (s *PersonRefreshService) refreshPersonSince(
 		if failed || consulted == 0 {
 			outcome = catalog.PersonRefreshFailed
 		}
-		s.recordRefreshOutcome(ctx, id, outcome)
+		s.recordRefreshOutcome(ctx, *person, outcome)
 		return nil, ErrPersonMetadataNotFound
 	}
 
@@ -241,7 +241,7 @@ func (s *PersonRefreshService) refreshPersonSince(
 	// failure instead of coming back every time the attempt's lease runs out.
 	refreshed, err := mergePersonIntoRecord(*person, accumulator)
 	if err != nil {
-		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
+		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
 		return nil, err
 	}
 
@@ -251,10 +251,11 @@ func (s *PersonRefreshService) refreshPersonSince(
 			// longer anything to refresh under this id.
 			return nil, ErrPersonNotFound
 		}
-		s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshFailed)
+		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
-	s.recordRefreshOutcome(ctx, id, catalog.PersonRefreshAnswered)
+	// The answer is about the ids just stored, which a provider can extend.
+	s.recordRefreshOutcome(ctx, refreshed, catalog.PersonRefreshAnswered)
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)
 
 	return &refreshed, nil
@@ -264,12 +265,22 @@ func (s *PersonRefreshService) refreshPersonSince(
 // the sweep looks the person up again. Like the attempt mark it is
 // bookkeeping: a failed write is logged, and the attempt's short lease then
 // brings the person back. It runs even when the refresh ran out of time.
-func (s *PersonRefreshService) recordRefreshOutcome(ctx context.Context, id int64, outcome catalog.PersonRefreshOutcome) {
+func (s *PersonRefreshService) recordRefreshOutcome(ctx context.Context, person models.Person, outcome catalog.PersonRefreshOutcome) {
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := s.repo.RecordRefreshOutcome(recordCtx, id, outcome); err != nil {
+	err := s.repo.RecordRefreshOutcome(recordCtx, person.ID, catalog.PersonIdentityOf(person), outcome)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The person's ids changed during the lookup, or the person is gone;
+		// the outcome is about an identity they no longer have.
+		slog.InfoContext(ctx, "person refresh: person changed during the lookup; outcome not recorded", "component", "metadata",
+			"person_id", person.ID,
+			"outcome", outcome,
+		)
+		return
+	}
+	if err != nil {
 		slog.WarnContext(ctx, "person refresh: failed to record refresh outcome", "component", "metadata",
-			"person_id", id,
+			"person_id", person.ID,
 			"outcome", outcome,
 			"error", err,
 		)
