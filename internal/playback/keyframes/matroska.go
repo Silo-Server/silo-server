@@ -267,8 +267,6 @@ func readVint(b []byte, keepMarker bool) (value uint64, length int, ok bool) {
 	return value, length, true
 }
 
-// children calls fn for each child element in a master element's data. It
-// stops at the first malformed child.
 // readSeekTarget reads the element a seek head points at, which must be want.
 func readSeekTarget(r io.ReaderAt, at int64, want uint64) ([]byte, error) {
 	id, dataSize, headerLen, err := readElementHeader(r, at)
@@ -304,6 +302,8 @@ func childrenComplete(data []byte, fn func(id uint64, payload []byte)) bool {
 	return true
 }
 
+// children calls fn for each child element in a master element's data. It
+// stops at the first malformed child.
 func children(data []byte, fn func(id uint64, payload []byte)) {
 	for len(data) > 0 {
 		id, idLen, ok := readVint(data, true)
