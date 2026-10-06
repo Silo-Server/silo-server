@@ -962,10 +962,11 @@ func checkStatusOf(value pluginv1.CheckAccountStatus) string {
 	}
 }
 
-// recordIdentityCheck stamps the answer, which supersedes a pending
-// refusal. An answer that decides nothing (unavailable, unsupported) leaves
-// a refusal on record as the status: the person stays refused, for
+// recordIdentityCheck stamps the answer. An answer that decides nothing
+// (unavailable, unsupported) leaves a refusal on record, as the status or as
+// a pending refusal the next re-check applies: the person stays refused, for
 // networkRefused and primaryAuthorityOf, until the provider vouches again.
+// Any other answer supersedes a pending refusal.
 // An active answer also counts as a provider authentication
 // (last_authenticated_at) and refreshes what the provider says about the
 // person, keeping stored values the provider left empty.
@@ -983,7 +984,8 @@ func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatu
 			username = COALESCE(NULLIF($4, ''), username),
 			email = COALESCE(NULLIF($5, ''), email),
 			display_name = COALESCE(NULLIF($6, ''), display_name),
-			pending_refusal = '', updated_at = NOW()
+			pending_refusal = CASE WHEN $2 IN ('unavailable', 'unsupported') THEN pending_refusal ELSE '' END,
+			updated_at = NOW()
 		WHERE id = $1`,
 		id, checkStatus, strings.TrimSpace(account.GetIssuer()), strings.TrimSpace(account.GetUsername()),
 		strings.TrimSpace(account.GetEmail()), strings.TrimSpace(account.GetDisplayName()), refusalStatuses); err != nil {

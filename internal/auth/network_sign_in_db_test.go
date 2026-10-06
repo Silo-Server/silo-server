@@ -259,6 +259,18 @@ func TestNetworkRefusalBlocksLocalPasswordDB(t *testing.T) {
 		}
 	}
 
+	// So does one that arrives while a refusal waits to be applied.
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = $3 WHERE id = $1`,
+		networkIdentityID, CheckStatusActive, CheckStatusNotFound)
+	if err := recordIdentityCheck(ctx, env.pool, networkIdentityID, CheckStatusUnavailable, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := signIn(owner); !errors.Is(err, ErrNotPermitted) {
+		t.Fatalf("password sign-in after an unavailable answer to a pending refusal = %v, want ErrNotPermitted", err)
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = '' WHERE id = $1`,
+		networkIdentityID, CheckStatusNotFound)
+
 	// A break-glass admin is never blocked.
 	admin := env.localAccount(t, "glass", models.RoleAdmin)
 	exec(`UPDATE users SET break_glass = true WHERE id = $1`, admin.ID)
