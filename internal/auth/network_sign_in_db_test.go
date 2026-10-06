@@ -250,6 +250,15 @@ func TestNetworkRefusalBlocksLocalPasswordDB(t *testing.T) {
 		t.Fatalf("wrong password after the refusal = %v, want ErrInvalidCredentials", err)
 	}
 
+	// An answer that decides nothing keeps the refusal on record.
+	for _, status := range []pluginv1.CheckAccountStatus{pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNAVAILABLE,
+		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED} {
+		recheck(status)
+		if err := signIn(owner); !errors.Is(err, ErrNotPermitted) {
+			t.Fatalf("password sign-in after a %v answer = %v, want ErrNotPermitted", status, err)
+		}
+	}
+
 	// A break-glass admin is never blocked.
 	admin := env.localAccount(t, "glass", models.RoleAdmin)
 	exec(`UPDATE users SET break_glass = true WHERE id = $1`, admin.ID)

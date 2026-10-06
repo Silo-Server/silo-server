@@ -549,7 +549,9 @@ the SDK's `NetworkIdentityAuth`.
   refuses the account with `not_permitted`, after checking the password;
   break-glass accounts are exempt. The refusal itself ends every session and
   API key of the account, as for any provider that answers for it. The block
-  lifts when the provider vouches again, at a network sign-in or a re-check;
+  lifts only when the provider vouches again, at a network sign-in or an
+  active re-check: an unavailable or unsupported answer keeps a refusal on
+  record as the identity's status (`recordIdentityCheck`);
   the scheduled pass re-checks the network identity of an account with local
   password sign-in on even when it holds no credential to bound, so a person
   removed from the overlay is found and one added back is let in. It is not

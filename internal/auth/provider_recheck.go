@@ -963,7 +963,10 @@ func checkStatusOf(value pluginv1.CheckAccountStatus) string {
 }
 
 // recordIdentityCheck stamps the answer, which supersedes a pending
-// refusal. An active answer also counts as a provider authentication
+// refusal. An answer that decides nothing (unavailable, unsupported) leaves
+// a refusal on record as the status: the person stays refused, for
+// networkRefused and primaryAuthorityOf, until the provider vouches again.
+// An active answer also counts as a provider authentication
 // (last_authenticated_at) and refreshes what the provider says about the
 // person, keeping stored values the provider left empty.
 func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatus string, account *pluginv1.AuthenticateResponse) error {
@@ -972,7 +975,9 @@ func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatu
 	}
 	if _, err := db.Exec(ctx, `
 		UPDATE plugin_auth_identities
-		SET last_checked_at = NOW(), last_check_status = $2,
+		SET last_checked_at = NOW(),
+			last_check_status = CASE WHEN $2 IN ('unavailable', 'unsupported') AND last_check_status = ANY($7)
+				THEN last_check_status ELSE $2 END,
 			last_authenticated_at = CASE WHEN $2 = 'active' THEN NOW() ELSE last_authenticated_at END,
 			issuer = COALESCE(NULLIF($3, ''), issuer),
 			username = COALESCE(NULLIF($4, ''), username),
@@ -981,7 +986,7 @@ func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatu
 			pending_refusal = '', updated_at = NOW()
 		WHERE id = $1`,
 		id, checkStatus, strings.TrimSpace(account.GetIssuer()), strings.TrimSpace(account.GetUsername()),
-		strings.TrimSpace(account.GetEmail()), strings.TrimSpace(account.GetDisplayName())); err != nil {
+		strings.TrimSpace(account.GetEmail()), strings.TrimSpace(account.GetDisplayName()), refusalStatuses); err != nil {
 		return fmt.Errorf("recording provider re-check: %w", err)
 	}
 	return nil
