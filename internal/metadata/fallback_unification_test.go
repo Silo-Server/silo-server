@@ -51,7 +51,11 @@ func (r *fakePersonRefreshRepo) MarkRefreshAttempt(_ context.Context, id int64) 
 	return r.refreshAttemptErr
 }
 
-func (r *fakePersonRefreshRepo) RecordRefreshOutcome(_ context.Context, _ int64, outcome catalog.PersonRefreshOutcome) error {
+func (r *fakePersonRefreshRepo) RecordRefreshOutcome(ctx context.Context, _ int64, _ catalog.PersonIdentity, outcome catalog.PersonRefreshOutcome) error {
+	// The service must record with a context that outlives the lookup's.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.outcomes = append(r.outcomes, outcome)
 	return nil
 }

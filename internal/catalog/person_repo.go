@@ -1096,6 +1096,17 @@ const (
 	PersonRefreshFailed PersonRefreshOutcome = "failed"
 )
 
+// PersonIdentity is the provider ids a lookup asked about. An outcome
+// recorded for an identity the person no longer has is stale.
+type PersonIdentity struct {
+	TmdbID, ImdbID, TvdbID string
+}
+
+// PersonIdentityOf is the identity a lookup of p asks about.
+func PersonIdentityOf(p models.Person) PersonIdentity {
+	return PersonIdentity{TmdbID: p.TmdbID, ImdbID: p.ImdbID, TvdbID: p.TvdbID}
+}
+
 // RecordRefreshOutcome stores a lookup's outcome and when the sweep may look
 // the person up again. An answer is trusted for PersonMetadataStaleAfter.
 // metadata_refresh_failures counts consecutive lookups with the outcome just
@@ -1105,7 +1116,15 @@ const (
 // is retried every PersonRefreshRetryAfter until PersonRefreshNotFoundAttempts
 // not-found lookups in a row, then only on demand, so failures and
 // unavailable providers never use up that budget.
-func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, outcome PersonRefreshOutcome) error {
+//
+// The outcome is written only while the person still has the identity the
+// lookup asked about: a lookup that started before an admin corrected the
+// person's ids says nothing about the new ones, and it must not undo the
+// reset the correction made (see execPersonUpdate). Such a write matches no
+// row and returns pgx.ErrNoRows. Recording an outcome also stamps a missing
+// attempt time, so a lookup whose attempt mark failed isn't taken for one
+// never made.
+func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, identity PersonIdentity, outcome PersonRefreshOutcome) error {
 	switch outcome {
 	case PersonRefreshAnswered, PersonRefreshNotFound, PersonRefreshFailed:
 	default:
@@ -1116,7 +1135,8 @@ func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, o
 	// recorded at once both count. The SET list sees the old column values.
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE people
-		SET metadata_refresh_outcome = $2,
+		SET metadata_refresh_attempted_at = COALESCE(metadata_refresh_attempted_at, NOW()),
+			metadata_refresh_outcome = $2,
 			metadata_refresh_failures = `+personRefreshStreak+`,
 			metadata_refresh_due_at = CASE
 				WHEN $2 = 'answered' THEN NOW() + make_interval(secs => $3)
@@ -1124,13 +1144,19 @@ func (r *PersonRepository) RecordRefreshOutcome(ctx context.Context, id int64, o
 				WHEN $2 = 'not_found' THEN NOW() + make_interval(secs => $5)
 				ELSE NOW() + make_interval(secs => LEAST($6 * power(2, LEAST(`+personRefreshStreak+` - 1, 30)), $5))
 			END
-		WHERE id = $1`,
+		WHERE id = $1
+			AND tmdb_id IS NOT DISTINCT FROM $7
+			AND imdb_id IS NOT DISTINCT FROM $8
+			AND tvdb_id IS NOT DISTINCT FROM $9`,
 		id,
 		string(outcome),
 		PersonMetadataStaleAfter.Seconds(),
 		PersonRefreshNotFoundAttempts,
 		PersonRefreshRetryAfter.Seconds(),
 		PersonRefreshFailureBackoff.Seconds(),
+		identity.TmdbID,
+		identity.ImdbID,
+		identity.TvdbID,
 	)
 	if err != nil {
 		return fmt.Errorf("record person %d refresh outcome: %w", id, err)
