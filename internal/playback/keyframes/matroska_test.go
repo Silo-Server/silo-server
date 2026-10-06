@@ -221,22 +221,30 @@ func TestReadMatroskaTracksAfterClustersThroughSeekHead(t *testing.T) {
 	wantIndex(t, got, err)
 }
 
-// A malformed cue point makes the index incomplete, even when the points read
-// before it happen to cover every keyframe: here the broken one is the last,
-// a duplicate.
+// Malformed data in a cue point makes the index incomplete, even when the
+// points read around it happen to cover every keyframe: here the broken one
+// is a duplicate.
 func TestReadMatroskaRejectsMalformedCues(t *testing.T) {
 	seekHead := func(pos uint64) []byte {
 		return el(idSeekHead, el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, pos)))
 	}
 	posA := uint64(len(seekHead(0)) + len(info) + len(tracks))
 	posB := posA + uint64(len(clusterA))
-	cues := cuesFor(layout{}, posA, posB)
-	payload := cues[12:] // past the Cues ID and its 8-byte size
-	malformed := el(idCues, payload[:len(payload)-3])
-	segment := el(idSegment, seekHead(posB+uint64(len(clusterB))), info, tracks, clusterA, clusterB, malformed)
-	_, err := read(slices.Concat(ebmlHeader, segment))
-	if !errors.Is(err, ErrNoIndex) {
-		t.Fatalf("err = %v, want ErrNoIndex", err)
+	payload := cuesFor(layout{}, posA, posB)[12:] // past the Cues ID and its 8-byte size
+	// A duplicate cue point whose track position holds a cut-off CueTrack.
+	truncatedTrack := el(idCuePoint, uintEl(idCueTime, 2216),
+		el(idCueTrackPos, uintEl(idCueTrack, videoTrack)[:5], uintEl(idCueClusterPosition, posA)))
+	for name, malformed := range map[string][]byte{
+		"truncated cue point":      el(idCues, payload[:len(payload)-3]),
+		"truncated track position": el(idCues, payload, truncatedTrack),
+	} {
+		t.Run(name, func(t *testing.T) {
+			segment := el(idSegment, seekHead(posB+uint64(len(clusterB))), info, tracks, clusterA, clusterB, malformed)
+			_, err := read(slices.Concat(ebmlHeader, segment))
+			if !errors.Is(err, ErrNoIndex) {
+				t.Fatalf("err = %v, want ErrNoIndex", err)
+			}
+		})
 	}
 }
 
