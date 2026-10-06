@@ -451,6 +451,103 @@ describe("AdminAccessGroups", () => {
     adminUsers.data = [];
   });
 
+  it("shows request limit and approval changes between groups that both allow requests", async () => {
+    // Two groups identical in policy, both allowing requests, but with
+    // different request terms stored apart from the group.
+    const serve = globalThis.fetch;
+    const kids = { ...GROUP, requests_allowed: true };
+    const guests = { ...kids, id: "2", name: "Guests", is_default: false };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) => {
+        const url = String(input);
+        if (url === "/api/v2/admin/access-groups?limit=200") {
+          return jsonResponse({ items: [kids, guests], page: { has_more: false } });
+        }
+        if (url === "/api/v2/admin/access-groups/1") {
+          return new Response(JSON.stringify(kids), {
+            headers: { "Content-Type": "application/json", ETag: '"initial"' },
+          });
+        }
+        if (url === "/api/v2/admin/request-groups/1/limit") {
+          return jsonResponse(
+            {
+              group_id: "1",
+              limit_mode: "custom",
+              max_requests: 0,
+              window_days: 7,
+              approval_mode: "manual",
+            },
+            200,
+            '"kids"',
+          );
+        }
+        if (url === "/api/v2/admin/request-groups/2/limit") {
+          return jsonResponse(
+            {
+              group_id: "2",
+              limit_mode: "unlimited",
+              max_requests: null,
+              window_days: null,
+              approval_mode: "auto",
+            },
+            200,
+            '"guests"',
+          );
+        }
+        return serve(input, init);
+      }),
+    );
+    adminUsers.data = [member(7, "taylor", "user", 1)];
+    adminUsers.update.mockReset().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("checkbox", { name: "Select taylor" }));
+    await pickOption(user, "Move selected members to", "Guests");
+    await user.click(within(members).getByRole("button", { name: /Move 1 selected/ }));
+
+    const confirm = await screen.findByRole("alertdialog");
+    expect(
+      await within(confirm).findByText("Request limit: no new requests (0 per 7 days) → no limit"),
+    ).toBeInTheDocument();
+    expect(
+      within(confirm).getByText("Request approval: an admin approves → approved automatically"),
+    ).toBeInTheDocument();
+    expect(within(confirm).queryByText("No inherited settings change.")).not.toBeInTheDocument();
+    adminUsers.data = [];
+  });
+
+  it("confirms adding users against the group list's current policy", async () => {
+    // The editor's own snapshot of Kids predates the shared group list, which
+    // already has it allowing downloads and granting Anime instead of Movies.
+    const serve = globalThis.fetch;
+    const listed = { ...GROUP, download_allowed: true, library_ids: ["3"] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200"
+          ? jsonResponse({ items: [listed], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+    adminUsers.data = [member(9, "robin", "user", null)];
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("checkbox"));
+    await user.click(within(dialog).getByRole("button", { name: /Add 1 selected/ }));
+
+    const confirm = await screen.findByRole("alertdialog");
+    expect(within(confirm).getByText("Libraries: All libraries → Anime")).toBeInTheDocument();
+    expect(within(confirm).queryByText(/Downloads:/)).not.toBeInTheDocument();
+    adminUsers.data = [];
+  });
+
   it("adds eligible users to the group, showing where they come from", async () => {
     withGuestsGroup();
     adminUsers.data = [

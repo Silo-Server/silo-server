@@ -1,6 +1,13 @@
 import type { AccessGroup } from "@/api/types";
 import { PLAYBACK_QUALITY_OPTIONS, playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
+import {
+  formatRequestApproval,
+  formatRequestQuota,
+  resolveRequestTerms,
+  type RequestLimitLayer,
+  type RequestServerDefaults,
+} from "@/lib/requestAccess";
 
 /** The group settings members inherit, which is what a move compares. */
 export type GroupPolicy = Pick<
@@ -77,6 +84,34 @@ function sameIds(a: number[] | null, b: number[] | null) {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((id) => set.has(id));
+}
+
+/**
+ * How the request limit and approval that members inherit change between two
+ * groups' request settings (null for no group), each over the server-wide
+ * defaults. The group switch itself is groupPolicyChanges' "Requests".
+ */
+export function requestTermsChanges(
+  from: RequestLimitLayer | null,
+  to: RequestLimitLayer | null,
+  server: RequestServerDefaults,
+): PolicyChange[] {
+  const terms = (layer: RequestLimitLayer | null) =>
+    resolveRequestTerms(layer ? [[{ kind: "group", name: "" }, layer]] : [], server);
+  const a = terms(from);
+  const b = terms(to);
+  const changes: PolicyChange[] = [];
+  const quotaFrom = formatRequestQuota(a.quota);
+  const quotaTo = formatRequestQuota(b.quota);
+  if (quotaFrom !== quotaTo) changes.push({ label: "Request limit", from: quotaFrom, to: quotaTo });
+  if (a.autoApprove !== b.autoApprove) {
+    changes.push({
+      label: "Request approval",
+      from: formatRequestApproval(a.autoApprove),
+      to: formatRequestApproval(b.autoApprove),
+    });
+  }
+  return changes;
 }
 
 /** The group policies that differ between two groups, as members inheriting them see it. */

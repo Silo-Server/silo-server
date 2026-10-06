@@ -40,7 +40,12 @@ import {
 import { accessGroupsKey } from "@/hooks/queries/admin/accessGroups";
 import { adminUsersKey, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { NO_GROUP_POLICY, groupPolicyChanges } from "@/lib/accessGroupPolicyChanges";
+import { useRequestGroupLimits, useRequestSettings } from "@/hooks/queries/admin/requests";
+import {
+  NO_GROUP_POLICY,
+  groupPolicyChanges,
+  requestTermsChanges,
+} from "@/lib/accessGroupPolicyChanges";
 
 /** A pending group change awaiting the admin's confirmation. */
 interface GroupMove {
@@ -90,6 +95,16 @@ export function AccessGroupMembers({
   );
   const otherGroups = groups.filter((candidate) => String(candidate.id) !== String(group.id));
   const selectedMembers = members.filter((member) => selected.has(member.id));
+  // The target as the shared group list holds it now: a refresh while the
+  // confirmation is open shows, and applies, its current policy rather than
+  // the one captured when the move was chosen. The move itself carries only
+  // the group id, so what's confirmed must be what the server will apply.
+  const pendingMove: GroupMove | null = pending && {
+    ...pending,
+    target:
+      groups.find((candidate) => String(candidate.id) === String(pending.target.id)) ??
+      pending.target,
+  };
 
   function toggle(id: number, checked: boolean) {
     setSelected((current) => {
@@ -260,21 +275,26 @@ export function AccessGroupMembers({
           onClose={() => setAdding(false)}
           onChoose={(chosen) => {
             setAdding(false);
-            setPending({ users: chosen, target: group });
+            // group is the editor's snapshot; the list may be newer.
+            setPending({
+              users: chosen,
+              target:
+                groups.find((candidate) => String(candidate.id) === String(group.id)) ?? group,
+            });
           }}
         />
       )}
 
-      {pending && (
+      {pendingMove && (
         <ConfirmMoveDialog
-          move={pending}
+          move={pendingMove}
           groups={groups}
           libraryNames={
             new Map((libraries.data ?? []).map((library) => [library.id, library.name]))
           }
           saving={saving}
           onCancel={() => setPending(null)}
-          onConfirm={() => void applyMove(pending)}
+          onConfirm={() => void applyMove(pendingMove)}
         />
       )}
     </section>
@@ -399,6 +419,29 @@ function ConfirmMoveDialog({
   const unresolved = [...bySource.keys()].some(
     (key) => key !== "none" && !groups.some((candidate) => String(candidate.id) === key),
   );
+  // Request limits and approval are stored per group apart from the group's
+  // policy. They only matter where the target lets members request.
+  const requestSettings = useRequestSettings();
+  const termsMatter = move.target.requests_allowed;
+  const limitIds = termsMatter
+    ? [
+        ...new Set(
+          [...bySource.keys(), String(move.target.id)].filter((key) => key !== "none").map(Number),
+        ),
+      ]
+    : [];
+  const groupLimits = useRequestGroupLimits(limitIds);
+  const termsLoading = termsMatter && (requestSettings.isPending || groupLimits.isLoading);
+  const termsFailed = termsMatter && (requestSettings.isError || groupLimits.isError);
+  const server = requestSettings.data;
+  const requestChanges = (key: string): ReturnType<typeof requestTermsChanges> => {
+    if (!termsMatter || !server?.requests_enabled) return [];
+    return requestTermsChanges(
+      key === "none" ? null : (groupLimits.limits.get(Number(key)) ?? null),
+      groupLimits.limits.get(Number(move.target.id)) ?? null,
+      server,
+    );
+  };
   return (
     <AlertDialog open onOpenChange={(open) => !open && !saving && onCancel()}>
       <AlertDialogContent>
@@ -419,16 +462,26 @@ function ConfirmMoveDialog({
             // missing from the list is unresolved (not "no group") and its
             // changes are unknown.
             const changes =
-              source === undefined
+              source === undefined || termsLoading || termsFailed
                 ? null
-                : groupPolicyChanges(source ?? NO_GROUP_POLICY, move.target, libraryNames);
+                : [
+                    ...groupPolicyChanges(source ?? NO_GROUP_POLICY, move.target, libraryNames),
+                    ...requestChanges(key),
+                  ];
             const who = `${sourceUsers.length} from ${
               source === null ? "no group" : (source?.name ?? `group #${key}`)
             }`;
             return (
               <div key={key}>
                 <p className="font-medium">{who}</p>
-                {changes === null ? (
+                {changes === null && termsLoading ? (
+                  <p className="text-muted-foreground">Loading request settings…</p>
+                ) : changes === null && termsFailed ? (
+                  <p className="text-muted-foreground">
+                    The groups&apos; request settings couldn&apos;t be loaded, so the settings that
+                    change are unknown.
+                  </p>
+                ) : changes === null ? (
                   <p className="text-muted-foreground">
                     Their current group couldn&apos;t be loaded, so the settings that change are
                     unknown.
@@ -451,7 +504,7 @@ function ConfirmMoveDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={saving || unresolved}
+            disabled={saving || unresolved || termsLoading || termsFailed}
             onClick={(event) => {
               event.preventDefault();
               onConfirm();
