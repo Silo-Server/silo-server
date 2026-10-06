@@ -5,10 +5,7 @@ import "testing"
 func TestSectionReplaceAcceptanceRequiresEffectReads(t *testing.T) {
 	for _, mutation := range []string{"missing pairing", "missing read", "wrong principal", "wrong scope"} {
 		t.Run(mutation, func(t *testing.T) {
-			catalogs, err := Load()
-			if err != nil {
-				t.Fatal(err)
-			}
+			catalogs := loadPairingCatalogs(t)
 			selected, err := SectionReplaceAcceptance(catalogs)
 			if err != nil {
 				t.Fatal(err)

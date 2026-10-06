@@ -1,22 +1,11 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { BrowseItem } from "@/api/types";
-import { catalogItemFromV2 } from "@/api/v2/catalog";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { v2 } from "@/api/v2/request";
-import { watchlistKeys } from "./keys";
 import { toast } from "sonner";
 import {
   cancelItemDetailQueries,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
-
-export function useWatchlist() {
-  return useQuery({
-    queryKey: watchlistKeys.list(),
-    queryFn: ({ signal }): Promise<BrowseItem[]> =>
-      v2("GET /api/v2/watchlist", { signal }).then((data) => data.items.map(catalogItemFromV2)),
-  });
-}
 
 export function useToggleWatchlist(itemId: string) {
   const queryClient = useQueryClient();

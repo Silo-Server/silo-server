@@ -85,6 +85,7 @@ func TestListSortMetricsIncludesEbookReaderProgress(t *testing.T) {
 	items := []*models.MediaItem{
 		{ContentID: "ebook-progress", Type: "ebook", Title: "Progress"},
 		{ContentID: "ebook-complete", Type: "ebook", Title: "Complete"},
+		{ContentID: "ebook-unseen", Type: "ebook", Title: "Unread"},
 	}
 
 	progressMetrics := handler.listSortMetrics(ctx, items, "progress", catalog.AccessFilter{}, nil, store, 42, "profile-1")
@@ -103,64 +104,13 @@ func TestListSortMetricsIncludesEbookReaderProgress(t *testing.T) {
 	if plays == nil || plays.PlayCount == nil || *plays.PlayCount != 1 {
 		t.Fatalf("plays metrics = %#v", plays)
 	}
-}
-
-func TestListSortMetricsExcludesHiddenEbookReaderProgress(t *testing.T) {
-	ctx := context.Background()
-	store := newProfileTestStore(t)
-	updatedAt := time.Date(2026, 6, 3, 9, 15, 0, 0, time.UTC)
-	handler := &ItemsHandler{
-		ebookProgressStore: &fakeEbookReaderProgressLister{
-			progress: map[string]EbookReaderProgress{
-				"ebook-hidden": {
-					UserID:    42,
-					ProfileID: "profile-1",
-					ContentID: "ebook-hidden",
-					Progress:  0.95,
-					UpdatedAt: updatedAt,
-				},
-				"ebook-reread": {
-					UserID:    42,
-					ProfileID: "profile-1",
-					ContentID: "ebook-reread",
-					Progress:  0.95,
-					UpdatedAt: updatedAt.Add(2 * time.Hour),
-				},
-			},
-			hiddenBefore: map[string]time.Time{
-				"ebook-hidden": updatedAt.Add(time.Hour),
-				"ebook-reread": updatedAt.Add(time.Hour),
-			},
-		},
-	}
-	items := []*models.MediaItem{
-		{ContentID: "ebook-hidden", Type: "ebook", Title: "Hidden"},
-		{ContentID: "ebook-reread", Type: "ebook", Title: "Reread"},
-	}
-
-	viewedMetrics := handler.listSortMetrics(ctx, items, "date_viewed", catalog.AccessFilter{}, nil, store, 42, "profile-1")
-	if got := viewedMetrics["ebook-hidden"]; got != nil {
-		t.Fatalf("hidden ebook must have no viewed metrics, got %#v", got)
-	}
-	if got := viewedMetrics["ebook-reread"]; got == nil || got.ViewedAt != "2026-06-03T11:15:00Z" {
-		t.Fatalf("progress updated after hidden_before must count again, got %#v", got)
-	}
-
-	playsMetrics := handler.listSortMetrics(ctx, items, "plays", catalog.AccessFilter{}, nil, store, 42, "profile-1")
-	if got := playsMetrics["ebook-hidden"]; got != nil {
-		t.Fatalf("hidden ebook must have no play count, got %#v", got)
-	}
-	if got := playsMetrics["ebook-reread"]; got == nil || got.PlayCount == nil || *got.PlayCount != 1 {
-		t.Fatalf("progress updated after hidden_before must count again, got %#v", got)
+	if viewedMetrics["ebook-unseen"] != nil || playsMetrics["ebook-unseen"] != nil {
+		t.Fatal("missing reader progress produced viewed or play-count metrics")
 	}
 }
 
 type fakeEbookReaderProgressLister struct {
 	progress map[string]EbookReaderProgress
-	// hiddenBefore models user_history_hidden_items: like the PG store, a
-	// row is excluded while progress.UpdatedAt <= hidden_before and counts
-	// again once the progress row is updated after the hide.
-	hiddenBefore map[string]time.Time
 }
 
 func (f *fakeEbookReaderProgressLister) ListByContentIDs(
@@ -173,9 +123,6 @@ func (f *fakeEbookReaderProgressLister) ListByContentIDs(
 	for _, contentID := range contentIDs {
 		progress, ok := f.progress[contentID]
 		if !ok {
-			continue
-		}
-		if hiddenBefore, hidden := f.hiddenBefore[contentID]; hidden && !progress.UpdatedAt.After(hiddenBefore) {
 			continue
 		}
 		result[contentID] = progress

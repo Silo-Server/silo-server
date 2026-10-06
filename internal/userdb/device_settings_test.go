@@ -44,6 +44,15 @@ func TestDeviceSettingsTiesAndRollback(t *testing.T) {
 		v := page[0]
 		opts.After = &userstore.DevicePosition{LastSeenAt: v.LastSeenAt, ProfileID: v.ProfileID, DeviceID: v.DeviceID}
 	}
+	identity := userstore.SettingIdentity{Key: "theme", Scope: settingscontract.ScopeProfileDevice, ProfileID: "a", DeviceID: "one"}
+	canonical, err := store.UpsertSettingValue(ctx, identity, json.RawMessage(`"dark"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := userstore.DeviceSettingEntry{ProfileID: "a", DeviceID: "one", Key: "theme", Value: "legacy-dark"}
+	if err := store.SetDeviceSetting(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`CREATE TRIGGER fail_device_delete BEFORE DELETE ON user_devices BEGIN SELECT RAISE(ABORT,'injected'); END`); err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +62,14 @@ func TestDeviceSettingsTiesAndRollback(t *testing.T) {
 	exists, err := store.DeviceExists(ctx, "a", "one")
 	if err != nil || !exists {
 		t.Fatalf("rollback: %v %v", exists, err)
+	}
+	preserved, err := store.GetSettingValue(ctx, identity)
+	if err != nil || preserved == nil || string(preserved.Value) != string(canonical.Value) || preserved.Revision != canonical.Revision {
+		t.Fatalf("canonical setting after rollback: %+v %v", preserved, err)
+	}
+	old, err := store.GetDeviceSetting(ctx, legacy.ProfileID, legacy.DeviceID, legacy.Key)
+	if err != nil || old == nil || old.Value != legacy.Value {
+		t.Fatalf("legacy setting after rollback: %+v %v", old, err)
 	}
 }
 

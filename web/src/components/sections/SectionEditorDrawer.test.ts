@@ -182,7 +182,7 @@ describe("SectionEditorDrawer recipe choices", () => {
   });
 
   it("keeps the whole catalog when the profile may add admin-only recipes", () => {
-    expect(filterRecipeCatalog(catalog, true)).toBe(catalog);
+    expect(filterRecipeCatalog(catalog, true)).toEqual(catalog);
     expect(filterRecipeCatalog(undefined, false)).toBeUndefined();
   });
 

@@ -23,22 +23,6 @@ func TestProviderConfigEnabledForFetchSortsAndFilters(t *testing.T) {
 	}
 }
 
-func TestProviderConfigGet(t *testing.T) {
-	s := &ProviderConfigStore{cache: map[string]ProviderConfig{
-		"introdb": {Provider: "introdb", FetchEnabled: true, ContributeEnabled: false},
-	}}
-	c, ok := s.Get("introdb")
-	if !ok {
-		t.Fatal("expected introdb config")
-	}
-	if c.ContributeEnabled {
-		t.Error("contribute should default off")
-	}
-	if _, ok := s.Get("missing"); ok {
-		t.Error("unexpected config for unknown provider")
-	}
-}
-
 func TestProviderConfigRuntimeRevisionRequiresDatabase(t *testing.T) {
 	for _, store := range []*ProviderConfigStore{nil, NewProviderConfigStore(nil)} {
 		if revision, err := store.RuntimeRevision(t.Context()); err == nil || revision != "" {

@@ -40,7 +40,7 @@ func TestRoomSocketTicketAndRawRoute(t *testing.T) {
 	f := new(fakeRoomSocket)
 	deps.WatchTogetherSocket = f
 	claims := &auth.Claims{UserID: 1, Role: "user", SessionID: "session", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims}}, fakeSessions{map[string]bool{"session": true}}, nil, nil)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{memberToken: claims}}, fakeSessions{map[string]string{"session": "user"}}, nil, nil)
 	h := NewHandler(deps)
 	path := Prefix + "/watch-together/rooms/room/ws-ticket"
 	headers := profileOwner()

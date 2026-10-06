@@ -65,7 +65,9 @@ is ignored. `state` is the first that applies:
 
 `GET /api/v2/libraries/capabilities` (`getLibraryCapabilities`, administrators
 only) is the feature-detection document for these library features; it answers
-`realtime_monitoring: true` alongside the common capability members.
+`realtime_monitoring: true` and `trickplay: true` alongside the common capability
+members. `trickplay_supported` reports whether public asset storage is configured,
+so administrators can enable seek previews when creating the first library.
 
 Scans the monitor queues carry the trigger `realtime_monitor`.
 

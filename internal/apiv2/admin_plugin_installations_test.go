@@ -141,3 +141,77 @@ func TestAdminPluginInstallationsRead(t *testing.T) {
 	deps.AdminPluginInventory = nil
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
+
+// TestAdminPluginAuthBindingURLs: an OAuth binding shows the callback and
+// post-logout redirect URLs to register at the provider, built from the
+// public URL; a password binding and a server without a public URL show
+// none.
+func TestAdminPluginAuthBindingURLs(t *testing.T) {
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	installation := func(id int, capabilityID string, modes ...string) handlers.PluginInstallationView {
+		return handlers.PluginInstallationView{ID: id, PluginID: "org.example." + capabilityID, Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
+			Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: capabilityID, AuthModes: modes}},
+			AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: capabilityID, Enabled: true, CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
+	}
+	f := &fakePluginInventory{installations: []handlers.PluginInstallationView{installation(3, "oidc", "oauth2"), installation(4, "ldap", "password")}}
+	deps := pilotDeps(nil, nil)
+	deps.AdminPluginInventory = f
+	read := func(deps Dependencies) []AdminPluginInstallation {
+		t.Helper()
+		rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/plugins/installations", "", bearer(adminToken))
+		var body Collection[AdminPluginInstallation]
+		if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body.Items) != 2 {
+			t.Fatal(rec.Code, rec.Body.String())
+		}
+		return body.Items
+	}
+	items := read(deps)
+	oidc, ldap := items[0].AuthBindings[0], items[1].AuthBindings[0]
+	if oidc.CallbackURL != "https://silo.example.test/api/v2/auth/oauth/3/callback" || oidc.PostLogoutRedirectURL != "https://silo.example.test/login" {
+		t.Fatalf("oidc binding = %+v", oidc)
+	}
+	if ldap.CallbackURL != "" || ldap.PostLogoutRedirectURL != "" {
+		t.Fatalf("ldap binding = %+v", ldap)
+	}
+	deps.OAuth = noPublicURLOAuth{fakeOAuth{}}
+	if got := read(deps)[0].AuthBindings[0]; got.CallbackURL != "" || got.PostLogoutRedirectURL != "" {
+		t.Fatalf("without a public URL = %+v", got)
+	}
+}
+
+// TestAdminPluginAuthCapabilitySignIn: an auth_provider.v1 capability says
+// how it signs in, and an OAuth one carries its registration URLs, without
+// any binding row (a fresh installation) and while its binding is off.
+func TestAdminPluginAuthCapabilitySignIn(t *testing.T) {
+	at := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	fresh := handlers.PluginInstallationView{ID: 3, PluginID: "org.example.oidc", Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
+		Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: "oidc", AuthModes: []string{"oauth2"}}, {Type: "metadata_provider.v1", ID: "meta"}}, CreatedAt: at, UpdatedAt: at}
+	disabledLDAP := handlers.PluginInstallationView{ID: 4, PluginID: "org.example.ldap", Version: "1.0.0", Enabled: true, Kind: plugins.KindPlugin, UpdatePolicy: "manual", SourceKind: "silo",
+		Capabilities: []handlers.PluginCapabilityView{{Type: "auth_provider.v1", ID: "ldap", AuthModes: []string{"password"}}},
+		AuthBindings: []handlers.PluginAuthBindingView{{CapabilityID: "ldap", CreatedAt: at, UpdatedAt: at}}, CreatedAt: at, UpdatedAt: at}
+	deps := pilotDeps(nil, nil)
+	deps.AdminPluginInventory = &fakePluginInventory{installations: []handlers.PluginInstallationView{fresh, disabledLDAP}}
+	rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/plugins/installations", "", bearer(adminToken))
+	var body Collection[AdminPluginInstallation]
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &body) != nil || len(body.Items) != 2 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	oidc, meta, ldap := body.Items[0].Capabilities[0], body.Items[0].Capabilities[1], body.Items[1].Capabilities[0]
+	if oidc.SignInMode != "oauth" || oidc.CallbackURL == nil || *oidc.CallbackURL != "https://silo.example.test/api/v2/auth/oauth/3/callback" ||
+		oidc.PostLogoutRedirectURL == nil || *oidc.PostLogoutRedirectURL != "https://silo.example.test/login" {
+		t.Fatalf("fresh oidc capability = %+v", oidc)
+	}
+	if ldap.SignInMode != "credentials" || ldap.CallbackURL != nil || ldap.PostLogoutRedirectURL != nil {
+		t.Fatalf("ldap capability = %+v", ldap)
+	}
+	if meta.SignInMode != "" || meta.CallbackURL != nil || meta.PostLogoutRedirectURL != nil {
+		t.Fatalf("metadata capability = %+v", meta)
+	}
+}
+
+// noPublicURLOAuth is fakeOAuth on a server without a public URL.
+type noPublicURLOAuth struct{ fakeOAuth }
+
+func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
+
+func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }

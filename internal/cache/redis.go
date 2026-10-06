@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -45,6 +46,8 @@ const (
 	EventAdminStatsInvalidated       = "admin_stats_invalidated"
 	EventPlaybackSessionsChanged     = "playback_sessions_changed"
 	EventMarkersUpdated              = "markers_updated"
+	EventSubtitleTimingChanged       = "subtitle_timing_changed"
+	EventSubtitleSyncUpdated         = "subtitle_sync_updated"
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"
@@ -61,6 +64,12 @@ const (
 	// every API replica's plugin event dispatcher rebuilds its subscriber index.
 	EventPluginsChanged = "plugins_changed"
 )
+
+// EventAuthProvidersChanged is published on ChannelAdmin after an auth
+// binding write, so every API replica rebuilds its sign-in providers without
+// a restart. Plugin install, config and removal changes arrive as
+// EventPluginsChanged and trigger the same rebuild.
+const EventAuthProvidersChanged = "auth_providers_changed"
 
 // EventUserSessionsRevoked is published on ChannelAdmin with a user ID whose
 // login sessions were revoked, so every API replica drops that account's
@@ -143,6 +152,8 @@ type subscription struct {
 // JSON-serialized before being published.
 type RedisEventBus struct {
 	client *redis.Client
+	// db is the database number the client selects; see redisChannel.
+	db int
 
 	mu   sync.Mutex
 	subs []subscription
@@ -157,27 +168,48 @@ func newRedisEventBus(redisURL string) *RedisEventBus {
 		// If the URL cannot be parsed, treat it as a simple address.
 		opts = &redis.Options{Addr: redisURL}
 	}
+	return newRedisEventBusFromOptions(opts)
+}
+
+func newRedisEventBusFromOptions(opts *redis.Options) *RedisEventBus {
 	return &RedisEventBus{
 		client: instrumentRedis(redis.NewClient(opts), "events"),
+		db:     opts.DB,
 		done:   make(chan struct{}),
 	}
 }
 
+// redisChannel returns the Redis channel that carries an event-bus channel
+// for a client on the given database number. Redis delivers a published
+// message to every subscriber of a channel whatever database either
+// connection selected, so installs that share one Redis server on different
+// database numbers would otherwise receive each other's events. Database 0
+// keeps the bare name, which is the name every node used before channels were
+// scoped. So does a negative number: go-redis accepts one in a URL and leaves
+// the connection on database 0.
+func redisChannel(channel string, db int) string {
+	if db <= 0 {
+		return channel
+	}
+	return channel + "@db" + strconv.Itoa(db)
+}
+
 // Publish serializes the event as JSON and publishes it on the given
-// Redis channel.
+// channel, scoped to the bus's database number.
 func (r *RedisEventBus) Publish(ctx context.Context, channel string, event Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	return r.client.Publish(ctx, channel, data).Err()
+	return r.client.Publish(ctx, redisChannel(channel, r.db), data).Err()
 }
 
-// Subscribe creates a Redis pub/sub subscription on the given channel and
-// spawns a goroutine that delivers incoming messages to the handler.
+// Subscribe creates a Redis pub/sub subscription on the given channel,
+// scoped to the bus's database number, and spawns a goroutine that delivers
+// incoming messages to the handler.
 func (r *RedisEventBus) Subscribe(ctx context.Context, channel string, handler EventHandler) error {
 	subCtx, cancel := context.WithCancel(ctx)
-	pubsub := r.client.Subscribe(subCtx, channel)
+	pubsub := r.client.Subscribe(subCtx, redisChannel(channel, r.db))
 
 	// Wait for the subscription to be confirmed.
 	if _, err := pubsub.Receive(subCtx); err != nil {

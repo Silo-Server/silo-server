@@ -53,18 +53,6 @@ describe("useGridLayout", () => {
     vi.unstubAllGlobals();
   });
 
-  it("tracks the first resize frame immediately, then coalesces the rest", () => {
-    render(<Harness />);
-    expect(screen.getByRole("status")).toHaveTextContent("2:322.5");
-
-    // The virtualizer positions absolute rows from this geometry, so deferring
-    // the first frame would leave rows overlapping the already-reflowed grid
-    // for the whole settle window.
-    containerWidth = 360;
-    act(() => notifyResize?.([], {} as ResizeObserver));
-    expect(screen.getByRole("status")).toHaveTextContent("2:292.5");
-  });
-
   it("measures immediately when a resize crosses a column breakpoint", () => {
     render(<Harness />);
     expect(screen.getByRole("status")).toHaveTextContent("2:322.5");

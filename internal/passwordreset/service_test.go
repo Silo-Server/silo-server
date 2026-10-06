@@ -169,6 +169,9 @@ func TestRequestEmailsTheMatchingAccount(t *testing.T) {
 		if !ok || msg.To[0] != "alice@example.test" || auth.HashLinkToken(token) != got.tokenHash {
 			t.Fatalf("%q: email to %v does not carry the stored link", login, msg.To)
 		}
+		if len(msg.Inline) != 1 || !strings.Contains(msg.HTMLBody, "cid:"+msg.Inline[0].ContentID) {
+			t.Fatalf("%q: email does not carry the header logo it references", login)
+		}
 		// The account holder asked; the email must not credit an admin.
 		if !strings.Contains(msg.TextBody, "Someone asked to reset the password") || strings.Contains(msg.TextBody, "An admin") {
 			t.Fatalf("%q: wording %q", login, msg.TextBody)
@@ -263,6 +266,9 @@ func TestIssueDeliversLinkOnlyWhereAsked(t *testing.T) {
 	}
 	if !strings.Contains(sender.sent[0].TextBody, "/reset-password/") {
 		t.Fatal("email carries no link")
+	}
+	if inline := sender.sent[0].Inline; len(inline) != 1 || !strings.Contains(sender.sent[0].HTMLBody, "cid:"+inline[0].ContentID) {
+		t.Fatal("email does not carry the header logo it references")
 	}
 
 	sender.err = errors.New("smtp timeout")

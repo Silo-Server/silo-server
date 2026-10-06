@@ -241,6 +241,8 @@ func itemURL(baseURL, itemID string) string {
 
 // emailComposeOptions carries the per-send rendering context.
 type emailComposeOptions struct {
+	// Brand styles the shell; the zero value is Silo's default branding.
+	Brand mail.Brand
 	// BaseURL is the admin-configured external URL; empty renders without
 	// links.
 	BaseURL string
@@ -392,6 +394,7 @@ func composeNotificationEmail(mode string, rows []DeliveryRow, opts emailCompose
 	}
 
 	htmlBody := mail.RenderLayout(mail.LayoutOptions{
+		Brand:      opts.Brand,
 		Preheader:  emailPreheader(items),
 		Title:      strings.TrimSuffix(intro, ":"),
 		BodyHTML:   body.String(),

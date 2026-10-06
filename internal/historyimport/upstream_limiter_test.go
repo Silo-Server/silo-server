@@ -43,7 +43,8 @@ func TestHistoryImportClients_ShareServerLimiter(t *testing.T) {
 
 	plex := NewPlexClient()
 	emby := NewEmbyClient()
-	if plex.limiter != emby.limiter {
-		t.Fatal("expected Plex and Emby clients to share the same upstream limiter")
+	jellyfin := NewJellyfinClient()
+	if plex.limiter == nil || plex.limiter != emby.limiter || plex.limiter != jellyfin.limiter {
+		t.Fatal("expected Plex, Emby, and Jellyfin clients to share the same upstream limiter")
 	}
 }

@@ -1,9 +1,9 @@
-import type { MouseEvent, ReactNode } from "react";
-import { MemoryRouter } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { MouseEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -132,21 +132,6 @@ function renderSearchMarkup(props: Partial<Parameters<typeof GlobalSearch>[0]> =
   );
 }
 
-// The request section loads lazily, so its props are read once it appears.
-async function renderSearchSection(props: Partial<Parameters<typeof GlobalSearch>[0]> = {}) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <GlobalSearch {...props} />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
-  return (await screen.findByTestId("request-section")).textContent ?? "";
-}
-
 const personFixture = {
   id: "9007199254740993",
   name: "Test Actor",
@@ -183,65 +168,6 @@ describe("GlobalSearch", () => {
       isFetching: false,
       isError: false,
     });
-  });
-
-  it("renders preview rows with keyboard hints", () => {
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
-
-    expect(markup).toContain('data-testid="dialog"');
-    expect(markup).toContain('placeholder="Search library..."');
-    expect(markup).toContain("Test Movie");
-    expect(markup).not.toContain("of 50");
-    expect(markup).toContain("See all");
-    expect(markup).toContain("Navigate");
-    expect(markup).toContain("Close");
-  });
-
-  it("keeps the Esc hint in the search box until there are results", () => {
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "" });
-
-    expect(markup).toContain("ESC");
-    expect(markup).not.toContain("See all");
-    expect(markup).not.toContain("Navigate");
-  });
-
-  it("shows a compact independent play target for playable library results", () => {
-    mocks.useQuery.mockReturnValue({
-      data: {
-        total: 1,
-        has_more: false,
-        items: [{ ...browseFixture, play_content_id: "movie-99" }],
-      },
-      isFetching: false,
-      isError: false,
-    });
-
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
-    expect(markup).toContain('href="/watch/movie-99"');
-    expect(markup).toContain('aria-label="Play Test Movie"');
-    expect(markup).toContain('data-size="compact"');
-  });
-
-  it("labels ebook preview rows with title case media type", () => {
-    mocks.useQuery.mockReturnValue({
-      data: {
-        total: 1,
-        has_more: false,
-        items: [
-          {
-            ...browseFixture,
-            type: "ebook",
-            title: "A Reader",
-          },
-        ],
-      },
-      isFetching: false,
-      isError: false,
-    });
-
-    const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Reader" });
-
-    expect(markup).toContain("2020 · Ebook");
   });
 
   it("disables the preview query when the dialog is closed", () => {
@@ -354,6 +280,10 @@ describe("GlobalSearch", () => {
     expect(input).toHaveFocus();
     expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
     expect(screen.getByRole("option", { selected: true })).toHaveAttribute("id", "search-result-0");
+    const highlighted = screen.getByRole("option", { selected: true }).closest("[data-selected]");
+    expect(highlighted).not.toBeNull();
+    expect(highlighted).toHaveClass("data-[selected]:bg-accent");
+    expect(document.querySelectorAll("[data-selected]")).toHaveLength(1);
 
     // Keystrokes after selecting must still reach the input, and a new query
     // clears the selection.
@@ -415,18 +345,6 @@ describe("GlobalSearch", () => {
     expect(mocks.navigate).toHaveBeenCalledWith(buildQueryCatalogHref("Test"));
   });
 
-  it("selects the row under the moving pointer", () => {
-    const input = renderTwoResults();
-
-    fireEvent.mouseMove(screen.getByRole("option", { name: /Second Movie/ }));
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
-
-    // Keyboard selection still moves on from the pointer's row.
-    fireEvent.keyDown(input, { key: "ArrowUp" });
-    expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
-    expect(input).toHaveFocus();
-  });
-
   it("scrolls rows into view for the keyboard but not the pointer", () => {
     const input = renderTwoResults();
     const original = Element.prototype.scrollIntoView;
@@ -435,8 +353,11 @@ describe("GlobalSearch", () => {
     try {
       fireEvent.mouseMove(screen.getByRole("option", { name: /Second Movie/ }));
       expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-1");
 
       fireEvent.keyDown(input, { key: "ArrowUp" });
+      expect(input).toHaveAttribute("aria-activedescendant", "search-result-0");
+      expect(input).toHaveFocus();
       expect(scrollIntoView).toHaveBeenCalledTimes(1);
       expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("id", "search-result-0");
     } finally {
@@ -466,20 +387,6 @@ describe("GlobalSearch", () => {
     } finally {
       Element.prototype.scrollIntoView = original;
     }
-  });
-
-  it("highlights the selected title row", () => {
-    const input = renderTwoResults();
-
-    fireEvent.keyDown(input, { key: "ArrowDown" });
-
-    // The highlight class lives on the row wrapper around the option, so the
-    // selection marker must be there too for the selector to match.
-    const option = screen.getByRole("option", { selected: true });
-    const highlighted = option.closest("[data-selected]");
-    expect(highlighted).not.toBeNull();
-    expect(highlighted).toHaveClass("data-[selected]:bg-accent");
-    expect(document.querySelectorAll("[data-selected]")).toHaveLength(1);
   });
 
   it("opens the selected result when Enter is pressed", () => {
@@ -613,22 +520,6 @@ describe("GlobalSearch people results", () => {
     expect(
       screen.getAllByRole("option").map((option) => option.getAttribute("aria-label")),
     ).toEqual(["Chris, Person", "Test Movie, 2020, Movie"]);
-  });
-
-  it("puts the divider above the titles when people lead", () => {
-    renderOpen("Test Actor");
-
-    expect(screen.getByRole("group", { name: "Titles" })).toHaveClass("border-t");
-    expect(screen.getByRole("group", { name: "People" })).not.toHaveClass("border-t");
-  });
-
-  it("leaves title-only results without group headings", () => {
-    mocks.usePersonSearch.mockReturnValue({ data: [], isFetching: false });
-    renderOpen();
-
-    expect(screen.getByRole("option", { name: "Test Movie, 2020, Movie" })).toBeInTheDocument();
-    expect(screen.queryByRole("group")).not.toBeInTheDocument();
-    expect(screen.queryByText("Titles")).not.toBeInTheDocument();
   });
 
   it("opens a person picked with the mouse", async () => {
@@ -828,16 +719,12 @@ describe("GlobalSearch request rows", () => {
     expect(screen.getByText("See all")).toBeInTheDocument();
   });
 
-  it("mentions requests in the placeholder when discovery is on", async () => {
-    const input = await renderOpenSearch();
-
-    expect(input).toHaveAttribute("placeholder", "Search library or find titles to request...");
-  });
-
   it("closes the dialog and opens the request page when a request row is clicked", async () => {
     await renderOpenSearch();
 
-    await userEvent.click(screen.getByRole("option", { name: /Requested Show/ }));
+    const row = screen.getByRole("option", { name: /Requested Show/ });
+    expect(row.querySelector('[data-request-state="processing"]')).toHaveTextContent("Processing");
+    await userEvent.click(row);
 
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/title/series/7");
     expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
@@ -902,13 +789,6 @@ describe("GlobalSearch request rows", () => {
     expect(screen.getByTestId("dialog")).toBeInTheDocument();
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
-
-  it("shows the shared status badge on a requested row", async () => {
-    await renderOpenSearch();
-
-    const row = screen.getByRole("option", { name: /Requested Show/ });
-    expect(row.querySelector('[data-request-state="processing"]')).toHaveTextContent("Processing");
-  });
 });
 
 describe("GlobalSearch + RequestToAddSection wiring", () => {
@@ -934,129 +814,6 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     });
   });
 
-  it("renders the section with libraryHadHits=true when library returned results", async () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          {
-            media_type: "movie",
-            tmdb_id: 1,
-            title: "X",
-            availability: "missing",
-            request: { requestable: true },
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    const section = await renderSearchSection({ defaultOpen: true, initialQuery: "Dune" });
-
-    expect(section).toContain('libraryHadHits="true"');
-    expect(section).toContain('libraryResultsKnown="true"');
-    expect(section).toContain('variant="dialog"');
-  });
-
-  it("renders the section with libraryHadHits=false when library returned 0 results", async () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: { total: 0, has_more: false, items: [] },
-      isFetching: false,
-      isError: false,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          {
-            media_type: "movie",
-            tmdb_id: 1,
-            title: "X",
-            availability: "missing",
-            request: { requestable: true },
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-    const section = await renderSearchSection({
-      defaultOpen: true,
-      initialQuery: "ThisDoesNotExist",
-    });
-
-    expect(section).toContain('libraryHadHits="false"');
-    expect(section).toContain('libraryResultsKnown="true"');
-  });
-
-  it("marks library results unknown while the local preview is still pending", async () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: true,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    mocks.useQuery.mockReturnValue({
-      data: undefined,
-      isFetching: true,
-      isError: false,
-    });
-    mocks.useRequestSearch.mockReturnValue({
-      data: {
-        page: 1,
-        total_pages: 1,
-        total_results: 1,
-        results: [
-          {
-            media_type: "movie",
-            tmdb_id: 1,
-            title: "X",
-            availability: "missing",
-            request: { requestable: true },
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    });
-
-    const section = await renderSearchSection({ defaultOpen: true, initialQuery: "Dune" });
-
-    expect(section).toContain('libraryHadHits="false"');
-    expect(section).toContain('libraryResultsKnown="false"');
-  });
-
-  it("does not call useRequestSearch with enabled=true when discoveryEnabled is false", () => {
-    mocks.useCanRequest.mockReturnValue({
-      discoveryEnabled: false,
-      isResolving: false,
-      submitDisabledReason: null,
-    });
-    renderSearchMarkup({ defaultOpen: true, initialQuery: "Dune" });
-
-    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
-    expect(call?.[3]).toEqual({
-      enabled: false,
-      requireProfile: true,
-      staleTime: 5 * 60 * 1000,
-      gcTime: 30_000,
-      retry: false,
-    });
-  });
-
   it("does not mount RequestToAddSection when discovery is disabled", async () => {
     mocks.useCanRequest.mockReturnValue({
       discoveryEnabled: false,
@@ -1077,6 +834,14 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     });
 
     expect(screen.queryByTestId("request-section")).not.toBeInTheDocument();
+    const call = mocks.useRequestSearch.mock.calls[mocks.useRequestSearch.mock.calls.length - 1];
+    expect(call?.[3]).toEqual({
+      enabled: false,
+      requireProfile: true,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30_000,
+      retry: false,
+    });
   });
 
   it("suppresses 'No matches' when library is empty and TMDB is still loading", () => {
@@ -1153,5 +918,49 @@ describe("GlobalSearch + RequestToAddSection wiring", () => {
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "ZzzNothing" });
 
     expect(markup).toContain("No matches");
+  });
+
+  it("marks library results unknown while the local preview is still pending", async () => {
+    mocks.useCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    mocks.useQuery.mockReturnValue({
+      data: undefined,
+      isFetching: true,
+      isError: false,
+    });
+    mocks.useRequestSearch.mockReturnValue({
+      data: {
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [
+          {
+            media_type: "movie",
+            tmdb_id: 1,
+            title: "X",
+            availability: "missing",
+            request: { requestable: true },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <GlobalSearch defaultOpen initialQuery="Dune" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const section = (await screen.findByTestId("request-section")).textContent ?? "";
+
+    expect(section).toContain('libraryHadHits="false"');
+    expect(section).toContain('libraryResultsKnown="false"');
   });
 });

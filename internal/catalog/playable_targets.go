@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,8 +52,8 @@ type PlayableTargetInput struct {
 
 // Key identifies this card in the map Resolve returns. It includes the anchor
 // hint because two cards can legitimately display the SAME item and still want
-// different targets — recently-added TV keeps one card per scan-run event, so a
-// series hit by two multi-episode runs appears twice with different anchors.
+// different targets — recently-added TV keeps one card per arrival event, so a
+// series with two multi-episode arrivals appears twice with different anchors.
 // Callers look a response row up with the key built from the same three fields.
 func (in PlayableTargetInput) Key() string {
 	return strings.ToLower(strings.TrimSpace(in.Type)) + "\x00" +
@@ -76,6 +77,15 @@ type PlayableTargetQuery struct {
 // PostgreSQL user tables.
 type PlayableTargetProgressStore interface {
 	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error)
+}
+
+// PlayableTarget is the leaf a card plays.
+type PlayableTarget struct {
+	ContentID string
+	// SeasonNumber is the target episode's season; nil when the target is
+	// not an episode. It comes from the row that chose the target, so a
+	// caller that opens the target's season needs no second lookup.
+	SeasonNumber *int
 }
 
 // PlayableTargetResolver resolves card-level playback targets in one query.
@@ -109,7 +119,25 @@ func NewPlayableTargetResolverForItems(repo *ItemRepository) *PlayableTargetReso
 // access filters, and episodes inherit the parent series rating. File-library
 // access is still enforced here before any target is returned.
 func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQuery) (map[string]string, error) {
-	result := make(map[string]string)
+	targets, err := r.ResolveTargets(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return PlayableTargetIDs(targets), nil
+}
+
+// PlayableTargetIDs drops the seasons from ResolveTargets' answer.
+func PlayableTargetIDs(targets map[string]PlayableTarget) map[string]string {
+	ids := make(map[string]string, len(targets))
+	for key, target := range targets {
+		ids[key] = target.ContentID
+	}
+	return ids
+}
+
+// ResolveTargets is Resolve with each target's season attached.
+func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableTargetQuery) (map[string]PlayableTarget, error) {
+	result := make(map[string]PlayableTarget)
 	if r == nil || r.pool == nil || q.UserID <= 0 || strings.TrimSpace(q.ProfileID) == "" {
 		return result, nil
 	}
@@ -190,6 +218,16 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 		}
 	}
 
+	// PostgreSQL progress lives beside the catalog, so the database can choose
+	// winners without returning every episode or issuing progress batches.
+	// Other stores retain the backend-neutral candidate path below.
+	if store, ok := q.ProgressStore.(userstore.CatalogProgressRelationStore); ok &&
+		(slices.Contains(types, playableTypeSeries) || slices.Contains(types, playableTypeSeason)) {
+		if progress, progressArgs, ok := store.CatalogProgressRelation(r.pool, q.UserID, q.ProfileID, len(args)+1); ok {
+			return r.resolvePostgresTargets(ctx, append(args, progressArgs...), fileConditions, keysByOrd, progress)
+		}
+	}
+
 	query := fmt.Sprintf(`
 		WITH requested AS (
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
@@ -201,8 +239,12 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			-- rather than one CASE expression: a CASE over both columns keeps
 			-- PostgreSQL from using either media_files index and forces a scan
 			-- of the whole table per requested card.
-			SELECT requested.ord, requested.content_id, requested.content_id AS play_content_id
+			SELECT requested.ord, requested.content_id, requested.content_id AS play_content_id,
+			       leaf_episode.season_number AS target_season
 			FROM requested
+			LEFT JOIN episodes leaf_episode
+			  ON requested.media_type = 'episode'
+			 AND leaf_episode.content_id = requested.content_id
 			WHERE (
 				requested.media_type = 'movie'
 				AND EXISTS (
@@ -272,26 +314,26 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 			-- card's own available leaves, so it passes exactly the same file
 			-- conditions (library, enabled folder, quality rank) as any other
 			-- candidate and can never point outside the displayed item.
-			SELECT candidate.ord, candidate.content_id, candidate.play_content_id
+			SELECT candidate.ord, candidate.content_id, candidate.play_content_id, candidate.season_number AS target_season
 			FROM available_candidates candidate
 			JOIN requested
 			  ON requested.ord = candidate.ord
 			 AND requested.preferred_content_id = candidate.play_content_id
 			UNION ALL
-			SELECT leaf.ord, leaf.content_id, leaf.play_content_id
+			SELECT leaf.ord, leaf.content_id, leaf.play_content_id, leaf.target_season
 			FROM leaf_targets leaf
 			JOIN requested
 			  ON requested.ord = leaf.ord
 			 AND requested.preferred_content_id = leaf.play_content_id
 		),
 		resolved AS (
-			SELECT ord, play_content_id, TRUE AS is_hint, -1 AS season_number, -1 AS episode_number FROM hint_targets
+			SELECT ord, play_content_id, TRUE AS is_hint, -1 AS season_number, -1 AS episode_number, target_season FROM hint_targets
 			UNION ALL
-			SELECT ord, play_content_id, FALSE, -1, -1 FROM leaf_targets
+			SELECT ord, play_content_id, FALSE, -1, -1, target_season FROM leaf_targets
 			UNION ALL
-			SELECT ord, play_content_id, FALSE, season_number, episode_number FROM available_candidates
+			SELECT ord, play_content_id, FALSE, season_number, episode_number, season_number FROM available_candidates
 		)
-		SELECT ord, play_content_id, is_hint
+		SELECT ord, play_content_id, is_hint, target_season
 		FROM resolved
 		ORDER BY ord,
 		         is_hint DESC,
@@ -308,17 +350,23 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	defer rows.Close()
 	candidates := make(map[string][]string, len(ids))
 	hints := make(map[string]string, len(ids))
+	// An episode has one season, so one map serves every card.
+	seasons := make(map[string]*int)
 	for rows.Next() {
 		var ord int64
 		var playContentID string
 		var isHint bool
-		if err := rows.Scan(&ord, &playContentID, &isHint); err != nil {
+		var season *int
+		if err := rows.Scan(&ord, &playContentID, &isHint, &season); err != nil {
 			return nil, fmt.Errorf("scanning playable poster target: %w", err)
 		}
 		if ord < 1 || ord > int64(len(keysByOrd)) {
 			return nil, fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
 		}
 		key := keysByOrd[ord-1]
+		if season != nil {
+			seasons[playContentID] = season
+		}
 		if isHint {
 			// Hints are ordered first within a card; the first one wins.
 			if _, ok := hints[key]; !ok {
@@ -341,13 +389,14 @@ func (r *PlayableTargetResolver) Resolve(ctx context.Context, q PlayableTargetQu
 	}
 	for key, targetCandidates := range candidates {
 		if len(targetCandidates) > 0 {
-			result[key] = preferredPlayableTarget(targetCandidates, progress)
+			id := preferredPlayableTarget(targetCandidates, progress)
+			result[key] = PlayableTarget{ContentID: id, SeasonNumber: seasons[id]}
 		}
 	}
 	// A validated hint is the surface's own anchor (for example the episode a
 	// recently-added event is about), so it outranks progress-based ranking.
 	for key, hint := range hints {
-		result[key] = hint
+		result[key] = PlayableTarget{ContentID: hint, SeasonNumber: seasons[hint]}
 	}
 	return result, nil
 }

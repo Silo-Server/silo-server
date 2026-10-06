@@ -4,6 +4,7 @@ import {
   setAccessToken,
   setRefreshToken,
   setProfileId,
+  StaleApiRequestContextError,
 } from "@/api/client";
 import { readAdminAutoscanSettings, readAdminAutoscanStatus } from "./adminAutoscanInspection";
 beforeEach(() => {
@@ -42,7 +43,23 @@ it("reads desired configuration and observed status separately without losing op
     "/api/v2/admin/autoscan/status",
   ]);
 });
-for (const read of [readAdminAutoscanSettings, readAdminAutoscanStatus]) {
+for (const { read, body } of [
+  {
+    read: readAdminAutoscanSettings,
+    body: { enabled: true, default_poll_interval_seconds: 60, debounce_seconds: 5 },
+  },
+  {
+    read: readAdminAutoscanStatus,
+    body: {
+      enabled: true,
+      sources: [],
+      running_polls: [],
+      active_scans: 0,
+      accepted_scans: 0,
+      running_scans: 0,
+    },
+  },
+]) {
   it(`rejects ${read.name} before dispatch after an authority change`, async () => {
     const authority = captureProfileRequestContext()!;
     setProfileId("b");
@@ -57,7 +74,7 @@ for (const read of [readAdminAutoscanSettings, readAdminAutoscanStatus]) {
     const reading = new Promise<void>((resolve) => {
       start = resolve;
     });
-    const res = response({});
+    const res = response(body);
     vi.spyOn(res, "text").mockImplementation(() => {
       start();
       return new Promise((resolve) => {
@@ -68,7 +85,7 @@ for (const read of [readAdminAutoscanSettings, readAdminAutoscanStatus]) {
     const result = read(captureProfileRequestContext()!);
     await reading;
     setProfileId("b");
-    finish("{}");
-    await expect(result).rejects.toThrow();
+    finish(JSON.stringify(body));
+    await expect(result).rejects.toBeInstanceOf(StaleApiRequestContextError);
   });
 }

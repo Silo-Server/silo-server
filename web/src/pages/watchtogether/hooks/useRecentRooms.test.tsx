@@ -127,6 +127,8 @@ describe("useRecentRooms", () => {
     const stale = {
       ...JSON.parse(localStorage.getItem(RECENT_ROOMS_KEY)!)[0],
       room_id: "stale",
+      user_id: 1,
+      profile_id: "p1",
       last_seen_at: new Date(Date.now() - 25 * 3600 * 1000).toISOString(),
     };
     localStorage.setItem(
@@ -149,8 +151,12 @@ describe("useRecentRooms", () => {
 
   it("returns nothing when signed out and survives corrupt storage", () => {
     localStorage.setItem(RECENT_ROOMS_KEY, "{not json");
+    const { result, rerender } = renderHook(() => useRecentRooms());
+    expect(result.current).toEqual([]);
+    act(() => rememberRecentRoom({ room: room("mine"), token: "t", userId: 1, profileId: "p1" }));
+    expect(result.current.map((entry) => entry.room_id)).toEqual(["mine"]);
     auth.user = null as never;
-    const { result } = renderHook(() => useRecentRooms());
+    rerender();
     expect(result.current).toEqual([]);
   });
 });

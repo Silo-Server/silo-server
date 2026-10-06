@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -484,15 +485,15 @@ func TestReplayedStopFinishesAnUnfinalizedStop(t *testing.T) {
 // feeding progress.
 func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 	t.Run("already stopped elsewhere", func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-		remoteStop := uuid.NewString()
-		if _, _, err := store.StopAttempt(context.Background(), f.session.ID, remoteStop, &playback.ProgressSampleV3{Sequence: 9, Position: 900}); err != nil {
-			t.Fatal(err)
-		}
-		f.handler.handleExpiredSession(f.session)
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
+		synctest.Test(t, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			remoteStop := uuid.NewString()
+			if _, _, err := store.StopAttempt(context.Background(), f.session.ID, remoteStop, &playback.ProgressSampleV3{Sequence: 9, Position: 900}); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.handleExpiredSession(f.session)
+			synctest.Wait()
 			receipt, _, err := store.StopAttempt(context.Background(), f.session.ID, uuid.NewString(), nil)
 			if err != nil {
 				t.Fatal(err)
@@ -500,20 +501,19 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 			if receipt.StopID != remoteStop || receipt.Accepted == nil || receipt.Accepted.Position != 900 {
 				t.Fatalf("expiry overwrote the remote stop: %+v", receipt)
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		})
 	})
 	t.Run("active elsewhere", func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
-		// The local copy went idle before the row's last accepted sample.
-		f.session.LastActivityAt = time.Now().Add(-time.Hour)
-		if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
-			t.Fatal(err)
-		}
-		f.handler.handleExpiredSession(f.session)
-		deadline := time.Now().Add(500 * time.Millisecond)
-		for time.Now().Before(deadline) {
+		synctest.Test(t, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+			// The local copy went idle before the row's last accepted sample.
+			f.session.LastActivityAt = time.Now().Add(-time.Hour)
+			if _, err := store.ApplyProgress(context.Background(), f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+				t.Fatal(err)
+			}
+			f.handler.handleExpiredSession(f.session)
+			synctest.Wait()
 			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -521,8 +521,7 @@ func TestExpiryDefersToAStoppedOrActiveRow(t *testing.T) {
 			if record.StoppedAt != nil {
 				t.Fatalf("expiry stopped an attempt that is live on another replica: %+v", record)
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
+		})
 	})
 }
 

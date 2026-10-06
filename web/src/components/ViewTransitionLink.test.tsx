@@ -152,6 +152,7 @@ describe("ViewTransitionLink sidebar navigation", () => {
     fireEvent.click(screen.getByRole("link", { name: "Movie" }));
 
     expect(screen.getByRole("status", { name: "location" })).toHaveTextContent("/item/movie-1");
+    expect(document.documentElement.dataset.navigationDirection).toBe("forward");
   });
 
   it("routes a desktop item boundary through the snapshot-free chokepoint", () => {
@@ -174,18 +175,6 @@ describe("ViewTransitionLink sidebar navigation", () => {
 });
 
 describe("ViewTransitionLink direction", () => {
-  it("moves the page forward on an ordinary click", () => {
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
-      </MemoryRouter>,
-    );
-
-    fireEvent.click(screen.getByRole("link", { name: "Movie" }));
-
-    expect(document.documentElement.dataset.navigationDirection).toBe("forward");
-  });
-
   it("replaces rather than pushes a second entry for the current URL", () => {
     render(
       <MemoryRouter initialEntries={["/item/movie-1"]}>

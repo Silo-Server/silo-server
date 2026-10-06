@@ -15,7 +15,6 @@ import {
 } from "@/api/adminSections";
 import { sectionFromV2 } from "@/api/v2/catalog";
 import type {
-  SectionsResponse,
   HomeLayoutResponse,
   LibraryLayoutResponse,
   HomeSectionItemsResponse,
@@ -70,18 +69,6 @@ export function profileSectionOverridesFromV2(
   }));
 }
 
-export function useHomeSections(enabled = true) {
-  return useQuery({
-    queryKey: sectionKeys.home(),
-    queryFn: ({ signal }): Promise<SectionsResponse> =>
-      v2("GET /api/v2/home/sections", { signal }).then((data) => ({
-        sections: data.sections.map(sectionFromV2),
-      })),
-    staleTime: 5 * 60 * 1000,
-    enabled,
-  });
-}
-
 export function useHomeLayout(enabled = true) {
   return useQuery({
     queryKey: sectionKeys.homeLayout(),
@@ -130,18 +117,6 @@ export function useLibraryLayout(libraryId: number) {
     queryFn: ({ signal }): Promise<LibraryLayoutResponse> =>
       v2("GET /api/v2/library/{id}/layout", { path: { id: String(libraryId) }, signal }).then(
         (layout) => ({ sections: layout.sections }),
-      ),
-    staleTime: 5 * 60 * 1000,
-    enabled: libraryId > 0,
-  });
-}
-
-export function useLibrarySections(libraryId: number) {
-  return useQuery({
-    queryKey: sectionKeys.library(libraryId),
-    queryFn: ({ signal }): Promise<SectionsResponse> =>
-      v2("GET /api/v2/library/{id}/sections", { path: { id: String(libraryId) }, signal }).then(
-        (data) => ({ sections: data.sections.map(sectionFromV2) }),
       ),
     staleTime: 5 * 60 * 1000,
     enabled: libraryId > 0,

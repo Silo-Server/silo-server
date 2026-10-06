@@ -124,21 +124,61 @@ describe("catalog browse and facets on the v2 contract", () => {
     expect(result.items[0]?.rating_imdb).toBeNull();
   });
 
-  it("jumps directly using the opaque seed and skips the total", async () => {
-    const fetchMock = stubFetch({ ...queryCatalogItemsOk, window_cursor: "opaque-window" });
-    await fetchCatalogPage(
-      { source: "query", query_definition: createEmptyQueryDefinition() },
+  it.each([undefined, ""])(
+    "jumps using the opaque seed when the continuation is %s and skips the total",
+    async (nextCursor) => {
+      const fetchMock = stubFetch({ ...queryCatalogItemsOk, window_cursor: "opaque-window" });
+      await fetchCatalogPage(
+        { source: "query", query_definition: createEmptyQueryDefinition() },
+        60,
+        60000,
+        undefined,
+        false,
+        "opaque-window",
+        nextCursor,
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+        cursor: "opaque-window",
+        seek: 60000,
+        skip_total: true,
+      });
+    },
+  );
+
+  it("continues from a page cursor without seeking and retains the next boundary", async () => {
+    const fetchMock = stubFetch({
+      ...queryCatalogItemsOk,
+      window_cursor: "opaque-window",
+      page: { has_more: true, next_cursor: "next-boundary" },
+    });
+    const controller = new AbortController();
+    const signal = controller.signal;
+    // The caller's abort reaches the in-flight request's signal.
+    let forwarded: boolean | undefined;
+    const respond = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementationOnce(async (input, init) => {
+      controller.abort();
+      forwarded = init?.signal?.aborted;
+      return respond(input, init);
+    });
+    const result = await fetchCatalogPage(
+      { source: "query", q: "Heat", query_definition: createEmptyQueryDefinition() },
       60,
-      60000,
-      undefined,
+      60,
+      { signal },
       false,
       "opaque-window",
+      "previous-boundary",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
-      cursor: "opaque-window",
-      seek: 60000,
-      skip_total: true,
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body).toMatchObject({ cursor: "previous-boundary", skip_total: true });
+    expect(body).not.toHaveProperty("seek");
+    expect(forwarded).toBe(true);
+    expect(result).toMatchObject({
+      snapshot: "opaque-window",
+      next_cursor: "next-boundary",
+      has_more: true,
     });
   });
 

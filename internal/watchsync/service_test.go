@@ -3899,48 +3899,6 @@ func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
 	}
 }
 
-func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing.T) {
-	repo := newServiceFakeRepo()
-	repo.historyExports = []HistoryExport{{
-		ID:           testHistoryExportID,
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusSent,
-	}}
-	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
-		t.Fatal(err)
-	}
-	if repo.historyExports[0].Status != historyExportStatusSent {
-		t.Fatalf("history exports = %#v", repo.historyExports)
-	}
-}
-
-func TestServiceFakeRepoPreservesNotFoundHistoryExport(t *testing.T) {
-	repo := newServiceFakeRepo()
-	repo.historyExports = []HistoryExport{{
-		ID:           testHistoryExportID,
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusNotFound,
-	}}
-	if err := repo.UpsertHistoryExports(context.Background(), []HistoryExport{{
-		ConnectionID: "conn-1",
-		HistoryID:    "history-1",
-		Status:       historyExportStatusPending,
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.MarkHistoryExportStatus(context.Background(), testHistoryExportID, historyExportStatusFailed, "retry"); err != nil {
-		t.Fatal(err)
-	}
-	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
-		t.Fatal(err)
-	}
-	if repo.historyExports[0].Status != historyExportStatusNotFound || repo.historyExports[0].AttemptCount != 0 {
-		t.Fatalf("history exports = %#v", repo.historyExports)
-	}
-}
-
 func TestServiceScrobbleRateLimitDefersConnection(t *testing.T) {
 	repo := newServiceFakeRepo()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)

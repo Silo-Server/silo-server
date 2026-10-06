@@ -53,11 +53,7 @@ import {
 } from "@/hooks/queries/useAutoscan";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { useAdminLibraries, useCancelLibraryScans } from "@/hooks/queries/admin/libraries";
-import {
-  buildPluginDisplayNames,
-  resolveEventSourceName,
-  type SourceLabelLookups,
-} from "@/lib/autoscanLabels";
+import { buildPluginDisplayNames, type SourceLabelLookups } from "@/lib/autoscanLabels";
 import {
   compareActiveScans,
   formatActiveScanMode,
@@ -67,6 +63,8 @@ import {
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
+
+import { eventSourceName } from "./sourceDisplay";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -160,9 +158,8 @@ function scanStatusLabel(status: AutoscanScanStatus | ScanRun["status"]) {
   return status === "accepted" ? "queued" : status;
 }
 
-// arr-plugin sources fan out one-per-connection under a single generic
-// capability, so resolve every Activity row through the shared label chain:
-// operator label -> connection name -> manifest display_name -> capability_id.
+// Name every Activity row the way the Sources list titles the source, so the
+// two tabs agree on what a source is called.
 type PollSourceRef = {
   source_id?: string | null;
   plugin_id?: string | null;
@@ -170,13 +167,11 @@ type PollSourceRef = {
 };
 
 function pollSourceName(event: PollSourceRef, lookups: SourceLabelLookups): string {
-  return (
-    resolveEventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan"
-  );
+  return eventSourceName(event, lookups) || event.plugin_id || event.capability_id || "Autoscan";
 }
 
 function scanSourceName(scan: AutoscanScan, lookups: SourceLabelLookups): string {
-  return resolveEventSourceName(scan, lookups) || "Autoscan";
+  return eventSourceName(scan, lookups) || "Autoscan";
 }
 
 function libraryName(librariesByID: Map<number, Library>, libraryID: number): string {

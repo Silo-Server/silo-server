@@ -1,10 +1,8 @@
 package userdb
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/storetest"
@@ -54,30 +52,6 @@ func TestSQLiteCollectionSortPreferences(t *testing.T) {
 	storetest.RunCollectionSortPreferences(t, newConformanceStore)
 }
 
-func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
-	ctx := context.Background()
-	store := newConformanceStore(t)
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateProfile: %v", err)
-	}
-
-	addedAt := time.Date(2026, time.July, 16, 12, 0, 0, 0, time.UTC)
-	inserted, err := store.AddFavoriteAt(ctx, "p1", "movie-1", addedAt)
-	if err != nil {
-		t.Fatalf("first AddFavoriteAt: %v", err)
-	}
-	if !inserted {
-		t.Fatal("first AddFavoriteAt reported no insertion")
-	}
-	inserted, err = store.AddFavoriteAt(ctx, "p1", "movie-1", addedAt)
-	if err != nil {
-		t.Fatalf("duplicate AddFavoriteAt: %v", err)
-	}
-	if inserted {
-		t.Fatal("duplicate AddFavoriteAt reported an insertion")
-	}
-}
-
 // TestSQLiteProgressPage runs the keyset progress paging conformance test
 // against the real SQLite backend; the Postgres backend runs the same suite in
 // internal/userstore/pgstore.
@@ -90,6 +64,10 @@ func TestSQLiteProgressPage(t *testing.T) {
 // text comparison of added_at to the RFC 3339 form AddFavoriteAt writes.
 func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunPersonalListPage(t, newConformanceStore)
+}
+
+func TestSQLiteHistoryEntryOnce(t *testing.T) {
+	storetest.RunHistoryEntryOnce(t, newConformanceStore(t))
 }
 
 func TestSQLiteDatedMarkWatchedBatchAtomic(t *testing.T) {

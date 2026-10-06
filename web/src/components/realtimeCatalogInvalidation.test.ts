@@ -1,8 +1,18 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { catalogKeys, mediaSurfaceKeys, sectionKeys } from "@/hooks/queries/keys";
+import {
+  calendarKeys,
+  catalogKeys,
+  collectionKeys,
+  downloadKeys,
+  libraryKeys,
+  mediaSurfaceKeys,
+  requestKeys,
+  sectionKeys,
+} from "@/hooks/queries/keys";
 import {
   createCatalogInvalidationScheduler,
+  invalidateAccessDependentState,
   PROGRESS_HOME_REFRESH_WINDOW_MS,
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
@@ -41,12 +51,14 @@ describe("createCatalogInvalidationScheduler", () => {
   it("invalidates the first event immediately", async () => {
     const queryClient = new QueryClient();
     seedLibraries(queryClient, [1, 3]);
+    queryClient.setQueryData(sectionKeys.libraryLayout(3), { sections: [] });
     const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
 
     scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(invalidatedLibraries(queryClient, [1, 3])).toEqual([3]);
+    expect(queryClient.getQueryState(sectionKeys.libraryLayout(3))?.isInvalidated).toBe(true);
   });
 
   it("coalesces a burst into a single trailing sweep", async () => {
@@ -88,17 +100,6 @@ describe("createCatalogInvalidationScheduler", () => {
     expect(invalidatedLibraries(queryClient, [1, 3])).toEqual([1, 3]);
   });
 
-  it("still invalidates the touched library's own sections on a scoped sweep", async () => {
-    const queryClient = new QueryClient();
-    queryClient.setQueryData(sectionKeys.libraryLayout(3), { sections: [] });
-    const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
-
-    scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(queryClient.getQueryState(sectionKeys.libraryLayout(3))?.isInvalidated).toBe(true);
-  });
-
   it("drops queued work on cancel", async () => {
     const queryClient = new QueryClient();
     const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
@@ -122,21 +123,45 @@ describe("createCatalogInvalidationScheduler", () => {
 
   it("marks home section data stale (without refetching) on a library-scoped sweep", async () => {
     const queryClient = new QueryClient();
+    const homeLayoutKey = sectionKeys.homeLayout();
     const homeItemsKey = sectionKeys.homeItems("recently-added");
-    queryClient.setQueryData(sectionKeys.homeLayout(), { sections: [] });
+    const loadHomeLayout = vi.fn(async () => ({ sections: [] }));
+    const loadHomeItems = vi.fn(async () => ({ items: [] }));
+    queryClient.setQueryData(homeLayoutKey, { sections: [] });
     queryClient.setQueryData(homeItemsKey, { items: [] });
+    const layoutObserver = new QueryObserver(queryClient, {
+      queryKey: homeLayoutKey,
+      queryFn: loadHomeLayout,
+      staleTime: Infinity,
+    });
+    const itemsObserver = new QueryObserver(queryClient, {
+      queryKey: homeItemsKey,
+      queryFn: loadHomeItems,
+      staleTime: Infinity,
+    });
+    const unsubscribeLayout = layoutObserver.subscribe(() => {});
+    const unsubscribeItems = itemsObserver.subscribe(() => {});
     const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
 
-    scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
-    await vi.advanceTimersByTimeAsync(0);
+    try {
+      expect(loadHomeLayout).not.toHaveBeenCalled();
+      expect(loadHomeItems).not.toHaveBeenCalled();
+      scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
+      await vi.advanceTimersByTimeAsync(0);
 
-    // Stale, so the throttled home queue reset fetches real data instead of
-    // re-rendering the fresh-but-outdated cache…
-    expect(queryClient.getQueryState(sectionKeys.homeLayout())?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(homeItemsKey)?.isInvalidated).toBe(true);
-    // …but the sweep itself never refetches them (no observers here, and the
-    // invalidation is refetchType "none").
-    expect(queryClient.isFetching()).toBe(0);
+      // Active home queries become stale so the home queue can refresh them,
+      // without this library sweep starting its own reads.
+      expect(queryClient.getQueryState(homeLayoutKey)?.isInvalidated).toBe(true);
+      expect(queryClient.getQueryState(homeItemsKey)?.isInvalidated).toBe(true);
+      expect(loadHomeLayout).not.toHaveBeenCalled();
+      expect(loadHomeItems).not.toHaveBeenCalled();
+      expect(queryClient.isFetching()).toBe(0);
+    } finally {
+      scheduler.cancel();
+      unsubscribeLayout();
+      unsubscribeItems();
+      queryClient.clear();
+    }
   });
 });
 
@@ -180,5 +205,27 @@ describe("scheduleProgressHomeRefresh", () => {
     scheduleProgressHomeRefresh(queryClient);
     vi.advanceTimersByTime(PROGRESS_HOME_REFRESH_WINDOW_MS);
     expect(signal()).toBe(2);
+  });
+});
+
+describe("invalidateAccessDependentState", () => {
+  it("marks every access-dependent surface stale", async () => {
+    const queryClient = new QueryClient();
+    const keys = [
+      libraryKeys.user("profile-1"),
+      catalogListKey(1),
+      catalogKeys.itemDetail("movie-1"),
+      sectionKeys.home(),
+      collectionKeys.list(),
+      calendarKeys.week("2026-09-28", "all"),
+      requestKeys.status(),
+      downloadKeys.capability(),
+    ];
+    for (const key of keys) queryClient.setQueryData(key, {});
+
+    invalidateAccessDependentState(queryClient, { allowDashboardRefetch: false });
+    await Promise.resolve();
+
+    expect(keys.filter((key) => !queryClient.getQueryState(key)?.isInvalidated)).toEqual([]);
   });
 });

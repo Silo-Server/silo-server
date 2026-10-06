@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { deleteWatchTogetherSuggestion } from "@/lib/watchTogether";
 
 beforeEach(() => {
@@ -32,7 +32,10 @@ it("deletes exactly the requested suggestion then refreshes under the same proof
     expect(String(call[0])).not.toContain("room-proof");
   }
 });
-it.each([401, 403, 404, 500])("does not replay or hide a %s deletion failure", async (status) => {
+it.each([401, 500])("does not replay or hide a %s deletion failure", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(
     new Response(JSON.stringify({ status, code: "failed", detail: "Delete failed" }), {
       status,

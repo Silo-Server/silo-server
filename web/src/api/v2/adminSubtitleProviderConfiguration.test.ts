@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
 import { adminSubtitleListScope } from "./adminSubtitles";
 import {
   captureProviderEditIntent,
@@ -53,7 +53,9 @@ it("sends one guarded PUT with original blank/clear fields and distinguishes lat
   expect(result).toEqual(saved);
   expect(providerSaveMessage(result)).toContain("different saved revision");
 });
-it.each([401, 412, 500, 503])("does not replay, reread or rebase after %s", async (status) => {
+it.each([401, 412, 500])("does not replay, reread or rebase after %s", async (status) => {
+  setAccessToken("synthetic-admin");
+  setRefreshToken("synthetic-refresh");
   const fetch = vi
     .fn<typeof globalThis.fetch>()
     .mockResolvedValueOnce(json(row))

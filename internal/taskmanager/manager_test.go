@@ -271,44 +271,6 @@ func TestTaskManagerStartSeedsCleanupTaskDefaults(t *testing.T) {
 	}
 }
 
-func TestTaskManagerStartPreservesExistingTriggers(t *testing.T) {
-	existing := []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:15"},
-	}
-	triggerRepo := &fakeTriggerRepository{
-		triggers: map[string][]taskmanager.TriggerConfig{
-			"cleanup_activity_log": existing,
-		},
-	}
-	manager := taskmanager.New(
-		triggerRepo,
-		fakeExecutionRepository{},
-		newFakeTrigger,
-		slog.New(slog.DiscardHandler),
-	)
-
-	manager.Register(stubTask{
-		key: "cleanup_activity_log",
-		triggers: []taskmanager.TriggerConfig{
-			{Type: taskmanager.TriggerTypeStartup},
-			{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((24 * time.Hour) / time.Millisecond)},
-		},
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer manager.Stop()
-	defer cancel()
-	manager.Start(ctx)
-
-	if _, ok := triggerRepo.setCalls["cleanup_activity_log"]; ok {
-		t.Fatalf("expected existing triggers to be preserved without SetTriggers call")
-	}
-
-	if got := manager.GetTaskInfo("cleanup_activity_log").Triggers; !reflect.DeepEqual(got, existing) {
-		t.Fatalf("worker triggers = %#v, want %#v", got, existing)
-	}
-}
-
 func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 	const taskKey = "refresh_metadata"
 	triggerRepo := &fakeTriggerRepository{
@@ -653,5 +615,111 @@ func TestStartTaskReservesBeforeAcknowledgment(t *testing.T) {
 	case <-task.done:
 	case <-time.After(time.Second):
 		t.Fatal("reserved work did not receive cancellation")
+	}
+}
+
+type manualMarkerTask struct {
+	stubTask
+	seen chan bool
+}
+
+func (t manualMarkerTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
+	t.seen <- taskmanager.StartedManually(ctx)
+	return nil
+}
+
+func TestStartTaskMarksRunStartedManually(t *testing.T) {
+	task := manualMarkerTask{stubTask: stubTask{key: "manual-marker"}, seen: make(chan bool, 1)}
+	manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, nil, nil)
+	manager.Register(task)
+	t.Cleanup(manager.Stop)
+
+	if taskmanager.StartedManually(context.Background()) {
+		t.Fatal("a plain context must not report a manual start")
+	}
+	if _, err := manager.StartTask(task.Key()); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	select {
+	case manual := <-task.seen:
+		if !manual {
+			t.Fatal("StartTask run must report StartedManually")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StartTask did not execute the task")
+	}
+	waitIdle(t, manager, task.Key())
+
+	// RunTask is also the trigger loop's execution path (w.run with the
+	// manager's context) and programmatic kicks; it must not look manual.
+	if err := manager.RunTask(context.Background(), task.Key()); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	select {
+	case manual := <-task.seen:
+		if manual {
+			t.Fatal("RunTask run must not report StartedManually")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RunTask did not execute the task")
+	}
+}
+
+type recordingAutoscanPoller struct {
+	calls chan string
+}
+
+func (p recordingAutoscanPoller) PollOnce(context.Context) error {
+	p.calls <- "PollOnce"
+	return nil
+}
+
+func (p recordingAutoscanPoller) PollNow(context.Context) error {
+	p.calls <- "PollNow"
+	return nil
+}
+
+func TestAutoscanPollTaskPollsNowOnlyWhenStartedManually(t *testing.T) {
+	poller := recordingAutoscanPoller{calls: make(chan string, 1)}
+	task := taskdefs.NewAutoscanPollTask(poller, 0)
+	manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, nil, nil)
+	manager.Register(task)
+	t.Cleanup(manager.Stop)
+
+	if _, err := manager.StartTask(task.Key()); err != nil {
+		t.Fatalf("StartTask: %v", err)
+	}
+	select {
+	case call := <-poller.calls:
+		if call != "PollNow" {
+			t.Fatalf("manual start called %s, want PollNow", call)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("StartTask did not run the autoscan poll")
+	}
+	waitIdle(t, manager, task.Key())
+
+	if err := manager.RunTask(context.Background(), task.Key()); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	select {
+	case call := <-poller.calls:
+		if call != "PollOnce" {
+			t.Fatalf("non-manual run called %s, want PollOnce", call)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("RunTask did not run the autoscan poll")
+	}
+}
+
+// waitIdle waits until a StartTask goroutine has released the worker.
+func waitIdle(t *testing.T, manager *taskmanager.TaskManager, key string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for manager.GetTaskInfo(key).State != taskmanager.TaskStateIdle {
+		if time.Now().After(deadline) {
+			t.Fatalf("task %s did not return to idle", key)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

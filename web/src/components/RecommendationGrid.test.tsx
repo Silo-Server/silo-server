@@ -23,25 +23,6 @@ describe("RecommendationGrid", () => {
     mocks.useCatalogItemDetail.mockReset();
   });
 
-  it("encodes item IDs in detail links", () => {
-    mocks.useCatalogItemDetail.mockReturnValue({
-      data: {
-        content_id: "ebook 1",
-        title: "A Reader",
-        poster_url: "",
-      },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <RecommendationGrid items={[{ content_id: "ebook 1" }]} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain('href="/item/ebook%201"');
-    expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("ebook 1");
-  });
-
   it("uses the shared Embla carousel at the selected density and omits artwork-only captions", () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: {
@@ -97,7 +78,7 @@ describe("RecommendationGrid", () => {
   it("keeps recommendation details and playback as independent links", () => {
     mocks.useCatalogItemDetail.mockReturnValue({
       data: {
-        content_id: "series-1",
+        content_id: "series 1",
         play_content_id: "episode-4",
         title: "Running Show",
         poster_url: "/poster.jpg",
@@ -106,11 +87,12 @@ describe("RecommendationGrid", () => {
 
     const markup = renderToStaticMarkup(
       <MemoryRouter>
-        <RecommendationGrid items={[{ content_id: "series-1" }]} />
+        <RecommendationGrid items={[{ content_id: "series 1" }]} />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain('href="/item/series-1"');
+    expect(markup).toContain('href="/item/series%201"');
+    expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series 1");
     expect(markup).toContain('href="/watch/episode-4"');
     expect(markup).toContain('aria-label="Play Running Show"');
   });

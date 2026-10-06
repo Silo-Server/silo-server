@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 const (
@@ -15,6 +16,30 @@ const (
 	compatSubtitleSRT    = "srt"
 	compatSubtitleEncode = "Encode"
 )
+
+// deliverTextSubtitle answers from text subtitle bytes that already carry
+// their timing correction: ASS/SSA or SRT as they are when that format was
+// requested, anything else as WebVTT.
+func (h *PlaybackHandler) deliverTextSubtitle(w http.ResponseWriter, r *http.Request, format string, data []byte, requestedFormat string) {
+	if requestedFormat == compatSubtitleASS && playback.IsASS(format) {
+		h.deliverSubtitle(w, r, compatSubtitleASS, data)
+		return
+	}
+	if requestedFormat == compatSubtitleSRT && subtitleCanServeSRT(format) {
+		h.deliverSubtitle(w, r, compatSubtitleSRT, data)
+		return
+	}
+	if subtitles.SubtitleFormat(strings.ToLower(format)) == subtitles.FormatVTT {
+		h.deliverSubtitle(w, r, compatSubtitleVTT, data)
+		return
+	}
+	vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, format, h.FFmpegPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
+		return
+	}
+	h.deliverSubtitle(w, r, compatSubtitleVTT, vttData)
+}
 
 // deliverSubtitle preserves raw ASS styling when possible and applies the
 // Jellyfin text timing contract to VTT/SRT. Unsupported conversions are explicit.
@@ -51,6 +76,11 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 		writeSubtitleResponse(w, requested, data)
 		return
 	}
+	// Text written for left-to-right players gets its right-to-left lines
+	// marked so the punctuation lands where the author put it.
+	if format == compatSubtitleVTT || format == compatSubtitleSRT {
+		data = subtitles.MarkLTRAuthoredLines(data)
+	}
 	if requested == format && start == 0 && end == 0 && !timeMap {
 		writeSubtitleResponse(w, requested, data)
 		return
@@ -61,6 +91,7 @@ func (h *PlaybackHandler) deliverSubtitle(w http.ResponseWriter, r *http.Request
 			writeError(w, 500, "ServerError", "Failed to convert subtitle")
 			return
 		}
+		data = subtitles.MarkLTRAuthoredLines(data)
 	}
 	windowFormat := requested
 	if requested == "js" {
@@ -185,4 +216,12 @@ func windowSubtitleVTT(data []byte, format string, start, end int64, copyTimesta
 		}
 	}
 	return []byte(out.String()), nil
+}
+
+// subtitlePlayed hands a subtitle a client is being served to PlaySync. A
+// HEAD request only asks about the subtitle and is not a play.
+func (h *PlaybackHandler) subtitlePlayed(r *http.Request, target subtitles.SyncTarget) {
+	if h.PlaySync != nil && r.Method != http.MethodHead {
+		h.PlaySync.SubtitlePlayed(r.Context(), target)
+	}
 }

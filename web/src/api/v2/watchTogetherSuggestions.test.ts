@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { listWatchTogetherSuggestions, voteWatchTogetherSuggestion } from "@/lib/watchTogether";
 
 beforeEach(() => {
@@ -71,6 +71,8 @@ it("does not replay rejected votes or publish partial page results", async () =>
     .mockRejectedValueOnce(new Error("lost page"));
   vi.stubGlobal("fetch", fetch);
   await expect(listWatchTogetherSuggestions("room", "room-proof")).rejects.toThrow();
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
   fetch.mockReset().mockResolvedValue(
     new Response(JSON.stringify({ status: 401, code: "authentication_required" }), {
       status: 401,

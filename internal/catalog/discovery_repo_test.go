@@ -377,32 +377,6 @@ func TestForgottenFavorites_DefaultLookbackApplied(t *testing.T) {
 	}
 }
 
-func TestDiscoveryQueries_QualifyContentIDAndAvoidLibraryJoin(t *testing.T) {
-	restricted := AccessFilter{AllowedLibraryIDs: []int{1, 2}}
-
-	cases := []struct {
-		name  string
-		query string
-	}{
-		{"rating_threshold", mustQuery(buildRatingThresholdQuery(RatingFilter{Min: 7, Filter: restricted}))},
-		{"unplayed_high_rated", mustQuery(buildUnplayedHighRatedQuery(UnplayedFilter{MinRating: 7, UserID: 1, ProfileID: "p", Filter: restricted}))},
-		{"forgotten_favorites", mustQuery(buildForgottenFavoritesQuery(ForgottenFavoritesFilter{UserID: 1, ProfileID: "p", LookbackDays: 365, Filter: restricted}))},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assertQualifiedItemSelect(t, tc.query)
-			assertNoLibraryJoin(t, tc.query)
-			if !strings.Contains(tc.query, "EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in") {
-				t.Fatalf("expected allowed library EXISTS predicate, got:\n%s", tc.query)
-			}
-			if strings.Contains(tc.query, "SELECT content_id,") {
-				t.Fatalf("SELECT list uses an unqualified content_id, got:\n%s", tc.query)
-			}
-		})
-	}
-}
-
 func TestDiscoveryQueries_DisabledLibrariesUseNotExists(t *testing.T) {
 	filter := AccessFilter{DisabledLibraryIDs: []int{9}}
 

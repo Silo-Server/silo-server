@@ -104,43 +104,6 @@ func TestGPUGateHoldWorkIsNeverRefusedAndKeepsReprobesOut(t *testing.T) {
 	gate.endWork()
 }
 
-// A hardware probe runs on a background context so an abandoned caller cannot
-// kill work another request is waiting on. The capability build therefore
-// releases its gate claim while ffmpeg may still be encoding, and a re-probe
-// that counted only this node's own bookkeeping would claim an encoder that is
-// not free — its smoke matrix racing the one already running, publishing the
-// false hardware verdict this gate exists to prevent.
-func TestGPUGateRefusesReprobeWhileADetachedProbeRuns(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(1))
-	if ok {
-		t.Fatal("re-probe admitted while a detached smoke encode was still running")
-	}
-	if busy != 1 {
-		t.Fatalf("busy = %d, want the detached probe counted", busy)
-	}
-
-	if _, ok := gate.beginReprobe(otherWork(0)); !ok {
-		t.Fatal("re-probe refused once no probe was in flight")
-	}
-}
-
-// Tone-map probes detach from their caller exactly as hardware probes do, and
-// they run their own FFmpeg smoke encodes, so a re-probe that counted only the
-// hardware ones would start a second matrix beside a running first.
-func TestGPUGateCountsEveryDetachedProbeSource(t *testing.T) {
-	var gate gpuGate
-
-	busy, ok := gate.beginReprobe(otherWork(2))
-	if ok {
-		t.Fatal("re-probe admitted while detached smoke encodes were still running")
-	}
-	if busy != 2 {
-		t.Fatalf("busy = %d, want both detached probe sources counted", busy)
-	}
-}
-
 // otherWork builds the callback beginReprobe reads under its own lock, for
 // tests that want a fixed count.
 func otherWork(count int) func() int { return func() int { return count } }

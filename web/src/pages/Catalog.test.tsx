@@ -194,7 +194,6 @@ vi.mock("@/pages/settings/HistoryImportSettings", () => stubPage("History import
 vi.mock("@/pages/settings/WebhookSyncSettings", () => stubPage("Webhook sync settings"));
 vi.mock("@/pages/settings/SubtitleAppearanceSettings", () => stubPage("Subtitle appearance"));
 vi.mock("@/pages/settings/HomeScreenSettings", () => stubPage("Home screen settings"));
-vi.mock("@/pages/settings/PluginSettings", () => stubPage("Plugin settings"));
 vi.mock("@/pages/WatchRoute", () => stubPage("Watch"));
 
 import App from "../App";

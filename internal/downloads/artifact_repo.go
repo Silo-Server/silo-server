@@ -18,7 +18,9 @@ const artifactColumns = `id, media_file_id, format, params_hash, container, code
 	tone_map_dv_config_present, tone_map_dv_bl_compat_id_present, tone_map_dv_bl_present, tone_map_dv_rpu_present, output_path,
 	origin_node_id, origin_node_url, origin_node_group, origin_artifact_id, file_size, status, error_message,
 	attempts, max_attempts, lease_owner, lease_expires_at, next_retry_at,
-	created_at, completed_at, last_used_at`
+	created_at, completed_at, last_used_at,
+	started_at, worker_kind, worker_node_id, worker_name,
+	progress_encoded_seconds, progress_duration_seconds, progress_speed, progress_updated_at, progress_unavailable`
 
 // ArtifactRepository provides CRUD + durable-queue operations for
 // download_artifacts.
@@ -48,6 +50,8 @@ func scanArtifact(row pgx.Row) (*Artifact, error) {
 	var a Artifact
 	var leaseOwner *string
 	var preparedAudio []byte
+	var encoded, duration, speed *float64
+	var progressAt *time.Time
 	if err := row.Scan(
 		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio, &a.AudioRecipeVersion, &a.TrackRecipeVersion, &preparedAudio,
 		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.ToneMapPolicy, &a.ToneMapMode, &a.ToneMapSourceKind, &a.ToneMapRecipeVersion, &a.ToneMapPreflightRequired, &a.ToneMapSourceRevision,
@@ -55,10 +59,24 @@ func scanArtifact(row pgx.Row) (*Artifact, error) {
 		&a.OriginNodeID, &a.OriginNodeURL, &a.OriginNodeGroup, &a.OriginArtifactID, &a.FileSize, &a.Status, &a.ErrorMessage,
 		&a.Attempts, &a.MaxAttempts, &leaseOwner, &a.LeaseExpiresAt, &a.NextRetryAt,
 		&a.CreatedAt, &a.CompletedAt, &a.LastUsedAt,
+		&a.StartedAt, &a.WorkerKind, &a.WorkerNodeID, &a.WorkerName,
+		&encoded, &duration, &speed, &progressAt, &a.ProgressUnavailable,
 	); err != nil {
 		return nil, err
 	}
 	a.LeaseOwner = deref(leaseOwner)
+	if progressAt != nil {
+		a.Progress = &ArtifactProgress{UpdatedAt: *progressAt}
+		if encoded != nil {
+			a.Progress.EncodedSeconds = *encoded
+		}
+		if duration != nil {
+			a.Progress.DurationSeconds = *duration
+		}
+		if speed != nil {
+			a.Progress.Speed = *speed
+		}
+	}
 	if len(preparedAudio) > 0 {
 		if err := json.Unmarshal(preparedAudio, &a.PreparedAudioTracks); err != nil {
 			return nil, fmt.Errorf("decoding prepared audio tracks: %w", err)
@@ -90,6 +108,11 @@ func (r *ArtifactRepository) EnsureQueued(ctx context.Context, a *Artifact) (*Ar
 		return nil, false, fmt.Errorf("ensuring artifact: %w", err)
 	}
 	row, err := r.GetByKey(ctx, a.MediaFileID, a.Format, a.ParamsHash)
+	if errors.Is(err, ErrNotFound) && tag.RowsAffected() == 0 {
+		// The conflicting row was deleted (an administrator canceled it)
+		// between the insert and the read; queue a fresh one.
+		return r.EnsureQueued(ctx, a)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -124,8 +147,10 @@ func (r *ArtifactRepository) GetByKey(ctx context.Context, mediaFileID int, form
 	return a, nil
 }
 
-// ClaimNext atomically claims one runnable job: a queued row whose backoff has
-// elapsed, or a running row whose lease has expired (lease stealing). FOR UPDATE
+// ClaimNext atomically claims one runnable job: a queued, unpaused row whose
+// backoff has elapsed, or a running row whose lease has expired (lease
+// stealing). A queued row can carry an unowned lease_expires_at after a pause
+// took it from a worker that may still be running; it waits that out. FOR UPDATE
 // SKIP LOCKED makes concurrent workers (and nodes) safe without double-encoding.
 // Returns ErrNoArtifactJob when nothing is claimable.
 func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease time.Duration) (*Artifact, error) {
@@ -142,12 +167,16 @@ func (r *ArtifactRepository) ClaimNext(ctx context.Context, owner string, lease 
 		                  ELSE 'running'
 		              END,
 		     lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
-		     attempts = attempts + 1
+		     attempts = attempts + 1,
+		     started_at = now(), worker_kind = '', worker_node_id = NULL, worker_name = '',
+		     progress_encoded_seconds = NULL, progress_duration_seconds = NULL, progress_speed = NULL,
+		     progress_updated_at = NULL, progress_unavailable = false
 		 WHERE id = (
 		     SELECT id FROM download_artifacts
-		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND (next_retry_at IS NULL OR next_retry_at <= now()))
+		     WHERE (status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued') AND paused_at IS NULL
+		            AND (next_retry_at IS NULL OR next_retry_at <= now()) AND (lease_expires_at IS NULL OR lease_expires_at <= now()))
 		        OR (status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running') AND lease_expires_at < now())
-		     ORDER BY created_at
+		     ORDER BY created_at, id
 		     LIMIT 1
 		     FOR UPDATE SKIP LOCKED
 		 )
@@ -177,6 +206,57 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 	)
 	if err != nil {
 		return false, fmt.Errorf("heartbeating artifact: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// runningArtifactFence limits live-state writes to the current lease owner of
+// a running attempt, so a worker that lost its lease cannot overwrite the
+// state of the attempt that replaced it.
+const runningArtifactFence = `lease_owner = $2 AND status IN ('running', 'tone_map_running', 'audio_v2_running', 'tracks_v1_running')`
+
+// RecordWorker records where the current attempt executes. nodeID is nil for
+// the API server itself. Returns false when the lease was lost.
+func (r *ArtifactRepository) RecordWorker(ctx context.Context, id, owner, kind string, nodeID *int, name string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET worker_kind = $3, worker_node_id = $4, worker_name = $5,
+		     progress_encoded_seconds = NULL, progress_duration_seconds = NULL, progress_speed = NULL,
+		     progress_updated_at = NULL, progress_unavailable = false
+		 WHERE id = $1 AND `+runningArtifactFence,
+		id, owner, kind, nodeID, name,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact worker: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecordProgress persists the attempt's latest progress reading. Returns
+// false when the lease was lost.
+func (r *ArtifactRepository) RecordProgress(ctx context.Context, id, owner string, p ArtifactProgress) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts
+		 SET progress_encoded_seconds = $3, progress_duration_seconds = $4, progress_speed = $5,
+		     progress_updated_at = now(), progress_unavailable = false
+		 WHERE id = $1 AND `+runningArtifactFence,
+		id, owner, p.EncodedSeconds, p.DurationSeconds, p.Speed,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact progress: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RecordProgressUnavailable marks the attempt's worker as unable to report
+// progress, so the admin view can say so instead of waiting for a reading.
+func (r *ArtifactRepository) RecordProgressUnavailable(ctx context.Context, id, owner string) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE download_artifacts SET progress_unavailable = true WHERE id = $1 AND `+runningArtifactFence,
+		id, owner,
+	)
+	if err != nil {
+		return false, fmt.Errorf("recording artifact progress unavailable: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
 }
