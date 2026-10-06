@@ -1440,8 +1440,9 @@ export function VideoPlayer({
           setPendingTranslationHandoff(null);
           // Remember the real selection we're displacing and whether we were
           // playing, so completion/failure can restore the right state.
+          const video = videoRef.current;
           const wasPlaying =
-            !(videoRef.current?.paused ?? true) ||
+            (video ? !viewerPaused(video, stallRecoveryRef.current) : false) ||
             (translationPauseRef.current && translationResumeOnFinishRef.current);
           translationResumeOnFinishRef.current = wasPlaying;
           setActiveSubtitleIndex((idx) => {
@@ -1613,13 +1614,13 @@ export function VideoPlayer({
     const handleEnterPictureInPicture = () =>
       onPictureInPictureChange({
         active: true,
-        playbackContinues: !video.paused,
+        playbackContinues: !viewerPaused(video, stallRecoveryRef.current),
       });
     const handleLeavePictureInPicture = () => {
       window.setTimeout(() => {
         onPictureInPictureChange({
           active: false,
-          playbackContinues: !video.paused,
+          playbackContinues: !viewerPaused(video, stallRecoveryRef.current),
         });
       }, 0);
     };
@@ -2451,7 +2452,8 @@ export function VideoPlayer({
           scheduleHide();
           return;
         }
-        if (videoRef.current && !videoRef.current.paused) {
+        const video = videoRef.current;
+        if (video && !viewerPaused(video, stallRecoveryRef.current)) {
           setControlsVisible(false);
         }
         hideTimerRef.current = null;
@@ -3438,7 +3440,7 @@ export function VideoPlayer({
           return;
         case "play_pause":
           if (!video) return;
-          if (video.paused) {
+          if (viewerPaused(video, stallRecoveryRef.current)) {
             await video.play();
           } else {
             video.pause();

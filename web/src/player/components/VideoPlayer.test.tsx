@@ -3054,6 +3054,30 @@ describe("VideoPlayer native HLS timeline", () => {
     }
   });
 
+  it("pauses on a remote play/pause during a stall reload", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      const video = await startStallReload();
+      const play = vi.mocked(HTMLMediaElement.prototype.play);
+
+      await act(async () => {
+        await realtimeOptions.current!.onCommand({
+          type: "command",
+          command_id: "remote-toggle",
+          session_id: "session-1",
+          name: "play_pause",
+          deadline_ms: 8_000,
+          payload: {},
+        });
+      });
+      fireEvent.loadedMetadata(video);
+
+      expect(play).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("pauses on a mouse click during a stall reload", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     try {
