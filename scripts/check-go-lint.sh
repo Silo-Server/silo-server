@@ -84,7 +84,7 @@ worktree_differs() {
 	local dirs=$'\n' file
 	while IFS= read -r -d '' file; do
 		dirs+="$(dirname "$file")"$'\n'
-	done < <(git diff --cached --name-only -z -- '*.go')
+	done < <(git diff --cached --name-only --no-renames -z -- '*.go')
 	while IFS= read -r -d '' file; do
 		if [[ "$dirs" == *$'\n'"$(dirname "$file")"$'\n'* ]]; then
 			return 0
