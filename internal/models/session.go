@@ -13,4 +13,14 @@ type AuthSession struct {
 	RevokedAt              *time.Time // nil if active, set when revoked
 	ImpersonatorUserID     *int
 	ImpersonationStartedAt *time.Time
+	// IdentityID is the external sign-in identity the session came from
+	// (plugin_auth_identities.id); nil for a local session. A refresh of such
+	// a session re-checks the identity with its provider.
+	IdentityID *int64
+	// ProviderSince is when the external provider last vouched for the chain
+	// of sign-ins this session belongs to (auth_sessions.provider_since); nil
+	// for a session the provider never vouched for. When the provider cannot
+	// re-check the identity, or the identity is gone, the session ends the
+	// refresh expiry after this instant instead of sliding.
+	ProviderSince *time.Time
 }

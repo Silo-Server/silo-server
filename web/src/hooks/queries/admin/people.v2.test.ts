@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setAccessToken, setRefreshToken } from "@/api/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
@@ -30,6 +31,8 @@ function setup(response: () => Response) {
 it.each(["refresh", "update"] as const)(
   "does not refresh or replay administrator %s after401",
   async (action) => {
+    setAccessToken("synthetic-admin");
+    setRefreshToken("synthetic-refresh");
     const { calls, wrapper } = setup(
       () =>
         new Response(

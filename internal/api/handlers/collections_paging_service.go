@@ -183,6 +183,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 		for _, item := range page.Items {
 			out.Items = append(out.Items, h.itemListResponseOf(ctx, item))
 		}
+		h.setListingLogos(ctx, out.Items, page.Items, access)
 		out.Revision = witness
 		out.HasMore = page.HasMore
 		out.Query = page.Next
@@ -213,6 +214,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 			out.Items = append(out.Items, v)
 		}
 	}
+	h.setListingLogos(ctx, out.Items, items, access)
 	if _, err = h.repo.ListItemsPage(ctx, id, userstore.CollectionItemsPageOptions{Limit: 1, Revision: page.Revision}); err != nil {
 		return out, collectionPageError(err)
 	}

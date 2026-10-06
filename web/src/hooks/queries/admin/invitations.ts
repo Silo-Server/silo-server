@@ -14,6 +14,7 @@ import {
   resendAdminInvitation,
   revokeAdminInvitation,
   type InvitationAuthority,
+  type InvitationDeliveryChoice,
   type InvitationPage,
   type CreateInvitationBody,
 } from "@/api/v2/invitations";
@@ -84,8 +85,15 @@ export function useCreateInvitation() {
 export function useResendInvitation() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, profileContext }: { id: string; profileContext: InvitationAuthority }) =>
-      resendAdminInvitation(id, profileContext),
+    mutationFn: ({
+      id,
+      profileContext,
+      delivery,
+    }: {
+      id: string;
+      profileContext: InvitationAuthority;
+      delivery?: InvitationDeliveryChoice;
+    }) => resendAdminInvitation(id, profileContext, delivery),
     retry: false,
     gcTime: 0,
     onSuccess: (_result, v) => {

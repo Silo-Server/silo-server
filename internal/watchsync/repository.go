@@ -202,6 +202,30 @@ func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (
 	return out, nil
 }
 
+// SetServerSetting stores a plain, non-secret server setting.
+func (r *PostgresRepository) SetServerSetting(ctx context.Context, key, value string) error {
+	if _, err := r.pool.Exec(ctx,
+		`INSERT INTO server_settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		key, value,
+	); err != nil {
+		return fmt.Errorf("server_settings set %q: %w", key, err)
+	}
+	return nil
+}
+
+// HasConnections reports whether any profile is connected to providerKey.
+func (r *PostgresRepository) HasConnections(ctx context.Context, providerKey string) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM watch_provider_connections WHERE provider = $1)`,
+		providerKey,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check %s watch provider connections: %w", providerKey, err)
+	}
+	return exists, nil
+}
+
 func (r *PostgresRepository) UpsertAuthSession(
 	ctx context.Context,
 	session DeviceAuthSession,
@@ -276,7 +300,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
 	}
-	pluginCredentials, err := r.pluginCredentialsForConnection(conn)
+	pluginCredentials, err := r.encodePluginCredentials(conn)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -1959,16 +1983,10 @@ type storedPluginCredentials struct {
 	SecretAttributes map[string]string `json:"secret_attributes,omitempty"`
 }
 
-func (r *PostgresRepository) pluginCredentialsForConnection(conn Connection) (string, error) {
-	if !strings.HasPrefix(conn.Provider, providerSourcePlugin+":") {
-		// Built-in providers have legacy token writers that update the dedicated
-		// token columns directly. Keeping a second authoritative bundle for them
-		// would let that bundle become stale and overwrite freshly rotated tokens.
-		return "", nil
-	}
-	return r.encodePluginCredentials(conn)
-}
-
+// encodePluginCredentials encodes the authoritative credential bundle every
+// connection stores next to the dedicated token columns. A row written by a
+// former built-in provider has only the columns; decodePluginCredentials leaves
+// them in place when the bundle is empty, and the next write adds the bundle.
 func (r *PostgresRepository) encodePluginCredentials(conn Connection) (string, error) {
 	payload, err := json.Marshal(storedPluginCredentials{
 		AccessToken:      conn.AccessToken,

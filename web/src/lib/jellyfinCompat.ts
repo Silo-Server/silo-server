@@ -2,7 +2,7 @@ import type { JellyfinCompatStatus } from "@/api/types";
 
 type JellyfinWebInstallStatus = Pick<JellyfinCompatStatus, "installed_version" | "pinned_version">;
 
-export function normalizeJellyfinCompatVersion(version?: string | null): string {
+function normalizeJellyfinCompatVersion(version?: string | null): string {
   return version?.trim().replace(/^[vV]/, "") ?? "";
 }
 

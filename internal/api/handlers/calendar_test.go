@@ -522,6 +522,9 @@ func TestHandleGetCalendar_EverythingHasNoRestriction(t *testing.T) {
 
 	handler.HandleGetCalendar(rec, req)
 
+	if rec.Code != http.StatusOK || repo.calls != 1 {
+		t.Fatalf("calendar = %d with %d repository calls, want 200 and one call", rec.Code, repo.calls)
+	}
 	if repo.last.RestrictByIDs {
 		t.Fatalf("expected no restriction for everything")
 	}

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { PageSectionConfig } from "@/api/types";
 import { buildSectionReorderEntries, moveSectionBeforeTarget } from "./adminSectionOrder";

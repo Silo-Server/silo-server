@@ -50,7 +50,7 @@ func TestCombinedSearchPlayedFavoriteUsesBrowse(t *testing.T) {
 	svc := &composedBrowseContent{}
 	codec := NewResourceIDCodec()
 	h := &ItemsHandler{content: svc, codec: codec, mapper: newMapper(codec, &config.Config{}), userData: &mockUserDataService{}, images: NewImageCache(time.Hour, time.Now)}
-	performItemsRequest(t, h, "/Items?SearchTerm=Drama&IsPlayed=true&IsFavorite=true&Limit=1&StartIndex=2")
+	performItemsRequest(t, h, "/Items?SearchTerm=Drama&IsPlayed=true&isFavorite=true&Limit=1&StartIndex=2")
 	if svc.params.Get("search_term") != "Drama" || svc.params.Get("is_favorite") != "true" || svc.params.Get("is_played") != "true" {
 		t.Fatalf("lost combined predicates: %v", svc.params)
 	}

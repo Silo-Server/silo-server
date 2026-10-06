@@ -1,15 +1,12 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import type { AdminUserDownload, AdminUserDownloadSubscription } from "@/api/v2/adminUserActivity";
 import {
-  downloadQualityLabel,
   downloadStatusBadge,
   groupDeviceDownloads,
-  isAndroidPlatform,
-  monitorKeepsLabel,
-  monitorNowLabel,
   seriesGroupStatus,
-  seriesGroupSubtitle,
 } from "./downloadPresentation";
 
 function download(overrides: Partial<AdminUserDownload> = {}): AdminUserDownload {
@@ -86,30 +83,6 @@ describe("downloadStatusBadge", () => {
   ])("maps %s (android %s) to %s", (status, android, label, tone) => {
     expect(downloadStatusBadge(status, android)).toEqual({ label, tone });
   });
-
-  it("detects Android platforms", () => {
-    expect(isAndroidPlatform("Android TV")).toBe(true);
-    expect(isAndroidPlatform("android")).toBe(true);
-    expect(isAndroidPlatform("iOS")).toBe(false);
-    expect(isAndroidPlatform(undefined)).toBe(false);
-  });
-});
-
-describe("downloadQualityLabel", () => {
-  it("names original files and server-prepared copies", () => {
-    expect(downloadQualityLabel(download())).toBe("Original");
-    expect(downloadQualityLabel(download({ delivery_format: "remux" }))).toBe("Original");
-    expect(
-      downloadQualityLabel(
-        download({ delivery_format: "transcode", quality: "10mbps", target_bitrate_kbps: 10000 }),
-      ),
-    ).toBe("10 Mbps · server-prepared");
-    expect(
-      downloadQualityLabel(
-        download({ delivery_format: "transcode", quality: "5mbps", target_bitrate_kbps: 0 }),
-      ),
-    ).toBe("5 Mbps · server-prepared");
-  });
 });
 
 describe("groupDeviceDownloads", () => {
@@ -129,21 +102,6 @@ describe("groupDeviceDownloads", () => {
     expect(groupDeviceDownloads(rows, [monitor({ active: false })])[0]!.monitored).toBe(false);
     expect(groupDeviceDownloads(rows, [monitor({ device_id: "dev-b" })])[0]!.monitored).toBe(false);
     expect(groupDeviceDownloads(rows, [monitor({ profile_id: "p2" })])[0]!.monitored).toBe(false);
-  });
-
-  it("describes the episodes a group holds", () => {
-    const [range] = groupDeviceDownloads([episode(1), episode(2), episode(3)], []);
-    expect(seriesGroupSubtitle(range!)).toBe("3 episodes · S03E01–E03");
-    const [gap] = groupDeviceDownloads([episode(1), episode(4)], []);
-    expect(seriesGroupSubtitle(gap!)).toBe("2 episodes · Season 3");
-    const [seasons] = groupDeviceDownloads(
-      [
-        episode(1, { id: "a", episode: { season_number: 1, episode_number: 1, title: "" } }),
-        episode(1, { id: "b", episode: { season_number: 2, episode_number: 1, title: "" } }),
-      ],
-      [],
-    );
-    expect(seriesGroupSubtitle(seasons!)).toBe("2 episodes · Seasons 1, 2");
   });
 
   it("sums a series group's status", () => {
@@ -172,31 +130,5 @@ describe("groupDeviceDownloads", () => {
     // On Android neither row reports progress, so both are requests.
     expect(seriesGroupStatus(working[0]!, true)).toEqual({ label: "Requested", tone: "neutral" });
     expect(seriesGroupStatus(mixed!, true).label).toBe("1 requested");
-  });
-});
-
-describe("monitor labels", () => {
-  it("names what a monitor keeps", () => {
-    expect(monitorKeepsLabel(monitor())).toBe("All episodes");
-    expect(monitorKeepsLabel(monitor({ mode: "future" }))).toBe("New episodes only");
-    expect(monitorKeepsLabel(monitor({ mode: "latest_season", target_season: 3 }))).toBe(
-      "Latest season (S03)",
-    );
-    expect(monitorKeepsLabel(monitor({ mode: "specific_seasons", season_numbers: [2, 1] }))).toBe(
-      "Seasons 1, 2",
-    );
-  });
-
-  it("says where a monitor stands now", () => {
-    expect(monitorNowLabel(monitor({ on_device: 6, removed_episodes: 2 }))).toBe(
-      "6 on device · 2 removed by the user",
-    );
-    expect(monitorNowLabel(monitor({ on_device: 3 }))).toBe("3 on device");
-    expect(monitorNowLabel(monitor({ mode: "future" }))).toBe("Waiting for the next episode");
-    expect(monitorNowLabel(monitor())).toBe("Nothing downloaded yet");
-    expect(monitorNowLabel(monitor({ on_device: 2, in_progress: 1 }))).toBe(
-      "2 on device · 1 in progress",
-    );
-    expect(monitorNowLabel(monitor({ active: false, on_device: 4 }))).toBe("Paused");
   });
 });

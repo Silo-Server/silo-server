@@ -1,4 +1,141 @@
 export interface paths {
+  "/api/v2/account/identities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the external sign-in identities linked to the caller's account. */
+    get: operations["listAccountIdentities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Disconnect an external sign-in identity from the caller's account.
+     * @description Allowed only while the account can still sign in another way: its local password (with local password sign-in on, or as a break-glass account) or another identity; otherwise 409 last_sign_in_method. An API key or an impersonation session is refused with 403.
+     */
+    delete: operations["deleteAccountIdentity"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/link-complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm a native app's linking flow and link the provider identity to the caller's account.
+     * @description An app's linking flow (startNativeOAuthLogin with link_ticket) ends on the app redirect with link=1 and a code. The app redeems it here within 60 seconds with its code_verifier, signed in as the account the ticket was issued to; nothing is linked before. A verifier that does not fit is 400 invalid_grant and leaves the code redeemable; an unknown, used or expired code, or another account, is 401 invalid_token. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to the provider is 409 already_linked; a refusal by the provider is 403 not_permitted, or 403 account_disabled when the provider's account is disabled, locked or expired. An API key or impersonation session is 403.
+     */
+    post: operations["completeAccountIdentityLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/link-credentials": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link a directory (LDAP) identity to the caller's account with the directory username and password.
+     * @description The account re-enters its local password; the credentials plugin then checks the directory username and password, and the identity it answers for is linked to this account with the same rules as other linking: linking turns local password sign-in off unless the account is break-glass, and is audited. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 422 validation_failed at body.password (wrong local password) or at body.directory_password (the directory refused the credentials); 409 local_password_required (the account has no local password sign-in); 403 not_permitted (the directory's group rules); 403 account_disabled (the directory account is disabled, locked or expired); 403 password_expired (the directory password expired); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked (this account already has an identity at the installation); 404 not_found (not an enabled credentials provider, an OAuth one included); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports credentials_linking.
+     */
+    post: operations["linkAccountIdentityWithCredentials"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/link-network": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link the network identity of this device (such as its Tailscale login) to the caller's account.
+     * @description Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking (local password sign-in turns off unless the account is break-glass; audited). listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in.
+     */
+    post: operations["linkAccountIdentityWithNetwork"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/link-start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a web linking flow with a link ticket and get the provider sign-in URL.
+     * @description Consumes a ticket from createAccountIdentityLinkTicket issued to the caller's account, sets the flow's browser-binding cookie on this response and answers the provider URL for the same browser to open. Only the browser that made this request can finish the flow, so a ticket opened by anyone else links nothing. Call it on the public URL's origin (409 otherwise, or when no public URL is configured). The provider is asked for a fresh sign-in. The flow returns to next with linked=1, or error=oauth_link_failed&reason=<reason>. An unknown, used, expired or foreign ticket is 404; an API key or impersonation session is 403; a provider that cannot start the flow is 503 provider_unavailable.
+     */
+    post: operations["startAccountIdentityLink"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/account/identities/link-ticket": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm the account password and get a ticket that starts a provider linking flow.
+     * @description A signed-in account re-enters its local password here for a single-use ticket (valid 5 minutes) that starts one linking flow: the web passes it to startAccountIdentityLink; an app passes it as link_ticket to startNativeOAuthLogin and confirms the result with completeAccountIdentityLink. The flow links the provider identity to this account instead of signing in; an identity linked to another account ends in identity_linked_elsewhere. An account without local password sign-in is 409 local_password_required; a wrong password is 422 at body.password; an API key or impersonation session is 403; an installation that is not an enabled OAuth provider is 404.
+     */
+    post: operations["createAccountIdentityLinkTicket"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/account/me": {
     parameters: {
       query?: never;
@@ -393,7 +530,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reserve and start the autoscan poll task on this process. Returns a process task snapshot, not durable dispatch or scan completion. Enabled settings and per-source intervals still apply; inspect activity for per-source outcomes. No automatic replay. */
+    /** Reserve and start the autoscan poll task on this process. Returns a process task snapshot, not durable dispatch or scan completion. Polls every enabled polling source immediately, except a source already being polled, ignoring per-source and default poll intervals. Does nothing (still 200) while Autoscan is disabled; webhook sources are not polled. Inspect activity for per-source outcomes. No automatic replay. */
     post: operations["triggerAdminAutoscan"];
     delete?: never;
     options?: never;
@@ -1088,6 +1225,91 @@ export interface paths {
     get: operations["downloadAdminDiagnosticReport"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the offline-download preparation queue: running, queued and retrying jobs with live progress, and failures from the last 24 hours. */
+    get: operations["listAdminDownloadPreparations"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Cancel offline-download preparation jobs, including failed ones. A running encode stops, the job is removed, and every download still waiting on it fails with the message 'Canceled by an administrator'. A job that already finished preparing is not affected. */
+    post: operations["cancelAdminDownloadPreparations"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover the admin view of offline-download preparation. */
+    get: operations["getAdminDownloadPreparationCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations/pause": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Pause offline-download preparation jobs. A paused job keeps its place in the queue and no worker claims it until it is resumed. A running encode stops and restarts from the beginning when resumed; the stopped attempt does not count against the job. Waiting downloads stay preparing. */
+    post: operations["pauseAdminDownloadPreparations"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/downloads/preparations/resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Resume paused offline-download preparation jobs. Each job returns to the queue at its original position, or waits out a pending retry backoff. */
+    post: operations["resumeAdminDownloadPreparations"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2805,9 +3027,29 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the auth provider binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the auth provider binding for one capability. Sign-in providers rebuild on every node without a restart. Enabling a binding while another one is enabled is 409 provider_already_enabled. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginAuthBinding"];
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/plugins/installations/{id}/auth-binding/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Test an auth plugin's connection with staged, unsaved settings.
+     * @description The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.
+     */
+    post: operations["testAdminPluginAuthBinding"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2822,7 +3064,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace one global configuration entry after validating it against the plugin manifest, then stop the running plugin so it rebinds. Blank secret fields keep stored secrets; clear_secrets removes them. Repeating the same request converges on one stored entry. */
+    /** Replace one global configuration entry after validating it against the plugin manifest, then stop the running plugin so it rebinds. Omitted fields keep their stored values. A declared non-secret top-level field sent as null or a blank string is removed from the stored entry, so the plugin default applies; undeclared fields are kept. Blank secret fields keep stored secrets; only clear_secrets removes them. Repeating the same request converges on one stored entry. */
     put: operations["updateAdminPluginInstallationConfig"];
     post?: never;
     delete?: never;
@@ -4037,7 +4279,10 @@ export interface paths {
     };
     /** Read stored administrator settings with secrets excluded. */
     get: operations["getAdminStoredSettings"];
-    /** Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts. */
+    /**
+     * Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     */
     put: operations["updateAdminSettings"];
     post?: never;
     delete?: never;
@@ -4055,7 +4300,10 @@ export interface paths {
     };
     /** Read one visible stored setting; protected, missing and empty values return not found. */
     get: operations["getAdminSetting"];
-    /** Validate and replace one setting with the established single-key validation rules and transaction guard. */
+    /**
+     * Validate and replace one setting with the established single-key validation rules and transaction guard.
+     * @description Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required.
+     */
     put: operations["updateAdminSetting"];
     post?: never;
     delete?: never;
@@ -4662,7 +4910,10 @@ export interface paths {
     /** Manage login accounts and their household configuration. */
     put: operations["updateAdminUser"];
     post?: never;
-    /** Manage login accounts and their household configuration. */
+    /**
+     * Manage login accounts and their household configuration.
+     * @description Deleting the last usable break-glass admin while local password sign-in is off (auth.local_password_login) is 409 break_glass_required.
+     */
     delete: operations["deleteAdminUser"];
     options?: never;
     head?: never;
@@ -4755,6 +5006,47 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/identities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the external sign-in identities linked to an account. */
+    get: operations["listAdminUserIdentities"];
+    put?: never;
+    /**
+     * Link an account to an external sign-in identity by the provider's exact subject.
+     * @description The installation must have a sign-in binding. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to that installation is 409 already_linked. Linking turns the account's local password sign-in off unless it is a break-glass account. Only the server Owner may change another admin's sign-in.
+     */
+    post: operations["createAdminUserIdentity"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/users/{id}/identities/{identity_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Unlink an external sign-in identity from an account.
+     * @description The account may be left without a way to sign in: an account linked to a provider has local password sign-in off. Setting a password with updateAdminUser turns it back on. Only the server Owner may change another admin's sign-in.
+     */
+    delete: operations["deleteAdminUserIdentity"];
     options?: never;
     head?: never;
     patch?: never;
@@ -4917,6 +5209,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/users/policy-defaults": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** The policy values an admin account, or a regular account without an access group, uses for fields it does not override. */
+    get: operations["getAdminUserPolicyDefaults"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/api-keys": {
     parameters: {
       query?: never;
@@ -5032,7 +5341,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve a pairing request as the caller's account. */
+    /**
+     * Approve a pairing request as the caller's account.
+     * @description Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.
+     */
     post: operations["approveDeviceLogin"];
     delete?: never;
     options?: never;
@@ -5049,8 +5361,28 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve a remote-playback pairing request for the caller's verified profile. */
+    /**
+     * Approve a remote-playback pairing request for the caller's verified profile.
+     * @description Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.
+     */
     post: operations["approveDeviceHandoff"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/device/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Withdraw the device's own pairing request so its code can no longer be approved. */
+    post: operations["cancelDeviceLogin"];
     delete?: never;
     options?: never;
     head?: never;
@@ -5083,7 +5415,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Deny a pairing request. */
+    /**
+     * Deny a pairing request.
+     * @description Only a signed-in login session decides: an API key or an impersonation session is 403 permission_denied, because an approval gives the device a login session of the account.
+     */
     post: operations["denyDeviceLogin"];
     delete?: never;
     options?: never;
@@ -5119,6 +5454,23 @@ export interface paths {
     put?: never;
     /** Open a pairing request from a device. */
     post: operations["startDeviceLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/external-sign-in/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover which external sign-in (OIDC, LDAP) management operations this server serves. */
+    get: operations["getExternalSignInCapabilities"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -5176,6 +5528,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/network/{id}/sign-in": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign in the owner of this device through a network identity provider and open a login session.
+     * @description For a network provider (mode network in listAuthProviders), such as the Tailscale network access plugin: the provider's network already knows who owns the device a request came from, so there is no password and no browser. Only a request that arrived through that provider's own network address can sign in; listAuthProviders lists the provider, with the owner's name, only to such a request. The provider's plugin is asked who the device belongs to, and the answer goes through the same account resolution as other providers: a linked account signs in, an unknown person gets a new account while the binding's account creation is on, and the provider may set the account's role. The session is re-checked with the provider like other provider sessions. Send an empty JSON object as the body. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out, or the account's OIDC or LDAP provider refuses the account); 403 account_required; 403 permission_denied (the account is disabled); 409 email_in_use or identity_linked_elsewhere; 404 not_found (not an enabled network provider); 429 rate_limited; 503 provider_unavailable. Spends the login rate-limit budget.
+     */
+    post: operations["signInWithNetworkIdentity"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/oauth/{install_id}/callback": {
     parameters: {
       query?: never;
@@ -5183,7 +5555,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Continue the browser OAuth login handshake. */
+    /**
+     * Continue the OAuth handshake at the provider's redirect back.
+     * @description Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed&reason=<reason> (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed&reason=<reason>; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).
+     */
     get: operations["finishOAuthCallback"];
     put?: never;
     post?: never;
@@ -5202,8 +5577,51 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Continue the browser OAuth login handshake. */
+    /**
+     * Start a web OAuth sign-in from a form post.
+     * @description A browser on another origin than the public URL is sent (303) to startOAuthLogin there, so the flow's browser-binding cookie is set on the origin of the callback. A provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable.
+     */
     post: operations["initOAuthLogin"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/oauth/{install_id}/native/start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Start an OAuth sign-in for a native app in the system browser.
+     * @description The app opens this start on its saved server base in ASWebAuthenticationSession or a Custom Tab: it appends native_start_path from listAuthProviders to its saved server base URL (an oauth provider without native_start_path offers no native sign-in), adds code_challenge, code_challenge_method=S256 and app_state, and never opens another origin. The server records the start origin, the origin the start arrived on (scheme://host[:port], scheme and host in lower case, default port omitted, IPv6 in brackets, no path or trailing slash), derived from the host a trusted proxy names in X-Forwarded-Host or else the Host header, and the scheme of the connection or the one a trusted proxy names. A start that arrives on another origin than the public URL is accepted only on the origin of a connected network access provider or on a local address: an IP literal in the loopback, private, link-local or 100.64.0.0/10 range, or a single-label, .local, .lan, .localdomain, .home.arpa or .internal host name; any other origin is a plain-text 400. An accepted start is kept on the server and the browser is sent (302) to this start on the public origin with only flow, the kept start's random single-use ID, valid two minutes; the flow sets its binding cookie there and goes to the provider. The flow ends on org.siloserver.silo:/auth/callback with code, state (the app_state), server (getServerIdentity's server_id) and iss, the start origin; a failure carries error=<reason> instead of code. Every app redirect of a sign-in or linking flow carries iss, success or failure. The app accepts the redirect only when iss equals the origin of its saved server base, and redeems the code only at that saved base; a server that redirects its start to another server gets that server's own origin as iss, which the app refuses. The Host header is chosen by whoever sends the start, so iss does not stop a hostile server on a local address that sends the app's start here itself; that is why other origins are refused. A start with a valid code_challenge and app_state whose provider cannot start the flow goes straight to the app redirect with error=provider_unavailable (login_failed for a server error); an unknown, used, expired or foreign link_ticket goes there with error=session_expired. An unknown, used, expired or foreign flow is a plain-text 400, as is a flow presented on another origin than the public URL, which leaves the kept start for the public origin. Redeem the code within 60 seconds with completeOAuthLogin and the code_verifier; a linking flow's code carries link=1 and is redeemed with completeAccountIdentityLink instead.
+     */
+    get: operations["startNativeOAuthLogin"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/oauth/{install_id}/start": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Start a web OAuth sign-in.
+     * @description Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again.
+     */
+    get: operations["startOAuthLogin"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -5217,7 +5635,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Discover browser OAuth handshake availability. */
+    /** Discover browser and native-app OAuth handshake availability. */
     get: operations["getOAuthHandshakeCapabilities"];
     put?: never;
     post?: never;
@@ -5236,7 +5654,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Redeem the one-time code an OAuth callback issued for the token pair. */
+    /**
+     * Redeem the one-time code an OAuth callback issued for the token pair.
+     * @description A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in.
+     */
     post: operations["completeOAuthLogin"];
     delete?: never;
     options?: never;
@@ -5255,6 +5676,26 @@ export interface paths {
     put?: never;
     /** Issue the five-minute plugin access cookie on the v2 plugin-content parent path for the current login session and optional validated profile. Repeating the request reissues an equivalent cookie. */
     post: operations["createPluginLaunch"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/auth/provider-logout": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the OAuth provider sign-out URL for the caller's web logout.
+     * @description Call before logout while the session is still valid, then end the Silo session with logout and send the browser to end_session_url when it is not empty. It is empty unless the caller is the account's own login session (not an API key or an impersonation session), the account is linked to an enabled OAuth provider and the provider plugin offers an end-session URL; the plugin's own configuration turns provider logout on or off. The provider returns the browser to /login on the public origin.
+     */
+    get: operations["getProviderLogout"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -9792,6 +10233,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/subtitles/{media_file_id}/sync": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the timing and latest sync job of every subtitle of a media file that can be synced: stored subtitles, then subtitle files next to the media.
+     * @description Each entry's key is the subtitle's sync key, which the playback inventory publishes as sync_key on the matching track. Only SRT, WebVTT, ASS, and SSA subtitles are listed. A subtitle file next to the media that cannot be read is left out. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.
+     */
+    get: operations["listSubtitleSync"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/subtitles/{media_file_id}/sync/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read one subtitle's timing and latest sync job, and the validator for setSubtitleTiming.
+     * @description Poll it while the job is pending or running, or follow the subtitle_sync_updated realtime event of a playback session. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.
+     */
+    get: operations["getSubtitleSync"];
+    put?: never;
+    /**
+     * Align one subtitle to its file's audio.
+     * @description Starts a sync job, or returns the subtitle's active one, and returns the subtitle with that job. A request repeated after the job finished starts another job, which reaches the same timing. A synced job stores a correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. A subtitle file next to the media is never modified: its correction belongs to its current bytes. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.
+     */
+    post: operations["startSubtitleSync"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/subtitles/{media_file_id}/sync/{key}/timing": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace one subtitle's timing correction.
+     * @description Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getSubtitleSync. Requires file access only: the subtitle's bytes never change, and its timing can always be reset.
+     */
+    put: operations["setSubtitleTiming"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/subtitles/ai/jobs": {
     parameters: {
       query?: never;
@@ -10015,12 +10520,12 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a stored subtitle's timing and latest sync job. Requires file access. */
+    /** Read a stored subtitle's timing and latest sync job, and the validator for setStoredSubtitleTiming. Requires file access. */
     get: operations["getStoredSubtitleSync"];
     put?: never;
     /**
      * Align a stored subtitle to its file's audio.
-     * @description Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access and downloading-account or effective administrator authority, because the resulting timing applies to everyone watching the file. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list.
+     * @description Starts a sync job, or returns the subtitle's active one. A request repeated after that job finished starts another job; it aligns the same stored bytes against cached speech, so it reaches the same timing. Requires file access only: the stored bytes never change, and the timing can always be reset. A synced job stores a timing correction that every delivery path applies; no_match leaves the timing unchanged and means the subtitle most likely belongs to another release. Poll the job through the read operation or the stored subtitle list.
      */
     post: operations["syncStoredSubtitle"];
     delete?: never;
@@ -10039,7 +10544,7 @@ export interface paths {
     get?: never;
     /**
      * Replace a stored subtitle's timing correction.
-     * @description Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getViewerSubtitleMetadata, file access, and downloading-account or effective administrator authority. The stored bytes never change.
+     * @description Sets the correction every delivery path applies: original time t plays at t * scale + offset_ms. Send {offset_ms: 0, scale: 1} to restore the original timing. Requires If-Match with the validator from getStoredSubtitleSync, and file access. The stored bytes never change.
      */
     put: operations["setStoredSubtitleTiming"];
     post?: never;
@@ -11065,6 +11570,162 @@ export interface components {
        */
       username: string;
     };
+    AccountIdentity: {
+      /**
+       * @description Name at the provider; may be empty
+       * @example Alice Example
+       */
+      display_name: string;
+      /**
+       * @description Email at the provider, as of the last sign-in; may be empty
+       * @example alice@example.test
+       */
+      email: string;
+      /**
+       * @description Identity id
+       * @example 4
+       */
+      id: string;
+      /**
+       * @description Auth plugin installation the identity belongs to
+       * @example 3
+       */
+      installation_id: string;
+      /**
+       * Format: date-time
+       * @description Most recent provider answer about the identity: a sign-in through it, or a provider re-check (at session refresh or the scheduled recheck_external_identities pass); null when none
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      last_checked_at: string | null;
+      /**
+       * Format: date-time
+       * @description Most recent sign-in through this identity; null when none
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      last_sign_in_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      linked_at: string;
+      /**
+       * @description Sign-in provider id as listAuthProviders shows it; empty while that provider is not enabled
+       * @example plugin:3:oidc
+       */
+      provider_id: string;
+      /**
+       * @description Provider label; empty while that provider is not enabled
+       * @example Company SSO
+       */
+      provider_name: string;
+      /**
+       * @description Username at the provider, as of the last sign-in; may be empty
+       * @example alice
+       */
+      username: string;
+    };
+    AccountIdentityCollection: {
+      /**
+       * @description Whether deleteAccountIdentity would disconnect an identity now: the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity
+       * @example true
+       */
+      can_unlink: boolean;
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AccountIdentity"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    AccountIdentityCredentialsLinkInputBody: {
+      /**
+       * @description Password at the directory; passed to the directory plugin only
+       * @example directory password
+       */
+      directory_password: string;
+      /**
+       * @description The credentials (LDAP) auth plugin installation, as listAuthProviders shows it
+       * @example 4
+       */
+      installation_id: string;
+      /**
+       * @description The account's current local password
+       * @example correct horse battery staple
+       */
+      password: string;
+      /**
+       * @description Username at the directory
+       * @example alice
+       */
+      username: string;
+    };
+    AccountIdentityLinkCompleteInputBody: {
+      /**
+       * @description Code from the app redirect of a linking flow (link=1); single use, 60 seconds
+       * @example 3f2b47eb7b36dd2d
+       */
+      code: string;
+      /**
+       * @description PKCE code verifier of the challenge the native start sent
+       * @example dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+       */
+      code_verifier: string;
+    };
+    AccountIdentityLinkStart: {
+      /**
+       * @description Provider sign-in URL; navigate the same browser there
+       * @example https://id.example.test/authorize?client_id=silo&state=...
+       */
+      authorize_url: string;
+    };
+    AccountIdentityLinkStartInputBody: {
+      /**
+       * @description Ticket from createAccountIdentityLinkTicket, issued to the caller's account
+       * @example 9d2c5f0e8b7a41c3a6e5d4c3b2a19087f6e5d4c3b2a1908f7e6d5c4b3a291807
+       */
+      link_ticket: string;
+      /**
+       * @description Site-relative path the flow returns to with linked=1, or error=oauth_link_failed&reason=<reason>; anything that is not a same-origin path becomes /
+       * @example /settings/account
+       */
+      next?: string;
+    };
+    AccountIdentityLinkTicket: {
+      /**
+       * Format: date-time
+       * @description The ticket must start its flow before this instant
+       * @example 2026-01-02T03:09:05.678Z
+       */
+      expires_at: string;
+      /**
+       * @description Single-use ticket. The web client passes it to startAccountIdentityLink (POST /api/v2/account/identities/link-start), and the flow finishes in that browser; the GET web start refuses it. An app passes it as link_ticket to startNativeOAuthLogin (native/start) and confirms the result with completeAccountIdentityLink (POST /api/v2/account/identities/link-complete)
+       * @example 9d2c5f0e8b7a41c3a6e5d4c3b2a19087f6e5d4c3b2a1908f7e6d5c4b3a291807
+       */
+      ticket: string;
+    };
+    AccountIdentityLinkTicketInputBody: {
+      /**
+       * @description OAuth auth plugin installation to link, as listAuthProviders shows it
+       * @example 3
+       */
+      installation_id: string;
+      /**
+       * @description The account's current local password
+       * @example correct horse battery staple
+       */
+      password: string;
+    };
+    AccountIdentityNetworkLinkInputBody: {
+      /**
+       * @description The network identity auth plugin installation, as listAuthProviders shows it
+       * @example 5
+       */
+      installation_id: string;
+      /**
+       * @description The account's current local password
+       * @example correct horse battery staple
+       */
+      password: string;
+    };
     AccountPasswordCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -11218,6 +11879,8 @@ export interface components {
       password_reset_email: boolean;
       /** @description Whether createAdminUserPasswordReset can return a link to share; needs the server's public URL */
       password_reset_link: boolean;
+      /** @description Whether getAdminUserPolicyDefaults reports the policy an admin or a regular account with no access group uses for fields it does not override */
+      policy_defaults: boolean;
       /** @description Whether getAdminRequestUserUsage can report an account's request quota use */
       request_usage: boolean;
       /** @description Opaque revision of this document */
@@ -11299,6 +11962,8 @@ export interface components {
        */
       access_group_id?: string | null;
       audio_transcode_allowed?: boolean | null;
+      /** @description Make the admin account a break-glass account, which keeps local password sign-in while the server turns it off, or clear it. Only admins may hold it, and only the server Owner may set or clear it (403 permission_denied otherwise); clearing the last usable one while local password sign-in is off is 409 break_glass_required */
+      break_glass?: boolean;
       download_allowed?: boolean | null;
       download_transcode_allowed?: boolean | null;
       email?: string;
@@ -11315,6 +11980,7 @@ export interface components {
       max_streams?: number | null;
       /** Format: int64 */
       max_transcodes?: number | null;
+      /** @description New local password. Setting one also turns the account's local password sign-in back on (password_login), for example to recover an account whose external sign-in provider is gone. Only the server Owner may set its own account's password while password_login is false for it (403 permission_denied otherwise) */
       password?: string;
       permissions?: string[];
       requests_allowed?: boolean | null;
@@ -12654,6 +13320,229 @@ export interface components {
       /** Format: double */
       used_gb: number;
     };
+    AdminDownloadPreparation: {
+      /** Format: int64 */
+      attempts: number;
+      /** @description The movie, or the series an episode belongs to */
+      content_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      episode_id?: string;
+      episode_name?: string;
+      /** Format: int64 */
+      episode_number?: number;
+      /** @description Last attempt's failure, when there was one */
+      error?: string;
+      /**
+       * Format: date-time
+       * @description Present only when state is failed
+       */
+      failed_at?: string;
+      /** @enum {string} */
+      format: "remux" | "transcode";
+      /** @description Prepared artifact id; one job can serve many downloads */
+      id: string;
+      /** @description playback_session_id under which this job's FFmpeg output appears in the operational logs, across every attempt */
+      log_session_id: string;
+      /** Format: int64 */
+      max_attempts: number;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      media_file_id: string;
+      media_title: string;
+      media_type: string;
+      /**
+       * Format: date-time
+       * @description Present only when state is retrying
+       */
+      next_retry_at?: string;
+      output: components["schemas"]["AdminDownloadPreparationOutput"];
+      /**
+       * Format: date-time
+       * @description Present only when state is paused
+       */
+      paused_at?: string;
+      /** @description Latest reading of a running attempt, written about every 5 seconds; absent until the first one */
+      progress?: components["schemas"]["AdminDownloadPreparationProgress"];
+      /** @description The running attempt's worker cannot report progress, so progress will stay absent */
+      progress_unavailable: boolean;
+      /**
+       * Format: int64
+       * @description 1-based position among queued jobs; present only when state is queued
+       */
+      queue_position?: number;
+      /** @description Download rows waiting on this job, oldest first */
+      requesters: components["schemas"]["AdminDownloadPreparationRequester"][];
+      /** Format: int64 */
+      season_number?: number;
+      series_name?: string;
+      source: components["schemas"]["AdminDownloadPreparationSource"];
+      /**
+       * Format: date-time
+       * @description When the current or last attempt started
+       */
+      started_at?: string;
+      /**
+       * @description running: an attempt is encoding. queued: waiting for a worker. retrying: an attempt failed and the job waits out its backoff (next_retry_at). paused: an administrator paused the job (paused_at); no worker claims it until it is resumed. failed: attempts are exhausted; listed for 24 hours after failing.
+       * @enum {string}
+       */
+      state: "running" | "queued" | "retrying" | "paused" | "failed";
+      /** @description Where the current or last attempt ran; absent before a worker was chosen */
+      worker?: components["schemas"]["AdminDownloadPreparationWorker"];
+    };
+    AdminDownloadPreparationActionInputBody: {
+      /** @description Preparation job ids (the id of a listed job). A repeated id is reported once. */
+      ids: string[];
+    };
+    AdminDownloadPreparationActionOutputBody: {
+      /** @description One result per distinct requested id, in request order */
+      results: components["schemas"]["AdminDownloadPreparationActionResult"][];
+    };
+    AdminDownloadPreparationActionResult: {
+      id: string;
+      /**
+       * @description applied: the action took effect. unchanged: the job was already in the requested state. not_found: no such job is being prepared; it finished, was canceled, or never existed. not_applicable: the action does not apply to the job's state, such as pausing or resuming a failed job.
+       * @enum {string}
+       */
+      outcome: "applied" | "unchanged" | "not_found" | "not_applicable";
+    };
+    AdminDownloadPreparationAudioTrack: {
+      /** Format: int64 */
+      channels?: number;
+      codec?: string;
+      language?: string;
+    };
+    AdminDownloadPreparationCapabilitiesOutputBody: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      available: boolean;
+      /** @description Jobs can be paused, resumed and canceled */
+      controls: boolean;
+      /**
+       * Format: int64
+       * @description How long a failed job stays listed
+       */
+      failed_window_seconds: number;
+      /** @description Running jobs report progress */
+      live_progress: boolean;
+      /** @description Admin realtime channel carrying download_preparation.changed and download_preparation.progress */
+      realtime_channel: string;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    AdminDownloadPreparationCounts: {
+      /**
+       * Format: int64
+       * @description Jobs that failed in the last 24 hours
+       */
+      failed_recent: number;
+      /** Format: int64 */
+      paused: number;
+      /** Format: int64 */
+      queued: number;
+      /** Format: int64 */
+      retrying: number;
+      /** Format: int64 */
+      running: number;
+    };
+    AdminDownloadPreparationOutput: {
+      /** @description Every source audio track is kept, in source order */
+      all_audio_tracks: boolean;
+      /** @description Target audio codec, or copy */
+      audio_codec: string;
+      /**
+       * Format: int64
+       * @description Video bitrate cap of a transcode
+       */
+      bitrate_kbps?: number;
+      container: string;
+      resolution?: string;
+      /** @description Present when HDR is tone-mapped to SDR */
+      tone_map_mode?: string;
+      tone_map_source_kind?: string;
+      /** @description Target video codec, or copy for a remux */
+      video_codec: string;
+    };
+    AdminDownloadPreparationProgress: {
+      /**
+       * Format: double
+       * @description Length progress is measured against; 0 when unknown
+       */
+      duration_seconds: number;
+      /**
+       * Format: double
+       * @description Output timeline written so far
+       */
+      encoded_seconds: number;
+      /**
+       * Format: double
+       * @description Encode rate as a multiple of realtime; 0 when not reported yet
+       */
+      speed: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      updated_at: string;
+    };
+    AdminDownloadPreparationRequester: {
+      /** @description Absent for a one-off web download */
+      device_id?: string;
+      device_name?: string;
+      device_platform?: string;
+      profile_id: string;
+      profile_name?: string;
+      /** @description The download row's status */
+      status: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
+    };
+    AdminDownloadPreparationSource: {
+      audio_tracks: components["schemas"]["AdminDownloadPreparationAudioTrack"][];
+      /** Format: int64 */
+      bitrate_kbps?: number;
+      container?: string;
+      /** Format: double */
+      duration_seconds: number;
+      /** Format: int64 */
+      file_size: number;
+      hdr: boolean;
+      resolution?: string;
+      video_codec?: string;
+    };
+    AdminDownloadPreparationsOutputBody: {
+      counts: components["schemas"]["AdminDownloadPreparationCounts"];
+      /** @description Running jobs, then jobs waiting to retry, then the queue in claim order, then paused jobs in claim order, then recent failures, newest first */
+      items: components["schemas"]["AdminDownloadPreparation"][];
+    };
+    AdminDownloadPreparationWorker: {
+      /**
+       * @description server: an API server. node: a transcode node.
+       * @enum {string}
+       */
+      kind: "server" | "node";
+      /** @description Node name, or the API server's node id, when the attempt started */
+      name: string;
+      /**
+       * @description Transcode node id when kind is node
+       * @example 1
+       */
+      node_id?: string;
+    };
     AdminEmailTestInputBody: {
       to: string;
     };
@@ -13024,6 +13913,12 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /**
+       * @description How the link reached the invitee. email_unconfirmed: the send failed or its outcome is uncertain. unknown: created before delivery was recorded.
+       * @enum {string}
+       */
+      delivery: "link" | "email_sent" | "email_unconfirmed" | "unknown";
+      /** @description The bound address. Empty for a pending invitation created with delivery=link; after its acceptance, the address the account took. */
       email: string;
       /**
        * Format: date-time
@@ -13050,6 +13945,22 @@ export interface components {
       /** @enum {string} */
       status: "pending" | "accepted" | "revoked" | "expired";
     };
+    AdminInvitationCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Whether the selected profile store can atomically provision a requested default profile. */
+      default_profile: boolean;
+      /** @description Whether email is configured, so an invitation can be created with delivery=email. */
+      email_delivery: boolean;
+      profileless: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
     AdminInvitationCreateInputBody: {
       /**
        * @description Opaque identifier
@@ -13058,7 +13969,13 @@ export interface components {
       access_group_id?: string;
       /** @default true */
       create_profile: boolean;
-      email: string;
+      /**
+       * @description link: create a link to share, with no address and no email. email: email the link; fails when email is not configured. Omitted: email when configured, otherwise return the link for manual delivery.
+       * @enum {string}
+       */
+      delivery?: "link" | "email";
+      /** @description Required unless delivery is link, which forbids it. */
+      email?: string;
       /** @description Omit for inherited access; send [] for an explicit empty override. */
       library_ids?: string[];
       note?: string;
@@ -13069,6 +13986,13 @@ export interface components {
       role: "user" | "admin";
       /** @default true */
       show_tour: boolean;
+    };
+    AdminInvitationResend: {
+      /**
+       * @description link: replace the link and email nothing; the invitation keeps its address. email: email the new link; fails when email is not configured or the invitation has no address. Omitted: email when the invitation has an address and email is configured, otherwise return the link for manual delivery.
+       * @enum {string}
+       */
+      delivery?: "link" | "email";
     };
     AdminInviteCode: {
       code: string;
@@ -14327,6 +15251,11 @@ export interface components {
     };
     AdminPluginAuthBinding: {
       auto_provision: boolean;
+      /**
+       * @description Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured
+       * @example https://silo.example.test/api/v2/auth/oauth/3/callback
+       */
+      callback_url: string;
       capability_id: string;
       /**
        * Format: date-time
@@ -14338,13 +15267,25 @@ export interface components {
       display_order: number;
       enabled: boolean;
       /**
+       * @description Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured
+       * @example https://silo.example.test/login
+       */
+      post_logout_redirect_url: string;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       updated_at: string;
     };
+    AdminPluginAuthBindingTestInputBody: {
+      /** @description auth_provider.v1 capability to test; empty tests the plugin's first one */
+      capability_id?: string;
+      /** @description Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret; clear_secrets drops it from the test */
+      config?: components["schemas"]["AdminPluginConfigWrite"][];
+    };
     AdminPluginAuthBindingWrite: {
-      auto_provision: boolean;
+      /** @description Create an account for a person who passes the provider's rules on first sign-in; omitted means true */
+      auto_provision?: boolean;
       capability_id: string;
       default_login: boolean;
       /** Format: int64 */
@@ -14352,6 +15293,11 @@ export interface components {
       enabled: boolean;
     };
     AdminPluginCapability: {
+      /**
+       * @description On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog
+       * @example https://silo.example.test/api/v2/auth/oauth/3/callback
+       */
+      callback_url?: string;
       config_schema: components["schemas"]["AdminPluginConfigSchema"][];
       description: string;
       display_name: string;
@@ -14359,6 +15305,17 @@ export interface components {
       metadata: {
         [key: string]: unknown;
       };
+      /**
+       * @description On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog
+       * @example https://silo.example.test/login
+       */
+      post_logout_redirect_url?: string;
+      /**
+       * @description How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types
+       * @example oauth
+       * @enum {string}
+       */
+      sign_in_mode?: "oauth" | "credentials" | "network";
       subscriptions: string[];
       type: string;
     };
@@ -14429,7 +15386,7 @@ export interface components {
       clear_secrets?: string[];
       /** @description The manifest global_config_schema key */
       key: string;
-      /** @description The entry's fields; blank secret fields preserve the stored secret */
+      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret */
       value: {
         [key: string]: unknown;
       };
@@ -16801,6 +17758,11 @@ export interface components {
        */
       audio_transcode_allowed: boolean | null;
       /**
+       * @description Whether the account is a break-glass admin: it keeps local password sign-in while the server turns local password sign-in off (auth.local_password_login). Only admins can be break-glass accounts
+       * @example false
+       */
+      break_glass: boolean;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        * @example 2026-01-02T03:04:05.678Z
@@ -16890,7 +17852,7 @@ export interface components {
        */
       password_change_required: boolean;
       /**
-       * @description Whether the account signs in with a local password. False when an external authentication provider manages its sign-in; password actions do not apply then
+       * @description Whether the account can sign in with a local password: local password sign-in is on for it and it has a password. Linking an external sign-in identity turns it off unless the account is break-glass. Setting a password with updateAdminUser turns it back on (with or without require_password_change); a password reset link needs it
        * @example true
        */
       password_login: boolean;
@@ -17132,6 +18094,108 @@ export interface components {
        */
       total_bytes: number;
     };
+    AdminUserIdentity: {
+      /**
+       * @description Name at the provider; may be empty
+       * @example Alice Example
+       */
+      display_name: string;
+      /**
+       * @description Email at the provider, as of the last sign-in; may be empty
+       * @example alice@example.test
+       */
+      email: string;
+      /**
+       * @description The provider's exact subject (OIDC issuer|sub, LDAP unique id)
+       * @example https://id.example.test/realms/silo|8f14e45f
+       */
+      external_subject: string;
+      /**
+       * @description Identity id
+       * @example 4
+       */
+      id: string;
+      /**
+       * @description Auth plugin installation the identity belongs to
+       * @example 3
+       */
+      installation_id: string;
+      /**
+       * @description Who asserted the subject, as the provider last said; may be empty
+       * @example https://id.example.test
+       */
+      issuer: string;
+      /**
+       * @description That answer: active; not_found, disabled or not_permitted (the account's sessions were revoked); unsupported (the provider cannot re-check this identity, so its sessions end an absolute age after sign-in, and the account's API keys and Audiobookshelf sessions are revoked once the person has not signed in through the provider for that long); unavailable (the provider could not be reached; retried at the next refresh or scheduled pass); none before the first
+       * @example active
+       * @enum {string}
+       */
+      last_check_status:
+        | "none"
+        | "active"
+        | "not_found"
+        | "disabled"
+        | "not_permitted"
+        | "unsupported"
+        | "unavailable";
+      /**
+       * Format: date-time
+       * @description Most recent provider answer about the identity: a sign-in through it, or a provider re-check (at session refresh or the scheduled recheck_external_identities pass); null when none
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      last_checked_at: string | null;
+      /**
+       * Format: date-time
+       * @description Most recent sign-in through this identity; null when none
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      last_sign_in_at: string | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      linked_at: string;
+      /**
+       * @description Sign-in provider id as listAuthProviders shows it; empty while that provider is not enabled
+       * @example plugin:3:oidc
+       */
+      provider_id: string;
+      /**
+       * @description Provider label; empty while that provider is not enabled
+       * @example Company SSO
+       */
+      provider_name: string;
+      /**
+       * @description Username at the provider, as of the last sign-in; may be empty
+       * @example alice
+       */
+      username: string;
+    };
+    AdminUserIdentityCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminUserIdentity"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    AdminUserIdentityCreateInputBody: {
+      /** @description Name at the provider, shown until the first sign-in refreshes it */
+      display_name?: string;
+      /** @description Email at the provider, shown until the first sign-in refreshes it */
+      email?: string;
+      /**
+       * @description The provider's exact subject: OIDC issuer|sub (Entra tenant|object id), or the LDAP unique id attribute value
+       * @example https://id.example.test/realms/silo|8f14e45f
+       */
+      external_subject: string;
+      /**
+       * @description Auth plugin installation with a sign-in binding
+       * @example 3
+       */
+      installation_id: string;
+      /** @description Username at the provider, shown until the first sign-in refreshes it */
+      username?: string;
+    };
     AdminUserIP: {
       client_ip: string;
       /**
@@ -17151,6 +18215,12 @@ export interface components {
       location: "local" | "remote";
       /** Format: int64 */
       request_count: number;
+    };
+    AdminUserPolicyDefaults: {
+      /** @description What an admin account's unset policy fields resolve to: full access. Admin accounts never belong to an access group */
+      admin: components["schemas"]["PolicyDefaults"];
+      /** @description What a regular account with no access group resolves its unset policy fields to */
+      ungrouped: components["schemas"]["PolicyDefaults"];
     };
     AdminUserWatchSummary: {
       /** Format: int64 */
@@ -17469,6 +18539,36 @@ export interface components {
        */
       title?: string;
     };
+    AuthConnectionTestResult: {
+      /**
+       * @description Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it
+       * @example https://silo.example.test/api/v2/auth/oauth/3/callback
+       */
+      callback_url: string;
+      /** @description True only when every check passed */
+      ok: boolean;
+      /** @description Checks in the order they ran */
+      steps: components["schemas"]["AuthConnectionTestStep"][];
+    };
+    AuthConnectionTestStep: {
+      /**
+       * @description Stable check identifier
+       * @example discovery
+       */
+      id: string;
+      /**
+       * @description Operator-facing check name
+       * @example Discovery document reachable
+       */
+      label: string;
+      /**
+       * @description Result or failure reason from the plugin
+       * @example Loaded https://id.example.test/.well-known/openid-configuration
+       */
+      message: string;
+      /** @example true */
+      ok: boolean;
+    };
     AuthProvider: {
       /**
        * @description Whether this is the provider login uses when none is named
@@ -17496,16 +18596,45 @@ export interface components {
        */
       installation_id?: string;
       /**
-       * @description How the provider authenticates: credentials (login) or oauth (the OAuth handshake)
+       * @description How the provider authenticates: credentials (login), oauth (the OAuth handshake) or network (signInWithNetworkIdentity: the provider's network says who owns the device; listed only to a request that arrived through that network). Clients ignore modes they do not know
        * @example credentials
        */
       mode: string;
+      /**
+       * @description Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in
+       * @example /api/v2/auth/oauth/3/native/start
+       */
+      native_start_path?: string;
+      /** @description Who the network provider says owns the device that sent this request, for a Continue as label; present only for a network provider. It authorizes nothing: signInWithNetworkIdentity asks the provider again */
+      network_identity?: components["schemas"]["AuthProviderNetworkIdentity"];
+      /**
+       * @description Path of signInWithNetworkIdentity below the server base, for a network provider; absent for other modes. An app appends it to its saved server base URL and POSTs {} to sign in, with no password and no browser
+       * @example /api/v2/auth/network/5/sign-in
+       */
+      network_sign_in_path?: string;
     };
     AuthProviderCollection: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AuthProvider"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * @description Whether any listed provider takes a username and password. False on a server whose only sign-in is an OAuth provider with local password sign-in turned off: apps and TVs then hide the password form
+       * @example true
+       */
+      password_login: boolean;
+    };
+    AuthProviderNetworkIdentity: {
+      /**
+       * @description Name at the provider; may be empty
+       * @example Alice Example
+       */
+      display_name: string;
+      /**
+       * @description Login name at the provider; may be empty
+       * @example alice@example.test
+       */
+      username: string;
     };
     AutoscanDeliveryOutputBody: {
       /** @enum {string} */
@@ -17635,6 +18764,13 @@ export interface components {
       type: string;
       /** @example false */
       watched: boolean;
+    };
+    CancelDeviceLoginInputBody: {
+      /**
+       * @description The device code from startDeviceLogin
+       * @example d3v1c3c0d3
+       */
+      device_code: string;
     };
     Capability: {
       /** @description Whether the current principal may use the capability */
@@ -17942,6 +19078,11 @@ export interface components {
       pending_translation_language?: string;
       /** @description The item to play when the card is a series or season; absent when the item plays itself */
       play_content_id?: string;
+      /**
+       * Format: int64
+       * @description The season of play_content_id when it is an episode, so a client can open that season without fetching the episode; absent otherwise
+       */
+      play_season_number?: number;
       playback_variants?: components["schemas"]["PlaybackVariant"][];
       /**
        * Format: double
@@ -18930,6 +20071,11 @@ export interface components {
        * @example 3f2b47eb7b36dd2d
        */
       code: string;
+      /**
+       * @description PKCE code verifier of the challenge a native start sent (RFC 7636: 43 to 128 unreserved characters). Required for a code from startNativeOAuthLogin, refused for a web code; either mismatch is 400 invalid_grant and leaves the code redeemable
+       * @example dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+       */
+      code_verifier?: string;
     };
     ConnectInfo: {
       enabled: boolean;
@@ -19137,16 +20283,32 @@ export interface components {
        */
       ip_address_hint: string;
       /**
-       * @description Confirmation code shown on the device
-       * @example 42
+       * @description Legacy confirmation words; not displayed
+       * @example warm pony
        */
       match_code: string;
+      /**
+       * Format: date-time
+       * @description When the device opened the request
+       * @example 2026-01-02T03:04:05.678Z
+       */
+      requested_at: string;
+      /**
+       * @description This deployment's server identity, for app links that must reach the same server; absent when unavailable
+       * @example 3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35
+       */
+      server_id?: string;
+      /**
+       * @description Server display name the approver signs the device in to
+       * @example Silo
+       */
+      server_name: string;
       /**
        * @description Current state; see the domain notes
        * @example pending
        * @enum {string}
        */
-      status: "pending" | "approved" | "denied" | "consumed" | "expired";
+      status: "pending" | "approved" | "denied" | "consumed" | "canceled" | "expired";
       /**
        * @description Whether the resulting session will be temporary
        * @example false
@@ -19154,13 +20316,31 @@ export interface components {
       temporary: boolean;
       /**
        * @description User code; empty once the request is no longer decidable
-       * @example ABCD-1234
+       * @example 4821-7730
        */
       user_code: string;
+    };
+    DeviceLoginCancel: {
+      /**
+       * @description canceled when the request was pending or approved but not collected; otherwise its unchanged state
+       * @example canceled
+       * @enum {string}
+       */
+      status: "canceled" | "denied" | "consumed" | "expired";
     };
     DeviceLoginCapability: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
+      /**
+       * @description Whether a device can withdraw its own request with cancelDeviceLogin
+       * @example true
+       */
+      cancel: boolean;
+      /**
+       * @description Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved
+       * @example true
+       */
+      opened_signal: boolean;
       /**
        * @description Pairing protocol versions this server speaks
        * @example [
@@ -19191,6 +20371,17 @@ export interface components {
     };
     DeviceLoginPoll: {
       /**
+       * Format: date-time
+       * @description The pending request's current expiry, which approver lookups can move past the start answer's; the device moves its local deadline here. Absent on every other status
+       * @example 2026-01-02T03:14:05.678Z
+       */
+      expires_at?: string;
+      /**
+       * @description A pending request an approver has looked up; the device keeps its code and tells the person to continue on their phone
+       * @example false
+       */
+      opened: boolean;
+      /**
        * Format: int64
        * @description Seconds to wait before polling again
        * @example 5
@@ -19217,7 +20408,7 @@ export interface components {
        * @example pending
        * @enum {string}
        */
-      status: "pending" | "approved" | "denied" | "consumed" | "expired";
+      status: "pending" | "approved" | "denied" | "consumed" | "canceled" | "expired";
       /**
        * @description Whether the issued session is temporary
        * @example false
@@ -19256,7 +20447,7 @@ export interface components {
       /**
        * Format: int64
        * @description Seconds until the request expires
-       * @example 600
+       * @example 900
        */
       expires_in: number;
       /**
@@ -19266,8 +20457,8 @@ export interface components {
        */
       interval: number;
       /**
-       * @description Confirmation code shown on both screens so the approver can match them
-       * @example 42
+       * @description Legacy confirmation words; clients compare user_code instead and do not display this
+       * @example warm pony
        */
       match_code: string;
       /**
@@ -19276,18 +20467,18 @@ export interface components {
        */
       temporary: boolean;
       /**
-       * @description Short code a person types into the approving browser
-       * @example ABCD-1234
+       * @description Short code a person types into the approving browser or app: eight digits, shown grouped 4+4. Lookups ignore spaces and dashes. Unique only on this server
+       * @example 4821-7730
        */
       user_code: string;
       /**
-       * @description Page where the approver enters the user code
-       * @example https://silo.example.test/link
+       * @description Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used
+       * @example https://silo.example.test/activate
        */
       verification_uri: string;
       /**
-       * @description verification_uri with the user code prefilled
-       * @example https://silo.example.test/link?code=ABCD-1234
+       * @description verification_uri with the user code prefilled, for the QR code
+       * @example https://silo.example.test/activate?code=48217730
        */
       verification_uri_complete: string;
     };
@@ -19484,11 +20675,14 @@ export interface components {
       bounded_creation: boolean;
       bounded_manifests: boolean;
       bounded_subscription_sync: boolean;
+      bulk_quality: boolean;
       download_allowed: boolean;
       enabled: boolean;
       file_delivery: boolean;
+      monitor_quality: boolean;
       monitoring_modes: string[];
       ordered_status: boolean;
+      preparation_progress: boolean;
       proxy_delivery: boolean;
       quality_options: components["schemas"]["DownloadQualityOption"][];
       quality_presets: string[];
@@ -19590,6 +20784,8 @@ export interface components {
        * @example 1
        */
       media_file_id: string;
+      /** @description How far the server has got preparing the file. Present on listed preparing entries when the capability reports preparation_progress. */
+      preparation?: components["schemas"]["DownloadPreparation"];
       quality: string;
       /** Format: int64 */
       revision: number;
@@ -19665,6 +20861,8 @@ export interface components {
       /** Format: int64 */
       selected_audio_track_index?: number;
       series_id?: string;
+      /** @description Episode manifests only: the parent series poster's thumbhash. poster_thumbhash is the episode still. */
+      series_poster_thumbhash?: string;
       series_title?: string;
       stable_identity: components["schemas"]["OfflineIdentity"];
       subtitles: components["schemas"]["OfflineSubtitle"][];
@@ -19679,6 +20877,8 @@ export interface components {
       backdrop?: string;
       logo?: string;
       poster?: string;
+      /** @description Episode manifests only: the parent series poster. poster is the episode still. */
+      series_poster?: string;
     };
     DownloadManifestPage: {
       items: components["schemas"]["DownloadManifest"][];
@@ -19690,6 +20890,28 @@ export interface components {
       end: number;
       /** Format: double */
       start: number;
+    };
+    DownloadPreparation: {
+      /**
+       * Format: double
+       * @description Encoded fraction, once a running encode reports it.
+       */
+      progress?: number;
+      /**
+       * Format: int64
+       * @description 1-based place among every queued preparation on this server; present only while queued.
+       */
+      queue_position?: number;
+      /**
+       * Format: int64
+       * @description Estimated seconds left at the encode's reported speed.
+       */
+      remaining_seconds?: number;
+      /**
+       * @description retrying: an attempt failed and the job waits out its backoff. paused: an administrator paused the job; it isn't claimed until resumed.
+       * @enum {string}
+       */
+      state: "queued" | "running" | "retrying" | "paused";
     };
     DownloadQualityOption: {
       /** Format: int64 */
@@ -19730,6 +20952,11 @@ export interface components {
       /** Format: int64 */
       max_storage_bytes: number;
       mode: string;
+      /**
+       * @description Quality the monitor registers episodes in.
+       * @enum {string}
+       */
+      quality: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
       season_numbers: number[];
       series_id: string;
       /** Format: int64 */
@@ -19746,6 +20973,11 @@ export interface components {
       max_storage_bytes: number;
       /** @enum {string} */
       mode: "all" | "future" | "latest_season" | "specific_seasons";
+      /**
+       * @description Quality to register episodes in. Defaults to original. A new monitor needs the monitor_quality capability for any other preset; an existing monitor keeps its quality.
+       * @enum {string}
+       */
+      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps";
       season_numbers?: number[];
       series_id: string;
     };
@@ -19755,6 +20987,11 @@ export interface components {
       /** Format: int64 */
       max_storage_bytes?: number | null;
       mode?: string | null;
+      /**
+       * @description Quality preset for episodes registered from now on; already-registered downloads keep theirs.
+       * @enum {string|null}
+       */
+      quality?: "original" | "20mbps" | "10mbps" | "5mbps" | "2mbps" | "1mbps" | null;
       season_numbers?: number[] | null;
     };
     DownloadSubscriptionSync: {
@@ -20246,6 +21483,8 @@ export interface components {
       file_size: number;
       hdr: boolean;
       resolution?: string;
+      /** @description Present and true when the server could not read the file (empty, corrupt, or truncated). Playback of it falls back to another version of the episode the viewer may play; if no such version is available, playback returns the terminal reason source_unreadable until the file is replaced and a scan reads it successfully. */
+      unreadable?: boolean;
     };
     EventsCapabilities: {
       /** @description Whether the current principal may use the capability */
@@ -20330,6 +21569,35 @@ export interface components {
       updated_at?: string;
       /** @description The stored value; absent when is_set is false */
       value?: unknown;
+    };
+    ExternalSignInCapabilities: {
+      /** @description Whether administrators can list, link and unlink account identities */
+      admin_identities: boolean;
+      /** @description Whether the current principal may use the capability */
+      allowed?: boolean;
+      /** @description Whether identity storage is configured */
+      available: boolean;
+      /** @description Whether updateAdminUser accepts break_glass and the server honors the auth.local_password_login setting */
+      break_glass: boolean;
+      /** @description Whether testAdminPluginAuthBinding is served; the plugin must also declare connection_test */
+      connection_test: boolean;
+      /** @description Whether linkAccountIdentityWithCredentials links a directory (LDAP) identity to the caller's account with the directory username and password */
+      credentials_linking: boolean;
+      /** @description Whether listAccountIdentities and deleteAccountIdentity are served */
+      identities: boolean;
+      /** @description Whether auth binding and auth plugin changes apply without a server restart */
+      live_provider_changes: boolean;
+      /** @description Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network */
+      network_sign_in: boolean;
+      /** @description Whether refreshSession re-checks sessions opened through the external provider with that provider (auth.provider_recheck_interval, auth.provider_recheck_outage_policy), and admin identities report last_check_status */
+      provider_recheck: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
     };
     ExternalUser: {
       guest?: boolean;
@@ -20995,6 +22263,8 @@ export interface components {
       username: string;
     };
     InvitationAcceptInputBody: {
+      /** @description The invitee's address. Required when the lookup reports email_required; ignored otherwise. */
+      email?: string;
       password: string;
     };
     InvitationCapabilities: {
@@ -21014,19 +22284,27 @@ export interface components {
     InvitationDelivery: {
       /** @description One-time disclosure; never retained for replay. Contains the bearer claim token. */
       claim_url: string;
-      /** @enum {string} */
-      delivery_status: "sent" | "not_configured" | "failed_or_unknown";
+      /**
+       * @description not_requested: a link invitation; nothing was emailed.
+       * @enum {string}
+       */
+      delivery_status: "sent" | "not_configured" | "failed_or_unknown" | "not_requested";
       invitation: components["schemas"]["AdminInvitation"];
     };
     InvitationLookup: {
       acceptance_available: boolean;
+      /** @description The address the invitation is bound to; empty when email_required is true. */
       email: string;
+      /** @description True when the invitation is bound to no address, as for one created with delivery=link: the invitee enters their address at accept. */
+      email_required: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       expires_at: string;
       inviter_name: string;
+      /** @description The inviter's note; empty when none. */
+      note: string;
       server_name: string;
       show_tour: boolean;
     };
@@ -21737,7 +23015,7 @@ export interface components {
        */
       password: string;
       /**
-       * @description Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty selects the default
+       * @description Authentication provider id exactly as listAuthProviders advertises it; unbounded because plugin ids are composite. Empty routes by account: a name that may use its local password signs in locally, any other name goes to the enabled directory (LDAP) provider
        * @example
        */
       provider?: string;
@@ -22520,6 +23798,7 @@ export interface components {
       hosts: components["schemas"]["NetworkAccessHostStatus"][];
       provider: string;
     };
+    NetworkSignInInputBody: Record<string, never>;
     NodeHWAccel: {
       error?: string;
       node_name?: string;
@@ -22954,13 +24233,23 @@ export interface components {
        * @example eyJhbGciOi...
        */
       refresh_token: string;
+      /** @description The account the tokens authenticate */
+      user: components["schemas"]["Account"];
     };
     OAuthHandshakeCapabilitiesOutputBody: {
       /** @description Whether the current principal may use the capability */
       allowed?: boolean;
       available: boolean;
+      /** @description Whether createAccountIdentityLinkTicket issues link tickets: the web starts a linking flow with startAccountIdentityLink, an app passes the ticket as link_ticket to startNativeOAuthLogin and confirms the link with completeAccountIdentityLink */
+      linking: boolean;
+      /** @description Whether startNativeOAuthLogin serves the phone and desktop apps: the flow ends on org.siloserver.silo:/auth/callback with a one-time code bound to the app's PKCE S256 challenge, redeemed with completeOAuthLogin and its code_verifier */
+      native: boolean;
+      /** @description Whether getProviderLogout answers the provider end-session URL for web sign-out */
+      provider_logout: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in) */
+      select_account: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -24389,6 +25678,55 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
+    PolicyDefaults: {
+      /** @example true */
+      audio_transcode_allowed: boolean;
+      /** @example true */
+      download_allowed: boolean;
+      /** @example true */
+      download_transcode_allowed: boolean;
+      /**
+       * @description Libraries the account may see; null means every library, empty means none
+       * @example [
+       *       "1",
+       *       "2"
+       *     ]
+       */
+      library_ids: string[] | null;
+      /**
+       * Format: int64
+       * @description Local per-stream bitrate limit in kbps; 0 means unlimited
+       * @example 0
+       */
+      max_local_stream_bitrate_kbps: number;
+      /**
+       * @description Playback ceiling; empty means none
+       * @example
+       */
+      max_playback_quality: string;
+      /**
+       * Format: int64
+       * @description Remote per-stream bitrate limit in kbps; 0 means unlimited
+       * @example 0
+       */
+      max_remote_stream_bitrate_kbps: number;
+      /**
+       * Format: int64
+       * @description Concurrent stream limit; 0 means unlimited
+       * @example 0
+       */
+      max_streams: number;
+      /**
+       * Format: int64
+       * @description Concurrent transcode limit; 0 means unlimited
+       * @example 0
+       */
+      max_transcodes: number;
+      /** @example true */
+      requests_allowed: boolean;
+      /** @example true */
+      transcode_allowed: boolean;
+    };
     PollDeviceLoginInputBody: {
       /**
        * @description The device code from startDeviceLogin
@@ -25056,6 +26394,13 @@ export interface components {
       /** @example movie */
       content_level: string;
       entries: components["schemas"]["ProviderChainEntryInput"][];
+    };
+    ProviderLogout: {
+      /**
+       * @description Provider end-session URL to navigate to after logout; empty when there is none
+       * @example https://id.example.test/logout?id_token_hint=eyJhbGciOi...
+       */
+      end_session_url: string;
     };
     QuotaStatus: {
       /** Format: int64 */
@@ -26735,6 +28080,7 @@ export interface components {
       label?: string;
       language?: string;
       source: string;
+      sync_key?: string;
       track_id: string;
       url?: string;
     };
@@ -26874,6 +28220,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @enum {string} */
+      failure?: "subtitle_changed" | "no_audio" | "unavailable" | "error";
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -26884,6 +28232,10 @@ export interface components {
        * @example 1
        */
       id: string;
+      /** @enum {string} */
+      phase?: "queued" | "analyzing" | "matching";
+      /** Format: double */
+      progress?: number;
       result?: components["schemas"]["SubtitleTiming"];
       /** @enum {string} */
       status: "pending" | "running" | "synced" | "already_synced" | "no_match" | "failed";
@@ -26895,16 +28247,76 @@ export interface components {
       /** @enum {string} */
       trigger: "auto" | "manual";
     };
+    SubtitleSyncJobState: {
+      /** Format: double */
+      confidence: number | null;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** @enum {string} */
+      failure?: "subtitle_changed" | "no_audio" | "unavailable" | "error";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      finished_at: string | null;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /** @enum {string} */
+      phase?: "queued" | "analyzing" | "matching";
+      /** Format: double */
+      progress?: number;
+      result?: components["schemas"]["SubtitleTiming"];
+      /** @enum {string} */
+      status: "pending" | "running" | "synced" | "already_synced" | "no_match" | "failed";
+      /** @enum {string} */
+      trigger: "auto" | "manual";
+    };
+    SubtitleSyncListOutputBody: {
+      subtitles: components["schemas"]["SubtitleSyncState"][];
+    };
     SubtitleSyncReadOutputBody: {
       subtitle: components["schemas"]["StoredSubtitle"];
     };
     SubtitleSyncRequestOutputBody: {
       job: components["schemas"]["SubtitleSyncJob"];
     };
+    SubtitleSyncStartOutputBody: {
+      subtitle: components["schemas"]["SubtitleSyncState"];
+    };
+    SubtitleSyncState: {
+      format: string;
+      key: string;
+      label: string;
+      language: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      media_file_id: string;
+      /** @enum {string} */
+      source: "downloaded" | "external";
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      stored_subtitle_id?: string;
+      sync?: components["schemas"]["SubtitleSyncJobState"];
+      timing: components["schemas"]["SubtitleTiming"];
+    };
+    SubtitleSyncStateOutputBody: {
+      subtitle: components["schemas"]["SubtitleSyncState"];
+    };
     SubtitleSyncStatus: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       auto_sync: boolean;
+      external: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -29065,6 +30477,897 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  listAccountIdentities: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentityCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAccountIdentity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identity id */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  completeAccountIdentityLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccountIdentityLinkCompleteInputBody"];
+      };
+    };
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  linkAccountIdentityWithCredentials: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccountIdentityCredentialsLinkInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  linkAccountIdentityWithNetwork: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccountIdentityNetworkLinkInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentity"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startAccountIdentityLink: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccountIdentityLinkStartInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentityLinkStart"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAccountIdentityLinkTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AccountIdentityLinkTicketInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AccountIdentityLinkTicket"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getCurrentUser: {
     parameters: {
       query?: never;
@@ -40084,6 +42387,658 @@ export interface operations {
       };
     };
   };
+  listAdminDownloadPreparations: {
+    parameters: {
+      query?: {
+        /** @description Maximum items; counts always cover every listed job */
+        limit?: number;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationsOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  cancelAdminDownloadPreparations: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminDownloadPreparationActionInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationActionOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDownloadPreparationCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationCapabilitiesOutputBody"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  pauseAdminDownloadPreparations: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminDownloadPreparationActionInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationActionOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resumeAdminDownloadPreparations: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminDownloadPreparationActionInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminDownloadPreparationActionOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   sendAdminTestEmail: {
     parameters: {
       query?: never;
@@ -43708,7 +46663,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminInvitationResend"];
+      };
+    };
     responses: {
       /** @description Created */
       201: {
@@ -43765,8 +46724,35 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
         headers: {
           [name: string]: unknown;
         };
@@ -43847,7 +46833,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["InvitationCapabilities"];
+          "application/json": components["schemas"]["AdminInvitationCapabilities"];
         };
       };
       /** @description The representation named by If-None-Match is current; no body. */
@@ -54950,6 +57936,155 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  testAdminPluginAuthBinding: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPluginAuthBindingTestInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthConnectionTestResult"];
+        };
       };
       /** @description Bad Request */
       400: {
@@ -67221,6 +70356,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Precondition Failed */
       412: {
         headers: {
@@ -67485,6 +70629,15 @@ export interface operations {
       };
       /** @description Request Timeout */
       408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -72783,6 +75936,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Precondition Failed */
       412: {
         headers: {
@@ -73328,6 +76490,374 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["AdminUserDownloadSummary"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminUserIdentities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Account id */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserIdentityCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAdminUserIdentity: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Account id */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminUserIdentityCreateInputBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserIdentity"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminUserIdentity: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Account id */
+        id: string;
+        /** @description Identity id */
+        identity_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -74641,6 +78171,112 @@ export interface operations {
       };
     };
   };
+  getAdminUserPolicyDefaults: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserPolicyDefaults"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listPersonalAPIKeys: {
     parameters: {
       query?: {
@@ -75508,9 +79144,9 @@ export interface operations {
   getDeviceLogin: {
     parameters: {
       query?: {
-        /** @description User code the person typed */
+        /** @description User code from the verification link or typed by the person */
         code?: string;
-        /** @description Browser code from the verification link */
+        /** @description Browser code from a verification link issued before user codes moved into the link */
         token?: string;
       };
       header?: never;
@@ -75617,6 +79253,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -75880,6 +79525,111 @@ export interface operations {
       };
     };
   };
+  cancelDeviceLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelDeviceLoginInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeviceLoginCancel"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getDeviceLoginCapability: {
     parameters: {
       query?: never;
@@ -75996,6 +79746,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -76305,6 +80064,98 @@ export interface operations {
       };
     };
   };
+  getExternalSignInCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalSignInCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   endImpersonation: {
     parameters: {
       query?: never;
@@ -76471,6 +80322,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -76608,12 +80468,149 @@ export interface operations {
       };
     };
   };
+  signInWithNetworkIdentity: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The network provider's plugin installation, as listAuthProviders shows it */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["NetworkSignInInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TokenPair"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   finishOAuthCallback: {
     parameters: {
       query?: {
-        /** @description Browser OAuth handshake value; validated by the owning handshake. */
+        /** @description Provider redirect value; validated by the owning handshake. */
         code?: string;
-        /** @description Browser OAuth handshake value; validated by the owning handshake. */
+        /** @description Provider redirect value; validated by the owning handshake. */
+        error?: string;
+        /** @description Provider redirect value; validated by the owning handshake. */
         state?: string;
       };
       header?: never;
@@ -76625,7 +80622,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Provider authorization or local completion/error redirect. */
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
       302: {
         headers: {
           Location?: string;
@@ -76656,8 +80653,12 @@ export interface operations {
   initOAuthLogin: {
     parameters: {
       query?: {
-        /** @description Browser OAuth handshake value; validated by the owning handshake. */
+        /** @description Set by the server when it redirects a web start to its public origin; clients omit it. */
+        bounce?: "1";
+        /** @description Site-relative path to return to; anything that is not a same-origin path becomes /. */
         next?: string;
+        /** @description select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead. */
+        prompt?: "select_account";
       };
       header?: never;
       path: {
@@ -76668,8 +80669,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Provider authorization or local completion/error redirect. */
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
       302: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
+      303: {
         headers: {
           Location?: string;
           [name: string]: unknown;
@@ -76678,6 +80687,15 @@ export interface operations {
       };
       /** @description Plain-text handshake failure. */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Plain-text handshake failure. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -76696,6 +80714,133 @@ export interface operations {
       };
       /** @description Plain-text handshake failure. */
       502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startNativeOAuthLogin: {
+    parameters: {
+      query?: {
+        /** @description Required from the app. Opaque value of 1 to 512 unreserved characters (A-Z a-z 0-9 - . _ ~); echoed as state on the app redirect. */
+        app_state?: string;
+        /** @description Required from the app. PKCE S256 challenge: unpadded base64url of SHA-256 of the app's code verifier (RFC 7636). */
+        code_challenge?: string;
+        /** @description Required from the app. Always S256. */
+        code_challenge_method?: "S256";
+        /** @description Set by the server when it moves a start that arrived on another origin to its public origin: the random ID of the start it keeps, single use, valid two minutes. A start with flow takes no other parameters; apps omit it. */
+        flow?: string;
+        /** @description Link ticket from createAccountIdentityLinkTicket: the flow ends on the app redirect with link=1 and a code the app confirms with completeAccountIdentityLink, signed in as the ticket's account. No session opens. */
+        link_ticket?: string;
+        /** @description select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead. */
+        prompt?: "select_account";
+      };
+      header?: never;
+      path: {
+        /** @description Positive authentication-plugin installation ID. */
+        install_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
+      302: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Plain-text handshake failure. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Plain-text handshake failure. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Plain-text handshake failure. */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Plain-text handshake failure. */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/plain": string;
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startOAuthLogin: {
+    parameters: {
+      query?: {
+        /** @description Set by the server when it redirects a web start to its public origin; clients omit it. */
+        bounce?: "1";
+        /** @description Site-relative path to return to; anything that is not a same-origin path becomes /. */
+        next?: string;
+        /** @description select_account asks the provider to let the person choose which provider account to sign in with, for a Switch account sign-in; omit it otherwise. Any other value is 400. A linking flow always asks for a fresh sign-in instead. */
+        prompt?: "select_account";
+      };
+      header?: never;
+      path: {
+        /** @description Positive authentication-plugin installation ID. */
+        install_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location. */
+      302: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Plain-text handshake failure. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -76811,7 +80956,10 @@ export interface operations {
       query?: never;
       header?: never;
       path?: never;
-      cookie?: never;
+      cookie?: {
+        /** @description Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it */
+        silo_oauth_complete?: string;
+      };
     };
     requestBody: {
       content: {
@@ -76964,6 +81112,89 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getProviderLogout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProviderLogout"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };
@@ -87509,12 +91740,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -87534,12 +91770,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -87853,12 +92094,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -87878,12 +92124,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -95115,6 +99366,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
@@ -115894,12 +120154,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -115919,12 +120184,17 @@ export interface operations {
           "audio/ogg": string;
           "audio/wav": string;
           "multipart/byteranges": string;
+          "video/3gpp": string;
+          "video/3gpp2": string;
           "video/mp2t": string;
           "video/mp4": string;
+          "video/mpeg": string;
+          "video/ogg": string;
           "video/quicktime": string;
           "video/webm": string;
           "video/x-flv": string;
           "video/x-matroska": string;
+          "video/x-ms-asf": string;
           "video/x-ms-wmv": string;
           "video/x-msvideo": string;
         };
@@ -117064,6 +121334,506 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listSubtitleSync: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        media_file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubtitleSyncListOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getSubtitleSync: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The subtitle's sync key, from the playback inventory or listSubtitleSync */
+        key: string;
+        /** @description Opaque identifier */
+        media_file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubtitleSyncStateOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startSubtitleSync: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The subtitle's sync key, from the playback inventory or listSubtitleSync */
+        key: string;
+        /** @description Opaque identifier */
+        media_file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubtitleSyncStartOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  setSubtitleTiming: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The subtitle's sync key, from the playback inventory or listSubtitleSync */
+        key: string;
+        /** @description Opaque identifier */
+        media_file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SubtitleTiming"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubtitleSyncStateOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };
@@ -118628,6 +123398,7 @@ export interface operations {
       /** @description OK */
       200: {
         headers: {
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {

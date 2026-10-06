@@ -89,6 +89,37 @@ jobs:
           fi
       - name: Verify no local paths leaked into committed docs
         run: make verify-local-paths
+      # Linux checks out two paths that differ only in case without
+      # complaint; macOS and Windows builds then fail. Like the selection
+      # tools, the checker comes from this workflow's commit on main, so a
+      # branch cannot skip it by deleting or editing its own copy, and a
+      # branch cut before the checker existed is checked too. A change to the
+      # checker gates later runs once it merges; its tests run in Go test.
+      # After the PR checkout, which would otherwise clean it away.
+      - name: Check out the case-collision checker from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /scripts/ci/casecollisions/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # The checker uses only the standard library, so it needs a toolchain
+      # but no module cache.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Equivalent to make verify-case-collisions with main's checker. It
+      # lists the files tracked in the PR checkout; .ci-tools is untracked.
+      - name: Verify no tracked paths collide ignoring case
+        run: |
+          go build -o "$RUNNER_TEMP/casecollisions" ./.ci-tools/scripts/ci/casecollisions
+          "$RUNNER_TEMP/casecollisions"
 
   # Contract assertions run once in the full suite; artifact generation and
   # semantic comparison retain their separate gate. PG17 race tests and
@@ -357,6 +388,8 @@ jobs:
   # is missing, skipped or failing, so a PR that turns a pinned budget into an
   # N+1 fails here. It is a job of its own so it adds no time to go-test, and
   # because the full schema needs pgvector, which go-test's image lacks.
+  # The long external sign-in suite has its own database job below so it can
+  # run beside these pins instead of extending this job's critical path.
   go-db-pins:
     name: Go DB pins
     needs: select
@@ -406,6 +439,62 @@ jobs:
 
       - name: Test image cache cleanup resumption against Postgres
         run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
+
+      - name: Test device sign-in against Postgres
+        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+
+  # External sign-in tests are isolated from the query pins because several of
+  # them intentionally create and mutate the same account state. Keeping them
+  # in one fresh database preserves their ordering while allowing the long
+  # suite to run in parallel with the query-budget job above.
+  go-db-auth:
+    name: Go DB external auth
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: db-auth
+
+      # A throwaway key: it only has to pass the bootstrap length check, and
+      # nothing encrypted with it outlives the job.
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+
+      # Account resolution and linking, the local-password policy, the OAuth
+      # flow store across nodes, provider re-checks, network identity sign-in
+      # and linking, compatibility routing, and the Owner and break-glass
+      # identity guards. The break-glass guards run first because they skip on
+      # a database that already holds a break-glass account.
+      - name: Test external sign-in against Postgres
+        run: |
+          go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
+          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
+          go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
+          go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
 
   web:
     name: Web
@@ -554,7 +643,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, web, web-test]
+    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
     runs-on: ubuntu-latest
     steps:
       - name: Check out the CI tools from main

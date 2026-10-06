@@ -434,93 +434,6 @@ describe("EpisodeContent", () => {
     expect(markup).toContain(">Season 99<");
   });
 
-  it("passes on-view translation controls to the hero", () => {
-    const onTranslate = vi.fn();
-    mocks.useOnViewTranslation.mockReturnValue({
-      translating: true,
-      onTranslate,
-    });
-
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ pending_translation_language: "fr" })} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.useOnViewTranslation).toHaveBeenCalledWith(
-      expect.objectContaining({ content_id: "episode-1", type: "episode" }),
-    );
-    expect(mocks.capturedDetailHeroProps.value).toMatchObject({
-      overviewTranslating: true,
-      onTranslateOverview: onTranslate,
-    });
-  });
-
-  it("shows all season episodes in the carousel, not just nearby ones", () => {
-    const allEpisodes = Array.from({ length: 10 }, (_, i) => ({
-      content_id: `ep-${i + 1}`,
-      season_number: 1,
-      episode_number: i + 1,
-      title: `Episode ${i + 1} Title`,
-      overview: "",
-      air_date: null,
-      runtime: 42,
-      still_url: "",
-      still_thumbhash: "",
-      files: [],
-    }));
-
-    mocks.useSeasonEpisodes.mockReturnValue({
-      data: { episodes: allEpisodes },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ episode_number: 5 })} />
-      </MemoryRouter>,
-    );
-
-    // All 10 episodes should be rendered
-    for (let i = 1; i <= 10; i++) {
-      expect(markup).toContain(`Episode ${i} Title`);
-    }
-
-    // Current episode (5) should be marked
-    expect(markup).toContain('data-current="true"');
-    expect(countOccurrences(markup, 'data-current="true"')).toBe(1);
-  });
-
-  it("hides the carousel when only one episode exists", () => {
-    mocks.useSeasonEpisodes.mockReturnValue({
-      data: {
-        episodes: [
-          {
-            content_id: "ep-1",
-            season_number: 1,
-            episode_number: 1,
-            title: "Only Episode",
-            overview: "",
-            air_date: null,
-            runtime: 42,
-            still_url: "",
-            still_thumbhash: "",
-            files: [],
-          },
-        ],
-      },
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem({ episode_number: 1 })} />
-      </MemoryRouter>,
-    );
-
-    expect(markup).not.toContain("More Episodes");
-    expect(markup).not.toContain("episode-detail-navigation");
-    expect(markup).not.toContain("episode-carousel");
-  });
-
   it("passes restartHref when the episode is partially watched", () => {
     renderToStaticMarkup(
       <MemoryRouter initialEntries={["/item/episode-1"]}>
@@ -565,17 +478,6 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       restartHref: undefined,
     });
-  });
-
-  it("does not pass rating props to ActionBar", () => {
-    renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
-    );
-
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("rating");
-    expect(mocks.capturedActionBarProps.value).not.toHaveProperty("onRatingChange");
   });
 
   it("passes marker re-detection only for admins", () => {

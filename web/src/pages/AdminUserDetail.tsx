@@ -12,6 +12,7 @@ import { isNotFoundProblem, V2ProblemError } from "@/api/v2/request";
 import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
+import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -27,7 +28,12 @@ import {
   useViewerIsOwner,
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
-import { canManageAccount, canTransferOwnership, canViewAsAccount } from "@/lib/accountOwner";
+import {
+  canChangeAccessPolicy,
+  canManageAccount,
+  canTransferOwnership,
+  canViewAsAccount,
+} from "@/lib/accountOwner";
 import { guardRedirectTarget } from "@/lib/authRedirect";
 
 import { AccessTab } from "./admin-users/detail/access/AccessTab";
@@ -38,7 +44,7 @@ import { OverviewTab } from "./admin-users/detail/overview/OverviewTab";
 import { PreferencesTab } from "./admin-users/detail/preferences/PreferencesTab";
 import { UnsavedCardGuard } from "./admin-users/detail/UnsavedCardGuard";
 import { UserDetailHeader } from "./admin-users/detail/UserDetailHeader";
-import { UserDetailTabs } from "./admin-users/detail/UserDetailTabs";
+import { UserDetailTabBar } from "./admin-users/detail/UserDetailTabBar";
 import { parseUserDetailTab, userDetailTabSearch } from "./admin-users/detail/userDetailTabs";
 
 export default function AdminUserDetail() {
@@ -71,6 +77,7 @@ function AdminUserDetailPage() {
   const transferOwnership = useTransferOwnership();
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [disableOpen, setDisableOpen] = useState(false);
   const [deleteEditor, setDeleteEditor] = useState<AdminUserEditor | null>(null);
@@ -121,6 +128,7 @@ function AdminUserDetailPage() {
   const tab = parseUserDetailTab(searchParams.get("tab"));
   const viewAsDisabled = !canViewAsAccount(account, viewerId, viewerIsOwner);
   const manageable = canManageAccount(account, viewerId, viewerIsOwner);
+  const policyManageable = canChangeAccessPolicy(account, viewerId, viewerIsOwner);
   const transferable =
     capabilities.data?.ownership_transfer === true &&
     canTransferOwnership(account, viewerId, viewerIsOwner);
@@ -199,6 +207,10 @@ function AdminUserDetailPage() {
           ownAccount={ownAccount}
           onViewAs={() => setConfirmImpersonateOpen(true)}
           onResetPassword={() => setResetOpen(true)}
+          onSetPassword={() => {
+            selectTab("sign-in");
+            setPasswordOpen(true);
+          }}
           onTransfer={() => setTransferOpen(true)}
           onDisable={() => setDisableOpen(true)}
           onEnable={() => void setEnabled(true)}
@@ -206,7 +218,7 @@ function AdminUserDetailPage() {
         />
 
         <Tabs value={tab} onValueChange={selectTab} className="min-w-0 gap-4">
-          <UserDetailTabs user={account} active={tab} />
+          <UserDetailTabBar user={account} active={tab} />
           <TabsContent value="overview" className="min-w-0">
             <OverviewTab user={account} />
           </TabsContent>
@@ -215,7 +227,17 @@ function AdminUserDetailPage() {
               user={account}
               editor={editor}
               manageable={manageable}
+              policyManageable={policyManageable}
               available={available}
+            />
+          </TabsContent>
+          <TabsContent value="sign-in" className="min-w-0">
+            <AdminUserSignIn
+              user={account}
+              manageable={manageable}
+              viewerIsOwner={viewerIsOwner}
+              passwordOpen={passwordOpen}
+              onPasswordOpenChange={setPasswordOpen}
             />
           </TabsContent>
           <TabsContent value="activity" className="min-w-0">

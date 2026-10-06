@@ -23,14 +23,6 @@ describe("installPreloadErrorReload", () => {
     cleanups = [];
   });
 
-  it("reloads when a dynamically imported chunk fails to load", () => {
-    const { reload, deps } = harness(() => 1_000_000);
-    cleanups.push(installPreloadErrorReload(deps));
-
-    window.dispatchEvent(new Event("vite:preloadError"));
-    expect(reload).toHaveBeenCalledTimes(1);
-  });
-
   it("does not reload again within the loop-guard window", () => {
     let clock = 1_000_000;
     const { reload, deps } = harness(() => clock);

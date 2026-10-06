@@ -35,6 +35,10 @@ function scrollTo(top: number) {
 
 describe("ItemGrid scroll anchoring", () => {
   beforeEach(() => {
+    // Every scroll arms the virtualizer's is-scrolling reset timer, which
+    // unmounting does not clear. A real one can fire after the file's DOM is
+    // torn down and fail the run with "window is not defined".
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     vi.spyOn(window, "scrollTo").mockImplementation(
       (options: ScrollToOptions | number, y?: number) => {
         const top = typeof options === "number" ? y : options.top;
@@ -56,6 +60,8 @@ describe("ItemGrid scroll anchoring", () => {
   });
   afterEach(() => {
     cleanup();
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     scrollTo(0);
   });

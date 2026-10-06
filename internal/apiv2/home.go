@@ -164,9 +164,6 @@ const (
 	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
 )
 
-// homeOperationIDs is every operation the catalog-home section registers.
-var homeOperationIDs = []string{opGetCalendar, opDismissHomeItem, opUndismissHomeItem, opGetHomeLayout, opListHomeSections, opGetHomeSectionItems, opListSectionRecipes, opListSectionRecipeCandidates}
-
 func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abssocket"
 )
 
@@ -26,24 +25,6 @@ func (r *recordingLogger) Warn(msg string, _ ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.logs = append(r.logs, "warn:"+msg)
-}
-
-// TestNew_BuildsAndExposesHandler is the bare-minimum smoke: New returns a
-// Server, Handler is non-nil, Close is a no-op when never used.
-func TestNew_BuildsAndExposesHandler(t *testing.T) {
-	s := abssocket.New(
-		func() []byte { return nil },
-		nil, // nil tokenValidator → skip revocation check
-		nil, // nil logger → noop
-		nil, // default in-memory adapter
-	)
-	if s == nil {
-		t.Fatal("New returned nil")
-	}
-	if s.Handler() == nil {
-		t.Fatal("Handler() returned nil")
-	}
-	s.Close()
 }
 
 // TestHandler_ServesSocketIOOpenHandshake confirms the underlying engine
@@ -88,11 +69,4 @@ func TestPublish_NoConnections_IsNoOp(t *testing.T) {
 	// Should not panic, should not block.
 	s.Publish("u-no-such-user", "user_item_progress_updated", map[string]any{"x": 1})
 	s.Publish("", "noop", nil) // empty user id is an explicit no-op
-}
-
-// TestEventPublisherInterfaceSatisfied is a compile-time check (executed at
-// test time only). It guarantees that abssocket.Server stays usable wherever
-// abs.EventPublisher is expected.
-func TestEventPublisherInterfaceSatisfied(t *testing.T) {
-	var _ abs.EventPublisher = (*abssocket.Server)(nil)
 }

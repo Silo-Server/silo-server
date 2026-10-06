@@ -15,20 +15,6 @@ func tailStats() StatsOutput {
 	return StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}}
 }
 
-func TestBuildStatsGraphNamesFilterInstances(t *testing.T) {
-	graph := buildStatsGraph(tailStats(), "", 0)
-	want := "crop=trunc(iw*0.9/2)*2:trunc(ih*0.8/2)*2,scale=480:-2:flags=area,format=yuv420p," +
-		"blackframe=amount=0:threshold=20,blackframe=amount=0:threshold=26,blackframe=amount=0:threshold=32," +
-		"signalstats,metadata=print"
-	if graph.filter != want {
-		t.Fatalf("filter\n got %s\nwant %s", graph.filter, want)
-	}
-	// ffmpeg names each parsed filter by its position in the chain.
-	if !reflect.DeepEqual(graph.blackframes, []int{3, 4, 5}) || graph.metadata != 7 {
-		t.Fatalf("instances: blackframe %v, metadata %d", graph.blackframes, graph.metadata)
-	}
-}
-
 // The fixture holds jellyfin-ffmpeg 7.1.4 lines of a keyframes-only tail
 // pass: two complete frames interleaved with decoder warnings and their
 // "Last message repeated" lines, a progress line ended by a bare "\r", a

@@ -57,7 +57,7 @@ func TestAdminAutoscanSourceWriteValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
-			h := NewAutoscanHandler(&fakeAutoscanStore{createSourceFn: func(s autoscan.Source) (autoscan.Source, error) { calls++; return s, nil }}, &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{{PluginID: "plugin", CapabilityID: "cap"}}})
+			h := NewAutoscanHandler(&fakeAutoscanStore{createSourceFn: func(s autoscan.Source) (autoscan.Source, error) { calls++; return s, nil }}, &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{{PluginID: "plugin", CapabilityID: "cap"}, {PluginID: autoscan.BuiltinArrWebhookPluginID, CapabilityID: autoscan.BuiltinArrWebhookCapabilityID}}})
 			in := AdminAutoscanSourceWrite{PluginID: "plugin", CapabilityID: "cap"}
 			tc.change(&in)
 			_, err := h.CreateAdminAutoscanSource(t.Context(), in)

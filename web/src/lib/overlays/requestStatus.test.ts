@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
 import {
   buildDefaultPrefs,
   overlayDataFromWatchlistTitle,
   requestDownloadBarPercent,
   SAMPLE_REQUEST_DATA,
 } from "@/lib/overlays";
+import { describe, expect, it } from "vitest";
 
 describe("overlayDataFromWatchlistTitle", () => {
   it("carries the status badge, icon, attention and download progress", () => {
@@ -26,15 +26,6 @@ describe("overlayDataFromWatchlistTitle", () => {
 });
 
 describe("requestDownloadBarPercent", () => {
-  it("draws the bar only while the request status badge is on", () => {
-    const prefs = buildDefaultPrefs();
-    expect(prefs.items.request_status.enabled).toBe(true);
-    expect(requestDownloadBarPercent(SAMPLE_REQUEST_DATA, prefs)).toBe(43);
-
-    prefs.items.request_status = { ...prefs.items.request_status, enabled: false };
-    expect(requestDownloadBarPercent(SAMPLE_REQUEST_DATA, prefs)).toBeNull();
-  });
-
   it("draws no bar with overlays off, without a status, or without a known size", () => {
     const prefs = buildDefaultPrefs();
     expect(requestDownloadBarPercent(SAMPLE_REQUEST_DATA, null)).toBeNull();

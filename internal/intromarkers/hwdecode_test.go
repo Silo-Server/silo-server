@@ -280,12 +280,17 @@ func TestSampleTailsDecodeASourceWithAnImplausibleBitDepth(t *testing.T) {
 	if err != nil {
 		t.Skipf("ffmpeg capabilities unavailable: %v", err)
 	}
-	candidate := Candidate{FileID: 1, DurationSeconds: 120, CodecVideo: "h264", VideoBitDepth: 32}
+	candidate := Candidate{FileID: 1, DurationSeconds: 10, CodecVideo: "h264", VideoBitDepth: 32}
 	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
 		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
 	}
 	candidate.FilePath = filepath.Join(t.TempDir(), "source.mkv")
-	synthesizeCreditsClip(ctx, t, ffmpeg, candidate.FilePath)
+	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=320x180:r=10:d=10",
+		"-c:v", "libx264", "-threads", "1", "-g", "10", "-pix_fmt", "yuv420p", "-y", candidate.FilePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create tail fixture: %v: %s", err, output)
+	}
 
 	extractor := NewChromaprintExtractor(DefaultConfig(ffmpeg))
 	sample, err := extractor.SampleCreditsTail(ctx, candidate, false)

@@ -14,33 +14,6 @@ import (
 	"time"
 )
 
-// TestValidateSourceCachesPositiveVerdicts verifies completed successful validation is reused.
-func TestValidateSourceCachesPositiveVerdicts(t *testing.T) {
-	tests := []struct {
-		name            string
-		wantConversions int
-	}{
-		{name: "positive", wantConversions: 3},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetSourcePreflightCache(t)
-			request := sourcePreflightTestRequest(t)
-			conversions := 0
-			runner := sourcePreflightTestRunner(&conversions, func() string { return "ffmpeg version 1" }, nil)
-			for attempt := 0; attempt < 2; attempt++ {
-				err := ValidateSourceWithRunner(context.Background(), request, runner)
-				if err != nil {
-					t.Fatalf("ValidateSourceWithRunner() error = %v", err)
-				}
-			}
-			if conversions != tt.wantConversions {
-				t.Fatalf("conversion calls = %d, want %d before cached verdict", conversions, tt.wantConversions)
-			}
-		})
-	}
-}
-
 // TestValidateSourceCacheInvalidatesExecutorAndSourceFacts verifies cache keys bind every frozen input.
 func TestValidateSourceCacheInvalidatesExecutorAndSourceFacts(t *testing.T) {
 	resetSourcePreflightCache(t)

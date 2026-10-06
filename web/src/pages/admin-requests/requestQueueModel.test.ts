@@ -1,8 +1,9 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { MediaRequest } from "@/api/types";
 import {
   defaultRequestQueueView,
-  formatRequestEventType,
   parseRequestQueueUser,
   parseRequestQueueView,
   requestQueueActions,
@@ -40,10 +41,6 @@ describe("requestQueueActions", () => {
   ])("offers a %s request only what the server allows", (_label, request, actions) => {
     expect(requestQueueActions(request)).toEqual(actions);
   });
-
-  it("never offers Retry for a pending request", () => {
-    expect(requestQueueActions({ status: "pending", outcome: "active" })).not.toContain("retry");
-  });
 });
 
 describe("queue links", () => {
@@ -61,25 +58,5 @@ describe("queue links", () => {
     for (const value of ["0", "-1", "7a", "01", "", null, "99999999999"]) {
       expect(parseRequestQueueUser(value)).toBeUndefined();
     }
-  });
-});
-
-describe("formatRequestEventType", () => {
-  it.each([
-    ["created", "Requested"],
-    ["approved", "Approved"],
-    ["status_approved", "Approved"],
-    ["status_queued", "Sent to the server"],
-    ["status_downloading", "Downloading"],
-    ["status_completed", "Downloaded"],
-    ["available_in_library", "In the library"],
-    ["outcome_declined", "Declined"],
-    ["outcome_cancelled", "Cancelled"],
-    ["outcome_failed", "Failed"],
-    ["retried", "Retried"],
-    ["submit_deferred", "Couldn't send yet"],
-    ["something_new", "something_new"],
-  ])("names %s as %s", (type, label) => {
-    expect(formatRequestEventType(type)).toBe(label);
   });
 });

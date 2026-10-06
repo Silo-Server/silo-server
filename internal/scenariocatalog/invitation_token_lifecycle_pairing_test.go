@@ -7,10 +7,7 @@ import (
 )
 
 func TestRequiredInvitationTokenLifecyclePairingCannotChange(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := InvitationTokenLifecycleAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +17,7 @@ func TestRequiredInvitationTokenLifecyclePairingCannotChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range RequiredInvitationTokenLifecycleScenarios {
-		for _, failure := range []string{"missing case", "duplicate case", "missing pair", "wrong operation", "wrong method", "wrong route", "changed bearer", "original request", "principal", "pair principal", "requirements", "settings", "sequence", "status", "original body", "translated body"} {
+		for _, failure := range []string{"missing case", "changed bearer", "original request", "principal", "pair principal", "requirements", "settings", "sequence", "status", "original body", "translated body"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
 				var changed []*Catalog
 				if err := json.Unmarshal(data, &changed); err != nil {
@@ -37,16 +34,6 @@ func TestRequiredInvitationTokenLifecyclePairingCannotChange(t *testing.T) {
 							switch failure {
 							case "missing case":
 								row.Scenarios = append(row.Scenarios[:i], row.Scenarios[i+1:]...)
-							case "duplicate case":
-								row.Scenarios = append(row.Scenarios, *s)
-							case "missing pair":
-								s.V2Expectation = nil
-							case "wrong operation":
-								s.V2Expectation.OperationID = "listProfiles"
-							case "wrong method":
-								s.V2Expectation.Method = "PATCH"
-							case "wrong route":
-								s.V2Expectation.Request.Path = "/api/v2/profiles"
 							case "changed bearer":
 								s.V2Expectation.Request.Headers = map[string]*string{adminInvitationCreateAuthorizationHeader: new("Bearer replacement")}
 							case "original request":

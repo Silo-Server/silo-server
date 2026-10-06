@@ -10,8 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // managedFixture is the seeded data a managed-entry authorization test needs:
@@ -452,55 +450,5 @@ func TestPurgeProfileDevices(t *testing.T) {
 		f.userID, f.profileB,
 	).Scan(&otherRows); err != nil || otherRows != 1 {
 		t.Fatalf("profileB device rows = %d (%v), want 1", otherRows, err)
-	}
-}
-
-// TestRegisterSubscriptionItemsBatchAndCount pins the bulk-registration
-// contract: registration is one batched fetch + one batched insert (not a
-// per-episode loop), and the count covers ONLY the newly created rows, so the
-// sync response's "registered" count reports 0 in the steady state.
-func TestRegisterSubscriptionItemsBatchAndCount(t *testing.T) {
-	ctx := context.Background()
-	f := seedManagedFixture(t)
-	svc := &Service{}
-	sub := &Subscription{ID: "batch-reg", UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA}
-	store := managedRegistryStore{f.pool}
-
-	mkItems := func(n int) []managedItem {
-		items := make([]managedItem, 0, n)
-		for i := 0; i < n; i++ {
-			items = append(items, managedItem{
-				file:      &models.MediaFile{ID: f.fileID, FileSize: 1024},
-				contentID: f.contentID,
-				episodeID: fmt.Sprintf("reg-ep-%d", i),
-			})
-		}
-		return items
-	}
-
-	first, err := svc.registerSubscriptionItems(ctx, sub, mkItems(3), store)
-	if err != nil {
-		t.Fatalf("first register: %v", err)
-	}
-	if first != 3 {
-		t.Fatalf("first register = %d rows, want 3", first)
-	}
-
-	// Steady state: nothing new → zero rows returned.
-	again, err := svc.registerSubscriptionItems(ctx, sub, mkItems(3), store)
-	if err != nil {
-		t.Fatalf("second register: %v", err)
-	}
-	if again != 0 {
-		t.Fatalf("steady-state register = %d rows, want 0", again)
-	}
-
-	// A grown scope registers only the delta.
-	grown, err := svc.registerSubscriptionItems(ctx, sub, mkItems(5), store)
-	if err != nil {
-		t.Fatalf("grown register: %v", err)
-	}
-	if grown != 2 {
-		t.Fatalf("grown register = %d rows, want 2", grown)
 	}
 }

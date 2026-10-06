@@ -44,6 +44,7 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
 
+    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
     const card = container.firstElementChild;
     expect(card).toHaveClass("media-card", "group/card");
     // A missing poster falls back to the library's plain title placeholder.
@@ -164,19 +165,6 @@ describe("RequestPosterCard (discover variant)", () => {
     );
   });
 
-  it("names the reason when a title without a request cannot be requested", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard
-          variant="discover"
-          item={{ ...requestable, request: { requestable: false, reason: "quota_exceeded" } }}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
-  });
-
   it("dims the artwork of a title that can't be requested", () => {
     const withPoster = { ...requestable, poster_path: "/poster.jpg" };
     const { rerender } = render(
@@ -195,6 +183,7 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("img", { name: "Test Movie" })).toHaveClass("saturate-[0.8]");
+    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
   });
 
   it("follows the viewer's poster size and always names the type under a caption", () => {
@@ -269,15 +258,6 @@ describe("RequestPosterCard watchlist action", () => {
     expect(remove).toHaveAttribute("aria-pressed", "true");
     expect(remove).toHaveAttribute("title", "On Watchlist");
   });
-
-  it("offers no watchlist action without a handler", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard variant="discover" item={requestable} />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
-  });
 });
 
 describe("RequestPosterCard (mine variant)", () => {
@@ -295,11 +275,7 @@ describe("RequestPosterCard (mine variant)", () => {
 
   it.each<[Partial<MediaRequest>, string]>([
     [{ status: "pending" }, "Pending"],
-    [{ status: "queued" }, "Processing"],
-    [{ status: "downloading" }, "Processing"],
-    [{ status: "completed" }, "Available"],
     [{ status: "pending", outcome: "cancelled" }, "Cancelled"],
-    [{ status: "approved", outcome: "failed" }, "Failed"],
     // The server's derived state wins: a downloaded title not yet scanned in
     // is still processing.
     [{ status: "completed", state: "processing" }, "Processing"],

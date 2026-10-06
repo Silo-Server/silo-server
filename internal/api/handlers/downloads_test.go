@@ -1040,18 +1040,6 @@ func TestHandleDirectDownloadViaProxyStaysLocalWhenTargetIneligible(t *testing.T
 	}
 }
 
-func TestHandleDirectDownloadViaProxyMapsResolverError(t *testing.T) {
-	svc := &proxyDownloadService{fakeDownloadService: &fakeDownloadService{}, resolveErr: catalog.ErrItemNotFound}
-	h := NewDownloadHandler(svc)
-	h.SetProxyDelivery(nodepool.NewPlanner(nodepool.NewProxyPool(), nodepool.NewTranscodePool()), func() string { return "secret" })
-	rec := httptest.NewRecorder()
-	h.HandleDirectDownloadViaProxy(rec, downloadTestRequest(http.MethodGet, "/direct-download-proxy?file_id=42", nil, 7, "", ""))
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-}
-
 // An unknown file_id reaches the handler as the catalog not-found sentinel the
 // download service now returns, on every direct-download variant.
 func TestHandleDirectDownloadUnknownFileIsNotFound(t *testing.T) {
@@ -1215,6 +1203,20 @@ func TestManagedArtworkThreadsIdentity(t *testing.T) {
 	}
 	if svc.gotArtwork != (identityCall{7, "pA", "devA", "dl1"}) || svc.gotArtworkKind != "backdrop" {
 		t.Fatalf("artwork identity = %+v kind = %q", svc.gotArtwork, svc.gotArtworkKind)
+	}
+}
+
+// The series poster kind is v2-only; the frozen v1 route never serves it.
+func TestManagedArtworkV1RefusesSeriesPoster(t *testing.T) {
+	svc := &fakeDownloadService{}
+	h := NewDownloadHandler(svc)
+	req := withChiParams(downloadTestRequest(http.MethodGet, "/downloads/dl1/artwork/series_poster", nil, 7, "pA", "devA"),
+		map[string]string{"id": "dl1", "kind": "series_poster"})
+	rec := httptest.NewRecorder()
+	h.HandleArtwork(rec, req)
+
+	if rec.Code != http.StatusNotFound || svc.gotArtworkKind != "" {
+		t.Fatalf("status = %d, served kind = %q; want 404 without serving", rec.Code, svc.gotArtworkKind)
 	}
 }
 

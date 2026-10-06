@@ -18,6 +18,7 @@ type fakeVerificationSender struct {
 	mu      sync.Mutex
 	enabled bool
 	err     error
+	cancel  context.CancelFunc
 	sent    []mail.Message
 }
 
@@ -29,6 +30,9 @@ func (f *fakeVerificationSender) Send(_ context.Context, msg mail.Message) error
 		return mail.ErrNotConfigured
 	}
 	f.sent = append(f.sent, msg)
+	if f.cancel != nil {
+		f.cancel()
+	}
 	return f.err
 }
 func (f *fakeVerificationSender) messages() []mail.Message {
@@ -72,7 +76,7 @@ func TestEmailVerificationDispatchDeliversRetainedMessageOnce(t *testing.T) {
 	if len(sent) != 1 || sent[0].To[0] != in.Address || sent[0].Headers["Message-ID"] != emailVerificationMessageID(in.ID) {
 		t.Fatalf("hand-offs %+v", sent)
 	}
-	state, err := repo.VerificationDispatchState(ctx, in.ID)
+	state, err := readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchDelivered || state.Attempts != 1 || state.CompletedAt == nil || !state.HasPayload {
 		t.Fatalf("%+v %v", state, err)
 	}
@@ -95,14 +99,17 @@ func TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage(t *tes
 	if _, err := repo.QueueVerification(ctx, in, d.cipher); err != nil {
 		t.Fatal(err)
 	}
-	d.afterSend = func(context.Context, string) error { return errEmailVerificationCrashInjected }
-	d.runPass(ctx)
-	state, err := repo.VerificationDispatchState(ctx, in.ID)
+	// Losing the worker context after hand-off makes the real receipt write fail.
+	interrupted, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sender.cancel = cancel
+	d.runPass(interrupted)
+	state, err := readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchSending || state.Attempts != 1 || len(sender.messages()) != 1 {
 		t.Fatalf("crash left %+v %v", state, err)
 	}
 	// Before the lease lapses the claim still belongs to the crashed worker.
-	d.afterSend = nil
+	sender.cancel = nil
 	d.runPass(ctx)
 	if len(sender.messages()) != 1 {
 		t.Fatal("retried inside lease")
@@ -113,7 +120,7 @@ func TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage(t *tes
 	if len(sent) != 2 || sent[0].TextBody != sent[1].TextBody || sent[0].Headers["Message-ID"] != sent[1].Headers["Message-ID"] || sent[1].To[0] != in.Address {
 		t.Fatalf("retry changed message: %+v", sent)
 	}
-	state, err = repo.VerificationDispatchState(ctx, in.ID)
+	state, err = readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchDelivered || state.Attempts != 2 {
 		t.Fatalf("retry not recorded %+v %v", state, err)
 	}
@@ -131,15 +138,17 @@ func TestEmailVerificationDispatchStopsAfterSecondUncertainty(t *testing.T) {
 	if _, err := repo.QueueVerification(ctx, in, d.cipher); err != nil {
 		t.Fatal(err)
 	}
-	d.afterSend = func(context.Context, string) error { return errEmailVerificationCrashInjected }
 	for range 3 {
-		d.runPass(ctx)
+		interrupted, cancel := context.WithCancel(ctx)
+		sender.cancel = cancel
+		d.runPass(interrupted)
+		cancel()
 		clock.advance(emailVerificationClaimLease + time.Second)
 	}
 	if n := len(sender.messages()); n != emailVerificationMaxAttempts {
 		t.Fatalf("hand-offs %d, want %d", n, emailVerificationMaxAttempts)
 	}
-	state, err := repo.VerificationDispatchState(ctx, in.ID)
+	state, err := readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchFailed || state.Attempts != 2 || state.Error == "" {
 		t.Fatalf("%+v %v", state, err)
 	}
@@ -157,7 +166,7 @@ func TestEmailVerificationDispatchProviderRejectionRetriesOnceThenFails(t *testi
 	}
 	sender.err = errors.New("smtp send: 451 try again later")
 	d.runPass(ctx)
-	state, err := repo.VerificationDispatchState(ctx, in.ID)
+	state, err := readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchQueued || state.Attempts != 1 || state.Error == "" {
 		t.Fatalf("first rejection %+v %v", state, err)
 	}
@@ -167,7 +176,7 @@ func TestEmailVerificationDispatchProviderRejectionRetriesOnceThenFails(t *testi
 	}
 	clock.advance(emailVerificationClaimLease + time.Second)
 	d.runPass(ctx)
-	state, err = repo.VerificationDispatchState(ctx, in.ID)
+	state, err = readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.State != dispatchFailed || state.Attempts != 2 || len(sender.messages()) != 2 {
 		t.Fatalf("second rejection %+v %v", state, err)
 	}
@@ -183,7 +192,7 @@ func TestEmailVerificationDispatchProviderRejectionRetriesOnceThenFails(t *testi
 	}
 	sender.enabled = false
 	d.runPass(ctx)
-	state, err = repo.VerificationDispatchState(ctx, next.ID)
+	state, err = readVerificationDispatchState(ctx, repo, next.ID)
 	if err != nil || state.State != dispatchQueued || state.Attempts != 1 {
 		t.Fatalf("unconfigured %+v %v", state, err)
 	}
@@ -194,7 +203,7 @@ func TestEmailVerificationDispatchProviderRejectionRetriesOnceThenFails(t *testi
 	sender.err = nil
 	clock.advance(emailVerificationClaimLease + time.Second)
 	d.runPass(ctx)
-	if state, err = repo.VerificationDispatchState(ctx, next.ID); err != nil || state.State != dispatchDelivered || state.Attempts != 2 {
+	if state, err = readVerificationDispatchState(ctx, repo, next.ID); err != nil || state.State != dispatchDelivered || state.Attempts != 2 {
 		t.Fatalf("recovered %+v %v", state, err)
 	}
 }
@@ -241,7 +250,7 @@ func TestEmailVerificationDispatchAuthorizesUnderClaim(t *testing.T) {
 		}
 		tc.mutate(in)
 		d.runPass(ctx)
-		state, err := repo.VerificationDispatchState(ctx, in.ID)
+		state, err := readVerificationDispatchState(ctx, repo, in.ID)
 		if err != nil || state.State != dispatchFailed || state.Error == "" {
 			t.Fatalf("%s: %+v %v", name, state, err)
 		}
@@ -279,7 +288,7 @@ func TestEmailVerificationDispatchConcurrentClaimsSendOnce(t *testing.T) {
 		t.Fatalf("hand-offs %d for %d intents", n, len(intents))
 	}
 	for _, in := range intents {
-		if state, err := repo.VerificationDispatchState(ctx, in.ID); err != nil || state.State != dispatchDelivered || state.Attempts != 1 {
+		if state, err := readVerificationDispatchState(ctx, repo, in.ID); err != nil || state.State != dispatchDelivered || state.Attempts != 1 {
 			t.Fatalf("%+v %v", state, err)
 		}
 	}
@@ -308,7 +317,7 @@ func TestEmailVerificationDispatchRetention(t *testing.T) {
 	if err != nil || payloads != 1 || rows != 0 {
 		t.Fatal("payload retirement", payloads, rows, err)
 	}
-	state, err := repo.VerificationDispatchState(ctx, in.ID)
+	state, err := readVerificationDispatchState(ctx, repo, in.ID)
 	if err != nil || state.HasPayload || state.State != dispatchDelivered {
 		t.Fatalf("receipt lost with payload %+v %v", state, err)
 	}
@@ -326,7 +335,7 @@ func TestEmailVerificationDispatchRetention(t *testing.T) {
 	}
 	expire(late.ID, time.Minute)
 	d.runPass(ctx)
-	if state, err = repo.VerificationDispatchState(ctx, late.ID); err != nil || state.State != dispatchFailed || state.Attempts != 0 {
+	if state, err = readVerificationDispatchState(ctx, repo, late.ID); err != nil || state.State != dispatchFailed || state.Attempts != 0 {
 		t.Fatalf("expired queued row %+v %v", state, err)
 	}
 	expire(in.ID, emailVerificationReceiptRetention+time.Minute)
@@ -334,4 +343,18 @@ func TestEmailVerificationDispatchRetention(t *testing.T) {
 	if _, rows, err = repo.RetireVerificationDispatch(ctx, time.Now()); err != nil || rows != 2 {
 		t.Fatal("receipt retention", rows, err)
 	}
+}
+
+type verificationDispatchState struct {
+	State       string
+	Attempts    int
+	Error       string
+	CompletedAt *time.Time
+	HasPayload  bool
+}
+
+func readVerificationDispatchState(ctx context.Context, r *EmailPrefsRepository, id string) (verificationDispatchState, error) {
+	var s verificationDispatchState
+	err := r.pool.QueryRow(ctx, `SELECT dispatch_state,dispatch_attempts,dispatch_error,dispatch_completed_at,payload_ciphertext<>'' FROM notification_email_verifications WHERE id=$1`, id).Scan(&s.State, &s.Attempts, &s.Error, &s.CompletedAt, &s.HasPayload)
+	return s, err
 }

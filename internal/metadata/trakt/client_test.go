@@ -3,10 +3,13 @@ package trakt
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 func TestGetCollectionPresetTrendingSendsHeadersAndDecodesMovies(t *testing.T) {
@@ -99,36 +102,33 @@ func TestGetCollectionPresetRejectsRecommendedWithoutToken(t *testing.T) {
 	}
 }
 
+type retryTransport func(*http.Request) (*http.Response, error)
+
+func (f retryTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 func TestGetCollectionPresetRetriesRateLimit(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
+	synctest.Test(t, func(t *testing.T) {
+		attempts := 0
+		client := NewClient("client-id", 1000)
+		client.httpClient = &http.Client{Transport: retryTransport(func(*http.Request) (*http.Response, error) {
+			attempts++
+			if attempts == 1 {
+				return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {"1"}}, Body: http.NoBody}, nil
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`[{"title":"Popular","year":2026,"ids":{"trakt":3,"tmdb":10}}]`))}, nil
+		})}
+		started := time.Now()
+		results, err := client.GetCollectionPreset(t.Context(), "popular", "movie", 1, "")
+		if err != nil {
+			t.Fatalf("GetCollectionPreset: %v", err)
 		}
-		writeJSON(t, w, []map[string]any{{
-			"title": "Popular",
-			"year":  2026,
-			"ids": map[string]any{
-				"trakt": 3,
-				"tmdb":  10,
-			},
-		}})
-	}))
-	defer server.Close()
-
-	client := NewClient("client-id", 1000)
-	client.SetBaseURL(server.URL)
-
-	results, err := client.GetCollectionPreset(context.Background(), "popular", "movie", 1, "")
-	if err != nil {
-		t.Fatalf("GetCollectionPreset: %v", err)
-	}
-	if attempts != 2 || len(results) != 1 {
-		t.Fatalf("attempts=%d results=%+v", attempts, results)
-	}
+		if attempts != 2 || len(results) != 1 {
+			t.Fatalf("attempts=%d results=%+v", attempts, results)
+		}
+		if elapsed := time.Since(started); elapsed < time.Second {
+			t.Fatalf("retry waited %s, want at least the Retry-After second", elapsed)
+		}
+	})
 }
 
 // A saved credential change has to reach a client that was built at startup;

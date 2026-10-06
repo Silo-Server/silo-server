@@ -30,6 +30,8 @@ export interface UserDetailHeaderProps {
   ownAccount: boolean;
   onViewAs(): void;
   onResetPassword(): void;
+  /** Opens the Sign-in tab's Set password dialog, for an account without password sign-in. */
+  onSetPassword(): void;
   onTransfer(): void;
   onDisable(): void;
   onEnable(): void;
@@ -66,6 +68,7 @@ export function UserDetailHeader({
   ownAccount,
   onViewAs,
   onResetPassword,
+  onSetPassword,
   onTransfer,
   onDisable,
   onEnable,
@@ -108,6 +111,7 @@ export function UserDetailHeader({
   const { active: activeEdit } = useCardEditing();
   const deleteBlocked = activeEdit !== null && activeEdit.changeCount > 0;
   const showReset = user.password_login && manageable;
+  const showSetPassword = !user.password_login && manageable;
   const hasMenu = transferable || canDisable || canEnable || canDelete;
   const viewAsReason = available
     ? viewAsDisabledReason(user, ownAccount, viewAsDisabled)
@@ -213,7 +217,9 @@ export function UserDetailHeader({
               View as user
             </Button>
           </span>
-          {/* An external provider manages this account's sign-in: it has no password to reset. */}
+          {/* A reset link needs password sign-in on. An account without it (one a
+              sign-in provider manages) gets a password set directly on the
+              Sign-in tab, and setting one turns its password sign-in back on. */}
           {showReset ? (
             <span className="flex flex-1 sm:flex-none">
               <Button
@@ -225,6 +231,20 @@ export function UserDetailHeader({
                 disabled={!available}
               >
                 Reset password
+              </Button>
+            </span>
+          ) : null}
+          {showSetPassword ? (
+            <span className="flex flex-1 sm:flex-none">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                onClick={onSetPassword}
+                disabled={!available || !user.enabled}
+              >
+                Set password
               </Button>
             </span>
           ) : null}

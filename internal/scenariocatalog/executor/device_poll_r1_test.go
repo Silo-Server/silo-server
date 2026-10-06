@@ -613,13 +613,24 @@ func assertDevicePollCollection(t *testing.T, e *Env, id, transport string, resp
 }
 
 func TestDevicePollR1Selection(t *testing.T) {
+	catalogs, err := scenariocatalog.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(catalogs)
+	if err != nil {
+		t.Fatal(err)
+	}
 	load := func() []*scenariocatalog.Catalog {
 		t.Helper()
-		c, err := scenariocatalog.Load()
-		if err != nil {
+		var cloned []*scenariocatalog.Catalog
+		if err := json.Unmarshal(data, &cloned); err != nil {
 			t.Fatal(err)
 		}
-		return c
+		for i, c := range cloned {
+			c.File = catalogs[i].File
+		}
+		return cloned
 	}
 	if _, err := selectDevicePollR1(load()); err != nil {
 		t.Fatal(err)

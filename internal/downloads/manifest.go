@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -136,7 +136,13 @@ type OfflineManifest struct {
 		Poster   string `json:"poster,omitempty"`
 		Backdrop string `json:"backdrop,omitempty"`
 		Logo     string `json:"logo,omitempty"`
+		// SeriesPoster is v2-only; see SeriesPosterThumbhash.
+		SeriesPoster string `json:"-"`
 	} `json:"artwork_urls"`
+	// An episode's poster is its still, so episode manifests also name the
+	// parent series poster for series-level offline screens. Only the v2
+	// manifest carries the series poster; the frozen v1 manifest omits it.
+	SeriesPosterThumbhash string `json:"-"`
 
 	Container               string              `json:"container"`
 	CodecVideo              string              `json:"codec_video"`
@@ -170,6 +176,9 @@ type ManifestBuilder struct {
 	subs             SubtitleSource
 	fileRepo         FileResolver
 	MarkerPopulation MarkerPopulationService
+	// externalTimings applies sidecar timing corrections to the revisions
+	// and sizes of external subtitles; nil describes them as they are on disk.
+	externalTimings subtitles.ExternalTimingLookup
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
 	artifact func(ctx context.Context, id string) (*Artifact, error)
@@ -192,6 +201,17 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 	return b.build(ctx, dl, filter, nil, true)
 }
 
+// episodeSeriesID returns the parent series of an episode entry, or "" for
+// anything else. Series extras and manga chapters also carry a SeriesID, so
+// the entry's EpisodeID decides. The manifest's series_poster and the artwork
+// route that serves it both use this rule.
+func episodeSeriesID(dl *Download, detail *catalog.ItemDetail) string {
+	if dl.EpisodeID == "" {
+		return ""
+	}
+	return detail.SeriesID
+}
+
 // build is Build with an optional per-batch series-detail cache: a season
 // batch shares one series, so the batch endpoint resolves its detail once
 // instead of once per episode.
@@ -202,13 +222,13 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	file := b.lookupFile(ctx, dl.MediaFileID)
 	var seriesDetail *catalog.ItemDetail
-	if dl.EpisodeID != "" && detail.SeriesID != "" {
-		if cached, ok := seriesCache[detail.SeriesID]; ok {
+	if seriesID := episodeSeriesID(dl, detail); seriesID != "" {
+		if cached, ok := seriesCache[seriesID]; ok {
 			seriesDetail = cached
-		} else if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
+		} else if sd, err := b.detail.GetItemDetail(ctx, seriesID, filter); err == nil {
 			seriesDetail = sd
 			if seriesCache != nil {
-				seriesCache[detail.SeriesID] = sd
+				seriesCache[seriesID] = sd
 			}
 		}
 	}
@@ -256,6 +276,12 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 	}
 	if detail.LogoURL != "" {
 		m.ArtworkURLs.Logo = artworkProxyURL(dl.ID, "logo")
+	}
+	if seriesDetail != nil {
+		m.SeriesPosterThumbhash = seriesDetail.PosterThumbhash
+		if seriesDetail.PosterURL != "" {
+			m.ArtworkURLs.SeriesPoster = artworkProxyURL(dl.ID, "series_poster")
+		}
 	}
 
 	if v := pickVersion(detail, dl.MediaFileID); v != nil {
@@ -403,9 +429,18 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 
 	if file != nil {
 		for i, ext := range file.ExternalSubtitles {
+			// The revision follows the delivered bytes: the file on disk and
+			// its timing correction. An unreadable sidecar is still listed;
+			// fetching it reports the error.
 			var size int64
-			if info, statErr := os.Stat(ext.Path); statErr == nil {
-				size = info.Size()
+			var revision string
+			if data, err := playback.LoadExternalSubtitleRaw(ext.Path); err == nil {
+				timed, rev, timingErr := subtitles.ExternalDelivery(ctx, b.externalTimings, file.ID, subtitles.SubtitleFormat(strings.ToLower(ext.Format)), data)
+				if timingErr != nil {
+					slog.WarnContext(ctx, "download sidecar timing lookup failed", "file_id", file.ID, "error", timingErr)
+				} else {
+					size, revision = int64(len(timed)), rev
+				}
 			}
 			out = append(out, OfflineSubtitle{
 				Language:        ext.Language,
@@ -416,6 +451,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file
 				External:        true,
 				FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
 				FileSize:        size,
+				Revision:        revision,
 			})
 		}
 		if prepared != nil && prepared.TrackRecipeVersion != "" {

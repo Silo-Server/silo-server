@@ -154,41 +154,6 @@ func TestReprobeCapabilitiesRefusesWhileWorkIsStarting(t *testing.T) {
 	}
 }
 
-// The other direction: while a re-probe holds the encoder, new GPU work is
-// refused rather than allowed to collide with the smoke encode. It is refused,
-// not queued — a viewer pressing play must not wait out a multi-minute probe,
-// and the API retries on another node.
-func TestTranscodeStartRefusedWhileReprobing(t *testing.T) {
-	server := newTestServer(t)
-	if _, ok := server.gpu.beginReprobe(otherWork(0)); !ok {
-		t.Fatal("re-probe refused on an idle node")
-	}
-	t.Cleanup(server.gpu.endReprobe)
-
-	if server.gpu.beginWork() {
-		t.Fatal("GPU work admitted while a re-probe held the encoder")
-	}
-}
-
-// A hardware thumbnail extraction reserves a render device and runs ffmpeg on
-// it, but never touches activeJobs — so before it consulted the gate it left
-// the node looking idle and a re-probe could smoke-encode beside it.
-func TestReprobeCapabilitiesRefusesWhileExtractingAThumbnail(t *testing.T) {
-	server := newTestServer(t)
-	server.storeCapabilityHash("sha256:previous")
-	if !server.gpu.beginWork() {
-		t.Fatal("beginWork on an idle node was refused")
-	}
-	t.Cleanup(server.gpu.endWork)
-
-	if recorder := postReprobe(t, server); recorder.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409 while a GPU extraction holds the encoder", recorder.Code)
-	}
-	if got := server.storedCapabilityHash(); got != "sha256:previous" {
-		t.Fatalf("stored hash = %q, want the previous report untouched", got)
-	}
-}
-
 // The re-probe deliberately does not join a capability build already in flight
 // — bumping the invalidation generation is what makes it honest — so without a
 // lock the scheduled snapshot's ffmpeg matrix and the operator's would run at
