@@ -618,3 +618,166 @@ func TestPushDeliveryEnabledFailsClosedOnReadError(t *testing.T) {
 		t.Fatalf("EnabledPushPlatforms = %v, want empty on read error", got)
 	}
 }
+
+// rejectingRelay serves a relay whose send endpoint rejects every capability
+// except accepted with the given 401 code, and whose register endpoint mints
+// minted (accepted when empty).
+type rejectingRelay struct {
+	t             *testing.T
+	accepted      string
+	minted        string
+	rejectCode    string
+	renewCode     string
+	registrations int
+	sendAuth      []string
+}
+
+func (r *rejectingRelay) roundTrip(req *http.Request) (*http.Response, error) {
+	switch req.URL.Path {
+	case relayAppleSendPath:
+		auth := req.Header.Get("Authorization")
+		r.sendAuth = append(r.sendAuth, auth)
+		if auth == "Bearer "+r.accepted {
+			return relayResponse(http.StatusOK, `{"request_id":"relay-request-ok","status":"accepted"}`), nil
+		}
+		return relayResponse(http.StatusUnauthorized, `{"error":{"code":"`+r.rejectCode+`","message":"rejected"}}`), nil
+	case relayRenewPath:
+		return relayResponse(http.StatusUnauthorized, `{"error":{"code":"`+r.renewCode+`","message":"rejected"}}`), nil
+	case relayRegisterPath:
+		r.registrations++
+		minted := r.minted
+		if minted == "" {
+			minted = r.accepted
+		}
+		return relayResponse(http.StatusOK, credentialJSON("deployment-fresh", minted, time.Now().Add(30*24*time.Hour))), nil
+	default:
+		r.t.Fatalf("unexpected relay path %q", req.URL.Path)
+		return nil, nil
+	}
+}
+
+func newRejectedCredentialSender(t *testing.T, relay *rejectingRelay) (*pushSender, *atomicRelaySettings) {
+	t.Helper()
+	store := &atomicRelaySettings{lockedRelaySettings: lockedRelaySettings{values: map[string]string{
+		SettingPushRelayURL:          DefaultPushRelayURL,
+		SettingPushRelayDeploymentID: "deployment-shared",
+		SettingPushRelayAPIKey:       "superseded.capability",
+		SettingPushRelayExpiresAt:    time.Now().Add(20 * 24 * time.Hour).UTC().Format(time.RFC3339),
+	}}}
+	sender := newPushSender(nil, nil, nil, NewSettings(store))
+	sender.client = &http.Client{Transport: relayRoundTripFunc(relay.roundTrip)}
+	return sender, store
+}
+
+func sendTestPush(sender *pushSender, attemptID string) pushSendResult {
+	return sender.send(context.Background(), PushDeliveryAttempt{ID: attemptID}, &PushDevice{
+		APNsEnvironment: APNsEnvironmentSandbox,
+		APNsTopic:       ApplePushTopicSilo,
+		ServerDeviceID:  "server-device-rejected",
+	}, strings.Repeat("a", 64))
+}
+
+func TestPushSenderReplacesRejectedCapabilityAndResends(t *testing.T) {
+	// The relay rejects a capability whose generation another holder of the
+	// same credential (for example a cloned database) rotated away.
+	for _, code := range []string{"unauthorized", "capability_revoked"} {
+		t.Run(code, func(t *testing.T) {
+			relay := &rejectingRelay{t: t, accepted: "fresh.capability", rejectCode: code}
+			sender, store := newRejectedCredentialSender(t, relay)
+
+			result := sendTestPush(sender, "attempt-rejected")
+			if !result.OK {
+				t.Fatalf("result = %+v, want delivery after replacement", result)
+			}
+			if relay.registrations != 1 || len(relay.sendAuth) != 2 || relay.sendAuth[1] != "Bearer fresh.capability" {
+				t.Fatalf("registrations = %d, send auth = %#v", relay.registrations, relay.sendAuth)
+			}
+			if store.values[SettingPushRelayAPIKey] != "fresh.capability" || store.values[SettingPushRelayReregister] != "false" {
+				t.Fatalf("stored state = %#v", store.values)
+			}
+		})
+	}
+}
+
+func TestPushSenderReplacesCapabilityWhoseRenewalIsRejected(t *testing.T) {
+	// token_expired past the renewal grace, or a superseded generation, makes
+	// renewal impossible; the sender registers instead of failing forever.
+	relay := &rejectingRelay{t: t, accepted: "fresh.capability", rejectCode: "token_expired", renewCode: "token_expired"}
+	sender, store := newRejectedCredentialSender(t, relay)
+
+	result := sendTestPush(sender, "attempt-expired")
+	if !result.OK || relay.registrations != 1 {
+		t.Fatalf("result = %+v, registrations = %d", result, relay.registrations)
+	}
+	if store.values[SettingPushRelayAPIKey] != "fresh.capability" {
+		t.Fatalf("stored key = %q", store.values[SettingPushRelayAPIKey])
+	}
+}
+
+func TestPushSenderParksDeploymentTheRelayDisabled(t *testing.T) {
+	relay := &rejectingRelay{t: t, accepted: "never.issued", rejectCode: relayCodeDeploymentDisabled}
+	sender, store := newRejectedCredentialSender(t, relay)
+
+	result := sendTestPush(sender, "attempt-disabled")
+	if result.OK || result.HTTPStatus != http.StatusUnauthorized || result.UpstreamReason != relayCodeDeploymentDisabled {
+		t.Fatalf("result = %+v, want the relay's disabled rejection", result)
+	}
+	if relay.registrations != 0 {
+		t.Fatalf("registrations = %d; a disabled deployment must wait for the administrator", relay.registrations)
+	}
+	if store.values[SettingPushRelayAPIKey] != "" || store.values[SettingPushRelayReregister] != "true" {
+		t.Fatalf("stored state = %#v, want parked", store.values)
+	}
+	if _, err := sender.prepareRelayCredential(context.Background()); !errors.Is(err, ErrRelayReregistrationRequired) {
+		t.Fatalf("prepare after disable err = %v", err)
+	}
+}
+
+func TestPushSenderRateLimitsCapabilityReplacement(t *testing.T) {
+	// A relay that rejects even fresh credentials must not be hammered with
+	// registrations.
+	relay := &rejectingRelay{t: t, accepted: "never.issued", minted: "also.rejected", rejectCode: "unauthorized"}
+	sender, store := newRejectedCredentialSender(t, relay)
+	now := time.Now()
+	sender.now = func() time.Time { return now }
+
+	first := sendTestPush(sender, "attempt-first")
+	second := sendTestPush(sender, "attempt-second")
+	if first.OK || second.OK || relay.registrations != 1 {
+		t.Fatalf("first = %+v, second = %+v, registrations = %d", first, second, relay.registrations)
+	}
+	if second.HTTPStatus != http.StatusServiceUnavailable || !retryableHTTPStatus(second.HTTPStatus) {
+		t.Fatalf("second = %+v, want a retryable cooldown failure", second)
+	}
+	if store.values[SettingPushRelayReregister] == "true" {
+		t.Fatal("rejection parked the credential")
+	}
+
+	now = now.Add(relayReplacementCooldown)
+	_ = sendTestPush(sender, "attempt-after-cooldown")
+	if relay.registrations != 2 {
+		t.Fatalf("registrations after cooldown = %d, want 2", relay.registrations)
+	}
+}
+
+func TestPushSenderKeepsCredentialRegisteredWhileParking(t *testing.T) {
+	// An administrator registers while the relay's disabled response is in
+	// flight; parking must not discard the new credential.
+	relay := &rejectingRelay{t: t, accepted: "admin.capability", rejectCode: relayCodeDeploymentDisabled}
+	sender, store := newRejectedCredentialSender(t, relay)
+	store.beforeWrite = func(values map[string]string) {
+		values[SettingPushRelayDeploymentID] = "deployment-admin"
+		values[SettingPushRelayAPIKey] = "admin.capability"
+	}
+
+	result := sendTestPush(sender, "attempt-disabled-race")
+	if !result.OK {
+		t.Fatalf("result = %+v, want delivery with the administrator's credential", result)
+	}
+	if relay.registrations != 0 {
+		t.Fatalf("registrations = %d", relay.registrations)
+	}
+	if store.values[SettingPushRelayAPIKey] != "admin.capability" || store.values[SettingPushRelayReregister] == "true" {
+		t.Fatalf("stored state = %#v, want the administrator's credential kept", store.values)
+	}
+}

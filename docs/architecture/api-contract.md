@@ -176,8 +176,8 @@ The finite `/debug/pprof/` route set on `operational_debug` and `/metrics` on
 `operational_metrics` are explicitly outside native migration decisions and
 native release-scenario catalogs. They are validated by the profiling,
 metrics-listener, and route-inventory suites and documented in
-[the profiling runbook](../operations/profiling.md) and
-[the monitoring runbook](../operations/monitoring.md). Each exclusion matches
+[Observability](observability.md#profiling-and-resource-boundaries) and its
+[deployment section](observability.md#deployment-and-retention). Each exclusion matches
 its exact listener, methods, and paths; it cannot hide a profiling or metrics
 path on a native listener or an unexpected route on an operational listener.
 The root listener's own `/metrics` row, which answers 404 so a disabled metrics
@@ -335,7 +335,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
   matching Problem Details document by switching on the v1 body's machine-readable `error` and
   `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
-  `profile_verification_required` type so clients still know to ask for the PIN. A gate the
+  `profile_verification_required` type so clients still know to ask for the PIN, a session
+  holding a temporary password keeps `password_change_required` so clients route to the
+  password change, and an access token minted before the account's role changed gets
+  `token_refresh_required` so clients refresh instead of signing out. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -623,7 +626,9 @@ required, invalid token, session expired, permission denied, profile verificatio
 resource not found, method not allowed, resource conflict, idempotency conflict, payload too
 large, unsupported media type, rate limit exceeded, capability disabled, dependency unavailable,
 client upgrade required, and internal error. Domain-specific types are added only when a client
-needs distinct corrective behavior.
+needs distinct corrective behavior. `token_refresh_required` (401) is one: the login
+session is valid but the access token predates a change to the account's role, so the client
+refreshes and retries instead of signing out.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;
@@ -1292,7 +1297,10 @@ surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`
 membership reads answer a body instead of a bare `204`; `setRating` answers `422` (typed
 `out_of_range`) where v1 answered `400`; the list responses carry `page` instead of `has_more`;
 the watchlist list still hides fully-watched series as v1 does; and the v2 access filter carries
-no device id because the v2 listener reads no device header.
+no device id because the v2 listener reads no device header. `listWatchlist`,
+`getWatchlistEntry` and v1 `GET /watchlist` first move watchlist entries for titles
+outside the library that have since arrived onto this list; see
+[Watchlist titles](#watchlist-titles).
 
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
@@ -1811,17 +1819,93 @@ prevents concurrent active requests for the same media, but terminal requests no
 longer hold that uniqueness key. Safe automatic retries require a durable client
 request identity across terminal states. The web mutation disables retries.
 
+A series request can name its seasons (`seasons` on `POST /api/v2/requests`);
+series detail lists the regular seasons with availability and request coverage;
+requests carry `seasons`, `season_progress` and the `partially_available` state;
+`GET /api/v2/requests/status` advertises `season_requests_supported`.
+
+While a request downloads, requests, their targets and the title detail's
+request state carry `download` (phase, percent, bytes, estimated completion,
+and when the server last heard from the download server), and
+`GET /api/v2/requests/status` advertises `download_progress_supported`. The
+phase is an open set: clients render an unknown one like `downloading`. See
+[Media requests](media-requests.md#download-progress).
+
+A profile can follow a title another profile already requested, to be notified
+when it becomes available, with `PUT` and `DELETE
+/api/v2/requests/follows/{media_type}/{tmdb_id}`. Both are naturally idempotent.
+Request state gains `following` and `requested_by_viewer`, and
+`GET /api/v2/requests/status` advertises `follow_supported`. The frozen v1
+surface has no follow operation and does not carry these fields.
+
+Requests carry `source`: `direct` for a request someone made, `watchlist` for
+one a watchlist add made. It is an open set; the admin queue reads it too.
+Discovery results (search, the Discover sections and browse operations, and a
+title detail's recommendations) and the title detail carry `in_watchlist`,
+true when the acting profile has the title on its watchlist, in or out of the
+library.
+
 Native Apple and Android request migrations accompany this contract change;
 integrate those client changes before retiring their v1 routes. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
 
+### Watchlist titles
+
+A profile can keep movies and series the library doesn't have on its watchlist,
+by TMDB ID, under the `watchlist` tag:
+
+- `GET /api/v2/watchlist/titles` (`listWatchlistTitles`) pages the entries by
+  `limit` and a signed cursor over `(added_at DESC, title id DESC)`, bound to the
+  account, profile and viewer policy. Each `WatchlistTitle` carries the current
+  `tmdb_id`, a snapshot for display (`title`, `year`, `release_date`,
+  `poster_path`, `vote_average`, `content_rating`), `added_at`, `status` and the
+  viewer's `request` state, with `download` while it downloads. `status` is
+  `active`, `needs_review` (TMDB now lists the title twice) or `removed` (TMDB
+  no longer lists it); it is an open set and clients read an unknown value as
+  `active`. Titles above the viewer's rating ceiling are omitted, and `has_more`
+  is decided from the raw rows.
+- `PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}` (`addWatchlistTitle`)
+  answers `200` with `{media_type, tmdb_id, added_at, item_id?, request}`. When
+  exactly one library item the viewer can see has the title, it is added to the
+  library watchlist instead and `item_id` names it. A TMDB ID TMDB doesn't have,
+  or a title above the ceiling, is `404`. The add may also request the title
+  (below).
+- `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`
+  (`deleteWatchlistTitle`) answers `204` whether or not the entry existed. It
+  accepts a title's current or former TMDB ID and also removes the matching
+  library watchlist entry.
+
+The three operations belong to the requests surface: while requests are off
+they answer `409 capability_disabled` and the stored entries are kept. The two
+mutations are profile-scoped, demo-restricted and `non_retryable`.
+`GET /api/v2/requests/status` advertises `watchlist_titles_supported`, false
+while requests are off, and
+`watchlist_requests` when an add by the acting profile will also request the
+title: requests are on, the admin's `watchlist_requests` setting and the
+profile's `requests.watchlist_auto_request` setting are both on, and the
+account may request.
+
+Library reads promote: `listWatchlistTitles`, `listWatchlist`,
+`getWatchlistEntry`, a catalog query with `source: "watchlist"`, the home
+Watchlist section and item detail `user_state` first move entries whose title
+reached the library onto the library watchlist, keeping `added_at`, with the
+side effects of a manual add. The frozen v1 routes gain no field. jellycompat
+has no view of these entries. There is no new realtime event. See
+[External watchlist titles](external-watchlist.md).
+
 ### History imports
 
 Seven v2 operations list sources, list/create/read import runs, create/check a Plex
-PIN and perform Emby Connect login. These are account operations with an optional
-profile header; creating a run separately verifies ownership of the target profile
-before source authentication. Run lists use signed `(created_at, id)` cursors scoped
-to the account. A 202 response identifies the persisted run and its polling location.
+PIN and perform Emby Connect login. Source discovery and external sign-in are account
+operations. Run creation, listing, and reads enforce the acting profile: a secondary
+profile acts only for itself, while an admin or the primary profile with any required
+PIN verification may act for its household. Non-admin creation requires an acting
+profile. Target account ownership is checked before source authentication. Run lists
+use signed `(created_at, id)` cursors scoped to the account and acting profile.
+The retained v1 run handlers enforce the same rule as a critical bridge fix, preserving
+their existing envelopes, success statuses, and 50-run list cap. See
+[Personal history import acceptance and monitoring](../admin-api.md#personal-history-import-acceptance-and-monitoring).
+A 202 response identifies the persisted run and its polling location.
 Execution is dispatched within the server process; persistence of run status is not
 a durable job-dispatch guarantee.
 
@@ -1863,7 +1947,9 @@ rating run counters exist only on v2, as do the `import_ratings` and `export_rat
 capability flags, which v2 projects through its own `WatchProviderCapabilities` type. The
 frozen v1 provider, connection, and run responses omit all of them, and a v1 settings
 update ignores the toggles. See
-[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules.
+[watch-provider-rating-sync.md](watch-provider-rating-sync.md) for the sync rules. The
+dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
+the same way; see [dropped-shows.md](dropped-shows.md).
 
 ### Webhook connection management
 
@@ -1911,6 +1997,15 @@ cleanup deadline, and failures leave the settings unchanged. Cleanup may already
 committed if the later connection transaction fails, so the operation remains
 non-retryable and does not promise an atomic cross-store mutation.
 
+Token refresh uses a separate advisory lock per connection across API nodes. A
+waiting caller reloads the complete connection before deciding whether to refresh.
+Persistence locks the existing row and compares its account binding and previous
+credential set before updating only credentials and the connection error. A
+removed row or replaced sign-in makes the old refresh fail; refresh never
+recreates a deleted row or overwrites the new sign-in. Disconnect waits for an
+in-flight refresh before deleting the row. Concurrent preference changes, sync
+cursors, timestamps and rate-limit deferrals survive token rotation.
+
 The full connection metadata read has no ETag: provider capabilities, display labels,
 credential availability and configuration schemas may change independently of the
 connection row. The canonical settings read exists to keep that external metadata
@@ -1932,7 +2027,11 @@ canonical representation: `GET /collections/{id}`, `GET /collections/groups/{id}
 `GET /collections/{id}/items/order`. Paths in this section have the `/api/v2` prefix.
 Each response supplies a strong ETag bound to the representation, account, profile, and access
 scope. Canonical collection editors omit the volatile presigned poster URL; display listings
-continue to provide artwork. Ordering writes use PUT, group and collection partial edits use
+continue to provide artwork. Personal collection detail responses include the viewer's live
+`item_count`, so their ETag also binds that count. A catalog or watch-state change that changes
+the count invalidates an earlier tag at precondition evaluation, even without a collection edit.
+The stored collection revision continues to guard concurrent definition edits in the write
+transaction. Ordering writes use PUT, group and collection partial edits use
 PATCH, and a successful delete returns 204 without an ETag. Storage compares the version and advances it in the transaction that applies the write. Missing preconditions return 428; stale
 preconditions return 412 with the current authorized validator. Clients must not automatically retry or implicitly
 replace the observed validator with a wildcard. Web editors retain the observed validator and preserve drafts
@@ -1989,9 +2088,32 @@ have no request-administration consumers; the bundled web migrates these workflo
 Jellyfin compatibility has no corresponding administration contract.
 
 Moderation uses signed `(created_at, id)` cursors scoped to the administrator,
-profile and filters. Integration lists return bounded ID-ordered pages over the
+profile and filters. The v2 queue adds filters v1 never had: a `view`
+(`needs_approval`, `in_progress`, `failed`, `done`), a title or TMDB ID search
+(`q`), `media_type` and `requested_by_user_id`. Two v2-only reads serve the queue:
+`GET /admin/requests/counts` counts each view, and
+`GET /admin/requests/{id}/events` returns a request's history, newest first and
+bounded to 200 entries. An access group's request approval and limit
+(`/admin/request-groups/{group_id}/limit`) is v2-only and guarded by `If-Match`
+like an account's; a group with none saved reads as revision zero. Integration lists return bounded ID-ordered pages over the
 configured integrations. The service currently loads that small configuration set
 before slicing a page; it does not claim database-bounded enumeration.
+
+Request routing rules (`/admin/request-routes`) are v2-only: list (bounded,
+unpaginated, in evaluation order, always including each media type's fallback),
+read, create, replace and delete by ID, reorder a media type's rules, and a
+read-only `preview` that shows which server each quality tier of a title would
+go to and, rule by rule, why, plus an admin title search
+(`GET /admin/request-routes/titles`) for trying titles while requests are off. Replacement and deletion require `If-Match` on the rule's revision; a
+fallback that was never saved reads as revision zero and its first replacement
+creates it. The fallback cannot be deleted, and a rule cannot be created until
+its media type's fallback has an HD server.
+`GET`/`PUT /admin/request-routing` reads and switches the routing mode
+(`standard` or `advanced`) with `If-Match` on its revision; the read also says
+where Standard sends each media type, or why it cannot be used, and switching
+to Standard is refused with a validation problem while it cannot. The `routing`
+field of `getAdminRequestCapabilities` reports whether the server offers both
+the routing rule operations and the routing mode operations.
 
 Settings, account limits and integrations require `If-Match` for replacement and
 integration deletion. A shared PostgreSQL sequence assigns a new revision on every
@@ -2001,6 +2123,11 @@ limit row has a version-zero default representation; a nonexistent target accoun
 returns 404. Row locks and conditional upserts arbitrate concurrent writers. Explicit
 wildcards overwrite atomically; first-party clients never supply them automatically.
 
+The v2 request settings add `watchlist_requests` (default on): whether a
+watchlist add of a title outside the library requests it. An update that omits
+it keeps the stored value, and so does every v1 settings write; responses
+always carry it.
+
 Settings and limits expose only their editable fields (plus the target account ID
 for limits), without volatile metadata. Integration reads include persisted public
 configuration and check status, all covered by the row revision, and a credential
@@ -2009,6 +2136,24 @@ credential and retains the existing requirement to re-enter it when changing the
 base URL. Plugin validation happens before the storage transaction; an intervening
 edit still fails the final comparison instead of overwriting it. A failed plugin
 validation uses structured v2 problem errors for the web's inline field messages.
+
+A v2 integration's `base_url` is normalized before option loading and before
+create or update: `http://` is assumed when no scheme is given and a trailing
+slash is dropped, so the saved address is the one the options probe used. An
+address with credentials, a query or a fragment, or another scheme, is a
+`validation_failed` problem on `body.base_url`. When `POST
+/admin/request-integrations/{id}/options` fails, the host answers with its own
+sentences and never echoes the plugin's upstream text. What the admin must fix
+is a `validation_failed` problem on `body.base_url` (wrong address, missing URL
+base, https on an http port) or `body.api_key_ref` (missing or rejected key). A
+message the plugin wrote as gRPC `InvalidArgument` or `FailedPrecondition` is
+the problem detail. A server that cannot be reached stays `dependency_unavailable`,
+with a detail naming the cause when known (nothing listening, unknown host,
+timeout, rejected certificate). A plugin may return a single `service_kind`
+option naming the service it found; the Sonarr and Radarr plugin does, and the
+web uses it to set the server type. The frozen v1 routes keep their behavior:
+they pass and store the address as submitted, and a failed v1 probe the host
+classified still answers 500.
 
 All mutations remain non-retryable after an uncertain response. Approve, retry and
 option loading retain their owning service behavior and may invoke a plugin; they

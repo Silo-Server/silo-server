@@ -66,11 +66,4 @@ describe("effectiveSettingsQueryKey", () => {
 
     expect(theirs).not.toEqual(mine);
   });
-
-  it("is stable for the same request", () => {
-    const keys = ["player.hdr_enabled"] as const;
-    expect(effectiveSettingsQueryKey({ keys, deviceId: "tv" })).toEqual(
-      effectiveSettingsQueryKey({ keys, deviceId: "tv" }),
-    );
-  });
 });

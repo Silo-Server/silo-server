@@ -3,6 +3,8 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
+import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
+import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type {
@@ -34,6 +36,8 @@ const controls = vi.hoisted(() => ({
     videoFit?: VideoFitMode;
     onVideoFitToggle?: () => void;
     onSubtitleJobAccepted?: (jobId: string) => void;
+    onMutedChange?: (muted: boolean) => void;
+    onVolumeChange?: (volume: number) => void;
   },
 }));
 const playerV2Mock = vi.hoisted(() => vi.fn());
@@ -45,9 +49,18 @@ const subtitleTimeline = vi.hoisted(() => ({
   liveCues: [] as Array<{ text: string }>,
   liveKey: null as string | null,
   streamGeneration: 0,
+  cueRevision: 0,
+  assCueRevision: 0,
+  setLoadState: null as null | ((state: string) => void),
 }));
 const toastError = vi.hoisted(() => vi.fn());
-const hlsJS = vi.hoisted(() => ({ supported: false, constructed: vi.fn() }));
+const hlsJS = vi.hoisted(() => ({
+  supported: false,
+  constructed: vi.fn(),
+  startLoad: vi.fn(),
+  stopLoad: vi.fn(),
+  latest: null as null | { emit: (event: string, data: unknown) => void },
+}));
 
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn(), message: vi.fn() } }));
 
@@ -70,12 +83,15 @@ vi.mock("../hooks/useSubtitleTracks", () => ({
     subtitleTimeline.liveCues = args[7] as Array<{ text: string }>;
     subtitleTimeline.liveKey = args[8] as string | null;
     subtitleTimeline.streamGeneration = args[9] as number;
+    subtitleTimeline.setLoadState = args[10] as (state: string) => void;
+    subtitleTimeline.cueRevision = args[11] as number;
     return [];
   },
 }));
 vi.mock("../hooks/useASSSubtitles", () => ({
   useASSSubtitles: (...args: unknown[]) => {
     subtitleTimeline.assOffsetSeconds = args[4] as number;
+    subtitleTimeline.assCueRevision = args[9] as number;
     return { isActive: false };
   },
 }));
@@ -99,11 +115,21 @@ vi.mock("hls.js", () => ({
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
     static isSupported = () => hlsJS.supported;
 
+    handlers = new Map<string, (event: string, data: unknown) => void>();
+    startLoad = hlsJS.startLoad;
+    stopLoad = hlsJS.stopLoad;
+
     constructor(config?: unknown) {
       hlsJS.constructed(config);
+      hlsJS.latest = this;
     }
 
-    on() {}
+    on(event: string, handler: (event: string, data: unknown) => void) {
+      this.handlers.set(event, handler);
+    }
+    emit(event: string, data: unknown) {
+      this.handlers.get(event)?.(event, data);
+    }
     loadSource() {}
     attachMedia() {}
     destroy() {}
@@ -488,6 +514,26 @@ describe("VideoPlayer room catch-up", () => {
     expect(connection.rejoinRoom).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { at: "at the end of the item", position: 3598, notice: "Playback finished." },
+    { at: "mid-item", position: 1200, notice: "The host stopped playback." },
+  ])("says why the room returned to the lobby $at", async ({ position, notice }) => {
+    const { connection, rerenderPlayer } = setup(position);
+    const onExit = vi.fn();
+    rerenderPlayer({
+      onExit,
+      watchTogetherConnection: {
+        ...connection,
+        room: { ...connection.room!, phase: "lobby", playback_state: "idle" },
+      },
+    });
+    expect(screen.getByText(notice)).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["canplay", "retry", "pending play"])(
     "prevents late autoplay after replacement during %s without reloading the stream",
     async (stage) => {
@@ -557,6 +603,14 @@ describe("VideoPlayer room catch-up", () => {
     video.currentTime = 100.2;
     fireEvent.timeUpdate(video);
     expect(controls.current!.currentTime).toBe(target);
+
+    video.currentTime = target + 0.5;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target + 0.5);
+
+    video.currentTime = target + 2;
+    fireEvent.timeUpdate(video);
+    expect(controls.current!.currentTime).toBe(target + 2);
   });
 
   it.each([1500, 30])("holds a room seek to %ss through stale seeked events", async (target) => {
@@ -860,6 +914,248 @@ describe("VideoPlayer room catch-up", () => {
       position_seconds: 1500.3,
       is_paused: true,
     });
+  });
+
+  it.each(["target", "play", "pause"] as const)(
+    "ends a guest seek pre-roll on %s",
+    async (ending) => {
+      const { connection, video, command, rerenderPlayer } = setup(100);
+      let paused = true;
+      Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+      Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+      vi.mocked(video.play).mockImplementation(async () => {
+        paused = false;
+      });
+      vi.mocked(video.pause).mockImplementation(() => {
+        paused = true;
+      });
+      const waitingConnection = {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: waitingConnection });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      // The copy remux starts at the keyframe 2.5 s before the target, and the
+      // progressive response cannot seek to the plan's player start.
+      rerenderPlayer({
+        watchTogetherConnection: waitingConnection,
+        planRevision: 2,
+        plan: fixturePlanV3({
+          ...directPlan,
+          delivery: "server_remux_progressive",
+          timeline: {
+            ...directPlan.timeline,
+            source_start_seconds: 1500,
+            stream_origin_seconds: 1497.5,
+            timeline_offset_seconds: 1497.5,
+            player_start_seconds: 2.5,
+            can_seek_anywhere: false,
+          },
+        }),
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 0 },
+      });
+      video.currentTime = 0.05;
+      vi.mocked(video.play).mockClear();
+      vi.mocked(connection.sendRoomMessage).mockClear();
+
+      // Until the rebuilt stream loads, the element still holds the old one.
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).not.toHaveBeenCalled();
+      fireEvent(video, new Event("loadstart"));
+
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.muted).toBe(true);
+      expect(video.playbackRate).toBe(4);
+      // The temporary mute is not saved as the viewer's preference, while a
+      // viewer's volume change still is.
+      const setMuted = vi.spyOn(video, "muted", "set");
+      act(() => controls.current!.onVolumeChange!(0.4));
+      expect(setMuted).not.toHaveBeenCalledWith(false);
+      expect(video.muted).toBe(true);
+      fireEvent.volumeChange(video);
+      expect(localStorage.getItem("player-muted")).not.toBe("true");
+      expect(localStorage.getItem("player-volume")).toBe("0.4");
+      setMuted.mockClear();
+      await act(async () => {
+        await realtimeOptions.current!.onCommand({
+          type: "command",
+          command_id: "volume-command",
+          session_id: "session-1",
+          name: "set_volume",
+          deadline_ms: 8_000,
+          payload: { volume: 0.6 },
+        });
+      });
+      expect(setMuted).not.toHaveBeenCalledWith(false);
+      expect(video.muted).toBe(true);
+      expect(localStorage.getItem("player-volume")).toBe("0.6");
+
+      // The mute shortcut flips the viewer's choice rather than the element's
+      // temporary pre-roll mute, which it could only ever turn off.
+      const toggleMuted = vi.mocked(useKeyboardShortcuts).mock.lastCall![5];
+      act(() => toggleMuted());
+      expect(localStorage.getItem("player-muted")).toBe("true");
+      expect(video.muted).toBe(true);
+      act(() => vi.mocked(useKeyboardShortcuts).mock.lastCall![5]());
+      expect(localStorage.getItem("player-muted")).toBe("false");
+      expect(video.muted).toBe(true);
+
+      // A mute chosen during the pre-roll holds; the element stays muted until
+      // the pre-roll ends and then keeps the viewer's choice.
+      act(() => controls.current!.onMutedChange!(true));
+      expect(video.muted).toBe(true);
+      expect(localStorage.getItem("player-muted")).toBe("true");
+
+      if (ending !== "target") {
+        act(() => controls.current!.onMutedChange!(false));
+        rerenderPlayer({
+          watchTogetherConnection: {
+            ...waitingConnection,
+            room: {
+              ...waitingConnection.room!,
+              playback_state: ending === "play" ? "playing" : "paused",
+            },
+            transportCommand: {
+              ...waitingConnection.transportCommand,
+              command_id: "next-command",
+              action: ending,
+              playback_state: ending === "play" ? "playing" : "paused",
+              execute_at: new Date(Date.now() + 500).toISOString(),
+            },
+          },
+        });
+        // The new command owns playback at its scheduled time. The muted
+        // pre-roll must stop before its mute and speed are restored.
+        expect(paused).toBe(true);
+        expect(video.muted).toBe(false);
+        expect(video.playbackRate).toBe(1);
+        await act(() => vi.advanceTimersByTimeAsync(500));
+        expect(paused).toBe(ending === "pause");
+        return;
+      }
+
+      // Still in the pre-roll: no acknowledgement yet. Close to the target it
+      // slows to normal speed, found by polling even without a timeupdate.
+      video.currentTime = 1.8;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(paused).toBe(false);
+      expect(video.playbackRate).toBe(1);
+      expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ready" }),
+      );
+
+      video.currentTime = 2.6;
+      fireEvent.timeUpdate(video);
+      expect(paused).toBe(true);
+      expect(video.muted).toBe(true);
+      expect(video.playbackRate).toBe(1);
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+        type: "ready",
+        session_id: "session-1",
+        command_id: command.command_id,
+        position_seconds: 1500.1,
+        is_paused: true,
+      });
+    },
+  );
+
+  it("holds a hidden tab's seek pre-roll to the gap a throttled check can spend", async () => {
+    const { connection, video, command, rerenderPlayer } = setup(100);
+    let paused = true;
+    Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
+    Object.defineProperty(video, "readyState", { configurable: true, value: 3 });
+    vi.mocked(video.play).mockImplementation(async () => {
+      paused = false;
+    });
+    vi.mocked(video.pause).mockImplementation(() => {
+      paused = true;
+    });
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+    try {
+      const waitingConnection = {
+        ...connection,
+        room: { ...connection.room!, playback_state: "waiting" as const },
+        transportCommand: {
+          ...command,
+          action: "seek" as const,
+          playback_state: "waiting" as const,
+          position_seconds: 1500,
+        },
+      };
+      rerenderPlayer({ watchTogetherConnection: waitingConnection });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      // A 12 s pre-roll at normal speed would outlast the room's 10 s waiting
+      // deadline, so a hidden tab still starts fast and slows as it closes in.
+      rerenderPlayer({
+        watchTogetherConnection: waitingConnection,
+        planRevision: 2,
+        plan: fixturePlanV3({
+          ...directPlan,
+          delivery: "server_remux_progressive",
+          timeline: {
+            ...directPlan.timeline,
+            source_start_seconds: 1500,
+            stream_origin_seconds: 1488,
+            timeline_offset_seconds: 1488,
+            player_start_seconds: 12,
+            can_seek_anywhere: false,
+          },
+        }),
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 1, start: () => 0, end: () => 0 },
+      });
+      video.currentTime = 0.05;
+      vi.mocked(video.play).mockClear();
+      vi.mocked(connection.sendRoomMessage).mockClear();
+      fireEvent(video, new Event("loadstart"));
+      await act(() => vi.advanceTimersByTimeAsync(600));
+      expect(video.play).toHaveBeenCalledOnce();
+      expect(video.playbackRate).toBe(4);
+
+      // Within three seconds of the target a throttled check, up to about 1.5 s
+      // late, must not carry the element past the one-second tolerance.
+      video.currentTime = 9;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(video.playbackRate).toBe(2);
+      expect(paused).toBe(false);
+
+      video.currentTime = 10.6;
+      await act(() => vi.advanceTimersByTimeAsync(60));
+      expect(video.playbackRate).toBe(1);
+      expect(paused).toBe(false);
+      expect(connection.sendRoomMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "ready" }),
+      );
+
+      // Inside the last half second a throttled check could carry the element
+      // out of the room's tolerance, so the pre-roll gives up the rest of the
+      // gap and acknowledges from where it stopped.
+      video.currentTime = 11.6;
+      fireEvent.timeUpdate(video);
+      expect(paused).toBe(true);
+      expect(connection.sendRoomMessage).toHaveBeenCalledWith({
+        type: "ready",
+        session_id: "session-1",
+        command_id: command.command_id,
+        position_seconds: 1499.6,
+        is_paused: true,
+      });
+    } finally {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
   });
 
   it("lets the host acknowledge a seek that landed short of the target", async () => {
@@ -2844,6 +3140,221 @@ describe("VideoPlayer server-invalidated transport swap", () => {
   });
 });
 
+describe("VideoPlayer subtitle sync", () => {
+  const SIDECAR = "external-" + "e".repeat(64);
+  const sidecarTrack: PlayerSubtitleInfo = {
+    index: 0,
+    language: "en",
+    label: "Movie.en.srt",
+    source: "external",
+    codec: "srt",
+    sync_key: SIDECAR,
+    url: "/api/v1/stream/session-1/subtitles/0.vtt?file_id=7",
+  };
+  const storedTrack: PlayerSubtitleInfo = {
+    index: 2,
+    language: "fr",
+    label: "French",
+    source: "downloaded",
+    codec: "srt",
+    sync_key: "stored-31",
+    url: "/api/v1/stream/session-1/subtitles/2.vtt?file_id=7&downloaded_subtitle_id=31",
+  };
+  const state = (key: string, overrides: Record<string, unknown> = {}) => ({
+    key,
+    media_file_id: "7",
+    source: key === SIDECAR ? "external" : "downloaded",
+    language: "en",
+    format: "srt",
+    label: "Movie.en.srt",
+    timing: { offset_ms: 0, scale: 1 },
+    ...overrides,
+  });
+  const timingChanged = (fileId: number, key: string): PlaybackRealtimeEventEnvelope => ({
+    type: "event",
+    session_id: "session-1",
+    name: "subtitle_timing_changed",
+    payload: { session_id: "session-1", file_id: fileId, sync_key: key },
+  });
+  const syncUpdated = (
+    job: Record<string, unknown>,
+    timing = { offset_ms: 0, scale: 1 },
+  ): PlaybackRealtimeEventEnvelope => ({
+    type: "event",
+    session_id: "session-1",
+    name: "subtitle_sync_updated",
+    payload: {
+      session_id: "session-1",
+      file_id: 7,
+      sync_key: SIDECAR,
+      timing,
+      job: {
+        id: "80",
+        trigger: "manual",
+        confidence: null,
+        created_at: "2026-01-02T03:04:05.000Z",
+        finished_at: null,
+        status: "running",
+        ...job,
+      } as never,
+    },
+  });
+  const selectTrack = (index: number) =>
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        index,
+      ),
+    );
+
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    playerV2Mock
+      .mockReset()
+      .mockImplementation(
+        async (_config: unknown, route: string, options: { path?: { key?: string } }) => {
+          if (route === "GET /api/v2/subtitles/sync/status") return { state: "available" };
+          if (route === "GET /api/v2/subtitles/{media_file_id}/sync") {
+            return { subtitles: [state(SIDECAR), state("stored-31")] };
+          }
+          if (route === "GET /api/v2/subtitles/{media_file_id}/sync/{key}") {
+            return {
+              subtitle: state(options.path?.key ?? SIDECAR, {
+                timing: { offset_ms: 1200, scale: 1 },
+              }),
+            };
+          }
+          if (route === "POST /api/v2/subtitles/{media_file_id}/sync/{key}") {
+            return {
+              subtitle: state(SIDECAR, {
+                sync: {
+                  id: "80",
+                  status: "pending",
+                  trigger: "manual",
+                  phase: "queued",
+                  progress: 0,
+                  confidence: null,
+                  created_at: "2026-01-02T03:04:05.000Z",
+                  finished_at: null,
+                },
+              }),
+            };
+          }
+          return {};
+        },
+      );
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("refetches the active track when its timing changes on this file", async () => {
+    renderPlayer({ subtitleUrls: [sidecarTrack, storedTrack] });
+    selectTrack(0);
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    // Another file's subtitle and an inactive subtitle leave the cues alone.
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(8, SIDECAR)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, "stored-31")));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(0);
+
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, SIDECAR)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    expect(subtitleTimeline.assCueRevision).toBe(1);
+    // The follow-up read refreshes the menu's status without a second reload.
+    expect(playerV2Mock).toHaveBeenCalledWith(
+      playerConfig,
+      "GET /api/v2/subtitles/{media_file_id}/sync/{key}",
+      { path: { media_file_id: "7", key: SIDECAR } },
+    );
+    expect(subtitleTimeline.cueRevision).toBe(1);
+    const sync = (
+      controls.current as unknown as {
+        subtitleSync: { entries: Record<string, { state: { timing: unknown } }> };
+      }
+    ).subtitleSync;
+    expect(sync.entries[SIDECAR]?.state.timing).toEqual({ offset_ms: 1200, scale: 1 });
+  });
+
+  it("shows a sync the viewer started from progress to the corrected cues", async () => {
+    renderPlayer({ subtitleUrls: [sidecarTrack, storedTrack] });
+    selectTrack(0);
+    await act(async () => {});
+    act(() => subtitleTimeline.setLoadState?.("ready"));
+
+    const sync = (
+      controls.current as unknown as { subtitleSync: { requestSync: (k: string) => Promise<void> } }
+    ).subtitleSync;
+    await act(async () => {
+      await sync.requestSync(SIDECAR);
+    });
+    const indicator = () => screen.getByTestId("subtitle-sync-indicator");
+    expect(indicator()).toHaveTextContent("Syncing English subtitles");
+    expect(indicator()).toHaveTextContent("Waiting to start…");
+
+    act(() =>
+      realtimeOptions.current?.onEvent?.(syncUpdated({ phase: "analyzing", progress: 0.5 })),
+    );
+    expect(indicator()).toHaveTextContent("Listening to the audio…");
+    expect(screen.getByRole("progressbar", { name: "Subtitle sync progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
+    );
+
+    act(() =>
+      realtimeOptions.current?.onEvent?.(
+        syncUpdated(
+          {
+            status: "synced",
+            result: { offset_ms: 2300, scale: 1 },
+            finished_at: "2026-01-02T03:05:05.000Z",
+          },
+          { offset_ms: 2300, scale: 1 },
+        ),
+      ),
+    );
+    await act(async () => {});
+    expect(indicator()).toHaveTextContent("Applying new timing…");
+    // The server follows the result with the timing event: one reload, and a
+    // read that finds the finished job.
+    const routes = playerV2Mock.getMockImplementation()!;
+    playerV2Mock.mockImplementation(async (config: unknown, route: string, options: unknown) =>
+      route === "GET /api/v2/subtitles/{media_file_id}/sync/{key}"
+        ? {
+            subtitle: state(SIDECAR, {
+              timing: { offset_ms: 2300, scale: 1 },
+              sync: {
+                id: "80",
+                status: "synced",
+                trigger: "manual",
+                confidence: 0.9,
+                result: { offset_ms: 2300, scale: 1 },
+                created_at: "2026-01-02T03:04:05.000Z",
+                finished_at: "2026-01-02T03:05:05.000Z",
+              },
+            }),
+          }
+        : routes(config, route, options),
+    );
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, SIDECAR)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
+
+    act(() => subtitleTimeline.setLoadState?.("loading"));
+    act(() => subtitleTimeline.setLoadState?.("ready"));
+    expect(indicator()).toHaveTextContent("Subtitles synced");
+    expect(indicator()).toHaveTextContent("+2.3 s");
+  });
+});
+
 describe("VideoPlayer translation handoff", () => {
   beforeEach(() => {
     toastError.mockClear();
@@ -3174,6 +3685,50 @@ describe("VideoPlayer translation handoff", () => {
     },
   );
 
+  it("makes the host's fullscreen root fullscreen instead of its own container", () => {
+    const root = document.createElement("div");
+    const requestRootFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(root, "requestFullscreen", {
+      value: requestRootFullscreen,
+      configurable: true,
+    });
+    const { container } = render(createElement(VideoPlayer, playerProps()), {
+      wrapper: ({ children }) =>
+        wrapper({
+          children: createElement(PlayerFullscreenRootContext.Provider, {
+            value: { current: root },
+            children,
+          }),
+        }),
+    });
+    const playerContainer = container.querySelector(".player-container") as HTMLElement;
+    const requestContainerFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(playerContainer, "requestFullscreen", {
+      value: requestContainerFullscreen,
+      configurable: true,
+    });
+
+    act(() => {
+      controls.current?.onFullscreenToggle?.();
+    });
+
+    expect(requestRootFullscreen).toHaveBeenCalledOnce();
+    expect(requestContainerFullscreen).not.toHaveBeenCalled();
+  });
+
+  it("starts in fullscreen when mounted inside a fullscreen host", () => {
+    Object.defineProperty(document, "fullscreenElement", {
+      value: document.body,
+      configurable: true,
+    });
+    try {
+      renderPlayer();
+      expect(controls.current?.isFullscreen).toBe(true);
+    } finally {
+      delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    }
+  });
+
   it("tracks WebKit fullscreen events on the video element", async () => {
     const { container } = renderPlayer();
 
@@ -3213,5 +3768,314 @@ describe("VideoPlayer translation handoff", () => {
 
     expect(video).toHaveClass("object-contain");
     expect(controls.current?.videoFit).toBe("contain");
+  });
+});
+
+describe("VideoPlayer controls auto-hide", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function renderPlaying() {
+    const rendered = renderPlayer({ shouldAutoPlay: false });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    act(() => {
+      fireEvent.play(video);
+    });
+    const container = rendered.container.querySelector(".player-container")!;
+    return { container };
+  }
+
+  it("keeps the controls up while a player menu is open", async () => {
+    const { container } = renderPlaying();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    container.appendChild(menu);
+
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(controls.current?.visible).toBe(true);
+    fireEvent.mouseLeave(container);
+    expect(controls.current?.visible).toBe(true);
+
+    menu.remove();
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(controls.current?.visible).toBe(false);
+  });
+});
+
+describe("VideoPlayer lost connection", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    hlsJS.supported = false;
+    hlsJS.constructed.mockClear();
+    hlsJS.startLoad.mockClear();
+    hlsJS.stopLoad.mockClear();
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  function setNetworkError(video: HTMLVideoElement) {
+    Object.defineProperty(video, "error", {
+      configurable: true,
+      value: { code: 2, message: "PIPELINE_ERROR_NETWORK" },
+    });
+  }
+
+  it("hands a network error on a stream that played to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    fireFrameTimeUpdate(video);
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    // The viewer seeks past the buffered range while the server is down.
+    act(() => controls.current?.onSeek(1_200));
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+    expect(screen.queryByText("Go Back")).not.toBeInTheDocument();
+  });
+
+  it("sends a replacement transport's network error before its first frame to route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    // A quality change hands over a new route that never shows a frame.
+    const nextPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:2222222222222222",
+      plan_attempt_key: "v3:2222222222222222",
+    });
+    rerenderPlayer({ plan: nextPlan, planRevision: 2 });
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+
+    // Once that transport plays, a network error is a lost connection again.
+    const thirdPlan = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:3333333333333333",
+      plan_attempt_key: "v3:3333333333333333",
+    });
+    rerenderPlayer({ plan: thirdPlan, planRevision: 3 });
+    fireFrameTimeUpdate(video);
+    fireEvent.error(video);
+    expect(onConnectionLost).toHaveBeenCalledOnce();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a network error before the first frame on route recovery", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("pauses behind a reconnecting notice the viewer can leave", async () => {
+    const onExit = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container, rerenderPlayer } = renderPlayer({ onExit, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    vi.mocked(HTMLMediaElement.prototype.pause).mockClear();
+
+    rerenderPlayer({ connectionStatus: "reconnecting" });
+
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent("Reconnecting…");
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled();
+    expect(screen.queryByText("Try again")).not.toBeInTheDocument();
+    // Route failures of the dead transport are not reported while reconnecting.
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Go Back" }));
+    await waitFor(() => expect(onExit).toHaveBeenCalled());
+  });
+
+  it("offers Try again once reconnecting gave up", () => {
+    const onRetryConnection = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({
+      onRetryConnection,
+      onPlanFailure,
+      connectionStatus: "lost",
+      connectionErrorTitle: "Connection lost",
+      connectionError: "Silo lost its connection to the server and couldn't reconnect.",
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Connection lost");
+    expect(screen.queryByText(/could not start playback/)).not.toBeInTheDocument();
+    setMediaError(video, "decoder failed");
+    fireEvent.error(video);
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetryConnection).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("keeps subtitles off when a reconnect had to start a new session", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const sidecarTrack: PlayerSubtitleInfo = {
+      index: 2,
+      media_file_id: 7,
+      track_id: "file:7:subtitle:2",
+      language: "en",
+      codec: "srt",
+      label: "English",
+      source: "external",
+      url: "/stream/session-1/subtitles/2.vtt",
+    };
+    const withSubtitle = fixturePlanV3({
+      ...directPlan,
+      selected_tracks: { ...directPlan.selected_tracks, subtitle: { id: "", index: 2 } },
+    });
+    const { rerenderPlayer } = renderPlayer({
+      plan: withSubtitle,
+      subtitleUrls: [sidecarTrack],
+      subtitleMode: "always",
+      preferredSubtitleLanguage: "en",
+      onSubtitleTrackChange,
+    });
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(2));
+
+    // The viewer turns subtitles off, and the replan for it lands.
+    act(() =>
+      (
+        controls.current as unknown as { onSubtitleSelect: (i: number | null) => void }
+      ).onSubtitleSelect(null),
+    );
+    await waitFor(() => expect(onSubtitleTrackChange).toHaveBeenCalledWith(null, 0));
+    rerenderPlayer({ plan: directPlan, planRevision: 2 });
+
+    // The server restarts: the reconnect starts session-2 with no subtitle.
+    rerenderPlayer({ plan: directPlan, planRevision: 2, connectionStatus: "reconnecting" });
+    const restarted = fixturePlanV3({
+      ...directPlan,
+      plan_id: "plan:restarted",
+      session_id: "session-2",
+    });
+    rerenderPlayer({
+      plan: restarted,
+      planRevision: 3,
+      sessionId: "session-2",
+      connectionStatus: "connected",
+    });
+    await act(async () => Promise.resolve());
+
+    expect(controls.current?.activeSubtitleIndex).toBeNull();
+    expect(onSubtitleTrackChange).toHaveBeenCalledOnce();
+  });
+
+  it("hands a fatal hls.js network error on a stream that played to the reconnect", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({ plan, onConnectionLost });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    const fatalNetworkError = {
+      fatal: true,
+      type: "networkError",
+      details: "fragLoadError",
+    };
+    // Before the first frame, hls.js keeps its startup recovery.
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    expect(onConnectionLost).not.toHaveBeenCalled();
+
+    fireFrameTimeUpdate(video);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(onConnectionLost).toHaveBeenCalledOnce();
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+  });
+
+  it("gives a replacement HLS transport that never played its startup recovery", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    // Direct play has been running; a quality change moves it to a transcode
+    // on a node this browser cannot reach.
+    const { container, rerenderPlayer } = renderPlayer({ onConnectionLost, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    fireFrameTimeUpdate(video);
+
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:2222222222222222",
+      plan_attempt_key: "v3:2222222222222222",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    rerenderPlayer({ plan: hlsPlan, planRevision: 2 });
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    const fatalNetworkError = { fatal: true, type: "networkError", details: "fragLoadError" };
+    vi.spyOn(Date, "now").mockReturnValue(10_000);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    // The startup guard gives up on a second fatal network error and reports
+    // the route as failed, so the server can pick another one.
+    vi.spyOn(Date, "now").mockReturnValue(20_000);
+    act(() => hlsJS.latest?.emit("error", fatalNetworkError));
+
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(onPlanFailure).toHaveBeenCalledOnce();
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
   });
 });

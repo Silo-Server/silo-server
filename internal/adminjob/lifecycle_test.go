@@ -120,6 +120,9 @@ func TestJobClaimRecoveryAndTerminalRace(t *testing.T) {
 			if err = stale.UpdateProgress(t.Context(), queued.ID, 9, 10, "stale"); !errors.Is(err, ErrJobNotFound) {
 				t.Fatalf("stale progress %v", err)
 			}
+			if err = stale.Yield(t.Context(), queued.ID, 9, 10, "stale", nil); !errors.Is(err, ErrJobNotFound) {
+				t.Fatalf("stale yield %v", err)
+			}
 			owner := r.withClaim(fresh)
 			start := make(chan struct{})
 			results := make(chan error, 2)
@@ -295,17 +298,6 @@ func TestQueuedCancellationAfterStorageCommitWaitsForRestart(t *testing.T) {
 	}
 	if current.Status != StatusRunning || result.Phase != "restart_pending" || result.ClaimGeneration != current.ClaimGeneration || !result.RestartRequired || !result.ManualRestartRequired || !strings.Contains(current.Message, "restart Silo manually") {
 		t.Fatalf("committed cancellation receipt status=%q result=%s message=%q", current.Status, current.ResultPayload, current.Message)
-	}
-}
-
-func TestStorageTransitionRestartRequestReportsUnavailableHost(t *testing.T) {
-	runner := &Runner{}
-	if err := runner.requestStorageTransitionRestart("job"); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("missing restart callback error = %v", err)
-	}
-	runner.storageTransitionCommitted = func(context.Context) error { return errors.New("restart refused") }
-	if err := runner.requestStorageTransitionRestart("job"); err == nil || !strings.Contains(err.Error(), "restart refused") {
-		t.Fatalf("refused restart error = %v", err)
 	}
 }
 

@@ -28,12 +28,18 @@ import type {
 import { uploadAdminPlugin } from "@/api/v2/adminPluginUpload";
 import type { ChunkedUploadProgress } from "@/api/v2/adminPluginUpload";
 import { adminKeys } from "../keys";
+import { refreshRatingChoice } from "../ratingsSurfaceRefresh";
+import { refreshAuthProviders } from "../authProviders";
 
 const ADMIN_STALE_TIME = 30_000;
 export const CHECK_PLUGIN_UPDATES_TASK_KEY = "check_plugin_updates";
 
 function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  // Installing, updating, enabling, disabling or removing a plugin can change
+  // the ratings metadata plugins declare, so rating surfaces refresh too.
+  refreshRatingChoice(queryClient);
   return Promise.all([
+    refreshAuthProviders(queryClient),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() }),
@@ -222,16 +228,22 @@ export function useAdminPluginRepositories() {
   });
 }
 
-export function useAdminPlugins() {
-  const repositoriesQuery = useAdminPluginRepositories();
-
+// useAdminPluginCatalog reads the merged catalog. The server fetches every
+// repository index live for this call, so pages that only sometimes need the
+// catalog (a plugin page previewing an uninstalled plugin) pass `enabled`.
+export function useAdminPluginCatalog(options: { enabled?: boolean } = {}) {
   const profileContext = captureProfileRequestContext();
-  const catalogQuery = useQuery({
+  return useQuery({
     queryKey: [...adminKeys.pluginCatalog(), ...profileScopeKey(profileContext)],
     queryFn: () => fetchPluginCatalog(profileContext),
     staleTime: ADMIN_STALE_TIME,
-    enabled: profileContext !== null,
+    enabled: profileContext !== null && (options.enabled ?? true),
   });
+}
+
+export function useAdminPlugins() {
+  const repositoriesQuery = useAdminPluginRepositories();
+  const catalogQuery = useAdminPluginCatalog();
 
   const installationsQuery = useAdminPluginInstallations();
 
@@ -376,9 +388,11 @@ export function useCreatePluginRepository() {
   });
   return {
     ...mutation,
-    mutate: (body: CreatePluginRepositoryRequest) => {
+    mutate: (body: CreatePluginRepositoryRequest, options?: { onSuccess?: () => void }) => {
       try {
-        mutation.mutate(captureRepositoryCreation(body));
+        mutation.mutate(captureRepositoryCreation(body), {
+          onSuccess: () => options?.onSuccess?.(),
+        });
       } catch {
         toast.error("Select an administrator profile before adding a repository.");
       }
@@ -810,9 +824,9 @@ export function useDeletePluginInstallation() {
   });
   return {
     ...mutation,
-    mutate: (id: number) => {
+    mutate: (id: number, options?: { onSuccess?: () => void }) => {
       try {
-        mutation.mutate(captureInstallation(id));
+        mutation.mutate(captureInstallation(id), { onSuccess: () => options?.onSuccess?.() });
       } catch {
         toast.error("Select an administrator profile before removing a plugin.");
       }
@@ -965,7 +979,8 @@ export function useSavePluginAuthBinding() {
     retry: false,
     onSuccess: (_result, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.success("Auth binding saved — restart the server to apply it");
+      // Sign-in providers rebuild on every node when a binding changes.
+      toast.success("Sign-in provider saved");
       invalidatePluginQueries(queryClient);
     },
     onError: (error, intent) => {

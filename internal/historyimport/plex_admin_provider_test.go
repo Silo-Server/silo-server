@@ -36,7 +36,7 @@ func TestPlexAdminProviderEnrichesLocalizedMovieForStableMatching(t *testing.T) 
 	defer server.Close()
 
 	provider := NewPlexAdminProvider(newUnthrottledPlexClient(), server.URL, "admin-token", "7")
-	records, warnings, err := provider.Fetch(context.Background())
+	records, warnings, err := provider.Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPlexAdminProviderEnrichesLocalizedMovieForStableMatching(t *testing.T) 
 	repo := &matcherRepoStub{mediaByExternal: map[string][]mediaLookupRow{
 		"movie:tmdb_id:278": {{ContentID: "movie-278", Title: "The Shawshank Redemption", Year: 1994}},
 	}}
-	match, reason, err := NewMatcher(repo).Match(context.Background(), record)
+	match, reason, err := NewMatcher(repo).Match(trustLoopback(context.Background()), record)
 	if err != nil || reason != "" || match == nil || match.MediaItemID != "movie-278" {
 		t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
 	}
@@ -91,7 +91,7 @@ func TestPlexAdminProviderTreatsPlexOnlyGuidAsUnresolved(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestPlexAdminProviderAcceptsMovieTVDBGuid(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestPlexAdminProviderFetchesMetadataOncePerRatingKey(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestPlexAdminProviderSkipsMetadataForStableProviderGuid(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestPlexAdminProviderMetadataFailureLeavesItemUnmatched(t *testing.T) {
 
 			records, warnings, err := NewPlexAdminProvider(
 				newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-			).Fetch(context.Background())
+			).Fetch(trustLoopback(context.Background()))
 			if err != nil {
 				t.Fatalf("Fetch: %v", err)
 			}
@@ -251,7 +251,7 @@ func TestPlexAdminProviderMetadataFailureLeavesItemUnmatched(t *testing.T) {
 				t.Fatalf("warnings = %v, want the first upstream error named", warnings)
 			}
 
-			match, reason, err := NewMatcher(&matcherRepoStub{}).Match(context.Background(), records[0])
+			match, reason, err := NewMatcher(&matcherRepoStub{}).Match(trustLoopback(context.Background()), records[0])
 			if err != nil || match != nil || reason != missingProviderIDsReason {
 				t.Fatalf("match = %+v, reason = %q, err = %v", match, reason, err)
 			}
@@ -284,7 +284,7 @@ func TestPlexAdminProviderPreservesEpisodeSeriesEnrichment(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestPlexAdminProviderUsesOneSeriesRequestForEpisodeHistory(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestPlexAdminProviderBatchesItemMetadataRequests(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestPlexAdminProviderRetriesFailedBatchPerKey(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestPlexAdminProviderDoesNotRetrySystematicBatchFailurePerKey(t *testing.T)
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestFetchMetadataBatchReadsVideoResponse(t *testing.T) {
 	defer server.Close()
 
 	items, err := newUnthrottledPlexClient().FetchMetadataBatch(
-		context.Background(), server.URL, "admin-token", []string{"42"},
+		trustLoopback(context.Background()), server.URL, "admin-token", []string{"42"},
 	)
 	if err != nil {
 		t.Fatalf("FetchMetadataBatch: %v", err)
@@ -569,7 +569,7 @@ func TestPlexAdminProviderSkipsMetadataForNonVideoItems(t *testing.T) {
 
 	_, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestPlexAdminProviderSkipsMetadataForNonVideoItems(t *testing.T) {
 func TestPlexAdminProviderAbortsMetadataSweepOnCancel(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(trustLoopback(context.Background()))
 	defer cancel()
 	metadataCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -677,7 +677,7 @@ func TestPlexAdminProviderResolvesSeriesFromGrandparentKey(t *testing.T) {
 
 	records, warnings, err := NewPlexAdminProvider(
 		newUnthrottledPlexClient(), server.URL, "admin-token", "7",
-	).Fetch(context.Background())
+	).Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}

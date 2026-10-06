@@ -12,7 +12,8 @@ import {
 } from "@/lib/settingsContract";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
-import { deviceKeys, settingsKeys } from "./keys";
+import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
+import { deviceKeys, sectionKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -240,6 +241,50 @@ export function useSettingValue<T = unknown>(
   };
 }
 
+/**
+ * The values stored at exactly one scope, keyed by setting. A key with nothing
+ * stored there is absent from the map.
+ *
+ * The effective read names only the winning scope, so a row the resolver
+ * passes over — a device value kept while the profile's "apply to all
+ * devices" value wins — is invisible to it. A screen that must show or reset
+ * that row reads it here.
+ */
+export function useStoredSettingValues(options: {
+  keys: readonly SettingKey[];
+  identity: SettingIdentity;
+  enabled?: boolean;
+}) {
+  const { keys, identity } = options;
+  return useQuery({
+    queryKey: [
+      ...settingsKeys.all,
+      "values",
+      "stored",
+      identity.profileId ?? activeProfileId(),
+      identity.scope,
+      identity.deviceId ?? "",
+      identity.libraryId ?? "",
+      identity.seriesId ?? "",
+      [...keys].sort().join(","),
+    ] as const,
+    queryFn: async () => {
+      const result = await v2("GET /api/v2/settings/values", {
+        query: { ...identityQuery(identity), keys: [...keys] },
+      });
+      const byKey: Partial<Record<SettingKey, unknown>> = {};
+      for (const item of result.items) {
+        if (item.is_set && KNOWN_SETTING_KEYS.has(item.key)) {
+          byKey[item.key as SettingKey] = item.value;
+        }
+      }
+      return byKey;
+    },
+    enabled: (options.enabled ?? true) && keys.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 /** The HTTP status of a documented v2 problem, or null for anything else (transport, network). */
 export function settingMutationStatus(error: unknown): number | null {
   return error instanceof V2ProblemError ? error.status : null;
@@ -265,12 +310,24 @@ function shouldReconcileAfterMutationError(error: unknown): boolean {
   return !isDefinitiveSettingMutationRejection(error);
 }
 
-function invalidateSettingValueQueries(
+function refreshHomeForSetting(queryClient: ReturnType<typeof useQueryClient>, key?: string) {
+  if (key !== SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS) return;
+  // Home uses observer-less fetchQuery calls. Mark its data stale before
+  // resetting the load queue, including when the settings screen has unmounted.
+  return queryClient
+    .invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" })
+    .then(() => bumpHomeRefreshSignal(queryClient));
+}
+
+/** Refreshes the reads a setting write changes, as useSetSettingValue does. */
+export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
   identity: SettingIdentity,
+  key: SettingKey,
 ) {
   const invalidations = [
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
+    refreshHomeForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -312,12 +369,12 @@ export function useSetSettingValue() {
       // Keep ordinary controls pending until their active effective-value
       // reads reconcile. Otherwise a rapid follow-up edit can spread a stale
       // object and silently undo the first field that was just saved.
-      return invalidateSettingValueQueries(qc, variables.identity);
+      return invalidateSettingValueQueries(qc, variables.identity, variables.key);
     },
     onError: (error, variables) => {
       if (variables.invalidateOnSettled === false) return;
       if (shouldReconcileAfterMutationError(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
       }
     },
   });
@@ -377,13 +434,13 @@ export function useClearSettingValue() {
     mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
       v2("DELETE /api/v2/settings/values/{key}", { path: { key }, query: identityQuery(identity) }),
     onSuccess: (_data, variables) => {
-      return invalidateSettingValueQueries(qc, variables.identity);
+      return invalidateSettingValueQueries(qc, variables.identity, variables.key);
     },
     onError: (error, variables) => {
       // DELETE is idempotent for reset callers: a 404 means another client
       // already cleared the value, so stale effective caches must catch up.
       if (shouldReconcileAfterMutationError(error) || isSettingValueMissing(error)) {
-        return invalidateSettingValueQueries(qc, variables.identity);
+        return invalidateSettingValueQueries(qc, variables.identity, variables.key);
       }
     },
   });
@@ -509,6 +566,7 @@ export function useSettingValuesRealtime() {
         if (changedProfile && activeProfile && changedProfile !== activeProfile) return;
 
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+        void refreshHomeForSetting(qc, event.data?.key);
       },
     }),
     [qc],

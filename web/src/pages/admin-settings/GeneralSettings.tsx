@@ -15,11 +15,12 @@ import { FieldGroup } from "./FieldGroup";
 // public signups on the Invite Codes tab; both are plain server-wide switches an
 // admin looks for under General, so they save with everything else on this page.
 const IDENTITY_KEYS = ["branding.server_name", "branding.login_subtitle"];
-const ACCESS_KEYS = ["signup.enabled"];
+const ACCESS_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
 const LOGGING_ADVANCED_KEYS = ["server.log_quiet"];
 const LOGGING_KEYS = ["server.log_level", ...LOGGING_ADVANCED_KEYS];
 
-const KEYS = ["server.public_url", ...IDENTITY_KEYS, ...ACCESS_KEYS, ...LOGGING_KEYS];
+const NETWORK_KEYS = ["server.public_url", "server.lan_discovery"];
+const KEYS = [...NETWORK_KEYS, ...IDENTITY_KEYS, ...ACCESS_KEYS, ...LOGGING_KEYS];
 
 export default function GeneralSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
@@ -75,7 +76,11 @@ export default function GeneralSettings() {
           />
         </FieldGroup>
 
-        <FieldGroup label="Network">
+        <FieldGroup
+          label="Network"
+          restartAll={allRestart(NETWORK_KEYS)}
+          dirty={anyDirty(NETWORK_KEYS)}
+        >
           <SettingField
             label="Silo public URL"
             settingKey="server.public_url"
@@ -85,6 +90,16 @@ export default function GeneralSettings() {
             value={form.getValue("server.public_url")}
             onChange={(v) => form.setValue("server.public_url", v)}
             restartRequired={restartKeys.has("server.public_url")}
+          />
+          <SettingField
+            label="Show on the local network"
+            settingKey="server.lan_discovery"
+            dirty={form.isDirty("server.lan_discovery")}
+            type="toggle"
+            description="Silo apps on the same network list this server when adding one, so nobody has to type its address. Needs a network that passes multicast (Docker host networking, not the default bridge)."
+            value={form.getValue("server.lan_discovery")}
+            onChange={(v) => form.setValue("server.lan_discovery", v)}
+            restartRequired={restartKeys.has("server.lan_discovery")}
           />
         </FieldGroup>
 
@@ -111,6 +126,16 @@ export default function GeneralSettings() {
             value={form.getValue("signup.enabled")}
             onChange={(v) => form.setValue("signup.enabled", v)}
             restartRequired={restartKeys.has("signup.enabled")}
+          />
+          <SettingField
+            label="Self-service password reset"
+            settingKey="password_reset.self_service_enabled"
+            dirty={form.isDirty("password_reset.self_service_enabled")}
+            type="toggle"
+            description="Adds “Forgot password?” to the sign-in page, so people can get a reset link by email. Needs email and the public URL."
+            value={form.getValue("password_reset.self_service_enabled")}
+            onChange={(v) => form.setValue("password_reset.self_service_enabled", v)}
+            restartRequired={restartKeys.has("password_reset.self_service_enabled")}
           />
         </FieldGroup>
 

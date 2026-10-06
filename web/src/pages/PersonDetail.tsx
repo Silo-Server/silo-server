@@ -4,11 +4,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, RefreshCw } from "lucide-react";
 
 import { getPerson } from "@/api/v2/people";
+import { isNotFoundProblem } from "@/api/v2/request";
 import { createEmptyQueryDefinition, type Person } from "@/api/types";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import EditPersonDialog from "@/components/EditPersonDialog";
 import ItemGrid from "@/components/ItemGrid";
 import PageBack from "@/components/PageBack";
+import PageUnavailable from "@/components/PageUnavailable";
 import { Button } from "@/components/ui/button";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { personKeys } from "@/hooks/queries/keys";
@@ -36,7 +38,13 @@ export default function PersonDetail() {
   const isAdmin = useIsActingAdmin();
   const refreshMutation = useRefreshPerson(id, isAdmin);
 
-  const { data: person, isLoading: personLoading } = useQuery({
+  const {
+    data: cachedPerson,
+    isLoading: personLoading,
+    isFetching: personFetching,
+    error: personError,
+    refetch: refetchPerson,
+  } = useQuery({
     queryKey: personKeys.detail(id!),
     queryFn: ({ signal }) => getPerson(id!, { signal }),
     enabled: !!id,
@@ -45,7 +53,12 @@ export default function PersonDetail() {
     refetchOnMount: "always",
   });
 
-  useDocumentTitle(person?.name ?? "Person");
+  // A 404 outranks a cached person: the view read runs even over prefetched
+  // data, and a person it finds gone must not keep their old page.
+  const personNotFound = isNotFoundProblem(personError);
+  const person = personNotFound ? undefined : cachedPerson;
+
+  useDocumentTitle(personNotFound ? "Not found" : (person?.name ?? "Person"));
 
   const hasPerson = !!person;
   useEffect(() => {
@@ -97,10 +110,21 @@ export default function PersonDetail() {
   }
 
   if (!person) {
+    if (personError && !isNotFoundProblem(personError)) {
+      return (
+        <PageUnavailable
+          title="Couldn't load this person"
+          description="Something went wrong while loading them. Try again in a moment."
+          onRetry={() => void refetchPerson()}
+          retrying={personFetching}
+        />
+      );
+    }
     return (
-      <div className="page-shell flex min-h-[40vh] items-center justify-center">
-        <p className="text-muted-foreground">Person not found.</p>
-      </div>
+      <PageUnavailable
+        title="This person isn't available"
+        description="They may have been removed from the catalog, or the link may be wrong."
+      />
     );
   }
 

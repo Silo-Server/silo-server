@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -15,38 +17,102 @@ const wsKeepAlive = "KeepAlive"
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
+// wsMessage is one socket frame. Jellyfin stamps every outbound message with
+// a fresh MessageId, and jellyfin-sdk-kotlin rejects messages without one.
 type wsMessage struct {
 	MessageType string          `json:"MessageType"`
 	Data        json.RawMessage `json:"Data,omitempty"`
+	MessageID   string          `json:"MessageId,omitempty"`
 }
 
 // NewSocketHandler implements Jellyfin's application KeepAlive protocol without
 // advertising remote-control commands. Tokens are revalidated while connected.
 func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) http.HandlerFunc {
+	return NewSocketHandlerWithUserData(sessions, keys, nil, nil)
+}
+
+// NewSocketHandlerWithUserData is NewSocketHandler that also forwards the
+// session's watched-state changes as Jellyfin UserDataChanged messages, so
+// clients such as Jellyfin Web refresh Continue Watching without a reload.
+func NewSocketHandlerWithUserData(sessions *SessionStore, keys *AdminAPIKeyAuthenticator, events UserStateEvents, codec *ResourceIDCodec) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token, ok := ExtractToken(r)
-		validate := func(ctx context.Context) bool {
+		resolve := func(ctx context.Context) *Session {
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 			if strings.HasPrefix(token, "sa_") {
 				session, _, _ := keys.resolveSession(ctx, token)
-				return session != nil
+				return session
 			}
 			if sessions == nil {
-				return false
+				return nil
 			}
 			if sessions.repo != nil {
 				session, err := sessions.repo.GetByToken(ctx, token, sessions.now())
-				return err == nil && session != nil
+				if err != nil {
+					return nil
+				}
+				return session
 			}
-			_, ok := sessions.Get(token)
-			return ok
+			session, ok := sessions.Get(token)
+			if !ok {
+				return nil
+			}
+			return session
 		}
-		if !ok || !validate(r.Context()) {
+		validate := func(ctx context.Context) bool { return resolve(ctx) != nil }
+		if !ok {
 			writeError(w, 401, "Unauthorized", "Invalid or expired authentication token")
 			return
 		}
-		serveCompatSocket(w, r, validate, 12*time.Second)
+		session := resolve(r.Context())
+		if session == nil {
+			writeError(w, 401, "Unauthorized", "Invalid or expired authentication token")
+			return
+		}
+		var notices <-chan wsMessage
+		if events != nil && codec != nil {
+			var stop func()
+			notices, stop = userDataNotices(events, session, codec)
+			defer stop()
+		}
+		serveCompatSocketWithNotices(w, r, validate, 12*time.Second, notices)
+	}
+}
+
+// userDataNotices subscribes to the realtime hub and yields the session's
+// UserDataChanged messages until stop is called. A slow socket drops notices
+// rather than blocking the hub: any later one refreshes the same list.
+func userDataNotices(events UserStateEvents, session *Session, codec *ResourceIDCodec) (<-chan wsMessage, func()) {
+	envelopes, unsubscribe := events.Subscribe()
+	notices := make(chan wsMessage, 8)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case env, ok := <-envelopes:
+				if !ok {
+					return
+				}
+				msg, ok := userDataChangedFor(env, session, codec)
+				if !ok {
+					continue
+				}
+				select {
+				case notices <- msg:
+				default:
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return notices, func() {
+		once.Do(func() {
+			close(done)
+			unsubscribe()
+		})
 	}
 }
 
@@ -56,6 +122,13 @@ func NewSocketHandler(sessions *SessionStore, keys *AdminAPIKeyAuthenticator) ht
 // check would grow without bound. Each check starts its own trace instead,
 // while the request's cancellation and values still apply.
 func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(context.Context) bool, checkInterval time.Duration) {
+	serveCompatSocketWithNotices(w, r, validate, checkInterval, nil)
+}
+
+// serveCompatSocketWithNotices is serveCompatSocket that also writes each
+// server-initiated message from notices to the client. A nil channel sends
+// none.
+func serveCompatSocketWithNotices(w http.ResponseWriter, r *http.Request, validate func(context.Context) bool, checkInterval time.Duration, notices <-chan wsMessage) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -85,6 +158,7 @@ func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(con
 		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 			return err
 		}
+		message.MessageID = uuid.NewString()
 		return conn.WriteJSON(message)
 	}
 	force := wsMessage{MessageType: "ForceKeepAlive", Data: json.RawMessage("60")}
@@ -100,6 +174,10 @@ func serveCompatSocket(w http.ResponseWriter, r *http.Request, validate func(con
 			return
 		case <-readDone:
 			return
+		case notice := <-notices:
+			if err := write(notice); err != nil {
+				return
+			}
 		case msg := <-messages:
 			if msg.MessageType == wsKeepAlive {
 				lastKeepAlive = time.Now()

@@ -62,7 +62,10 @@ func (s *populationRecorder) Cooldown(_ context.Context, provider, _ string, unt
 func (s *populationRecorder) Cached(context.Context, int, string) (map[string]Result, error) {
 	return s.cached, nil
 }
-func (s *populationRecorder) Candidates(context.Context, map[string]string, int, int, bool) ([]int, error) {
+func (s *populationRecorder) CooldownEnd(context.Context, map[string]string) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (s *populationRecorder) Candidates(context.Context, map[string]string) ([]int, error) {
 	return nil, nil
 }
 
@@ -184,6 +187,38 @@ func TestPopulationQuotaPreservesCachedPreferredProvider(t *testing.T) {
 	}
 	if store.completions["preferred"].Outcome != "limited" || store.completions["fallback"].Result == nil {
 		t.Fatalf("incorrect request states: %+v", store.completions)
+	}
+}
+
+// Recent releases keep short retries while crowd-sourced markers arrive;
+// older ones follow the long durations a quota-limited sync needs.
+func TestPopulationStoredFreshnessFollowsReleaseDate(t *testing.T) {
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		name     string
+		markers  []Marker
+		released time.Duration
+		want     time.Duration
+	}{
+		{"recent miss", nil, -2 * day, markerRecentMissTTL},
+		{"recent hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -2 * day, markerRecentPositiveTTL},
+		{"old miss", nil, -365 * day, markerMissTTL},
+		{"old hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -365 * day, markerPositiveTTL},
+		{"upcoming miss", nil, 2 * day, markerRecentMissTTL},
+		{"far future miss", nil, 90 * day, markerMissTTL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{Markers: tc.markers}, nil }}
+			service, store := populationFixture(t, OnlineStorageStored, provider)
+			service.opts.Resolver = populationResolver{ExternalIDs{Kind: ItemKindMovie, TmdbID: "42", Released: time.Now().Add(tc.released)}}
+			service.opts.Write = func(context.Context, *models.MediaFile, Result) (bool, error) { return true, nil }
+			if _, _, err := service.Populate(t.Context(), &models.MediaFile{ID: 1, Duration: 1000}); err != nil {
+				t.Fatal(err)
+			}
+			if got := time.Until(store.completions["provider"].RetryAt); got < tc.want-time.Minute || got > tc.want {
+				t.Fatalf("result fresh for %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -47,7 +47,7 @@ func adminAccountsDB(t *testing.T) *UserRepository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL)`)
+	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL); CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL); CREATE TRIGGER api_key_configuration_revision BEFORE INSERT OR UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION public.advance_api_key_configuration_revision(); CREATE TABLE password_reset_tokens (LIKE public.password_reset_tokens INCLUDING ALL); CREATE TABLE invitations (LIKE public.invitations INCLUDING ALL)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +103,9 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := r.pool.Exec(t.Context(), `INSERT INTO abs_sessions(user_id, token_hash, device_id) VALUES ($1, 'abs-token', 'abs-device')`, u.ID); err != nil {
+		t.Fatal(err)
+	}
 	before, err := r.GetAdminSnapshot(t.Context(), u.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +138,10 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 		if err != nil || valid {
 			t.Fatalf("session %s valid=%v err=%v", id, valid, err)
 		}
+	}
+	var liveABS int
+	if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL`, u.ID).Scan(&liveABS); err != nil || liveABS != 0 {
+		t.Fatalf("%d Audiobookshelf sessions survived (%v)", liveABS, err)
 	}
 	fresh := uuid.NewString()
 	if err := NewSessionRepository(r.pool).Create(t.Context(), models.AuthSession{ID: fresh, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -181,5 +188,77 @@ func TestAdminAccountMutationRollbackAndDelete(t *testing.T) {
 	}
 	if valid, err := NewSessionRepository(r.pool).IsValid(t.Context(), session); err != nil || valid {
 		t.Fatalf("impersonation survived deletion: %v %v", valid, err)
+	}
+}
+
+// A role change keeps the account's own sessions, which then report the new
+// role so access tokens minted under the old one must be refreshed, and ends
+// every impersonation session the account started or that views as it.
+func TestAdminAccountRoleChangeKeepsSessionsAndEndsImpersonationPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	sessions := NewSessionRepository(r.pool)
+	admin := testAdminAccount(t, r)
+	if err := r.Update(t.Context(), admin.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+		t.Fatal(err)
+	}
+	viewed := testAdminAccount(t, r)
+	promoted := testAdminAccount(t, r)
+	bystander := testAdminAccount(t, r)
+	own, startedByAdmin, viewingPromoted, unrelated := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, s := range []models.AuthSession{
+		{ID: own, UserID: admin.ID, ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: startedByAdmin, UserID: viewed.ID, ImpersonatorUserID: new(admin.ID), ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: viewingPromoted, UserID: promoted.ID, ImpersonatorUserID: new(admin.ID), ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: unrelated, UserID: viewed.ID, ImpersonatorUserID: new(bystander.ID), ExpiresAt: time.Now().Add(time.Hour)},
+	} {
+		if err := sessions.Create(t.Context(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	activeRole := func(id string) (string, bool) {
+		t.Helper()
+		role, active, err := sessions.ActiveSessionRole(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return role, active
+	}
+	if role, active := activeRole(own); !active || role != models.RoleAdmin {
+		t.Fatalf("own session before demotion: role %q active %v", role, active)
+	}
+
+	// The handlers' rule no longer asks MutateAdminAccount to sign out.
+	if _, err := r.MutateAdminAccount(t.Context(), admin.ID, -1, &models.UpdateUserInput{Role: new(models.RoleUser)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if role, active := activeRole(own); !active || role != models.RoleUser {
+		t.Fatalf("own session after demotion: role %q active %v, want it kept with role user", role, active)
+	}
+	if _, active := activeRole(startedByAdmin); active {
+		t.Fatal("the demoted admin's impersonation session survived")
+	}
+	if _, active := activeRole(unrelated); !active {
+		t.Fatal("another admin's impersonation session was ended")
+	}
+
+	// viewingPromoted was started by the now-demoted admin and is already
+	// gone; a fresh session viewing as the account shows promotion ends it.
+	viewingBeforePromotion := uuid.NewString()
+	if err := sessions.Create(t.Context(), models.AuthSession{ID: viewingBeforePromotion, UserID: promoted.ID, ImpersonatorUserID: new(bystander.ID), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.MutateAdminAccount(t.Context(), promoted.ID, -1, &models.UpdateUserInput{Role: new(models.RoleAdmin)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := activeRole(viewingBeforePromotion); active {
+		t.Fatal("an impersonation session viewing as the promoted account survived")
+	}
+
+	// Resending the current role changes nothing.
+	if _, err := r.MutateAdminAccount(t.Context(), bystander.ID, -1, &models.UpdateUserInput{Role: new(models.RoleUser)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := activeRole(unrelated); !active {
+		t.Fatal("an unchanged role ended impersonation sessions")
 	}
 }

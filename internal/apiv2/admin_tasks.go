@@ -40,8 +40,11 @@ type AdminTaskExecution struct {
 }
 
 type AdminTaskMarkerResult struct {
-	Submitted         int `json:"submitted"`
-	Skipped           int `json:"skipped"`
+	Submitted int `json:"submitted"`
+	Skipped   int `json:"skipped"`
+	// Invalid counts items the provider refused, such as a season it does not
+	// list. They are retried after 30 days rather than every run.
+	Invalid           int `json:"invalid"`
 	Failed            int `json:"failed"`
 	RetryAfterSeconds int `json:"retry_after_seconds"`
 }

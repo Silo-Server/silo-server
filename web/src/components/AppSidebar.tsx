@@ -69,9 +69,6 @@ import {
   Send,
   Bell,
 } from "lucide-react";
-import { isKeyboardFocus, useTheme } from "@/hooks/useTheme";
-import { CURATED_THEME_IDS, THEMES } from "@/lib/themes";
-import { cn } from "@/lib/utils";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 
@@ -122,7 +119,8 @@ function SidebarSectionHeader({
   expanded?: boolean;
   onToggle?: () => void;
 }) {
-  const textClass = "text-muted-foreground text-[10px] font-semibold tracking-[0.22em] uppercase";
+  const textClass =
+    "text-muted-foreground text-[0.625rem] font-semibold tracking-[0.22em] uppercase";
 
   // Centred on the 64px rail, not on the 260px surface. `-left-3` cancels the
   // nav's own `px-3`, so this box starts at the sidebar's left edge and spans
@@ -194,7 +192,6 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const params = useParams<{ libraryId: string }>();
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
-  const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
@@ -430,7 +427,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
     navLinkClassForState(isActive(href, exact));
 
   const navLinkClassForState = (active: boolean) =>
-    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[13px] font-medium transition-all duration-200 ${
+    `relative flex items-center gap-2.5 rounded-xl px-3 py-3 text-[0.8125rem] font-medium transition-all duration-200 ${
       active
         ? "text-sidebar-accent-foreground bg-sidebar-accent/90 shadow-[0_16px_30px_-24px_rgba(0,0,0,0.7)]"
         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
@@ -592,7 +589,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       <li key={lib.id}>
                         {/* Library row: chevron (if pins) + icon + name link */}
                         <div
-                          className={`relative flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150 ${
+                          className={`relative flex items-center rounded-lg text-[0.8125rem] font-medium transition-colors duration-150 ${
                             active
                               ? "text-sidebar-accent-foreground bg-sidebar-accent"
                               : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
@@ -675,7 +672,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                                   <ViewTransitionLink
                                     to={pinHref}
                                     onClick={onNavigate}
-                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[12.5px] font-medium transition-colors duration-150 ${
+                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[0.78125rem] font-medium transition-colors duration-150 ${
                                       pinActive
                                         ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
                                         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
@@ -738,7 +735,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   <SidebarLabel show={showLabels}>Search</SidebarLabel>
                   <kbd
                     aria-hidden={!showLabels}
-                    className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none lg:inline-flex ${
+                    className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none lg:inline-flex ${
                       showLabels ? "opacity-100" : "opacity-0"
                     }`}
                   >
@@ -761,7 +758,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       />
                     )}
                     <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
+                    <SidebarLabel show={showLabels}>For You</SidebarLabel>
                   </ViewTransitionLink>
                 </li>
               ) : null}
@@ -832,7 +829,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                     <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
                     {(unreadNotifications ?? 0) > 0 && (
                       <span
-                        className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold ${
+                        className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${
                           showLabels ? "opacity-100" : "opacity-0"
                         }`}
                         style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
@@ -1013,7 +1010,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </Avatar>
                 </span>
                 <span
-                  className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[13px] font-medium ${
+                  className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[0.8125rem] font-medium ${
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
                 >
@@ -1036,65 +1033,16 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[14px] font-semibold">
+                  <span className="truncate text-[0.875rem] font-semibold">
                     {profile?.name ?? user?.username ?? "User"}
                   </span>
                   {profile && user?.username && user.username !== profile.name && (
-                    <span className="text-muted-foreground truncate text-[11px] font-normal">
+                    <span className="text-muted-foreground truncate text-[0.6875rem] font-normal">
                       {user.username}
                     </span>
                   )}
                 </div>
               </DropdownMenuLabel>
-
-              <div
-                className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-1.5"
-                role="group"
-                aria-label="Theme"
-              >
-                <span className="text-muted-foreground text-[10px] font-medium tracking-[0.14em] uppercase">
-                  Theme
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {CURATED_THEME_IDS.map((id) => {
-                    const def = THEMES[id];
-                    const isActive = theme === id;
-                    return (
-                      <DropdownMenuItem
-                        key={id}
-                        onSelect={(event) => {
-                          event.preventDefault();
-                          setTheme(id);
-                        }}
-                        onMouseEnter={() => previewTheme(id)}
-                        onMouseLeave={resetPreviewTheme}
-                        // Radix focuses whichever item the pointer is over, so
-                        // an unconditional focus preview would bypass the hover
-                        // intent delay. Keyboard focus only.
-                        onFocus={(event) => {
-                          if (isKeyboardFocus(event.currentTarget)) previewTheme(id);
-                        }}
-                        onBlur={resetPreviewTheme}
-                        aria-label={def.label}
-                        title={def.label}
-                        className={cn(
-                          "relative h-6 w-6 flex-none cursor-pointer rounded-full border p-0 transition-transform hover:scale-110 focus:scale-110",
-                          isActive
-                            ? "ring-primary ring-offset-popover border-transparent ring-2 ring-offset-2"
-                            : "border-border/60",
-                        )}
-                        style={{ backgroundColor: def.previewBg }}
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="absolute top-1/2 left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                          style={{ backgroundColor: def.previewAccent }}
-                        />
-                      </DropdownMenuItem>
-                    );
-                  })}
-                </div>
-              </div>
 
               <DropdownMenuSeparator />
 
@@ -1102,7 +1050,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 onClick={() => {
                   navigate("/settings");
                 }}
-                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem]"
               >
                 <Settings className="h-[18px] w-[18px]" />
                 Settings
@@ -1117,7 +1065,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                       clearProfile();
                       navigate("/profiles");
                     }}
-                    className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
+                    className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                   >
                     <UserCircle className="h-[18px] w-[18px]" />
                     Switch Profile
@@ -1125,7 +1073,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <DropdownMenuItem
                   onClick={logout}
-                  className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
+                  className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                 >
                   <LogOut className="h-[18px] w-[18px]" />
                   Logout

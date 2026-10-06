@@ -4884,7 +4884,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers.",
+            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers. V2 adds password_login: true here, since both listed providers take a password.",
             "recorded_in": "internal/scenariocatalog/executor/auth_providers_pairing_test.go",
             "operation_id": "listAuthProviders",
             "method": "GET",
@@ -4905,8 +4905,14 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "items"
+                    "items",
+                    "password_login"
                   ]
+                },
+                {
+                  "pointer": "/password_login",
+                  "op": "equals",
+                  "value": true
                 },
                 {
                   "pointer": "/items",
@@ -5010,7 +5016,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers.",
+            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers. V2 adds password_login: true here, since both listed providers take a password.",
             "recorded_in": "internal/scenariocatalog/executor/auth_providers_pairing_test.go",
             "operation_id": "listAuthProviders",
             "method": "GET",
@@ -5031,8 +5037,14 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "items"
+                    "items",
+                    "password_login"
                   ]
+                },
+                {
+                  "pointer": "/password_login",
+                  "op": "equals",
+                  "value": true
                 },
                 {
                   "pointer": "/items",
@@ -5140,7 +5152,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers.",
+            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers. V2 adds password_login: true here, since both listed providers take a password.",
             "recorded_in": "internal/scenariocatalog/executor/auth_providers_pairing_test.go",
             "operation_id": "listAuthProviders",
             "method": "GET",
@@ -5161,8 +5173,14 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "items"
+                    "items",
+                    "password_login"
                   ]
+                },
+                {
+                  "pointer": "/password_login",
+                  "op": "equals",
+                  "value": true
                 },
                 {
                   "pointer": "/items",
@@ -5282,7 +5300,7 @@
           "notes": "The executor registers a second credentials provider (fixture-directory, display name 'Fixture Directory') that accepts no login, so the ordering rule is observable; local ('Local') sorts first by default, not by name.",
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers.",
+            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers. V2 adds password_login: true here, since both listed providers take a password.",
             "recorded_in": "internal/scenariocatalog/executor/auth_providers_pairing_test.go",
             "operation_id": "listAuthProviders",
             "method": "GET",
@@ -5303,8 +5321,14 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "items"
+                    "items",
+                    "password_login"
                   ]
+                },
+                {
+                  "pointer": "/password_login",
+                  "op": "equals",
+                  "value": true
                 },
                 {
                   "pointer": "/items",
@@ -5407,7 +5431,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers.",
+            "summary": "V2 wraps the same sign-in provider metadata in a bounded items collection. Local remains first/default, absent icon and installation IDs remain omitted, and unavailable OAuth routes do not advertise OAuth providers. V2 adds password_login: true here, since both listed providers take a password.",
             "recorded_in": "internal/scenariocatalog/executor/auth_providers_pairing_test.go",
             "operation_id": "listAuthProviders",
             "method": "GET",
@@ -5428,8 +5452,14 @@
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
-                    "items"
+                    "items",
+                    "password_login"
                   ]
+                },
+                {
+                  "pointer": "/password_login",
+                  "op": "equals",
+                  "value": true
                 },
                 {
                   "pointer": "/items",
@@ -5578,7 +5608,9 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
-                    "protocol_versions"
+                    "protocol_versions",
+                    "cancel",
+                    "opened_signal"
                   ]
                 },
                 {
@@ -5658,7 +5690,9 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
-                    "protocol_versions"
+                    "protocol_versions",
+                    "cancel",
+                    "opened_signal"
                   ]
                 },
                 {
@@ -5759,7 +5793,9 @@
                     "revision",
                     "state",
                     "remote_playback_handoff",
-                    "protocol_versions"
+                    "protocol_versions",
+                    "cancel",
+                    "opened_signal"
                   ]
                 },
                 {
@@ -14492,7 +14528,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -14603,7 +14639,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -14642,12 +14678,12 @@
                 {
                   "pointer": "/verification_uri_complete",
                   "op": "matches",
-                  "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+                  "value": "/activate\\?code=[A-Z0-9]{8}$"
                 },
                 {
                   "pointer": "/expires_in",
                   "op": "equals",
-                  "value": 600
+                  "value": 900
                 },
                 {
                   "pointer": "/interval",
@@ -14782,7 +14818,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -15099,7 +15135,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -15210,7 +15246,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -15249,12 +15285,12 @@
                 {
                   "pointer": "/verification_uri_complete",
                   "op": "matches",
-                  "value": "/activate\\?token=[A-Za-z0-9_-]+$"
+                  "value": "/activate\\?code=[A-Z0-9]{8}$"
                 },
                 {
                   "pointer": "/expires_in",
                   "op": "equals",
-                  "value": 600
+                  "value": 900
                 },
                 {
                   "pointer": "/interval",
@@ -15389,7 +15425,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 links by user code (?code=) and a pending request lasts 900 seconds.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "startDeviceLogin",
             "method": "POST",
@@ -15792,7 +15828,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds.",
+            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -15822,9 +15858,12 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
                     "temporary",
-                    "user_code"
+                    "user_code",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -15865,6 +15904,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -15899,7 +15947,7 @@
           "notes": "Token lookups omit user_code entirely (omitempty) while code lookups include it; the shape depends on the lookup key.",
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds.",
+            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -15929,9 +15977,12 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
                     "temporary",
-                    "user_code"
+                    "user_code",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -15972,6 +16023,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": "FIXT-URE1"
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16024,7 +16084,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds.",
+            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16054,9 +16114,12 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
                     "temporary",
-                    "user_code"
+                    "user_code",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16097,6 +16160,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16130,7 +16202,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves expired lookup as 200 without mutating stored state, uses a 404 Problem for unknown tokens, and validates absent lookup parameters with 422 instead of the legacy 404.",
+            "summary": "V2 preserves expired lookup as 200 without mutating stored state, uses a 404 Problem for unknown tokens, and validates absent lookup parameters with 422 instead of the legacy 404. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_lookup_errors_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16180,9 +16252,21 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16224,7 +16308,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds.",
+            "summary": "V2 preserves pending lookup metadata and code normalization while making temporary=false and token-lookup user_code=\"\" explicit; expiry uses UTC milliseconds. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16254,9 +16338,12 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
                     "temporary",
-                    "user_code"
+                    "user_code",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16297,6 +16384,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16569,7 +16665,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16610,8 +16706,11 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16623,6 +16722,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16657,7 +16765,7 @@
           "notes": "Token lookups omit user_code entirely (omitempty) while code lookups include it; the shape depends on the lookup key.",
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16698,8 +16806,11 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16711,6 +16822,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": "FIXT-URE1"
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16763,7 +16883,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16823,8 +16943,11 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16836,6 +16959,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16869,7 +17001,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -16910,8 +17042,11 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -16923,6 +17058,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -16964,7 +17108,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption.",
+            "summary": "Preserve registration-specific device start/lookup intent and original oracle. V2 explicit lookup fields, validation Problems and no-store; actual code hashes and full effects checked without redemption. V2 also returns requested_at and the server identity, and a pending lookup records opened_at and extends expires_at.",
             "recorded_in": "internal/scenariocatalog/executor/device_start_lookup_pairing_test.go",
             "operation_id": "getDeviceLogin",
             "method": "GET",
@@ -17000,8 +17144,11 @@
                     "device_platform",
                     "ip_address_hint",
                     "expires_at",
+                    "requested_at",
                     "client_purpose",
-                    "temporary"
+                    "temporary",
+                    "server_id",
+                    "server_name"
                   ]
                 },
                 {
@@ -17013,6 +17160,15 @@
                   "pointer": "/user_code",
                   "op": "equals",
                   "value": ""
+                },
+                {
+                  "pointer": "/requested_at",
+                  "op": "rfc3339"
+                },
+                {
+                  "pointer": "/server_name",
+                  "op": "equals",
+                  "value": "Silo"
                 }
               ]
             }
@@ -17386,7 +17542,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged.",
+            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_states_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -17437,11 +17593,22 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
+                  "pointer": "/expires_at",
+                  "op": "rfc3339"
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "expires_at",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"
@@ -17754,7 +17921,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged.",
+            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_states_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -17805,11 +17972,17 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"
@@ -17863,7 +18036,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged.",
+            "summary": "V2 preserves the pending, denied or expired state and polling interval, with explicit empty profile fields and temporary=false. No credentials are issued and stored state remains unchanged. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_states_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -17914,11 +18087,17 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"
@@ -18241,7 +18420,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit.",
+            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_r1_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -18292,11 +18471,22 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
+                  "pointer": "/expires_at",
+                  "op": "rfc3339"
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "expires_at",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"
@@ -18609,7 +18799,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit.",
+            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_r1_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -18660,11 +18850,17 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"
@@ -18718,7 +18914,7 @@
           ],
           "v2_expectation": {
             "kind": "intentional_difference",
-            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit.",
+            "summary": "Original registration1 executes independently on the real limited router. Preserve polling state, one-time credential collection and temporary profile authority; v2 nests tokens and explicitly prevents caching. Every original repeated request is observed; no earlier registration result supplies credit. V2 adds opened, plus expires_at while pending.",
             "recorded_in": "internal/scenariocatalog/executor/device_poll_r1_pairing_test.go",
             "operation_id": "pollDeviceLogin",
             "method": "POST",
@@ -18769,11 +18965,17 @@
                   "value": false
                 },
                 {
+                  "pointer": "/opened",
+                  "op": "equals",
+                  "value": false
+                },
+                {
                   "pointer": "",
                   "op": "keys_equal",
                   "value": [
                     "status",
                     "poll_after",
+                    "opened",
                     "profile_id",
                     "profile_token",
                     "temporary"

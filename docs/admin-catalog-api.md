@@ -219,24 +219,139 @@ replay. No additional optimistic concurrency or request replay receipt is
 introduced. Existing native viewers and Jellyfin reads remain separate from
 these curation actions.
 
-## Episode marker analysis
+## Episode and movie marker analysis
 
-`POST /api/v2/admin/items/{id}/refresh-markers` and
+`POST /api/v2/admin/items/{id}/refresh-markers`,
+`POST /api/v2/admin/items/{id}/redetect-markers`, and
 `POST /api/v2/admin/items/{id}/redetect-intro` require acting-administrator
-authorization. Both retain the existing local episode analyzer. The episode
-must exist, have media files, and belong to a library with intro detection
-enabled. Marker settings must allow local analysis; off and online-only modes
-return `409`. Unconfigured dependencies return `503`.
+authorization and run the existing local analyzer, which finds an episode's
+intros and end credits and a movie's end credits. Movie credits are best
+effort, and movies never get local intros.
 
-Both return `202` with `status: "queued"` or `status: "already_running"`.
+- `refresh-markers` refreshes an episode or a movie from its configured
+  sources. In `both` mode, local analysis then fills an episode's missing
+  intro or credits, or a movie's missing credits, for the kinds the detection
+  settings leave on, and is skipped when none apply. In `local` mode it runs
+  local analysis of every kind that is on, and returns the same `409` as
+  `redetect-markers` when none are.
+- `redetect-markers` backs the web **Re-detect Markers** action for episodes
+  and **Re-detect Credits** for movies. Its optional JSON body
+  `{"kind": "intro" | "credits" | "all"}` selects what local detection runs
+  again; an absent body or kind means `all`. For an episode, `intro` and
+  `credits` run that kind alone and `all` runs both. For a movie, `credits`
+  and `all` run the credits analysis. `intro` takes episodes only, so it
+  answers a movie like any other item that is not an episode. Any other kind
+  returns a `422` validation problem at `body.kind`. The requested kinds are
+  narrowed to those `markers.detect_intros` and `markers.detect_credits` leave
+  on; when none remain, it returns a `409` conflict whose detail names the
+  kinds that are off, such as `Credits detection is turned off in marker
+  settings`. A movie counts as a credits request.
+- `redetect-intro` ports the v1 route and, like the v1 `refresh-markers` and
+  `redetect-intro` routes, finds episode intros only, whatever the detection
+  settings say.
+
+For local analysis the item must exist, have media files, and have at least
+one in a library with marker detection enabled: a series or mixed library for
+an episode, a movie or mixed library for a movie. An item of the wrong type
+returns a `422` validation problem (`400` on v1): anything but an episode for
+`redetect-intro` and `redetect-markers` with `intro`, and anything but an
+episode or a movie otherwise. Marker settings must allow local analysis; off
+and online-only modes return `409`. Unconfigured dependencies return `503`.
+
+`GET /api/v2/admin/markers/capabilities` tells a client which of these it can
+use. `movie_credits: true` means the server accepts movie IDs in
+`refresh-markers` and in `redetect-markers` with `credits` or `all`, and looks
+for their credits locally. `redetect_markers: true` means the server offers
+`redetect-markers`. `detection_kind_settings: true` means local detection
+honors `markers.detect_intros` and `markers.detect_credits`. Servers without a
+field lack that support: without `movie_credits` they analyze episodes only
+and reject a movie, without `redetect_markers` the operation does not exist,
+and without `detection_kind_settings` they store the two settings but detect
+both kinds anyway, so clients should not offer them. The document describes the
+build; marker settings and library switches still decide whether an item is
+analyzed.
+
+All three return `202` with `status: "queued"` or `status: "already_running"`.
 These statuses acknowledge process-local background work. There is no persisted
 job, job Location, cluster-wide exclusion, or restart recovery promise. Active
-work is coalesced by episode ID within the process. Successful analysis retains
-the existing marker-update notifications.
+work is coalesced by item ID within the process, and one analysis of an item
+runs at a time. While local analysis of an item runs, a request for kinds that
+analysis, together with any work queued behind it, already covers reports
+`already_running`. A request for further kinds, such as `credits` while an
+intro-only analysis runs, reports `queued` and runs just those kinds once the
+running analysis finishes. While an online `refresh-markers` runs, every other
+request for the item reports `already_running`, and a `refresh-markers` that
+would run online reports `already_running` while local analysis runs. The
+frozen v1 routes also report `already_running` while any analysis of the item
+runs and never queue. Successful analysis retains the existing marker-update
+notifications.
 
-Both operations are non-retryable. The web re-detection action disables mutation
+The operations are non-retryable. The web re-detection actions disable mutation
 retries and authentication replay. No native administrator caller or matching
 Jellyfin action exists; playback marker reads remain separate.
+
+## Seek preview administration
+
+These operations require acting-administrator authorization: an administrator
+account and, when `X-Profile-Id` is present, its primary household profile.
+Discover the feature through `GET /api/v2/libraries/capabilities`
+(`getLibraryCapabilities`), whose `trickplay: true` covers the library setting
+and these administration operations. Library `trickplay_supported` separately
+reports whether public asset storage is configured.
+
+| Endpoint | Result |
+| --- | --- |
+| `GET /api/v2/admin/items/{id}/trickplay` | `200` with `files`, ordered by file ID |
+| `POST /api/v2/admin/items/{id}/trickplay/regenerate` | `202` with `requeued`, the number of files queued ahead of the backlog |
+| `GET /api/v2/admin/trickplay/libraries` | `200` with `items`, ordered by library ID |
+
+The item ID can name a movie, episode, or series; a series includes all its
+episode files. Each represented episode of a multi-episode file resolves that
+file, including when it is missing. File and library IDs are opaque strings.
+The arrays are complete lists, never null, without pagination.
+
+Each file reports `state`, `servable`, and `failures`, with optional
+`last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
+and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
+unsupported type, or one with previews turned off; `unusable` for an ineligible
+file or a permanent sampling failure; otherwise it reflects `pending`,
+`running`, or `ready`. An eligible file with
+no queue row yet reports `pending`. `servable` independently reports whether
+the current store has a published revision matching the file: previous sheets
+can remain available after a failed or unusable regeneration. Turning previews
+off or disabling the library suppresses availability immediately. Published
+timestamps are canonical UTC instants; widths are pixels, intervals are
+milliseconds, and storage sizes are bytes.
+
+Regeneration queues eligible video files in enabled, opted-in libraries and
+clears their failure backoff. Missing, unprobed, zero-duration, and audio-only
+files are skipped. Running files finish their current attempt. A successful
+response may report `requeued: 0` when no eligible file needs queuing; `202`
+acknowledges persisted queue changes rather than completed extraction. Previous
+published sheets keep serving until replacements publish. There is no
+administrator job resource or replay receipt. Repeating the request after work
+finishes queues another generation, so it is non-retryable; clients must disable
+automatic mutation retries and authentication replay.
+
+The library listing includes enabled video libraries with previews turned on.
+Each entry contains `library_id`, `name`, `pending`, `running`, `ready`, `unusable`,
+and `sheet_bytes`. Pending counts include failure backoff and eligible files
+not yet reconciled into the queue. A tracked file that becomes missing,
+unprobed, zero-duration, or audio-only counts as `unusable` regardless of its
+persisted queue state. Ineligible files that have never entered the queue do
+not contribute to these counts. Status reads do not alter queue rows. Storage
+sums the retained published sheets; generation counts do not replace each
+file's `servable` value.
+
+The item operations return `404` `not_found` when no associated media file
+exists. Regeneration returns `409` `capability_disabled` when none belongs to an
+enabled, opted-in video library. All three return `503` `dependency_unavailable`
+when the service is unconfigured, and `500` `internal_error` on an unexpected service
+failure, using the common Problem response. Ordinary profiles receive `403`
+`permission_denied`; authentication failures use the common `401` problems.
+Web administration uses these operations. Apple, Android, and Jellyfin have
+no corresponding administration callers; their playback preview reads are
+separate.
 
 ## Marker edit history
 
@@ -278,8 +393,15 @@ No native client or Jellyfin administration caller requires migration.
 file access. Its optional body selects a provider and marker segments; an absent
 body uses the existing contributor defaults. The request waits for contribution
 processing and returns `200` with per-provider outcomes, including skipped or
-failed outcomes. Provider-specific content claims do not make the whole request
+failed outcomes. Provider-specific claims do not make the whole request
 replay-safe across providers; the operation is non-retryable.
+
+A claim covers the provider item (show, season and episode, or movie), not the
+submitted times: providers accept one submission per account for each item and
+segment and cannot amend it, so a later payload for a claimed item is skipped.
+A provider refusal of the item itself, such as a season the provider's catalog
+does not list, is recorded with status `invalid` and holds the claim for 30 days
+before one more attempt. Retryable errors release the claim.
 
 `GET /api/v2/admin/files/{fileId}/contributions` applies the same access checks
 and returns `items` plus `page`, with default limit 50 and maximum 200. Database
@@ -359,7 +481,11 @@ messages. The web drains all pages under one captured authority and refuses
 repeated or invalid continuation rather than publishing a partial list.
 
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and
-optional `provider_id`. It preserves target validation before remote work,
+optional `provider_id`. An HTTP(S) `original_url` may name a public or
+local-network address; link-local, cloud metadata and other blocked addresses
+are refused (see
+[Outbound address guard](architecture/outbound-address-guard.md#artwork-downloads)).
+It preserves target validation before remote work,
 episode-to-still coercion, parent/season/episode cache identity, immutable upload,
 transactional catalog publication and orphan-GC scheduling after publication
 failure. Success returns the stored path, thumbhash and available revision/display

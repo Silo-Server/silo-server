@@ -11,6 +11,7 @@
       "marker_edit",
       "metadata_curation"
     ],
-    "download_allowed": true
+    "download_allowed": true,
+    "password_change_required": false
   }
 }

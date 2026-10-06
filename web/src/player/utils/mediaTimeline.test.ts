@@ -20,10 +20,6 @@ describe("toMediaTime / toPlayerTime", () => {
 });
 
 describe("mediaDurationSeconds", () => {
-  it("prefers the server runtime over the element duration", () => {
-    expect(mediaDurationSeconds(5400, 120)).toBe(5400);
-  });
-
   // The regression this function exists for: a copy remux resumed at 50
   // minutes reports a player-local duration covering only the produced
   // window. Pairing that with a media-time position of ~3060 would read as

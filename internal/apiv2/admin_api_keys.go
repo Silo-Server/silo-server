@@ -116,6 +116,9 @@ func adminAPIKeyProblem(ctx context.Context, err error) *Problem {
 		return NewProblem(TypeValidationFailed, "Invalid API key configuration.").
 			WithErrors(ProblemError{Location: locationBody + ".scopes", Code: codeInvalid, Detail: "unknown api key scope " + strconv.Quote(scopeErr.Scope)})
 	}
+	if _, ok := errors.AsType[*handlers.APIError](err); ok {
+		return serviceProblem(err)
+	}
 	switch {
 	case errors.Is(err, auth.ErrAPIKeyNotFound):
 		return NewProblem(TypeNotFound, "API key not found.")

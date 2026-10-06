@@ -97,31 +97,16 @@ describe("home dismissal query hooks", () => {
     const mutation = latestMutationOptions();
 
     await mutation.mutationFn({
-      itemId: "ep-1",
-      surface: "continue_watching",
-      progressUpdatedAt: "2026-03-22T18:10:00Z",
-    });
-
-    expect(lastRequest()).toEqual({
-      url: "/api/v2/home/dismissals/continue_watching/ep-1",
-      method: "PUT",
-      body: JSON.stringify({ progress_updated_at: "2026-03-22T18:10:00Z" }),
-    });
-  });
-
-  it("encodes item IDs in the dismissal path", async () => {
-    useDismissHomeItem();
-    const mutation = latestMutationOptions();
-
-    await mutation.mutationFn({
       itemId: "ebook 1/isbn:978",
       surface: "continue_watching",
       progressUpdatedAt: "2026-03-22T18:10:00Z",
     });
 
-    expect(lastRequest().url).toBe(
-      "/api/v2/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
-    );
+    expect(lastRequest()).toEqual({
+      url: "/api/v2/home/dismissals/continue_watching/ebook%201%2Fisbn%3A978",
+      method: "PUT",
+      body: JSON.stringify({ progress_updated_at: "2026-03-22T18:10:00Z" }),
+    });
   });
 
   it("calls the next up dismissal endpoint with series_id", async () => {
@@ -187,6 +172,29 @@ describe("home dismissal query hooks", () => {
     expect(mocks.invalidateMediaSurfaceQueries).toHaveBeenCalledWith(queryClient, {
       itemId: "ep-1",
     });
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(
+      "Removed from Continue Watching and Next Up",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          label: "Undo",
+        }),
+      }),
+    );
+  });
+
+  it("keeps continue watching toast copy for movie dismissals", async () => {
+    useDismissHomeItem();
+    const mutation = latestMutationOptions();
+
+    const variables: DismissHomeItemVariables = {
+      itemId: "movie-1",
+      surface: "continue_watching",
+      mediaType: "movie",
+      progressUpdatedAt: "2026-03-22T18:10:00Z",
+    };
+
+    await mutation.onSuccess?.(undefined, variables);
+
     expect(mocks.toastSuccess).toHaveBeenCalledWith(
       "Removed from Continue Watching",
       expect.objectContaining({

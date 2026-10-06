@@ -1005,6 +1005,43 @@ were scanned: a file rewritten in place while the scan read it produces a
 verdict about bytes nobody is serving, which is neither persisted nor pushed at
 any session.
 
+### 6.2 A lost connection is not a failed route
+
+When a stream that already showed frames stops because the server cannot be
+reached (a network error on the media element, a fatal HLS network error, or a
+recovery replan that gets no answer), the route did not fail and the client must
+not report it with `failure_recovery`: that operation excludes the current
+route, so a direct-play viewer would come back on a transcode. The web player
+(`web/src/player/hooks/usePlaybackSession.ts`) recovers like this instead:
+
+1. Pause, keep the position, and tell the viewer it is reconnecting. Stop
+   reporting route failures for the dead transport.
+2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
+   Each attempt is a `track_change` that changes nothing, at the saved
+   position. It keeps the current route eligible and returns a fresh plan.
+3. A network failure, a 5xx, `408`, `429`, or `replan_in_progress` waits for
+   the next attempt. Any other answer means the session did not survive (a
+   server restart answers 404), and the client starts a new attempt at the
+   saved position with the current tracks. That includes `installation_changed`:
+   a replan always carries the old session's installation and cannot succeed,
+   while a start refused that way drops the cached capabilities and waits for
+   the next attempt. A start that names no subtitle track plays without one, so
+   subtitles that were off stay off; the player keeps the granted selection
+   and sends no subtitle change until it has applied it. A refused burned-in
+   subtitle is retried without subtitles, as at an initial start.
+4. The new plan plays only if the viewer was playing. That intent is taken
+   when the recovery is requested, and until the current plan's transport has
+   shown a frame it is the intent the plan was adopted with, so the pause that
+   tearing down a failed transport forces does not count.
+5. Any adopted plan ends the cycle. When the budget runs out, the client says
+   the connection was lost and offers to try again. Leaving the player or
+   starting other playback cancels the cycle.
+
+A network failure before a transport's own first frame stays on the ordinary
+failure path, even when an earlier transport of the same viewing played: the
+new route may be one this client cannot reach. If that recovery then cannot
+reach the server, it joins the reconnect and continues the same budget.
+
 ---
 
 ## 7. Registries
@@ -1049,10 +1086,23 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 *Planner:* `adaptation_exhausted`, `adaptation_unavailable`,
 `client_hls_unsupported`, `conversion_tool_unavailable`,
 `hdr_transcode_unsupported`, `no_alternate_version`,
-`source_metadata_incomplete`, `source_unavailable`,
+`source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. When a video adaptation is forced solely by a
+`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+the file has not been probed yet or lacks a field a route needs.
+`source_unreadable` is not: ffprobe rejected the effective file (empty,
+corrupt, truncated) and it carries no stream metadata. The scanner and the
+playback-time probe repair record the rejection in `media_files.probe_failed_at`
+only for a non-zero ffprobe exit with the caller's context still live, when
+ffprobe's error output names no operating-system read failure and the server
+can read the start and end of the file. A timeout, cancellation, missing
+binary, or an access failure (permission denied, I/O error or timeout on a
+mount, stale handle, vanished file) never marks a file and keeps the retryable
+`source_metadata_incomplete`; an empty file is readable and is marked. A
+successful probe clears the mark. Like the HDR and 4K refusals,
+`source_unreadable` lets the server try the item's other versions, limited to
+versions the viewer may play (library access and playback-quality ceiling). When a video adaptation is forced solely by a
 subtitle burn-in requirement and cannot execute, the terminal is
 `subtitle_conversion_unsupported` naming the subtitle rather than the underlying
 HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playback.
@@ -1138,8 +1188,11 @@ an ordinal by counting tracks, summing array lengths, or taking `max(index)+1`.
 
 Each entry carries `source` (`external` | `embedded` | `downloaded`), `delivery`
 (`sidecar` | `burn_in_only`), the `forced` / `default` / `hearing_impaired`
-flags, a `url` when deliverable, and a `font_bundle_url` for embedded ASS tracks
-with attachments. `default` reflects the source container's own default flag, so
+flags, a `url` when deliverable, a `font_bundle_url` for embedded ASS tracks
+with attachments, and a `sync_key` on external and downloaded SRT, WebVTT, ASS,
+and SSA tracks. The sync key names the track to the subtitle sync operations
+(see [subtitles-api.md](../subtitles-api.md#subtitle-sync)); it is stable across
+sessions and inventory order, and realtime sync events carry it. `default` reflects the source container's own default flag, so
 only embedded and external tracks can carry it — a downloaded subtitle is never
 `default`. `url` is present only on `sidecar` tracks, and only once a session
 exists to scope it to — but it does not depend on the current selection: a start
@@ -1201,7 +1254,10 @@ sliding window may explicitly supply `position` (nonnegative source seconds)
 and `duration` (positive seconds, at most 3600). They must request subsequent
 windows themselves; HTTP EOF ends only the requested window. ASS remains a
 complete script. PGS windows require `windowed=1` in addition to the window
-parameters. External and downloaded sidecars are always returned whole.
+parameters. External and downloaded sidecars are always returned whole, with
+their timing correction applied before any conversion (an `original=1` SRT
+included) and `Cache-Control: private, no-cache`, since a correction changes
+the bytes behind the same URL.
 
 Complete embedded text and PGS extracts are cached by source file identity,
 modification time, size, subtitle ordinal, and output format. Partial or failed
@@ -1248,7 +1304,9 @@ compute rungs.
 The source rung is always present, labelled `original`, with
 `preserves_source: true`. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
-available to the client, transcoding is enabled, and 4K transcoding is permitted
+available to the client, transcoding is enabled, the viewer's account may
+transcode video (`transcode_allowed`; admission still enforces it), and 4K
+transcoding is permitted
 for a 4K-or-higher source. A source falls under that policy when its catalog
 resolution label reads `2160p`, `4k`, `uhd`, `4320p`, or `8k` (case- and
 whitespace-insensitive), its probed width is at least 3840, or its probed height
@@ -1281,14 +1339,36 @@ remux without video encoding.
 A rung below the source resolution class is always useful. At the source's own
 class, a rung is published only when it undercuts the source bitrate; a 25.2
 Mbps 4K file therefore offers 4K Medium and 4K Low but not a pointless 40 Mbps
-4K High encode. Resolution classification also considers width, so cinema-crop
-UHD sources such as 3840x1540 retain their native dimensions on a 4K bitrate
-step instead of being upscaled to 2160 lines.
+4K High encode. A source's class is the smallest one whose bounds hold both
+dimensions: 480p up to 854x480, 720p up to 1280x962, 1080p up to 2560x1440,
+2160p up to 4096x3072, and 4320p up to 8192x6144. These are the scanner's
+buckets for the catalog's resolution label. Cropped and cinema-aspect encodes
+therefore keep their labelled class: a 1918x872 file is 1080p, and a 3840x1540
+UHD source retains its native dimensions on a 4K bitrate step instead of being
+upscaled to 2160 lines. An 8K source sits above every rung, so its 4K rungs
+scale it down to 2160 lines.
 
 Compound rungs are strict resolution/bitrate selections. A bandwidth cap can
 clamp their bitrate but does not silently demote their resolution. Plain labels
-remain accepted for stored/default preferences and retain their existing
-height-only behavior.
+remain accepted for stored/default preferences and size their output like
+`auto` below.
+
+`auto` picks its resolution from the shared bitrate ladder
+([quality-ladder.md](quality-ladder.md)): 80% of the bandwidth estimate or cap
+earns a class for the source's frame rate. A source whose height already fits
+the class is sent as-is when its bitrate allows, even when it is wider than the
+16:9 box (a 2560x1080 film at the 1080p class). Otherwise automatic and
+plain-label targets fit the source into that class's 16:9 box, so a 3840x1600
+film at the 1080p class streams at 1920x800, and encode at the class bitrate: 20000 kbps for 2160p, 6000
+for 1080p, 2000 for 720p, 1800 for 540p and 1500 for 480p, never above that 80%
+budget. A source that already fits the class but whose bitrate exceeds 80% of the
+bandwidth estimate is re-encoded at its own size within that budget rather than
+sent as-is; a source of unknown bitrate counts as needing its class's full
+bitrate. Under a cap, a source over the cap itself is re-encoded, and so is a
+video source of unknown bitrate, since it cannot be shown to fit. A transcode
+also never targets more than the source's own bitrate, counted in the output
+codec (H.264 for a scaled encode, or HEVC for any encode when the planner
+chooses HEVC).
 
 Registry availability is deliberately *not* consulted when building the menu: a
 capability check there could trigger lazy node fetches that a source-preserving
@@ -1348,6 +1428,13 @@ do not declare; a binary that predates that envelope can still erase
 newer-generation fields (such as the remux flags) during the single rolling
 deploy that introduces them.
 
+A Jellyfin HLS remux that strips Dolby Vision to its HDR10 base layer uses the
+literal `remux-dv-v1` segment for every audio mode, taking precedence over
+`remux-v1` and `audio-v2`. An older binary would keep the strip flag without
+acting on it and copy Dolby Vision to a client that rejected it; its router has
+no handler for this segment, so the request fails instead. Current handlers
+reject a strip session on any other path and any other session on this one.
+
 A remote start carrying source-channel facts is valid only for the exact AAC
 stereo shape and must echo recipe version 2 after FFmpeg reaches readiness. The
 caller stops a job that omits or contradicts that receipt. Shared reconstruction
@@ -1356,7 +1443,14 @@ session updates preserve codec, source/target channels, bitrate, and the
 transcode decision as one recipe. A failed Jellyfin audio switch restores the
 prior durable selection and executor facts so the same client report can retry.
 Prepared downloads persist the audio recipe version and use `audio_v2_*` queue
-states that pre-v2 API workers cannot claim or publish as ready.
+states that pre-v2 API workers cannot claim or publish as ready. The multi-track
+prepared layout (every audio track, plain-text subtitles as MP4 timed text,
+ASS/SSA and PGS as manifest sidecars) is a
+separate `track_recipe_version` with `tracks_v1_*` queue states that outrank the
+audio and tone-map families. Its per-track plan travels in the prepare request
+and execution fingerprint; only transcode nodes advertising the
+`prepared_tracks_v1` transport feature receive it, and an older node's legacy
+receipt is rejected.
 
 They are advertised only if an eligible executor actually has the required
 capability. The ordinary FFmpeg feature probe is cached; the more expensive

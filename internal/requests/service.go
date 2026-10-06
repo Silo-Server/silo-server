@@ -5,8 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -23,6 +28,12 @@ type TMDBClient interface {
 
 type TMDBExternalIDClient interface {
 	GetExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
+}
+
+// TMDBExternalIDRefresher bypasses the client's external-ID cache. Detected by
+// type assertion, like TMDBExternalIDClient.
+type TMDBExternalIDRefresher interface {
+	RefreshExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
 }
 
 // TMDBCertificationClient resolves a title's content rating. Detected by type
@@ -57,17 +68,28 @@ type RequesterIdentityResolver interface {
 	ResolveRequester(ctx context.Context, userID int) (email, username string, err error)
 }
 
+// TVDBIDResolver finds a series' TVDB ID from its other IDs when TMDB has no
+// TVDB cross-reference, by asking the configured metadata providers (TVDB's own
+// remote-ID search). It returns 0 when no provider knows the series.
+type TVDBIDResolver interface {
+	ResolveSeriesTVDBID(ctx context.Context, tmdbID int, imdbID string) (int, error)
+}
+
 type Service struct {
 	store             Store
 	tmdb              TMDBClient
+	animeIndex        AnimeIndex
 	presence          PresenceResolver
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
 	groupProvider     access.GroupPolicyProvider
 	users             access.UserRepository
 	requesterIdentity RequesterIdentityResolver
+	tvdbResolver      TVDBIDResolver
 	notifier          FulfillmentNotifier
 	lifecycle         LifecycleNotifier
+	watchlistPref     WatchlistPreference
+	titleObserver     TitleObserver
 	Now               func() time.Time
 }
 
@@ -109,6 +131,10 @@ func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
 	s.requesterIdentity = r
 }
 
+// SetTVDBIDResolver wires the metadata-provider fallback used when TMDB has no
+// TVDB ID for a requested series.
+func (s *Service) SetTVDBIDResolver(r TVDBIDResolver) { s.tvdbResolver = r }
+
 // populateRequesterIdentity fills req.RequesterEmail/Username from the resolver.
 // Nil resolver or any error leaves them empty (the plugin then behaves as admin).
 func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
@@ -123,15 +149,17 @@ func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
 	req.RequesterEmail, req.RequesterUsername = email, username
 }
 
-func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID string) string {
+// requesterCeiling resolves the requester's playback quality ceiling. resolved
+// is false when the lookup failed and the HD-only fail-safe was used instead.
+func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID string) (ceiling string, resolved bool) {
 	if s.entitlements == nil {
-		return "" // no resolver -> unlimited (1080p baseline still applies)
+		return "", true // no resolver -> unlimited (1080p baseline still applies)
 	}
 	q, err := s.entitlements.MaxPlaybackQuality(ctx, userID, profileID)
 	if err != nil {
-		return access.PlaybackQualityStandard // fail safe: HD only
+		return access.PlaybackQualityStandard, false // fail safe: HD only
 	}
-	return q
+	return q, true
 }
 
 // viewerContentCeiling resolves the viewer's parental rating ceiling. Empty
@@ -349,16 +377,19 @@ func (s *Service) filterPageByCeiling(ctx context.Context, raw *tmdb.MediaPage, 
 
 // allowedQualities returns the qualities a request may receive: 1080p always,
 // plus 2160p when force-dual is on or the requester's entitlement ceiling allows 4K.
-func (s *Service) allowedQualities(ctx context.Context, req Request, settings Settings) []Quality {
+// allowedQualities returns the qualities the request should be fulfilled in.
+// resolved is false when the requester's entitlement could not be looked up,
+// so the answer is the HD-only fail-safe rather than the real policy.
+func (s *Service) allowedQualities(ctx context.Context, req Request, settings Settings) (qualities []Quality, resolved bool) {
 	out := []Quality{Quality1080p}
-	ceiling := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
+	ceiling, resolved := s.requesterCeiling(ctx, req.RequestedByUserID, req.RequestedByProfileID)
 	// QualityAllowed treats an empty ceiling as "no cap" (the "Any" preset), so a
 	// requester with unlimited playback quality correctly gets 4K. A raw
 	// CompareQuality would rank "" as the LOWEST quality and wrongly drop 4K.
 	if settings.ForceDualQuality || access.QualityAllowed(access.PlaybackQuality4K, ceiling) {
 		out = append(out, Quality2160p)
 	}
-	return out
+	return out, resolved
 }
 
 // fulfillContext caches the global fulfillment inputs for one reconcile cycle
@@ -368,9 +399,50 @@ func (s *Service) allowedQualities(ctx context.Context, req Request, settings Se
 type fulfillContext struct {
 	integrations []Integration
 	settings     Settings
+	routes       []Route
+	// standard holds where Standard routing sends each media type, when
+	// Standard is on and the servers allow it.
+	standard []StandardDestination
+	// standardOn is set when Standard routing is in effect.
+	standardOn bool
+
+	// mu guards features, which caches the features each router capability
+	// declares (see routerFeatures).
+	mu       sync.Mutex
+	features map[routerCapabilityKey]RouterFeatures
+}
+
+// routesFor returns the media type's routing rules; none means the router
+// plugin routes the media type itself. Under Standard the rules are paused
+// and the media type's one server decides.
+func (fc *fulfillContext) routesFor(mediaType MediaType) []Route {
+	if fc.standardOn {
+		return standardRoutes(fc.integrations, fc.standard, mediaType)
+	}
+	var out []Route
+	for _, route := range fc.routes {
+		if route.MediaType == mediaType {
+			out = append(out, route)
+		}
+	}
+	return out
 }
 
 func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error) {
+	// The mode is read before the servers and the rules, in separate queries.
+	// A switch to Advanced writes Everything else and the mode in one commit,
+	// so reading the mode first sees either Standard, which ignores the rules
+	// (and routes with the rules read after it when the servers read after it
+	// no longer allow Standard), or Advanced with the rules it was committed
+	// with. Reading the rules first could pair the old rules with Advanced.
+	mode := RoutingAdvanced
+	if store, ok := s.store.(RoutingModeStore); ok {
+		routing, err := store.GetRoutingSettings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		mode = routing.Mode
+	}
 	integrations, err := s.store.ListIntegrations(ctx)
 	if err != nil {
 		return nil, err
@@ -379,7 +451,18 @@ func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error
 	if err != nil {
 		return nil, err
 	}
-	return &fulfillContext{integrations: integrations, settings: settings}, nil
+	routes, err := s.store.ListRoutes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	fc := &fulfillContext{integrations: integrations, settings: settings, routes: routes}
+	if mode == RoutingStandard {
+		// Standard with two servers of a kind (saved around a server
+		// change) routes with the rules until an admin sorts it out.
+		layout, blocker := standardLayout(integrations)
+		fc.standard, fc.standardOn = layout, blocker == ""
+	}
+	return fc, nil
 }
 
 // resolveRouterConnections turns enabled request_router integrations that serve
@@ -387,8 +470,8 @@ func (s *Service) newFulfillContext(ctx context.Context) (*fulfillContext, error
 // plaintext, plugin_config attached), and returns the installation+capability to
 // dispatch to.
 //
-// It filters by media type to match the integrationConfigured auto-approve gate
-// (so a series-only connection is never used for a movie request). Multi-
+// It filters by media type (so a series-only connection is never used for a
+// movie request). Multi-
 // installation routing isn't supported yet: it picks the first eligible
 // connection's installation and includes ONLY connections belonging to it, so a
 // second installation's resolved plaintext credentials are never handed to the
@@ -425,11 +508,81 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 	return conns, installationID, capabilityID, nil
 }
 
+// Reasons a configured router connection cannot take a submission, recorded in
+// the request's last_error.
+const (
+	msgRouterUnbound = "request backend connection is not bound to a plugin installation; re-save it in admin"
+	msgRouterNoKey   = "request backend connection has no API key; add it in admin"
+)
+
+// unusableRouterMessage explains why no configured connection could take a
+// submission, for the request's last_error.
+func unusableRouterMessage(fc *fulfillContext, mediaType MediaType) string {
+	for _, in := range fc.integrations {
+		if !in.Enabled || in.CapabilityID == "" || !integrationSupportsMediaType(in, mediaType) {
+			continue
+		}
+		if in.InstallationID == nil {
+			// The migration left installation_id NULL on rows that predate the
+			// plugin install and were never re-bound.
+			return msgRouterUnbound
+		}
+		if strings.TrimSpace(in.APIKeyRef) == "" {
+			return msgRouterNoKey
+		}
+	}
+	return "no usable request backend connection"
+}
+
+// moreSeasonsRequestable reports whether a series already in the library can
+// be requested for the seasons it is missing. The library fulfills such a
+// request when no download server takes series. A download server fetches
+// only the missing seasons when its router plugin declares supports_seasons;
+// any other plugin would add the whole series again, refused by a download
+// server that has it and every season downloaded by one that does not. So it
+// is offered when every download server that takes series is bound to a
+// plugin that takes seasons. A request made before a server that cannot was
+// set up waits for the library (see submitApprovedRequest).
+func (s *Service) moreSeasonsRequestable(ctx context.Context) (bool, error) {
+	if s.router == nil {
+		return true, nil
+	}
+	fc, err := s.newFulfillContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.allTakeSeasons(ctx, fc, seriesRouterConnections(fc))
+}
+
+// routerConfiguredFor reports whether any enabled router connection is meant to
+// serve the media type, including a misconfigured one (no installation bound,
+// no key). Only when none is does a request fall back to waiting for the
+// library; a misconfigured connection surfaces as a submission failure instead.
+func routerConfiguredFor(fc *fulfillContext, mediaType MediaType) bool {
+	for _, in := range fc.integrations {
+		if in.Enabled && in.CapabilityID != "" && integrationSupportsMediaType(in, mediaType) {
+			return true
+		}
+	}
+	return false
+}
+
+// skippedRouterConnection reports whether resolveRouterConnections leaves out
+// a connection that would otherwise serve the media type, because its API key
+// is missing.
+func skippedRouterConnection(fc *fulfillContext, mediaType MediaType) bool {
+	for _, in := range fc.integrations {
+		if eligibleRouterConnection(in, mediaType) && strings.TrimSpace(in.APIKeyRef) == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // eligibleRouterConnection reports whether a connection is a candidate fulfillment
 // backend for the media type: enabled, bound to an installation, and naming a
-// capability sub-id that serves the media type. resolveRouterConnections (which
-// then resolves credentials) and integrationConfigured (the auto-approval gate)
-// share this predicate so the two cannot drift.
+// capability sub-id that serves the media type. resolveRouterConnections then
+// resolves credentials for the ones it uses.
 func eligibleRouterConnection(in Integration, mediaType MediaType) bool {
 	return in.Enabled && in.CapabilityID != "" && in.InstallationID != nil &&
 		integrationSupportsMediaType(in, mediaType)
@@ -512,6 +665,7 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
+	ctx = withPolicyCache(ctx)
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
@@ -546,6 +700,7 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
+	ctx = withPolicyCache(ctx)
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
@@ -558,6 +713,8 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	}
 
 	raw, err := s.tmdb.GetMediaDetail(ctx, string(mediaType), tmdbID)
+	// A watchlist title tracking this TMDB ID refreshes from the read.
+	s.observeDetail(ctx, mediaType, tmdbID, raw, err)
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +760,41 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	if err != nil {
 		return nil, err
 	}
+	primaryFollowing, err := s.followedTitles(ctx, viewer, mediaType, primaryRequests)
+	if err != nil {
+		return nil, err
+	}
+	// A series counts as available only when every aired season is complete;
+	// until then its missing seasons can be requested.
+	available := primaryMatch.Available
+	var seasons []RequestSeason
+	if mediaType == MediaTypeSeries {
+		counts, err := s.seasonCounts(ctx, primaryMatch)
+		if err != nil {
+			return nil, err
+		}
+		seasons = requestSeasons(raw, counts, primaryRequests[raw.ID])
+		if active := primaryRequests[raw.ID]; active != nil && len(active.Seasons) > 0 && counts != nil {
+			// Attach the season progress the request lists attach, so the
+			// state can read partially available or available.
+			withProgress := *active
+			withProgress.LibraryContentID = primaryMatch.ContentID
+			withProgress.SeasonProgress = seasonProgress(active.Seasons, counts)
+			primaryRequests[raw.ID] = &withProgress
+		}
+		if available && seriesHasOpenSeason(raw, counts) {
+			more, err := s.moreSeasonsRequestable(ctx)
+			if err != nil {
+				return nil, err
+			}
+			available = !more
+		}
+	}
+	primaryState := requestStateFor(viewer, policy, available, primaryRequests[raw.ID])
+	primaryState.Following = primaryRequests[raw.ID] != nil && primaryFollowing[raw.ID]
+	if primaryState.Download, err = s.activeRequestDownload(ctx, primaryRequests[raw.ID]); err != nil {
+		return nil, err
+	}
 
 	detail := &MediaDetail{
 		MediaType:           mediaType,
@@ -633,7 +825,8 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 		Creators:            raw.Creators,
 		Availability:        availabilityValue(primaryMatch.Available),
 		LibraryContentID:    primaryMatch.ContentID,
-		Request:             requestStateFor(viewer, policy, primaryMatch.Available, primaryRequests[raw.ID]),
+		Request:             primaryState,
+		Seasons:             seasons,
 	}
 	if raw.TVDBID > 0 {
 		tvdb := raw.TVDBID
@@ -683,15 +876,24 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err := s.ensureCreateAllowedByCeiling(ctx, viewer, normalized); err != nil {
 		return nil, err
 	}
-	s.enrichExternalIDs(ctx, &normalized)
-	isAnime := s.detectRequestAnime(ctx, normalized.MediaType, normalized.TMDBID)
+	tvdbLookupFailed := s.enrichExternalIDs(ctx, &normalized)
 
 	matches, err := s.lookupPresence(ctx, normalized.MediaType, []PresenceCandidate{createPresenceCandidate(normalized)})
 	if err != nil {
 		return nil, err
 	}
-	if matches[normalized.TMDBID].Available {
-		return nil, ErrAlreadyAvailable
+	match := matches[normalized.TMDBID]
+	if match.Available {
+		if normalized.MediaType == MediaTypeMovie || normalized.WholeSeries {
+			return nil, ErrAlreadyAvailable
+		}
+		more, err := s.moreSeasonsRequestable(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			return nil, ErrAlreadyAvailable
+		}
 	}
 
 	active, err := s.store.ListActiveByTMDB(ctx, normalized.MediaType, []int{normalized.TMDBID})
@@ -702,17 +904,46 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, ErrAlreadyRequested
 	}
 
-	// Re-requesting media that previously failed (e.g., transient integration
-	// error) should not leave stale failed rows behind in user/admin lists.
-	if _, err := s.store.DeleteFailedByTMDB(ctx, normalized.MediaType, normalized.TMDBID); err != nil {
-		return nil, err
+	// One TMDB detail read, after the cheap refusals, serves routing and the
+	// stored title: the server's copy of the title and year wins over the
+	// client's.
+	detail := s.requestDetail(ctx, normalized.MediaType, normalized.TMDBID)
+	if detail != nil {
+		if title := strings.TrimSpace(detail.Title); title != "" {
+			normalized.Title = title
+		}
+		if detail.Year > 0 {
+			year := detail.Year
+			normalized.Year = &year
+		}
+		// A caller without the display fields (a watchlist add keeps only
+		// its own snapshot) gets TMDB's; one that sent them keeps its own.
+		if normalized.Overview == "" {
+			normalized.Overview = strings.TrimSpace(detail.Overview)
+		}
+		if normalized.PosterPath == "" {
+			normalized.PosterPath = strings.TrimSpace(detail.PosterPath)
+		}
+		if normalized.BackdropPath == "" {
+			normalized.BackdropPath = strings.TrimSpace(detail.BackdropPath)
+		}
+	}
+	facts := s.routingFacts(ctx, detail)
+	if normalized.MediaType == MediaTypeSeries && !normalized.WholeSeries {
+		// A series partly in the library can still be requested for the
+		// seasons it is missing.
+		seasons, err := s.resolveRequestedSeasons(ctx, normalized.Seasons, detail, match)
+		if err != nil {
+			return nil, err
+		}
+		normalized.Seasons = seasons
 	}
 
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateCreatePolicy(policy); err != nil {
+	if err := validateCreateAccess(policy); err != nil {
 		return nil, err
 	}
 
@@ -720,21 +951,24 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	if err != nil {
 		return nil, err
 	}
+	// Auto-approval does not depend on a router: without one, an approved
+	// request waits for the title to appear in the library.
 	status := StatusPending
 	if policy.AutoApprove {
-		configured, err := s.integrationConfigured(ctx, normalized.MediaType)
-		if err == nil && configured {
-			status = StatusApproved
-		}
+		status = StatusApproved
 	}
 	record := CreateRequestRecord{
 		ID:        id,
 		Input:     normalized,
 		Status:    status,
 		Outcome:   OutcomeActive,
-		IsAnime:   isAnime,
+		IsAnime:   facts.Anime,
+		Facts:     facts,
 		Requester: viewer,
 		Now:       s.now(),
+		// Re-requesting a title that failed for this user (e.g. a transient
+		// integration error) replaces their failed row.
+		ReplaceFailed: true,
 	}
 	if !policy.Unlimited {
 		record.Quota = &QuotaCheck{
@@ -762,9 +996,11 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		// Auto-approval is a real approval transition; channels subscribed to
 		// approvals see it alongside the submission.
 		s.notifyApproval(ctx, *req, ApprovalOriginPolicy)
-		return s.submitApprovedRequest(ctx, *req, viewer, nil)
+		req.externalIDsResolved = true
+		req.tvdbLookupFailed = tvdbLookupFailed
+		return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *req, viewer)), nil
 	}
-	return req, nil
+	return s.withLibraryContent(ctx, req), nil
 }
 
 func (s *Service) ListMine(ctx context.Context, viewer Viewer, filter ListFilter) ([]*Request, error) {
@@ -791,6 +1027,19 @@ func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilte
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
+	if filter.View != "" && !filter.View.Valid() {
+		return nil, fmt.Errorf("%w: unknown view %q", ErrInvalidInput, filter.View)
+	}
+	if filter.MediaType != "" {
+		mediaType, err := normalizeMediaType(filter.MediaType)
+		if err != nil {
+			return nil, err
+		}
+		filter.MediaType = mediaType
+	}
+	if utf8.RuneCountInString(filter.Query) > maxAdminQueryLength {
+		return nil, fmt.Errorf("%w: search is longer than %d characters", ErrInvalidInput, maxAdminQueryLength)
+	}
 	reqs, err := s.store.ListAdmin(ctx, normalizeListFilter(filter))
 	if err != nil {
 		return nil, err
@@ -804,18 +1053,53 @@ func (s *Service) ListAdmin(ctx context.Context, viewer Viewer, filter ListFilte
 	return reqs, nil
 }
 
+// maxAdminQueryLength bounds the admin queue's title search.
+const maxAdminQueryLength = 200
+
+// maxRequestEvents bounds a request's history as the admin queue reads it.
+const maxRequestEvents = 200
+
+// CountAdminViews counts the requests in each admin queue view.
+func (s *Service) CountAdminViews(ctx context.Context, viewer Viewer) (AdminViewCounts, error) {
+	if !viewer.IsAdmin {
+		return AdminViewCounts{}, ErrForbidden
+	}
+	return s.store.CountAdminViews(ctx)
+}
+
+// ListRequestEvents returns a request's history, newest first, for admins.
+func (s *Service) ListRequestEvents(ctx context.Context, viewer Viewer, id string) ([]RequestEvent, error) {
+	if !viewer.IsAdmin {
+		return nil, ErrForbidden
+	}
+	id = strings.TrimSpace(id)
+	if _, err := s.store.GetRequest(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.store.ListEvents(ctx, id, maxRequestEvents)
+}
+
 // attachTargets loads and attaches the per-instance fulfillment targets for each
 // request so callers (admin queue, detail view) can surface multi-target status.
+// One query serves the whole page.
 func (s *Service) attachTargets(ctx context.Context, reqs ...*Request) error {
+	ids := make([]string, 0, len(reqs))
 	for _, r := range reqs {
-		if r == nil {
-			continue
+		if r != nil {
+			ids = append(ids, r.ID)
 		}
-		targets, err := s.store.ListTargets(ctx, r.ID)
-		if err != nil {
-			return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	byRequest, err := s.store.ListTargetsForRequests(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, r := range reqs {
+		if r != nil {
+			r.Targets = byRequest[r.ID]
 		}
-		r.Targets = targets
 	}
 	return nil
 }
@@ -846,6 +1130,9 @@ func (s *Service) attachLibraryContent(ctx context.Context, reqs ...*Request) er
 		candidatesByType[req.MediaType] = append(candidatesByType[req.MediaType], requestPresenceCandidate(*req))
 	}
 
+	// Season requests whose series is in the library, by series content ID,
+	// so one query reads every series' season counts.
+	seasonRequests := map[string][]*Request{}
 	for mediaType, candidates := range candidatesByType {
 		matches, err := s.lookupPresence(ctx, mediaType, candidates)
 		if err != nil {
@@ -857,10 +1144,38 @@ func (s *Service) attachLibraryContent(ctx context.Context, reqs ...*Request) er
 			}
 			for _, req := range requestsByKey[requestKey{mediaType: mediaType, tmdbID: tmdbID}] {
 				req.LibraryContentID = match.ContentID
+				if req.MediaType == MediaTypeSeries && len(req.Seasons) > 0 {
+					seasonRequests[match.ContentID] = append(seasonRequests[match.ContentID], req)
+				}
 			}
 		}
 	}
+	resolver, ok := s.presence.(SeasonPresenceResolver)
+	if !ok || len(seasonRequests) == 0 {
+		return nil
+	}
+	bySeries, err := resolver.SeasonAvailability(ctx, slices.Collect(maps.Keys(seasonRequests)))
+	if err != nil {
+		return err
+	}
+	for series, reqs := range seasonRequests {
+		for _, req := range reqs {
+			req.SeasonProgress = seasonProgress(req.Seasons, bySeries[series])
+		}
+	}
 	return nil
+}
+
+// withLibraryContent attaches the library match and season progress to a
+// request a mutation returns, so its state reads as a detail or list read
+// would. The mutation has committed, so a lookup failure is logged and the
+// request returned without them rather than reported as a failed mutation.
+func (s *Service) withLibraryContent(ctx context.Context, req *Request) *Request {
+	if err := s.attachLibraryContent(ctx, req); err != nil {
+		slog.WarnContext(ctx, "requests: attach library content to mutation response failed", "component", "requests",
+			"request_id", req.ID, "err", err)
+	}
+	return req
 }
 
 func (s *Service) GetRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
@@ -887,55 +1202,50 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
-	if err != nil {
-		return nil, err
-	}
-	if req.Outcome != OutcomeActive || req.Status != StatusPending {
-		return nil, ErrInvalidState
-	}
-	approved, err := s.store.SetStatus(ctx, req.ID, StatusApproved, viewer)
+	approved, err := s.store.SetStatus(ctx, strings.TrimSpace(id), guardPending, StatusApproved, viewer)
 	if err != nil {
 		return nil, err
 	}
 	s.notifyApproval(ctx, *approved, ApprovalOriginAdmin)
-	return s.submitApprovedRequest(ctx, *approved, viewer, nil)
+	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *approved, viewer)), nil
 }
 
+// Decline rejects a request nothing has been sent for: a pending one, or an
+// approved one still waiting for the library or backing off. Once a submission
+// is in flight or a target exists, declining could leave the downstream
+// service's state diverged from Silo's, so the guard refuses it.
 func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
+	declined, err := s.store.SetOutcome(ctx, strings.TrimSpace(id), guardWithdrawable, OutcomeDeclined, viewer, reason)
 	if err != nil {
 		return nil, err
 	}
-	// Approved requests are pending submission by the reconciler; declining
-	// while submission may be in flight risks a divergent external state.
-	if req.Outcome != OutcomeActive ||
-		req.Status == StatusApproved ||
-		req.Status == StatusCompleted ||
-		req.Status == StatusQueued ||
-		req.Status == StatusDownloading ||
-		strings.TrimSpace(req.ExternalID) != "" ||
-		strings.TrimSpace(req.IntegrationKind) != "" {
-		return nil, ErrInvalidState
-	}
-	declined, err := s.store.SetOutcome(ctx, req.ID, OutcomeDeclined, viewer, reason)
-	if err != nil {
-		return nil, err
-	}
-	declined.DeclineReason = strings.TrimSpace(reason)
 	s.notifyLifecycle(ctx, *declined, LifecycleNotifier.RequestDeclined)
 	return declined, nil
 }
 
-// Cancel withdraws a request that has not yet been submitted to a downstream
-// integration. Owners can cancel their own pending requests; admins can cancel
-// any active request that has not entered the fulfillment pipeline. Requests
-// already approved, queued, downloading, or completed cannot be cancelled —
-// callers should decline (admin) or wait for completion in those cases.
+// Cancel withdraws a request that has not been sent to a downstream service:
+// pending, or approved but not yet sent (see guardWithdrawable). Owners can
+// withdraw their own; admins can withdraw any. Once a submission is in flight
+// or a target exists, the request stays in the pipeline until it completes or
+// fails.
 func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
+	return s.cancel(ctx, viewer, id, reason, false)
+}
+
+// AdminCancel is Cancel for the admin queue, which may also close a failed
+// request instead of retrying it. The v1 cancel keeps refusing failed
+// requests.
+func (s *Service) AdminCancel(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
+	if !viewer.IsAdmin {
+		return nil, ErrForbidden
+	}
+	return s.cancel(ctx, viewer, id, reason, true)
+}
+
+func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, closeFailed bool) (*Request, error) {
 	if viewer.UserID == 0 {
 		return nil, ErrForbidden
 	}
@@ -951,39 +1261,28 @@ func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) 
 	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
 		return nil, ErrForbidden
 	}
-	if req.Outcome != OutcomeActive ||
-		req.Status == StatusApproved ||
-		req.Status == StatusCompleted ||
-		req.Status == StatusQueued ||
-		req.Status == StatusDownloading ||
-		strings.TrimSpace(req.ExternalID) != "" ||
-		strings.TrimSpace(req.IntegrationKind) != "" {
-		return nil, ErrInvalidState
+	guard := guardWithdrawable
+	if closeFailed && req.Outcome == OutcomeFailed {
+		// Closing a failed request moves it out of the admin's failed view;
+		// nothing more is sent for it.
+		guard = guardFailed
 	}
-	return s.store.SetOutcome(ctx, req.ID, OutcomeCancelled, viewer, reason)
+	withdrawn, err := s.store.SetOutcome(ctx, req.ID, guard, OutcomeCancelled, viewer, reason)
+	if err != nil {
+		return nil, err
+	}
+	return withdrawn, nil
 }
 
 func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
-	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
+	reopened, err := s.store.ReopenFailed(ctx, strings.TrimSpace(id), viewer)
 	if err != nil {
 		return nil, err
 	}
-	if req.Outcome != OutcomeFailed {
-		return nil, ErrInvalidState
-	}
-	if _, err := s.store.SetOutcome(ctx, req.ID, OutcomeActive, viewer, "retry requested"); err != nil {
-		return nil, err
-	}
-	// submitApprovedRequest only re-submits qualities lacking a healthy target, so
-	// it is idempotent; gate it on the approved status it expects.
-	active, err := s.store.SetStatus(ctx, req.ID, StatusApproved, viewer)
-	if err != nil {
-		return nil, err
-	}
-	return s.submitApprovedRequest(ctx, *active, viewer, nil)
+	return s.withLibraryContent(ctx, s.submitAfterCommit(ctx, *reopened, viewer)), nil
 }
 
 func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileResult, error) {
@@ -1001,12 +1300,21 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 	if err != nil {
 		return ReconcileResult{}, err
 	}
+	present, err := s.presentRequests(ctx, candidates)
+	if err != nil {
+		return ReconcileResult{}, err
+	}
 	result := ReconcileResult{Checked: len(candidates)}
 	for _, req := range candidates {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		change, err := s.reconcileRequest(ctx, *req, fc)
+		change, err := s.reconcileRequest(ctx, *req, fc, present[req.ID])
+		// Stamp every candidate, including ones that errored, so the next pass
+		// starts with the requests this one did not reach.
+		if markErr := s.store.MarkReconciled(ctx, req.ID); markErr != nil {
+			slog.WarnContext(ctx, "request reconcile stamp failed", "component", "requests", "request_id", req.ID, "err", markErr)
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "request reconcile failed", "component", "requests",
 				"request_id", req.ID,
@@ -1028,9 +1336,14 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 			result.Completed++
 		case reconcileFailed:
 			result.Failed++
+		case reconcileDeferred:
+			result.Deferred++
 		case reconcileSkipped:
 			result.Skipped++
 		}
+	}
+	if err := s.completeWaitingFromLibrary(ctx, 2*limit, &result); err != nil {
+		return result, err
 	}
 	// Presence-gated fulfillment notifications: completion above (and via the
 	// per-target aggregate path) only marks status; the notification fires
@@ -1048,7 +1361,7 @@ func (s *Service) GetSettings(ctx context.Context, viewer Viewer) (Settings, err
 	return s.store.GetSettings(ctx)
 }
 
-func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus, error) {
+func (s *Service) GetFeatureStatus(ctx context.Context, viewer Viewer) (FeatureStatus, error) {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return FeatureStatus{}, err
@@ -1058,10 +1371,19 @@ func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus
 	// server behaves like an older version, and clients should know that.
 	_, hasRatings := s.entitlements.(ContentRatingResolver)
 	_, hasCerts := s.tmdb.(TMDBCertificationClient)
-	return FeatureStatus{
+	status := FeatureStatus{
 		RequestsEnabled:            settings.RequestsEnabled,
 		RatingRestrictionsEnforced: hasRatings && hasCerts,
-	}, nil
+	}
+	if settings.RequestsEnabled {
+		if status.MissingSeasonsRequestable, err = s.moreSeasonsRequestable(ctx); err != nil {
+			return FeatureStatus{}, err
+		}
+		// The account's own permission is left to the caller, which reads
+		// it for the request capability anyway.
+		status.WatchlistRequests = settings.WatchlistRequests && viewer.UserID != 0 && s.watchlistAutoRequest(ctx, viewer)
+	}
+	return status, nil
 }
 
 func (s *Service) ensureRequestsEnabled(ctx context.Context) error {
@@ -1186,6 +1508,9 @@ func (s *Service) UpdateIntegration(ctx context.Context, viewer Viewer, in Integ
 	if err := validateInstance(&in); err != nil {
 		return nil, err
 	}
+	if err := s.ensureRoutesKeepServerKind(ctx, in); err != nil {
+		return nil, err
+	}
 	if err := s.validateViaPlugin(ctx, in); err != nil {
 		return nil, err
 	}
@@ -1214,7 +1539,7 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			// Don't pair a stored API key with a caller-changed base URL: require the
 			// key to be re-entered when the server URL changes (defense against
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
-			if strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.BaseURL) != strings.TrimSpace(stored.BaseURL) {
+			if strings.TrimSpace(in.BaseURL) != "" && !sameIntegrationBaseURL(in.BaseURL, stored.BaseURL) {
 				return &ValidationError{FieldErrors: map[string]string{"api_key_ref": "re-enter the API key when changing the base URL"}}
 			}
 			in.APIKeyRef = stored.APIKeyRef
@@ -1311,11 +1636,10 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 		if stored != nil {
 			submittedBaseURL := strings.TrimSpace(integration.BaseURL)
-			storedBaseURL := strings.TrimSpace(stored.BaseURL)
-			if strings.TrimSpace(integration.BaseURL) == "" {
+			if submittedBaseURL == "" {
 				integration.BaseURL = stored.BaseURL
 			}
-			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || submittedBaseURL == storedBaseURL) {
+			if strings.TrimSpace(integration.APIKeyRef) == "" && (submittedBaseURL == "" || sameIntegrationBaseURL(submittedBaseURL, stored.BaseURL)) {
 				integration.APIKeyRef = stored.APIKeyRef
 			}
 			if strings.TrimSpace(integration.CapabilityID) == "" {
@@ -1330,55 +1654,69 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		}
 	}
 
+	// Without a key the plugin could only fail; say so on the key field. The
+	// address is passed as given: the v2 adapter normalizes it first, and the
+	// frozen v1 route keeps sending what the client submitted.
 	apiKey := strings.TrimSpace(integration.APIKeyRef)
+	if apiKey == "" {
+		return nil, probeValidation(&ValidationError{FieldErrors: map[string]string{fieldAPIKey: integrationKeyMissing}})
+	}
 	if s.router == nil || integration.InstallationID == nil {
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: apiKey, Config: integration.PluginConfig}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
-		return nil, classifyIntegrationTransportError(err)
+		return nil, classifyIntegrationError(err, integration.CapabilityID)
 	}
 	return options, nil
 }
 
-// classifyIntegrationTransportError marks a failure to reach the configured
-// integration as a dependency failure. Errors the router already classifies
-// (plugin validation results and the request-domain sentinels) pass through
-// untouched so the API keeps rendering them as client problems.
-func classifyIntegrationTransportError(err error) error {
+func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
+	cache, _ := ctx.Value(policyCacheKey{}).(*policyCache)
+	if cache == nil {
+		return s.resolvePolicy(ctx, userID)
+	}
+	// Held while resolving, so sections enriched concurrently wait for the
+	// first rather than each reading the account, group and quota again.
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if policy, ok := cache.byUser[userID]; ok {
+		return policy, nil
+	}
+	policy, err := s.resolvePolicy(ctx, userID)
 	if err == nil {
-		return nil
+		cache.byUser[userID] = policy
 	}
-	var validation *ValidationError
-	if errors.As(err, &validation) {
-		return err
-	}
-	for _, sentinel := range []error{
-		ErrInvalidInput,
-		ErrInvalidMediaType,
-		ErrRequestsDisabled,
-		ErrUserBlocked,
-		ErrQuotaExceeded,
-		ErrAlreadyAvailable,
-		ErrAlreadyRequested,
-		ErrNotFound,
-		ErrForbidden,
-		ErrInvalidState,
-	} {
-		if errors.Is(err, sentinel) {
-			return err
-		}
-	}
-	return fmt.Errorf("%w: %w", ErrIntegrationUnreachable, err)
+	return policy, err
 }
 
-func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
+// policyCache shares a viewer's resolved policy across the page enrichments
+// of one call (DiscoverAll's sections, a detail and its recommendations).
+type policyCache struct {
+	mu     sync.Mutex
+	byUser map[int]EffectivePolicy
+}
+
+type policyCacheKey struct{}
+
+func withPolicyCache(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(policyCacheKey{}).(*policyCache); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, policyCacheKey{}, &policyCache{byUser: map[int]EffectivePolicy{}})
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return EffectivePolicy{}, err
 	}
 	limit, err := s.store.GetUserLimit(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
 	if err != nil {
 		return EffectivePolicy{}, err
 	}
@@ -1388,32 +1726,50 @@ func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePol
 		MaxRequests:     settings.GlobalMaxRequests,
 		WindowDays:      settings.GlobalWindowDays,
 		AutoApprove:     settings.GlobalAutoApprovalEnabled,
+		Blocked:         !viewerAccess.allowed,
 	}
 	if policy.WindowDays <= 0 {
 		policy.WindowDays = 7
 	}
+	// The account's own limits win, then its access group's, then the
+	// server's; a layer set to inherit defers to the next.
+	limitMode, maxRequests, windowDays := LimitModeInherit, (*int)(nil), (*int)(nil)
+	approval := ApprovalModeInherit
+	layers := []*UserLimit{}
+	if g := viewerAccess.group; g != nil {
+		layers = append(layers, &UserLimit{LimitMode: g.LimitMode, MaxRequests: g.MaxRequests, WindowDays: g.WindowDays, ApprovalMode: g.ApprovalMode})
+	}
 	if limit != nil {
-		switch limit.LimitMode {
-		case LimitModeBlocked:
-			policy.Blocked = true
-		case LimitModeUnlimited:
-			policy.Unlimited = true
-		case LimitModeCustom:
-			if limit.MaxRequests != nil {
-				policy.MaxRequests = *limit.MaxRequests
-			}
-			if limit.WindowDays != nil && *limit.WindowDays > 0 {
-				policy.WindowDays = *limit.WindowDays
-			}
+		layers = append(layers, limit)
+	}
+	for _, layer := range layers {
+		if layer.LimitMode != "" && layer.LimitMode != LimitModeInherit {
+			limitMode, maxRequests, windowDays = layer.LimitMode, layer.MaxRequests, layer.WindowDays
 		}
-		switch limit.ApprovalMode {
-		case ApprovalModeBlocked:
-			policy.Blocked = true
-		case ApprovalModeManual:
-			policy.AutoApprove = false
-		case ApprovalModeAuto:
-			policy.AutoApprove = true
+		if layer.ApprovalMode != "" && layer.ApprovalMode != ApprovalModeInherit {
+			approval = layer.ApprovalMode
 		}
+	}
+	switch limitMode {
+	case LimitModeBlocked:
+		policy.Blocked = true
+	case LimitModeUnlimited:
+		policy.Unlimited = true
+	case LimitModeCustom:
+		if maxRequests != nil {
+			policy.MaxRequests = *maxRequests
+		}
+		if windowDays != nil && *windowDays > 0 {
+			policy.WindowDays = *windowDays
+		}
+	}
+	switch approval {
+	case ApprovalModeBlocked:
+		policy.Blocked = true
+	case ApprovalModeManual:
+		policy.AutoApprove = false
+	case ApprovalModeAuto:
+		policy.AutoApprove = true
 	}
 
 	policy.WindowStart = s.now().AddDate(0, 0, -policy.WindowDays)
@@ -1473,6 +1829,7 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 
 	available := map[MediaType]map[int]PresenceMatch{}
 	active := map[MediaType]map[int]*Request{}
+	following := map[MediaType]map[int]bool{}
 	for mediaType, ids := range idsByType {
 		presence, err := s.lookupAvailable(ctx, mediaType, ids)
 		if err != nil {
@@ -1484,6 +1841,9 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 			return nil, err
 		}
 		active[mediaType] = requests
+		if following[mediaType], err = s.followedTitles(ctx, viewer, mediaType, requests); err != nil {
+			return nil, err
+		}
 	}
 
 	out := &MediaPage{
@@ -1499,6 +1859,8 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 		}
 		match := available[mediaType][item.ID]
 		activeRequest := active[mediaType][item.ID]
+		state := requestStateFor(viewer, policy, match.Available, activeRequest)
+		state.Following = activeRequest != nil && following[mediaType][item.ID]
 		out.Results = append(out.Results, MediaResult{
 			MediaType:        mediaType,
 			TMDBID:           item.ID,
@@ -1512,7 +1874,7 @@ func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw 
 			VoteAverage:      item.VoteAverage,
 			Availability:     availabilityValue(match.Available),
 			LibraryContentID: match.ContentID,
-			Request:          requestStateFor(viewer, policy, match.Available, activeRequest),
+			Request:          state,
 		})
 	}
 	return out, nil
@@ -1634,53 +1996,113 @@ func (s *Service) lookupAvailable(ctx context.Context, mediaType MediaType, ids 
 	return matches, nil
 }
 
-func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) {
+// enrichExternalIDs fills missing IMDb and TVDB IDs from TMDB and, for a
+// series still without a TVDB ID, from the metadata providers. It reports
+// whether a series is left without a TVDB ID because a lookup (TMDB or a
+// metadata provider) failed, rather than because none exists.
+func (s *Service) enrichExternalIDs(ctx context.Context, input *CreateRequestInput) (tvdbLookupFailed bool) {
 	if input == nil {
-		return
-	}
-	client, ok := s.tmdb.(TMDBExternalIDClient)
-	if !ok {
-		return
-	}
-	externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
-	if err != nil || externalIDs == nil {
-		return
-	}
-	if input.IMDbID == "" {
-		input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
-	}
-	if input.TVDBID == nil && externalIDs.TVDBID > 0 {
-		tvdbID := externalIDs.TVDBID
-		input.TVDBID = &tvdbID
-	}
-}
-
-func (s *Service) detectRequestAnime(ctx context.Context, mediaType MediaType, tmdbID int) bool {
-	detail, err := s.tmdb.GetMediaDetail(ctx, tmdbMediaType(mediaType), tmdbID)
-	if err != nil || detail == nil {
 		return false
 	}
-	return detectAnime(detail.KeywordIDs)
-}
-
-// integrationConfigured reports whether a fulfillment backend exists for the
-// media type, gating auto-approval (pending vs approved). It uses the same
-// router-connection selection as resolveRouterConnections — an enabled
-// request_router.v1 connection with an installation — and additionally honors a
-// connection's declared media-type support so a movie request only auto-approves
-// when a router connection supporting "movie" exists.
-func (s *Service) integrationConfigured(ctx context.Context, mediaType MediaType) (bool, error) {
-	instances, err := s.store.ListIntegrations(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, in := range instances {
-		if eligibleRouterConnection(in, mediaType) &&
-			strings.TrimSpace(in.BaseURL) != "" && strings.TrimSpace(in.APIKeyRef) != "" {
-			return true, nil
+	tmdbFailed := false
+	// Only TMDB's own IMDb ID is trusted for the provider lookup. A
+	// caller-supplied one may be stale or belong to another series, and a TVDB
+	// match found by it can't always be checked against the TMDB ID.
+	lookupIMDbID := ""
+	if client, ok := s.tmdb.(TMDBExternalIDClient); ok {
+		externalIDs, err := client.GetExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+		tmdbFailed = err != nil
+		// A cached answer without a TVDB ID may predate the admin adding one
+		// on TMDB (the failure message asks them to), so ask TMDB again. If
+		// that fails, keep the cached IDs and record the failure.
+		if refresher, ok := s.tmdb.(TMDBExternalIDRefresher); ok && input.MediaType == MediaTypeSeries &&
+			input.TVDBID == nil && err == nil && (externalIDs == nil || externalIDs.TVDBID <= 0) {
+			if fresh, refreshErr := refresher.RefreshExternalIDs(ctx, tmdbMediaType(input.MediaType), input.TMDBID); refreshErr == nil {
+				externalIDs = fresh
+			} else {
+				tmdbFailed = true
+			}
+		}
+		if err == nil && externalIDs != nil {
+			lookupIMDbID = strings.TrimSpace(externalIDs.IMDbID)
+			if input.IMDbID == "" {
+				input.IMDbID = strings.TrimSpace(externalIDs.IMDbID)
+			}
+			if input.TVDBID == nil && externalIDs.TVDBID > 0 {
+				tvdbID := externalIDs.TVDBID
+				input.TVDBID = &tvdbID
+			}
 		}
 	}
-	return false, nil
+	// Sonarr adds series by TVDB ID only, and TMDB often lacks the
+	// cross-reference for new or regional series. Ask the metadata providers
+	// (TVDB's remote-ID search) before giving up.
+	if input.MediaType == MediaTypeSeries && input.TVDBID == nil && s.tvdbResolver != nil {
+		tvdbID, err := s.tvdbResolver.ResolveSeriesTVDBID(ctx, input.TMDBID, lookupIMDbID)
+		if tvdbID > 0 {
+			input.TVDBID = &tvdbID
+		} else if err != nil {
+			slog.WarnContext(ctx, "requests: resolve series tvdb id via metadata providers failed", "component", "requests",
+				"tmdb_id", input.TMDBID, "err", err)
+			return true
+		}
+	}
+	return tmdbFailed && input.MediaType == MediaTypeSeries && input.TVDBID == nil
+}
+
+// ensureSeriesTVDBID looks up a series request's missing TVDB ID again right
+// before submission (approve, Retry, reconcile), so an ID added on TMDB or TVDB
+// since the request was created is used, and records it on the request.
+func (s *Service) ensureSeriesTVDBID(ctx context.Context, req *Request) error {
+	if req.MediaType != MediaTypeSeries || (req.TVDBID != nil && *req.TVDBID > 0) || req.externalIDsResolved {
+		return nil
+	}
+	input := CreateRequestInput{MediaType: req.MediaType, TMDBID: req.TMDBID, IMDbID: strings.TrimSpace(req.IMDbID)}
+	req.tvdbLookupFailed = s.enrichExternalIDs(ctx, &input)
+	if input.TVDBID == nil {
+		return nil
+	}
+	// Save before submitting: a backend that accepted the series under an ID
+	// the request row doesn't carry would leave the two out of step.
+	// Submit the ID the row holds: a concurrent submission may have saved a
+	// different one first, and SetExternalIDs keeps it.
+	saved, err := s.store.SetExternalIDs(ctx, req.ID, *input.TVDBID, input.IMDbID)
+	if err != nil {
+		return err
+	}
+	req.TVDBID = &saved
+	if req.IMDbID == "" {
+		req.IMDbID = input.IMDbID
+	}
+	return nil
+}
+
+// missingTVDBIDMessage replaces a backend's "TVDB ID required" error (for
+// example "sonarr: tvdb_id is required") once every lookup has come up empty.
+const missingTVDBIDMessage = "No TVDB ID found for this series. TMDB has none, and the metadata providers found no match on TVDB, " +
+	"so the request backend can't add it. Add the TVDB ID on TMDB (or the TMDB or IMDb ID on TVDB), then retry."
+
+// tvdbLookupFailedMessage replaces the same error when TMDB or a metadata
+// provider failed during the lookup, so the admin isn't sent to fix IDs that
+// may exist.
+const tvdbLookupFailedMessage = "Couldn't look up a TVDB ID for this series because TMDB or a metadata provider failed during the lookup, " +
+	"so the request backend can't add it yet. Check TMDB and the metadata providers, then retry."
+
+// missingTVDBIDError matches backend errors about a missing TVDB ID, such as
+// "sonarr: tvdb_id is required", and not other TVDB failures such as a
+// missing API key.
+var missingTVDBIDError = regexp.MustCompile(`(?i)tvdb[ _-]?id\b.*\b(required|missing)\b|\b(missing|no)\b.*\btvdb[ _-]?id`)
+
+// explainSubmissionFailure turns a backend failure caused by a missing TVDB ID
+// into an explanation the admin can act on. Other failures pass through.
+func explainSubmissionFailure(req Request, msg string) string {
+	if req.MediaType != MediaTypeSeries || (req.TVDBID != nil && *req.TVDBID > 0) || !missingTVDBIDError.MatchString(msg) {
+		return msg
+	}
+	if req.tvdbLookupFailed {
+		return tvdbLookupFailedMessage
+	}
+	return missingTVDBIDMessage
 }
 
 // integrationSupportsMediaType reports whether a router connection serves the
@@ -1697,12 +2119,49 @@ func integrationSupportsMediaType(in Integration, mediaType MediaType) bool {
 	return false
 }
 
+// submitLease bounds how long one server's submission claim keeps the others
+// out. It must outlast a router call; if the claiming server dies mid-call, a
+// reconcile pass after the lease picks the request up.
+const submitLease = 10 * time.Minute
+
+// maxSubmitAttempts is how many claimed submissions may fail before the request
+// is marked failed for an admin to retry. With submitBackoff that is about six
+// hours of retries, enough to ride out a restarting or briefly offline service.
+const maxSubmitAttempts = 10
+
+// submitBackoff is the wait after the given number of failed attempts: 5
+// minutes doubling to a one-hour cap. The reconcile pass runs every 5 minutes,
+// so shorter waits would not be honored anyway.
+func submitBackoff(attempts int) time.Duration {
+	d := 5 * time.Minute
+	for i := 1; i < attempts && d < time.Hour; i++ {
+		d *= 2
+	}
+	return min(d, time.Hour)
+}
+
+// submitAfterCommit submits a request whose approval is already committed. The
+// approval stands whatever happens next, so a submission error is logged and
+// the committed request returned: answering an error would tell the caller the
+// approval failed, and the reconcile pass retries the submission anyway.
+func (s *Service) submitAfterCommit(ctx context.Context, req Request, actor Viewer) *Request {
+	submitted, err := s.submitApprovedRequest(ctx, req, actor, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "requests: submission after approval failed; reconcile will retry", "component", "requests",
+			"request_id", req.ID, "err", err)
+		return &req
+	}
+	return submitted
+}
+
+// submitApprovedRequest sends an approved request to the router plugin. Only
+// the caller that claims the submission sends it, so concurrent approvals and
+// reconcile passes on any server cannot double-submit. A failed attempt is
+// recorded on the request and retried with backoff until maxSubmitAttempts,
+// after which the request is marked failed.
 func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor Viewer, fc *fulfillContext) (*Request, error) {
 	if req.Outcome != OutcomeActive || req.Status != StatusApproved {
 		return &req, nil
-	}
-	if s.router == nil {
-		return s.markSubmissionFailed(ctx, req.ID, actor, fmt.Errorf("no fulfillment backend configured"))
 	}
 	if fc == nil {
 		built, err := s.newFulfillContext(ctx)
@@ -1711,59 +2170,124 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		}
 		fc = built
 	}
+	if s.router == nil || !routerConfiguredFor(fc, req.MediaType) {
+		// No router serves this media type: the request stays approved and
+		// the reconcile pass completes it when the title reaches the library.
+		return &req, nil
+	}
+	missingSeasons := false
+	if req.MediaType == MediaTypeSeries && len(req.Seasons) > 0 {
+		// A season request for a series already in the library goes only to
+		// a server whose plugin takes seasons; any other would add the whole
+		// series (see moreSeasonsRequestable). Otherwise it waits for the
+		// library, even when the server was set up after it was made.
+		matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(req)})
+		if err != nil {
+			return nil, err
+		}
+		if match := matches[req.TMDBID]; match.Available {
+			// Seasons that reached the library since the request was made
+			// need no download: the reconcile pass completes the request.
+			fulfilled, _, err := s.requestFulfilled(ctx, req, match)
+			if err != nil {
+				return nil, err
+			}
+			if fulfilled {
+				return &req, nil
+			}
+			deliverable, err := s.missingSeasonsDeliverable(ctx, fc, req)
+			if err != nil {
+				return nil, err
+			}
+			if !deliverable {
+				return &req, nil
+			}
+			missingSeasons = true
+		}
+	}
+	claimed, ok, err := s.store.ClaimSubmission(ctx, req.ID, submitLease)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		// Another caller holds the claim, or a failed attempt's backoff has
+		// not elapsed; a later reconcile pass submits it.
+		return &req, nil
+	}
+	// The claim reloads the row; keep this call's external-ID lookup result.
+	claimed.externalIDsResolved = req.externalIDsResolved
+	claimed.tvdbLookupFailed = req.tvdbLookupFailed
+	submitted, submitErr := s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
+	if submitErr == nil {
+		return submitted, nil
+	}
+	if claimed.SubmitAttempts >= maxSubmitAttempts {
+		return s.markSubmissionFailed(ctx, *claimed, actor, submitErr)
+	}
+	deferred, err := s.store.DeferSubmission(ctx, claimed.ID, claimLease(*claimed), submitBackoff(claimed.SubmitAttempts), submitErr.Error())
+	if err != nil {
+		if errors.Is(err, ErrInvalidState) {
+			// The attempt created targets before failing, which moved the
+			// request past approved and the per-target state now owns it; or
+			// this attempt outlived its lease and another claim holds the
+			// request now.
+			return s.store.GetRequest(ctx, claimed.ID)
+		}
+		return nil, fmt.Errorf("submit request: %w; schedule retry: %w", submitErr, err)
+	}
+	slog.WarnContext(ctx, "requests: submission failed; will retry", "component", "requests",
+		"request_id", claimed.ID,
+		"attempt", claimed.SubmitAttempts,
+		"retry_in", submitBackoff(claimed.SubmitAttempts),
+		"err", submitErr,
+	)
+	return deferred, nil
+}
+
+// submitClaimed does the submission work for a request whose claim the caller
+// holds. missingSeasons marks a request for seasons of a series already in the
+// library, which only a router that takes seasons may receive.
+func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, fc *fulfillContext, missingSeasons bool) (*Request, error) {
+	// Resolve before planSubmission drops failed targets, so a failed save
+	// leaves their error records in place.
+	if err := s.ensureSeriesTVDBID(ctx, &req); err != nil {
+		return nil, err
+	}
+	if routes := fc.routesFor(req.MediaType); len(routes) > 0 {
+		return s.submitRouted(ctx, req, actor, fc, routes, missingSeasons)
+	}
 	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, fc, req.MediaType)
 	if err != nil {
 		return nil, err
 	}
 	if len(conns) == 0 {
-		// Distinguish "no backend at all" from the migration breakage where an
-		// existing connection row exists but its installation_id is NULL (the row
-		// predates the plugin install and was never re-bound).
-		msg := "no fulfillment backend configured"
-		for _, in := range fc.integrations {
-			if in.Enabled && in.CapabilityID != "" && in.InstallationID == nil {
-				msg = "request backend connection is not bound to a plugin installation; re-save it in admin"
-				break
-			}
+		// A connection is configured for the media type (routerConfiguredFor)
+		// but none is usable. That is an admin-fixable setup problem, so it is
+		// returned as a submission error: the request keeps its approval and
+		// retries with backoff, and goes through once the connection is fixed.
+		return nil, errors.New(unusableRouterMessage(fc, req.MediaType))
+	}
+	if missingSeasons {
+		// missingSeasonsDeliverable checked every series connection; this
+		// guards the plugin actually chosen.
+		ok, err := s.routerSupportsSeasons(ctx, fc, installationID, capabilityID)
+		if err != nil {
+			return nil, err
 		}
-		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
-	}
-	existing, err := s.store.ListTargets(ctx, req.ID)
-	if err != nil {
-		return nil, err
-	}
-	healthy := map[Quality]bool{}
-	for _, t := range existing {
-		if t.Status != StatusFailed {
-			healthy[t.Quality] = true
+		if !ok {
+			return nil, errMissingSeasonsUnsupported("The request backend")
 		}
 	}
-	allowed := s.allowedQualities(ctx, req, fc.settings)
+	allowed, resolved := s.allowedQualities(ctx, req, fc.settings)
 	if !fc.settings.ForceDualQuality {
 		allowed = filterUnconfiguredOptionalQualities(allowed, conns)
 	}
-	var want []Quality
-	for _, q := range allowed {
-		if !healthy[q] {
-			want = append(want, q)
-		}
-	}
-	if len(want) == 0 {
-		return &req, nil
-	}
-	for _, t := range existing { // drop stale failed targets for the qualities we re-submit
-		if t.Status == StatusFailed {
-			for _, q := range want {
-				if t.Quality == q {
-					if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
-						return nil, err
-					}
-				}
-			}
-		}
+	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved && !skippedRouterConnection(fc, req.MediaType))
+	if done != nil || err != nil {
+		return done, err
 	}
 	s.populateRequesterIdentity(ctx, &req)
-	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
+	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, plan.want, conns)
 	if err != nil {
 		return nil, err
 	}
@@ -1771,24 +2295,295 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		if msg == "" {
 			msg = "fulfillment backend created no targets"
 		}
-		return s.markSubmissionFailed(ctx, req.ID, actor, errors.New(msg))
+		return s.markSubmissionFailed(ctx, req, actor, errors.New(explainSubmissionFailure(req, msg)))
 	}
-	connKind := connectionKindByID(conns)
-	latest := &req
-	// The plugin is an out-of-process trust boundary: validate every returned
-	// target against the DB CHECK constraints (quality, status) and skip any
-	// quality that is duplicated in the batch or already has a healthy target, so
-	// a misbehaving plugin can't violate UNIQUE(request_id, quality) and wedge the
-	// request.
+	return s.recordTargets(ctx, req, actor, plan, targets, connectionKindByID(conns), nil, nil)
+}
+
+// submitRouted sends each wanted tier to the server the routing rules chose
+// for it, one plugin call per tier with only that server, so the plugin
+// cannot pick another.
+func (s *Service) submitRouted(ctx context.Context, req Request, actor Viewer, fc *fulfillContext, routes []Route, missingSeasons bool) (*Request, error) {
+	if err := s.ensureRoutingFacts(ctx, &req, routes); err != nil {
+		return nil, err
+	}
+	allowed, resolved := s.allowedQualities(ctx, req, fc.settings)
+	decisions := decideRoutes(routes, req, allowed)
+	allowed = slices.DeleteFunc(allowed, func(q Quality) bool {
+		decision, routed := decisions[q]
+		switch {
+		case routed && decision.Skip:
+			// A matching route skips the tier: no copy, even with force-dual.
+			return true
+		case !routed && q == Quality2160p && !fc.settings.ForceDualQuality:
+			// No route gives this title a 4K destination: it does not get a
+			// 4K copy, the same as when no 4K server is configured.
+			return true
+		}
+		return false
+	})
+	plan, done, err := s.planSubmission(ctx, req, actor, allowed, resolved)
+	if done != nil || err != nil {
+		return done, err
+	}
+	s.populateRequesterIdentity(ctx, &req)
+	var targets []RouterTarget
+	connKind := map[string]string{}
+	failures := map[Quality]string{}
+	for _, q := range plan.want {
+		decision, ok := decisions[q]
+		if !ok {
+			failures[q] = unroutedMessage(routes, req.MediaType, q)
+			continue
+		}
+		conn, installationID, capabilityID, err := routedConnection(fc, decision, req.MediaType, q)
+		if err != nil {
+			if len(targets) == 0 {
+				// The chosen server is gone, disabled or not set up: an
+				// admin-fixable problem. Nothing reached a server yet, so the
+				// submission retries with backoff and goes through once the
+				// server or the route is fixed.
+				return nil, err
+			}
+			failures[q] = err.Error()
+			continue
+		}
+		if missingSeasons {
+			// Routing facts read after the claim can choose a server
+			// missingSeasonsDeliverable did not check.
+			ok, err := s.routerSupportsSeasons(ctx, fc, installationID, capabilityID)
+			if err == nil && !ok {
+				err = errMissingSeasonsUnsupported(fmt.Sprintf("%q (route %q)", integrationName(fc, conn.ID), decision.RouteName))
+			}
+			if err != nil {
+				if len(targets) == 0 {
+					return nil, err
+				}
+				failures[q] = err.Error()
+				continue
+			}
+		}
+		maps.Copy(connKind, connectionKindByID([]ResolvedRouterConnection{conn}))
+		got, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, []Quality{q}, []ResolvedRouterConnection{conn})
+		if err != nil {
+			if len(targets) == 0 {
+				// Nothing reached a server yet: retry the whole submission.
+				return nil, err
+			}
+			failures[q] = err.Error()
+			continue
+		}
+		// The call asked for this tier only. A target labeled with the other
+		// tier would sit on this tier's server and could win the other tier's
+		// slot in recordTargets over that tier's real target, so drop it.
+		var tier []RouterTarget
+		for _, t := range got {
+			if t.Quality != q {
+				slog.WarnContext(ctx, "requests: plugin returned a target for another quality; skipping", "component", "requests",
+					"request_id", req.ID, "requested_quality", string(q), "quality", string(t.Quality))
+				continue
+			}
+			// The plugin was handed only this server, so a target it returns
+			// without a connection is on it; recording that keeps the target
+			// checked through the plugin that owns the server.
+			if t.ConnectionID == "" {
+				t.ConnectionID = conn.ID
+			}
+			tier = append(tier, t)
+		}
+		if len(tier) == 0 && msg != "" {
+			failures[q] = msg
+		}
+		targets = append(targets, tier...)
+	}
+	return s.recordTargets(ctx, req, actor, plan, targets, connKind, decisions, failures)
+}
+
+// unroutedMessage says why a tier went nowhere. Under Standard it can only be
+// HD, when the media type's one server is marked 4K.
+func unroutedMessage(routes []Route, mediaType MediaType, q Quality) string {
+	if isStandardRouting(routes, mediaType) {
+		return fmt.Sprintf("no server takes %s %s: the only one is marked 4K", qualityLabel(q), mediaTypePlural(mediaType))
+	}
+	return "no routing rule sends " + qualityLabel(q) + " for this title"
+}
+
+// qualityLabel names a tier in messages.
+func qualityLabel(q Quality) string {
+	if q == Quality2160p {
+		return "4K"
+	}
+	return "HD"
+}
+
+// unratedRecheck is how long a title with no US rating goes before routing
+// asks TMDB again.
+const unratedRecheck = 24 * time.Hour
+
+// TMDBCertificationsClient reads every country's certifications, for the
+// routing rating's fallback to a title's own country.
+type TMDBCertificationsClient interface {
+	GetCertifications(ctx context.Context, mediaType string, id int) (map[string][]string, error)
+}
+
+// routingRatingOf reads a captured request's rating again: its US rating, or
+// its own country's when it has none. A client without the per-country read
+// answers with the US rating alone.
+func (s *Service) routingRatingOf(ctx context.Context, req Request) (string, error) {
+	if certs, ok := s.tmdb.(TMDBCertificationsClient); ok {
+		all, err := certs.GetCertifications(ctx, string(req.MediaType), req.TMDBID)
+		if err != nil {
+			return "", err
+		}
+		us := tmdb.USCertificationFrom(string(req.MediaType), all)
+		return routingRating(us, all, req.RoutingFacts.OriginCountries), nil
+	}
+	one, ok := s.tmdb.(TMDBCertificationClient)
+	if !ok {
+		return "", errors.New("no certification client")
+	}
+	return one.GetCertification(ctx, string(req.MediaType), req.TMDBID)
+}
+
+// ensureRoutingFacts fetches the routing facts of a request created before
+// they were captured, or while TMDB was unreachable, and stores them. Routing
+// without them could send a title to the wrong server, so a TMDB failure is a
+// submission error and the submission retries. A request captured before its
+// rating was is given one, only when an enabled route checks ratings.
+func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes []Route) error {
+	if req.RoutingFacts.Captured() {
+		// A title TMDB had not rated yet (unreleased) is asked again a day
+		// later, so a rating route can still match it once it is rated.
+		stored := req.RoutingFacts.ContentRating
+		known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
+		if known || !routesCheckRating(routes, req.MediaType) {
+			return nil
+		}
+		rating, err := s.routingRatingOf(ctx, *req)
+		if err != nil {
+			return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
+		}
+		facts := req.RoutingFacts
+		now := s.now()
+		facts.ContentRating, facts.CapturedAt = &rating, &now
+		updated, err := s.store.SetRoutingFacts(ctx, req.ID, facts)
+		if err != nil {
+			return err
+		}
+		req.RoutingFacts = updated.RoutingFacts
+		return nil
+	}
+	detail := s.requestDetail(ctx, req.MediaType, req.TMDBID)
+	if detail == nil {
+		if isStandardRouting(routes, req.MediaType) {
+			// Standard's only condition is anime, which the request's stored
+			// anime flag already answers, so it is sent without the facts.
+			req.RoutingFacts.Anime = req.IsAnime
+			return nil
+		}
+		if !routesUseConditions(routes, req.MediaType) {
+			// Only Everything else decides: the facts would
+			// not change where the request goes, so it is sent without them.
+			return nil
+		}
+		return errors.New("could not read the title's details from TMDB to route it")
+	}
+	updated, err := s.store.SetRoutingFacts(ctx, req.ID, s.routingFacts(ctx, detail))
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	return nil
+}
+
+// submissionPlan is what a submission still has to send.
+type submissionPlan struct {
+	// healthy holds the qualities that already have a live or finished target.
+	healthy map[Quality]bool
+	// want is the qualities to send now.
+	want []Quality
+}
+
+// planSubmission compares the qualities a request should have with its
+// targets. It drops failed targets for qualities no longer wanted (4K turned
+// off, the requester lost 4K, the 4K destination removed), which would keep the
+// request failed forever, but only when allowed is certain: an entitlement
+// lookup error or a skipped connection also shrinks it, and a transient error
+// must not discard a failure an admin still needs to see. It also drops the
+// failed targets of the qualities it is about to resend. done is set when
+// nothing is left to send.
+func (s *Service) planSubmission(ctx context.Context, req Request, actor Viewer, allowed []Quality, certain bool) (submissionPlan, *Request, error) {
+	existing, err := s.store.ListTargets(ctx, req.ID)
+	if err != nil {
+		return submissionPlan{}, nil, err
+	}
+	plan := submissionPlan{healthy: map[Quality]bool{}}
+	for _, t := range existing {
+		if t.Status != StatusFailed {
+			plan.healthy[t.Quality] = true
+		}
+	}
+	if certain {
+		for _, t := range existing {
+			if t.Status == StatusFailed && !slices.Contains(allowed, t.Quality) {
+				if err := s.store.DeleteTarget(ctx, t.ID); err != nil && !errors.Is(err, ErrNotFound) {
+					return submissionPlan{}, nil, err
+				}
+			}
+		}
+	}
+	for _, q := range allowed {
+		if !plan.healthy[q] {
+			plan.want = append(plan.want, q)
+		}
+	}
+	if len(plan.want) == 0 {
+		// Nothing left to send: let the remaining targets decide the status so
+		// the request does not sit in approved.
+		updated, err := s.store.RecomputeStatus(ctx, req.ID, actor)
+		if errors.Is(err, ErrInvalidState) {
+			updated, err = s.store.GetRequest(ctx, req.ID)
+		}
+		if err != nil {
+			return submissionPlan{}, nil, err
+		}
+		return submissionPlan{}, updated, nil
+	}
+	for _, t := range existing {
+		if t.Status == StatusFailed && slices.Contains(plan.want, t.Quality) {
+			if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
+				return submissionPlan{}, nil, err
+			}
+		}
+	}
+	return plan, nil, nil
+}
+
+// msgNoTargetForQuality is recorded on a wanted quality the plugin returned no
+// target for.
+const msgNoTargetForQuality = "fulfillment backend returned no target for this quality"
+
+// recordTargets stores what the plugin returned for a submission. The plugin
+// is an out-of-process trust boundary: every returned target is validated
+// against the DB CHECK constraints (quality, status), and a quality duplicated
+// in the batch or already holding a healthy target is skipped, so a
+// misbehaving plugin can't violate UNIQUE(request_id, quality) and wedge the
+// request. Any wanted quality left without a target is recorded as a failed
+// target rather than silently dropped, so it stays visible and Retry
+// re-attempts it; failures carries the reason when one is known. decisions,
+// when routing chose the servers, stamps each target with its route.
+func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, plan submissionPlan, targets []RouterTarget,
+	connKind map[string]string, decisions map[Quality]RouteDecision, failures map[Quality]string) (*Request, error) {
 	validQuality := map[Quality]bool{Quality1080p: true, Quality2160p: true}
 	validStatus := map[Status]bool{StatusQueued: true, StatusDownloading: true, StatusCompleted: true, StatusFailed: true}
 	returned := map[Quality]bool{}
+	var record []Target
 	for _, rt := range targets {
 		if !validQuality[rt.Quality] {
 			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "component", "requests", "request_id", req.ID, "quality", string(rt.Quality))
 			continue
 		}
-		if returned[rt.Quality] || healthy[rt.Quality] {
+		if returned[rt.Quality] || plan.healthy[rt.Quality] {
 			continue // dup-in-batch, or a healthy target already exists for this quality
 		}
 		if rt.ConnectionID != "" {
@@ -1798,48 +2593,47 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			}
 		}
 		returned[rt.Quality] = true
-		created, err := s.store.CreateTarget(ctx, Target{
-			RequestID: req.ID, IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
-			Quality: rt.Quality, IsAnime: req.IsAnime, Status: StatusQueued,
-		})
-		if err != nil {
-			return nil, err
-		}
+		decision := decisions[rt.Quality]
 		status := rt.Status
 		if status == "" || !validStatus[status] {
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
-		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, status, rt.ExternalID, rt.ExternalStatus, rt.Message, actor)
-		if err != nil {
-			return nil, err
+		message := rt.Message
+		if status == StatusFailed {
+			message = explainSubmissionFailure(req, message)
 		}
-		if updated != nil {
-			latest = updated
-		}
+		record = append(record, Target{
+			IntegrationID: rt.ConnectionID, IntegrationKind: connKind[rt.ConnectionID],
+			Quality: rt.Quality, IsAnime: req.IsAnime, Status: status,
+			ExternalID: rt.ExternalID, ExternalStatus: rt.ExternalStatus, LastError: message,
+			RouteID: decision.RouteID, RouteName: decision.RouteName,
+		})
 	}
-	// Any wanted quality the plugin did not fulfill is recorded as a failed target
-	// rather than silently dropped, so it stays visible and Retry re-attempts it
-	// (a failed target is not "healthy").
-	const noTargetMsg = "fulfillment backend returned no target for this quality"
-	for _, q := range want {
+	for _, q := range plan.want {
 		if returned[q] {
 			continue
 		}
-		created, err := s.store.CreateTarget(ctx, Target{
-			RequestID: req.ID, Quality: q, IsAnime: req.IsAnime, Status: StatusFailed, LastError: noTargetMsg,
+		msg := explainSubmissionFailure(req, failures[q])
+		if msg == "" {
+			msg = msgNoTargetForQuality
+		}
+		decision := decisions[q]
+		record = append(record, Target{
+			IntegrationID: decision.IntegrationID, Quality: q, IsAnime: req.IsAnime,
+			Status: StatusFailed, LastError: msg, RouteID: decision.RouteID, RouteName: decision.RouteName,
 		})
-		if err != nil {
-			return nil, err
-		}
-		updated, err := s.store.UpdateTargetStatus(ctx, created.ID, StatusFailed, "", "", noTargetMsg, actor)
-		if err != nil {
-			return nil, err
-		}
-		if updated != nil {
-			latest = updated
-		}
 	}
-	return latest, nil
+	recorded, err := s.store.RecordSubmission(ctx, req.ID, claimLease(req), record, actor)
+	if errors.Is(err, ErrInvalidState) {
+		// The router call outlived this claim's lease, and meanwhile the
+		// request was withdrawn, completed from the library, or claimed
+		// again. That state stands; the downstream service may still hold
+		// what this call added.
+		slog.WarnContext(ctx, "requests: submission outlived its claim; result dropped", "component", "requests",
+			"request_id", req.ID, "targets", len(record))
+		return s.store.GetRequest(ctx, req.ID)
+	}
+	return recorded, err
 }
 
 // connectionKindByID maps each connection id to its plugin-declared service kind
@@ -1906,9 +2700,25 @@ func boolConfig(config map[string]any, key string) bool {
 	return ok && b
 }
 
-func (s *Service) markSubmissionFailed(ctx context.Context, requestID string, actor Viewer, submitErr error) (*Request, error) {
-	failed, err := s.store.SetOutcome(ctx, requestID, OutcomeFailed, actor, submitErr.Error())
+// claimLease returns the lease a claimed request holds, which fences the
+// writes that end the claim.
+func claimLease(claimed Request) time.Time {
+	if claimed.SubmitLeaseUntil == nil {
+		return time.Time{}
+	}
+	return *claimed.SubmitLeaseUntil
+}
+
+// markSubmissionFailed ends a claimed submission as failed. claimed is the
+// request as ClaimSubmission returned it; its lease fences the write.
+func (s *Service) markSubmissionFailed(ctx context.Context, claimed Request, actor Viewer, submitErr error) (*Request, error) {
+	failed, err := s.store.FailSubmission(ctx, claimed.ID, claimLease(claimed), actor, submitErr.Error())
 	if err != nil {
+		if errors.Is(err, ErrInvalidState) {
+			// The attempt created targets before failing, or it outlived its
+			// lease and another claim holds the request now.
+			return s.store.GetRequest(ctx, claimed.ID)
+		}
 		return nil, fmt.Errorf("submit request failed: %w; mark failed: %v", submitErr, err)
 	}
 	return failed, nil
@@ -1923,18 +2733,103 @@ const (
 	reconcileDownloading reconcileChange = "downloading"
 	reconcileCompleted   reconcileChange = "completed"
 	reconcileFailed      reconcileChange = "failed"
+	reconcileDeferred    reconcileChange = "deferred"
 )
 
-func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfillContext) (reconcileChange, error) {
-	completed, err := s.requestAvailable(ctx, req)
+// completeWaitingFromLibrary completes pending and recently failed requests
+// whose title has reached the library. Nothing is in flight for them, so they
+// run in their own rotation, apart from the requests that need router calls,
+// and one batched presence lookup per media type covers the whole batch.
+func (s *Service) completeWaitingFromLibrary(ctx context.Context, limit int, result *ReconcileResult) error {
+	waiting, err := s.store.ListLibraryWaitCandidates(ctx, limit)
 	if err != nil {
-		return reconcileUnchanged, err
+		return err
 	}
-	if completed {
+	present, err := s.presentRequests(ctx, waiting)
+	if err != nil {
+		return err
+	}
+	result.Checked += len(waiting)
+	for _, req := range waiting {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if present[req.ID] {
+			if _, err := s.store.MarkAvailable(ctx, req.ID, Viewer{}); err == nil {
+				result.Completed++
+			} else if !errors.Is(err, ErrInvalidState) {
+				slog.WarnContext(ctx, "request library completion failed", "component", "requests", "request_id", req.ID, "err", err)
+				result.Errors++
+			}
+		}
+		if err := s.store.MarkReconciled(ctx, req.ID); err != nil {
+			slog.WarnContext(ctx, "request reconcile stamp failed", "component", "requests", "request_id", req.ID, "err", err)
+		}
+	}
+	return nil
+}
+
+// presentRequests reports which requests are fulfilled by the library, with
+// one presence lookup per media type and one season lookup for every season
+// request: the title is in, or, for a season request, every requested season
+// is complete.
+func (s *Service) presentRequests(ctx context.Context, reqs []*Request) (map[string]bool, error) {
+	byType := map[MediaType][]*Request{}
+	for _, req := range reqs {
+		if req != nil && req.TMDBID > 0 {
+			byType[req.MediaType] = append(byType[req.MediaType], req)
+		}
+	}
+	out := make(map[string]bool, len(reqs))
+	// Season requests whose series is in the library, by series content ID.
+	seasonRequests := map[string][]*Request{}
+	for mediaType, group := range byType {
+		candidates := make([]PresenceCandidate, 0, len(group))
+		for _, req := range group {
+			candidates = append(candidates, requestPresenceCandidate(*req))
+		}
+		matches, err := s.lookupPresence(ctx, mediaType, candidates)
+		if err != nil {
+			return nil, err
+		}
+		for _, req := range group {
+			match := matches[req.TMDBID]
+			if req.MediaType != MediaTypeSeries || len(req.Seasons) == 0 {
+				out[req.ID] = match.Available
+				continue
+			}
+			out[req.ID] = false
+			if match.Available && match.ContentID != "" {
+				seasonRequests[match.ContentID] = append(seasonRequests[match.ContentID], req)
+			}
+		}
+	}
+	resolver, ok := s.presence.(SeasonPresenceResolver)
+	if !ok || len(seasonRequests) == 0 {
+		return out, nil
+	}
+	bySeries, err := resolver.SeasonAvailability(ctx, slices.Collect(maps.Keys(seasonRequests)))
+	if err != nil {
+		return nil, err
+	}
+	for series, group := range seasonRequests {
+		for _, req := range group {
+			progress := seasonProgress(req.Seasons, bySeries[series])
+			out[req.ID] = seasonsDelivered(progress, req.Status == StatusCompleted)
+		}
+	}
+	return out, nil
+}
+
+// reconcileRequest moves one in-flight request forward. present reports
+// whether its title is already in the library.
+func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfillContext, present bool) (reconcileChange, error) {
+	if present {
 		// The presence check is quality-agnostic (TMDB id only), so it must not
 		// force-complete a request whose targets are still in flight — that would
-		// orphan in-progress downloads. Only take the shortcut for legacy/no-live
-		// -target requests; otherwise let per-target reconcile + aggregate drive
+		// orphan in-progress downloads. Only take the shortcut for requests with
+		// no live target (pending, failed, waiting for the library without a
+		// router, or legacy); otherwise let per-target reconcile + aggregate drive
 		// completion.
 		live, err := s.liveTargets(ctx, req.ID)
 		if err != nil {
@@ -1944,7 +2839,12 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 			if req.Status == StatusCompleted {
 				return reconcileUnchanged, nil
 			}
-			if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
+			if _, err := s.store.MarkAvailable(ctx, req.ID, Viewer{}); err != nil {
+				if errors.Is(err, ErrInvalidState) {
+					// Another actor moved it first, or a submission holds the
+					// claim; a later pass completes it.
+					return reconcileUnchanged, nil
+				}
 				return reconcileUnchanged, err
 			}
 			return reconcileCompleted, nil
@@ -1968,6 +2868,10 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 			return reconcileFailed, nil
 		case updated.Status == StatusQueued:
 			return reconcileSubmitted, nil
+		case updated.Status == StatusApproved && updated.SubmitAttempts > req.SubmitAttempts:
+			// This pass made an attempt and it failed; a request still in
+			// backoff comes back unchanged and counts as skipped.
+			return reconcileDeferred, nil
 		default:
 			return reconcileSkipped, nil
 		}
@@ -1980,64 +2884,205 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 	if s.router == nil {
 		return reconcileUnchanged, nil
 	}
-	conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, fc, req.MediaType)
+	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
+	change, err := s.applyTargetStatuses(ctx, targets, statuses)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
-	if len(conns) == 0 {
-		return reconcileUnchanged, nil
-	}
+	return change, checkErr
+}
 
-	var refs []RouterTargetRef
-	for _, t := range targets {
-		if t.Status == StatusCompleted || t.Status == StatusFailed {
-			continue
-		}
-		refs = append(refs, RouterTargetRef{Quality: t.Quality, ConnectionID: t.IntegrationID, ExternalID: t.ExternalID})
-	}
-	if len(refs) == 0 {
-		return reconcileUnchanged, nil
-	}
-
-	statuses, err := s.router.CheckStatus(ctx, installationID, capabilityID, req, refs, conns)
-	if err != nil {
-		return reconcileUnchanged, err
-	}
-
+// applyTargetStatuses writes the statuses a router reported for the given
+// targets, matched by quality and connection, and the download progress of
+// each target still queued or downloading afterwards. A target that reports
+// no progress has any it had cleared; one that had none is not written, so an
+// idle target costs no write per pass. A target with progress that got no
+// status back (its server was skipped or failed, or the call did) keeps it
+// until it goes stale; see settleUnansweredDownload. Both reconcile and the
+// download refresh pass apply statuses here.
+func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
 	change := reconcileUnchanged
+	answered := make([]bool, len(targets))
 	for _, st := range statuses {
 		// Match the returned status to the live target by (quality, connection).
 		var target *Target
 		for i := range targets {
 			if targets[i].Quality == st.Quality && targets[i].IntegrationID == st.ConnectionID {
 				target = &targets[i]
+				answered[i] = true
 				break
 			}
 		}
 		if target == nil || target.Status == StatusCompleted || target.Status == StatusFailed {
 			continue
 		}
-		newStatus := st.Status
-		if newStatus == "" || newStatus == target.Status {
-			continue
-		}
-		if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
-			return reconcileUnchanged, err
-		}
-		switch newStatus {
-		case StatusCompleted:
-			change = reconcileCompleted
-		case StatusDownloading:
-			if change == reconcileUnchanged {
-				change = reconcileDownloading
+		status := target.Status
+		if newStatus := st.Status; newStatus != "" && newStatus != target.Status {
+			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
+				return reconcileUnchanged, err
 			}
-		case StatusFailed:
-			if change == reconcileUnchanged {
-				change = reconcileFailed
+			status = newStatus
+			switch newStatus {
+			case StatusCompleted:
+				change = reconcileCompleted
+			case StatusDownloading:
+				if change == reconcileUnchanged {
+					change = reconcileDownloading
+				}
+			case StatusFailed:
+				if change == reconcileUnchanged {
+					change = reconcileFailed
+				}
+			}
+		} else if st.ExternalStatus != "" && st.ExternalStatus != target.ExternalStatus {
+			// The server's own state moved without changing the target's
+			// status (say, a download went from importing to stalled). Keep
+			// the raw status in step with the progress shown beside it.
+			if err := s.store.UpdateTargetExternalStatus(ctx, target.ID, st.ExternalStatus); err != nil {
+				return reconcileUnchanged, err
+			}
+		}
+		if (status == StatusQueued || status == StatusDownloading) && (st.Progress != nil || target.Download != nil) {
+			if err := s.store.UpdateTargetDownload(ctx, target.ID, st.Progress); err != nil {
+				return reconcileUnchanged, err
 			}
 		}
 	}
+	for i, target := range targets {
+		if answered[i] {
+			continue
+		}
+		if err := s.settleUnansweredDownload(ctx, target); err != nil {
+			return reconcileUnchanged, err
+		}
+	}
 	return change, nil
+}
+
+// checkTargetStatuses asks each live target's plugin for its status. Targets
+// are grouped by the installation and capability that own their server, so a
+// target sent through one plugin is never checked through another (routing
+// can send a request's tiers through different plugins, and an admin can
+// rebind a server). A target the plugin returned without a connection is
+// checked through the plugin that routes the media type without rules, with
+// all its connections, as before routing. A target whose server is gone,
+// disabled or unusable is skipped; the library presence check retires it if
+// the media arrives.
+func (s *Service) checkTargetStatuses(ctx context.Context, req Request, targets []Target, fc *fulfillContext) ([]RouterTargetStatus, error) {
+	type owner struct {
+		installationID int
+		capabilityID   string
+	}
+	type group struct {
+		refs  []RouterTargetRef
+		conns []ResolvedRouterConnection
+		seen  map[string]bool
+	}
+	groups := map[owner]*group{}
+	var order []owner
+	groupFor := func(key owner) *group {
+		g := groups[key]
+		if g == nil {
+			g = &group{seen: map[string]bool{}}
+			groups[key] = g
+			order = append(order, key)
+		}
+		return g
+	}
+	addConn := func(g *group, conn ResolvedRouterConnection) {
+		if !g.seen[conn.ID] {
+			g.seen[conn.ID] = true
+			g.conns = append(g.conns, conn)
+		}
+	}
+	for _, t := range targets {
+		if t.Status != StatusQueued && t.Status != StatusDownloading {
+			continue
+		}
+		ref := RouterTargetRef{Quality: t.Quality, ConnectionID: t.IntegrationID, ExternalID: t.ExternalID}
+		if t.IntegrationID == "" {
+			conns, installationID, capabilityID, err := s.resolveRouterConnections(ctx, fc, req.MediaType)
+			if err != nil || len(conns) == 0 {
+				continue
+			}
+			g := groupFor(owner{installationID, capabilityID})
+			g.refs = append(g.refs, ref)
+			for _, conn := range conns {
+				addConn(g, conn)
+			}
+			continue
+		}
+		in := integrationByID(fc, t.IntegrationID)
+		if !statusCheckable(in) {
+			continue
+		}
+		g := groupFor(owner{*in.InstallationID, in.CapabilityID})
+		g.refs = append(g.refs, ref)
+		addConn(g, ResolvedRouterConnection{ID: in.ID, BaseURL: in.BaseURL, APIKey: strings.TrimSpace(in.APIKeyRef), Config: in.PluginConfig})
+	}
+	// One plugin being down must not hide the statuses another reported, so
+	// every group is asked and the errors are returned alongside them.
+	var out []RouterTargetStatus
+	var errs []error
+	for _, key := range order {
+		g := groups[key]
+		statuses, err := s.router.CheckStatus(ctx, key.installationID, key.capabilityID, req, g.refs, g.conns)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		keepProgress, err := s.keepsReportedProgress(ctx, fc, key.installationID, key.capabilityID, statuses)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		// A plugin that omits connection_id from its statuses omits it from
+		// its targets too, and a routed target was recorded on its server
+		// anyway. When every target in the group is on one server, a status
+		// without a connection is that server's.
+		server := soleRefConnection(g.refs)
+		for _, st := range statuses {
+			if st.ConnectionID == "" {
+				st.ConnectionID = server
+			}
+			if !keepProgress {
+				st.Progress = nil
+			}
+			out = append(out, st)
+		}
+	}
+	return out, errors.Join(errs...)
+}
+
+// soleRefConnection returns the one connection all refs are on, or "" when
+// they are on several or any is on none.
+func soleRefConnection(refs []RouterTargetRef) string {
+	server := ""
+	for _, ref := range refs {
+		if ref.ConnectionID == "" || (server != "" && ref.ConnectionID != server) {
+			return ""
+		}
+		server = ref.ConnectionID
+	}
+	return server
+}
+
+// statusCheckable reports whether a target's server can be asked for the
+// target's status: it still exists, is enabled, is bound to a router
+// capability, and has an API key.
+func statusCheckable(in *Integration) bool {
+	return in != nil && in.Enabled && in.InstallationID != nil && in.CapabilityID != "" && strings.TrimSpace(in.APIKeyRef) != ""
+}
+
+func integrationByID(fc *fulfillContext, id string) *Integration {
+	if id == "" {
+		return nil
+	}
+	for i := range fc.integrations {
+		if fc.integrations[i].ID == id {
+			return &fc.integrations[i]
+		}
+	}
+	return nil
 }
 
 // liveTargets returns the request's non-terminal (queued or downloading)
@@ -2108,14 +3153,6 @@ func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []
 	return updated, retired, nil
 }
 
-func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, error) {
-	matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(req)})
-	if err != nil {
-		return false, err
-	}
-	return matches[req.TMDBID].Available, nil
-}
-
 func (s *Service) now() time.Time {
 	if s.Now != nil {
 		return s.Now()
@@ -2125,15 +3162,7 @@ func (s *Service) now() time.Time {
 
 func requestStateFor(viewer Viewer, policy EffectivePolicy, available bool, req *Request) RequestState {
 	if req != nil {
-		state := RequestState{
-			Status:      req.Status,
-			Requestable: false,
-			Reason:      "already_requested",
-		}
-		if viewer.IsAdmin || req.RequestedByUserID == viewer.UserID {
-			state.RequestID = req.ID
-		}
-		return state
+		return activeRequestState(viewer, req)
 	}
 	switch {
 	case available:
@@ -2149,14 +3178,32 @@ func requestStateFor(viewer Viewer, policy EffectivePolicy, available bool, req 
 	}
 }
 
-func validateCreatePolicy(policy EffectivePolicy) error {
+// activeRequestState is the state of a title that already has an active
+// request: not requestable, and the request is visible to its account and to
+// admins.
+func activeRequestState(viewer Viewer, req *Request) RequestState {
+	state := RequestState{
+		Status:      req.Status,
+		Requestable: false,
+		Reason:      "already_requested",
+	}
+	if viewer.IsAdmin || req.RequestedByUserID == viewer.UserID {
+		state.RequestID = req.ID
+	}
+	state.State = req.State()
+	state.RequestedByViewer = req.requestedBy(viewer)
+	return state
+}
+
+// validateCreateAccess applies the policy rules a create decides up front. The
+// quota is not one of them: the store checks it under the requester's lock, so
+// concurrent creates cannot both take the last slot.
+func validateCreateAccess(policy EffectivePolicy) error {
 	switch {
 	case !policy.RequestsEnabled:
 		return ErrRequestsDisabled
 	case policy.Blocked:
 		return ErrUserBlocked
-	case !policy.Unlimited && policy.Used >= policy.MaxRequests:
-		return QuotaError{Used: policy.Used, Limit: policy.MaxRequests, WindowDays: policy.WindowDays}
 	default:
 		return nil
 	}
@@ -2183,11 +3230,24 @@ func normalizeCreateInput(input CreateRequestInput) (CreateRequestInput, error) 
 	input.Overview = strings.TrimSpace(input.Overview)
 	input.PosterPath = strings.TrimSpace(input.PosterPath)
 	input.BackdropPath = strings.TrimSpace(input.BackdropPath)
+	if input.TVDBID != nil && *input.TVDBID <= 0 {
+		input.TVDBID = nil
+	}
 	if input.TMDBID <= 0 {
 		return CreateRequestInput{}, fmt.Errorf("%w: tmdb_id is required", ErrInvalidInput)
 	}
 	if input.Title == "" {
 		return CreateRequestInput{}, fmt.Errorf("%w: title is required", ErrInvalidInput)
+	}
+	if len(input.Seasons) > 0 && mediaType != MediaTypeSeries {
+		return CreateRequestInput{}, fmt.Errorf("%w: only a series request names seasons", ErrInvalidInput)
+	}
+	for _, season := range input.Seasons {
+		if season <= 0 {
+			// Refused, never dropped: an emptied list would mean every
+			// missing season.
+			return CreateRequestInput{}, &ValidationError{FieldErrors: map[string]string{"seasons": "Season numbers start at 1."}}
+		}
 	}
 	return input, nil
 }

@@ -7,6 +7,7 @@ interface MetadataBadgesProps {
   advisorySource?: string;
   duration?: string;
   seasonCount?: number;
+  seasonLabel?: string;
   episodeCount?: number;
   volumeCount?: number;
   chapterCount?: number;
@@ -25,6 +26,7 @@ export default function MetadataBadges({
   advisorySource,
   duration,
   seasonCount,
+  seasonLabel,
   episodeCount,
   volumeCount,
   chapterCount,
@@ -54,6 +56,7 @@ export default function MetadataBadges({
           {seasonCount} {seasonCount === 1 ? "Season" : "Seasons"}
         </span>
       )}
+      {seasonLabel && <span className="metadata-badge">{seasonLabel}</span>}
       {episodeCount != null && (
         <span className="metadata-badge">
           {episodeCount} {episodeCount === 1 ? "Episode" : "Episodes"}

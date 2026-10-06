@@ -57,6 +57,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -385,6 +386,12 @@ func (e *Env) Reseed() {
 	}
 	e.mustSetting("branding.server_name", serverName)
 	e.mustSetting("signup.enabled", "true")
+	// A deployment mints its server identity on first use and keeps it. Seed
+	// it here so the first v2 read that reports server_id (device lookup,
+	// system info) is not observed as a server_settings write.
+	if _, err := serveridentity.Ensure(ctx, catalog.NewServerSettingsRepo(e.pool)); err != nil {
+		e.t.Fatalf("scenario executor: seed server identity: %v", err)
+	}
 	// Media requests on, so the onboarding flow's requests step is present
 	// for non-child profiles and the child filter has something to remove.
 	e.mustExec(`INSERT INTO request_settings (id, requests_enabled) VALUES (true, true)

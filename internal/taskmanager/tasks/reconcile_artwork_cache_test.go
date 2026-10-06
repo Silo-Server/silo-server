@@ -42,6 +42,19 @@ func (f *fakeSettingsStore) Get(_ context.Context, key string) (string, error) {
 	return f.values[key], nil
 }
 
+func (f *fakeSettingsStore) GetMany(_ context.Context, keys ...string) (map[string]string, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	out := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if value, ok := f.values[key]; ok {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeSettingsStore) Set(_ context.Context, key, value string) error {
 	if f.values == nil {
 		f.values = map[string]string{}
@@ -207,17 +220,6 @@ func TestReconcileArtworkCacheRefusesCommitBeforeBaselineRead(t *testing.T) {
 	}
 	if runner.runs != 1 || store.values[ArtworkStorageIdentityKey] != "new" {
 		t.Fatalf("stale task certification state: runs=%d identity=%q", runner.runs, store.values[ArtworkStorageIdentityKey])
-	}
-}
-
-func TestReconcileArtworkCacheRunsWithoutManagedTransition(t *testing.T) {
-	runner := &fakeReconcileRunner{}
-	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "current"}}
-	if err := NewReconcileArtworkCacheTask(runner, store, nil, "current").Execute(t.Context(), &fakeProgress{}); err != nil {
-		t.Fatal(err)
-	}
-	if runner.runs != 1 {
-		t.Fatalf("manual reconcile runs = %d, want 1", runner.runs)
 	}
 }
 

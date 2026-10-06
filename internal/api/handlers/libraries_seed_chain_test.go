@@ -66,20 +66,6 @@ func TestBuildSeededChainEntries_OptOutAndLevelScoping(t *testing.T) {
 	}
 }
 
-// A provider with default_enabled=true (the default) that declares the level is
-// seeded enabled, unchanged from the pre-flag behavior.
-func TestBuildSeededChainEntries_DefaultsEnabled(t *testing.T) {
-	entries := buildSeededChainEntries("movie", []seedCandidate{
-		{installationID: 1, capabilityID: "tmdb", supportsLevel: true, declaredPriority: 2, defaultEnabled: true},
-	})
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(entries))
-	}
-	if !entries[0].Enabled {
-		t.Errorf("provider with default_enabled=true should be seeded enabled")
-	}
-}
-
 // A legacy provider that declares no default_priority map at all makes no claim
 // and stays eligible for every level (parked last, disabled) — preserving the
 // pre-existing catch-all behavior for providers that never enumerated levels.

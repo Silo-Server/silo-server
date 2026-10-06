@@ -33,6 +33,9 @@ func (f *fakeNotificationEmailLinks) UnsubscribeEmail(_ context.Context, token s
 }
 
 func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
+	fake := new(fakeNotificationEmailLinks)
+	links := handlers.NewEmailLinkHandler(fake)
+	h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: links})
 	for _, tc := range []struct {
 		name, path, method string
 		outcome            notifications.EmailVerifyOutcome
@@ -50,9 +53,7 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 		{"unsubscribe-error", "unsubscribe", http.MethodPost, 0, false, errors.New("private database detail"), 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeNotificationEmailLinks{outcome: tc.outcome, unsubscribed: tc.ok, err: tc.err}
-			links := handlers.NewEmailLinkHandler(fake)
-			h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: links})
+			*fake = fakeNotificationEmailLinks{outcome: tc.outcome, unsubscribed: tc.ok, err: tc.err}
 			req := httptest.NewRequest(tc.method, "/api/v2/notifications/email/"+tc.path+"?token=synthetic-proof", strings.NewReader("List-Unsubscribe=One-Click"))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req.Header.Set("Accept", "text/html")

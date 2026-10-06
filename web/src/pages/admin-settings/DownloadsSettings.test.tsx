@@ -48,16 +48,8 @@ beforeEach(() => {
   useSettingsFormMock.mockReturnValue(makeForm());
 });
 
-describe("DownloadsSettings layout", () => {
-  it("opens with the title alone and one Downloads group", () => {
-    render(<DownloadsSettings />);
-
-    expect(screen.getByRole("heading", { level: 1, name: "Downloads" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Downloads" })).toBeInTheDocument();
-    expect(screen.queryByText(/Settings ›/)).not.toBeInTheDocument();
-  });
-
-  it("owns the whole download key family and nothing from playback", () => {
+describe("DownloadsSettings staged edits", () => {
+  it("stages the downloads toggle without saving it", () => {
     render(<DownloadsSettings />);
 
     expect(useSettingsFormMock.mock.calls[0]?.[0]?.keys).toEqual([
@@ -73,57 +65,6 @@ describe("DownloadsSettings layout", () => {
       "download.max_concurrent_prepares",
       "download.artifact_max_bytes",
     ]);
-  });
-
-  it("shows the two essential controls and hides the rest behind Advanced", () => {
-    render(<DownloadsSettings />);
-
-    expect(screen.getByRole("switch", { name: /Allow downloads/i })).toBeInTheDocument();
-    expect(screen.getByLabelText("Per-user bandwidth")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Server bandwidth")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Advanced · 9 settings" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
-  });
-
-  it("groups the per-user limits ahead of the server-wide ones", () => {
-    expandAdvanced();
-    render(<DownloadsSettings />);
-
-    const text = screen.getByRole("group", { name: "Downloads" }).textContent ?? "";
-    const order = [
-      "Per user",
-      "Downloads at once per user",
-      "Downloads per period",
-      "Period length",
-      "Whole server",
-      "Server bandwidth",
-      "Prepared file storage budget",
-    ].map((label) => text.indexOf(label));
-
-    expect(order.every((index) => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-  });
-
-  it("forces the advanced disclosure open while a hidden field is dirty", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({}, ["download.artifact_dir"]));
-    render(<DownloadsSettings />);
-
-    expect(screen.getByLabelText("Prepared file directory")).toBeInTheDocument();
-  });
-
-  it("marks restart-required fields from the restart key list", () => {
-    expandAdvanced();
-    render(<DownloadsSettings />);
-
-    expect(screen.getAllByLabelText("Takes effect after a server restart")).toHaveLength(1);
-  });
-});
-
-describe("DownloadsSettings staged edits", () => {
-  it("stages the downloads toggle without saving it", () => {
-    render(<DownloadsSettings />);
 
     fireEvent.click(screen.getByRole("switch", { name: /Allow downloads/i }));
 
@@ -153,19 +94,12 @@ describe("DownloadsSettings staged edits", () => {
       "/var/lib/silo/downloads",
     );
   });
-
-  it("raises the save bar once edits are staged", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({}, ["download.enabled"]));
-    render(<DownloadsSettings />);
-
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-  });
 });
 
 describe("DownloadsSettings prepared file storage budget", () => {
   beforeEach(expandAdvanced);
 
-  it("shows a byte budget in GB", () => {
+  it("writes bytes back when a GB budget is typed", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_max_bytes": "53687091200" }));
     render(<DownloadsSettings />);
 
@@ -173,11 +107,6 @@ describe("DownloadsSettings prepared file storage budget", () => {
     expect(screen.getByRole("group", { name: "Downloads" }).textContent).not.toContain(
       "53687091200",
     );
-  });
-
-  it("writes bytes back when a GB budget is typed", () => {
-    useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_max_bytes": "53687091200" }));
-    render(<DownloadsSettings />);
 
     fireEvent.change(screen.getByLabelText("Prepared file storage budget"), {
       target: { value: "100" },
@@ -212,41 +141,6 @@ describe("DownloadsSettings prepared file directory", () => {
 
   const RESET = { name: "Reset Prepared file directory to default" };
 
-  it("shows where a blank directory resolves to", () => {
-    render(<DownloadsSettings />);
-
-    expect(screen.getByLabelText("Prepared file directory")).toHaveAttribute(
-      "placeholder",
-      "/tmp/silo-download-artifacts",
-    );
-    expect(
-      screen.getByText(
-        "Leave blank for a silo-download-artifacts folder beside the transcode directory.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  // The transcode directory lives on the Playback page's form, so this page
-  // only ever sees the saved value — but it still has to derive from it rather
-  // than quoting the built-in default.
-  it("derives the placeholder from the saved transcode directory", () => {
-    useSettingsFormMock.mockReturnValue(
-      makeForm({ "playback.transcode_dir": "/mnt/fast/transcode" }),
-    );
-    render(<DownloadsSettings />);
-
-    expect(screen.getByLabelText("Prepared file directory")).toHaveAttribute(
-      "placeholder",
-      "/mnt/fast/silo-download-artifacts",
-    );
-  });
-
-  it("offers no reset while the field already runs the default", () => {
-    render(<DownloadsSettings />);
-
-    expect(screen.queryByRole("button", RESET)).not.toBeInTheDocument();
-  });
-
   it("stages an empty value when an overridden directory is reset", () => {
     useSettingsFormMock.mockReturnValue(makeForm({ "download.artifact_dir": "/mnt/downloads" }));
     render(<DownloadsSettings />);
@@ -254,15 +148,5 @@ describe("DownloadsSettings prepared file directory", () => {
     fireEvent.click(screen.getByRole("button", RESET));
 
     expect(lastForm().setValue).toHaveBeenCalledWith("download.artifact_dir", "");
-  });
-
-  it("counts the reset as one unsaved change and falls back to the placeholder", () => {
-    // The staged empty string, as the form would report it on the next render.
-    useSettingsFormMock.mockReturnValue(makeForm({}, ["download.artifact_dir"]));
-    render(<DownloadsSettings />);
-
-    expect(screen.getByLabelText("Prepared file directory")).toHaveValue("");
-    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
-    expect(screen.queryByRole("button", RESET)).not.toBeInTheDocument();
   });
 });

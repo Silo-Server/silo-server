@@ -19,9 +19,12 @@ type contextKey string
 // claimsKey is the context key for storing JWT claims.
 const claimsKey contextKey = "claims"
 
-// SessionValidator checks whether a session is still valid (not revoked/expired).
+// SessionValidator checks a login session on every access-token request.
+// ActiveSessionRole reports whether the session is still active (not revoked
+// or expired) and the current role of the account it belongs to, in one
+// lookup; auth.SessionRepository implements it.
 type SessionValidator interface {
-	IsValid(ctx context.Context, sessionID string) (bool, error)
+	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
 }
 
 // TokenValidator validates a JWT token string and returns the parsed claims.
@@ -68,6 +71,11 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 // middleware keeps no cache, so a revocation applies to the session's next
 // request), and sets the parsed claims in the request context for downstream
 // handlers.
+//
+// The same lookup returns the account's current role. Admin gates trust the
+// role in the access token, so a token minted before an admin changed the
+// account's role is refused with ReasonTokenRefreshRequired: the session
+// stays valid, and a refresh issues a token carrying the new role.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)
@@ -131,9 +139,13 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			valid, err := am.sessionValidator.IsValid(r.Context(), claims.SessionID)
-			if err != nil || !valid {
+			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
+			if err != nil || !active {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
+				return
+			}
+			if role != claims.Role {
+				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
 		}
@@ -146,9 +158,31 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			lc.SessionID = claims.SessionID
 		}
 
+		// Attributed above, so the audit log shows whose restricted session
+		// was refused.
+		if claims.PasswordChangeRequired && !passwordChangeRoutes[r.Method+" "+r.URL.Path] {
+			writePasswordChangeRequired(w)
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// passwordChangeRoutes are the only routes a session holding a temporary
+// password may call: enough to read the account, replace the password, and
+// sign out. Refreshing the session afterwards is a public route; the refreshed
+// tokens drop the restriction once the account has a new password.
+var passwordChangeRoutes = map[string]bool{
+	"GET /api/v1/auth/me":                     true,
+	"GET /api/v1/auth/account/capability":     true,
+	"POST /api/v1/auth/account/password":      true,
+	"POST /api/v1/auth/logout":                true,
+	"GET /api/v2/account/me":                  true,
+	"GET /api/v2/account/password/capability": true,
+	"POST /api/v2/account/password":           true,
+	"POST /api/v2/auth/logout":                true,
 }
 
 // RequireAdmin is a standalone HTTP middleware that checks if the authenticated
@@ -352,6 +386,11 @@ const (
 	// ReasonSessionInvalid: the credential is well-formed but its login
 	// session no longer exists.
 	ReasonSessionInvalid = "session_invalid"
+	// ReasonTokenRefreshRequired: the login session is valid, but the access
+	// token was minted before the account's role changed. Refreshing the
+	// session issues a token with the current role; the client must not sign
+	// out.
+	ReasonTokenRefreshRequired = "token_refresh_required"
 	// ReasonProfileHeaderRequired: RequireProfile found no X-Profile-Id.
 	ReasonProfileHeaderRequired = "profile_header_required"
 	// ReasonItemIDRequired: an item-scoped permission gate found no {id} path
@@ -368,6 +407,22 @@ func writeUnauthorized(w http.ResponseWriter, message, reason string) {
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   "unauthorized",
 		Message: message,
+	})
+}
+
+// CodePasswordChangeRequired is the error code of a request a session made
+// before replacing its temporary password. internal/apiv2 renders it as the
+// password_change_required problem type.
+const CodePasswordChangeRequired = "password_change_required"
+
+// writePasswordChangeRequired writes the 403 a restricted session gets for
+// any route outside passwordChangeRoutes.
+func writePasswordChangeRequired(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   CodePasswordChangeRequired,
+		Message: "Choose a new password to continue",
 	})
 }
 

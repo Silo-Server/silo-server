@@ -43,7 +43,14 @@ func TestCache_MissThenHit(t *testing.T) {
 		t.Fatalf("first GetOrConvert: %v", err)
 	}
 	assertValidEpub(t, p1)
-	fi1, _ := os.Stat(p1)
+	fi1, err := os.Stat(p1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(p1, old, old); err != nil {
+		t.Fatal(err)
+	}
 
 	p2, err := c.GetOrConvert(context.Background(), src, key)
 	if err != nil {
@@ -52,7 +59,13 @@ func TestCache_MissThenHit(t *testing.T) {
 	if p1 != p2 {
 		t.Fatalf("hit returned different path: %s vs %s", p1, p2)
 	}
-	fi2, _ := os.Stat(p2)
+	fi2, err := os.Stat(p2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(fi2.ModTime()) > time.Minute {
+		t.Fatalf("cache hit did not refresh mtime for LRU; mtime is %v old", time.Since(fi2.ModTime()))
+	}
 	// A hit refreshes mtime for LRU but must NOT reconvert: the cached entry is
 	// the same underlying file, not a freshly converted+renamed replacement.
 	if !os.SameFile(fi1, fi2) {
@@ -141,28 +154,6 @@ func TestCache_EvictionSkipsInFlightTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp); err != nil {
 		t.Fatalf("eviction deleted an in-flight temp file: %v", err)
-	}
-}
-
-// A cache hit refreshes mtime so the mtime-ordered budget eviction behaves as a
-// real LRU (most-recently-read entries survive).
-func TestCache_HitTouchesModTimeForLRU(t *testing.T) {
-	c := newTestCache(t, CacheOptions{})
-	src := filepath.Join("testdata", "sample-ncx.mobi")
-	key := keyFor(t, 1, src)
-	p, err := c.GetOrConvert(context.Background(), src, key)
-	if err != nil {
-		t.Fatalf("convert: %v", err)
-	}
-	old := time.Now().Add(-time.Hour)
-	_ = os.Chtimes(p, old, old)
-
-	if _, err := c.GetOrConvert(context.Background(), src, key); err != nil {
-		t.Fatalf("hit: %v", err)
-	}
-	fi, _ := os.Stat(p)
-	if time.Since(fi.ModTime()) > time.Minute {
-		t.Fatalf("cache hit did not refresh mtime for LRU; mtime is %v old", time.Since(fi.ModTime()))
 	}
 }
 
@@ -281,12 +272,6 @@ func TestCache_BudgetEviction(t *testing.T) {
 	}
 	if total > budget {
 		t.Fatalf("budget not enforced: total=%d > %d (%d files)", total, budget, len(epubs))
-	}
-}
-
-func TestModuleVersion_Stable(t *testing.T) {
-	if len(moduleVersion) != 16 {
-		t.Fatalf("moduleVersion len = %d, want 16", len(moduleVersion))
 	}
 }
 

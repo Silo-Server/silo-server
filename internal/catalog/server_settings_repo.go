@@ -7,9 +7,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-const serverSettingsMutationLock = "silo:server_settings:mutation"
+const serverSettingsMutationLock = config.ServerSettingsMutationLock
 
 // ServerSettingsRepo provides CRUD access to the server_settings table.
 type ServerSettingsRepo struct {
@@ -36,6 +38,31 @@ func (r *ServerSettingsRepo) Get(ctx context.Context, key string) (string, error
 	return value, nil
 }
 
+// GetMany reads keys in one query, so a batch written by SetMany or
+// UpdateAtomic is seen either whole or not at all. Keys without a row are
+// absent from the map.
+func (r *ServerSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT key, value FROM server_settings WHERE key = ANY($1)`, keys,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("server_settings get many: %w", err)
+	}
+	defer rows.Close()
+	values := make(map[string]string, len(keys))
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, fmt.Errorf("server_settings scan: %w", err)
+		}
+		values[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("server_settings iterate: %w", err)
+	}
+	return values, nil
+}
+
 // Set upserts a setting.
 func (r *ServerSettingsRepo) Set(ctx context.Context, key, value string) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {
@@ -60,12 +87,23 @@ func (r *ServerSettingsRepo) UpdateAtomic(
 	ctx context.Context,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateAtomicInTransaction also supplies the held transaction for validation
+// that reads other tables, without requesting another pool connection.
+func (r *ServerSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
 	return r.withMutationTransaction(ctx, func(tx pgx.Tx) error {
 		current, err := getAllServerSettings(ctx, tx)
 		if err != nil {
 			return err
 		}
-		writes, err := update(current)
+		writes, err := update(current, tx)
 		if err != nil {
 			return err
 		}

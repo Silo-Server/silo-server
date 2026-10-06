@@ -27,6 +27,9 @@ type ServerConfig struct {
 	LogFormat string `yaml:"log_format"`
 	LogQuiet  string `yaml:"log_quiet"`
 	PublicURL string `yaml:"public_url"`
+	// LANDiscovery advertises the API server on the local network with
+	// DNS-SD (see internal/landiscovery). Settings key server.lan_discovery.
+	LANDiscovery bool `yaml:"-"`
 }
 
 // DatabaseConfig holds the primary PostgreSQL connection settings.
@@ -140,6 +143,10 @@ type ScannerConfig struct {
 	MaxConcurrentScoped    int           `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool          `yaml:"-"`
 	FileRemovalGrace       time.Duration `yaml:"-"`
+	// RealtimeMonitoring is the server-wide real-time monitoring switch
+	// (scanner.realtime_monitoring). It hot-reloads; each library also has
+	// its own switch.
+	RealtimeMonitoring bool `yaml:"-"`
 }
 
 // scannerConfigRaw is the raw YAML representation with duration strings.
@@ -149,6 +156,7 @@ type scannerConfigRaw struct {
 	MaxConcurrentLibraries int    `yaml:"max_concurrent_libraries"`
 	MaxConcurrentScoped    int    `yaml:"max_concurrent_scoped"`
 	EmptyTrashAfterScan    bool   `yaml:"empty_trash_after_scan"`
+	RealtimeMonitoring     bool   `yaml:"realtime_monitoring"`
 }
 
 // MatcherConfig holds metadata matching settings.
@@ -181,12 +189,16 @@ type PlaybackConfig struct {
 	// identical paths on every node; devices absent on a node fall out of
 	// that node's rotation. The admin hw-accel endpoint reports each node's
 	// inventory so the UI can flag divergence.
-	HWDevice                     string                `yaml:"hw_device"`
-	ChapterThumbnailWorkers      int                   `yaml:"chapter_thumbnail_workers"`
-	ChapterThumbnailExecution    string                `yaml:"chapter_thumbnail_execution"`
-	ChapterThumbnailNodeCapacity int                   `yaml:"chapter_thumbnail_node_capacity"`
-	TranscodeEnabled             bool                  `yaml:"transcode_enabled"`
-	Routing                      PlaybackRoutingPolicy `yaml:"-"`
+	HWDevice                     string `yaml:"hw_device"`
+	ChapterThumbnailWorkers      int    `yaml:"chapter_thumbnail_workers"`
+	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`
+	ChapterThumbnailNodeCapacity int    `yaml:"chapter_thumbnail_node_capacity"`
+	// SubtitleSyncNodeCapacity is how many media sampling runs (subtitle sync
+	// speech decoding) one transcode node admits at once, across every API
+	// server that sends it work (subtitles.sync_node_capacity).
+	SubtitleSyncNodeCapacity int                   `yaml:"-"`
+	TranscodeEnabled         bool                  `yaml:"transcode_enabled"`
+	Routing                  PlaybackRoutingPolicy `yaml:"-"`
 }
 
 // RedisConfig holds Redis connection settings.
@@ -337,6 +349,11 @@ type DownloadConfig struct {
 	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
 	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
 	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
+
+	// Playback transcode switches that also govern converted downloads, read
+	// from their playback setting keys so both surfaces follow one toggle.
+	Allow4KTranscode  bool `yaml:"-"` // allow_4k_transcode: 4K sources may be converted
+	AllowHEVCEncoding bool `yaml:"-"` // playback.allow_hevc_encoding: HEVC output when the device decodes it
 }
 
 // PolicyConfig holds embedded policy engine settings.
@@ -346,6 +363,13 @@ type PolicyConfig struct {
 	DecisionLogVerbosity       string `yaml:"-"` // digest or verbose
 	DecisionLogScopeSampleRate int    `yaml:"-"` // log one successful scope decision in N
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window
+}
+
+// MarkersConfig holds local marker detection settings.
+type MarkersConfig struct {
+	// DetectionWorkers is how many seasons intro detection analyzes at once,
+	// which also bounds its ffmpeg processes.
+	DetectionWorkers int `yaml:"-"`
 }
 
 // MetadataConfig holds metadata pipeline settings.
@@ -378,6 +402,7 @@ type Config struct {
 	Matcher              MatcherConfig              `yaml:"matcher"`
 	Artwork              ArtworkConfig              `yaml:"artwork"`
 	Metadata             MetadataConfig             `yaml:"-"`
+	Markers              MarkersConfig              `yaml:"-"`
 	Playback             PlaybackConfig             `yaml:"playback"`
 	Redis                RedisConfig                `yaml:"redis"`
 	RateLimit            RateLimitConfig            `yaml:"rate_limiting"`
@@ -510,6 +535,7 @@ func setDefaults() *configRaw {
 			Workers:                8,
 			MaxConcurrentLibraries: 1,
 			MaxConcurrentScoped:    2,
+			RealtimeMonitoring:     true,
 		},
 		Artwork: ArtworkConfig{StorageBackend: artworkBackendAuto, LocalPath: "/var/lib/silo/artwork"},
 		Matcher: MatcherConfig{
@@ -525,6 +551,7 @@ func setDefaults() *configRaw {
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",
 			ChapterThumbnailNodeCapacity: 1,
+			SubtitleSyncNodeCapacity:     1,
 			TranscodeEnabled:             true,
 		},
 		RateLimit: RateLimitConfig{

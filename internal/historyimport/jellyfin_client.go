@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
@@ -32,7 +34,7 @@ type JellyfinClient struct {
 }
 
 func NewJellyfinClient() *JellyfinClient {
-	return &JellyfinClient{httpClient: &http.Client{Timeout: 30 * time.Second}, limiter: sharedHistoryImportUpstreamLimiter}
+	return &JellyfinClient{httpClient: netguard.NewClient(30 * time.Second), limiter: sharedHistoryImportUpstreamLimiter}
 }
 
 type jellyfinServerAuthResponse struct {

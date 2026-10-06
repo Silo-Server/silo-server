@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
@@ -50,7 +52,7 @@ type PlexAccount struct {
 
 func NewPlexClient() *PlexClient {
 	return &PlexClient{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: netguard.NewClient(30 * time.Second),
 		limiter:    sharedHistoryImportUpstreamLimiter,
 	}
 }

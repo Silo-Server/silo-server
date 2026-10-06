@@ -199,7 +199,7 @@ func TestConfigurationPersistsProfileSettingsAndPartialChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dto.Configuration.AudioLanguagePreference != "fr" || dto.Configuration.SubtitleMode != "Always" || dto.Configuration.EnableNextEpisodeAutoPlay || !dto.Configuration.HidePlayedInLatest || len(dto.Configuration.OrderedViews) != 1 {
+	if dto.Configuration.AudioLanguagePreference != "fra" || dto.Configuration.SubtitleMode != "Always" || dto.Configuration.EnableNextEpisodeAutoPlay || !dto.Configuration.HidePlayedInLatest || len(dto.Configuration.OrderedViews) != 1 {
 		t.Fatalf("lost configuration %+v", dto.Configuration)
 	}
 	if err := store.CreateProfile(t.Context(), userstore.Profile{ID: "profile-2", Name: "Other"}); err != nil {

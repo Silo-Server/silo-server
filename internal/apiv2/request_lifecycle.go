@@ -37,6 +37,26 @@ type FeatureStatus struct {
 	Capability
 	RequestsEnabled            bool `json:"requests_enabled"`
 	RatingRestrictionsEnforced bool `json:"rating_restrictions_enforced"`
+	// FollowSupported advertises PUT/DELETE /requests/follows/{media_type}/{tmdb_id}
+	// and the following flag on request state.
+	FollowSupported bool `json:"follow_supported"`
+	// SeasonRequestsSupported advertises seasons on createRequest, the season
+	// list on series detail, and season progress on requests.
+	SeasonRequestsSupported bool `json:"season_requests_supported"`
+	// MissingSeasonsRequestable reports whether a series already in the
+	// library can be requested for its missing seasons.
+	MissingSeasonsRequestable bool `json:"missing_seasons_requestable" doc:"Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available."`
+	// DownloadProgressSupported advertises download on requests, their
+	// targets, and the title detail's request state.
+	DownloadProgressSupported bool `json:"download_progress_supported" doc:"Whether the server reports download progress (download on requests, their targets, the title detail's request state, and watchlist titles). Whether a given request has any depends on its download server's request plugin."`
+	// WatchlistTitlesSupported advertises the /watchlist/titles operations
+	// and in_watchlist on discovery results and title detail. It follows
+	// RequestsEnabled because the operations answer 409 capability_disabled
+	// while requests are off.
+	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept."`
+	// WatchlistRequests is the effective watchlist-requests setting for the
+	// viewer.
+	WatchlistRequests bool `json:"watchlist_requests" doc:"Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request."`
 }
 type RequestFeatureStatusOutput struct {
 	Status       int
@@ -99,6 +119,7 @@ type WatchProviderSettings struct {
 	ScrobbleEnabled              bool `json:"scrobble_enabled"`
 	ImportRatingsEnabled         bool `json:"import_ratings_enabled" doc:"Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars)."`
 	ExportRatingsEnabled         bool `json:"export_ratings_enabled" doc:"Send the profile's star ratings to the provider (stars times two) and clear removed ones."`
+	SyncDroppedEnabled           bool `json:"sync_dropped_enabled" doc:"Sync dropped shows both ways: dismissing a show, or one of its episodes, from Home drops the show on the provider, shows dropped on the provider are hidden from Continue Watching and the profile-wide Next Up (a single series' Next Up still lists them), and watching a dropped show again undrops it on both sides."`
 }
 
 func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSettings {
@@ -117,6 +138,7 @@ func watchProviderSettingsOf(status watchsync.ConnectionStatus) WatchProviderSet
 		ScrobbleEnabled:              status.ScrobbleEnabled,
 		ImportRatingsEnabled:         status.ImportRatingsEnabled,
 		ExportRatingsEnabled:         status.ExportRatingsEnabled,
+		SyncDroppedEnabled:           status.SyncDroppedEnabled,
 	}
 }
 
@@ -174,17 +196,19 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 				return nil, requestProblem(err)
 			}
 		}
-		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced}}, nil
+		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true,
+			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
 		if requests == nil {
 			return nil, unavailable("requests")
 		}
-		result, err := requests.Cancel(ctx, lifecycleViewer(ctx), string(in.ID), in.Body.Reason)
+		viewer := lifecycleViewer(ctx)
+		result, err := requests.Cancel(ctx, viewer, string(in.ID), in.Body.Reason)
 		if err != nil {
 			return nil, requestProblem(err)
 		}
-		return &MediaRequestOutput{Body: mediaRequestOf(result)}, nil
+		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
 	})
 	scope := func(ctx context.Context) (int, string, error) {
 		if providers == nil {
@@ -413,6 +437,7 @@ type WatchProviderCapabilities struct {
 	ScrobblePlayback       bool `json:"scrobble_playback"`
 	ImportRatings          bool `json:"import_ratings"`
 	ExportRatings          bool `json:"export_ratings"`
+	SyncDropped            bool `json:"sync_dropped" doc:"The provider can read, drop, and undrop dropped shows."`
 }
 
 func watchProviderCapabilitiesOf(c watchsync.Capabilities) WatchProviderCapabilities {
@@ -431,6 +456,7 @@ func watchProviderCapabilitiesOf(c watchsync.Capabilities) WatchProviderCapabili
 		ScrobblePlayback:       c.ScrobblePlayback,
 		ImportRatings:          c.ImportRatings,
 		ExportRatings:          c.ExportRatings,
+		SyncDropped:            c.SyncDropped,
 	}
 }
 
@@ -455,6 +481,7 @@ type WatchProviderConnection struct {
 	ScrobbleEnabled              bool                      `json:"scrobble_enabled"`
 	ImportRatingsEnabled         bool                      `json:"import_ratings_enabled"`
 	ExportRatingsEnabled         bool                      `json:"export_ratings_enabled"`
+	SyncDroppedEnabled           bool                      `json:"sync_dropped_enabled"`
 	CredentialsConfigured        bool                      `json:"credentials_configured"`
 	ConnectionConfigSchema       []AdminPluginConfigSchema `json:"connection_config_schema,omitempty"`
 	LastInboundSyncAt            *Instant                  `json:"last_inbound_sync_at,omitempty"`
@@ -492,6 +519,7 @@ func watchProviderConnectionOf(s watchsync.ConnectionStatus) (WatchProviderConne
 		ScrobbleEnabled:              s.ScrobbleEnabled,
 		ImportRatingsEnabled:         s.ImportRatingsEnabled,
 		ExportRatingsEnabled:         s.ExportRatingsEnabled,
+		SyncDroppedEnabled:           s.SyncDroppedEnabled,
 		CredentialsConfigured:        s.CredentialsConfigured,
 		ConnectionConfigSchema:       schemas,
 		LastInboundSyncAt:            instantPtr(s.LastInboundSyncAt),
@@ -571,8 +599,6 @@ func watchProviderSyncRunOf(s watchsync.SyncRun) WatchProviderSyncRun {
 		CreatedAt:                NewInstant(s.CreatedAt),
 	}
 }
-
-var requestLifecycleOperationIDs = []string{"getRequestStatus", "cancelRequest", "listWatchProviders", opGetWatchProviderConnection, opGetWatchProviderSettings, opUpdateWatchProviderConnection, "deleteWatchProviderConnection", "startWatchProviderDeviceAuth", "pollWatchProviderDeviceAuth", "connectWatchProviderAPIKey", "triggerWatchProviderSync", "listWatchProviderSyncRuns"}
 
 // WatchProviderSummary shares configuration forms with plugin administration.
 type WatchProviderSummary struct {

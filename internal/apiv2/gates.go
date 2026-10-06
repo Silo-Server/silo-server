@@ -227,6 +227,11 @@ func (d *denialWriter) problem() *Problem {
 		// keeps a type of its own rather than collapsing into permission_denied.
 		p = NewProblem(TypeProfileVerificationRequired,
 			"The declared profile is locked; verify it and retry with X-Profile-Token.")
+	case apimw.CodePasswordChangeRequired:
+		// Clients route to the password change on this type rather than
+		// treating the refusal as a missing permission.
+		p = NewProblem(TypePasswordChangeRequired,
+			"The account holds a temporary password; change it, then refresh the session.")
 	case legacyForbiddenCode, legacyDemoRestrictedCode:
 		p = NewProblem(TypePermissionDenied, safeDetail(legacy.Message, "The caller is not permitted to perform this operation."))
 	case TypeNotFound.ID:
@@ -258,6 +263,10 @@ func unauthorizedProblem(reason string) *Problem {
 	switch reason {
 	case apimw.ReasonSessionInvalid:
 		return NewProblem(TypeSessionExpired, "The session is no longer valid; sign in again.")
+	case apimw.ReasonTokenRefreshRequired:
+		// The session is still valid: the client refreshes it and retries
+		// once, and must not sign out.
+		return NewProblem(TypeTokenRefreshRequired, "The account's role changed; refresh the session and retry the request.")
 	case apimw.ReasonInvalidCredential, apimw.ReasonAccountDisabled:
 		// account_disabled shares invalid_token today: the credential no
 		// longer authenticates anyone and the corrective action is the same.

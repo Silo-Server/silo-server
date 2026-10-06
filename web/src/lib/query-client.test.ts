@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiClientError } from "@/api/client";
-import { V2ProblemError, V2TransportError } from "@/api/v2/request";
+import { V2ProblemError, V2TimeoutError, V2TransportError } from "@/api/v2/request";
 import { queryClient } from "./query-client";
 
 function problem(status: number): V2ProblemError {
@@ -33,5 +33,17 @@ describe("query retry policy", () => {
     ["a v1 error", new ApiClientError(403, "forbidden", "Forbidden")],
   ])("does not retry %s that refuses the caller", (_kind, error) => {
     expect(retry(0, error)).toBe(false);
+  });
+
+  it("does not retry a 404 problem, which answers the same every time", () => {
+    expect(retry(0, problem(404))).toBe(false);
+  });
+
+  it("retries a 404 without a problem document, which says nothing about the resource", () => {
+    expect(retry(0, new V2TransportError("listProfiles", 404, "not a problem"))).toBe(true);
+  });
+
+  it("does not retry a read that already waited out its deadline", () => {
+    expect(retry(0, new V2TimeoutError("listProfiles", 30_000))).toBe(false);
   });
 });

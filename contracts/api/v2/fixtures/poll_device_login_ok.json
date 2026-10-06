@@ -1,6 +1,7 @@
 {
   "status": "approved",
   "poll_after": 5,
+  "opened": false,
   "tokens": {
     "access_token": "acc",
     "refresh_token": "ref",
@@ -11,7 +12,8 @@
       "email": "laura@example.test",
       "role": "user",
       "permissions": [],
-      "download_allowed": true
+      "download_allowed": true,
+      "password_change_required": false
     }
   },
   "profile_id": "",

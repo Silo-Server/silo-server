@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Settings } from "lucide-react";
 import { resolveActiveQualityOptionId } from "../playback-info";
+import type { EffectiveRecipeV3 } from "../protocol-v3";
 import type { QualityOption } from "../types";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 
@@ -14,6 +15,8 @@ export interface VersionInfo {
 interface QualityMenuProps {
   options: QualityOption[];
   activeId: string;
+  /** The plan's effective recipe, which shows when a bitrate cap reduced the source. */
+  deliveredRecipe?: EffectiveRecipeV3;
   isTranscoding: boolean;
   error: string | null;
   onSelect: (id: string) => void;
@@ -25,6 +28,7 @@ interface QualityMenuProps {
 export function QualityMenu({
   options,
   activeId,
+  deliveredRecipe,
   isTranscoding,
   error,
   onSelect,
@@ -93,9 +97,13 @@ export function QualityMenu({
     items[nextIndex]?.focus();
   }, []);
 
-  if (options.length === 0) return null;
+  const showVersions = !versionLocked && versions && versions.length > 1 && onSwitchVersion;
+  const showQuality = options.length > 1;
+  if (!showVersions && !showQuality) return null;
 
-  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId);
+  const menuLabel = showQuality ? "Quality" : "Version";
+
+  const resolvedActiveId = resolveActiveQualityOptionId(options, activeId, deliveredRecipe);
   const activeOption = options.find((option) => option.id === resolvedActiveId);
   let menuItemIndex = 0;
 
@@ -105,31 +113,32 @@ export function QualityMenu({
         type="button"
         className="player-quality-trigger player-utility-btn sm:w-auto sm:gap-1.5 sm:px-3"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Quality"
+        aria-label={menuLabel}
         aria-expanded={open}
         aria-haspopup="menu"
       >
         <Settings className="h-[18px] w-[18px]" />
         <span className="hidden text-[11px] font-medium tracking-wide sm:inline">
-          {isTranscoding ? "…" : (activeOption?.label ?? "Quality")}
+          {!showQuality ? "Version" : isTranscoding ? "…" : (activeOption?.label ?? "Quality")}
         </span>
       </button>
 
       {open && (
         <PlayerMenuSurface
+          anchorRef={menuRef}
           className="absolute right-0 bottom-full z-30 mb-2 min-w-[200px] rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           {error && <div className="px-3 py-1 text-xs text-red-400">{error}</div>}
-          {versionLocked && (
+          {versionLocked && showQuality && (
             <p className="max-w-64 px-3 py-2 text-xs text-white/60">
               Watch Party keeps everyone on the same version. You can adjust your streaming quality
               below.
             </p>
           )}
           {/* Version switching (multiple file versions) */}
-          {!versionLocked && versions && versions.length > 1 && onSwitchVersion && (
+          {showVersions && (
             <>
               <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
                 Version
@@ -171,41 +180,45 @@ export function QualityMenu({
                   </button>
                 );
               })}
-              <div className="my-1 border-t border-white/10" />
+            </>
+          )}
+          {showQuality && (
+            <>
+              {showVersions && <div className="my-1 border-t border-white/10" />}
               <div className="px-3 py-1 text-xs tracking-wider text-white/40 uppercase">
                 Quality
               </div>
+              {options.map((opt) => {
+                const idx = menuItemIndex++;
+                return (
+                  <button
+                    key={opt.id}
+                    ref={(el) => {
+                      menuItemsRef.current[idx] = el;
+                    }}
+                    role="menuitem"
+                    type="button"
+                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                      opt.id === resolvedActiveId ? "text-white" : "text-white/70"
+                    }`}
+                    aria-current={opt.id === resolvedActiveId ? "true" : undefined}
+                    onClick={() => handleSelect(opt.id)}
+                  >
+                    <span>{opt.label}</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-xs text-white/40">{opt.sublabel}</span>
+                      {opt.id === resolvedActiveId && (
+                        <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
+                          <Check className="size-3" strokeWidth={3} aria-hidden="true" />
+                          <span className="sr-only">Selected</span>
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })}
             </>
           )}
-          {options.map((opt) => {
-            const idx = menuItemIndex++;
-            return (
-              <button
-                key={opt.id}
-                ref={(el) => {
-                  menuItemsRef.current[idx] = el;
-                }}
-                role="menuitem"
-                type="button"
-                className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
-                  opt.id === resolvedActiveId ? "text-white" : "text-white/70"
-                }`}
-                aria-current={opt.id === resolvedActiveId ? "true" : undefined}
-                onClick={() => handleSelect(opt.id)}
-              >
-                <span>{opt.label}</span>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-white/40">{opt.sublabel}</span>
-                  {opt.id === resolvedActiveId && (
-                    <span className="flex size-4 shrink-0 items-center justify-center rounded-full bg-white text-black">
-                      <Check className="size-3" strokeWidth={3} aria-hidden="true" />
-                      <span className="sr-only">Selected</span>
-                    </span>
-                  )}
-                </span>
-              </button>
-            );
-          })}
         </PlayerMenuSurface>
       )}
     </div>

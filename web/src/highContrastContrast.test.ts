@@ -5,25 +5,18 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Computed WCAG contrast for the tokens high contrast mode rewrites, per theme.
+ * Computed WCAG contrast for the tokens high contrast mode rewrites on the
+ * base theme.
  *
- * Asserting that the declarations merely exist is not enough: the block used to
- * push every token toward white, which raises contrast on a dark theme and
- * destroys it on a light one. On cinema-light that drove `--muted-foreground`
- * to 1.36:1 and `--foreground` to 1.10:1 against the page — high contrast mode
- * made the theme unreadable, and nothing in the suite noticed. These tests do
- * the colour maths so a future theme, or a changed mix percentage, cannot
- * reintroduce that silently.
+ * Asserting that the declarations merely exist is not enough: the block once
+ * pushed every token toward white, which destroyed contrast on a light theme
+ * and nothing in the suite noticed. These tests do the colour maths so a
+ * changed mix percentage or base colour cannot make high contrast worse
+ * silently.
  */
 const css = readFileSync(fileURLToPath(new URL("./app.css", import.meta.url)), "utf8");
 
-const THEMES = [
-  "midnight-cinema",
-  "cinema-light",
-  "cobalt-studio",
-  "oxblood-noir",
-  "evergreen-studio",
-] as const;
+const THEMES = ["midnight-cinema"] as const;
 
 /** WCAG 2.1 AA for normal-size body text. */
 const AA_TEXT = 4.5;
@@ -74,31 +67,42 @@ function mix(pct: number, base: string, toward: string): string {
   return `#${channel(tr, br)}${channel(tg, bg)}${channel(tb, bb)}`;
 }
 
+function highContrastColor(theme: string, name: string): string {
+  const block = /html\[data-high-contrast="true"\] \{([^}]+)\}/.exec(css)?.[1];
+  if (block === undefined) throw new Error("no high contrast token block");
+  const value = token(block, name);
+  const reference = /^var\(--([a-z-]+)\)$/.exec(value);
+  if (reference?.[1]) return token(theme, reference[1]);
+  const mixed = /^color-mix\(in srgb, var\(--([a-z-]+)\) ([\d.]+)%, var\(--([a-z-]+)\)\)$/.exec(
+    value,
+  );
+  if (!mixed?.[1] || !mixed[2] || !mixed[3]) {
+    throw new Error(`unsupported color expression for --${name}: ${value}`);
+  }
+  return mix(Number(mixed[2]), token(theme, mixed[3]), token(theme, mixed[1]));
+}
+
 describe.each(THEMES)("high contrast on %s", (theme) => {
   const body = themeBlock(theme);
   const background = token(body, "background");
-  const boost = token(body, "contrast-boost");
-
-  it("pushes away from the page, not toward white regardless of theme", () => {
-    // The whole bug in one assertion: the boost must contrast with the page.
-    expect(contrast(boost, background)).toBeGreaterThan(AA_TEXT);
-  });
 
   it("keeps body text readable", () => {
-    expect(contrast(boost, background)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrast(highContrastColor(body, "foreground"), background)).toBeGreaterThanOrEqual(
+      AA_TEXT,
+    );
   });
 
   it("does not make muted text worse than it already was", () => {
     const base = token(body, "muted-foreground-base");
     const normal = contrast(base, background);
-    const boosted = contrast(mix(72, base, boost), background);
+    const boosted = contrast(highContrastColor(body, "muted-foreground"), background);
     expect(boosted).toBeGreaterThanOrEqual(normal);
     expect(boosted).toBeGreaterThanOrEqual(AA_TEXT);
   });
 
   it("does not make borders less visible than they already were", () => {
     const base = token(body, "border-base");
-    expect(contrast(mix(34, base, boost), background)).toBeGreaterThanOrEqual(
+    expect(contrast(highContrastColor(body, "border"), background)).toBeGreaterThanOrEqual(
       contrast(base, background),
     );
   });

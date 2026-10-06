@@ -93,13 +93,23 @@ func (p Policy) Allows(mode Mode) bool {
 	}
 }
 
-// NVENCSoftwareFallbackPixelFormat preserves the decoded source depth when
-// CUDA frames must be downloaded for a software color conversion.
-func NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth int) string {
+// SurfaceDownloadPixelFormat is the only pixel format an hwdownload can write
+// for a CUDA, VAAPI or QSV surface decoded at the given depth. hwdownload does
+// not convert — it copies the surface out in the software format the frames
+// context was created with — so naming any other format there makes the whole
+// filter graph fail to configure. Callers that need something else append a
+// second, separate format= conversion.
+func SurfaceDownloadPixelFormat(sourceVideoBitDepth int) string {
 	if sourceVideoBitDepth > 8 {
 		return "p010le"
 	}
 	return "nv12"
+}
+
+// NVENCSoftwareFallbackPixelFormat preserves the decoded source depth when
+// CUDA frames must be downloaded for a software color conversion.
+func NVENCSoftwareFallbackPixelFormat(sourceVideoBitDepth int) string {
+	return SurfaceDownloadPixelFormat(sourceVideoBitDepth)
 }
 
 // SourceKind describes the transfer function and color primaries of the base
@@ -254,16 +264,6 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 		preflight = true
 	}
 	return SourceResolution{Kind: candidate, PreflightRequired: preflight}
-}
-
-// ClassifySource returns only classifications that are safe without executor
-// preflight; ambiguous or unsupported sources return an empty kind.
-func ClassifySource(source SourceMetadata) SourceKind {
-	resolution := ResolveSource(source)
-	if resolution.PreflightRequired {
-		return ""
-	}
-	return resolution.Kind
 }
 
 // sourceKindForCompatibilityID maps standardized Dolby Vision base-layer
@@ -429,20 +429,6 @@ func colorIsBT2020(value string) bool {
 // rangeIsLimited recognizes FFmpeg's names for limited-range video levels.
 func rangeIsLimited(value string) bool {
 	return value == "tv" || value == "mpeg" || value == "limited"
-}
-
-// SourceKindFor maps already trusted dynamic-range metadata to a base signal.
-// Call ResolveSource when the completeness of the metadata is not guaranteed.
-func SourceKindFor(dynamicRange string, dvBLCompatID int) SourceKind {
-	switch strings.ToLower(strings.TrimSpace(dynamicRange)) {
-	case DynamicRangeHDR10, DynamicRangeHDR10Plus:
-		return SourcePQ
-	case DynamicRangeHLG:
-		return SourceHLG
-	case DynamicRangeDolbyVision:
-		return sourceKindForCompatibilityID(dvBLCompatID)
-	}
-	return ""
 }
 
 // SourceTransfer returns the FFmpeg transfer characteristic for a source kind.

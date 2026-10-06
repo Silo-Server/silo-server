@@ -16,30 +16,6 @@ func TestFavoriteItemsNeedBrowseFilters(t *testing.T) {
 	}
 }
 
-func TestParseItemsQueryAcceptsIsFavoriteParam(t *testing.T) {
-	req := httptest.NewRequest("GET", "/Users/user/Items?isFavorite=true&IncludeItemTypes=Series", nil)
-
-	query := parseItemsQuery(req, NewResourceIDCodec())
-
-	if !query.isFavorite {
-		t.Fatal("expected isFavorite=true to enable favorite filtering")
-	}
-	if len(query.itemTypes) != 1 || query.itemTypes[0] != "series" {
-		t.Fatalf("got item types %v, want [series]", query.itemTypes)
-	}
-}
-
-func TestBuildBrowseParamsPropagatesEnableTotalRecordCount(t *testing.T) {
-	req := httptest.NewRequest("GET", "/Items?EnableTotalRecordCount=false", nil)
-
-	query := parseItemsQuery(req, NewResourceIDCodec())
-	params := buildBrowseParams(query)
-
-	if got := params.Get("include_total"); got != "false" {
-		t.Fatalf("include_total = %q, want false", got)
-	}
-}
-
 func TestParseItemsQueryAppliesExcludeItemTypesToDefaultVideoScope(t *testing.T) {
 	req := httptest.NewRequest("GET", "/Items?SearchTerm=sponge+bob"+
 		"&ExcludeItemTypes=Movie&ExcludeItemTypes=Episode&ExcludeItemTypes=TvChannel", nil)
@@ -125,6 +101,33 @@ func TestParseItemsQueryDateLastContentAddedSortScope(t *testing.T) {
 				t.Fatalf("sort = %q, want %q", query.sort, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseItemsQuerySort(t *testing.T) {
+	tests := []struct {
+		path, wantSort, wantOrder string
+	}{
+		// Jellyfin sorts an explicit SortBy ascending when SortOrder is absent.
+		{"/Items?SortBy=SortName", "sort_title", "asc"},
+		{"/Items?sortBy=PremiereDate&SortOrder=Descending", "release_date", "desc"},
+		// Episode-order keys keep the natural season/episode order.
+		{"/Shows/x/Episodes?sortBy=IndexNumber", "", "asc"},
+		{"/Items?SortBy=ParentIndexNumber,IndexNumber&SortOrder=Descending", "", "desc"},
+		// The first mapped key wins and takes the SortOrder at its position.
+		{"/Items?SortBy=IsFolder,SortName&SortOrder=Descending,Ascending", "sort_title", "asc"},
+		{"/Items?SortBy=SeriesSortName,DateCreated&SortOrder=Ascending,Descending", "created_at", "desc"},
+		{"/Items?SortBy=PremiereDate,SortName&SortOrder=Descending,Ascending", "release_date", "desc"},
+		// Unmapped keys alone keep the created_at fallback.
+		{"/Items?SortBy=Runtime", "created_at", "asc"},
+		// Without SortBy, Silo keeps its newest-first rail default.
+		{"/Items", "created_at", "desc"},
+	}
+	for _, tc := range tests {
+		query := parseItemsQuery(httptest.NewRequest("GET", tc.path, nil), NewResourceIDCodec())
+		if query.sort != tc.wantSort || query.order != tc.wantOrder {
+			t.Errorf("%s: sort=%q order=%q, want %q %q", tc.path, query.sort, query.order, tc.wantSort, tc.wantOrder)
+		}
 	}
 }
 

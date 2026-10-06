@@ -1,6 +1,7 @@
 import { ArrowLeft, Plus, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -9,9 +10,13 @@ import {
   getAccessGroup,
   type AccessGroupEditor as GroupEditor,
 } from "@/api/v2/accessGroups";
+import { isRequestEditorConflict } from "@/api/v2/adminRequests";
 import { V2ProblemError } from "@/api/v2/request";
 import type { AccessGroup, AccessGroupInput } from "@/api/types";
+import { EditorConflict } from "@/components/admin/EditorConflict";
+import { RequestLimitFields } from "@/components/admin/RequestLimitFields";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
+import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,8 +46,27 @@ import {
   useUpdateAccessGroup,
 } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAdminUsers } from "@/hooks/queries/admin/users";
+import {
+  useRequestGroupLimit,
+  useRequestSettings,
+  useUpdateRequestGroupLimit,
+} from "@/hooks/queries/admin/requests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import {
+  describeInheritedValue,
+  formatRequestApproval,
+  formatRequestQuota,
+  hasRequestLimitErrors,
+  requestGroupLimitSummary,
+  requestLimitBody,
+  requestLimitChanges,
+  requestLimitDraft,
+  requestLimitErrors,
+  resolveRequestTerms,
+} from "@/lib/requestAccess";
+import { useStagedDraft } from "@/pages/admin-settings/useStagedDraft";
 import {
   PLAYBACK_QUALITY_OPTIONS,
   playbackQualityPresetFromValue,
@@ -67,6 +91,39 @@ const ASSIGNABLE_PERMISSIONS: Array<{ value: string; label: string; description:
 
 function limitLabel(value: number) {
   return value > 0 ? String(value) : "Unlimited";
+}
+
+/**
+ * The body a save would send for the group as stored, built with the same
+ * normalization as the editor's (quality preset, clamped transcoded
+ * downloads), so an untouched draft compares equal to it.
+ */
+function storedGroupBody(group: AccessGroup): AccessGroupInput {
+  return {
+    name: group.name.trim(),
+    description: group.description.trim(),
+    library_ids: group.library_ids,
+    max_playback_quality: playbackQualityValueFromPreset(
+      playbackQualityPresetFromValue(group.max_playback_quality),
+    ),
+    download_allowed: group.download_allowed,
+    download_transcode_allowed: group.download_allowed && group.download_transcode_allowed,
+    transcode_allowed: group.transcode_allowed,
+    audio_transcode_allowed: group.audio_transcode_allowed,
+    max_streams: group.max_streams,
+    max_transcodes: group.max_transcodes,
+    max_remote_stream_bitrate_kbps: group.max_remote_stream_bitrate_kbps,
+    max_local_stream_bitrate_kbps: group.max_local_stream_bitrate_kbps,
+    allowed_permissions: group.allowed_permissions,
+    requests_allowed: group.requests_allowed,
+    is_default: group.is_default,
+  };
+}
+
+function sameGroupBody(a: AccessGroupInput, b: AccessGroupInput): boolean {
+  return (Object.keys(b) as Array<keyof AccessGroupInput>).every(
+    (key) => JSON.stringify(a[key]) === JSON.stringify(b[key]),
+  );
 }
 
 export default function AdminAccessGroups() {
@@ -183,6 +240,11 @@ function AccessGroupsPage() {
         <AccessGroupEditor
           key={selected.group.id}
           initialEditor={selected}
+          onSaved={() => {
+            toast.success("Group saved");
+            // Replace the group's entry so Back and "All groups" reach the same list.
+            if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
+          }}
           onDeleted={() => {
             if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
           }}
@@ -276,6 +338,11 @@ function AccessGroupsPage() {
 }
 
 function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () => void }) {
+  const requestLimit = useRequestGroupLimit(Number(group.id));
+  // The group's own request approval and limit, when it sets any; a group
+  // that only follows the server-wide defaults says nothing more.
+  const requestTerms =
+    group.requests_allowed && requestLimit.data ? requestGroupLimitSummary(requestLimit.data) : "";
   const facts = [
     group.library_ids === null
       ? "All libraries"
@@ -283,6 +350,7 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
     group.download_allowed ? "Downloads on" : "No downloads",
     `${limitLabel(group.max_streams)} stream${group.max_streams === 1 ? "" : "s"}`,
     group.requests_allowed ? "Requests on" : "No requests",
+    ...(requestTerms ? [requestTerms] : []),
   ];
   return (
     <button
@@ -324,10 +392,11 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
 
 interface AccessGroupEditorProps {
   initialEditor: GroupEditor;
+  onSaved: () => void;
   onDeleted: () => void;
 }
 
-function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps) {
+function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEditorProps) {
   const [editor, setEditor] = useState(initialEditor);
   const group = editor.group;
   const busy = useRef(false);
@@ -358,6 +427,28 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
   const updateGroup = useUpdateAccessGroup();
   const deleteGroup = useDeleteAccessGroup();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Deleting a group moves its members into the default group (server-side,
+  // in the same transaction), so the confirmation names where they go.
+  const allGroups = useAccessGroups();
+  const defaultGroupName = (allGroups.data ?? []).find(
+    (candidate) => candidate.is_default && String(candidate.id) !== String(group.id),
+  )?.name;
+  // The single-group read carries no member count; the list does.
+  const memberCount = (allGroups.data ?? []).find(
+    (candidate) => String(candidate.id) === String(group.id),
+  )?.member_count;
+  const destination = defaultGroupName
+    ? `the default group, ${defaultGroupName},`
+    : "the default group";
+  // The count is cached and can be stale (an account may have joined since the
+  // list loaded), so a zero never drops the move warning.
+  const movers =
+    memberCount === undefined
+      ? "Its members"
+      : memberCount === 0
+        ? "Any members (none when this list last loaded)"
+        : `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
+  const deleteDescription = `${movers} will move to ${destination} and get its access right away, without being signed out. Settings they override on their own account are unchanged. This can't be undone.`;
 
   // Draft state, keyed by group id via the parent's selection so switching
   // groups remounts this component with fresh initial values.
@@ -373,15 +464,44 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
   const [audioTranscodeAllowed, setAudioTranscodeAllowed] = useState(group.audio_transcode_allowed);
   const [maxStreams, setMaxStreams] = useState(group.max_streams);
   const [maxTranscodes, setMaxTranscodes] = useState(group.max_transcodes);
-  const [maxRemoteStreamBitrateKbps, setMaxRemoteStreamBitrateKbps] = useState(
+  // null while a custom bitrate box holds no valid value; Save stays disabled.
+  const [maxRemoteStreamBitrateKbps, setMaxRemoteStreamBitrateKbps] = useState<number | null>(
     group.max_remote_stream_bitrate_kbps,
   );
-  const [maxLocalStreamBitrateKbps, setMaxLocalStreamBitrateKbps] = useState(
+  const [maxLocalStreamBitrateKbps, setMaxLocalStreamBitrateKbps] = useState<number | null>(
     group.max_local_stream_bitrate_kbps,
   );
+  const bitrateLimitsValid =
+    maxRemoteStreamBitrateKbps !== null && maxLocalStreamBitrateKbps !== null;
   const [permissions, setPermissions] = useState<string[] | null>(group.allowed_permissions);
   const [requestsAllowed, setRequestsAllowed] = useState(group.requests_allowed);
   const [isDefault, setIsDefault] = useState(group.is_default);
+
+  // The group's request approval and limit are their own record with their
+  // own validator; Save writes them after the group when they changed.
+  const groupLimit = useRequestGroupLimit(Number(group.id), editor.profileContext);
+  const requestSettings = useRequestSettings();
+  const requestLimit = useStagedDraft(groupLimit.data, requestLimitDraft, requestLimitChanges);
+  const updateGroupLimit = useUpdateRequestGroupLimit();
+  const [limitConflict, setLimitConflict] = useState(false);
+  const [limitError, setLimitError] = useState("");
+  const limitErrors = requestLimit.draft ? requestLimitErrors(requestLimit.draft) : {};
+  const limitBlocksSave =
+    requestLimit.changes > 0 && (limitConflict || hasRequestLimitErrors(limitErrors));
+  const serverTerms = requestSettings.data
+    ? resolveRequestTerms([], requestSettings.data)
+    : undefined;
+
+  async function reloadLimit() {
+    const result = await groupLimit.refetch();
+    if (result.data && !result.isError) {
+      requestLimit.adopt(result.data);
+      setLimitConflict(false);
+      setLimitError("");
+    } else {
+      toast.error("Couldn't reload the group's request settings.");
+    }
+  }
 
   const allPermissions = permissions === null;
 
@@ -394,9 +514,11 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
   }
 
   async function save() {
-    if (busy.current || conflict) return;
+    if (busy.current || conflict || limitBlocksSave) return;
+    if (maxRemoteStreamBitrateKbps === null || maxLocalStreamBitrateKbps === null) return;
     busy.current = true;
     setError("");
+    setLimitError("");
     const body: AccessGroupInput = {
       name: name.trim(),
       description: description.trim(),
@@ -416,10 +538,39 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
       requests_allowed: requestsAllowed,
       is_default: isDefault,
     };
+    // Each group write advances its revision and can collide with another
+    // admin's edit, so a save that only changed the request limit, or a retry
+    // after the limit failed, leaves the group alone.
+    const groupChanged = !sameGroupBody(body, storedGroupBody(group));
+    if (groupChanged) {
+      try {
+        setEditor(await updateGroup.mutateAsync({ editor, body }));
+      } catch (err) {
+        failed(err);
+        busy.current = false;
+        return;
+      }
+    }
+    const { base: limitBase, draft: limitDraft } = requestLimit;
     try {
-      setEditor(await updateGroup.mutateAsync({ editor, body }));
+      if (requestLimit.changes > 0 && limitBase && limitDraft) {
+        requestLimit.adopt(
+          await updateGroupLimit.mutateAsync({
+            limit: limitBase,
+            body: requestLimitBody(limitDraft),
+            profileContext: editor.profileContext,
+          }),
+        );
+      }
+      onSaved();
     } catch (err) {
-      failed(err);
+      if (isRequestEditorConflict(err)) setLimitConflict(true);
+      const reason = err instanceof Error ? err.message : "The save failed.";
+      setLimitError(
+        groupChanged
+          ? `The group was saved, but its request approval and limit were not. ${reason}`
+          : `The request approval and limit were not saved. ${reason}`,
+      );
     } finally {
       busy.current = false;
     }
@@ -505,24 +656,26 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
             </SelectContent>
           </Select>
         </div>
-        <LimitField
-          id="group-stream-bitrate"
-          label="Max remote stream bitrate (kbps)"
-          hint="0 = unlimited. Applies to new remote streams."
-          value={maxRemoteStreamBitrateKbps}
-          onChange={setMaxRemoteStreamBitrateKbps}
-        />
-        <LimitField
-          id="group-local-stream-bitrate"
-          label="Max local stream bitrate (kbps)"
-          hint="0 = unlimited. Applies to new local streams."
-          value={maxLocalStreamBitrateKbps}
-          onChange={setMaxLocalStreamBitrateKbps}
-        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StreamBitrateLimitField
+            id="group-stream-bitrate"
+            label="Max remote stream bitrate"
+            hint="Applies to new remote streams."
+            value={maxRemoteStreamBitrateKbps}
+            onChange={setMaxRemoteStreamBitrateKbps}
+          />
+          <StreamBitrateLimitField
+            id="group-local-stream-bitrate"
+            label="Max local stream bitrate"
+            hint="Applies to new local streams."
+            value={maxLocalStreamBitrateKbps}
+            onChange={setMaxLocalStreamBitrateKbps}
+          />
+        </div>
       </section>
 
       <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
-        <h2 className="text-sm font-semibold">Downloads &amp; requests</h2>
+        <h2 className="text-sm font-semibold">Downloads</h2>
         <ToggleRow
           label="Allow downloads"
           description="Members may download items to their devices."
@@ -536,12 +689,80 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
           onCheckedChange={setTranscodeAllowed}
           disabled={!downloadAllowed}
         />
+      </section>
+
+      <section
+        className="surface-panel space-y-4 rounded-2xl border-0 p-5"
+        aria-labelledby="group-requests-heading"
+      >
+        <div>
+          <h2 id="group-requests-heading" className="text-sm font-semibold">
+            Requests
+          </h2>
+          <p className="text-muted-foreground mt-0.5 text-xs">
+            A member&apos;s own approval and limit win over the group&apos;s, and admin accounts
+            don&apos;t use a group. Server defaults are in{" "}
+            <Link to="/admin/settings/requests" className="text-foreground underline">
+              Settings › Requests
+            </Link>
+            .
+          </p>
+        </div>
         <ToggleRow
           label="Allow media requests"
           description="Members may request titles that aren't in the library yet."
           checked={requestsAllowed}
           onCheckedChange={setRequestsAllowed}
         />
+        {groupLimit.isError ? (
+          <p role="alert" className="text-sm">
+            Couldn&apos;t load the group&apos;s request approval and limit.{" "}
+            <Button variant="link" className="h-auto p-0" onClick={() => void groupLimit.refetch()}>
+              Retry
+            </Button>
+          </p>
+        ) : requestLimit.draft ? (
+          <RequestLimitFields
+            draft={requestLimit.draft}
+            onChange={(next) => requestLimit.update(() => next)}
+            subject="group"
+            inheritLabel="Use server default"
+            inherited={
+              serverTerms
+                ? {
+                    approval: describeInheritedValue(
+                      formatRequestApproval(serverTerms.autoApprove),
+                      serverTerms.approvalSource,
+                      null,
+                    ),
+                    limit: describeInheritedValue(
+                      formatRequestQuota(serverTerms.quota),
+                      serverTerms.quotaSource,
+                      null,
+                    ),
+                  }
+                : undefined
+            }
+            customSeed={
+              serverTerms && !serverTerms.quota.unlimited
+                ? {
+                    maxRequests: String(serverTerms.quota.max),
+                    windowDays: String(serverTerms.quota.days),
+                  }
+                : { maxRequests: "", windowDays: "" }
+            }
+            errors={limitErrors}
+            disabled={updateGroupLimit.isPending}
+          />
+        ) : (
+          <p className="text-muted-foreground text-sm">Loading request approval and limit...</p>
+        )}
+        {limitError && (
+          <p role="alert" className="text-destructive text-sm">
+            {limitError}
+          </p>
+        )}
+        {limitConflict && <EditorConflict onReload={reloadLimit} />}
       </section>
 
       <section className="surface-panel space-y-4 rounded-2xl border-0 p-5">
@@ -610,6 +831,8 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
         )}
       </section>
 
+      <AccessGroupMembers groupId={group.id} />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
           <Button
@@ -631,9 +854,17 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
         <Button
           type="button"
           onClick={save}
-          disabled={updateGroup.isPending || deleteGroup.isPending || conflict || reloading}
+          disabled={
+            updateGroup.isPending ||
+            updateGroupLimit.isPending ||
+            deleteGroup.isPending ||
+            conflict ||
+            reloading ||
+            !bitrateLimitsValid ||
+            limitBlocksSave
+          }
         >
-          {updateGroup.isPending ? "Saving..." : "Save changes"}
+          {updateGroup.isPending || updateGroupLimit.isPending ? "Saving..." : "Save changes"}
         </Button>
       </div>
 
@@ -646,13 +877,7 @@ function AccessGroupEditor({ initialEditor, onDeleted }: AccessGroupEditorProps)
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{group.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {group.member_count > 0
-                ? `${group.member_count} ${
-                    group.member_count === 1 ? "member" : "members"
-                  } will move to no group and fall back to the built-in defaults. Their own restrictions are unchanged.`
-                : "Members will move to no group and fall back to built-in defaults. This can't be undone."}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{deleteDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           {error && <p role="alert">{error}</p>}
           {conflict && (
@@ -689,6 +914,48 @@ interface ToggleRowProps {
   disabled?: boolean;
 }
 
+/** Read-only list of a group's members, each linking to their user page. */
+function AccessGroupMembers({ groupId }: { groupId: number | string }) {
+  const users = useAdminUsers();
+  const members = (users.data ?? [])
+    .filter((user) => user.role !== "admin" && String(user.access_group_id) === String(groupId))
+    .sort((a, b) => a.username.localeCompare(b.username));
+  return (
+    <section className="surface-panel space-y-3 rounded-2xl border-0 p-5" aria-label="Members">
+      <div>
+        <h2 className="text-sm font-semibold">Members</h2>
+        <p className="text-muted-foreground mt-0.5 text-xs">
+          Change a member&apos;s group from their user page.
+        </p>
+      </div>
+      {users.isPending && <p className="text-muted-foreground text-sm">Loading members...</p>}
+      {users.isError && (
+        <p role="alert" className="text-sm">
+          Could not load members.{" "}
+          <Button variant="link" className="h-auto p-0" onClick={() => void users.refetch()}>
+            Retry
+          </Button>
+        </p>
+      )}
+      {users.isSuccess && members.length === 0 && (
+        <p className="text-muted-foreground text-sm">No members yet.</p>
+      )}
+      {members.length > 0 && (
+        <ul className="divide-border divide-y text-sm">
+          {members.map((member) => (
+            <li key={member.id} className="flex items-center justify-between gap-3 py-2">
+              <Link to={`/admin/users/${member.id}`} className="font-medium hover:underline">
+                {member.username}
+              </Link>
+              <span className="text-muted-foreground truncate">{member.email}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ToggleRow({ label, description, checked, onCheckedChange, disabled }: ToggleRowProps) {
   return (
     <div className="border-border flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
@@ -712,6 +979,28 @@ interface LimitFieldProps {
   hint: string;
   value: number;
   onChange: (value: number) => void;
+}
+
+function StreamBitrateLimitField({
+  id,
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: number | null;
+  onChange: (kbps: number | null) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <StreamBitrateLimitInput id={id} label={label} value={value} onValueChange={onChange} />
+      <p className="text-muted-foreground text-xs">{hint}</p>
+    </div>
+  );
 }
 
 function LimitField({ id, label, hint, value, onChange }: LimitFieldProps) {

@@ -1,0 +1,104 @@
+# Database contracts that replace duplicate unit or SQL-shape assertions.
+# The dbpins runner requires every named test and subtest to pass without
+# skipping. Run against a disposable, migrated database with make test-db-contracts.
+
+# Library visibility, rating ceilings, mixed catalogs, and section results.
+./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
+./internal/catalog TestMixedCatalogMangaCounts
+./internal/catalog TestContentRatingCeilingAcrossSystemsDB
+./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
+./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
+./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
+
+# Profile history and account/invitation persistence.
+./internal/api/handlers TestEbookProgressEventsPostgres
+./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
+./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
+./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
+./internal/auth TestLoginIdentitySpaceDB
+./internal/invitations TestLinkInvitationLifecycleDB
+./internal/invitations TestEmailedInvitationLinkReplacementDB
+./internal/invitations TestInvitationServiceCommittedOutcomesDB
+./internal/invitations TestInvitationAtomicConcurrentAccept
+./internal/invitations TestInvitationAtomicRollbackAndExpiry
+
+# Task locks and bounded history cleanup.
+./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
+./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
+./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
+./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
+./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+
+# Persisted failure text stays valid UTF-8 and bounded.
+./internal/trickplay TestFinishAcceptsTruncatedUTF8ErrorDB
+
+# Metadata fallback excludes providers that do not support the item kind.
+./internal/metadata TestChainlessFallback_SkipsDefaultDisabledCapability
+
+# Edition matching preserves ignored and already assigned works.
+./internal/literaryworks TestAutoLinkEditionsPreservesIgnoresAndExistingWorks
+
+# Trailer refresh claims retain admission and release behavior.
+./internal/catalog TestTryClaimTrailersRefresh
+./internal/catalog TestReleaseTrailersRefreshClaim
+
+# Verification delivery survives a lost persistence receipt with bounded retries.
+./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
+./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Artwork publication, deletion locks and corrected metadata identity.
+./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
+./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
+./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
+./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState
+./internal/metadata TestArtworkRevisionGCBatchReferenceGateHealsRaces
+./internal/metadata TestArtworkRevisionGCRunLocksBatchDuringDeletion
+./internal/metadata TestArtworkRevisionGCRunRetriesIncompleteBatch
+./internal/metadata TestArtworkRevisionGCRunHealsReferencePublishedDuringDelete
+./internal/metadata TestArtworkRevisionGCBatchHealPreservesRetrackedRevision
+./internal/metadata TestArtworkRevisionGCBatchHealRechecksRetrackBetweenSurfaces
+./internal/metadata TestArtworkRevisionGCRunRetainsPartialDeletionForHealing
+./internal/metadata TestArtworkRevisionGCBatchRechecksOwnershipAndReferences
+
+# Persisted notification, request, marker and preview contracts.
+./internal/markers TestPopulationSyncResumesAfterQuotaAcrossRuns
+./internal/markers TestContributionStoreAllowsOnlyOneConcurrentStaleTakeover
+./internal/markers TestContributionStoreBlocksSameTargetWithDifferentTimes
+./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
+./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
+./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
+./migrations TestSubtitleTimingFileReplacePostgres
+./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
+./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
+./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
+./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/requests TestEditorIntegrationsDatabase
+./internal/requests TestClosingRequestForgetsFollowsDatabase
+
+# Request cleanup, prepared downloads and user-store transactions.
+./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
+./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
+./internal/downloads TestSubscriptionSyncPagePostgres
+./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres
+./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
+./internal/downloads TestDownloadCreatePagesPostgres
+./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestSubscriptionQualityPostgres
+./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
+./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
+./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
+./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
+./internal/downloads TestPreparedReplacementQuotaAccountingDB
+./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestAttachPreparationsPostgres
+./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
+./internal/downloads TestPreparationControlsPauseResumeAndCancel
+./internal/downloads TestDownloadLinkedToCanceledPreparationFails
+./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresMarkWatchedBatch
+./internal/userstore/pgstore TestPostgresPersonalListPage
+
+# Intro analysis state timestamps and config-hash isolation.
+./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres

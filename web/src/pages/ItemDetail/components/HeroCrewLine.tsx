@@ -65,7 +65,7 @@ export default function HeroCrewLine({
   if (!hasDirectors && !hasWriters && !hasAuthors && !hasGenres) return null;
 
   return (
-    <div className="text-muted-foreground text-[13px]">
+    <div className="text-muted-foreground text-[0.8125rem]">
       {hasAuthors && (
         <>
           <span className="text-muted-foreground/60">By </span>
@@ -97,8 +97,13 @@ export default function HeroCrewLine({
         genres.map((g, i) => (
           <span key={g}>
             <span className="text-foreground/60">{g}</span>
+            {/* <wbr /> gives the line a break point between genres; the
+                separator spans alone leave the whole list one unbreakable word. */}
             {i < genres.length - 1 && (
-              <span className="text-muted-foreground/40 mx-1.5">&middot;</span>
+              <>
+                <span className="text-muted-foreground/40 mx-1.5">&middot;</span>
+                <wbr />
+              </>
             )}
           </span>
         ))}

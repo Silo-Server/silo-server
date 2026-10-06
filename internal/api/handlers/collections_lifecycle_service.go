@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -127,12 +128,9 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			}
 		}
 		if req.SourceURL != nil {
-			if existing.CollectionType != collectionTypeMDBList {
-				return none, fieldError("source_url", "source_url can only be edited for MDBList collections")
-			}
-			normalized, err := usercollections.CanonicalMDBListURL(*req.SourceURL)
+			normalized, err := normalizeEditableSourceURL(existing, *req.SourceURL)
 			if err != nil {
-				return none, fieldError("source_url", "source_url must be an MDBList list (https://mdblist.com/lists/...)")
+				return none, err
 			}
 			patch["url"] = normalized
 			input.SourceURL = new(normalized)
@@ -171,7 +169,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve updated collection")
 	}
 
-	return h.collectionView(ctx, *collection), nil
+	return h.collectionView(ctx, store, userID, *collection), nil
 }
 
 func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req PersonalCollectionPreviewRequest, filter catalog.AccessFilter) (PersonalCollectionPreviewView, error) {
@@ -392,11 +390,11 @@ func (h *CollectionHandler) personalCollectionStore(ctx context.Context, userID 
 
 // GetPersonalCollection returns one collection visible to the selected profile.
 func (h *CollectionHandler) GetPersonalCollection(ctx context.Context, userID int, profileID, id string) (PersonalCollectionView, error) {
-	_, c, err := h.personalCollectionStore(ctx, userID, profileID, id, false)
+	store, c, err := h.personalCollectionStore(ctx, userID, profileID, id, false)
 	if err != nil {
 		return PersonalCollectionView{}, err
 	}
-	return h.collectionView(ctx, *c), nil
+	return h.collectionView(ctx, store, userID, *c), nil
 }
 
 // UploadPersonalCollectionPoster stores uploaded image bytes for a collection's
@@ -434,4 +432,24 @@ func (h *CollectionHandler) SetPersonalCollectionPosterSource(ctx context.Contex
 		return PersonalCollectionView{}, apiError(500, "internal_error", "Failed to store collection artwork")
 	}
 	return h.GetPersonalCollection(ctx, userID, profileID, id)
+}
+
+// normalizeEditableSourceURL validates a new source URL for the collections
+// whose source is a user-supplied list: MDBList lists and TMDB lists.
+func normalizeEditableSourceURL(existing *userstore.Collection, raw string) (string, error) {
+	if existing.CollectionType == collectionTypeMDBList {
+		normalized, err := usercollections.CanonicalMDBListURL(raw)
+		if err != nil {
+			return "", fieldError("source_url", "source_url must be an MDBList list (https://mdblist.com/lists/...)")
+		}
+		return normalized, nil
+	}
+	if cfg, err := usercollections.ParseSourceConfig(existing.SourceConfig); err == nil && cfg.Mode == usercollections.SourceModeTMDBList {
+		normalized, err := collectionutil.CanonicalTMDBListURL(raw)
+		if err != nil {
+			return "", fieldError("source_url", "source_url must be a TMDB list (https://www.themoviedb.org/list/...)")
+		}
+		return normalized, nil
+	}
+	return "", fieldError("source_url", "source_url can only be edited for MDBList and TMDB list collections")
 }

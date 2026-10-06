@@ -2,7 +2,8 @@ import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +11,52 @@ import { installPolicyStorageMocks, jsonResponse } from "./admin-policy/policyTe
 import AdminAccessGroups from "./AdminAccessGroups";
 
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({}) }));
+const adminUsers = vi.hoisted(() => ({
+  data: [] as Array<{
+    id: number;
+    username: string;
+    email: string;
+    role: string;
+    access_group_id: number | null;
+  }>,
+}));
+vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminUsers: () => ({
+    data: adminUsers.data,
+    isPending: false,
+    isError: false,
+    isSuccess: true,
+    refetch: vi.fn(),
+  }),
+}));
+const toastSuccess = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
+
+// Radix Select needs these to open under jsdom.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === "undefined") {
+  (globalThis as unknown as { ResizeObserver: typeof ResizeObserverStub }).ResizeObserver =
+    ResizeObserverStub;
+}
+if (!window.HTMLElement.prototype.hasPointerCapture) {
+  window.HTMLElement.prototype.hasPointerCapture = () => false;
+  window.HTMLElement.prototype.releasePointerCapture = () => {};
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
+async function pickOption(
+  user: ReturnType<typeof userEvent.setup>,
+  combobox: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name: combobox }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 const GROUP = {
   id: "1",
   name: "Kids",
@@ -50,8 +97,29 @@ function renderPage(initialPath = "/admin/access-groups") {
   return router;
 }
 
+const REQUEST_SETTINGS = {
+  requests_enabled: true,
+  global_max_requests: 12,
+  global_window_days: 14,
+  global_auto_approval_enabled: true,
+  force_dual_quality: false,
+};
+const INHERIT_LIMIT = {
+  group_id: "1",
+  limit_mode: "inherit",
+  max_requests: null,
+  window_days: null,
+  approval_mode: "inherit",
+};
+
 describe("AdminAccessGroups", () => {
   let putBody: unknown;
+  let group: typeof GROUP;
+  // The group's request limit as stored, and every write to it, in order.
+  let groupLimit: Record<string, unknown>;
+  let groupLimitTag: string;
+  let writes: Array<{ url: string; ifMatch: string | null; body: Record<string, unknown> }>;
+  let refuseLimitWrites: number;
 
   beforeEach(() => {
     installPolicyStorageMocks();
@@ -59,18 +127,53 @@ describe("AdminAccessGroups", () => {
     setProfileId("owner");
     setProfileToken(null);
     putBody = undefined;
+    group = GROUP;
+    groupLimit = INHERIT_LIMIT;
+    groupLimitTag = '"limit-initial"';
+    writes = [];
+    refuseLimitWrites = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
         const url = String(input);
         const method = init?.method ?? "GET";
+        if (method === "PUT") {
+          writes.push({
+            url,
+            ifMatch: new Headers(init?.headers).get("If-Match"),
+            body: JSON.parse(String(init?.body)),
+          });
+        }
+        if (url === "/api/v2/admin/request-settings") return jsonResponse(REQUEST_SETTINGS);
+        if (url === "/api/v2/admin/request-groups/1/limit" && method === "GET") {
+          return jsonResponse(groupLimit, 200, groupLimitTag);
+        }
+        if (url === "/api/v2/admin/request-groups/1/limit" && method === "PUT") {
+          if (refuseLimitWrites > 0) {
+            refuseLimitWrites--;
+            groupLimitTag = '"limit-newer"';
+            return jsonResponse(
+              {
+                type: "https://silo.example/problems/precondition_failed",
+                title: "Changed",
+                status: 412,
+                detail: "The access group's request limit changed; reload before saving.",
+              },
+              412,
+              groupLimitTag,
+            );
+          }
+          groupLimit = { group_id: "1", ...JSON.parse(String(init?.body)) };
+          groupLimitTag = '"limit-saved"';
+          return jsonResponse(groupLimit, 200, groupLimitTag);
+        }
         if (url === "/api/v2/admin/users/capabilities")
           return jsonResponse({ access_groups: true });
         if (url === "/api/v2/admin/access-groups?limit=200" && method === "GET") {
-          return jsonResponse({ items: [GROUP], page: { has_more: false } });
+          return jsonResponse({ items: [group], page: { has_more: false } });
         }
         if (url === "/api/v2/admin/access-groups/1" && method === "GET") {
-          return new Response(JSON.stringify(GROUP), {
+          return new Response(JSON.stringify(group), {
             headers: { "Content-Type": "application/json", ETag: '"initial"' },
           });
         }
@@ -97,7 +200,9 @@ describe("AdminAccessGroups", () => {
   });
 
   it("summarizes a group and saves edited restrictions", async () => {
-    renderPage();
+    toastSuccess.mockClear();
+    const user = userEvent.setup();
+    const router = renderPage();
 
     expect(await screen.findByText("Kids")).toBeInTheDocument();
     expect(screen.getByText("3 members")).toBeInTheDocument();
@@ -109,9 +214,7 @@ describe("AdminAccessGroups", () => {
 
     // Drill-in editor seeds from the group; toggle downloads on and save.
     fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
-    fireEvent.change(screen.getByLabelText("Max remote stream bitrate (kbps)"), {
-      target: { value: "4000" },
-    });
+    await pickOption(user, "Max remote stream bitrate", "8 Mbps");
     fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
 
     await waitFor(() => {
@@ -120,12 +223,170 @@ describe("AdminAccessGroups", () => {
         library_ids: ["2"],
         download_allowed: true,
         max_streams: 1,
-        max_remote_stream_bitrate_kbps: 4000,
+        max_remote_stream_bitrate_kbps: 8000,
+        max_local_stream_bitrate_kbps: 0,
         requests_allowed: false,
         allowed_permissions: [],
         is_default: true,
       });
     });
+    // The request limit was not edited, so nothing wrote it.
+    expect(writes.map((write) => write.url)).toEqual(["/api/v2/admin/access-groups/1"]);
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+  });
+
+  it("saves only the request approval and limit when no group field changed", async () => {
+    group = { ...GROUP, requests_allowed: true };
+    toastSuccess.mockClear();
+    const user = userEvent.setup();
+    const router = renderPage("/admin/access-groups/1");
+    const requests = await screen.findByRole("region", { name: "Requests" });
+    // Inheriting fields say what the server-wide default is.
+    expect(
+      await within(requests).findByText("Server default: approved automatically"),
+    ).toBeInTheDocument();
+    expect(
+      within(requests).getByText("Server default: 12 requests per 14 days"),
+    ).toBeInTheDocument();
+
+    await pickOption(user, "Approval", "An admin approves");
+    await user.click(screen.getByRole("combobox", { name: "Limit" }));
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "Use server default",
+      "Custom limit",
+      "No limit",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Custom limit" }));
+    const max = screen.getByRole("spinbutton", { name: "Requests allowed" });
+    expect(max).toHaveValue(12);
+    await user.clear(max);
+    await user.type(max, "3");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
+    expect(toastSuccess).toHaveBeenCalledWith("Group saved");
+    // The group itself was untouched, so its revision is left alone.
+    expect(writes.map((write) => write.url)).toEqual(["/api/v2/admin/request-groups/1/limit"]);
+    expect(writes[0]).toMatchObject({
+      ifMatch: '"limit-initial"',
+      body: { limit_mode: "custom", max_requests: 3, window_days: 14, approval_mode: "manual" },
+    });
+    expect(await screen.findByText("Admin approves · 3 per 14 days")).toBeInTheDocument();
+    expect(screen.getByText("Requests on")).toBeInTheDocument();
+  });
+
+  it("saves a group's limit of zero and says it only stops new requests", async () => {
+    groupLimit = { ...INHERIT_LIMIT, limit_mode: "custom", max_requests: 0, window_days: 7 };
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const max = await screen.findByRole("spinbutton", { name: "Requests allowed" });
+    expect(max).toHaveValue(0);
+    expect(
+      screen.getByText(
+        "0 stops new requests; to block this group, turn off Media requests instead.",
+      ),
+    ).toBeInTheDocument();
+    await pickOption(user, "Approval", "Approve automatically");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(writes).toEqual([
+      expect.objectContaining({
+        url: "/api/v2/admin/request-groups/1/limit",
+        body: { limit_mode: "custom", max_requests: 0, window_days: 7, approval_mode: "auto" },
+      }),
+    ]);
+  });
+
+  it("stays on the group when its request limit could not be saved, and retries only the limit", async () => {
+    toastSuccess.mockClear();
+    refuseLimitWrites = 1;
+    const user = userEvent.setup();
+    const router = renderPage("/admin/access-groups/1");
+    await screen.findByRole("region", { name: "Requests" });
+    fireEvent.click(screen.getByRole("switch", { name: "Allow downloads" }));
+    await pickOption(user, "Limit", "No limit");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      await screen.findByText(/The group was saved, but its request approval and limit were not/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/changed by another administrator/)).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+    expect(toastSuccess).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Reload latest version" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Limit" })).toHaveTextContent(
+        "Use server default",
+      ),
+    );
+    await pickOption(user, "Limit", "No limit");
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    // The group was written once; the retry wrote only the limit.
+    expect(writes.map((write) => write.url)).toEqual([
+      "/api/v2/admin/access-groups/1",
+      "/api/v2/admin/request-groups/1/limit",
+      "/api/v2/admin/request-groups/1/limit",
+    ]);
+    const limitWrites = writes.filter((write) => write.url.includes("request-groups"));
+    expect(limitWrites.map((write) => write.ifMatch)).toEqual(['"limit-initial"', '"limit-newer"']);
+    expect(limitWrites[1]?.body).toMatchObject({ limit_mode: "unlimited", max_requests: null });
+  });
+
+  it("lists the group's members with links to their user pages", async () => {
+    const user = (id: number, username: string, role: string, group: number | null) => ({
+      id,
+      username,
+      email: `${username}@example.test`,
+      role,
+      access_group_id: group,
+    });
+    adminUsers.data = [
+      user(7, "taylor", "user", 1),
+      user(8, "sam", "user", 2),
+      user(9, "robin", "user", null),
+      user(10, "root", "admin", null),
+    ];
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+    expect(within(members).getByRole("link", { name: "taylor" })).toHaveAttribute(
+      "href",
+      "/admin/users/7",
+    );
+    expect(within(members).queryByRole("link", { name: "sam" })).toBeNull();
+    expect(within(members).queryByRole("link", { name: "robin" })).toBeNull();
+    expect(within(members).queryByRole("link", { name: "root" })).toBeNull();
+    adminUsers.data = [];
+  });
+
+  it("stays in the editor with the error when a save fails", async () => {
+    toastSuccess.mockClear();
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups/1" && init?.method === "PUT"
+          ? jsonResponse({ error: "internal_error", message: "Could not save the group." }, 500)
+          : serve(input, init),
+      ),
+    );
+    const router = renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+    fireEvent.click(await screen.findByRole("switch", { name: "Allow downloads" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups/1");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeInTheDocument();
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 
   it("opens a group at its own URL so Back returns to the group list", async () => {
@@ -267,47 +528,123 @@ describe("AdminAccessGroups", () => {
     expect(router.state.location.pathname).toBe("/admin/access-groups/1");
   });
 
-  it("opens the group editor when loaded from a group URL", async () => {
+  it("locks demotion and deletion for the default group", async () => {
     const router = renderPage("/admin/access-groups/1");
     expect(await screen.findByLabelText("Name")).toHaveValue("Kids");
-    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
-    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/admin/access-groups");
-  });
-
-  it("locks demotion and deletion for the default group", async () => {
-    renderPage();
-
-    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
 
     // The server rejects demoting or deleting the default group, so the
     // editor disables both paths and explains the promote-another-group flow.
     expect(await screen.findByRole("switch", { name: "Default for new users" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /delete group/i })).toBeDisabled();
     expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "All groups" }));
+    expect(await screen.findByRole("heading", { name: "Access Groups" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/access-groups");
   });
 
-  it("does not truncate a fractional remote bitrate limit", async () => {
+  it("says a deleted group's members move to the default group", async () => {
+    group = { ...GROUP, is_default: false };
+    const everyone = { ...GROUP, id: "2", name: "Everyone", is_default: true, member_count: 0 };
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ items: [group, everyone], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+    renderPage("/admin/access-groups/1");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent(
+        "3 members will move to the default group, Everyone, and get its access right away, without being signed out",
+      ),
+    );
+    expect(dialog).not.toHaveTextContent("no group");
+  });
+
+  it("keeps the move warning when the cached member count is zero", async () => {
+    // The list's count can be stale: an account may have joined since it loaded.
+    group = { ...GROUP, is_default: false, member_count: 0 };
+    const everyone = { ...GROUP, id: "2", name: "Everyone", is_default: true, member_count: 0 };
+    const serve = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input, init) =>
+        String(input) === "/api/v2/admin/access-groups?limit=200" &&
+        (init?.method ?? "GET") === "GET"
+          ? jsonResponse({ items: [group, everyone], page: { has_more: false } })
+          : serve(input, init),
+      ),
+    );
+    renderPage("/admin/access-groups/1");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete group" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent(
+        "Any members (none when this list last loaded) will move to the default group, Everyone, and get its access right away, without being signed out",
+      ),
+    );
+    expect(dialog).not.toHaveTextContent("This group has no members");
+  });
+
+  it("saves a custom Mbps bitrate limit as whole kbps", async () => {
+    const user = userEvent.setup();
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
-    fireEvent.change(limit, { target: { value: "1.5" } });
+    await screen.findByRole("combobox", { name: "Max remote stream bitrate" });
+    await pickOption(user, "Max remote stream bitrate", "Custom");
+    await user.type(screen.getByLabelText("Max remote stream bitrate in Mbps"), "1.5");
+    await pickOption(user, "Max local stream bitrate", "40 Mbps");
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => {
-      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 0 });
+      expect(putBody).toMatchObject({
+        max_remote_stream_bitrate_kbps: 1500,
+        max_local_stream_bitrate_kbps: 40000,
+      });
     });
   });
 
-  it("keeps an existing limit when the number input has invalid intermediate text", async () => {
+  it("blocks saving until a custom limit is a valid Mbps value and warns below 1 Mbps", async () => {
+    const user = userEvent.setup();
+    group = { ...GROUP, max_remote_stream_bitrate_kbps: 4500 };
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
-    const limit = await screen.findByLabelText("Max remote stream bitrate (kbps)");
-    fireEvent.change(limit, { target: { value: "4000" } });
-    Object.defineProperty(limit, "validity", { value: { badInput: true }, configurable: true });
-    fireEvent.change(limit, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    const limit = await screen.findByLabelText("Max remote stream bitrate in Mbps");
+    expect(limit).toHaveValue("4.5");
+    expect(screen.getByRole("combobox", { name: "Max remote stream bitrate" })).toHaveTextContent(
+      "Custom",
+    );
+    expect(screen.getByRole("combobox", { name: "Max local stream bitrate" })).toHaveTextContent(
+      "Unlimited",
+    );
+    const save = screen.getByRole("button", { name: "Save changes" });
+
+    // A cleared box is an unsaved edit, never a silent 0 (unlimited).
+    await user.clear(limit);
+    expect(save).toBeDisabled();
+    expect(screen.getByText(/Enter a value above 0 Mbps/)).toBeInTheDocument();
+
+    // 0 means unlimited and has its own choice, so a half-typed "0." is not a cap.
+    await user.type(limit, "0.");
+    expect(save).toBeDisabled();
+    // kbps resolution is the floor; finer values are rejected, not rounded.
+    await user.type(limit, "0005");
+    expect(limit).toHaveValue("0.0005");
+    expect(save).toBeDisabled();
+
+    await user.clear(limit);
+    await user.type(limit, "0.5");
+    expect(save).toBeEnabled();
+    expect(screen.getByText(/Below 1 Mbps/)).toBeInTheDocument();
+    fireEvent.click(save);
     await waitFor(() => {
-      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 4000 });
+      expect(putBody).toMatchObject({ max_remote_stream_bitrate_kbps: 500 });
     });
   });
 });

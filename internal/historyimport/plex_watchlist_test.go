@@ -87,9 +87,9 @@ func TestFetchWatchlistPaginatesDiscoverAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
-	items, warnings, err := client.FetchWatchlist(context.Background(), "account-token-1")
+	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "account-token-1")
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
@@ -142,9 +142,9 @@ func TestFetchWatchlistResolvesGuidsViaItemMetadata(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
-	items, warnings, err := client.FetchWatchlist(context.Background(), "tok")
+	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
@@ -189,9 +189,9 @@ func TestFetchWatchlistWarnsWhenDetailHasNoProviderID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
-	items, warnings, err := client.FetchWatchlist(context.Background(), "tok")
+	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
@@ -221,9 +221,9 @@ func TestFetchWatchlistWarnsWhenGuidResolutionFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
-	items, warnings, err := client.FetchWatchlist(context.Background(), "tok")
+	items, warnings, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
@@ -245,9 +245,9 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewPlexClient()
+	client := newUnthrottledPlexClient()
 	client.discoverBaseURL = server.URL
-	items, _, err := client.FetchWatchlist(context.Background(), "tok")
+	items, _, err := client.FetchWatchlist(trustLoopback(context.Background()), "tok")
 	if err != nil {
 		t.Fatalf("FetchWatchlist: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 }
 
 func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := trustLoopback(context.Background())
 	pool := newPlexWatchlistImportTestPool(t)
 	repo := NewRepository(pool, nil)
 	service := &Service{
@@ -339,7 +339,7 @@ func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
 	}
-	ctx := context.Background()
+	ctx := trustLoopback(context.Background())
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatalf("parse db config: %v", err)

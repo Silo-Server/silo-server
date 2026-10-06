@@ -554,25 +554,27 @@ is exercised.
 
 ### Frozen API-key creation refusal pairs
 
-`make test-scenario-api-key-create-refusals` requires five original cases:
+`make test-scenario-api-key-create-refusals` requires six original cases:
 `keys_create.bad_scope`, `keys_create.missing_label`, `keys_create.malformed`,
-`keys_create.demo` and `keys_create.no_token`. Original requests, settings and
-expectations remain unchanged. V2 explicitly records validation 422, malformed
-JSON 400 and demo/authentication 403/401 Problem Details. Ten real-router
-transport requests use per-transport reseeding and 20 full API-key-table
+`keys_create.member_forbidden`, `keys_create.demo` and `keys_create.no_token`.
+The three input cases run as the admin, because only server admins create keys;
+`member_forbidden` records that a regular account is refused with 403 on both
+transports. V2 explicitly records validation 422, malformed JSON 400, demo and
+non-admin 403, and unauthenticated 401 Problem Details. Twelve real-router
+transport requests use per-transport reseeding and 24 full API-key-table
 snapshots to prove all three fixture rows remain unchanged. Required DSN,
 pre-setup occupancy and fixed-selector gates fail closed. No successful
 credential creation, API-key-auth metadata update or external call is exercised.
-These five frozen pairs remain separate from NEW acceptance.
+These six frozen pairs remain separate from NEW acceptance.
 
 ### Frozen successful API-key creation pairs
 
 `make test-scenario-api-key-creations` requires `keys_create.ok`,
-`keys_create.meaning`, `keys_create.scoped` and `keys_create.shape`.
-Original v1 expectations and requests remain unchanged. V2 records string IDs,
-UTC-millisecond timestamps and creation-only secret disclosure. Eight real
+`keys_create.meaning`, `keys_create.scoped` and `keys_create.shape`, all as the
+admin. V2 records string IDs, UTC-millisecond timestamps and creation-only
+secret disclosure. Eight real
 transport requests reseed independently and compare 16 full-table snapshots:
-exactly one new member-owned row must match the returned ID, credential, label,
+exactly one new admin-owned row must match the returned ID, credential, label,
 normalized scopes, standard tier and timestamp, with no usage timestamp; all
 three prior rows remain byte-identical. Credentials stay out of effect-assertion
 messages. Required DSN, pre-setup occupancy and fixed-selector gates fail closed.
@@ -759,10 +761,15 @@ deployment is exercised.
 `device_lookup.by_code`, `device_lookup.meaning` and `device_lookup.shape`.
 Original public requests, database requirements and assertions remain unchanged.
 V2 preserves code normalization, masked address and device metadata, with an
-explicit temporary boolean and empty user_code on token lookup. Eight
-transport requests reseed independently; 16 combined snapshots cover complete
-users, profiles, API-key, settings, login-session and device-request tables
-(96 observations), with every row unchanged. Required DSN, pre-setup scratch/API-key
+explicit temporary boolean and empty user_code on token lookup, and adds
+requested_at, server_id and server_name. The executor seeds the server identity
+with the fixture, so reporting server_id is not a settings write. A v2 lookup of
+a pending request writes opened_at and extends expires_at: the fixture request
+gains opened_at (updated_at matches it) and an expiry at least five minutes past
+it, and no other column changes. Eight transport requests reseed independently;
+16 combined snapshots cover complete users, profiles, API-key, settings,
+login-session and device-request tables (96 observations). V1 leaves every row
+unchanged; v2 changes only the looked-up request. Required DSN, pre-setup scratch/API-key
 occupancy and fixed-selector gates fail closed. No start, approval, poll, token
 collection or enrollment is exercised. These four frozen pairs remain separate
 from NEW acceptance.
@@ -771,8 +778,9 @@ from NEW acceptance.
 
 `make test-scenario-device-lookup-errors` requires `device_lookup.expired`,
 `device_lookup.not_found` and `device_lookup.no_params`. Original public/database
-requests and assertions remain unchanged. V2 preserves expired status with 200,
-uses a 404 Problem for unknown tokens, and rejects missing parameters with a
+requests and assertions remain unchanged. V2 preserves expired status with 200
+(adding requested_at, server_id and server_name, without marking the request
+opened), uses a 404 Problem for unknown tokens, and rejects missing parameters with a
 422 validation Problem instead of legacy 404. Six transport requests reseed
 independently; 12 combined snapshots cover complete users, profiles, API-key,
 settings, login-session and device-request tables (72 observations), with every
@@ -1142,7 +1150,8 @@ guards run before setup. No successful creation, send or other cohort runs.
 `device_poll.denied` and `device_poll.expired`. Original requests, public
 principals, database requirements and 200 assertions remain unchanged. V2
 reports the same state and three-second polling interval with empty profile
-fields, temporary=false and no tokens or session expiry. Six real-router
+fields, temporary=false, opened=false and no tokens or session expiry; a pending
+poll also returns the request's current expires_at. Six real-router
 requests reseed independently; twelve combined full snapshots compare users,
 profiles, API keys, settings, login sessions and device requests (72 table
 observations), with no exemptions. Required DSN, pre-constructor occupancy and

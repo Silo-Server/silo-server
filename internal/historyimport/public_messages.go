@@ -145,3 +145,44 @@ func PublicUnmatchedReason(diagnostic string) string {
 	}
 	return GenericUnmatchedReason
 }
+
+// GenericRunError is the monitor text for a stored failure that is not one of
+// the messages written for users.
+const GenericRunError = "The import failed. Review the source configuration before starting a new run."
+
+// PublicRunError returns the monitor text for a stored run failure. Failures
+// written for users pass through; anything else may carry an upstream
+// response or an internal error and becomes GenericRunError.
+func PublicRunError(message string) string {
+	switch message {
+	case "", ErrRunConfigurationChanged.Error(), LegacyDispatchUnavailableMessage, StaleRunInterruptedMessage,
+		ErrPersonalCredentialsUnavailable.Error(), RunErrorSourceRejected, RunErrorStoppedEarly, RunErrorNotCompleted,
+		PrivateAddressMessage, BlockedAddressMessage:
+		return message
+	default:
+		return GenericRunError
+	}
+}
+
+// PublicRun returns run with its stored diagnostics replaced by the text a
+// run monitor may show the account that owns it. Every surface that sends a
+// run to that account uses it; applying it twice is not supported.
+func PublicRun(run Run) Run {
+	run.ErrorMessage = PublicRunError(run.ErrorMessage)
+	if run.Warnings != nil {
+		warnings := make([]string, 0, len(run.Warnings))
+		for _, warning := range run.Warnings {
+			warnings = append(warnings, PublicWarning(warning))
+		}
+		run.Warnings = warnings
+	}
+	if run.UnmatchedSamples != nil {
+		samples := make([]UnmatchedSample, len(run.UnmatchedSamples))
+		copy(samples, run.UnmatchedSamples)
+		for i := range samples {
+			samples[i].Reason = PublicUnmatchedReason(samples[i].Reason)
+		}
+		run.UnmatchedSamples = samples
+	}
+	return run
+}

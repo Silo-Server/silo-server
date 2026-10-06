@@ -22,6 +22,8 @@ const (
 	BrowseSortTitle         = "sort_title"
 	BrowseSortReleaseDate   = "release_date"
 	BrowseSortCreatedAt     = "created_at"
+	BrowseSortYear          = "year"
+	BrowseSortRatingIMDB    = "rating_imdb"
 	BrowseOrderDescending   = "desc"
 )
 
@@ -38,7 +40,7 @@ type BrowseFilters struct {
 	Genres             []string // any matching genre
 	Years              []int    // exact release years
 	SearchTerm         string   // case-insensitive literal title substring
-	NamePrefix         string   // case-insensitive prefix filter on sort_title/title
+	NamePrefix         string   // case-insensitive prefix filter on the sort_title order key
 	ContentIDs         []string // optional allowlist of exact content IDs
 	LibraryID          int      // filter by specific library
 	LibraryIDs         []int    // accessible library IDs (nil = all)
@@ -60,6 +62,17 @@ type BrowseFilters struct {
 	AudioLanguages     []string   // any accessible file has an audio track in one of these languages
 	SubtitleLanguages  []string   // any accessible file has an embedded or external subtitle in one of these languages
 	MaxPlaybackQuality string     // viewer quality ceiling for file-level language predicates and facets
+	// Jellyfin-compat predicates, applied by appendCompatBrowsePredicates.
+	// NameLessThan and NameStartsWithOrGreater compare the sort_title order key
+	// so a count of the preceding rows is a grid position (letter jump).
+	NameLessThan            string
+	NameStartsWithOrGreater string
+	ExcludeContentIDs       []string
+	Studios                 []string // any matching studio name
+	OfficialRatings         []string // exact content ratings
+	MinCommunityRating      float64  // minimum rating_imdb, the compat CommunityRating
+	MinPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
+	MaxPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
 	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
 	// files the viewer may play (library lists and MaxPlaybackQuality), as the
 	// Jellyfin-compat Filters2 languages must agree with its language filters.
@@ -152,6 +165,24 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 		Total:   total,
 		HasMore: hasMore,
 	}, nil
+}
+
+// BrowseCount returns the total a browse of filters would report without
+// fetching a page (Jellyfin's Limit=0).
+func (r *BrowseRepository) BrowseCount(ctx context.Context, filters BrowseFilters) (int, error) {
+	plan, earlyEmpty, err := r.buildBrowsePlan(filters)
+	if err != nil {
+		return 0, err
+	}
+	if earlyEmpty {
+		return 0, nil
+	}
+	countSQL, countArgs := plan.countSQL()
+	var total int
+	if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count browse: %w", err)
+	}
+	return total, nil
 }
 
 // BrowseRecentlyAddedAcrossLibraries serves a recently_added browse spanning
@@ -444,16 +475,7 @@ func (r *BrowseRepository) buildBrowsePlan(filters BrowseFilters) (browseQueryPl
 	}
 
 	if prefix := strings.TrimSpace(filters.NamePrefix); prefix != "" {
-		// Dual-column OR so titles without a curated sort_title still match.
-		// First arm matches the idx_media_items_sort_key expression
-		// (LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title))) so the
-		// anchored LIKE is sargable; second arm uses idx_media_items_search_exact_title
-		// (LOWER(title)). Both arms are equivalent when sort_title is empty,
-		// which is harmless — the planner can BitmapOr the two index scans.
-		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			argIdx, argIdx,
-		))
+		conditions = append(conditions, sortTitlePrefixCondition(argIdx))
 		args = append(args, likePrefixPattern(prefix))
 		argIdx++
 	}
@@ -650,12 +672,7 @@ func filterWhereClauseForSource(filters BrowseFilters, baseRelation string, medi
 		}
 	}
 	if prefix := strings.TrimSpace(filters.NamePrefix); prefix != "" {
-		// Same dual-column shape as filterWhereClauseForSource's primary
-		// browse path — see comment there for index-alignment rationale.
-		conditions = append(conditions, fmt.Sprintf(
-			"(LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title)) LIKE $%d ESCAPE '\\' OR LOWER(mi.title) LIKE $%d ESCAPE '\\')",
-			argIdx, argIdx,
-		))
+		conditions = append(conditions, sortTitlePrefixCondition(argIdx))
 		args = append(args, likePrefixPattern(prefix))
 		argIdx++
 	}
@@ -1507,6 +1524,14 @@ func likePrefixPattern(prefix string) string {
 	return escapePrefixForLike(prefix) + "%"
 }
 
+// sortTitlePrefixCondition matches a name_prefix (alphabetical jump) against
+// sortTitleKeyExpr, the key title sorting orders by, which falls back to title
+// when sort_title is empty. Matching the raw title too would list "The Hobbit"
+// (sort_title "Hobbit, The") under both T and H.
+func sortTitlePrefixCondition(argIdx int) string {
+	return fmt.Sprintf("%s LIKE $%d ESCAPE '\\'", sortTitleKeyExpr, argIdx)
+}
+
 // scanBrowseItems scans rows returned by the browse query, which include an
 // extra added_at column appended after the standard item columns.
 func scanBrowseItems(rows pgx.Rows) ([]*models.MediaItem, error) {
@@ -1710,6 +1735,13 @@ func splitTypes(s string) []string {
 	return result
 }
 
+// sortTitleKeyExpr is the sort_title order key (see the sort_title ORDER BY).
+const sortTitleKeyExpr = "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))"
+
+// premiereDateKeyExpr is the release_date order key; first_air_date is text, so
+// both sides compare as ISO dates.
+const premiereDateKeyExpr = "COALESCE(mi.release_date::text, NULLIF(BTRIM(mi.first_air_date), ''))"
+
 func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, args *[]any, argIdx *int) {
 	add := func(sql string, value any) {
 		*conditions = append(*conditions, fmt.Sprintf(sql, *argIdx))
@@ -1724,6 +1756,30 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	}
 	if filters.SearchTerm != "" {
 		add("mi.title ILIKE $%d ESCAPE '\\'", "%"+strings.TrimSuffix(likePrefixPattern(filters.SearchTerm), "%")+"%")
+	}
+	if value := strings.TrimSpace(filters.NameLessThan); value != "" {
+		add(sortTitleKeyExpr+" < LOWER($%d)", value)
+	}
+	if value := strings.TrimSpace(filters.NameStartsWithOrGreater); value != "" {
+		add(sortTitleKeyExpr+" >= LOWER($%d)", value)
+	}
+	if len(filters.ExcludeContentIDs) > 0 {
+		add("NOT (mi.content_id = ANY($%d::text[]))", filters.ExcludeContentIDs)
+	}
+	if len(filters.Studios) > 0 {
+		add("mi.studios && $%d::text[]", filters.Studios)
+	}
+	if len(filters.OfficialRatings) > 0 {
+		add("mi.content_rating = ANY($%d::text[])", filters.OfficialRatings)
+	}
+	if filters.MinCommunityRating > 0 {
+		add("mi.rating_imdb >= $%d", filters.MinCommunityRating)
+	}
+	if filters.MinPremiereDate != "" {
+		add(premiereDateKeyExpr+" >= $%d", filters.MinPremiereDate)
+	}
+	if filters.MaxPremiereDate != "" {
+		add(premiereDateKeyExpr+" <= $%d", filters.MaxPremiereDate)
 	}
 	audioCodes := languageFilterCodes(filters.AudioLanguages)
 	subtitleCodes := languageFilterCodes(filters.SubtitleLanguages)

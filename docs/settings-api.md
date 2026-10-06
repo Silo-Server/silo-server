@@ -113,6 +113,10 @@ Every list-valued query parameter is sent once per value. `keys=<csv>` becomes
 `listEffectiveSettings`. A comma inside a value is part of the key name and will be rejected as
 an unknown key.
 
+The examples in this section mirror the committed v2 fixtures, which use `ui.theme`. That
+key is deprecated and no client reads it (see [Retired theme settings](#retired-theme-settings));
+the request and response mechanics are the same for every key.
+
 ```http
 GET /api/v2/settings/values?scope=profile&keys=ui.theme&keys=playback.preferred_quality
 GET /api/v2/settings/values/effective?keys=ui.theme&library_ids=3&library_ids=7
@@ -447,7 +451,7 @@ Branding remains public so it can render before sign-in:
 | Method | Path | Response |
 |---|---|---|
 | GET | `/api/v2/theme/capabilities` | Branding, CSS-override, and asset-storage availability |
-| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent/theme and asset URLs, storage availability |
+| GET | `/api/v2/theme/branding` | Server name, login subtitle, optional accent color and asset URLs, storage availability |
 | GET | `/api/v2/theme/admin-css` | JSON object with `vars` and `raw_css` strings |
 | GET / HEAD | `/api/v2/branding/assets/{kind}` | Image bytes or matching headers without a body |
 
@@ -467,53 +471,23 @@ A valid kind without a configured asset returns `404`; missing asset storage ret
 `503`. Assets use the raw HTTP registry rather than JSON encoding.
 
 The frozen v1 routes and administrator asset upload/delete operations are unchanged.
-Theme catalog/download and catalog refresh are separate operations.
 
+The web client has one theme, Cinema Dark. Only an administrator customizes it, with
+the accent color and the overrides `admin-css` returns (`ui.admin_theme_vars` and
+`ui.admin_custom_css`), layered on that theme. The v2 branding document therefore
+has no default theme and no light-theme logo URLs, and v2 has no theme catalog.
+The frozen v1 `/theme/branding` response is unchanged: it still reports a stored
+`default_theme` and light logo URLs. The server keeps those settings for v1 alone. The v1
+`/theme/catalog`, `/theme/catalog/refresh` and `/theme/download` routes keep their
+behavior, and `theme.catalog_url` its default, until v1 retires.
 
-## Theme catalog and portable downloads
+### Retired theme settings
 
-| Method | Path | Response |
-|---|---|---|
-| GET | `/api/v2/theme/catalog/capabilities` | Availability and accepted document byte limits |
-| GET | `/api/v2/theme/catalog` | `{document, stale}` catalog envelope |
-| POST | `/api/v2/theme/catalog/refresh` | The same envelope after clearing this node's cache and fetching synchronously |
-| GET | `/api/v2/theme/download?url=...` | `{document}` portable theme file envelope |
-
-Reads require account authentication and do not require a profile. Refresh requires
-acting-admin authority. It invalidates the serving node's cache; it is neither a
-cluster-wide invalidation nor a durable job. Repeated refresh converges, matching its
-natural-idempotent retry declaration. The bundled web still disables automatic
-mutation retries and authentication replay for the refresh button.
-
-The `document` objects preserve the portable theme format's established property
-names, including `updatedAt`, `downloadUrl`, `baseTheme`, `customCss`, and `createdAt`.
-Catalog documents carry `version` and `themes`; each theme includes its identifier,
-name, author/description, preview colors, tags, download URL, and version. Theme file
-documents carry `version`, `name`, `baseTheme`, a string-valued `vars` object, and
-`customCss`, with optional author, description, and creation time. Unsupported theme
-versions/base themes remain subject to the installing client's parser. The web keeps
-its existing portable-file validation and CSS sanitizer before applying a download.
-
-Both transports call the same application methods for upstream access and caching.
-Initial and redirected requests retain the existing approved-host HTTPS restriction
-and timeout. The cache remains bound to the configured catalog URL; a fresh cache
-from a previous URL cannot hide a configuration change. Upstream connection or
-non-200 failures may return an expired catalog for the same URL, indicated by
-`stale: true`. Invalid JSON and read failures do not use that fallback. Refresh clears
-the cache before fetching and therefore cannot fall back to its former contents.
-
-V2 responses use `no-store`; the frozen v1 transport keeps its original cache and
-stale headers and byte-preserving JSON response. V1 reads remain capped at 1 MiB for
-catalogs and 256 KiB for files. Because a capped read can be a valid JSON prefix of a
-larger document, v2 refuses bodies exactly at those caps: its capability reports
-1,048,575 and 262,143 accepted bytes respectively. Malformed portable documents and
-upstream failures return `503 dependency_unavailable`; invalid requested URLs return
-`422 validation_failed`, and disallowed download targets return
-`403 permission_denied`. V1 status codes and error identifiers are unchanged.
-
-There are no first-party Apple, Android, or Jellyfin callers of these theme catalog,
-download, and refresh operations to migrate. The separate public branding discovery
-consumer work remains tracked independently.
+Manifest revision 12 deprecates `ui.theme`, `ui.custom_theme_vars` and
+`ui.custom_css`. They were web-only, and the web client no longer reads or writes
+them. Migration `20260926233851_retire_profile_themes` (SQLite user store schema
+v29) deleted every stored value at every scope. The definitions stay published, so
+a write from a stale cached web bundle still succeeds, but nothing reads the value.
 
 ### Viewer library discovery
 
@@ -575,31 +549,15 @@ administrator-device metadata consumer was found.
 
 ### Browser OAuth login handshake
 
-`POST /api/v2/auth/oauth/{install_id}/init` accepts a browser form submission
-and redirects with 302 to the authentication plugin's authorization URL.
-Optional `next` is normalized by the existing application service to a local
-path. No request-body fields are consumed. This operation is non-retryable: it
-creates a new provider authorization attempt and persisted state.
-
-`GET /api/v2/auth/oauth/{install_id}/callback?state=...&code=...` completes the
-provider redirect through the same application service. Signed state binds the
-installation and expiry; the stored state is consumed before exchange. Exchange
-uses its stored provider state and exact redirect URI. Success redirects to the
-SPA with a one-time completion code, never bearer/refresh tokens in the URL.
-The already-migrated `POST /api/v2/auth/oauth/complete` redeems that code. Failed
-state, exchange, or login completion redirects to the existing local login-error
-page. Missing code/state or invalid installation IDs return 400 plain text;
-init's plugin/storage failures retain 502/500 plain text. Missing service returns
-a 503 problem. V2 handshakes set `Cache-Control: no-store` and
-`Referrer-Policy: no-referrer` and do not require an ambient login/profile.
-
-`GET /api/v2/auth/oauth/capabilities` exposes `available`. The existing web login
-form uses the v2 init route. **Providers must register the v2 callback URI**
-(`/api/v2/auth/oauth/{install_id}/callback` under the configured host base URL)
-before using that flow. V1 init continues to issue its v1 callback URI, and frozen
-v1 transports are unchanged. This port adds no account-linking, PKCE, or new
-browser-session-binding mechanism. No native in-app handshake or Jellyfin caller
-was found; provider redirects and browser forms follow the emitted URLs.
+The OAuth sign-in and linking flows (web and native starts, the provider
+callback, completion codes, browser binding, PKCE and account linking) are
+specified in [auth-api.md](auth-api.md#oauth-sign-in-flows), with the rules
+behind them in
+[external-sign-in.md](architecture/external-sign-in.md#oauth-flows).
+Providers register the v2 callback URI
+(`/api/v2/auth/oauth/{install_id}/callback` on the public URL). The frozen v1
+init still issues its v1 callback URI (`/api/v1/auth/oauth/{install_id}/callback`),
+so a provider that serves v1 clients must register that one too.
 
 ### External watch-state webhook receiver
 
@@ -620,6 +578,14 @@ unknown secrets 404, and internal failures a safe 500 problem. Known-connection
 rejections retain delivery logs. This synchronous operation is non-retryable;
 existing provider ordering and duplicate-handling behavior is unchanged and does
 not provide an exactly-once guarantee.
+
+A Plex connection's `base_url` follows the history import rule for server
+addresses: it must be on the public internet unless the account is an admin or
+an admin turned on `media_servers.allow_private_destinations`. Creating a
+connection with a refused address returns `422 validation_failed` (v1: 400
+`bad_request`), and a delivery whose metadata lookup is refused records that
+message as the connection's last error. See
+[Outbound address guard](architecture/outbound-address-guard.md).
 
 Responses set `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 `GET /api/v2/webhook-sync/capabilities` exposes `available` and `max_body_bytes`.
@@ -736,6 +702,12 @@ schemas, and is applied where the request is read rather than where the session
 is created so the decision logs and `playback_route_events` observe it too.
 Nothing is validated against an enum either, so a client may introduce a new
 channel without a server change.
+
+The `/api/v2` playback operations also declare `X-Client-Name`,
+`X-Client-Version`, `X-Client-Build`, and `X-Client-Channel`. A request with a
+non-blank `X-Client-Name` takes its whole identity from that set; a request
+without one takes it from the `X-Silo-Client*` set above when `X-Silo-Client` is
+non-blank. The two sets are never mixed field by field.
 
 Protocol-v3 `POST /playback/start` accepts `client_playback_context.app_version`,
 `.app_build`, and `.app_channel` as a body-level fallback for clients that cannot
@@ -997,6 +969,21 @@ catalog read return only the versions stored in the `library_id` it was given.
 It is server-wide, applies without a restart, and never affects playback; see
 "Library-scoped version lists" in [catalog-api.md](catalog-api.md).
 
+`catalog.extra_rating_sources` (default empty) lists, comma-separated, the
+external rating sources clients show in addition to IMDb and TMDB, which always
+show. The sources are the ones metadata plugins declare (see "Rating sources"
+in [catalog-api.md](catalog-api.md)); `GET /api/v2/admin/rating-sources` lists
+them. A name must match `^[a-z][a-z0-9_]{0,31}$`; a name no enabled plugin
+declares is kept but shows nothing. It is
+server-wide and applies within seconds, without a restart; see "Ratings on
+title pages" in [catalog-api.md](catalog-api.md).
+
+`scanner.realtime_monitoring` (default `true`) is the server-wide real-time
+monitoring switch: Silo scans library folders automatically when their files
+change. A library is monitored only while this setting, the library's own
+`realtime_monitoring` switch (see [libraries-api.md](libraries-api.md)), and the
+library itself are all on. The setting applies without a restart.
+
 `access.unrated_content` (`hide` or `allow`, default `hide`) decides whether a
 profile with a content-rating ceiling sees titles that have no rating: an empty
 rating or an explicit marker such as `NR` or `Not Rated`. A rating the server
@@ -1007,7 +994,8 @@ server-wide and applies within seconds, without a restart. Ceilings compare
 minimum viewer ages, so a ceiling from any national system limits titles rated
 in any other; a US ceiling admits its whole tier (`PG-13` admits `TV-14`, `R`
 admits `NC-17`). The setting does not apply to a profile's advisory-age limit
-(`max_advisory_age`), which never hides a title that has no advisory age; see
+(`max_advisory_age`). Whether that limit hides a title with no advisory age is
+a per-profile choice, `require_advisory_age`, not this server-wide setting; see
 "Advisory age" in [catalog-api.md](catalog-api.md).
 
 ## Forward and rewind intervals

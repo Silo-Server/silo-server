@@ -22,8 +22,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogsvc "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/librarymonitor"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/routeinventory"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -51,6 +53,10 @@ type fixtureCase struct {
 // shape apimw.NewRequestID mints (24 hex characters) with a value no real
 // request produces.
 func fixtureRequestID(i int) string { return fmt.Sprintf("%024x", i+1) }
+
+// fixtureContractDigest stands in for the served contract_digest: the same
+// 64-hex shape with a value no real OpenAPI artifact hashes to.
+var fixtureContractDigest = strings.Repeat("0", 64)
 
 func fixtureCases() []fixtureCase {
 	viewer := with(bearer(memberToken), "X-Profile-Id", "p-owner")
@@ -367,7 +373,7 @@ func fixtureCases() []fixtureCase {
 		{name: "upload_library_poster_ok", operationID: "uploadLibraryPoster",
 			scenario: "A multipart poster upload; the library is answered with its new presigned poster URL.",
 			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
-			body:   fixtureMultipart("poster", "poster.png", "image/png", strings.Repeat("\x89", 16)),
+			body:   fixtureMultipart("poster", "poster.png", "image/png", "png-bytes"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Library"},
 		{name: "upload_library_poster_unsupported_media_type", operationID: "uploadLibraryPoster",
 			scenario: "A JSON body on the multipart upload operation.",
@@ -376,7 +382,7 @@ func fixtureCases() []fixtureCase {
 		{name: "upload_library_poster_unsupported_image", operationID: "uploadLibraryPoster",
 			scenario: "A part whose media type is not JPEG, PNG or WebP is a validation failure naming body.poster.",
 			method:   http.MethodPut, path: "/api/v2/libraries/1/poster", headers: with(bearer(adminToken), "Content-Type", fixtureMultipartType),
-			body:   fixtureMultipart("poster", "poster.png", "image/gif", strings.Repeat("\x89", 16)),
+			body:   fixtureMultipart("poster", "poster.png", "image/gif", "gif-bytes"),
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "delete_library_poster_not_found", operationID: "deleteLibraryPoster",
 			scenario: "A library identifier that names no library; success answers 204 with no body.",
@@ -1472,7 +1478,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "get_device_login_ok", operationID: "getDeviceLogin",
 			scenario: "A browser looks a pairing request up by its user code before deciding.",
-			method:   http.MethodGet, path: "/api/v2/auth/device?code=ABCD-1234",
+			method:   http.MethodGet, path: "/api/v2/auth/device?code=4821-7730",
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLogin"},
 		{name: "get_device_login_code_required", operationID: "getDeviceLogin",
 			scenario: "A lookup naming neither code is a validation failure; v1 forwarded it to the store as a 404.",
@@ -1488,11 +1494,11 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "approve_device_login_ok", operationID: "approveDeviceLogin",
 			scenario: "A signed-in account approves a pending pairing request by its user code.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"ABCD-1234"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"4821-7730"}`, headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginDecision"},
 		{name: "approve_device_login_authentication_required", operationID: "approveDeviceLogin",
 			scenario: "A decision without a credential.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"ABCD-1234"}`,
+			method:   http.MethodPost, path: "/api/v2/auth/device/approve", body: `{"code":"4821-7730"}`,
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "approve_device_login_expired", operationID: "approveDeviceLogin",
 			scenario: "A decision on a request that outlived its window: 410 under the domain's own type.",
@@ -1508,7 +1514,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "deny_device_login_ok", operationID: "denyDeviceLogin",
 			scenario: "A signed-in account denies a pending pairing request.",
-			method:   http.MethodPost, path: "/api/v2/auth/device/deny", body: `{"code":"ABCD-1234"}`, headers: bearer(memberToken),
+			method:   http.MethodPost, path: "/api/v2/auth/device/deny", body: `{"code":"4821-7730"}`, headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginDecision"},
 		{name: "deny_device_login_code_required", operationID: "denyDeviceLogin",
 			scenario: "A decision naming neither code is a validation failure.",
@@ -1544,7 +1550,7 @@ func fixtureCases() []fixtureCase {
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "complete_oauth_login_ok", operationID: "completeOAuthLogin",
 			scenario: "The SPA redeems the one-time code the OAuth callback redirected it with.",
-			method:   http.MethodPost, path: "/api/v2/auth/oauth/complete", body: `{"code":"c0de"}`,
+			method:   http.MethodPost, path: "/api/v2/auth/oauth/complete", body: `{"code":"c0de"}`, headers: completionCookie,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/OAuthCompletion"},
 		{name: "complete_oauth_login_code_required", operationID: "completeOAuthLogin",
 			scenario: "A completion without its code is a validation failure naming the member.",
@@ -1657,7 +1663,6 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, subtitleDownloadFixtureCases()...)
 	cases = append(cases, subtitleUploadFixtureCases()...)
 	cases = append(cases, adminSubtitleInspectionFixtureCases()...)
-	cases = append(cases, themeCatalogFixtureCases()...)
 	cases = append(cases, ebookProgressFixtureCases()...)
 	cases = append(cases, ebookConfigFixtureCases()...)
 	cases = append(cases, ebookAnnotationFixtureCases()...)
@@ -1706,6 +1711,8 @@ func fixtureCases() []fixtureCase {
 			method:   http.MethodGet, path: "/api/v2/catalog/series/series:severance/seasons?include_artwork=invalid", headers: viewer,
 			status: http.StatusUnprocessableEntity, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
 		{name: "list_admin_users_exact_identity", operationID: opListAdminUsers, method: http.MethodGet, path: Prefix + "/admin/users?identity=LAURA%40example.test", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminUserCollection", scenario: "An exact identity filter matches case-insensitively before account pagination."},
+		{name: "admin_download_preparation_capabilities", operationID: "getAdminDownloadPreparationCapabilities", method: "GET", path: Prefix + "/admin/downloads/preparations/capabilities", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminDownloadPreparationCapabilitiesOutputBody", scenario: "Administrator discovery names the realtime channel and how long failed preparations stay listed."},
+		{name: "admin_download_preparations", operationID: "listAdminDownloadPreparations", method: "GET", path: Prefix + "/admin/downloads/preparations?limit=10", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminDownloadPreparationsOutputBody", scenario: "The preparation queue lists a running transcode with live progress, a queued remux, a paused transcode, and a recent failure, with totals across every listed job."},
 		{name: "admin_playback_summary", operationID: "getAdminPlaybackSummary", method: "GET", path: Prefix + "/admin/sessions/summary?user_id=7&limit=1", headers: bearer(adminToken), status: 200, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AdminPlaybackSummaryOutputBody", scenario: "A bounded account activity sample omits diagnostic identifiers and network metadata."},
 		{name: "admin_resource_capabilities", operationID: "getAdminResourceCapabilities", scenario: "Administrator discovery reports unavailable sampling when no sampler is configured.", method: "GET", path: Prefix + "/admin/system/resources/capabilities", headers: bearer(adminToken), status: 200, schema: "#/components/schemas/AdminResourceCapabilities", assertHeaders: []string{"Content-Type", "Cache-Control"}},
 		{name: "login_provider_null", operationID: "login",
@@ -1721,7 +1728,41 @@ func fixtureCases() []fixtureCase {
 	// fixtures keep their ids.
 	cases = append(cases, networkAccessFixtureCases()...)
 	cases = append(cases, serverIdentityFixtureCases()...)
-	return append(cases, themeSongsFixtureCases()...)
+	cases = append(cases, themeSongsFixtureCases()...)
+	cases = append(cases, passwordResetFixtureCases()...)
+	cases = append(cases, adminRatingSourcesFixtureCases()...)
+	cases = append(cases, libraryMonitoringFixtureCases()...)
+	cases = append(cases, adminAccountInsightsFixtureCases()...)
+	cases = append(cases, ratingsCapabilityFixtureCases()...)
+	cases = append(cases, fixtureCase{name: "token_refresh_required", operationID: "getCurrentUser",
+		scenario: "An access token minted before an administrator changed the account's role. The session is still valid: the client refreshes it, retries once with the new token, and does not sign out.",
+		method:   http.MethodGet, path: "/api/v2/account/me", headers: bearer(demotedToken),
+		status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"})
+	cases = append(cases, watchTrickplayFixtureCases()...)
+	cases = append(cases, adminTrickplayFixtureCases()...)
+	cases = append(cases, deviceSignInFixtureCases()...)
+	cases = append(cases, externalSignInFixtureCases()...)
+	return append(cases, adminDownloadPreparationControlFixtureCases()...)
+}
+
+// deviceSignInFixtureCases covers the TV sign-in additions: the opened
+// signal and the device withdrawing its own request.
+func deviceSignInFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "poll_device_login_opened", operationID: "pollDeviceLogin",
+			scenario: "The device polls a pending request an approver has open: it keeps its code and says to continue on the phone.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-opened"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginPoll"},
+		{name: "cancel_device_login_ok", operationID: "cancelDeviceLogin",
+			scenario: "The device leaves its sign-in screen and withdraws its request, so the code can no longer be approved.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/cancel", body: `{"device_code":"dev-pending"}`,
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLoginCancel"},
+		{name: "cancel_device_login_not_found", operationID: "cancelDeviceLogin",
+			scenario: "Canceling with an unknown device code.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/cancel", body: `{"device_code":"nope"}`,
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // fixtureMultipartType is the multipart Content-Type of the avatar fixtures,
@@ -1765,6 +1806,12 @@ func fixtureDeps() Dependencies {
 	deps.PersonalCollections = &fixturePersonalCollections{fakePersonalCollections: fakePersonalCollections{list: handlers.PersonalCollectionListView{Collections: []handlers.PersonalCollectionView{fixtureCollectionView()}, Groups: []handlers.CollectionGroupView{}}}}
 	deps.CollectionImports = &fakeCollectionImports{configured: true}
 	deps, _ = withLibraryAdmin(deps)
+	deps.LibraryMonitoring = &fakeLibraryMonitoring{snap: librarymonitor.StatusSnapshot{
+		ServerEnabled: true,
+		Libraries:     []*models.MediaFolder{monitoredFolder(1, 0), monitoredFolder(2, 1)},
+		Reports: []librarymonitor.NodeReport{{NodeID: "node-a", LibraryID: 1, State: librarymonitor.StateMonitoring,
+			Backend: librarymonitor.BackendInotify, Directories: 4812, UpdatedAt: fixedTime()}},
+	}}
 	deps.DeviceSettings = &fakeDeviceSettings{}
 	deps.LibraryJobs = &fakeLibraryJobs{job: &models.AdminJob{ID: "job-2", JobType: adminjob.JobTypeLibraryRefresh, Status: adminjob.StatusQueued, RequestedAt: fixedTime()}}
 
@@ -1789,6 +1836,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminCatalogSearch = &fakeAdminCatalogTransfer{}
 	deps.AdminLiteraryWorks = &fakeAdminLiterary{}
 	deps.AdminRecommendations = &fakeAdminRecommendations{}
+	deps.RatingSources = ratingsources.NewPolicy(fixtureRatingSettings{}, func(context.Context) ([]ratingsources.DeclaredSource, error) {
+		return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: "kinopoisk", Name: "Kinopoisk", Label: "Kinopoisk", Scale: 10}, Provider: "Kinopoisk"}}, nil
+	})
 	deps.AdminPeople = &fakeAdminPeople{}
 	deps.AdminMetadataTranslation = &fakeAdminTranslation{}
 	deps.AdminItemMetadata = &fakeAdminItemMetadata{}
@@ -1813,17 +1863,21 @@ func fixtureDeps() Dependencies {
 	deps.Ratings = &fakeRatings{ratings: ratingRows(), hidden: map[string]bool{"movie:hidden": true}}
 	deps.History = newFakeHistory()
 	deps.Watch = &fakeWatch{}
+	deps.Trickplay = &fakeTrickplay{}
+	deps.AdminTrickplay = &fakeAdminTrickplay{}
 	deps.Recommendations = &fakeRecommendations{seedCandidates: 1, cardsHasMore: true}
 	deps.Requests = fixtureRequests()
 	deps.AdminRequests = fixtureAdminRequests()
 	deps.AdminHistoryImports = fixtureAdminHistoryImports()
 	deps.AdminAPIKeys = fixtureAdminAPIKeys()
-	deps.ThemeCatalog = fixtureThemeCatalog()
 	deps.ThemeSongs = &fakeThemeSongs{}
 	deps.UserLibraries = new(fakeUserLibraries)
 	deps.AdminPlaybackSessions = new(fakeAdminPlaybackSessions)
+	deps.AdminDownloadPreparations = new(fakeAdminDownloadPreparations)
+	deps.AdminDownloadPreparationControls = new(fakeAdminDownloadPreparationControls)
 	deps.AdminDevices = new(fakeAdminDevices)
 	deps.Invitations = fixtureInvitations()
+	deps.PasswordResets = fixturePasswordResets()
 	deps.NotificationInbox = fixtureNotificationInbox()
 	deps.AdminNotificationPush = new(fakeAdminNotificationPush)
 	deps.AdminNotificationDiscord = new(fakeAdminNotificationDiscord)
@@ -1843,6 +1897,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}
 	deps.Markers = &fakeMarkers{}
@@ -1863,6 +1918,7 @@ func fixtureDeps() Dependencies {
 	deps.CatalogAccess, deps.CatalogBrowse, deps.CatalogItems = catalog, catalog, catalog
 	actions := &fakeCatalogActions{enabled: true, trailerView: handlers.TrailerRefreshView{Status: "queued"}}
 	deps.CatalogTrailers, deps.MetadataAI, deps.People, deps.LiteraryWorks = actions, actions, actions, actions
+	deps.ExternalSignIn = &fakeExternalSignIn{}
 	deps.CursorSecret = []byte("fixture-cursor-key")
 	deps.SettingValues.(*fakeSettingValuesSeam).contendedLabel = "Contended"
 	prefs := preferenceDeps(nil, nil)
@@ -1966,8 +2022,11 @@ func generateFixtures(t *testing.T) map[string][]byte {
 			}
 		} else {
 			mt := strings.TrimSpace(strings.Split(rec.Header().Get("Content-Type"), ";")[0])
+			// The real digest changes with every contract edit, so committing
+			// it would make any two API pull requests conflict on this line.
+			raw := bytes.ReplaceAll(rec.Body.Bytes(), []byte(contractDigest), []byte(fixtureContractDigest))
 			var pretty bytes.Buffer
-			if err := json.Indent(&pretty, bytes.TrimSpace(rec.Body.Bytes()), "", "  "); err != nil {
+			if err := json.Indent(&pretty, bytes.TrimSpace(raw), "", "  "); err != nil {
 				t.Fatalf("%s: body is not JSON: %v", c.name, err)
 			}
 			pretty.WriteByte('\n')
@@ -2050,17 +2109,6 @@ func TestContractFixtures(t *testing.T) {
 	for name := range files {
 		if !seen[name] {
 			t.Errorf("contracts/api/v2/fixtures/%s is not committed; run make apiv2-fixtures", name)
-		}
-	}
-}
-
-// TestContractFixturesAreDeterministic pins the property the golden depends
-// on: two generations in one process are byte-identical.
-func TestContractFixturesAreDeterministic(t *testing.T) {
-	a, b := generateFixtures(t), generateFixtures(t)
-	for name := range a {
-		if !bytes.Equal(a[name], b[name]) {
-			t.Errorf("%s differs between generations", name)
 		}
 	}
 }

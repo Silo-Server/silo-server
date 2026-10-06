@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
@@ -76,7 +75,7 @@ vi.mock("sonner", () => ({
 
 import {
   fetchWatchDetail,
-  redetectEpisodeIntro,
+  redetectItemMarkers,
   useRefreshItemMetadata,
   useWatchedStateMutation,
 } from "./items";
@@ -164,17 +163,19 @@ describe("item query helpers", () => {
       }),
     );
     vi.stubGlobal("fetch", fetch);
-    await redetectEpisodeIntro("episode 1/id:abc");
+    await redetectItemMarkers("episode 1/id:abc", "credits");
 
-    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/admin/items/{id}/redetect-intro", {
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/admin/items/{id}/redetect-markers", {
       path: { id: "episode 1/id:abc" },
+      body: { kind: "credits" },
       retryAuthentication: false,
     });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "/api/v2/admin/items/episode%201%2Fid%3Aabc/redetect-intro",
+      "/api/v2/admin/items/episode%201%2Fid%3Aabc/redetect-markers",
     );
     expect(fetch.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ kind: "credits" }));
     expect(mocks.api).not.toHaveBeenCalled();
   });
 
@@ -275,28 +276,25 @@ describe("item query helpers", () => {
     });
   });
 
-  it("sends watched-state writes with keepalive so they survive tab close", async () => {
-    useWatchedStateMutation({ content_id: "series-1", type: "series" });
-    const options = mocks.useMutation.mock.calls[
-      mocks.useMutation.mock.calls.length - 1
-    ]?.[0] as WatchedMutationOptions;
-
-    // Marking a large series expands to every episode server-side; without
-    // keepalive the request dies with the document and nothing is marked.
-    await options.mutationFn(true);
-    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/watched/{id}", {
-      path: { id: "series-1" },
-      keepalive: true,
-    });
-  });
-
   it("optimistically flips played state and reverts only that field on failure", async () => {
+    const queryClient = {};
+    mocks.useQueryClient.mockReturnValue(queryClient);
+    let finishCancellation!: () => void;
+    mocks.cancelItemDetailQueries.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishCancellation = resolve;
+      }),
+    );
     useWatchedStateMutation({ content_id: "series-1", type: "series" });
     const options = mocks.useMutation.mock.calls[
       mocks.useMutation.mock.calls.length - 1
     ]?.[0] as WatchedMutationOptions;
 
-    await options.onMutate?.(true);
+    const updating = options.onMutate?.(true);
+    expect(mocks.cancelItemDetailQueries).toHaveBeenCalledWith(queryClient, "series-1");
+    expect(mocks.updateCatalogItemDetail).not.toHaveBeenCalled();
+    finishCancellation();
+    await updating;
     expect(mocks.updateCatalogItemDetail).toHaveBeenCalledWith(
       expect.anything(),
       "series-1",
@@ -326,11 +324,11 @@ describe("item query helpers", () => {
     expect(
       revert({
         user_data: { played: true },
-        user_state: { played: true, is_favorite: true, in_watchlist: false },
+        user_state: { played: true, is_favorite: true, in_watchlist: true },
       }),
     ).toMatchObject({
       user_data: { played: false },
-      user_state: { played: false, is_favorite: true, in_watchlist: false },
+      user_state: { played: false, is_favorite: true, in_watchlist: true },
     });
     expect(mocks.toastError).toHaveBeenCalledWith("boom");
   });
@@ -354,48 +352,6 @@ describe("item query helpers", () => {
       itemId: "ebook-1",
       watchedKeys: [],
       skipSimilarItems: true,
-    });
-  });
-
-  it("updates watched state optimistically before refreshing derived surfaces", async () => {
-    const queryClient = { getQueriesData: vi.fn(() => []) };
-    mocks.useQueryClient.mockReturnValue(queryClient);
-
-    useWatchedStateMutation({ content_id: "movie-1", type: "movie" });
-    const options = mocks.useMutation.mock.calls[
-      mocks.useMutation.mock.calls.length - 1
-    ]?.[0] as WatchedMutationOptions;
-
-    await options.onMutate?.(true);
-
-    expect(mocks.cancelItemDetailQueries).toHaveBeenCalledWith(queryClient, "movie-1");
-    expect(mocks.updateCatalogItemDetail).toHaveBeenCalledWith(
-      queryClient,
-      "movie-1",
-      expect.any(Function),
-    );
-    const updater = mocks.updateCatalogItemDetail.mock.calls[0]?.[2] as (
-      detail: ItemDetail,
-    ) => ItemDetail;
-    expect(
-      updater({ user_data: { played: false }, user_state: { played: false } } as ItemDetail),
-    ).toMatchObject({
-      user_data: { played: true },
-      user_state: { played: true },
-    });
-
-    options.onError?.(new Error("failed"), true);
-    const rollback = mocks.updateCatalogItemDetail.mock.calls[1]?.[2] as (
-      detail: ItemDetail,
-    ) => ItemDetail;
-    expect(
-      rollback({
-        user_data: { played: true },
-        user_state: { played: true, is_favorite: true, in_watchlist: true },
-      } as ItemDetail),
-    ).toMatchObject({
-      user_data: { played: false },
-      user_state: { played: false, is_favorite: true, in_watchlist: true },
     });
   });
 });

@@ -15,9 +15,10 @@ import (
 // fakeWatch is the watch seam: one playable movie, one series (not directly
 // playable), everything else unknown.
 type fakeWatch struct {
-	filters []catalogpkg.AccessFilter
-	marks   []fakeMark
-	err     error
+	filters   []catalogpkg.AccessFilter
+	marks     []fakeMark
+	err       error
+	trickplay *catalogpkg.TrickplayGrid
 }
 
 type fakeMark struct {
@@ -52,6 +53,7 @@ func (f *fakeWatch) WatchDetail(_ context.Context, userID int, profileID, conten
 				AudioTracks: []models.AudioTrack{{Language: "eng", Codec: "eac3", Channels: 6, Default: true}},
 				Chapters:    []catalogpkg.VersionChapter{{Index: 1, Title: "Opening", StartSeconds: 0, EndSeconds: 300, Source: "embedded"}},
 				Intro:       &catalogpkg.Marker{Start: 0, End: 90},
+				Trickplay:   f.trickplay,
 			}},
 			PlaybackVariants: []catalogpkg.PlaybackVariant{{VariantID: "v1", PartCount: 1, DefaultFileID: 42, Parts: []catalogpkg.PlaybackVariantPart{{PartIndex: 0, DefaultFileID: 42}}}},
 			Subtitles:        []catalogpkg.SubtitleInfo{{Source: "embedded", Language: "eng"}},
@@ -84,7 +86,7 @@ func watchDeps(watch *fakeWatch) Dependencies {
 }
 
 func TestGetWatchState(t *testing.T) {
-	watch := &fakeWatch{}
+	watch := &fakeWatch{trickplay: &catalogpkg.TrickplayGrid{Width: 300}}
 	h := newTestHandler(t, watchDeps(watch))
 	owner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
 
@@ -101,7 +103,7 @@ func TestGetWatchState(t *testing.T) {
 	}
 	versions := body["versions"].([]any)
 	v := versions[0].(map[string]any)
-	if v["file_id"] != "42" || v["duration_seconds"].(float64) != 10200 || v["added_at"] != "2026-01-02T03:04:05.000Z" || v["intro"].(map[string]any)["end_seconds"].(float64) != 90 {
+	if v["file_id"] != "42" || v["duration_seconds"].(float64) != 10200 || v["added_at"] != "2026-01-02T03:04:05.000Z" || v["intro"].(map[string]any)["end_seconds"].(float64) != 90 || v["trickplay_available"] != true {
 		t.Fatalf("version = %v", v)
 	}
 	if variant := body["playback_variants"].([]any)[0].(map[string]any); variant["default_file_id"] != "42" || variant["parts"].([]any)[0].(map[string]any)["versions"] == nil {
@@ -118,6 +120,7 @@ func TestGetWatchState(t *testing.T) {
 
 	// The profile header is optional: an account-only caller gets the
 	// catalog answer without user_data.
+	watch.trickplay = nil
 	rec = do(t, h, http.MethodGet, "/api/v2/watch/movie:heat-1995", "", bearer(memberToken))
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
@@ -128,6 +131,9 @@ func TestGetWatchState(t *testing.T) {
 	}
 	if _, ok := body["user_data"]; ok {
 		t.Fatalf("user_data present without a profile: %s", rec.Body.String())
+	}
+	if v := body["versions"].([]any)[0].(map[string]any); v["trickplay_available"] != false {
+		t.Fatalf("version without previews = %v", v)
 	}
 	if subs, ok := body["subtitles"].([]any); !ok || len(subs) != 1 {
 		t.Fatalf("subtitles = %v", body["subtitles"])

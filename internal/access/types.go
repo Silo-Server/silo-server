@@ -36,6 +36,11 @@ type Scope struct {
 	// socket tickets and progress snapshots hash as the access fingerprint:
 	// changing the row mid-session must not invalidate either.
 	NextUpMode string `json:"-"`
+	// PreferencesDegraded is set when the profile's viewer preferences could
+	// not be read and the scope carries their defaults (see
+	// ResolveViewerPreferences). It stays out of the access fingerprint, which
+	// therefore does not describe the profile's real scope while it is set.
+	PreferencesDegraded bool `json:"-"`
 }
 
 // MaturityLimits are the per-viewer maturity restrictions every catalog read
@@ -63,6 +68,23 @@ type MaturityLimits struct {
 	// the field existed, so a deploy does not invalidate every in-flight socket
 	// ticket and progress snapshot at once.
 	MaxAdvisoryAge int `json:",omitempty"`
+	// RequireAdvisoryAge makes the advisory-age limit fail closed: a title
+	// with no advisory age is hidden too, so the profile sees only titles an
+	// advisory service has rated at or under MaxAdvisoryAge. It has no effect
+	// without a limit (see HidesUnadvised). Profiles opt into it because
+	// advisory coverage fills in over days on a large library, so a strict
+	// profile starts nearly empty.
+	//
+	// omitempty for the same reason as MaxAdvisoryAge.
+	RequireAdvisoryAge bool `json:",omitempty"`
+}
+
+// HidesUnadvised reports whether titles with no advisory age are hidden: a
+// limit is set and the profile requires an advisory age. Everything that
+// renders or keys the limit reads this rather than RequireAdvisoryAge alone,
+// so a stored flag without a limit never changes a predicate or a key.
+func (m MaturityLimits) HidesUnadvised() bool {
+	return m.MaxAdvisoryAge > 0 && m.RequireAdvisoryAge
 }
 
 // Active reports whether the limits restrict anything at all.

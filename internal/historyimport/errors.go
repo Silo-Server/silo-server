@@ -21,6 +21,11 @@ func IsReachabilityError(err error) bool {
 	if err == nil || UpstreamHTTPStatus(err) > 0 {
 		return false
 	}
+	// The guard refuses before connecting: the address is not allowed, and
+	// the user needs that message rather than "unreachable".
+	if _, refused := ServerAddressMessage(err); refused {
+		return false
+	}
 
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true

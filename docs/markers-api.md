@@ -12,8 +12,9 @@ New installations include TheIntroDB and default to online markers with local
 detection as a fallback (`markers.mode=both`). Online markers are saved to the
 library by default. The setup wizard offers separate controls for online lookup
 and local detection before automatic lookup begins. New TV and mixed libraries
-created in the web UI enable local detection by default; existing library choices
-are preserved. Local detection only runs in libraries where it is enabled.
+created in the web UI enable local detection by default; new movie libraries
+leave it off, since movie credits are best effort. Existing library choices are
+preserved. Local detection only runs in libraries where it is enabled.
 Existing installations retain their configured marker mode, which accepts `off`,
 `local`, `online`, and `both`.
 
@@ -21,8 +22,17 @@ Existing installations retain their configured marker mode, which accepts `off`,
 
 - `stored` persists markers and enables the **Sync online markers** task,
   scheduled daily at 03:00 in server-local time by default.
-  Sync checks unqueried files before refreshing previous results. Successful
-  responses are fresh for seven days; empty results are retried after one day.
+  Each run lists the due files once: unqueried files first, then the least
+  recently fetched results, so a run stopped by a provider quota resumes where
+  it left off. A run, including one that starts during a cooldown, waits out a
+  cooldown of up to a minute that covers every provider and ends at a longer
+  one. A metadata change makes a file due until a sync or lookup confirms its
+  external IDs against every provider.
+  For every provider, successful responses are fresh for 30 days and empty
+  results are retried after 14 days, following TheIntroDB's guidance for
+  clients that sync a library. Episodes that aired, and movies released, in the
+  last 30 days or the coming week use 7 days and 1 day instead, while
+  providers are still gaining markers for them.
   `markers.lazy_playback` also allows reads and playback to fill missing markers.
 - `on_demand` looks up markers for the selected file and keeps a bounded,
   fifteen-minute memory cache. It does not persist provider responses or run
@@ -30,15 +40,55 @@ Existing installations retain their configured marker mode, which accepts `off`,
   still shared through the database. Previously stored markers remain available.
 
 Both paths honor provider priority, manual edits, and provider quota limits.
+
+Local detection finds episode intros and end credits, and movie end credits on
+a best-effort basis: from chapters and the picture near the end, never intros.
+Some movies get no local credits, or credits that start late. It never replaces
+a marker from a higher-priority source, and it judges each kind separately, so
+an episode with an online intro can still get local credits. With `on_demand`
+storage, players keep the online intro while playback detects the credits.
+
+`markers.detect_intros` and `markers.detect_credits` choose which kinds local
+detection finds, server-wide. Each is `true` or `false`, independent of the
+other, and defaults to `true`; a change applies without a restart. Credits
+detection costs more, since it reads the end of each episode and movie. With
+credits off, the **Detect markers on this server** task, playback detection,
+and admin refresh skip episode credits and movies; with intros off, they skip
+episode intros. Chapter markers of a kind that is off are skipped as well.
+Turning a kind off keeps the markers already saved.
+`detection_kind_settings` on `GET /api/v2/admin/markers/capabilities` reports
+that the server honors the two settings; an older server stores them through
+the generic settings endpoint but ignores them, so clients offer the switches
+only when it is `true`.
+
+`markers.detection_workers` sizes local detection: how many seasons or movies
+the **Detect markers on this server** task analyzes at once, which also bounds
+how many ffmpeg processes read audio and video. It defaults to `1` and accepts
+1 to 64.
+Detection mostly waits on reading each file's opening and closing minutes, so
+a higher value finishes a large library sooner on fast storage, at the cost of
+load that competes with playback. Analysis started from playback always has one
+extra ffmpeg slot of its own. A change applies without a restart; extractions
+already running finish first.
+
 Replicas coordinate fetches with expiring database leases. File replacement or
 rematching invalidates derived markers; a result fetched for the previous file
 identity cannot overwrite the new one. Successful provider refreshes can correct
 or withdraw that provider's existing ranges.
 
 `POST /api/v2/admin/items/{id}/refresh-markers` explicitly refreshes an episode
-from its configured sources. In `both` mode, eligible local detection fills
-missing intro markers. The existing v1 refresh endpoint retains its
-local-only behavior.
+or a movie from its configured sources; `movie_credits` on
+`GET /api/v2/admin/markers/capabilities` reports that movies are accepted. In
+`both` mode, eligible local detection fills missing intro and credits markers
+of an episode, or missing credits of a movie, for the kinds the two detection
+settings leave on.
+`POST /api/v2/admin/items/{id}/redetect-markers`, which `redetect_markers` on
+the same capabilities document reports, reruns local detection of an episode's
+intro, credits, or both, or of a movie's credits; see
+[admin-catalog-api.md](admin-catalog-api.md#episode-and-movie-marker-analysis).
+The v1 refresh endpoint retains its local-only behavior, and it, the v1
+re-detect endpoint, and v2 `redetect-intro` analyze episode intros only,
+whatever the detection settings say.
 
 ## Operations
 

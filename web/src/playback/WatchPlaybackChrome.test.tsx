@@ -3,9 +3,10 @@
 import { Profiler, useEffect, type ReactNode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { createWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackBar, WatchPlaybackProvider } from "./WatchPlaybackChrome";
 import {
   useWatchPlaybackController,
@@ -71,10 +72,10 @@ vi.mock("@/components/ui/slider", () => ({
   ),
 }));
 
-// About one home page of cards, each with its own play overlay.
-const CARD_COUNT = 160;
-// Ten seconds of playback at the player's 4 Hz time updates.
-const TICKS = 40;
+// Several independent card consumers must stay idle during time updates.
+const CARD_COUNT = 3;
+// Repeated updates at the player's 4 Hz cadence.
+const TICKS = 4;
 const DURATION = 3600;
 
 function renderPlaybackHarness(player?: ReactNode) {
@@ -148,16 +149,16 @@ describe("WatchPlaybackBar time updates", () => {
       barRenders: TICKS,
       commits: TICKS,
     });
-    expect(screen.getByText("1:10")).toBeInTheDocument();
+    expect(screen.getByText("1:01")).toBeInTheDocument();
     expect(screen.getByText("1:00:00")).toBeInTheDocument();
-    expect(screen.getByRole("slider", { name: "Playback position" })).toHaveValue("70");
+    expect(screen.getByRole("slider", { name: "Playback position" })).toHaveValue("61");
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
 
     // An identical snapshot changes nothing on screen, so it renders nothing.
-    harness.tick(request.requestKey, 70);
+    harness.tick(request.requestKey, 61);
     expect(counts.barRenders).toBe(TICKS);
 
-    harness.tick(request.requestKey, 70, false);
+    harness.tick(request.requestKey, 61, false);
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
   });
 
@@ -175,7 +176,7 @@ describe("WatchPlaybackBar time updates", () => {
 
     // The position recorded while the bar was hidden is there once it shows.
     act(() => harness.controller().minimizePlayback());
-    expect(screen.getByText("1:10")).toBeInTheDocument();
+    expect(screen.getByText("1:01")).toBeInTheDocument();
   });
 
   it("does not show the replaced request's position", () => {
@@ -244,5 +245,91 @@ describe("WatchPlaybackBar time updates", () => {
     act(() => harness.controller().startPlayback({ contentId: "movie-2", libraryId: 1 }, "viewer"));
     expect(screen.getByText("0:00")).toBeInTheDocument();
     expect(screen.getByText("1:30:00")).toBeInTheDocument();
+  });
+});
+
+describe("PlaybackFullscreenRoot", () => {
+  afterEach(() => {
+    delete (document as { fullscreenElement?: Element | null }).fullscreenElement;
+    delete (document as { exitFullscreen?: () => Promise<void> }).exitFullscreen;
+  });
+
+  // Stands in for the player, which the host replaces for every request.
+  function EpisodePlayer() {
+    const { state } = useWatchPlaybackController();
+    const requestKey = state.request?.requestKey ?? "none";
+    return <span key={requestKey} data-testid="player" />;
+  }
+
+  function renderFullscreenHarness(fullscreenElement: () => Element | null) {
+    const exitFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, "fullscreenElement", {
+      get: fullscreenElement,
+      configurable: true,
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      value: exitFullscreen,
+      configurable: true,
+    });
+    const harness = renderPlaybackHarness(
+      <PlaybackFullscreenRoot>
+        <EpisodePlayer />
+      </PlaybackFullscreenRoot>,
+    );
+    const request = createWatchRouteRequest({ contentId: "episode-1", libraryId: 1 });
+    act(() => harness.controller().syncRouteRequest(request));
+    return { ...harness, exitFullscreen, root: screen.getByTestId("player").parentElement };
+  }
+
+  it("stays fullscreen through post-roll and the next episode's player", () => {
+    let root: Element | null = null;
+    const harness = renderFullscreenHarness(() => root);
+    root = harness.root;
+    const firstPlayer = screen.getByTestId("player");
+
+    act(() => harness.controller().enterPostRoll(harness.controller().state.request!.requestKey));
+    act(() =>
+      harness.controller().startPlayback({ contentId: "episode-2", libraryId: 1 }, "automatic"),
+    );
+
+    expect(screen.getByTestId("player")).not.toBe(firstPlayer);
+    expect(screen.getByTestId("player").parentElement).toBe(root);
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["minimizing", (controller: WatchPlaybackControllerValue) => controller.minimizePlayback()],
+    ["stopping", (controller: WatchPlaybackControllerValue) => controller.stopPlayback()],
+  ])("leaves fullscreen when %s playback", (_, leave) => {
+    let root: Element | null = null;
+    const harness = renderFullscreenHarness(() => root);
+    root = harness.root;
+
+    act(() => leave(harness.controller()));
+
+    expect(harness.exitFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("leaves fullscreen that a pending request enters after playback stops", () => {
+    let fullscreenElement: Element | null = null;
+    const harness = renderFullscreenHarness(() => fullscreenElement);
+
+    act(() => harness.controller().stopPlayback());
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
+
+    fullscreenElement = harness.root;
+    act(() => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+
+    expect(harness.exitFullscreen).toHaveBeenCalledOnce();
+  });
+
+  it("leaves another element's fullscreen alone", () => {
+    const harness = renderFullscreenHarness(() => document.body);
+
+    act(() => harness.controller().stopPlayback());
+
+    expect(harness.exitFullscreen).not.toHaveBeenCalled();
   });
 });

@@ -74,7 +74,7 @@ const fileColumns = `id, content_id, episode_id, extra_id, season_number, episod
 	presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 	multi_episode_start, multi_episode_end,
 	multiple_pps, multiple_pps_scan_size, multiple_pps_scan_mtime,
-	probe_source, probe_updated_at, match_attempted_at, missing_since,
+	probe_source, probe_updated_at, probe_failed_at, match_attempted_at, missing_since,
 	first_seen_scan_run_id, created_at, updated_at`
 
 const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
@@ -99,7 +99,7 @@ const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.seas
 	mf.presentation_kind, mf.presentation_group_key, mf.presentation_part_index, mf.presentation_part_total,
 	mf.multi_episode_start, mf.multi_episode_end,
 	mf.multiple_pps, mf.multiple_pps_scan_size, mf.multiple_pps_scan_mtime,
-	mf.probe_source, mf.probe_updated_at, mf.match_attempted_at, mf.missing_since,
+	mf.probe_source, mf.probe_updated_at, mf.probe_failed_at, mf.match_attempted_at, mf.missing_since,
 	mf.first_seen_scan_run_id, mf.created_at, mf.updated_at`
 
 // scanMediaFile scans a single row into a *models.MediaFile.
@@ -221,6 +221,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.MultiplePPSScanMtime,
 		&probeSource,
 		&f.ProbeUpdatedAt,
+		&f.ProbeFailedAt,
 		&f.MatchAttemptedAt,
 		&f.MissingSince,
 		&firstSeenScanRunID,
@@ -540,6 +541,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.MultiplePPSScanMtime,
 			&probeSource,
 			&f.ProbeUpdatedAt,
+			&f.ProbeFailedAt,
 			&f.MatchAttemptedAt,
 			&f.MissingSince,
 			&firstSeenScanRunID,
@@ -955,7 +957,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		edition_raw, edition_key, edition_confidence, edition_source,
 		presentation_kind, presentation_group_key, presentation_part_index, presentation_part_total,
 		multi_episode_start, multi_episode_end,
-		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id
+		probe_source, probe_updated_at, missing_since, first_seen_scan_run_id, probe_failed_at
 	) VALUES (
 		$1, $2, $3, $4, $5,
 		$6, $7, $8, $9, $10,
@@ -967,7 +969,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		$39, $40, $41, $42,
 		$43, $44, $45, $46,
 		$47, $48,
-		$49, $50, $51, $52
+		$49, $50, $51, $52, $53
 	)
 	ON CONFLICT (file_path) DO UPDATE SET
 		content_id = CASE
@@ -1025,6 +1027,20 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		multi_episode_end = EXCLUDED.multi_episode_end,
 		probe_source = EXCLUDED.probe_source,
 		probe_updated_at = EXCLUDED.probe_updated_at,
+		-- A successful probe clears the rejection and a new rejection
+		-- replaces it. A write that carries neither (the probe was skipped,
+		-- timed out, or could not read the file) keeps the stored rejection
+		-- while the bytes it describes are unchanged; changed bytes drop it.
+		-- media_files.* here are the row's values before this update.
+		probe_failed_at = CASE
+			WHEN EXCLUDED.probe_updated_at IS NOT NULL THEN NULL
+			WHEN EXCLUDED.probe_failed_at IS NOT NULL THEN EXCLUDED.probe_failed_at
+			WHEN media_files.file_size IS NOT DISTINCT FROM EXCLUDED.file_size
+				AND date_trunc('microseconds', media_files.file_modified_at)
+					IS NOT DISTINCT FROM date_trunc('microseconds', EXCLUDED.file_modified_at)
+				THEN media_files.probe_failed_at
+			ELSE NULL
+		END,
 		match_suppressed_at = NULL,
 		missing_since = NULL,
 		updated_at = NOW()
@@ -1083,6 +1099,7 @@ func (r *FileRepository) upsertWithQueryer(ctx context.Context, queryer fileQuer
 		mf.ProbeUpdatedAt,
 		mf.MissingSince,
 		nilIfEmpty(scanbatch.RunID(ctx)),
+		mf.ProbeFailedAt,
 	)
 	if _, ok := queryer.(*fileUpsertCapture); ok {
 		return nil, nil
@@ -1237,7 +1254,9 @@ func (r *FileRepository) UpdateChapterThumbnailState(
 		}
 	}
 
-	row := r.pool.QueryRow(ctx, `
+	// Commit through the session holding the chapter lock. If that session
+	// dies during extraction, its former owner cannot save after takeover.
+	row := r.chapterStateWriter(ctx, fileID).QueryRow(ctx, `
 		UPDATE media_files
 		SET chapters = $2,
 		    chapter_thumbnail_retry_after = CASE WHEN $3 THEN $4 ELSE chapter_thumbnail_retry_after END,
@@ -1271,7 +1290,7 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	if lastError != "" {
 		lastErrorPtr = &lastError
 	}
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.chapterStateWriter(ctx, fileID).Exec(ctx, `
 		UPDATE media_files
 		SET chapter_thumbnail_retry_after = $2,
 		    chapter_thumbnail_failure_count = $3,
@@ -1288,6 +1307,41 @@ func (r *FileRepository) SetChapterThumbnailFailure(
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrFileNotFound
+	}
+	return nil
+}
+
+// MarkProbeFailed records that ffprobe rejected a file whose row is otherwise
+// left untouched. Only rows with no successful probe are marked, so a probe
+// that succeeded concurrently, or valid metadata from an earlier probe, is never
+// overridden, and a row already marked is not rewritten. The next successful
+// probe clears the mark through Upsert.
+//
+// probedSize and probedMtime describe the bytes ffprobe rejected, and the row
+// is marked only while it still carries them. A scan that replaced the file
+// and wrote the new revision without a probe result before this update landed
+// would otherwise have the old rejection blamed on the replacement. The mtime
+// comparison is normalized to microseconds, as in UpdateMultiplePPS.
+func (r *FileRepository) MarkProbeFailed(ctx context.Context, fileID int, probedSize int64, probedMtime *time.Time) error {
+	var normalizedMtime *time.Time
+	if probedMtime != nil {
+		normalized := models.NormalizeFileModifiedAt(*probedMtime)
+		normalizedMtime = &normalized
+	}
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE media_files
+		SET probe_failed_at = NOW(),
+		    updated_at = NOW()
+		WHERE id = $1
+		  AND probe_updated_at IS NULL
+		  AND probe_failed_at IS NULL
+		  AND file_size = $2
+		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz`,
+		fileID,
+		probedSize,
+		normalizedMtime,
+	); err != nil {
+		return fmt.Errorf("recording probe failure: %w", err)
 	}
 	return nil
 }
@@ -1359,26 +1413,6 @@ type segmentState struct {
 	confidence *float64
 	algorithm  *string
 	detectedAt *time.Time
-}
-
-// applySegmentPatch merges the patched start/end into the segment state, then
-// gates the write on the shared priority check. Returns true if the state was
-// mutated. The legacy `markers_source` field is consulted as a fallback when
-// the segment-specific source is nil but the segment already has a range.
-func applySegmentPatch(
-	state *segmentState,
-	legacySharedSource *string,
-	source string,
-	provider *string,
-	confidence *float64,
-	algorithm string,
-	patchStart, patchEnd *float64,
-	duration float64,
-	segmentName string,
-	mutationAt time.Time,
-) (bool, error) {
-	return applySegmentRanges(state, legacySharedSource, source, provider, confidence, algorithm,
-		patchStart, patchEnd, nil, duration, segmentName, mutationAt)
 }
 
 func applySegmentRanges(
@@ -1493,6 +1527,62 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 // whether a row was updated.
 func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
+}
+
+// WithdrawScannerMarker clears a file's intro or credits segment while it
+// still holds the scanner result algorithm wrote, and reports whether it
+// cleared it. Local analysis uses it to take back a result its current rules
+// no longer produce. A marker another source or detector has written since
+// stays. expected, when set, guards the file identity like
+// MarkerUpdate.ExpectedFile.
+func (r *FileRepository) WithdrawScannerMarker(ctx context.Context, fileID int, segment, algorithm string, expected *models.MediaFile) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin marker withdrawal transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	state, err := loadMarkerMutationState(ctx, tx, fileID)
+	if err != nil {
+		return false, err
+	}
+	if expected != nil && models.MarkerFileIdentity(expected) != models.MarkerFileIdentity(&state.file) {
+		return false, ErrStaleMarkerUpdate
+	}
+	flags, err := markerClearFlags([]string{segment})
+	if err != nil {
+		return false, err
+	}
+	var target *segmentState
+	switch {
+	case flags.intro:
+		target = &state.intro
+	case flags.credits:
+		target = &state.credits
+	default:
+		return false, fmt.Errorf("marker segment %q cannot be withdrawn", segment)
+	}
+	// A segment written before per-segment provenance carries only the
+	// file's shared source.
+	source := target.source
+	if source == nil || strings.TrimSpace(*source) == "" {
+		source = state.existingSource
+	}
+	if source == nil || strings.TrimSpace(*source) != models.MarkerSourceScanner ||
+		target.algorithm == nil || *target.algorithm != algorithm || !clearSegmentState(target) {
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit marker withdrawal transaction: %w", err)
+		}
+		return false, nil
+	}
+	wrote, err := writeMarkerMutationState(ctx, tx, fileID, state)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit marker withdrawal transaction: %w", err)
+	}
+	return wrote, nil
 }
 
 // UpsertAndClearMarkers applies manual marker sets and clears in one row-locking
@@ -2161,6 +2251,25 @@ func ptrStringEqual(a, b *string) bool {
 func (r *FileRepository) GetByID(ctx context.Context, id int) (*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files WHERE id = $1`
 	return scanMediaFile(r.pool.QueryRow(ctx, query, id))
+}
+
+// PlayableContentID returns the catalog item a media file plays as: its
+// episode, otherwise its content item, otherwise its local extra. It returns
+// ErrFileNotFound when no file has the id, and "" for an unlinked file.
+func (r *FileRepository) PlayableContentID(ctx context.Context, id int) (string, error) {
+	var contentID string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(episode_id, ''), NULLIF(content_id, ''), NULLIF(extra_id, ''), '')
+		FROM media_files
+		WHERE id = $1
+	`, id).Scan(&contentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrFileNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("querying playable content id for media file %d: %w", id, err)
+	}
+	return contentID, nil
 }
 
 // GetByIDs retrieves media files by primary key.
@@ -3522,21 +3631,41 @@ func (r *FileRepository) UpdateContentIDByPathPrefix(ctx context.Context, folder
 }
 
 // UpdateContentIDByObservedRootPath assigns one content item to all present
-// files under the same observed root path in a media folder.
-func (r *FileRepository) UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, error) {
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE media_files
-		SET content_id = $1, updated_at = NOW()
-		WHERE media_folder_id = $2
-		  AND observed_root_path = $3
-		  AND missing_since IS NULL
-		  AND extra_id IS NULL
-		  AND (content_id IS NULL OR content_id <> $1)
-	`, contentID, folderID, observedRootPath)
-	if err != nil {
-		return 0, fmt.Errorf("updating content_id by observed root path: %w", err)
+// files under the same observed root path in a media folder. Files an admin
+// split pinned with a file-scope identity override keep their item. It returns
+// the number of files relinked and the distinct content IDs they were linked
+// to before, so the caller can reconcile memberships those items may have lost.
+func (r *FileRepository) UpdateContentIDByObservedRootPath(ctx context.Context, folderID int, observedRootPath, contentID string) (int, []string, error) {
+	// The self-join reads each row as it was before the update.
+	var updated int
+	var replaced []string
+	if err := r.pool.QueryRow(ctx, `
+		WITH relinked AS (
+			UPDATE media_files mf
+			SET content_id = $1, updated_at = NOW()
+			FROM media_files previous
+			WHERE previous.id = mf.id
+			  AND mf.media_folder_id = $2
+			  AND mf.observed_root_path = $3
+			  AND mf.missing_since IS NULL
+			  AND mf.extra_id IS NULL
+			  AND (mf.content_id IS NULL OR mf.content_id <> $1)
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM media_identity_overrides o
+				WHERE o.media_folder_id = mf.media_folder_id
+				  AND o.scope = 'file'
+				  AND o.file_path = mf.file_path
+			  )
+			RETURNING previous.content_id
+		)
+		SELECT COUNT(*)::int,
+		       COALESCE(array_agg(DISTINCT content_id) FILTER (WHERE content_id IS NOT NULL AND content_id <> ''), ARRAY[]::text[])
+		FROM relinked
+	`, contentID, folderID, observedRootPath).Scan(&updated, &replaced); err != nil {
+		return 0, nil, fmt.Errorf("updating content_id by observed root path: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+	return updated, replaced, nil
 }
 
 // ClearContentID removes any matched media item linkage from a file row.
@@ -3937,8 +4066,9 @@ func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episode
 
 // ListMissingChapterThumbnails returns present media files in enabled,
 // opted-in libraries that either have no chapter probe data yet or still have
-// chapters missing thumbnail assets.
-func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int) ([]*models.MediaFile, error) {
+// chapters missing thumbnail assets. A thumbnail whose path does not end in
+// currentSuffix was made at another width and counts as missing.
+func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit int, currentSuffix string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + mfFileColumns + ` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.missing_since IS NULL
@@ -3956,7 +4086,10 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 				AND EXISTS (
 					SELECT 1
 					FROM jsonb_array_elements(mf.chapters) AS chapter
-					WHERE COALESCE(chapter->>'thumbnail_path', '') = ''
+					WHERE (
+						COALESCE(chapter->>'thumbnail_path', '') = ''
+						OR right(chapter->>'thumbnail_path', length($2)) <> $2
+					  )
 					  AND (
 						COALESCE(chapter->>'thumbnail_retry_after', '') = ''
 						OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW()
@@ -3966,13 +4099,100 @@ func (r *FileRepository) ListMissingChapterThumbnails(ctx context.Context, limit
 		  )
 		ORDER BY mf.probe_updated_at ASC NULLS FIRST, mf.id ASC
 		LIMIT $1`
-	rows, err := r.pool.Query(ctx, query, limit)
+	rows, err := r.pool.Query(ctx, query, limit, currentSuffix)
 	if err != nil {
 		return nil, fmt.Errorf("querying files missing chapter thumbnails: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// chapterHDRFileSQL matches files whose chapter frames need HDR tone
+// mapping, as tonemap.NeedsToneMap decides: flagged HDR or a Dolby Vision
+// video track.
+const chapterHDRFileSQL = `(mf.hdr OR EXISTS (
+	SELECT 1 FROM jsonb_array_elements(
+		CASE WHEN jsonb_typeof(mf.video_tracks) = 'array' THEN mf.video_tracks ELSE '[]'::jsonb END
+	) AS track
+	WHERE btrim(COALESCE(track->>'dolby_vision', '')) <> ''))`
+
+// ListChapterThumbnailsAtOtherWidths pages chapters without the current image
+// width by file ID. A zero retry time means complete; otherwise the final page
+// returns the earliest time any stale image can become retryable. Missing
+// images stay pending until an in-flight first extraction reaches this width.
+// skipHDR leaves out files that need tone mapping, which chapter extraction
+// skips while the HDR policy is disabled.
+func (r *FileRepository) ListChapterThumbnailsAtOtherWidths(ctx context.Context, limit int, currentSuffix string, afterID int, skipHDR bool) ([]*models.MediaFile, time.Time, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+mfFileColumns+` FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.id > $3
+		  AND mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND (mf.chapter_thumbnail_retry_after IS NULL OR mf.chapter_thumbnail_retry_after <= NOW())
+		  AND NOT ($4::boolean AND `+chapterHDRFileSQL+`)
+		  AND EXISTS (
+			SELECT 1 FROM jsonb_array_elements(
+				CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+			) AS chapter
+			WHERE right(COALESCE(chapter->>'thumbnail_path', ''), length($2)) <> $2
+			  AND (COALESCE(chapter->>'thumbnail_retry_after', '') = ''
+			       OR (chapter->>'thumbnail_retry_after')::timestamptz <= NOW())
+		  )
+		ORDER BY mf.id
+		LIMIT $1`, limit, currentSuffix, afterID, skipHDR)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("querying chapter thumbnails at other widths: %w", err)
+	}
+	files, err := scanMediaFiles(rows)
+	rows.Close()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if len(files) > 0 {
+		// The page already proves work is eligible now. Do not expand the
+		// catalog again to compute cooldowns while these requests are pending.
+		return files, time.Now(), nil
+	}
+	// File and chapter cooldowns both apply, so each stale image becomes
+	// eligible at their later deadline. The earliest such deadline schedules
+	// the next scan without repeatedly expanding JSON during the cooldown.
+	var nextRetry *time.Time
+	err = r.pool.QueryRow(ctx, `SELECT min(GREATEST(
+		COALESCE(mf.chapter_thumbnail_retry_after, NOW()),
+		COALESCE(NULLIF(chapter->>'thumbnail_retry_after', '')::timestamptz, NOW())
+	))
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		CROSS JOIN LATERAL jsonb_array_elements(
+			CASE WHEN jsonb_typeof(mf.chapters) = 'array' THEN mf.chapters ELSE '[]'::jsonb END
+		) AS chapter
+		WHERE mf.missing_since IS NULL
+		  AND folders.enabled = true
+		  AND folders.chapter_thumbnails_enabled = true
+		  AND NOT ($2::boolean AND `+chapterHDRFileSQL+`)
+		  AND right(COALESCE(chapter->>'thumbnail_path', ''), length($1)) <> $1`, currentSuffix, skipHDR).Scan(&nextRetry)
+	if err != nil {
+		return nil, time.Time{}, fmt.Errorf("checking remaining chapter thumbnail widths: %w", err)
+	}
+	if nextRetry == nil {
+		return files, time.Time{}, nil
+	}
+	return files, *nextRetry, nil
+}
+
+// ChapterThumbnailLibraryKey fingerprints only the eligible library IDs. Once
+// a width backfill completes, polling this small table avoids expanding every
+// media file's chapter JSON while still noticing library enable and opt-in edits.
+func (r *FileRepository) ChapterThumbnailLibraryKey(ctx context.Context) (string, error) {
+	var key string
+	err := r.pool.QueryRow(ctx, `SELECT md5(COALESCE(string_agg(id::text, ',' ORDER BY id), ''))
+		FROM media_folders WHERE enabled AND chapter_thumbnails_enabled`).Scan(&key)
+	if err != nil {
+		return "", fmt.Errorf("checking chapter thumbnail library eligibility: %w", err)
+	}
+	return key, nil
 }
 
 // nilIfEmpty returns nil if the string is empty, otherwise a pointer to it.

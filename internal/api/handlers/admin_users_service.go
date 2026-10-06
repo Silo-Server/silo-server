@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -15,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type adminAccountRepository interface {
@@ -26,7 +29,13 @@ type AdminAccountView struct {
 	Revision      int64
 	GroupRevision int64
 }
-type AdminProfileView struct{ ID, Name string }
+
+// AdminProfileView is one household profile on an account. LastSeenAt is the
+// latest time any device registration reported the profile; nil when none has.
+type AdminProfileView struct {
+	ID, Name   string
+	LastSeenAt *time.Time
+}
 
 func (h *AdminHandler) AdminAccountCapabilities() (bool, bool) {
 	_, ok := h.userRepo.(adminAccountRepository)
@@ -45,7 +54,15 @@ func (h *AdminHandler) GetAdminAccount(ctx context.Context, id int) (AdminAccoun
 	if err != nil {
 		return AdminAccountView{}, err
 	}
-	return AdminAccountView{User: toAdminUserResponse(snapshot.User, group), Revision: snapshot.Revision, GroupRevision: groupRevision}, nil
+	view := toAdminUserResponse(snapshot.User, group)
+	// Last activity is a hint on the account, as on v1 GET /admin/users/{id};
+	// a failed lookup leaves it unknown rather than failing the read.
+	lastActive, err := h.loadUserLastActiveAt(ctx, []int{snapshot.User.ID})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to load admin user last activity", "component", "api", "user_id", snapshot.User.ID, "error", err)
+	}
+	applyLastActiveAt(&view, lastActive)
+	return AdminAccountView{User: view, Revision: snapshot.Revision, GroupRevision: groupRevision}, nil
 }
 func (h *AdminHandler) adminAccountGroup(ctx context.Context, user *models.User) (*access.GroupPolicy, int64, error) {
 	if user.Role == roleAdmin || user.AccessGroupID == nil {
@@ -116,6 +133,15 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	}
 	if actorIsScopedAPIKey(ctx) && input.User.Role == roleAdmin {
 		return 0, apiError(403, "insufficient_scope", "A scoped API key may not create an admin account")
+	}
+	if input.User.Role == roleAdmin {
+		actor, err := requestOwnerActor(ctx, h.userRepo)
+		if err != nil {
+			return 0, err
+		}
+		if err := auth.CheckGrantAdmin(actor, input.User.Role); err != nil {
+			return 0, ownerError(err)
+		}
 	}
 	if input.User.MaxProfiles != nil && *input.User.MaxProfiles < 1 {
 		return 0, fieldError("max_profiles", "Must be at least 1")
@@ -203,6 +229,11 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 		}
 		input.MaxPlaybackQuality.Value = new(value)
 	}
+	actor, err := requestOwnerActor(ctx, h.userRepo)
+	if err != nil {
+		return 0, err
+	}
+	enableLocalLoginWithPassword(&input)
 	revoked := false
 	snapshot, err := repo.MutateAdminAccount(ctx, id, revision, &input, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
@@ -214,12 +245,21 @@ func (h *AdminHandler) UpdateAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
+		if err := auth.CheckOwnerUpdate(actor, current, input); err != nil {
+			return false, ownerError(err)
+		}
 		role := current.Role
 		if input.Role != nil {
 			role = *input.Role
 		}
-		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil))) {
+		if actorIsScopedAPIKey(ctx) && ((input.Role != nil && role == roleAdmin) || (current.Role == roleAdmin && (input.Password != nil || input.Role != nil || input.BreakGlass != nil))) {
 			return false, apiError(403, "insufficient_scope", "A scoped API key may not change admin credentials or grant admin")
+		}
+		if input.BreakGlass != nil && *input.BreakGlass && role != roleAdmin {
+			return false, fieldError("break_glass", "Only admin accounts can be break-glass accounts")
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, &input); err != nil {
+			return false, breakGlassError(err)
 		}
 		if input.AccessGroupID.Set {
 			if err := h.validateAdminGroup(ctx, tx, input.AccessGroupID.Value, role); err != nil {
@@ -242,7 +282,11 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if !ok {
 		return apiError(501, "capability_unsupported", "Guarded account management is unavailable")
 	}
-	_, err := repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
+	actor, err := requestOwnerActor(ctx, h.userRepo)
+	if err != nil {
+		return err
+	}
+	_, err = repo.MutateAdminAccount(ctx, id, revision, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if revision != -1 {
 			_, actual, err := adminAccountTransactionGroup(ctx, tx, current)
 			if err != nil {
@@ -252,6 +296,12 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 				return false, auth.ErrAdminUserRevision
 			}
 		}
+		if err := auth.CheckOwnerDelete(actor, current); err != nil {
+			return false, ownerError(err)
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(ctx, tx, current, nil); err != nil {
+			return false, breakGlassError(err)
+		}
 		return true, nil
 	})
 	if err != nil {
@@ -260,9 +310,29 @@ func (h *AdminHandler) DeleteAdminAccount(ctx context.Context, id int, revision,
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, id)
 	}
+	h.sweepWatchlistTitles(ctx, id)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 	return nil
 }
+
+// enableLocalLoginWithPassword makes an administrator's password write turn
+// the account's local password sign-in back on: the password is only useful
+// with it, and it is how an administrator recovers an account whose external
+// sign-in provider is gone (docs/architecture/external-sign-in.md).
+func enableLocalLoginWithPassword(input *models.UpdateUserInput) {
+	if input.Password != nil && input.LocalPasswordLoginEnabled == nil {
+		input.LocalPasswordLoginEnabled = new(true)
+	}
+}
+
+// breakGlassError renders the break-glass requirement as the conflict it is.
+func breakGlassError(err error) error {
+	if errors.Is(err, auth.ErrBreakGlassRequired) {
+		return apiError(http.StatusConflict, "break_glass_required", "Local password sign-in is off, and this is the last break-glass admin that can still sign in with a password")
+	}
+	return err
+}
+
 func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, deviceName, ip string) (TokenPairView, error) {
 	claims := apimw.GetClaims(ctx)
 	if claims == nil || claims.TokenType == auth.TokenTypeAPIKey || claims.SessionID == "" {
@@ -276,6 +346,27 @@ func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, devi
 		return TokenPairView{}, err
 	}
 	return TokenPairView(buildLoginResponse(pair, user, effectiveDownloadAllowed(ctx, user, h.groupPolicyProvider()), actor)), nil
+}
+
+// ownershipTransferrer moves the server Owner role. *auth.UserRepository
+// implements it.
+type ownershipTransferrer interface {
+	TransferOwnership(ctx context.Context, fromID, toID int) error
+}
+
+// TransferAdminOwnership makes account id the server Owner in place of the
+// caller, who must be the Owner acting from a signed-in session: an API key
+// or an impersonation session may not hand the server over.
+func (h *AdminHandler) TransferAdminOwnership(ctx context.Context, id int) error {
+	claims := apimw.GetClaims(ctx)
+	if !claims.IsOwnLoginSession() {
+		return ownerError(auth.ErrNotOwner)
+	}
+	repo, ok := h.userRepo.(ownershipTransferrer)
+	if !ok {
+		return apiError(501, "capability_unsupported", "Ownership transfer is unavailable")
+	}
+	return ownerError(repo.TransferOwnership(ctx, claims.UserID, id))
 }
 func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]AdminProfileView, error) {
 	if _, err := h.userRepo.GetByID(ctx, id); err != nil {
@@ -295,9 +386,39 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	if err != nil {
 		return nil, err
 	}
+	// Last use is a hint on the profile list; a device registry failure
+	// leaves it unknown rather than failing the list.
+	devices, err := listRegisteredDevices(ctx, store)
+	if err != nil {
+		slog.WarnContext(ctx, "admin profile last-seen lookup failed", "component", "api", "user_id", id, "error", err)
+		devices = nil
+	}
+	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		result = append(result, AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name)})
+		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name)}
+		if at, ok := lastSeen[row.ID]; ok {
+			view.LastSeenAt = &at
+		}
+		result = append(result, view)
 	}
 	return result, nil
+}
+
+// profileLastSeen is the latest device registration time per profile. A
+// registration whose timestamp does not parse as RFC 3339 is skipped rather
+// than guessed at.
+func profileLastSeen(devices []userstore.DeviceEntry) map[string]time.Time {
+	out := make(map[string]time.Time)
+	for _, device := range devices {
+		profileID := strings.TrimSpace(device.ProfileID)
+		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(device.LastSeenAt))
+		if profileID == "" || err != nil {
+			continue
+		}
+		if current, ok := out[profileID]; !ok || at.After(current) {
+			out[profileID] = at
+		}
+	}
+	return out
 }

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -19,7 +20,7 @@ func (s failingPublicationStore) StoreSubtitle(_ context.Context, req subtitles.
 	return nil, s.failure
 }
 func TestPublicationFailureDoesNotAnnounceReadyOrComplete(t *testing.T) {
-	for _, failure := range []error{subtitles.ErrAIJobInactive, subtitles.ErrAIPublicationUncertain, errors.New("publication failed before commit")} {
+	for _, failure := range []error{subtitles.ErrAIJobInactive, fmt.Errorf("commit reply lost: %w", subtitles.ErrAIPublicationUncertain), errors.New("publication failed before commit")} {
 		for _, kind := range []JobKind{JobKindTranslate, JobKindTranscribe, JobKindTranscribeTranslate} {
 			t.Run(string(kind)+"/"+failure.Error(), func(t *testing.T) {
 				repo := &recordingRepo{}

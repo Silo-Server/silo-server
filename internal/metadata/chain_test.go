@@ -127,3 +127,30 @@ func TestExtractLookupProviderIDs(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractBulkLookupLimit(t *testing.T) {
+	cases := []struct {
+		name         string
+		metadataJSON string
+		want         int
+	}{
+		{"inside envelope", `{"metadata":{"bulk_lookup_limit":100}}`, 100},
+		{"top level", `{"bulk_lookup_limit":10}`, 10},
+		{"capped", `{"metadata":{"bulk_lookup_limit":100000}}`, maxBulkLookupLimit},
+
+		// Anything but a positive integer leaves the provider out of the pass.
+		{"absent", tmdbCapMetadata, 0},
+		{"zero", `{"metadata":{"bulk_lookup_limit":0}}`, 0},
+		{"negative", `{"metadata":{"bulk_lookup_limit":-5}}`, 0},
+		{"fractional", `{"metadata":{"bulk_lookup_limit":2.5}}`, 0},
+		{"string", `{"metadata":{"bulk_lookup_limit":"100"}}`, 0},
+		{"malformed json", `{not json`, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractBulkLookupLimit([]byte(tc.metadataJSON)); got != tc.want {
+				t.Fatalf("extractBulkLookupLimit(%q) = %d, want %d", tc.metadataJSON, got, tc.want)
+			}
+		})
+	}
+}

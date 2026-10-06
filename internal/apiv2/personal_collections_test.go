@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
@@ -108,6 +110,7 @@ type fakeCollectionImports struct {
 	configured bool
 	lastMDB    handlers.UserImportMDBListRequest
 	lastTMDB   handlers.UserImportTMDBRequest
+	lastList   handlers.UserImportTMDBListRequest
 	lastTrakt  handlers.UserImportTraktRequest
 	lastQuery  string
 }
@@ -134,6 +137,11 @@ func (f *fakeCollectionImports) ImportMDBList(_ context.Context, _ int, _ string
 
 func (f *fakeCollectionImports) ImportTMDB(_ context.Context, _ int, _ string, req handlers.UserImportTMDBRequest) (handlers.UserImportView, error) {
 	f.lastTMDB = req
+	return f.view()
+}
+
+func (f *fakeCollectionImports) ImportTMDBList(_ context.Context, _ int, _ string, req handlers.UserImportTMDBListRequest) (handlers.UserImportView, error) {
+	f.lastList = req
 	return f.view()
 }
 
@@ -220,7 +228,7 @@ func TestGetCollectionCapabilities(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"groups":false,"imports":false,"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
+	want := `{"groups":false,"imports":false,"import_sources":[],"artwork":false,"item_reorder":false,"display_filter_fields":["type","watched"],"display_filter_presets":{"watched":["all","watched","unwatched"],"media":["all","movie","series"]},"collection_default_sort":true,"collection_sort_preferences":true,"effective_collection_sort":true,"sort_preference_kinds":["library","user","watchlist","favorites"]}` + "\n"
 	if !capabilityBodyMatches(t, rec.Body.Bytes(), want) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -344,6 +352,11 @@ func TestImportCollections(t *testing.T) {
 	if rec.Code != 201 || ci.lastTMDB.Preset != "trending" || ci.lastTMDB.MediaType != "movie" || ci.lastTMDB.TimeWindow != "week" {
 		t.Fatalf("%d %+v", rec.Code, ci.lastTMDB)
 	}
+	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list","url":"https://www.themoviedb.org/list/310-my-movie-list","limit":40}`, viewerHeaders())
+	if rec.Code != 201 || ci.lastList.URL != "https://www.themoviedb.org/list/310-my-movie-list" || ci.lastList.Title != "My list" || ci.lastList.Limit == nil || *ci.lastList.Limit != 40 {
+		t.Fatalf("%d %+v", rec.Code, ci.lastList)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/collections/import/tmdb-list", `{"title":"My list"}`, viewerHeaders()), TypeValidationFailed)
 	rec = do(t, h, http.MethodPost, "/api/v2/collections/import/trakt", `{"title":"Trending","preset":"trending"}`, viewerHeaders())
 	if rec.Code != 201 || ci.lastTrakt.Preset != "trending" || ci.lastTrakt.MediaType != "" {
 		t.Fatalf("%d %+v", rec.Code, ci.lastTrakt)
@@ -429,4 +442,45 @@ func (f *fakePersonalCollections) PersonalCollectionGroupEditor(_ context.Contex
 }
 func (f *fakePersonalCollections) PersonalCollectionItemsOrderEditor(_ context.Context, _ int, _ string, id string) (handlers.PersonalCollectionOrderView, error) {
 	return handlers.PersonalCollectionOrderView{OrderedIDs: []string{}, Revision: 1}, f.err
+}
+
+// The personal template gallery offered TMDB Discover and franchise templates
+// that can't become personal collections, so Create did nothing (#1640).
+func TestImportableCollectionTemplatesKeepsPersonalSources(t *testing.T) {
+	full := templates.CatalogDefault()
+	want := map[templates.Source]int{}
+	hasExcludedSource := false
+	for _, group := range full.Categories {
+		for _, template := range group.Templates {
+			if slices.Contains(importableCollectionSources[:], string(template.Source)) {
+				want[template.Source]++
+			} else {
+				hasExcludedSource = true
+			}
+		}
+	}
+	if len(want) == 0 || !hasExcludedSource {
+		t.Fatal("built-in catalog must contain both importable and excluded sources")
+	}
+	got := importableCollectionTemplates(full)
+
+	kept := map[templates.Source]int{}
+	for _, group := range got.Categories {
+		if len(group.Templates) == 0 {
+			t.Errorf("category %q kept with no templates", group.Category)
+		}
+		for _, template := range group.Templates {
+			kept[template.Source]++
+		}
+	}
+	for source := range kept {
+		if !slices.Contains(importableCollectionSources[:], string(source)) {
+			t.Errorf("catalog keeps %d templates with source %q, which personal collections can't import", kept[source], source)
+		}
+	}
+	for source, count := range want {
+		if kept[source] != count {
+			t.Errorf("kept %d templates with importable source %q, want %d", kept[source], source, count)
+		}
+	}
 }

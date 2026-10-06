@@ -24,6 +24,16 @@ export class PlayerFetchError extends Error {
 }
 
 /**
+ * Whether a failed player request may succeed if it is sent again later: the
+ * server answered 5xx, or never answered at all (network failure, timeout,
+ * abort). A 4xx is the server's considered answer and is final.
+ */
+export function isTransientPlayerRequestError(error: unknown): boolean {
+  if (error instanceof PlayerFetchError) return error.status >= 500;
+  return error instanceof TypeError || error instanceof DOMException;
+}
+
+/**
  * The client, auth, profile and device headers every player request carries.
  * Credentials come from PlayerConfig so a host that embeds the player
  * elsewhere keeps control of them. The client identity is the one every web

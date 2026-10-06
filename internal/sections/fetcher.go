@@ -91,12 +91,17 @@ type Fetcher struct {
 	// never calls the upstream provider.
 	TrendingSnapshots trendingSnapshotGetter
 
+	// WatchlistPromoter moves the profile's entries for titles the library
+	// now has onto the library watchlist before the watchlist section reads
+	// it. Nil skips promotion.
+	WatchlistPromoter catalog.WatchlistPromoter
+
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
 	candidateGroup   singleflight.Group
 
 	// Clock returns the current time. Defaults to recipes.RealClock{}.
-	// Tests inject recipes.FixedClock for deterministic seasonal/editorial behavior.
+	// Clock controls time-based seasonal and editorial resolution.
 	Clock recipes.Clock
 }
 
@@ -269,6 +274,12 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		f.logSlowSectionFetch(resolved, libraryID, libraryIDs, result, time.Since(start), err)
 	}()
 
+	if resolved.SectionType == SectionBecauseYouWatched {
+		if reader, ok := f.RecommendationReader.(becauseWatchedSourceReader); ok {
+			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, reader)
+			return result, err
+		}
+	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		return result, err
@@ -432,7 +443,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	// watch-progress store, so reading sections pull from that table and skip
 	// the next-up handling below.
 	if continueType == ContinueTypeReading {
-		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+		orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, catalog.DroppedSeriesSet{}, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 			func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 				entries, err := f.listEbookContinueWatchingProgress(ctx, userID, profileID, pageLimit, offset)
 				if err != nil {
@@ -459,7 +470,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 		}, nil
 	}
 
-	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
+	dropped := f.activeDroppedSeries(ctx, userID, profileID)
+	orderedItems, err = f.collectContinueProgressItems(ctx, store, profileID, dismissals, dropped, continueType, effectiveLibID, effectiveLibraryIDs, filter, limit, orderedItems, itemMeta, completedCache,
 		func(pageLimit, offset int) ([]userstore.WatchProgress, error) {
 			entries, err := store.ListProgress(ctx, profileID, "in_progress", pageLimit, offset)
 			if err != nil {
@@ -510,7 +522,8 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 }
 
 // collectContinueProgressItems pages through in-progress entries from
-// listPage, drops dismissed entries, resolves the remainder to media items,
+// listPage, drops dismissed entries and episodes of dropped series, resolves
+// the remainder to media items,
 // and appends them to orderedItems until limit is reached, the source is
 // exhausted, or continueProgressMaxScanned entries have been scanned. Paging
 // past the requested limit matters because dismissal filtering and
@@ -521,6 +534,7 @@ func (f *Fetcher) collectContinueProgressItems(
 	store userstore.UserStore,
 	profileID string,
 	dismissals catalog.HomeDismissalIndex,
+	dropped catalog.DroppedSeriesSet,
 	continueType ContinueType,
 	libraryID *int,
 	libraryIDs []int,
@@ -553,6 +567,11 @@ func (f *Fetcher) collectContinueProgressItems(
 		}
 		rawProgressCount := len(progressEntries)
 		progressEntries = dismissals.FilterProgress(progressEntries)
+		if filtered, err := dropped.FilterProgress(ctx, progressEntries); err != nil {
+			slog.ErrorContext(ctx, "filtering dropped series from continue watching", "component", "sections", "profile_id", profileID, "error", err)
+		} else {
+			progressEntries = filtered
+		}
 
 		pageItems, pageMeta, err := f.fetchContinueProgressItems(ctx, store, profileID, progressEntries, continueType, libraryID, libraryIDs, filter, completedCache)
 		if err != nil {
@@ -987,6 +1006,23 @@ func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store user
 		return catalog.HomeDismissalIndex{}
 	}
 	return catalog.NewHomeDismissalIndex(dismissals)
+}
+
+// activeDroppedSeries loads the profile's dropped series for filtering
+// Continue Watching. A failure leaves the section unfiltered, like dismissals.
+func (f *Fetcher) activeDroppedSeries(ctx context.Context, userID int, profileID string) catalog.DroppedSeriesSet {
+	dropped, err := f.progressFilter.ActiveDroppedSeries(ctx, userID, profileID)
+	if err != nil {
+		slog.ErrorContext(ctx, "listing dropped series", "component", "sections", "profile_id", profileID, "error", err)
+		return catalog.DroppedSeriesSet{}
+	}
+	return dropped
+}
+
+// FilterDroppedProgress removes in-progress entries whose series the profile
+// dropped, for surfaces that list progress outside the sections fetcher.
+func (f *Fetcher) FilterDroppedProgress(ctx context.Context, userID int, profileID string, entries []userstore.WatchProgress) ([]userstore.WatchProgress, error) {
+	return f.progressFilter.FilterDroppedProgress(ctx, userID, profileID, entries)
 }
 
 func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profileID string, results []catalog.NextUpResult) []catalog.NextUpResult {
@@ -1450,6 +1486,11 @@ func (f *Fetcher) fetchPersonalListSection(ctx context.Context, s ResolvedSectio
 	var listed []catalog.PersonalListEntry
 	switch s.SectionType {
 	case SectionWatchlist:
+		if f.WatchlistPromoter != nil {
+			promoteAccess := filter
+			promoteAccess.UserID, promoteAccess.ProfileID = userID, profileID
+			f.WatchlistPromoter.PromoteWatchlist(ctx, promoteAccess)
+		}
 		entries, err := store.ListWatchlist(ctx, profileID, personalListFetchLimit, 0)
 		if err != nil {
 			return nil, 0, fmt.Errorf("listing watchlist: %w", err)
@@ -2265,14 +2306,21 @@ func (f *Fetcher) fetchTVRecentlyAdded(
 		return nil, 0, tvScoped, err
 	}
 
-	targets, total, _, err := catalog.NewRecentTVRepository(f.pool).List(ctx, catalog.RecentTVQuery{
-		LibraryIDs:    effectiveLibraryIDs,
-		Access:        filter,
-		Limit:         s.ItemLimit,
-		UniqueTargets: true,
+	// The home row needs the newest cards, not the size of the whole event
+	// history: ListNewest groups only recently active shows. total_count is a
+	// lower bound (the documented contract): one more than the page when more
+	// cards exist, which is what clients test it for.
+	targets, hasMore, err := catalog.NewRecentTVRepository(f.pool).ListNewest(ctx, catalog.RecentTVQuery{
+		LibraryIDs: effectiveLibraryIDs,
+		Access:     filter,
+		Limit:      s.ItemLimit,
 	})
 	if err != nil {
 		return nil, 0, true, err
+	}
+	total := len(targets)
+	if hasMore {
+		total++
 	}
 
 	seriesIDs := make([]string, 0, len(targets))
@@ -3050,7 +3098,23 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	case "30d":
 		interval = "30 days"
 	}
+	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, watchActivityScope{
+		interval: interval,
+		rank:     rankByViewers,
+	})
+	return f.queryWatchActivity(ctx, "trending", query, args)
+}
 
+// watchActivityQuery ranks titles by watch history inside interval. Watch
+// history records an episode play against the episode, which has no
+// media_items row, so plays are rolled up to their series first: every episode
+// of a show counts toward the show. The library and access predicates apply to
+// the resolved title before GROUP BY, so plays of titles outside the scope
+// never enter the aggregate. A series is in scope by its own library
+// membership, as for episode access elsewhere, so every play of its episodes
+// counts. scope.rank picks the aggregate and its order; content ID breaks ties
+// so the order is stable.
+func watchActivityQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter, scope watchActivityScope) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
@@ -3064,8 +3128,20 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
 
 	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
-	args = append(args, interval)
+	args = append(args, scope.interval)
 	argIdx++
+
+	if scope.profileID != "" {
+		op := "="
+		if scope.excludeProfile {
+			op = "<>"
+		}
+		conditions = append(conditions, fmt.Sprintf("uwh.profile_id %s $%d", op, argIdx))
+		args = append(args, scope.profileID)
+		argIdx++
+	}
+
+	aggregate, orderBy := scope.rank.sql()
 
 	limit := s.ItemLimit
 	if limit <= 0 {
@@ -3075,14 +3151,65 @@ func (f *Fetcher) fetchTrending(ctx context.Context, s ResolvedSection, libraryI
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s JOIN user_watch_history uwh ON uwh.media_item_id = mi.content_id %s GROUP BY mi.content_id ORDER BY COUNT(DISTINCT uwh.profile_id) DESC, COUNT(*) DESC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
+		`WITH wa AS (
+			SELECT mi.content_id, %s
+			FROM user_watch_history uwh
+			LEFT JOIN episodes ep ON ep.content_id = uwh.media_item_id
+			JOIN %s ON mi.content_id = COALESCE(ep.series_id, uwh.media_item_id)
+			%s
+			GROUP BY mi.content_id
+		)
+		SELECT %s FROM media_items mi JOIN wa ON wa.content_id = mi.content_id
+		ORDER BY %s, mi.content_id LIMIT $%d`,
+		aggregate, fromClause, whereClause, itemColumns("mi"), orderBy, argIdx,
 	)
 	args = append(args, limit)
+	return query, args
+}
 
+// watchActivityScope selects the watch history a rail counts and how it ranks
+// the per-title aggregate.
+type watchActivityScope struct {
+	interval string // Postgres interval, e.g. "7 days"
+	rank     watchActivityRank
+	// profileID, when set, keeps only that profile's history, or with
+	// excludeProfile every other profile's history.
+	profileID      string
+	excludeProfile bool
+}
+
+// watchActivityRank is how a watch-activity rail orders its titles.
+type watchActivityRank int
+
+const (
+	// rankByViewers (Trending) ranks breadth first: how many profiles
+	// watched a title, then how often.
+	rankByViewers watchActivityRank = iota
+	// rankByPlays (Most Watched) ranks raw volume: total plays.
+	rankByPlays
+	// rankByLatest (What Others Just Watched) ranks by each title's most
+	// recent play.
+	rankByLatest
+)
+
+// sql returns the per-title aggregate columns of wa and the ORDER BY over
+// them. Only Trending counts distinct profiles: COUNT(DISTINCT) forces a sort
+// of every play in the window, which the other ranks don't need.
+func (r watchActivityRank) sql() (aggregate, orderBy string) {
+	switch r {
+	case rankByPlays:
+		return "COUNT(*) AS plays", "wa.plays DESC"
+	case rankByLatest:
+		return "MAX(uwh.watched_at) AS latest", "wa.latest DESC"
+	default:
+		return "COUNT(DISTINCT uwh.profile_id) AS viewers, COUNT(*) AS plays", "wa.viewers DESC, wa.plays DESC"
+	}
+}
+
+func (f *Fetcher) queryWatchActivity(ctx context.Context, rail, query string, args []any) ([]*models.MediaItem, int, error) {
 	rows, err := f.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("fetching trending: %w", err)
+		return nil, 0, fmt.Errorf("fetching %s: %w", rail, err)
 	}
 	defer rows.Close()
 	items, err := scanMediaItems(rows)
@@ -3104,70 +3231,15 @@ func (f *Fetcher) fetchProfileActivityFeed(ctx context.Context, s ResolvedSectio
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	var args []any
-	argIdx := 1
-
-	// CTE deduplicates per media_item_id and keeps the most-recent watched_at,
-	// so each item appears once and is ordered by latest-watch DESC.
-	var cteCond string
-	var cteWindow string
-	if target == "" {
-		cteCond = fmt.Sprintf("profile_id <> $%d", argIdx)
-		args = append(args, profileID)
-		argIdx++
-		cteWindow = "INTERVAL '7 days'"
-	} else {
-		cteCond = fmt.Sprintf("profile_id = $%d", argIdx)
-		args = append(args, target)
-		argIdx++
-		cteWindow = "INTERVAL '30 days'"
+	// Household mode lists the last week of every other profile's plays; a
+	// named profile shows its last month. Each title appears once, ordered by
+	// its most recent play.
+	scope := watchActivityScope{interval: "7 days", rank: rankByLatest, profileID: profileID, excludeProfile: true}
+	if target != "" {
+		scope = watchActivityScope{interval: "30 days", rank: rankByLatest, profileID: target}
 	}
-
-	var conditions []string
-	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
-	conditions = append(conditions, libConditions...)
-	args = append(args, libArgs...)
-	argIdx = newArgIdx
-	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
-
-	limit := s.ItemLimit
-	if limit <= 0 {
-		limit = 20
-	}
-
-	whereClause := ""
-	if len(conditions) > 0 {
-		whereClause = "WHERE " + strings.Join(conditions, " AND ")
-	}
-
-	query := fmt.Sprintf(
-		`WITH most_recent AS (
-			SELECT media_item_id, MAX(watched_at) AS latest
-			FROM user_watch_history
-			WHERE %s AND watched_at > NOW() - %s
-			GROUP BY media_item_id
-		)
-		SELECT %s
-		FROM %s
-		JOIN most_recent mr ON mr.media_item_id = mi.content_id
-		%s
-		ORDER BY mr.latest DESC
-		LIMIT $%d`,
-		cteCond, cteWindow,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
-	)
-	args = append(args, limit)
-
-	rows, err := f.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fetching profile activity feed: %w", err)
-	}
-	defer rows.Close()
-	items, err := scanMediaItems(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, len(items), nil
+	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, scope)
+	return f.queryWatchActivity(ctx, "profile activity feed", query, args)
 }
 
 func (f *Fetcher) fetchNewToLibrary(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
@@ -3230,46 +3302,11 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 	if p.Window == "month" {
 		interval = "30 days"
 	}
-
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
-	conditions = append(conditions, libConditions...)
-	args = append(args, libArgs...)
-	argIdx = newArgIdx
-	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
-
-	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
-
-	conditions = append(conditions, fmt.Sprintf("uwh.watched_at > NOW() - $%d::interval", argIdx))
-	args = append(args, interval)
-	argIdx++
-
-	limit := s.ItemLimit
-	if limit <= 0 {
-		limit = 20
-	}
-
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
-
-	query := fmt.Sprintf(
-		`SELECT %s FROM %s JOIN user_watch_history uwh ON uwh.media_item_id = mi.content_id %s GROUP BY mi.content_id ORDER BY COUNT(*) DESC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
-	)
-	args = append(args, limit)
-
-	rows, err := f.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fetching most watched: %w", err)
-	}
-	defer rows.Close()
-	items, err := scanMediaItems(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, len(items), nil
+	query, args := watchActivityQuery(s, libraryID, libraryIDs, filter, watchActivityScope{
+		interval: interval,
+		rank:     rankByPlays,
+	})
+	return f.queryWatchActivity(ctx, "most watched", query, args)
 }
 
 // buildLibraryScope returns the FROM clause and membership predicates that

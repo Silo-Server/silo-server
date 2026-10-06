@@ -41,6 +41,10 @@ Transitions:
   lobby (staged). Host only. Keeps the selection columns so the item that was
   playing is now staged; advances the revision so every attached session is
   dropped. A room that is not playing is a no-op receipt.
+- **Finish** (`Service.reconcileRoom`, `internal/watchtogether/item_end.go`):
+  playing → lobby (staged). The reconciler performs the host's stop when the
+  room's position reaches the last two seconds of the playing file, so every
+  client returns to the lobby at the end of an item without calling stop.
 - **Switch mode** (`Service.UpdateSelectionMode`, `PATCH .../selection-mode`):
   lobby → lobby. Drops the staged item. Refused while playing.
 
@@ -59,6 +63,17 @@ sync command is issued and cleared by a state report that already matches the ro
 that member (an explicit action is intent, not a stale position). While it is
 set, a host's reports are treated like a guest's: corrected, never
 authoritative. The flag is persisted with the shared room runtime.
+
+An authoritative host report that changes the pause state is a transport
+decision, such as a pause from the system controls that never became a
+transport request. It moves `Room.PlaybackState` (`playing`/`paused`) and
+`Room.ResumeOnReady` together with `Room.IsPaused`, the same way a play or
+pause request does. Guest corrections, re-attach syncs, and buffering barriers
+choose play or pause from those two fields; a report that updates only `IsPaused`
+would leave a paused room telling members to play. Any authoritative host report
+is also issued as the room's transport command, as a request would be: members
+on other API servers receive it through the reconciler, and an earlier command
+cannot be replayed to a member whose socket renews before it re-attaches.
 
 ## Two counters
 

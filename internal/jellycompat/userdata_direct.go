@@ -20,6 +20,8 @@ type directUserDataService struct {
 	resumeFilter            *catalog.ContinueWatchingProgressFilter
 	profileStaler           profileStaler
 	profileRefreshRequester profileRefreshRequester
+	// events announces watched-state changes to other surfaces and replicas.
+	events UserStateEvents
 }
 
 func newDirectUserDataService(
@@ -196,8 +198,8 @@ func (s *directUserDataService) ListProgressFiltered(ctx context.Context, sessio
 }
 
 // FilterResumeProgress applies the same hiding rules as the first-party
-// Continue Watching fetcher: dismissed entries and episodes superseded by a
-// later-completed episode in the same series.
+// Continue Watching fetcher: dismissed entries, episodes of dropped series,
+// and episodes superseded by a later-completed episode in the same series.
 func (s *directUserDataService) FilterResumeProgress(ctx context.Context, session *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	if len(entries) == 0 {
 		return entries, nil
@@ -218,6 +220,11 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 		slog.ErrorContext(ctx, "listing continue watching dismissals", "component", "jellycompat", "profile_id", session.ProfileID, "error", err)
 	} else {
 		progress = catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress)
+	}
+	if filtered, err := s.resumeFilter.FilterDroppedProgress(ctx, session.StreamAppUserID, session.ProfileID, progress); err != nil {
+		slog.ErrorContext(ctx, "filtering dropped series from resume", "component", "jellycompat", "profile_id", session.ProfileID, "error", err)
+	} else {
+		progress = filtered
 	}
 
 	superseded, err := s.resumeFilter.SupersededEpisodeProgressIDs(ctx, store, session.ProfileID, progress)
@@ -293,6 +300,7 @@ func (s *directUserDataService) MarkPlayed(ctx context.Context, session *Session
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, []string{contentID}, true)
 	return nil
 }
 
@@ -307,6 +315,7 @@ func (s *directUserDataService) MarkPlayedBatch(ctx context.Context, session *Se
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, contentIDs, true)
 	return nil
 }
 
@@ -318,6 +327,7 @@ func (s *directUserDataService) MarkUnplayed(ctx context.Context, session *Sessi
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, []string{contentID}, false)
 	return nil
 }
 
@@ -332,6 +342,7 @@ func (s *directUserDataService) MarkUnplayedBatch(ctx context.Context, session *
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, contentIDs, false)
 	return nil
 }
 
@@ -363,6 +374,7 @@ func (s *directUserDataService) MarkPlayedBatchAt(ctx context.Context, session *
 		return err
 	}
 	triggerProfileRefresh(ctx, s.profileStaler, s.profileRefreshRequester, session.StreamAppUserID, session.ProfileID)
+	publishWatchedChange(ctx, s.events, session, ids, true)
 	return nil
 }
 

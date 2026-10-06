@@ -7,6 +7,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { collectionDefaultSortOptions } from "@/lib/collectionSortConfig";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 
 interface Props {
   value: string;
@@ -31,7 +32,12 @@ export function CollectionDefaultSortField({
   inputId = "collection-default-sort",
   disabled = false,
 }: Props) {
-  const options = collectionDefaultSortOptions(allowPersonalized);
+  const shownRatingSources = useShownRatingSources();
+  const options = collectionDefaultSortOptions(
+    allowPersonalized,
+    shownRatingSources,
+    value.split(":")[0],
+  );
 
   return (
     <div className="space-y-2">

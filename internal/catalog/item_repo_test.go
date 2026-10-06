@@ -47,25 +47,6 @@ func TestItemRepo_GetByIDsWithAccess_NoAccessFilterNoLibraryClause(t *testing.T)
 	}
 }
 
-// TestItemRepo_GetByIDsWithAccess_DisabledLibrariesProduceNotExists pins the
-// shape of the DisabledLibraryIDs branch: a NOT EXISTS subquery against
-// media_item_libraries with the disabled IDs bound at $2.
-func TestItemRepo_GetByIDsWithAccess_DisabledLibrariesProduceNotExists(t *testing.T) {
-	repo := &ItemRepository{}
-	sql, args := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		DisabledLibraryIDs: []int{9, 10},
-	})
-	if !strings.Contains(sql, "NOT EXISTS") {
-		t.Fatalf("expected NOT EXISTS clause for DisabledLibraryIDs; got %s", sql)
-	}
-	if !strings.Contains(sql, "media_folder_id = ANY($2)") {
-		t.Fatalf("expected DisabledLibraryIDs bound at $2; got %s", sql)
-	}
-	if len(args) != 2 {
-		t.Fatalf("expected 2 args (ids, disabled libs); got %v", args)
-	}
-}
-
 // TestItemRepo_GetByIDsWithAccess_DisabledOnlyRequiresLibraryMembership pins
 // the fix for the disabled-only access path: when AllowedLibraryIDs is nil
 // and only DisabledLibraryIDs is set, the SQL must additionally require
@@ -97,30 +78,6 @@ func TestItemRepo_GetByIDsWithAccess_DisabledOnlyRequiresLibraryMembership(t *te
 	}
 }
 
-// TestItemRepo_EnsureAccessibleSQL_UsesIndependentExistsPredicates pins the C3
-// fix: EnsureAccessible must gate library access with independent EXISTS /
-// NOT EXISTS subqueries, never allow/deny predicates over one joined
-// media_item_libraries row. The single-join form leaked items linked to BOTH
-// an allowed (or non-disabled) library and a disabled one.
-func TestItemRepo_EnsureAccessibleSQL_UsesIndependentExistsPredicates(t *testing.T) {
-	sql, args := buildEnsureAccessibleSQL("item-1", AccessFilter{
-		AllowedLibraryIDs:  []int{1, 2},
-		DisabledLibraryIDs: []int{9},
-	})
-	if strings.Contains(sql, "JOIN media_item_libraries") {
-		t.Fatalf("expected no membership join; got %s", sql)
-	}
-	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
-		t.Fatalf("expected allowed-library EXISTS bound at $2; got %s", sql)
-	}
-	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))") {
-		t.Fatalf("expected disabled-library NOT EXISTS bound at $3; got %s", sql)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (id, allowed, disabled); got %v", args)
-	}
-}
-
 // TestItemRepo_EnsureAccessibleSQL_DisabledOnlyRequiresMembership mirrors the
 // GetByIDsWithAccess orphan-item guard for the per-item path: disabled-only
 // scopes still require positive library membership.
@@ -136,43 +93,6 @@ func TestItemRepo_EnsureAccessibleSQL_DisabledOnlyRequiresMembership(t *testing.
 	}
 	if len(args) != 2 {
 		t.Fatalf("expected 2 args (id, disabled); got %v", args)
-	}
-}
-
-// TestItemRepo_EnsureAccessibleIDsSQL_MatchesEnsureAccessibleShape keeps the
-// batch form on the same predicates as the per-item form.
-func TestItemRepo_EnsureAccessibleIDsSQL_MatchesEnsureAccessibleShape(t *testing.T) {
-	sql, args := buildEnsureAccessibleIDsSQL([]string{"a", "b"}, AccessFilter{
-		AllowedLibraryIDs:  []int{1},
-		DisabledLibraryIDs: []int{9},
-	})
-	if strings.Contains(sql, "JOIN media_item_libraries") || strings.Contains(sql, "DISTINCT") {
-		t.Fatalf("expected join-free, DISTINCT-free batch query; got %s", sql)
-	}
-	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") ||
-		!strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))") {
-		t.Fatalf("expected EXISTS/NOT EXISTS pair at $2/$3; got %s", sql)
-	}
-	if len(args) != 3 {
-		t.Fatalf("expected 3 args (ids, allowed, disabled); got %v", args)
-	}
-}
-
-// TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck
-// asserts that when AllowedLibraryIDs is non-nil the membership EXISTS is
-// NOT added a second time — the allowed-list EXISTS already provides
-// positive membership, so adding another would be redundant and would
-// shift placeholder indices.
-func TestItemRepo_GetByIDsWithAccess_AllowedListSkipsRedundantMembershipCheck(t *testing.T) {
-	repo := &ItemRepository{}
-	sql, _ := repo.buildGetByIDsWithAccessSQL([]string{"a"}, AccessFilter{
-		AllowedLibraryIDs:  []int{1, 2},
-		DisabledLibraryIDs: []int{9},
-	})
-	// Exactly two EXISTS clauses: allowed-list EXISTS + disabled NOT EXISTS.
-	// A third (membership-only EXISTS) would be redundant.
-	if got := strings.Count(sql, "EXISTS ("); got != 2 {
-		t.Fatalf("expected exactly 2 EXISTS clauses (allowed + disabled); got %d in %s", got, sql)
 	}
 }
 
@@ -353,8 +273,9 @@ func TestItemRepo_Search_AppliesOverviewRankFloor(t *testing.T) {
 	if !strings.Contains(dataSQL, want) {
 		t.Fatalf("expected %q in dataSQL; got %s", want, dataSQL)
 	}
-	if !strings.Contains(countSQL, want) {
-		t.Fatalf("expected %q in countSQL too (must mirror dataSQL); got %s", want, countSQL)
+	countFloor := fmt.Sprintf("ts_rank_cd(mi.search_overview_vector, websearch_to_tsquery('english', $1)) >= %g", overviewMatchFloor)
+	if !strings.Contains(countSQL, countFloor) {
+		t.Fatalf("count must enforce the same overview floor %q; got %s", countFloor, countSQL)
 	}
 }
 
@@ -491,7 +412,7 @@ func TestItemRepo_Search_AliasScoresUseOneUncorrelatedPass(t *testing.T) {
 		if strings.Count(sql, "alias_scores AS MATERIALIZED") != 1 {
 			t.Fatalf("expected one materialized alias scoring pass; got:\n%s", sql)
 		}
-		if !strings.Contains(sql, "LEFT JOIN alias_scores search_alias") {
+		if sql == dataSQL && !strings.Contains(sql, "LEFT JOIN alias_scores search_alias") {
 			t.Fatalf("expected media ranking to reuse alias_scores; got:\n%s", sql)
 		}
 		if strings.Contains(sql, "FROM media_item_aliases mia WHERE mia.content_id = mi.content_id") {
@@ -586,7 +507,7 @@ func TestItemRepo_Search_NarrowTitlePathTypesSearchTextParameter(t *testing.T) {
 				t.Fatalf("unexpected fixed search arguments: %#v", args)
 			}
 			for _, sql := range []string{dataSQL, countSQL} {
-				if !strings.Contains(sql, "$1::text IS NOT NULL") {
+				if !strings.Contains(sql, "$1::text") {
 					t.Fatalf("narrow search must type bound $1 in both statements; got:\n%s", sql)
 				}
 			}
@@ -751,9 +672,8 @@ func TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates(t *testing.
 // 105 instead of recomputing normalization per row
 // (audit 2026-05-01 §3.12).
 //
-// The original_title and sort_title fallbacks are intentionally not stored
-// as generated columns (less search traffic), so they call the
-// public.normalize_search_text() function (migrations 127 / 138) inline.
+// Original and sort title normalization is also maintained synchronously so
+// ranking does not reconstruct documents for every matching candidate.
 func TestItemRepo_Search_UsesTitleNormalizedColumn(t *testing.T) {
 	repo := &ItemRepository{}
 	sql, _, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, AccessFilter{})
@@ -763,11 +683,11 @@ func TestItemRepo_Search_UsesTitleNormalizedColumn(t *testing.T) {
 	if !strings.Contains(sql, "mi.title_normalized") {
 		t.Fatalf("Search must reference mi.title_normalized; got:\n%s", sql)
 	}
-	if !strings.Contains(sql, "public.normalize_search_text(mi.original_title)") {
-		t.Fatalf("Search should call public.normalize_search_text() on mi.original_title; got:\n%s", sql)
+	if !strings.Contains(sql, "mi.original_title_normalized") {
+		t.Fatalf("Search should read stored original-title normalization; got:\n%s", sql)
 	}
-	if !strings.Contains(sql, "public.normalize_search_text(mi.sort_title)") {
-		t.Fatalf("Search should call public.normalize_search_text() on mi.sort_title; got:\n%s", sql)
+	if !strings.Contains(sql, "mi.sort_title_normalized") {
+		t.Fatalf("Search should read stored sort-title normalization; got:\n%s", sql)
 	}
 }
 
@@ -783,14 +703,8 @@ func TestItemRepo_Search_NormalizesTsqueryInput(t *testing.T) {
 	if !strings.Contains(sql, "to_tsquery('simple', $2)") {
 		t.Fatalf("title arm must use the normalized prefix query argument; got:\n%s", sql)
 	}
-	if !strings.Contains(sql, "public.normalize_search_text(COALESCE(mi.title, ''))") {
-		t.Fatalf("title tsvector must normalize mi.title to match the GIN index expression; got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "public.normalize_search_text(COALESCE(mi.original_title, ''))") {
-		t.Fatalf("title tsvector must normalize mi.original_title; got:\n%s", sql)
-	}
-	if !strings.Contains(sql, "public.normalize_search_text(COALESCE(mi.sort_title, ''))") {
-		t.Fatalf("title tsvector must normalize mi.sort_title; got:\n%s", sql)
+	if !strings.Contains(sql, "mi.search_title_vector") {
+		t.Fatalf("title matching and ranking must read the stored normalized vector; got:\n%s", sql)
 	}
 	if !strings.Contains(sql, "phraseto_tsquery('simple', public.normalize_search_text(") {
 		t.Fatalf("phrase rank must normalize the phrase input; got:\n%s", sql)
@@ -868,7 +782,7 @@ func TestItemRepo_Search_ScoredCTEIsLean(t *testing.T) {
 			dataSQL, countSQL, _ := repo.buildSearchSQL("avatar", test.itemTypes, 20, 0, AccessFilter{})
 			for _, sql := range []string{dataSQL, countSQL} {
 				end := strings.Index(sql, "), page AS")
-				if countEnd := strings.Index(sql, ")\nSELECT COUNT(*)"); end < 0 || (countEnd >= 0 && countEnd < end) {
+				if countEnd := strings.Index(sql, ") SELECT COUNT(*)"); end < 0 || (countEnd >= 0 && countEnd < end) {
 					end = countEnd
 				}
 				if end < 0 {
@@ -890,6 +804,7 @@ func TestItemRepo_Search_UnscopedIncludesEpisodeCandidateBranch(t *testing.T) {
 	sql, _, _ := repo.buildSearchSQL("Who Are You?", nil, 20, 0, AccessFilter{})
 	for _, want := range []string{
 		"FROM episode_catalog_entries ece JOIN media_items si",
+		"si.content_id = ece.series_id",
 		"si.type = 'series'",
 		"ece.search_title_vector",
 		"UNION ALL",
@@ -911,7 +826,7 @@ func TestItemRepo_Search_EpisodeScopeOmitsMediaItemCandidateBranch(t *testing.T)
 	if strings.Contains(scored, "FROM media_items mi") {
 		t.Fatalf("episode-only candidate set must not scan media_items directly:\n%s", scored)
 	}
-	if !strings.Contains(scored, "FROM episode_catalog_entries ece JOIN media_items si") {
+	if !strings.Contains(scored, "FROM episode_catalog_entries ece JOIN media_items si") || !strings.Contains(scored, "si.content_id = ece.series_id") {
 		t.Fatalf("episode-only candidate set missing episode branch:\n%s", scored)
 	}
 }

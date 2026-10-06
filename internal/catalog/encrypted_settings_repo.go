@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
@@ -161,6 +163,10 @@ type settingsBatchWriter interface {
 	SetMany(ctx context.Context, values map[string]string) error
 }
 
+type settingsBatchReader interface {
+	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
+}
+
 type settingsAtomicUpdater interface {
 	UpdateAtomic(
 		ctx context.Context,
@@ -196,11 +202,18 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 	ctx context.Context,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
-	inner, ok := r.inner.(settingsAtomicUpdater)
-	if !ok {
-		return fmt.Errorf("settings store does not support atomic updates")
-	}
-	return inner.UpdateAtomic(ctx, func(rawCurrent map[string]string) (map[string]string, error) {
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateAtomicInTransaction preserves the plaintext callback contract and
+// passes through the raw store's transaction when it supports one.
+func (r *EncryptedSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	encryptedUpdate := func(rawCurrent map[string]string, tx pgx.Tx) (map[string]string, error) {
 		current := make(map[string]string, len(rawCurrent))
 		for key, value := range rawCurrent {
 			plain, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
@@ -209,7 +222,7 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 			}
 			current[key] = plain
 		}
-		writes, err := update(current)
+		writes, err := update(current, tx)
 		if err != nil {
 			return nil, err
 		}
@@ -225,7 +238,18 @@ func (r *EncryptedSettingsRepo) UpdateAtomic(
 			encrypted[key] = value
 		}
 		return encrypted, nil
-	})
+	}
+	if inner, ok := r.inner.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return inner.UpdateAtomicInTransaction(ctx, encryptedUpdate)
+	}
+	if inner, ok := r.inner.(settingsAtomicUpdater); ok {
+		return inner.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return encryptedUpdate(current, nil)
+		})
+	}
+	return fmt.Errorf("settings store does not support atomic updates")
 }
 
 // SetIfAbsent applies Set's encryption contract to a conditional write: the
@@ -258,6 +282,27 @@ func (r *EncryptedSettingsRepo) Get(ctx context.Context, key string) (string, er
 		return "", fmt.Errorf("decrypt setting %q: %w", key, err)
 	}
 	return out, nil
+}
+
+// GetMany reads keys from the raw store in one snapshot and decrypts each
+// value as Get does. Keys without a value are absent from the map.
+func (r *EncryptedSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	inner, ok := r.inner.(settingsBatchReader)
+	if !ok {
+		return nil, fmt.Errorf("settings store does not support batch reads")
+	}
+	values, err := inner.GetMany(ctx, keys...)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range values {
+		out, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt setting %q: %w", key, err)
+		}
+		values[key] = out
+	}
+	return values, nil
 }
 
 // GetAll reads every setting and decrypts any enc:v1: value in place. An

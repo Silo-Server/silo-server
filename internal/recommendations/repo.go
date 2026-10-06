@@ -914,6 +914,16 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 	}
 	defer tx.Rollback(ctx)
 
+	// Lock the replacement, including an empty cluster set, across server
+	// processes. DELETE alone cannot protect rows another refresh has not yet
+	// committed, so concurrent replacements can otherwise collide on INSERT.
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
+		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
+		userID, profileID)
+	if err != nil {
+		return fmt.Errorf("lock taste clusters: %w", err)
+	}
+
 	_, err = tx.Exec(ctx,
 		`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
 		userID, profileID)

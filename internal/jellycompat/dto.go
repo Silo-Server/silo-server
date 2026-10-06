@@ -1,5 +1,10 @@
 package jellycompat
 
+import (
+	"cmp"
+	"encoding/json"
+)
+
 // queryResultDTO mirrors Jellyfin's common paged result envelope.
 type queryResultDTO struct {
 	Items            []baseItemDTO `json:"Items"`
@@ -42,86 +47,101 @@ type queryFiltersDTO struct {
 }
 
 type baseItemDTO struct {
-	ServerID                 string                       `json:"ServerId,omitempty"`
-	ID                       string                       `json:"Id"`
-	ChannelID                *string                      `json:"ChannelId"`
-	DateCreated              string                       `json:"DateCreated,omitempty"`
-	Type                     string                       `json:"Type,omitempty"`
-	MediaType                string                       `json:"MediaType,omitempty"`
-	Name                     string                       `json:"Name"`
-	IsFolder                 bool                         `json:"IsFolder"`
-	IsHD                     bool                         `json:"IsHD,omitempty"`
-	CanDelete                bool                         `json:"CanDelete,omitempty"`
-	CanDownload              bool                         `json:"CanDownload,omitempty"`
-	HasSubtitles             bool                         `json:"HasSubtitles,omitempty"`
-	SupportsSync             bool                         `json:"SupportsSync,omitempty"`
-	EnableMediaSourceDisplay bool                         `json:"EnableMediaSourceDisplay,omitempty"`
-	Container                string                       `json:"Container,omitempty"`
-	LocationType             string                       `json:"LocationType,omitempty"`
-	VideoType                string                       `json:"VideoType,omitempty"`
-	PlayAccess               string                       `json:"PlayAccess,omitempty"`
-	Etag                     string                       `json:"Etag,omitempty"`
-	DisplayPreferencesID     string                       `json:"DisplayPreferencesId,omitempty"`
-	CollectionType           string                       `json:"CollectionType,omitempty"`
-	RunTimeTicks             int64                        `json:"RunTimeTicks,omitempty"`
-	ProductionYear           int                          `json:"ProductionYear,omitempty"`
-	OfficialRating           string                       `json:"OfficialRating,omitempty"`
-	CommunityRating          *float64                     `json:"CommunityRating,omitempty"`
-	CriticRating             *float64                     `json:"CriticRating,omitempty"`
-	Overview                 string                       `json:"Overview,omitempty"`
-	OriginalTitle            string                       `json:"OriginalTitle,omitempty"`
-	OriginalLanguage         string                       `json:"OriginalLanguage,omitempty"`
-	PremiereDate             string                       `json:"PremiereDate,omitempty"`
-	Path                     string                       `json:"Path,omitempty"`
-	ExternalURLs             []map[string]any             `json:"ExternalUrls,omitempty"`
-	RemoteTrailers           []map[string]any             `json:"RemoteTrailers,omitempty"`
-	Genres                   []string                     `json:"Genres,omitempty"`
-	GenreItems               []namePairDTO                `json:"GenreItems,omitempty"`
-	Studios                  []namePairDTO                `json:"Studios,omitempty"`
-	Taglines                 []string                     `json:"Taglines,omitempty"`
-	Tags                     []string                     `json:"Tags,omitempty"`
-	ProviderIDs              map[string]string            `json:"ProviderIds,omitempty"`
-	ProductionLocations      []string                     `json:"ProductionLocations,omitempty"`
-	ImageTags                map[string]string            `json:"ImageTags"`
-	PrimaryImageItemID       string                       `json:"PrimaryImageItemId,omitempty"`
-	BackdropImageTags        []string                     `json:"BackdropImageTags,omitempty"`
-	PrimaryImageAspectRatio  *float64                     `json:"PrimaryImageAspectRatio,omitempty"`
-	ImageBlurHashes          map[string]map[string]string `json:"ImageBlurHashes,omitempty"`
-	UserData                 *itemUserDataDTO             `json:"UserData,omitempty"`
-	SeriesID                 string                       `json:"SeriesId,omitempty"`
-	SeasonID                 string                       `json:"SeasonId,omitempty"`
-	SeasonName               string                       `json:"SeasonName,omitempty"`
-	SeriesName               string                       `json:"SeriesName,omitempty"`
-	SeriesPrimaryImageTag    string                       `json:"SeriesPrimaryImageTag,omitempty"`
-	ParentBackdropImageTags  []string                     `json:"ParentBackdropImageTags,omitempty"`
-	ParentBackdropItemID     string                       `json:"ParentBackdropItemId,omitempty"`
-	ParentThumbImageTag      string                       `json:"ParentThumbImageTag,omitempty"`
-	ParentThumbItemID        string                       `json:"ParentThumbItemId,omitempty"`
-	ParentPrimaryImageItemID string                       `json:"ParentPrimaryImageItemId,omitempty"`
-	ParentPrimaryImageTag    string                       `json:"ParentPrimaryImageTag,omitempty"`
-	ParentID                 string                       `json:"ParentId,omitempty"`
-	SortName                 string                       `json:"SortName,omitempty"`
-	ForcedSortName           string                       `json:"ForcedSortName,omitempty"`
-	IndexNumber              *int                         `json:"IndexNumber,omitempty"`
-	ParentIndexNumber        *int                         `json:"ParentIndexNumber,omitempty"`
-	People                   []personDTO                  `json:"People,omitempty"`
-	ChildCount               int                          `json:"ChildCount,omitempty"`
-	RecursiveItemCount       int                          `json:"RecursiveItemCount,omitempty"`
-	LocalTrailerCount        int                          `json:"LocalTrailerCount,omitempty"`
-	SpecialFeatureCount      int                          `json:"SpecialFeatureCount,omitempty"`
-	MovieCount               int                          `json:"MovieCount,omitempty"`
-	SeriesCount              int                          `json:"SeriesCount,omitempty"`
-	SeasonCount              int                          `json:"SeasonCount,omitempty"`
-	EpisodeCount             int                          `json:"EpisodeCount,omitempty"`
-	LockedFields             []string                     `json:"LockedFields,omitempty"`
-	LockData                 bool                         `json:"LockData,omitempty"`
-	Chapters                 []map[string]any             `json:"Chapters,omitempty"`
-	Trickplay                map[string]any               `json:"Trickplay,omitempty"`
-	MediaSourceCount         int                          `json:"MediaSourceCount,omitempty"`
-	MediaSources             []mediaSourceDTO             `json:"MediaSources,omitempty"`
-	MediaStreams             []mediaStreamDTO             `json:"MediaStreams,omitempty"`
-	Width                    int                          `json:"Width,omitempty"`
-	Height                   int                          `json:"Height,omitempty"`
+	ServerID                 string                                 `json:"ServerId,omitempty"`
+	ID                       string                                 `json:"Id"`
+	ChannelID                *string                                `json:"ChannelId"`
+	DateCreated              string                                 `json:"DateCreated,omitempty"`
+	Type                     string                                 `json:"Type,omitempty"`
+	MediaType                string                                 `json:"MediaType,omitempty"`
+	Name                     string                                 `json:"Name"`
+	IsFolder                 bool                                   `json:"IsFolder"`
+	IsHD                     bool                                   `json:"IsHD,omitempty"`
+	CanDelete                bool                                   `json:"CanDelete,omitempty"`
+	CanDownload              bool                                   `json:"CanDownload,omitempty"`
+	HasSubtitles             bool                                   `json:"HasSubtitles,omitempty"`
+	SupportsSync             bool                                   `json:"SupportsSync,omitempty"`
+	EnableMediaSourceDisplay bool                                   `json:"EnableMediaSourceDisplay,omitempty"`
+	Container                string                                 `json:"Container,omitempty"`
+	LocationType             string                                 `json:"LocationType,omitempty"`
+	VideoType                string                                 `json:"VideoType,omitempty"`
+	PlayAccess               string                                 `json:"PlayAccess,omitempty"`
+	Etag                     string                                 `json:"Etag,omitempty"`
+	DisplayPreferencesID     string                                 `json:"DisplayPreferencesId,omitempty"`
+	CollectionType           string                                 `json:"CollectionType,omitempty"`
+	RunTimeTicks             int64                                  `json:"RunTimeTicks,omitempty"`
+	ProductionYear           int                                    `json:"ProductionYear,omitempty"`
+	OfficialRating           string                                 `json:"OfficialRating,omitempty"`
+	CommunityRating          *float64                               `json:"CommunityRating,omitempty"`
+	CriticRating             *float64                               `json:"CriticRating,omitempty"`
+	Overview                 string                                 `json:"Overview,omitempty"`
+	OriginalTitle            string                                 `json:"OriginalTitle,omitempty"`
+	OriginalLanguage         string                                 `json:"OriginalLanguage,omitempty"`
+	PremiereDate             string                                 `json:"PremiereDate,omitempty"`
+	Path                     string                                 `json:"Path,omitempty"`
+	ExternalURLs             []map[string]any                       `json:"ExternalUrls,omitempty"`
+	RemoteTrailers           []map[string]any                       `json:"RemoteTrailers,omitempty"`
+	Genres                   []string                               `json:"Genres,omitempty"`
+	GenreItems               []namePairDTO                          `json:"GenreItems,omitempty"`
+	Studios                  []namePairDTO                          `json:"Studios,omitempty"`
+	Taglines                 []string                               `json:"Taglines,omitempty"`
+	Tags                     []string                               `json:"Tags,omitempty"`
+	ProviderIDs              map[string]string                      `json:"ProviderIds,omitempty"`
+	ProductionLocations      []string                               `json:"ProductionLocations,omitempty"`
+	ImageTags                map[string]string                      `json:"ImageTags"`
+	PrimaryImageItemID       string                                 `json:"PrimaryImageItemId,omitempty"`
+	BackdropImageTags        jsonStringArray                        `json:"BackdropImageTags"`
+	PrimaryImageAspectRatio  *float64                               `json:"PrimaryImageAspectRatio,omitempty"`
+	ImageBlurHashes          map[string]map[string]string           `json:"ImageBlurHashes,omitempty"`
+	UserData                 *itemUserDataDTO                       `json:"UserData,omitempty"`
+	SeriesID                 string                                 `json:"SeriesId,omitempty"`
+	SeasonID                 string                                 `json:"SeasonId,omitempty"`
+	SeasonName               string                                 `json:"SeasonName,omitempty"`
+	SeriesName               string                                 `json:"SeriesName,omitempty"`
+	SeriesPrimaryImageTag    string                                 `json:"SeriesPrimaryImageTag,omitempty"`
+	ParentBackdropImageTags  []string                               `json:"ParentBackdropImageTags,omitempty"`
+	ParentBackdropItemID     string                                 `json:"ParentBackdropItemId,omitempty"`
+	ParentThumbImageTag      string                                 `json:"ParentThumbImageTag,omitempty"`
+	ParentThumbItemID        string                                 `json:"ParentThumbItemId,omitempty"`
+	ParentPrimaryImageItemID string                                 `json:"ParentPrimaryImageItemId,omitempty"`
+	ParentPrimaryImageTag    string                                 `json:"ParentPrimaryImageTag,omitempty"`
+	ParentID                 string                                 `json:"ParentId,omitempty"`
+	SortName                 string                                 `json:"SortName,omitempty"`
+	ForcedSortName           string                                 `json:"ForcedSortName,omitempty"`
+	IndexNumber              *int                                   `json:"IndexNumber,omitempty"`
+	ParentIndexNumber        *int                                   `json:"ParentIndexNumber,omitempty"`
+	People                   []personDTO                            `json:"People,omitempty"`
+	ChildCount               int                                    `json:"ChildCount,omitempty"`
+	RecursiveItemCount       int                                    `json:"RecursiveItemCount,omitempty"`
+	LocalTrailerCount        int                                    `json:"LocalTrailerCount,omitempty"`
+	SpecialFeatureCount      int                                    `json:"SpecialFeatureCount,omitempty"`
+	MovieCount               int                                    `json:"MovieCount,omitempty"`
+	SeriesCount              int                                    `json:"SeriesCount,omitempty"`
+	SeasonCount              int                                    `json:"SeasonCount,omitempty"`
+	EpisodeCount             int                                    `json:"EpisodeCount,omitempty"`
+	LockedFields             []string                               `json:"LockedFields,omitempty"`
+	LockData                 bool                                   `json:"LockData,omitempty"`
+	Chapters                 []map[string]any                       `json:"Chapters,omitempty"`
+	Trickplay                map[string]map[string]trickplayInfoDTO `json:"Trickplay,omitempty"`
+	MediaSourceCount         int                                    `json:"MediaSourceCount,omitempty"`
+	MediaSources             []mediaSourceDTO                       `json:"MediaSources,omitempty"`
+	MediaStreams             []mediaStreamDTO                       `json:"MediaStreams,omitempty"`
+	Width                    int                                    `json:"Width,omitempty"`
+	Height                   int                                    `json:"Height,omitempty"`
+}
+
+// jsonStringArray encodes a nil slice as [] instead of null. BackdropImageTags
+// uses it because real Jellyfin always sends an array there, and Roku
+// (BrightScript) clients index the field without checking for it, crashing
+// right after login when it is absent or null. Image filters and
+// ImageTypeLimit=0 still clear the field, so a nil slice is normalized at
+// encode time rather than at every assignment.
+type jsonStringArray []string
+
+func (a jsonStringArray) MarshalJSON() ([]byte, error) {
+	if a == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal([]string(a))
 }
 
 type itemUserDataDTO struct {
@@ -239,19 +259,44 @@ type mediaSourceDTO struct {
 	MediaStreams                        []mediaStreamDTO  `json:"MediaStreams,omitempty"`
 }
 
+// MarshalJSON adds the flag labels Jellyfin sets on audio and subtitle streams
+// (MediaStreamRepository): Default and External on both, the rest on subtitles. Clients build track names from them; Wholphin shows
+// "English SRT (null)" for an external track without LocalizedExternal.
+func (s mediaStreamDTO) MarshalJSON() ([]byte, error) {
+	type plain mediaStreamDTO
+	if s.Type == compatStreamTypeAudio || s.Type == compatStreamTypeSubtitle {
+		s.LocalizedDefault = cmp.Or(s.LocalizedDefault, "Default")
+		s.LocalizedExternal = cmp.Or(s.LocalizedExternal, "External")
+	}
+	if s.Type == compatStreamTypeSubtitle {
+		s.LocalizedUndefined = cmp.Or(s.LocalizedUndefined, "Undefined")
+		s.LocalizedForced = cmp.Or(s.LocalizedForced, "Forced")
+		s.LocalizedHearingImpaired = cmp.Or(s.LocalizedHearingImpaired, "Hearing Impaired")
+	}
+	return json.Marshal(plain(s))
+}
+
 type mediaStreamDTO struct {
-	Index                  int     `json:"Index"`
-	Type                   string  `json:"Type"`
-	Codec                  string  `json:"Codec,omitempty"`
-	Language               string  `json:"Language,omitempty"`
-	LocalizedLanguage      string  `json:"LocalizedLanguage,omitempty"`
-	LocalizedOriginal      string  `json:"LocalizedOriginal,omitempty"`
-	TimeBase               string  `json:"TimeBase,omitempty"`
-	DisplayTitle           string  `json:"DisplayTitle,omitempty"`
-	Title                  string  `json:"Title,omitempty"`
-	IsDefault              bool    `json:"IsDefault"`
-	IsExternal             bool    `json:"IsExternal"`
-	IsForced               bool    `json:"IsForced"`
+	Index                    int    `json:"Index"`
+	Type                     string `json:"Type"`
+	Codec                    string `json:"Codec,omitempty"`
+	Language                 string `json:"Language,omitempty"`
+	LocalizedLanguage        string `json:"LocalizedLanguage,omitempty"`
+	LocalizedOriginal        string `json:"LocalizedOriginal,omitempty"`
+	LocalizedUndefined       string `json:"LocalizedUndefined,omitempty"`
+	LocalizedDefault         string `json:"LocalizedDefault,omitempty"`
+	LocalizedForced          string `json:"LocalizedForced,omitempty"`
+	LocalizedExternal        string `json:"LocalizedExternal,omitempty"`
+	LocalizedHearingImpaired string `json:"LocalizedHearingImpaired,omitempty"`
+	TimeBase                 string `json:"TimeBase,omitempty"`
+	DisplayTitle             string `json:"DisplayTitle,omitempty"`
+	Title                    string `json:"Title,omitempty"`
+	IsDefault                bool   `json:"IsDefault"`
+	IsExternal               bool   `json:"IsExternal"`
+	IsForced                 bool   `json:"IsForced"`
+	// IsOriginal is required by the Jellyfin 12 SDK models; Silo does not track
+	// which audio track is the original language.
+	IsOriginal             bool    `json:"IsOriginal"`
 	IsHearingImpaired      bool    `json:"IsHearingImpaired"`
 	IsTextSubtitleStream   bool    `json:"IsTextSubtitleStream"`
 	SupportsExternalStream bool    `json:"SupportsExternalStream"`
@@ -283,4 +328,17 @@ type mediaStreamDTO struct {
 	Width                  int     `json:"Width"`
 	Channels               int     `json:"Channels,omitempty"`
 	BitRate                int     `json:"BitRate,omitempty"`
+}
+
+// trickplayInfoDTO is Jellyfin's TrickplayInfoDto: how one width of a media
+// source's seek-bar previews is laid out. Interval is in milliseconds and
+// Bandwidth in bits per second.
+type trickplayInfoDTO struct {
+	Width          int `json:"Width"`
+	Height         int `json:"Height"`
+	TileWidth      int `json:"TileWidth"`
+	TileHeight     int `json:"TileHeight"`
+	ThumbnailCount int `json:"ThumbnailCount"`
+	Interval       int `json:"Interval"`
+	Bandwidth      int `json:"Bandwidth"`
 }

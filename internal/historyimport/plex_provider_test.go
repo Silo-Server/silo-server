@@ -259,7 +259,7 @@ func TestPlexServerProviderFetchesWatchedAndInProgressItems(t *testing.T) {
 	}))
 	defer server.Close()
 
-	records, warnings, err := NewPlexServerProvider(newUnthrottledPlexClient(), server.URL, "server-token").Fetch(context.Background())
+	records, warnings, err := NewPlexServerProvider(newUnthrottledPlexClient(), server.URL, "server-token").Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}

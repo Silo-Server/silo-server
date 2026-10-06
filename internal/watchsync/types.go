@@ -32,6 +32,9 @@ type Capabilities struct {
 	// v1 responses keep their original capability fields.
 	ImportRatings bool `json:"-"`
 	ExportRatings bool `json:"-"`
+	// SyncDropped means the provider can read, drop, and undrop dropped
+	// shows. Like the rating flags it is served only by /api/v2.
+	SyncDropped bool `json:"-"`
 }
 
 // ListKind identifies which personal list a sync operates on. The favorites and
@@ -132,6 +135,13 @@ type singleBatchWatchedExporter interface {
 	ExportBatchSize() int
 }
 
+// historyPrecisionExporter is implemented by providers that store watch times
+// more coarsely than to the second. History matching truncates both sides to
+// that precision, so a local play keeps matching its stored copy.
+type historyPrecisionExporter interface {
+	HistoryTimePrecision() time.Duration
+}
+
 type UnwatchedExporter interface {
 	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
@@ -221,6 +231,30 @@ type RatingExportWatchGate interface {
 	RatingExportRequiresWatched(kind string) bool
 }
 
+// DroppedImporter reads the shows a provider account dropped.
+type DroppedImporter interface {
+	FetchDropped(ctx context.Context, cfg ServerConfig, conn Connection) (DroppedImportBatch, error)
+}
+
+// DroppedImportBatch is one read of a provider's dropped shows. Complete means
+// Rows is the account's full dropped set, so a series absent from it is not
+// dropped remotely. An incomplete read (a provider that skipped an unchanged
+// list, or could not confirm it read everything) leaves every absent series
+// unknown.
+type DroppedImportBatch struct {
+	Rows           []RemoteDropped
+	Complete       bool
+	UpdatedCursors map[string]string
+	Warnings       []string
+}
+
+// DroppedExporter drops and undrops shows on the provider. Both calls are
+// desired-state writes: repeating one must succeed.
+type DroppedExporter interface {
+	ExportDropped(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+	RemoveDropped(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+}
+
 type Scrobbler interface {
 	Start(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
 	Pause(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
@@ -267,6 +301,7 @@ type Connection struct {
 	ScrobbleEnabled              bool
 	ImportRatingsEnabled         bool
 	ExportRatingsEnabled         bool
+	SyncDroppedEnabled           bool
 	LastInboundSyncAt            *time.Time
 	LastProgressSyncAt           *time.Time
 	LastOutboundSyncAt           *time.Time
@@ -553,6 +588,28 @@ type LocalRating struct {
 	RatedAt time.Time
 }
 
+// RemoteDropped is one show a provider reports as dropped. The embedded
+// RemoteFavorite carries the series identity. A zero DroppedAt is unknown.
+type RemoteDropped struct {
+	RemoteFavorite
+	DroppedAt time.Time
+}
+
+// DroppedSyncState records that Silo and a provider agreed a series is
+// dropped; no state means they agreed it is not. RemoteSeen records that a
+// provider read confirmed the drop. ProviderAccountID scopes the row to the
+// provider account it was agreed with.
+type DroppedSyncState struct {
+	ConnectionID      string
+	ProviderAccountID string
+	SeriesID          string
+	ProviderItemKey   string
+	RemoteSeen        bool
+	// UpdatedAt is when the agreement was last recorded. A local drop made
+	// after it is a local change the provider has not been told about.
+	UpdatedAt time.Time
+}
+
 // LocalRatingEvent reports that a profile set or cleared ratings. It carries
 // no values: the handler reads the current rating so that events processed out
 // of order never send a stale value.
@@ -574,6 +631,15 @@ type RatingSyncState struct {
 	ProviderItemKey   string
 	SyncedRating      int
 	RemoteSeen        bool
+}
+
+// LocalDroppedEvent reports that a profile dropped or undropped series. It
+// carries no state: the handler reads each series' current drop so that events
+// processed out of order never send a stale value.
+type LocalDroppedEvent struct {
+	UserID    int
+	ProfileID string
+	SeriesIDs []string
 }
 
 type LocalWatchEventKind string
@@ -820,6 +886,7 @@ type ConnectionStatus struct {
 	// explicitly; the frozen v1 response keeps its original fields.
 	ImportRatingsEnabled bool `json:"-"`
 	ExportRatingsEnabled bool `json:"-"`
+	SyncDroppedEnabled   bool `json:"-"`
 }
 
 type ConnectionUpdate struct {
@@ -837,6 +904,7 @@ type ConnectionUpdate struct {
 	ScrobbleEnabled              *bool `json:"scrobble_enabled,omitempty"`
 	ImportRatingsEnabled         *bool `json:"import_ratings_enabled,omitempty"`
 	ExportRatingsEnabled         *bool `json:"export_ratings_enabled,omitempty"`
+	SyncDroppedEnabled           *bool `json:"sync_dropped_enabled,omitempty"`
 }
 
 // UnknownProviderError reports a provider key the registry does not know.

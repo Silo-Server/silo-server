@@ -10,7 +10,7 @@
   "consumer_method": "Client call sites were extracted by scripts/apiv2-ledger/extract_consumers.py from web/src (this repo) and the origin/main trees of silo-apple and silo-android at the commits pinned in source_trees (re-resolve a sibling site with git show <sha>:<file> in that repo, never against a moving branch): path literals and templates passed to HTTP/WebSocket calls, plus paths built by helper functions that return a template, templates rooted at the API base URL, Kotlin buildString/const val builders, and Swift let/static let path bindings, with interpolations normalized to a wildcard and matched against inventory paths by method (scripts/apiv2-ledger/match_consumers.py). scripts/apiv2-ledger/sweep_uncredited.py then greps the last two static segments of every inventory path across all three trees and every hit not within four lines of a credited site was resolved by hand. Server-internal and compat consumers are Go URL builders and callers in this repo. Sites marked match=manual were resolved by hand where the path is assembled from variables the scripts cannot follow. Call-site files are repository-root-relative for their repo (web: src/... under web/; apple: iosApp/...; android: shared/, android-shared/, androidApp/, androidTvApp/; server: this repository root). Absence of a first-party consumer is not proof of disuse.",
   "field_reference": "internal/contractledger validates this file against migration.schema.json and reconciles it against the route inventory: listener, namespace, method, path, registration_index, handler, handler_kind, source_file, route_group, middleware_chain, auth_class, auth_traits, conditional, conditions, delegates_to (inventory empty string is null here), request_kind, response_media_kind, streams, and upgrades_websocket are copied from the inventory row and must match it, except that dynamic_plugin_proxy rows record both media kinds as dynamic_proxy; profile_required and admin_required are derived from auth_traits. Every other field is curated by hand and preserved when scripts/apiv2-ledger/build_ledger.py merges a regenerated inventory into this file.",
   "totals": {
-    "entries": 779
+    "entries": 782
   },
   "entries": [
     {
@@ -8022,17 +8022,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/hooks/queries/items.ts",
-          "line": 210,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "admin-catalog",
       "release_flow": "other_admin",
       "tier": 2,
@@ -8046,7 +8038,7 @@
         "path": "/api/v2/admin/items/{id}/redetect-intro",
         "operation_id": "redetectAdminEpisodeIntro"
       },
-      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Typed202 queued/already_running is not persisted job acceptance. Existing web re-detection adopted; no native administrator callers or Jellyfin equivalent found.",
+      "notes": "Shared frozen-v1 marker analysis service with unchanged mode/eligibility checks and local background lifecycle; independently reviewed and ratified. Episodes and intros only, as in v1. Typed202 queued/already_running is not persisted job acceptance. Web re-detection moved to the v2-only redetectAdminItemMarkers, which also offers credits and movies; no native administrator callers or Jellyfin equivalent found.",
       "retry_safety": "non_retryable",
       "retry_safety_note": "An in-process in-flight map coalesces active work only; no durable receipt, cluster-wide lease, or persisted job. Web disables mutation and authentication retries."
     },
@@ -18778,7 +18770,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 11,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -18834,7 +18826,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 12,
+      "middleware_chain": 13,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -18991,7 +18983,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 16,
+      "middleware_chain": 17,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19084,10 +19076,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 2,
+      "middleware_chain": 11,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "profile_required": false,
       "admin_required": false,
@@ -19175,10 +19168,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 14,
+      "middleware_chain": 15,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
+        "rate_limited",
         "viewer_access"
       ],
       "profile_required": false,
@@ -19290,10 +19284,11 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 2,
+      "middleware_chain": 11,
       "auth_class": "authenticated",
       "auth_traits": [
-        "authenticated"
+        "authenticated",
+        "rate_limited"
       ],
       "profile_required": false,
       "admin_required": false,
@@ -19457,7 +19452,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 17,
+      "middleware_chain": 18,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19636,7 +19631,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 18,
+      "middleware_chain": 19,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -19853,7 +19848,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 20,
+      "middleware_chain": 21,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20250,7 +20245,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 11,
+      "middleware_chain": 12,
       "auth_class": "authenticated",
       "auth_traits": [
         "authenticated",
@@ -20636,7 +20631,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 21,
+      "middleware_chain": 22,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20810,7 +20805,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/auth",
-      "middleware_chain": 22,
+      "middleware_chain": 23,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -20923,7 +20918,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 15,
+      "middleware_chain": 16,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -27951,7 +27946,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 19,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -28063,7 +28058,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1/invitations/{token}",
-      "middleware_chain": 19,
+      "middleware_chain": 20,
       "auth_class": "public",
       "auth_traits": [
         "rate_limited"
@@ -31711,7 +31706,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 23,
+      "middleware_chain": 24,
       "auth_class": "profile_scoped",
       "auth_traits": [
         "authenticated",
@@ -36058,7 +36053,7 @@
         "path": null,
         "operation_id": null
       },
-      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here (docs/continuum-to-silo-docker-migration.md). Contract: docs/architecture/api-contract.md."
+      "notes": "Retained as unversioned probe on api listener with public; no v2 JSON operation (owner decision 2026-09-07, Quick104): GET /api/v1/ready stays exactly as served today, outside the OpenAPI artifact and the /api/v1 tombstone; 200 {status:ok} when Postgres pings and S3 is unconfigured or its bucket answers, otherwise 503 {status:error, postgres, s3} with the booleans present only on failure. Orchestrator readiness probes stay pointed here. Contract: docs/architecture/api-contract.md."
     },
     {
       "listener": "api",
@@ -41767,18 +41762,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/catalog",
-        "operation_id": "getThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41790,7 +41785,7 @@
       "handler_kind": "method",
       "source_file": "internal/api/router.go",
       "route_group": "/api/v1",
-      "middleware_chain": 13,
+      "middleware_chain": 14,
       "auth_class": "acting_admin",
       "auth_traits": [
         "acting_admin",
@@ -41823,20 +41818,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "POST",
-        "path": "/api/v2/theme/catalog/refresh",
-        "operation_id": "refreshThemeCatalog"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities.",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Resets a cache timestamp; converges."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -41880,18 +41873,18 @@
       ],
       "section": "settings-branding",
       "release_flow": "browse_search",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The community theme catalog routes\"); still registered on the bridge surface, retired by the tombstone. No successor: the web client has a single theme and no theme catalog.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/theme/download",
-        "operation_id": "downloadThemeFile"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Implemented shared theme upstream/cache application methods and typed portable document envelopes; independently reviewed and accepted. Frozen v1 bytes, status/error codes, size caps and cache/stale headers retained. V2 validates document shape and rejects cap-sized possibly truncated reads. Approved HTTPS initial/redirect targets unchanged. Account-authenticated reads and acting-admin synchronous per-node refresh. Bundled web uses v2 and retains parser/CSS sanitization; no native or Jellyfin theme-catalog/download consumer. Capability GET /api/v2/theme/catalog/capabilities."
+      "notes": "Section settings-branding. The v2 theme catalog operations (getThemeCatalog, refreshThemeCatalog, downloadThemeFile, getThemeCatalogCapabilities) were removed before the v2 lock when theming was reduced to the single Cinema Dark theme, which only the admin customizes through accent color, ui.admin_theme_vars and ui.admin_custom_css. The bundled web client no longer calls the catalog; no native or Jellyfin consumer exists. The frozen v1 route keeps its bytes, status and error codes, size caps and cache headers, and the theme.catalog_url server setting keeps its default for it, until the /api/v1 tombstone retires it. Removal ratified 2026-09-26 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -45344,7 +45337,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45404,7 +45397,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45457,7 +45450,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45510,7 +45503,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 24,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45569,7 +45562,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45622,7 +45615,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -45675,7 +45668,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45750,7 +45743,7 @@
       "handler_kind": "expression",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 24,
+      "middleware_chain": 25,
       "auth_class": "public",
       "auth_traits": [
         "cors"
@@ -45794,7 +45787,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45847,7 +45840,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45901,7 +45894,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -45955,7 +45948,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46000,7 +45993,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 26,
+      "middleware_chain": 27,
       "auth_class": "node_bearer",
       "auth_traits": [
         "cors",
@@ -46045,7 +46038,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46106,7 +46099,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46167,7 +46160,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46228,7 +46221,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46289,7 +46282,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46350,7 +46343,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46411,7 +46404,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46456,7 +46449,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46501,7 +46494,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46554,7 +46547,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46607,7 +46600,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46668,7 +46661,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46729,7 +46722,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46789,7 +46782,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46842,7 +46835,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46895,7 +46888,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -46948,7 +46941,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47001,7 +46994,7 @@
       "handler_kind": "method",
       "source_file": "internal/proxy/server.go",
       "route_group": "/",
-      "middleware_chain": 25,
+      "middleware_chain": 26,
       "auth_class": "public",
       "auth_traits": [
         "cors",
@@ -47061,7 +47054,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47120,7 +47113,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47172,7 +47165,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47281,7 +47274,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47333,7 +47326,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47386,7 +47379,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47438,7 +47431,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47490,7 +47483,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47538,13 +47531,65 @@
       "listener": "transcode_node",
       "namespace": "legacy_unversioned",
       "method": "GET",
+      "path": "/downloads/prepare/{artifact_id}/progress",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleDownloadPrepareProgress",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 28,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/downloadprepare/transport.go",
+          "line": 432,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "downloads",
+      "tier": 1,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node GET /downloads/prepare/{artifact_id}/progress. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
       "path": "/hw-capabilities",
       "registration_index": 0,
       "handler": "(*internal/transcodenode.Server).handleHWCapabilities",
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47610,6 +47655,58 @@
     },
     {
       "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/media-samples/run",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleMediaSample",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 28,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/mediasample/remote.go",
+          "line": 85,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "Node-listener route added with subtitle sync: transcode nodes run media sampling requests (speech levels for subtitle alignment) so large files are read next to the media instead of on the API server. The node listeners have no /api/v2 namespace; the route keeps its version-neutral path and is described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /media-samples/run. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
+    },
+    {
+      "listener": "transcode_node",
       "namespace": "operational",
       "method": "GET",
       "path": "/metrics",
@@ -47660,7 +47757,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47719,7 +47816,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47778,7 +47875,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47822,7 +47919,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47884,7 +47981,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -47937,7 +48034,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48011,7 +48108,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48085,7 +48182,7 @@
       "handler_kind": "method",
       "source_file": "internal/transcodenode/server.go",
       "route_group": "/",
-      "middleware_chain": 27,
+      "middleware_chain": 28,
       "auth_class": "node_bearer",
       "auth_traits": [
         "node_bearer"
@@ -48149,6 +48246,58 @@
       },
       "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /transcode/{session_id}/segment/{name}/downloaded. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2. Inventory media kind is heuristic and unresolved for this row; confirm in the section PR.",
       "retry_safety": "natural_idempotent"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/trickplay/extract",
+      "registration_index": 0,
+      "handler": "(*internal/transcodenode.Server).handleTrickplayExtract",
+      "handler_kind": "method",
+      "source_file": "internal/transcodenode/server.go",
+      "route_group": "/",
+      "middleware_chain": 28,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "profile_required": false,
+      "admin_required": false,
+      "conditional": false,
+      "conditions": [],
+      "delegates_to": null,
+      "request_kind": "json",
+      "response_media_kind": "json",
+      "streams": false,
+      "upgrades_websocket": false,
+      "capability_endpoint": null,
+      "consumers": [
+        "internal"
+      ],
+      "consumer_call_sites": [
+        {
+          "repo": "server",
+          "file": "internal/trickplay/remote.go",
+          "line": 145,
+          "types": [],
+          "match": "manual"
+        }
+      ],
+      "section": "node-transcode",
+      "release_flow": "background_refresh",
+      "tier": 2,
+      "disposition": "ported",
+      "disposition_rule": "listener_delegation",
+      "disposition_rationale": "No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: this route is retained at its version-neutral path on the node listener and described through the typed worker protocol extension (`x-silo-worker-protocols`), with no /api/v2 alias (plan constraint 4; api-contract.md section 8, version-neutral legacy routes are retired individually and are not aliases into v2). Its section PR confirms retention or retires it individually.",
+      "owner": null,
+      "review_state": "ratified",
+      "v2": {
+        "method": null,
+        "path": null,
+        "operation_id": null
+      },
+      "notes": "Retained on transcode_node listener with node_bearer; v2 unset by design; description: x-silo-worker-protocols transcode_node POST /trickplay/extract. v2 is null by design for node-listener rows: the route keeps its version-neutral path and is described by the worker protocol extension (`x-silo-worker-protocols`), not aliased under /api/v2."
     }
   ]
 }

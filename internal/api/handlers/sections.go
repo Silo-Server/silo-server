@@ -15,7 +15,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -1306,6 +1305,13 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 // buildSections renders sections for a viewer described by its context,
 // access filter and artwork size; it is what v1 and v2 share.
 func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size) homeSectionsResponse {
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, size, nil)
+}
+
+// buildSectionsWithUserStates is buildSections reusing user states the caller
+// already loaded for these items (the Home hide-watched filter does); nil
+// loads them as buildSections does.
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, size imagesize.Size, knownUserStates map[string]*itemUserStateResponse) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
 
 	contentIDs := make([]string, 0)
@@ -1384,7 +1390,11 @@ func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections
 		playTargets = resolvedTargets
 	})
 
-	wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	if knownUserStates != nil {
+		userStates = knownUserStates
+	} else {
+		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+	}
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
@@ -1610,7 +1620,7 @@ func (h *SectionHandler) resolveSectionItemImageURLs(ctx context.Context, withIt
 				},
 				posterPath:   sizedPosterPath(item.PosterPath, size),
 				backdropPath: sizedSectionBackdropPath(section.SectionType, item.BackdropPath, size),
-				logoPath:     sizedImagePath(item.LogoPath, artworkkey.ImageLogo, size, item.LogoPath),
+				logoPath:     sizedFeaturedLogoPath(item.LogoPath, size),
 			}
 			pending = append(pending, images)
 			addPath(images.posterPath)
@@ -1753,6 +1763,8 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 
 // injectNextUpSection inserts a synthetic SectionNextUp entry after the
 // contiguous continue rows that start with the video Continue Watching row.
+// The row has no override of its own, so it shows as many items as that
+// Continue Watching row.
 func injectNextUpSection(resolved []sections.ResolvedSection) []sections.ResolvedSection {
 	nextUp := sections.ResolvedSection{
 		ID:          "system-next-up",
@@ -1763,6 +1775,9 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 
 	for i, s := range resolved {
 		if s.SectionType == sections.SectionContinueWatching && sections.ContinueTypeFromConfig(s.Config) == sections.ContinueTypeWatching {
+			if s.ItemLimit > 0 {
+				nextUp.ItemLimit = s.ItemLimit
+			}
 			insertAt := i + 1
 			for insertAt < len(resolved) && resolved[insertAt].SectionType == sections.SectionContinueWatching {
 				insertAt++

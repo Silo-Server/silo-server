@@ -69,6 +69,82 @@ func TestHandleItemImageAcceptsSignedTagWithoutSessionOrCache(t *testing.T) {
 	}
 }
 
+// TestItemLogoTagIsAdvertisedAndLogoServedAnonymously covers clients such as
+// Neptune that check ImageTags for a logo and then fetch it without auth, on a
+// node whose cache has never seen the item.
+func TestItemLogoTagIsAdvertisedAndLogoServedAnonymously(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "series-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	updatedAt := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	item := &models.MediaItem{
+		ContentID:  contentID,
+		PosterPath: "metadb://poster/series-1",
+		LogoPath:   upstream.URL,
+		UpdatedAt:  updatedAt,
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	m := newMapper(codec, cfg)
+	listItem := upstreamListItem{
+		ContentID:  contentID,
+		Type:       "series",
+		Title:      "Series",
+		PosterURL:  item.PosterPath,
+		PosterPath: item.PosterPath,
+		LogoURL:    item.LogoPath,
+		LogoPath:   item.LogoPath,
+		UpdatedAt:  item.UpdatedAt,
+	}
+	tag := m.itemFromList(listItem, false, nil, nil).ImageTags["Logo"]
+	if tag == "" {
+		t.Fatal("series with a logo did not advertise a Logo image tag")
+	}
+
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, func() time.Time { return updatedAt }),
+		itemRepo:  fakeImageItemRepo{item: item},
+		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
+	}
+	for _, requestTag := range []string{tag, "0000000000000000"} {
+		req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Logo?maxWidth=400&tag="+requestTag, nil)
+		req = withImageRouteParams(req, routeID, "Logo")
+		rec := httptest.NewRecorder()
+
+		h.HandleItemImage(rec, req)
+
+		assertImageRedirect(t, rec, upstream.URL)
+	}
+
+	detail := m.itemFromDetail(upstreamItemDetail{
+		ContentID: contentID,
+		Type:      "series",
+		Title:     "Series",
+		LogoURL:   item.LogoPath,
+		LogoPath:  item.LogoPath,
+		UpdatedAt: item.UpdatedAt,
+	}, false, nil)
+	if detail.ImageTags["Logo"] != tag {
+		t.Fatalf("detail Logo tag = %q, want the list tag %q", detail.ImageTags["Logo"], tag)
+	}
+
+	withoutLogo := listItem
+	withoutLogo.LogoURL, withoutLogo.LogoPath = "", ""
+	if _, ok := m.itemFromList(withoutLogo, false, nil, nil).ImageTags["Logo"]; ok {
+		t.Fatal("item without a logo advertised a Logo image tag")
+	}
+	episode := listItem
+	episode.Type = "episode"
+	if _, ok := m.itemFromList(episode, false, nil, nil).ImageTags["Logo"]; ok {
+		t.Fatal("episode advertised its own Logo image tag")
+	}
+}
+
 // TestHandleItemImageReadsTagInAnyQueryCase covers jellyfin-kodi, which sends
 // "Tag=" and no auth. Jellyfin binds query parameters case-insensitively, so a
 // signed tag authorizes the request in any casing, even on a node whose image
@@ -262,7 +338,7 @@ func TestHandleItemImageProxyRouteIDUsesCanonicalItemAndProxy(t *testing.T) {
 	}
 }
 
-func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
+func TestHandleItemImageServesItemWithUnsignedTagWhenSecretBlank(t *testing.T) {
 	codec := NewResourceIDCodec()
 	contentID := "movie-1"
 	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
@@ -294,12 +370,9 @@ func TestHandleItemImageRejectsUnsignedTagWhenSecretBlank(t *testing.T) {
 
 	h.HandleItemImage(rec, req)
 
-	// An unsigned/invalid tag must not serve the image. Per the Jellyfin
-	// contract (item-image GETs are anonymous, 200/404 only) the rejection
-	// surfaces as a 404, not a 401.
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, body = %s; want 404", rec.Code, rec.Body.String())
-	}
+	// The tag is a cache hint, as in Jellyfin: an unsigned tag still serves
+	// the item's image to an anonymous request.
+	assertImageRedirect(t, rec, item.PosterPath)
 }
 
 func TestHandleItemImageAcceptsSignedCanonicalBackdropTagWithoutSessionOrCache(t *testing.T) {
@@ -417,7 +490,7 @@ func TestHandleItemImageAcceptsLegacyCachedURLTagWithoutRouteFallback(t *testing
 	}
 }
 
-func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
+func TestHandleItemImageServesCurrentImageForTagSignedWithOldSecret(t *testing.T) {
 	called := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -436,7 +509,7 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 		UpdatedAt:       updatedAt,
 	}
 	cache := NewImageCache(time.Hour, func() time.Time { return updatedAt })
-	cache.RememberSized(routeID, "Primary", upstream.URL, compatCardImageSize)
+	cache.RememberSized(routeID, "Primary", "https://cdn.example.test/previous-poster.jpg", compatCardImageSize)
 	tag := newMapper(codec, &config.Config{
 		Auth: config.AuthConfig{JWTSecret: "old-secret"},
 	}).itemFromList(upstreamListItem{
@@ -461,14 +534,109 @@ func TestHandleItemImageRevalidatesTagBeforeRouteCacheHit(t *testing.T) {
 
 	h.HandleItemImage(rec, req)
 
-	// A stale tag (signed with the old secret) must not serve the cached image.
-	// Per the Jellyfin contract the rejection surfaces as a 404, not a 401.
+	// A tag signed with an old secret is only a stale cache hint. The item's
+	// current image is served, not the older URL this node's route cache holds.
+	assertImageRedirect(t, rec, upstream.URL)
+	if called {
+		t.Fatal("compat image route proxied the upstream image instead of redirecting")
+	}
+}
+
+// TestHandleItemImageServesAnonymousTaglessBackdropWithoutCache covers Neptune,
+// which requests hero backdrops with maxWidth=1920, no tag, and no auth. No
+// list response warms the original-size cache bucket, so the catalog must
+// resolve it.
+func TestHandleItemImageServesAnonymousTaglessBackdropWithoutCache(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "series-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, time.Now),
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, BackdropPath: upstream.URL}},
+		imageTags: newImageTagSigner("image-secret"),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Backdrop?maxWidth=1920", nil)
+	req = withImageRouteParams(req, routeID, "Backdrop")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	assertImageRedirect(t, rec, upstream.URL)
+}
+
+// TestHandleItemImageHidesExcludedMediaTypesFromAnonymousRequests keeps the
+// anonymous path to what the compat surface exposes: audiobook and podcast
+// artwork stays behind the native and ABS APIs.
+func TestHandleItemImageHidesExcludedMediaTypesFromAnonymousRequests(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "audiobook-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, time.Now),
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, Type: "audiobook", PosterPath: upstream.URL}},
+		imageTags: newImageTagSigner("image-secret"),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary", nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, body = %s; want 404", rec.Code, rec.Body.String())
 	}
-	if called {
-		t.Fatal("served cached image before validating the signed tag")
+}
+
+// TestHandleItemImageServesTagMintedBeforeMetadataRefresh covers clients that
+// cache item lists: a refresh bumps UpdatedAt and rotates the tag, but the
+// client keeps requesting with the tag it already has.
+func TestHandleItemImageServesTagMintedBeforeMetadataRefresh(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer upstream.Close()
+
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	cfg := &config.Config{Auth: config.AuthConfig{JWTSecret: "image-secret"}}
+	before := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
+	staleTag := newMapper(codec, cfg).itemFromList(upstreamListItem{
+		ContentID:  contentID,
+		Type:       "movie",
+		Title:      "Movie",
+		PosterURL:  upstream.URL,
+		PosterPath: upstream.URL,
+		UpdatedAt:  before,
+	}, false, nil, nil).ImageTags["Primary"]
+	h := &ImagesHandler{
+		codec:     codec,
+		images:    NewImageCache(time.Hour, time.Now),
+		itemRepo:  fakeImageItemRepo{item: &models.MediaItem{ContentID: contentID, PosterPath: upstream.URL, UpdatedAt: before.Add(time.Hour)}},
+		imageTags: newImageTagSigner(cfg.Auth.JWTSecret),
 	}
+
+	req := httptest.NewRequest(http.MethodGet, "/Items/"+routeID+"/Images/Primary?maxWidth=400&tag="+staleTag, nil)
+	req = withImageRouteParams(req, routeID, "Primary")
+	rec := httptest.NewRecorder()
+
+	h.HandleItemImage(rec, req)
+
+	assertImageRedirect(t, rec, upstream.URL)
 }
 
 func TestRedirectImageURLRejectsNonHTTPURL(t *testing.T) {

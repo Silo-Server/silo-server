@@ -39,7 +39,7 @@ func TestFetchMetadataByKeyStopsAfterSystematicFailures(t *testing.T) {
 
 	client := &PlexClient{httpClient: server.Client()}
 	keys := metadataKeys(plexMetadataBatchSize * 10)
-	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFetchMetadataByKeyKeepsSweepingPastDeletedKeys(t *testing.T) {
 
 	client := &PlexClient{httpClient: server.Client()}
 	keys := metadataKeys(plexMetadataBatchSize * (plexMetadataFailureStreakLimit + 1))
-	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestFetchMetadataByKeyResumesAfterRecoveredFailure(t *testing.T) {
 	client := &PlexClient{httpClient: server.Client()}
 	batches := 6
 	keys := metadataKeys(plexMetadataBatchSize * batches)
-	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestFetchMetadataByKeyTreats404AsAnAnswer(t *testing.T) {
 
 	client := &PlexClient{httpClient: server.Client()}
 	keys := metadataKeys(plexMetadataBatchSize * 8)
-	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestFetchMetadataByKeyDoesNotReportAnEarlyStopOnTheLastBatch(t *testing.T) 
 
 	client := &PlexClient{httpClient: server.Client()}
 	keys := metadataKeys(plexMetadataBatchSize * plexMetadataFailureStreakLimit)
-	sweep, err := client.fetchMetadataByKey(t.Context(), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}

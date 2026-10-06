@@ -34,6 +34,10 @@ type Service struct {
 	stores     userstore.UserStoreProvider
 	bgContext  context.Context
 
+	// localNetwork decides whether a server address a user supplied may be on
+	// this server's own network. Nil limits those addresses to the internet.
+	localNetwork *LocalNetworkAccess
+
 	// runSemaphore limits concurrent run goroutines to maxConcurrentRuns.
 	runSemaphore   chan struct{}
 	queueWake      chan struct{}
@@ -69,6 +73,14 @@ func NewService(bgContext context.Context, repo *Repository, storeProvider users
 // observers have been configured. Construction must not consume persisted jobs.
 func (s *Service) StartBackgroundWork() {
 	s.backgroundOnce.Do(func() { s.startStaleRunMonitor(); s.startImportQueue() })
+}
+
+// SetLocalNetworkAccess installs the policy for server addresses users supply.
+// Without it, those addresses are limited to the public internet.
+func (s *Service) SetLocalNetworkAccess(access *LocalNetworkAccess) {
+	if s != nil {
+		s.localNetwork = access
+	}
 }
 
 func (s *Service) SetStableIdentityResolver(identity *watchstate.StableIdentityResolver) {
@@ -565,6 +577,9 @@ const (
 )
 
 func userFacingRunError(summary ExecutionSummary, err error) string {
+	if message, refused := ServerAddressMessage(err); refused {
+		return message
+	}
 	if UpstreamHTTPStatus(err) == http.StatusUnauthorized {
 		return RunErrorSourceRejected
 	}
@@ -591,6 +606,21 @@ func (s *Service) ListRunsPage(ctx context.Context, userID int, after *RunKey, l
 		limit = 10
 	}
 	return s.repo.ListRunsPageForUser(ctx, userID, after, limit)
+}
+
+// ListRunsPageForProfile is ListRunsPage limited to runs that write into
+// profileID.
+func (s *Service) ListRunsPageForProfile(ctx context.Context, userID int, profileID string, after *RunKey, limit int) ([]Run, bool, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.repo.ListRunsPageForProfile(ctx, userID, profileID, after, limit)
+}
+
+// UserStore returns the account's profile store, which callers use to decide
+// which of the account's profiles the acting profile may import for.
+func (s *Service) UserStore(ctx context.Context, userID int) (userstore.UserStore, error) {
+	return s.stores.ForUser(ctx, userID)
 }
 
 func (s *Service) ListActiveRuns(ctx context.Context, userID int) ([]Run, error) {
@@ -678,16 +708,6 @@ func IsNotFoundError(err error) bool {
 		errors.Is(err, ErrProfileNotFound) ||
 		errors.Is(err, ErrConnectSessionNotFound) ||
 		errors.Is(err, ErrPlexSessionNotFound)
-}
-
-func shouldWriteImportedProgress(record Record, localProgress *localProgressRow) bool {
-	if localProgress == nil {
-		return true
-	}
-	if record.UpdatedAt.IsZero() {
-		return false
-	}
-	return record.UpdatedAt.After(localProgress.UpdatedAt)
 }
 
 func toConnectServerResponses(servers []ConnectServer) []ConnectServerResponse {

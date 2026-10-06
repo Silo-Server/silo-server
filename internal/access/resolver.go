@@ -104,6 +104,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxAdvisoryAge = profile.MaxAdvisoryAge
+		scope.RequireAdvisoryAge = profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = preferences.PreferredMetadataLanguage
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
@@ -116,6 +117,8 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.ProfileVerified = verified
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
 	}
+
+	scope.PreferencesDegraded = preferences.Degraded
 
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs

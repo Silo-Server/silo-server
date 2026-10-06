@@ -50,7 +50,7 @@ func TestConfigurationFieldCasingUpdatesCanonicalSettings(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := dto.Configuration
-			if c.SubtitleMode != "Always" || c.AudioLanguagePreference != "fr" || c.SubtitleLanguagePreference != "en" || c.EnableNextEpisodeAutoPlay || c.CastReceiverID != "receiver" || !c.HidePlayedInLatest {
+			if c.SubtitleMode != "Always" || c.AudioLanguagePreference != "fra" || c.SubtitleLanguagePreference != "eng" || c.EnableNextEpisodeAutoPlay || c.CastReceiverID != "receiver" || !c.HidePlayedInLatest {
 				t.Fatalf("configuration=%+v", c)
 			}
 			update(map[string]any{"AudioLanguagePreference": nil, "SubtitleLanguagePreference": nil, "CastReceiverId": nil}, 204)

@@ -16,6 +16,7 @@
 package mail
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -53,6 +54,12 @@ const (
 // Callers treat email as an optional transport and degrade gracefully.
 var ErrNotConfigured = errors.New("email is not configured")
 
+// ErrNotSent marks a Send failure before the message reached the mail server
+// (building it, connecting, or authenticating), so it was certainly not
+// delivered. Any other Send error leaves delivery uncertain: the server may
+// have accepted the message before the failure.
+var ErrNotSent = errors.New("email was not sent")
+
 // Message is one outbound email. At least one body variant is required; when
 // both are set the message is sent as multipart/alternative.
 type Message struct {
@@ -64,6 +71,18 @@ type Message struct {
 	ReplyTo string
 	// Headers sets additional top-level headers (e.g. List-Unsubscribe).
 	Headers map[string]string
+	// Inline holds images the HTML body references as cid:<ContentID>.
+	Inline []InlineImage
+}
+
+// InlineImage is an image embedded in the message rather than linked, so it
+// renders without a remote-content prompt and without the recipient reaching
+// the server.
+type InlineImage struct {
+	ContentID   string // referenced from HTML as cid:<ContentID>
+	Filename    string
+	ContentType string
+	Data        []byte
 }
 
 // Sender is the feature-facing abstraction. Implementations must be safe for
@@ -169,7 +188,7 @@ func (s *SMTPSender) Enabled(ctx context.Context) bool {
 }
 
 // Send delivers one message over SMTP.
-func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
+func (s *SMTPSender) Send(ctx context.Context, msg Message) (err error) {
 	cfg, err := s.loadConfig(ctx)
 	if err != nil {
 		return err
@@ -183,16 +202,27 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 
 	message, err := buildMessage(cfg, msg)
 	if err != nil {
-		return err
+		return errors.Join(ErrNotSent, err)
 	}
 	client, err := newClient(cfg)
 	if err != nil {
-		return fmt.Errorf("smtp client: %w", err)
+		return errors.Join(ErrNotSent, fmt.Errorf("smtp client: %w", err))
 	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	if err := client.DialAndSendWithContext(sendCtx, message); err != nil {
+	// Dial and send separately, so a failure to connect or authenticate is
+	// known not to have delivered anything.
+	conn, err := client.DialToSMTPClientWithContext(sendCtx)
+	if err != nil {
+		return errors.Join(ErrNotSent, fmt.Errorf("smtp dial: %w", err))
+	}
+	defer func() {
+		if closeErr := client.CloseWithSMTPClient(conn); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("smtp close: %w", closeErr))
+		}
+	}()
+	if err := client.SendWithSMTPClient(conn, message); err != nil {
 		return fmt.Errorf("smtp send: %w", err)
 	}
 	return nil
@@ -223,6 +253,14 @@ func buildMessage(cfg *smtpConfig, msg Message) (*gomail.Msg, error) {
 		message.SetBodyString(gomail.TypeTextHTML, msg.HTMLBody)
 	default:
 		message.SetBodyString(gomail.TypeTextPlain, msg.TextBody)
+	}
+	for _, image := range msg.Inline {
+		if err := message.EmbedReader(image.Filename, bytes.NewReader(image.Data),
+			gomail.WithFileContentID("<"+image.ContentID+">"),
+			gomail.WithFileContentType(gomail.ContentType(image.ContentType)),
+		); err != nil {
+			return nil, fmt.Errorf("embed %s: %w", image.Filename, err)
+		}
 	}
 	return message, nil
 }

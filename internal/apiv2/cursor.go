@@ -84,6 +84,12 @@ func viewerScopeDigest(ctx context.Context) string {
 	if scope.MaxAdvisoryAge > 0 {
 		parts = append(parts, "advisory="+strconv.Itoa(scope.MaxAdvisoryAge))
 	}
+	// Same rule: only a profile that requires an advisory age changes its
+	// digest, so turning the option on or off moves cursors to page 1 while
+	// every other scope keeps the digest it had.
+	if scope.HidesUnadvised() {
+		parts = append(parts, "requireadvisory")
+	}
 	canonical := strings.Join(parts, "\x00")
 	sum := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(sum[:8])

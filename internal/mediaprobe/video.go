@@ -43,6 +43,8 @@ func (s *ScalarString) UnmarshalJSON(data []byte) error {
 }
 
 // Stream is the FFprobe stream shape shared by full scans and live validation.
+// Refs is 0 from FFmpeg 8.1, which reports it only when reading frames;
+// FFmpeg 7 reported the decoder default of 1, not the real count.
 type Stream struct {
 	ID                 ScalarString      `json:"id"`
 	Index              int               `json:"index"`

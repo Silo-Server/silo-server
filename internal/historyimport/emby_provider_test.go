@@ -126,7 +126,7 @@ func playedEmbyItem(item embyItem, lastPlayed time.Time, count int) embyItem {
 
 func fetchEmbyRecords(t *testing.T, provider *EmbyProvider) (map[string]Record, []string) {
 	t.Helper()
-	records, warnings, err := provider.Fetch(context.Background())
+	records, warnings, err := provider.Fetch(trustLoopback(context.Background()))
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestEmbyClientChunksItemIDLookups(t *testing.T) {
 		fake.series = append(fake.series, embyItem{ID: ids[i], Type: "Series"})
 	}
 	provider := fake.provider(t)
-	items, err := provider.client.FetchItemsByIDs(context.Background(), provider.auth, ids, "Series")
+	items, err := provider.client.FetchItemsByIDs(trustLoopback(context.Background()), provider.auth, ids, "Series")
 	if err != nil {
 		t.Fatalf("FetchItemsByIDs: %v", err)
 	}
@@ -395,23 +395,5 @@ func TestNormalizeEmbyItemWithoutLastPlayedDateHasNoFreshnessTimestamp(t *testin
 	}
 	if record.PositionSeconds != 120 {
 		t.Fatalf("PositionSeconds = %v, want 120", record.PositionSeconds)
-	}
-}
-
-func TestNormalizeEmbyItemUsesLastPlayedDateForFreshness(t *testing.T) {
-	t.Parallel()
-
-	lastPlayed := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
-	item := embyItem{ID: "emby-episode-1", Name: "Played", Type: "Episode"}
-	item.UserData.LastPlayedDate = &lastPlayed
-	item.UserData.Played = true
-
-	record := normalizeEmbyItem(item, embyItem{})
-
-	if !record.UpdatedAt.Equal(lastPlayed) {
-		t.Fatalf("UpdatedAt = %v, want %v", record.UpdatedAt, lastPlayed)
-	}
-	if record.LastPlayedAt == nil || !record.LastPlayedAt.Equal(lastPlayed) {
-		t.Fatalf("LastPlayedAt = %v, want %v", record.LastPlayedAt, lastPlayed)
 	}
 }

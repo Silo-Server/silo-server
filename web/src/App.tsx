@@ -26,6 +26,7 @@ import { RouterProvider } from "react-router/dom";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { CHANGE_PASSWORD_PATH } from "@/hooks/usePostSignInNavigation";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useNavigationDirection } from "@/hooks/useNavigationDirection";
@@ -47,7 +48,6 @@ import Login from "@/pages/Login";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import TasteSeedGate from "@/components/TasteSeedGate";
-import SettingsLayout from "@/pages/SettingsLayout";
 import {
   WatchPlaybackBar,
   WatchPlaybackHost,
@@ -61,7 +61,9 @@ import {
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
 import { buildLegacyAutoscanRedirectTarget } from "@/pages/autoscanSearchParams";
+import LegacyRequestDetailRedirect from "@/pages/LegacyRequestDetailRedirect";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
+import { guardRedirectTarget } from "@/lib/authRedirect";
 import { toast } from "sonner";
 import { prewarmCodecDetection } from "@/player/hooks/useCodecDetection";
 import { prefetchRouteChunks, type RouteChunkImport } from "@/lib/routeChunkPrefetch";
@@ -76,6 +78,10 @@ const importCollections = () => import("@/pages/Collections");
 const importRecommendations = () => import("@/pages/Recommendations");
 
 const AdminLayout = lazy(() => import("@/components/AdminLayout"));
+const AdminDownloadPreparationsRefresh = lazy(
+  () => import("@/components/AdminDownloadPreparationsRefresh"),
+);
+const SettingsLayout = lazy(() => import("@/pages/SettingsLayout"));
 const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));
@@ -93,7 +99,8 @@ const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"))
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
-const RequestDetail = lazy(() => import("@/pages/RequestDetail"));
+const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
+const TitleDetail = lazy(() => import("@/pages/TitleDetail"));
 const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 const AdminActivity = lazy(() => import("@/pages/AdminActivity"));
 const AdminLogs = lazy(() => import("@/pages/AdminLogs"));
@@ -117,6 +124,7 @@ const AdminUserDetail = lazy(() => import("@/pages/AdminUserDetail"));
 const AdminTasks = lazy(() => import("@/pages/AdminTasks"));
 const AdminTaskDetail = lazy(() => import("@/pages/AdminTaskDetail"));
 const AdminPlugins = lazy(() => import("@/pages/AdminPlugins"));
+const AdminPluginDetail = lazy(() => import("@/pages/AdminPluginDetail"));
 const AdminHistoryImport = lazy(() => import("@/pages/AdminHistoryImport"));
 const AdminRecommendations = lazy(() => import("@/pages/AdminRecommendations"));
 const AdminPolicyLayout = lazy(() => import("@/pages/admin-policy/AdminPolicyLayout"));
@@ -125,12 +133,15 @@ const RecommendationsSection = lazy(() => import("@/pages/RecommendationsSection
 const Calendar = lazy(() => import("@/pages/Calendar"));
 const Signup = lazy(() => import("@/pages/Signup"));
 const InviteClaim = lazy(() => import("@/pages/InviteClaim"));
+const PasswordReset = lazy(() => import("@/pages/PasswordReset"));
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword"));
+const ChoosePassword = lazy(() => import("@/pages/ChoosePassword"));
 const HouseholdSetup = lazy(() => import("@/pages/HouseholdSetup"));
 const TasteSeed = lazy(() => import("@/pages/TasteSeed"));
-const AppearanceSettings = lazy(() => import("@/pages/settings/AppearanceSettings"));
 const AccessibilitySettings = lazy(() => import("@/pages/settings/AccessibilitySettings"));
 const ProfilesSettings = lazy(() => import("@/pages/settings/ProfilesSettings"));
 const LibrarySettings = lazy(() => import("@/pages/settings/LibrarySettings"));
+const RequestsSettings = lazy(() => import("@/pages/settings/RequestsSettings"));
 const HistoryImportSettings = lazy(() => import("@/pages/settings/HistoryImportSettings"));
 const WebhookSyncSettings = lazy(() => import("@/pages/settings/WebhookSyncSettings"));
 const WatchProvidersSettings = lazy(() => import("@/pages/settings/WatchProvidersSettings"));
@@ -138,7 +149,6 @@ const SubtitleAppearanceSettings = lazy(
   () => import("@/pages/settings/SubtitleAppearanceSettings"),
 );
 const HomeScreenSettings = lazy(() => import("@/pages/settings/HomeScreenSettings"));
-const ThemeEditorSettings = lazy(() => import("@/pages/settings/ThemeEditorSettings"));
 const CardOverlaySettings = lazy(() => import("@/pages/settings/CardOverlaySettings"));
 const PersonalizeSettings = lazy(() => import("@/pages/settings/PersonalizeSettings"));
 const ConnectAppsSettings = lazy(() => import("@/pages/settings/ConnectAppsSettings"));
@@ -227,20 +237,8 @@ function RouteLoading() {
   );
 }
 
-/**
- * Builds a guard redirect target (e.g. "/login") that preserves the current
- * location so the user returns to it after authenticating.
- */
-function guardRedirectTarget(base: string, location: ReturnType<typeof useLocation>): string {
-  const destination = `${location.pathname}${location.search}`;
-  if (destination === "/" || destination === "") {
-    return base;
-  }
-  return `${base}?redirect=${encodeURIComponent(destination)}`;
-}
-
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, loading, setupLoading } = useAuth();
+  const { user, pendingPasswordChange, loading, setupLoading } = useAuth();
   const location = useLocation();
   // Setup status only decides where a signed-out visitor goes; a restored
   // session does not wait for it.
@@ -251,6 +249,10 @@ function RequireAuth({ children }: { children: ReactNode }) {
         Loading...
       </div>
     );
+  }
+  // A temporary password confines the session to choosing a new one.
+  if (pendingPasswordChange) {
+    return <Navigate to={guardRedirectTarget(CHANGE_PASSWORD_PATH, location)} replace />;
   }
   if (!user) return <Navigate to={guardRedirectTarget("/login", location)} replace />;
   return <>{children}</>;
@@ -459,6 +461,9 @@ function AppRoutes() {
       <Route path="/setup" element={<SetupWizard />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/invite/:token" element={<InviteClaim />} />
+      <Route path="/reset-password/:token" element={<PasswordReset />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path={CHANGE_PASSWORD_PATH} element={<ChoosePassword />} />
       {/* Shared Watch Party links: offers the native app on phones, else forwards to /rooms. */}
       <Route path="/rooms/join" element={<WatchPartyInvite />} />
       <Route path="/household-setup" element={<HouseholdSetup />} />
@@ -526,6 +531,7 @@ function AppRoutes() {
                   <Route path="nodes" element={<AdminNodes />} />
                   <Route path="sections" element={<AdminSections />} />
                   <Route path="plugins" element={<AdminPlugins />} />
+                  <Route path="plugins/:pluginId" element={<AdminPluginDetail />} />
                   <Route path="settings/*" element={<AdminSettingsLayout />} />
                   <Route path="policy" element={<AdminPolicyLayout />} />
                   <Route path="recommendations" element={<AdminRecommendations />} />
@@ -561,9 +567,17 @@ function AppRoutes() {
                   }
                 >
                   <Route index element={null} />
-                  <Route path="appearance" element={<AppearanceSettings />} />
+                  {/* Theme choice moved to the admin; date and time formats live on
+                      Accessibility. Keep the old paths landing somewhere useful. */}
+                  <Route
+                    path="appearance"
+                    element={<Navigate to="/settings/accessibility" replace />}
+                  />
+                  <Route
+                    path="theme-editor"
+                    element={<Navigate to="/settings/accessibility" replace />}
+                  />
                   <Route path="interface" element={<InterfaceSettings />} />
-                  <Route path="theme-editor" element={<ThemeEditorSettings />} />
                   <Route path="accessibility" element={<AccessibilitySettings />} />
                   <Route path="playback" element={<PlaybackSettings />} />
                   <Route
@@ -583,6 +597,7 @@ function AppRoutes() {
                   <Route path="home-screen" element={<HomeScreenSettings />} />
                   <Route path="card-overlays" element={<CardOverlaySettings />} />
                   <Route path="personalize" element={<PersonalizeSettings />} />
+                  <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
@@ -641,9 +656,21 @@ function AppRoutes() {
                           />
                           <Route
                             path="/requests/:mediaType/:tmdbId"
+                            element={<LegacyRequestDetailRedirect />}
+                          />
+                          <Route
+                            path="/title/:mediaType/:tmdbId"
                             element={
                               <RequireRequestsEnabled>
-                                <RequestDetail />
+                                <TitleDetail />
+                              </RequireRequestsEnabled>
+                            }
+                          />
+                          <Route
+                            path="/requests/discover/:section"
+                            element={
+                              <RequireRequestsEnabled>
+                                <RequestDiscoverSection />
                               </RequireRequestsEnabled>
                             }
                           />
@@ -722,7 +749,12 @@ function AdminRealtimeEventChannels() {
   useEventChannel("tasks");
   useEventChannel("scans");
   useEventChannel("settings");
-  return null;
+  useEventChannel("download_preparations");
+  return (
+    <Suspense fallback={null}>
+      <AdminDownloadPreparationsRefresh />
+    </Suspense>
+  );
 }
 
 function PlaybackCapabilityPrewarmer() {

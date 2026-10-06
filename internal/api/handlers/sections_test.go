@@ -121,51 +121,6 @@ func TestWriteSectionDeleteErrorDistinguishesMissingSectionsFromRepositoryFailur
 	}
 }
 
-func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
-	seasonNumber := 1
-	episodeNumber := 1
-	seriesID := "series-1"
-	fetcher := &stubSectionEpisodeFetcher{
-		meta: map[string]sections.SectionItemMeta{
-			"episode-1": {
-				SeriesID:      &seriesID,
-				SeriesTitle:   "American Dad!",
-				SeasonNumber:  &seasonNumber,
-				EpisodeNumber: &episodeNumber,
-			},
-		},
-	}
-	h := &SectionHandler{episodeFetcher: fetcher}
-	withItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "released", SectionType: sections.SectionCustomFilter, Title: "Released"},
-			Items: []*models.MediaItem{{
-				ContentID: "episode-1",
-				Type:      "episode",
-				Title:     "Dumbston Checks In",
-				Status:    "matched",
-			}},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems, nil)
-
-	if fetcher.calls != 1 {
-		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
-	}
-	item := resp.Sections[0].Items[0]
-	if item.SeriesTitle != "American Dad!" {
-		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "American Dad!")
-	}
-	if item.SeasonNumber == nil || *item.SeasonNumber != 1 {
-		t.Fatalf("season number = %v, want 1", item.SeasonNumber)
-	}
-	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
-		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
-	}
-}
-
 func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testing.T) {
 	seasonNumber := 3
 	episodeNumber := 7
@@ -194,6 +149,9 @@ func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testin
 	}}
 
 	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if fetcher.calls != 1 {
+		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
+	}
 	if len(resp.Sections) != 1 || len(resp.Sections[0].Items) != 2 {
 		t.Fatalf("response shape = %#v", resp)
 	}
@@ -586,6 +544,57 @@ func TestInjectNextUpAfterContiguousContinueRows(t *testing.T) {
 	}
 }
 
+func TestInjectNextUpMatchesContinueWatchingItemLimit(t *testing.T) {
+	watching := sections.ContinueTypeConfig(sections.ContinueTypeWatching)
+	listening := sections.ContinueTypeConfig(sections.ContinueTypeListening)
+	cases := []struct {
+		name string
+		in   []sections.ResolvedSection
+		want int
+	}{
+		{
+			name: "user limit on continue watching",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching, ItemLimit: 35},
+			},
+			want: 35,
+		},
+		{
+			name: "continue listening limit is not inherited",
+			in: []sections.ResolvedSection{
+				{ID: "cl", SectionType: sections.SectionContinueWatching, Config: listening, ItemLimit: 50},
+			},
+			want: 20,
+		},
+		{
+			name: "unset limit keeps the default",
+			in: []sections.ResolvedSection{
+				{ID: "cw", SectionType: sections.SectionContinueWatching, Config: watching},
+			},
+			want: 20,
+		},
+		{
+			name: "no continue row",
+			in:   []sections.ResolvedSection{{ID: "recent", SectionType: sections.SectionRecentlyAdded, ItemLimit: 40}},
+			want: 20,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, section := range injectNextUpSection(tc.in) {
+				if section.ID != "system-next-up" {
+					continue
+				}
+				if section.ItemLimit != tc.want {
+					t.Fatalf("next-up item limit = %d, want %d", section.ItemLimit, tc.want)
+				}
+				return
+			}
+			t.Fatal("next-up section was not injected")
+		})
+	}
+}
+
 func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 	in := []sections.SectionWithItems{
 		// empty seasonal — drop
@@ -605,15 +614,6 @@ func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 		if w.ID == "a" {
 			t.Errorf("empty seasonal section was not dropped")
 		}
-	}
-}
-
-func TestDropEmptySeasonalSectionsHandlesNilAndEmpty(t *testing.T) {
-	if got := dropEmptySeasonalSections(nil); len(got) != 0 {
-		t.Errorf("expected empty/nil result for nil input, got %v", got)
-	}
-	if got := dropEmptySeasonalSections([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("expected empty result for empty input, got %v", got)
 	}
 }
 
@@ -734,15 +734,6 @@ func TestApplyDiversityFilterAvoidSectionDoesNotShadowItself(t *testing.T) {
 	out := applyDiversityFilter(in)
 	if len(out[0].Items) != 1 {
 		t.Errorf("first section should not filter itself; got %d items", len(out[0].Items))
-	}
-}
-
-func TestApplyDiversityFilterHandlesNilAndEmpty(t *testing.T) {
-	if got := applyDiversityFilter(nil); got != nil && len(got) != 0 {
-		t.Errorf("nil input returned non-empty: %v", got)
-	}
-	if got := applyDiversityFilter([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("empty input returned non-empty: %v", got)
 	}
 }
 

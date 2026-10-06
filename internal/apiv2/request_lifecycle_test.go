@@ -19,6 +19,8 @@ type fakeLifecycle struct {
 	viewer     mediarequests.Viewer
 	id, reason string
 	err        error
+	// requestsDisabled turns requests off for the server.
+	requestsDisabled bool
 }
 
 func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, reason string) (*mediarequests.Request, error) {
@@ -29,7 +31,7 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 }
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
-	return mediarequests.FeatureStatus{RequestsEnabled: true, RatingRestrictionsEnforced: true}, f.err
+	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true}, f.err
 }
 
 type fakeWatchLifecycle struct {
@@ -287,7 +289,7 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(after.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 14 {
+	if len(fields) != 15 {
 		t.Fatalf("settings fields=%v", fields)
 	}
 	for key, value := range fields {
@@ -305,7 +307,7 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(patched.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 14 {
+	if len(fields) != 15 {
 		t.Fatalf("PATCH returned metadata: %v", fields)
 	}
 }

@@ -129,6 +129,25 @@ func CodeAliases(value string) []string {
 	return aliases
 }
 
+// ISO6392 returns the ISO 639-2/T code of value's primary language, the form
+// container formats such as MP4 store per track. Undefined, private-use, and
+// malformed values return "".
+func ISO6392(value string) string {
+	primary := PrimaryLanguage(value)
+	if primary == "" {
+		return ""
+	}
+	tag, err := language.Parse(primary)
+	if err != nil {
+		return ""
+	}
+	base, _ := tag.Base()
+	if code := base.ISO3(); code != "und" {
+		return code
+	}
+	return ""
+}
+
 // PrimaryLanguage intentionally drops script and region for language matching.
 // It never infers a language from an undefined or private-use tag.
 func PrimaryLanguage(value string) string {

@@ -48,6 +48,18 @@ other task failures.
 Operational log and client diagnostics cleanup stay separate tasks because
 their caps need a 15-minute cadence.
 
+`bulk_metadata_enrichment` looks movies and series up with enrichment-only
+metadata providers that batch their requests, such as MDBList, many titles at a
+time. Only providers that declare `bulk_lookup_limit` take part (see
+[metadata-enrichment-providers.md](architecture/metadata-enrichment-providers.md)).
+It runs hourly and skips runs with nothing to look up. A PostgreSQL advisory
+lock lets one server run it; the others record a completed run that did
+nothing. It records each answer as it goes, so a canceled run, a restart or a
+provider's spent quota loses no work, and the next run continues with the items
+still missing an answer. A run the quota stopped still completes successfully.
+The server log records each provider's found, empty and failed counts, and why
+its turn ended early, such as a spent quota.
+
 Manual-only tasks (`manual_only: true`) are repair and one-off tools. They
 reject schedules, and a schedule saved before a task became manual-only is
 ignored at startup. The web page lists them in a separate "On demand" group.

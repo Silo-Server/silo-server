@@ -107,6 +107,7 @@ function serverRoutes() {
     "GET /api/v2/system/setup": { body: { needs_setup: false, wizard_completed: true } },
     "GET /api/v2/auth/providers": { body: { items: [] } },
     "GET /api/v2/auth/signup": { body: { enabled: false } },
+    "GET /api/v2/capabilities/password-reset": { body: { revision: "r", state: "disabled" } },
     "GET /api/v2/theme/branding": { body: {} },
     "GET /api/v2/theme/admin-css": { body: {} },
     "GET /api/v2/account/me": { body: getCurrentUserOk },
@@ -192,7 +193,7 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 1,
       duplicateGets: 0,
-      total: 19,
+      total: 18,
     });
     // The session restore starts beside the public setup reads, not after them.
     expect(
@@ -228,8 +229,9 @@ describe("app boot request budget", () => {
       unauthorized: 1,
       refreshes: 1,
       duplicateGets: 0,
-      // Includes the login page's public signup-status read.
-      total: 6,
+      // Includes the login page's public signup-status and password-reset
+      // capability reads.
+      total: 7,
     });
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
   });
@@ -396,7 +398,7 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 0,
       duplicateGets: 1,
-      total: 9,
+      total: 8,
     });
     expect(
       viewedAccount.filter((request) => request.operation === "GET /api/v2/profiles"),
@@ -416,8 +418,9 @@ describe("app boot request budget", () => {
       unauthorized: 0,
       refreshes: 0,
       duplicateGets: 0,
-      // Includes the login page's public signup-status read.
-      total: 5,
+      // Includes the login page's public signup-status and password-reset
+      // capability reads.
+      total: 6,
     });
   });
 });

@@ -32,7 +32,8 @@ services:
       retries: 5
 
   meilisearch:
-    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:latest}
+    # Pinned: Meilisearch will not open data written by another version.
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:v1.54.0}
     restart: unless-stopped
     profiles: [search]
     entrypoint:
@@ -46,6 +47,7 @@ services:
         exec /bin/meilisearch
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_UPGRADE_DB: ${MEILI_UPGRADE_DB:-false}
     ports:
       - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
     volumes:
@@ -87,7 +89,7 @@ services:
       # report this container's share instead of the whole machine's. Harmless
       # everywhere else: on bare metal or a VM they are the same files Silo would
       # read anyway. Each is used independently, so dropping one only reverts
-      # that reading. See docs/wiki/deployment/docker.md.
+      # that reading. See docs/architecture/observability.md#node-resource-sampling.
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro

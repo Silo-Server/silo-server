@@ -86,6 +86,13 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
+		} else if errors.Is(err, auth.ErrLocalLoginDisabled) {
+			// The server turned local passwords off; this beta surface has no
+			// external sign-in.
+			http.Error(w, "password sign-in is turned off on this server", http.StatusUnauthorized)
+		} else if errors.Is(err, auth.ErrPasswordChangeRequired) {
+			// This client cannot run the change a temporary password requires.
+			http.Error(w, "sign in to Silo to replace your temporary password", http.StatusUnauthorized)
 		} else {
 			slog.ErrorContext(r.Context(), "abs login: cred validator failed", "component", "audiobooks", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)

@@ -3,6 +3,7 @@ package markers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,29 +242,6 @@ func TestPopulationRegistryTieBreaksSamePriorityByQuality(t *testing.T) {
 	}
 }
 
-func TestPopulationRegistrySingleProviderParity(t *testing.T) {
-	only := &fakeProvider{id: "introdb", result: Result{
-		ProviderID:  "introdb",
-		SourceClass: "online",
-		Algorithm:   "introdb:v3",
-		Markers:     []Marker{{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.9}},
-	}}
-	registry := NewRegistry(nil)
-	if err := registry.Register(only); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err != nil {
-		t.Fatalf("population: %v", err)
-	}
-	if !ok || len(res.Markers) != 1 || res.Markers[0].Kind != MarkerKindIntro {
-		t.Fatalf("single-provider merge = %+v, ok=%v", res.Markers, ok)
-	}
-	if res.Markers[0].ProviderID != "introdb" {
-		t.Errorf("provider = %q, want introdb (stamped from result)", res.Markers[0].ProviderID)
-	}
-}
-
 func TestNormalizeSetting(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -277,6 +255,10 @@ func TestNormalizeSetting(t *testing.T) {
 		{name: "mode rejects unknown", key: SettingMode, value: "remote", wantErr: true},
 		{name: "lazy true", key: SettingLazyPlayback, value: "TRUE", want: "true"},
 		{name: "lazy rejects unknown", key: SettingLazyPlayback, value: "yes", wantErr: true},
+		{name: "detect intros false", key: SettingDetectIntros, value: " False ", want: "false"},
+		{name: "detect intros rejects unknown", key: SettingDetectIntros, value: "off", wantErr: true},
+		{name: "detect credits true", key: SettingDetectCredits, value: "true", want: "true"},
+		{name: "detect credits rejects empty", key: SettingDetectCredits, value: "", wantErr: true},
 		{name: "other rejected", key: "playback.foo", value: " raw ", wantErr: true},
 	}
 
@@ -284,8 +266,8 @@ func TestNormalizeSetting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NormalizeSetting(tt.key, tt.value)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
+				if err == nil || !strings.Contains(err.Error(), tt.key) {
+					t.Fatalf("error = %v, want it to name %s", err, tt.key)
 				}
 				return
 			}
@@ -296,5 +278,19 @@ func TestNormalizeSetting(t *testing.T) {
 				t.Fatalf("NormalizeSetting = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectionToggleEnabled(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"":        true,
+		"true":    true,
+		" TRUE ":  true,
+		"false":   false,
+		" False ": false,
+	} {
+		if got := DetectionToggleEnabled(raw); got != want {
+			t.Errorf("DetectionToggleEnabled(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }

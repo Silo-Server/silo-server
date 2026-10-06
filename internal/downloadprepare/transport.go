@@ -38,8 +38,11 @@ const (
 
 var (
 	artifactIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	logSessionIDPattern = regexp.MustCompile(`^download-prepare-[A-Za-z0-9_-]{1,128}$`)
 	ErrArtifactNotFound = errors.New("remote download artifact not found")
 	ErrRelayReadIdle    = errors.New("remote download artifact read stalled")
+	// ErrProgressUnsupported means the node predates the progress endpoint.
+	ErrProgressUnsupported = errors.New("remote download prepare progress unsupported")
 )
 
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -98,8 +101,28 @@ type Request struct {
 	AudioRecipeVersion string `json:"audio_recipe_version,omitempty"`
 	// SourceAudioChannels freezes the selected input stream's probed channel
 	// count. Zero is the mixed-version-safe unknown value and never enables gain.
-	SourceAudioChannels int     `json:"source_audio_channels,omitempty"`
-	TotalDuration       float64 `json:"total_duration,omitempty"`
+	SourceAudioChannels int `json:"source_audio_channels,omitempty"`
+	// TrackRecipeVersion and PreparedTracks carry the multi-track stream
+	// layout. Older nodes ignore both, encode the legacy single-audio layout,
+	// and therefore cannot return the matching execution fingerprint.
+	TrackRecipeVersion string                   `json:"track_recipe_version,omitempty"`
+	PreparedTracks     *playback.PreparedTracks `json:"prepared_tracks,omitempty"`
+	TotalDuration      float64                  `json:"total_duration,omitempty"`
+	// LogSessionID labels the node's FFmpeg log lines with the durable job's
+	// key (playback.DownloadPrepareLogSessionID), so every attempt of one
+	// artifact reads as one stream. It never affects bytes, so the execution
+	// fingerprint excludes it; older nodes ignore it.
+	LogSessionID string `json:"log_session_id,omitempty"`
+}
+
+// Progress is a node's live reading for one prepare attempt. Running is false
+// when the node has no encode in flight under the id.
+type Progress struct {
+	ArtifactID      string  `json:"artifact_id"`
+	Running         bool    `json:"running"`
+	EncodedSeconds  float64 `json:"encoded_seconds" minimum:"0"`
+	DurationSeconds float64 `json:"duration_seconds" minimum:"0"`
+	Speed           float64 `json:"speed" minimum:"0"`
 }
 
 // Result identifies a completed artifact without exposing the node's local
@@ -194,11 +217,23 @@ func (r Request) StereoDownmixBoostRequested() bool {
 		playback.IsAudioToAACStereoDownmixV3(r.SourceAudioChannels, r.TargetCodecAudio, r.TargetAudioChannels)
 }
 
+// PreparedTracksRequested includes incomplete layouts so the node can reject a
+// partial recipe instead of encoding the legacy single-audio layout.
+func (r Request) PreparedTracksRequested() bool {
+	return r.TrackRecipeVersion != "" || r.PreparedTracks != nil
+}
+
+// ValidPreparedTracks reports whether a requested layout is complete and uses
+// the stream-layout version this build executes.
+func (r Request) ValidPreparedTracks() bool {
+	return r.TrackRecipeVersion == playback.PreparedTracksRecipeVersion && r.PreparedTracks != nil
+}
+
 // ExecutionAttestationRequested reports whether accepting bytes requires a
 // receipt from a node that understood all newly transported recipe fields.
 // Explicit audio output settings affect bytes even when the v2 boost does not.
 func (r Request) ExecutionAttestationRequested() bool {
-	return r.ToneMapRequested() || r.AudioRecipeRequested() ||
+	return r.ToneMapRequested() || r.AudioRecipeRequested() || r.PreparedTracksRequested() ||
 		r.TargetAudioChannels != 0 || r.TargetAudioBitrateKbps != 0
 }
 
@@ -215,6 +250,7 @@ func (r Request) ValidToneMapAttestation() bool {
 // deliberately excluding the idempotency handle.
 func (r Request) ExecutionFingerprint() string {
 	r.ArtifactID = ""
+	r.LogSessionID = ""
 	data, err := json.Marshal(r)
 	if err != nil {
 		return ""
@@ -251,6 +287,11 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TotalDuration:              opts.TotalDuration,
+		LogSessionID:               opts.SessionID,
+	}
+	if opts.PreparedTracks != nil {
+		request.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
+		request.PreparedTracks = opts.PreparedTracks
 	}
 	if playback.IsAudioToAACStereoDownmixV3(opts.SourceAudioChannels, request.TargetCodecAudio, request.TargetAudioChannels) {
 		request.SourceAudioChannels = opts.SourceAudioChannels
@@ -287,6 +328,7 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		AudioTrackIndex:            r.AudioTrackIndex,
 		SourceAudioChannels:        r.SourceAudioChannels,
 		SubtitleTrackIndex:         -1,
+		PreparedTracks:             r.PreparedTracks,
 		FFmpegPath:                 ffmpegPath,
 		HWAccel:                    hwAccel,
 		HWDevice:                   hwDevice,
@@ -294,7 +336,17 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		NodeType:                   "transcode",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              sink,
+		SessionID:                  r.logSessionID(),
 	}
+}
+
+// logSessionID admits only the job-key shape the API sends, so a request can
+// never label node logs as some other playback session.
+func (r Request) logSessionID() string {
+	if logSessionIDPattern.MatchString(r.LogSessionID) {
+		return r.LogSessionID
+	}
+	return ""
 }
 
 // RemotePreparer executes and manages artifacts on a selected transcode node.
@@ -368,6 +420,38 @@ func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID s
 		attestation.FileSize = size
 	}
 	return attestation, nil
+}
+
+// Progress reads a node's live progress for one prepare attempt. It returns
+// ErrProgressUnsupported when the node answers 404, which only nodes that
+// predate the endpoint do: a current node reports an unknown id as not running.
+func (p HTTPPreparer) Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Progress, error) {
+	if !ValidArtifactID(artifactID) {
+		return Progress{}, fmt.Errorf("remote download prepare progress: invalid artifact id")
+	}
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/prepare/"+url.PathEscape(artifactID)+"/progress", nil)
+	if err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return Progress{}, ErrProgressUnsupported
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Progress{}, responseError(resp, "remote download prepare progress")
+	}
+	var progress Progress
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&progress); err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: decode response: %w", err)
+	}
+	if progress.ArtifactID != artifactID || progress.EncodedSeconds < 0 || progress.DurationSeconds < 0 || progress.Speed < 0 {
+		return Progress{}, fmt.Errorf("remote download prepare progress: invalid response")
+	}
+	return progress, nil
 }
 
 func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error {

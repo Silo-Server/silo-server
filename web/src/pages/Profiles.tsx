@@ -21,6 +21,7 @@ export default function Profiles() {
     isLoading: profilesLoading,
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
+    requireAdvisoryAgeSupported,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -116,6 +117,7 @@ export default function Profiles() {
           libraries={libraries}
           avatarUploadEnabled={avatarUploadEnabled}
           advisoryAgeSupported={maxAdvisoryAgeSupported}
+          requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
           onOpenChange={setEditorOpen}
           onSaveSuccess={(profile, context) => void handleCreateSuccess(profile, context)}
         />

@@ -162,6 +162,11 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	if r.unrated != nil {
 		allowUnrated = r.unrated.AllowUnratedContent(ctx)
 	}
+	// Read off the profile, not the policy decision, the way AllowUnratedContent
+	// comes from the server setting: the option only ever hides more, so no
+	// override needs to loosen it. It applies to whatever limit the policy
+	// settles on, including one an override lowered.
+	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
 	return access.Scope{
 		UserID:              user.ID,
@@ -173,6 +178,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			MaxContentRating:    access.StricterCeiling(decision.MaxContentRating, decision.MaxContentRatingOverride),
 			AllowUnratedContent: allowUnrated,
 			MaxAdvisoryAge:      decision.MaxAdvisoryAge,
+			RequireAdvisoryAge:  requireAdvisory,
 		},
 		MaxPlaybackQuality:         decision.MaxPlaybackQuality,
 		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
@@ -180,6 +186,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		PreferredMetadataLanguage:  decision.PreferredMetadataLanguage,
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
 		NextUpMode:                 preferences.NextUpMode,
+		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a
 		// custom override may revoke verification but never grant it. ANDing

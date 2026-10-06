@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // fakeHistoryImports answers the history-imports seams from memory.
@@ -236,6 +239,16 @@ func TestCreateHistoryImportRun(t *testing.T) {
 	if p.Detail != "Choose a server and enter the Emby username." || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
 		t.Fatalf("invalid input problem = %+v", p)
 	}
+	// A server address the outbound guard refused names the fix, whether it
+	// arrives raw or through the v1 seam's mapping.
+	refusedDial := &url.Error{Op: "Post", URL: "http://192.168.1.10:8096/Users/AuthenticateByName", Err: &net.OpError{Op: "dial", Net: "tcp", Err: netguard.ErrPrivateDestination}}
+	for _, refused := range []error{refusedDial, &handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: historyimport.PrivateAddressMessage}} {
+		fake.createErr = refused
+		p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"jellyfin"}`, bearer(memberToken)), TypeValidationFailed)
+		if p.Detail != historyimport.PrivateAddressMessage || len(p.Errors) != 1 || p.Errors[0].Detail != p.Detail {
+			t.Fatalf("refused address problem = %+v", p)
+		}
+	}
 	fake.createErr = &handlers.APIError{Status: http.StatusConflict, Code: "conflict", Message: historyimport.ErrActiveRunExists.Error()}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", `{"profile_id":"p-owner","source":"plex"}`, bearer(memberToken)), TypeConflict)
 	fake.createErr = &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: historyimport.ErrProfileNotFound.Error()}
@@ -386,5 +399,93 @@ func TestHistoryImportInputMessage(t *testing.T) {
 	}
 	if got := historyImportInputMessage(fmt.Errorf("%w: base_url must be an http or https URL", historyimport.ErrInvalidInput)); got != "base_url must be an http or https URL." {
 		t.Fatalf("field-name message = %q", got)
+	}
+}
+
+// profileScopedFakeHistoryImports records the acting profile the v2 routes
+// pass to the profile-aware seam and applies the #1336 rule: p-owner may act
+// for every profile, any other profile only for itself.
+type profileScopedFakeHistoryImports struct {
+	*fakeHistoryImports
+	actors []handlers.HistoryImportActor
+}
+
+func (f *profileScopedFakeHistoryImports) mayActForAll(actor handlers.HistoryImportActor) bool {
+	return actor.ProfileID == "p-owner"
+}
+
+func (f *profileScopedFakeHistoryImports) ListImportRunsPageAs(ctx context.Context, actor handlers.HistoryImportActor, after *historyimport.RunKey, limit int) ([]historyimport.Run, bool, error) {
+	f.actors = append(f.actors, actor)
+	runs, more, err := f.ListImportRunsPage(ctx, actor.UserID, after, limit)
+	if err != nil || f.mayActForAll(actor) {
+		return runs, more, err
+	}
+	var own []historyimport.Run
+	for _, run := range runs {
+		if run.ProfileID == actor.ProfileID {
+			own = append(own, run)
+		}
+	}
+	return own, more, nil
+}
+
+func (f *profileScopedFakeHistoryImports) CreateImportRunAs(ctx context.Context, actor handlers.HistoryImportActor, input historyimport.CreateRunInput) (*historyimport.Run, error) {
+	f.actors = append(f.actors, actor)
+	if input.ProfileID != actor.ProfileID && !f.mayActForAll(actor) {
+		return nil, &handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Only the primary profile can import watch history into another profile"}
+	}
+	return f.CreateImportRun(ctx, actor.UserID, input)
+}
+
+func (f *profileScopedFakeHistoryImports) GetImportRunAs(ctx context.Context, actor handlers.HistoryImportActor, runID string) (*historyimport.Run, error) {
+	f.actors = append(f.actors, actor)
+	run, err := f.GetImportRun(ctx, actor.UserID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if run.ProfileID != actor.ProfileID && !f.mayActForAll(actor) {
+		return nil, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "run not found"}
+	}
+	return run, nil
+}
+
+func profileScopedHistoryImportDeps(fake *profileScopedFakeHistoryImports) Dependencies {
+	deps := historyImportDeps(fake.fakeHistoryImports)
+	deps.HistoryImports = fake
+	return deps
+}
+
+func TestHistoryImportRoutesActForTheRequestProfile(t *testing.T) {
+	fake := &profileScopedFakeHistoryImports{fakeHistoryImports: fixtureHistoryImports()}
+	h := newTestHandler(t, profileScopedHistoryImportDeps(fake))
+	asOwner := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+
+	body := `{"profile_id":"p-owner","source":"plex","plex_session_id":"plex-sess","plex_server_id":"abc123","source_id":"1"}`
+	if rec := do(t, h, http.MethodPost, "/api/v2/history-imports/runs", body, asOwner); rec.Code != http.StatusAccepted {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.actors) != 1 || fake.actors[0].UserID != 1 || fake.actors[0].ProfileID != "p-owner" || fake.actors[0].VerifyProfile == nil {
+		t.Fatalf("actors = %+v, want the account and the request's profile", fake.actors)
+	}
+
+	if rec := do(t, h, http.MethodGet, "/api/v2/history-imports/runs", "", asOwner); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodGet, "/api/v2/history-imports/runs/run-2", "", asOwner); rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.actors) != 3 {
+		t.Fatalf("list and get did not go through the profile-aware seam: %+v", fake.actors)
+	}
+}
+
+func TestHistoryImportCreateRefusedForAnotherProfileIsForbidden(t *testing.T) {
+	fake := &profileScopedFakeHistoryImports{fakeHistoryImports: fixtureHistoryImports()}
+	h := newTestHandler(t, profileScopedHistoryImportDeps(fake))
+	// No acting profile: only the seam's rule decides, and it refuses.
+	body := `{"profile_id":"p-owner","source":"plex","plex_session_id":"plex-sess","plex_server_id":"abc123","source_id":"1"}`
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/history-imports/runs", body, bearer(memberToken)), TypePermissionDenied)
+	if fake.lastCreate != nil {
+		t.Fatalf("a refused import was created: %+v", fake.lastCreate)
 	}
 }

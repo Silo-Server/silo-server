@@ -11,11 +11,14 @@ import "time"
 // outside internal/access should read these raw — resolve them through
 // access.EffectivePolicyForUser.
 type User struct {
-	ID                         int
-	Email                      string
-	Username                   string
-	PasswordHash               string
-	LocalPasswordLoginEnabled  bool
+	ID                        int
+	Email                     string
+	Username                  string
+	PasswordHash              string
+	LocalPasswordLoginEnabled bool
+	// PasswordChangeRequired marks a temporary password: until the account
+	// chooses a new one, its sessions may only change the password.
+	PasswordChangeRequired     bool
 	Role                       string
 	Permissions                []string
 	Enabled                    bool
@@ -33,8 +36,15 @@ type User struct {
 	DownloadTranscodeAllowed   *bool // nil = inherit
 	RequestsAllowed            *bool // nil = inherit
 	AccessGroupID              *int64
-	CreatedAt                  time.Time
-	UpdatedAt                  time.Time
+	// IsOwner marks the server Owner: the account that claimed the server at
+	// first-run setup. Only the Owner may change its own account.
+	IsOwner bool
+	// BreakGlass marks a local admin account that keeps password sign-in
+	// when the server turns local passwords off (auth.local_password_login).
+	// Only admin accounts may hold it.
+	BreakGlass bool
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // CreateUserInput contains the fields required to create a new user.
@@ -54,6 +64,7 @@ type CreateUserInput struct {
 	Email                      string // required
 	Username                   string // required
 	Password                   string // plaintext, will be bcrypt-hashed
+	PasswordChangeRequired     bool   // Password is temporary; see User.PasswordChangeRequired
 	LocalPasswordLoginEnabled  *bool
 	Role                       string // e.g. "admin", "user"
 	Permissions                []string
@@ -95,9 +106,13 @@ func ClearValue[T any]() Optional[T] {
 // value". Optional fields carry the tri-state needed by nullable policy
 // columns (leave / clear to inherit / set override).
 type UpdateUserInput struct {
-	Email                      *string
-	Username                   *string
-	Password                   *string // plaintext, will be bcrypt-hashed if provided
+	Email    *string
+	Username *string
+	Password *string // plaintext, will be bcrypt-hashed if provided
+	// PasswordChangeRequired applies only with Password: a new password is
+	// temporary when true and settled otherwise, so every password write
+	// decides the flag and none can leave a stale one behind.
+	PasswordChangeRequired     bool
 	LocalPasswordLoginEnabled  *bool
 	Role                       *string
 	Permissions                *[]string
@@ -115,4 +130,7 @@ type UpdateUserInput struct {
 	DownloadTranscodeAllowed   Optional[bool]
 	RequestsAllowed            Optional[bool]
 	AccessGroupID              Optional[int64]
+	// BreakGlass sets or clears the break-glass flag. A role change away
+	// from admin always clears it.
+	BreakGlass *bool
 }

@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { catalogKeys, ratingKeys, recKeys, sectionKeys } from "./keys";
+import { adminKeys, catalogKeys, ratingKeys, recKeys, sectionKeys } from "./keys";
 
 export async function invalidateRatingSurfaceQueries(queryClient: QueryClient, itemId: string) {
   // No `cancelRefetch: false` here: reusing an in-flight request would let a
@@ -35,6 +35,29 @@ export async function invalidateAllRatingSurfaceQueries(queryClient: QueryClient
       startsWith(query.queryKey, recKeys.all) ||
       startsWith(query.queryKey, sectionKeys.all),
   });
+}
+
+/**
+ * How long after a change to the rating choice the surfaces refresh a second
+ * time: each API node keeps its copy of the choice for up to 10 seconds.
+ */
+export const RATING_POLICY_SETTLE_MS = 11_000;
+
+/**
+ * Refreshes every rating surface and the admin list of rating sources after
+ * the rating choice may have changed (the setting, or a plugin that declares
+ * ratings), now and again once each API node's cached copy has expired.
+ */
+export function refreshRatingChoice(
+  queryClient: QueryClient,
+  schedule: (run: () => void, ms: number) => unknown = (run, ms) => setTimeout(run, ms),
+) {
+  const refresh = () => {
+    void invalidateAllRatingSurfaceQueries(queryClient);
+    void queryClient.invalidateQueries({ queryKey: adminKeys.ratingSources() });
+  };
+  refresh();
+  schedule(refresh, RATING_POLICY_SETTLE_MS);
 }
 
 function startsWith(queryKey: readonly unknown[], prefix: readonly unknown[]) {

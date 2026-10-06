@@ -32,10 +32,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/themedelivery"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // ItemsHandler serves Jellyfin browse/search/item endpoints.
 type ItemsHandler struct {
+	storeProvider    userstore.UserStoreProvider
 	themeSongs       themeSongStore
 	themeRouter      *themedelivery.Router
 	themeFFmpegPath  func() string
@@ -59,6 +61,10 @@ type ItemsHandler struct {
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
+	// collectionPosters is optional; when set, BoxSets show each viewer the
+	// collage of the members it can access. Without it, only uploaded and
+	// template posters are shown.
+	collectionPosters CollectionPosterResolver
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
 	queryExecutor   smartCollectionQueryExecutor
@@ -72,6 +78,9 @@ type ItemsHandler struct {
 	// unbounded progress scan. It is the section subsystem's read-time fetcher and
 	// is independent of any virtual-library/hub-section exposure.
 	sectionsFetcher *sections.Fetcher
+	// realtimeMonitoring reads the live server-wide
+	// scanner.realtime_monitoring switch. Nil counts as on, the default.
+	realtimeMonitoring func() bool
 }
 
 type MarkerPopulationService interface {
@@ -347,10 +356,10 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if mediaSourceID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID); err == nil {
-		contentID, ok := h.codec.LookupMediaSourceOwner(mediaSourceID)
-		if !ok {
-			writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+	if fileID, err := h.codec.DecodeIntID(EncodedIDMediaSource, rawID); err == nil {
+		contentID, err := h.codec.ResolveMediaSourceOwner(r.Context(), fileID)
+		if err != nil {
+			writeItemIDError(w, r, err)
 			return
 		}
 		rawID = h.codec.EncodeStringID(EncodedIDItem, contentID)
@@ -380,7 +389,7 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dto := h.mapper.itemFromDetail(*detail, favorites[detail.ContentID], progress[detail.ContentID])
-	h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
+	h.populateDetailSubtitles(r.Context(), detail, &dto, savedCompatSubtitleMode(r.Context(), h.storeProvider, session))
 	if strings.EqualFold(detail.Type, "series") {
 		if seasons, seasonErr := h.content.ListSeasons(r.Context(), session, detail.ContentID, nil); seasonErr == nil {
 			browsableSeasons := filterBrowsableSeasons(seasons)
@@ -412,22 +421,27 @@ func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-func (h *ItemsHandler) appendDownloadedSubtitlesToDetailDTO(ctx context.Context, contentID string, versions []catalog.FileVersion, dto *baseItemDTO) {
-	if h == nil || h.subtitleRepo == nil || dto == nil || len(dto.MediaSources) == 0 || len(versions) == 0 {
+func (h *ItemsHandler) populateDetailSubtitles(ctx context.Context, detail *upstreamItemDetail, dto *baseItemDTO, savedMode string) {
+	if h == nil || dto == nil || len(dto.MediaSources) == 0 || len(detail.Versions) == 0 {
 		return
 	}
 
-	routeItemID := h.codec.EncodeStringID(EncodedIDItem, contentID)
+	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	appendedAny := false
 
-	for i, version := range versions {
+	for i, version := range detail.Versions {
 		if i >= len(dto.MediaSources) {
 			break
 		}
-		downloaded, err := h.subtitleRepo.ListDownloadedSubtitles(ctx, version.FileID)
-		if err != nil || len(downloaded) == 0 {
-			continue
+		var downloaded []subtitles.DownloadedSubtitle
+		if h.subtitleRepo != nil {
+			var err error
+			downloaded, err = h.subtitleRepo.ListDownloadedSubtitles(ctx, version.FileID)
+			if err != nil {
+				downloaded = nil
+			}
 		}
+		dto.MediaSources[i].DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, version, downloaded, savedMode, dto.MediaSources[i].DefaultAudioStreamIndex)
 
 		sourceID := h.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
 		baseIndex := nextDownloadedSubtitleIndex(version)
@@ -777,21 +791,17 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "BadRequest", "Missing item id")
 		return
 	}
-	contentID, err := h.codec.DecodeStringID(EncodedIDItem, raw)
-	var requestedFileID int
-	if err != nil {
-		if fileID, fileErr := h.codec.DecodeIntID(EncodedIDMediaSource, raw); fileErr == nil {
-			if owner, ok := h.codec.LookupMediaSourceOwner(fileID); ok {
-				contentID = owner
-				requestedFileID = int(fileID)
-			}
-		}
+	contentID, fileID, err := decodeItemOrMediaSourceID(r.Context(), h.codec, raw)
+	if err != nil && !errors.Is(err, errMediaSourceOwnerNotFound) {
+		writeItemIDError(w, r, err)
+		return
 	}
-	if contentID == "" {
-		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with undecodable id", "component", "jellycompat", "raw_id", raw)
+	if err != nil {
+		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with unresolvable id", "component", "jellycompat", "raw_id", raw, "error", err)
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
 		return
 	}
+	requestedFileID := int(fileID)
 
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
 	if err != nil {
@@ -912,6 +922,14 @@ func (h *ItemsHandler) HandleGroupingOptionsStub(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, []struct{}{})
 }
 
+// enableRealtimeMonitor is a library's Jellyfin EnableRealtimeMonitor value:
+// real-time monitoring is effective only while both the library's switch and
+// the live server-wide switch are on. A nil server reader counts as on, the
+// setting's default.
+func enableRealtimeMonitor(server func() bool, library bool) bool {
+	return library && (server == nil || server())
+}
+
 // HandleVirtualFolders serves GET /Library/VirtualFolders.
 // Returns library metadata so clients like Infuse know library collection types.
 func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Request) {
@@ -936,7 +954,7 @@ func (h *ItemsHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Reque
 			ItemID:         h.codec.EncodeIntID(EncodedIDLibrary, int64(lib.ID)),
 			LibraryOptions: virtualLibraryOptDTO{
 				Enabled:                 true,
-				EnableRealtimeMonitor:   true,
+				EnableRealtimeMonitor:   enableRealtimeMonitor(h.realtimeMonitoring, lib.RealtimeMonitoring),
 				EnableInternetProviders: true,
 				SeasonZeroDisplayName:   "Specials",
 				TypeOptions:             []string{},
@@ -1063,12 +1081,24 @@ func (h *ItemsHandler) HandleStudios(w http.ResponseWriter, r *http.Request) {
 		if q.searchTerm != "" && !strings.Contains(strings.ToLower(studio), strings.ToLower(q.searchTerm)) {
 			continue
 		}
-		if q.namePrefix != "" && !strings.HasPrefix(strings.ToLower(studio), strings.ToLower(q.namePrefix)) {
+		name := strings.ToLower(studio)
+		if q.namePrefix != "" && !strings.HasPrefix(name, strings.ToLower(q.namePrefix)) {
+			continue
+		}
+		if q.nameLessThan != "" && name >= strings.ToLower(q.nameLessThan) {
+			continue
+		}
+		if q.nameStartsWithOrGreater != "" && name < strings.ToLower(q.nameStartsWithOrGreater) {
 			continue
 		}
 		items = append(items, baseItemDTO{ID: h.codec.EncodeStringID(EncodedIDStudio, studio), Name: studio, Type: "Studio"})
 	}
 	total := len(items)
+	// Jellyfin returns every studio when Limit is absent; parseItemsQuery's
+	// default page size is for item browsing.
+	if newCaseInsensitiveQuery(r.URL.Query()).Get("Limit") == "" {
+		q.limit = total
+	}
 	items = slicePage(items, q.startIndex, q.limit)
 	if q.limit == 0 {
 		items = []baseItemDTO{}
@@ -1382,8 +1412,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch. Jellyfin expects a flat list of parent series,
-// so this compatibility path explicitly opts out of the native TV scan-event
-// grouping that may return episode cards or repeat a series across scan runs.
+// so this compatibility path explicitly opts out of the native TV arrival-event
+// grouping that may return episode cards or repeat a series across arrivals.
 // The cached *models.MediaItem values are treated read-only;
 // LocalizeItemModels deep-copies before any presign mutation.
 func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
@@ -1843,6 +1873,12 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 // the result before detail hydration. Only the bounded AdjacentTo window
 // bypasses paging.
 func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, seriesID, requestedSeasonID string, page bool) {
+	// Jellyfin returns every episode when Limit is absent, and Infuse relies on
+	// that to build its season list; parseItemsQuery's default page size is for
+	// item browsing.
+	if query.limitDefaulted {
+		query.limit = catalog.MaxEpisodePageSize
+	}
 	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -2464,9 +2500,23 @@ func (h *ItemsHandler) batchListItemDetails(ctx context.Context, session *Sessio
 }
 
 func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
+	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
+	// catalog treats a zero limit as its default page, so fetch one row.
+	countOnly := query.countOnly
+	if countOnly {
+		query.limit = 1
+	}
 	result, err := h.content.BrowseItems(r.Context(), session, buildBrowseParams(query))
 	if err != nil {
 		writeCompatUpstreamError(w, err)
+		return
+	}
+	if countOnly {
+		total := result.Total
+		if !query.enableTotalRecordCount {
+			total = 0
+		}
+		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: total, StartIndex: query.startIndex})
 		return
 	}
 	h.rememberListImages(result.Items)
@@ -2779,6 +2829,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 	}
 
 	items := make([]baseItemDTO, 0, len(query.specificIDs))
+	savedMode := savedCompatSubtitleMode(r.Context(), h.storeProvider, session)
 	for _, contentID := range query.specificIDs {
 		detail, itemErr := h.content.GetItemDetail(r.Context(), session, contentID, libraryIDPtr(query.parentLibraryID))
 		if itemErr != nil {
@@ -2793,7 +2844,7 @@ func (h *ItemsHandler) handleSpecificItems(w http.ResponseWriter, r *http.Reques
 		if query.mediaTypesExplicit && !query.mediaTypesSet[strings.ToLower(dto.MediaType)] {
 			continue
 		}
-		h.appendDownloadedSubtitlesToDetailDTO(r.Context(), detail.ContentID, detail.Versions, &dto)
+		h.populateDetailSubtitles(r.Context(), detail, &dto, savedMode)
 		items = append(items, dto)
 	}
 
@@ -3538,6 +3589,47 @@ func decodeContentID(codec *ResourceIDCodec, raw string) (string, error) {
 
 func decodeItemID(codec *ResourceIDCodec, raw string) (string, error) {
 	return codec.DecodeStringID(EncodedIDItem, raw)
+}
+
+// decodeItemOrMediaSourceID decodes an id a client sent where an item id
+// belongs. Real Jellyfin gives a media source the same id as its item, so
+// clients such as Moonfin send MediaSources[i].Id there. A media-source id
+// resolves to the item that owns its file, and fileID names that file so the
+// caller can select its version; fileID is 0 for an item id. An id that names
+// no item or media source returns errMediaSourceOwnerNotFound.
+func decodeItemOrMediaSourceID(ctx context.Context, codec *ResourceIDCodec, raw string) (contentID string, fileID int64, err error) {
+	if contentID, err := decodeItemID(codec, raw); err == nil {
+		return contentID, 0, nil
+	}
+	fileID, err = codec.DecodeIntID(EncodedIDMediaSource, raw)
+	if err != nil {
+		return "", 0, errMediaSourceOwnerNotFound
+	}
+	contentID, err = codec.ResolveMediaSourceOwner(ctx, fileID)
+	if err != nil {
+		return "", 0, err
+	}
+	return contentID, fileID, nil
+}
+
+// decodeContentOrMediaSourceID is decodeContentID that also accepts a
+// media-source id, as decodeItemOrMediaSourceID describes.
+func decodeContentOrMediaSourceID(ctx context.Context, codec *ResourceIDCodec, raw string) (contentID string, fileID int64, err error) {
+	if seasonID, err := codec.DecodeStringID(EncodedIDSeason, raw); err == nil {
+		return seasonID, 0, nil
+	}
+	return decodeItemOrMediaSourceID(ctx, codec, raw)
+}
+
+// writeItemIDError answers an item-position id that failed to decode: 404 when
+// it names nothing, 500 when the media-source lookup itself failed.
+func writeItemIDError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, errMediaSourceOwnerNotFound) {
+		writeError(w, http.StatusNotFound, "NotFound", "Item not found")
+		return
+	}
+	slog.ErrorContext(r.Context(), "jellycompat: resolving media source owner failed", "component", "jellycompat", "error", err)
+	writeError(w, http.StatusInternalServerError, "ServerError", "Failed to resolve media source")
 }
 
 func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) bool {

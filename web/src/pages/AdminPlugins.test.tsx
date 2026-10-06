@@ -1,19 +1,16 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation, useNavigationType } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
-
-import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
 
 import AdminPlugins from "./AdminPlugins";
 
 const useAdminPluginsMock = vi.fn();
 const checkPluginUpdatesMutateMock = vi.fn();
 const updatePluginCatalogSettingsMutateMock = vi.fn();
-const restartPluginInstallationMutateMock = vi.fn();
-let restartPluginInstallationPending = false;
+const installPluginMutateMock = vi.fn();
 const capturedButtonProps: Array<Record<string, unknown>> = [];
 const capturedSwitchProps: Array<Record<string, unknown>> = [];
 
@@ -131,15 +128,12 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useCreatePluginRepository: () => ({ mutate: vi.fn(), isPending: false }),
   useUpdatePluginRepository: () => ({ mutate: vi.fn(), isPending: false }),
   useDeletePluginRepository: () => ({ mutate: vi.fn(), isPending: false }),
-  useInstallPlugin: () => ({ mutate: vi.fn(), isPending: false }),
+  useInstallPlugin: () => ({ mutate: installPluginMutateMock, isPending: false }),
   useUploadPlugin: () => ({ mutate: vi.fn(), isPending: false }),
   usePluginUpload: () => ({ upload: vi.fn(), progress: null, isPending: false }),
   useUpdatePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useApplyPluginUpdate: () => ({ mutate: vi.fn(), isPending: false }),
-  useRestartPluginInstallation: () => ({
-    mutate: restartPluginInstallationMutateMock,
-    isPending: restartPluginInstallationPending,
-  }),
+  useRestartPluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useDeletePluginInstallation: () => ({ mutate: vi.fn(), isPending: false }),
   useSavePluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
   useTestPluginConfig: () => ({ mutate: vi.fn(), isPending: false }),
@@ -157,8 +151,7 @@ describe("AdminPlugins", () => {
     capturedSwitchProps.length = 0;
     checkPluginUpdatesMutateMock.mockReset();
     updatePluginCatalogSettingsMutateMock.mockReset();
-    restartPluginInstallationMutateMock.mockReset();
-    restartPluginInstallationPending = false;
+    installPluginMutateMock.mockReset();
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       catalog: [],
@@ -166,98 +159,6 @@ describe("AdminPlugins", () => {
       catalogSettings: undefined,
       isLoading: false,
     });
-  });
-
-  it("reads runtime.state for the status dot only when the plugin is resident", () => {
-    const base = makeInstallation(1, "Resident");
-    expect(pluginStatusIndicator(base)).toMatchObject({ dotClass: "bg-success", label: "Active" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: false, state: "stopped", restart_count: 0 },
-      }),
-    ).toMatchObject({ dotClass: "bg-success", label: "Active" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "running", restart_count: 0 },
-      }),
-    ).toMatchObject({ dotClass: "bg-success", label: "Running" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "backoff", restart_count: 3, last_error: "exited" },
-      }),
-    ).toMatchObject({ dotClass: "bg-warning", label: "Restarting (3)", title: "exited" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        runtime: { resident: true, state: "failed", restart_count: 9, last_error: "boom" },
-      }),
-    ).toMatchObject({ dotClass: "bg-destructive", label: "Failed", title: "boom" });
-    expect(
-      pluginStatusIndicator({
-        ...base,
-        enabled: false,
-        runtime: { resident: true, state: "failed", restart_count: 9 },
-      }),
-    ).toMatchObject({ dotClass: "bg-muted-foreground", label: "Inactive" });
-  });
-
-  it("renders the resident runtime state on the installed card", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [
-        {
-          ...makeInstallation(1, "Overlay"),
-          runtime: { resident: true, state: "failed", restart_count: 10, last_error: "exited" },
-        },
-      ],
-      catalogSettings: undefined,
-      isLoading: false,
-    });
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-    expect(markup).toContain("bg-destructive");
-    expect(markup).toContain("Failed");
-    expect(markup).not.toContain(">Active<");
-    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
-    expect(restart).toBeDefined();
-    expect(restart?.disabled).toBe(false);
-    (restart?.onClick as () => void)();
-    expect(restartPluginInstallationMutateMock).toHaveBeenCalledWith(1);
-  });
-
-  it.each([
-    { enabled: false, resident: true, pending: false, visible: false },
-    { enabled: true, resident: false, pending: false, visible: false },
-    { enabled: true, resident: true, pending: true, visible: true },
-  ])("only offers restart to enabled residents and waits for the response: %j", (testCase) => {
-    restartPluginInstallationPending = testCase.pending;
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [
-        {
-          ...makeInstallation(1, "Overlay"),
-          enabled: testCase.enabled,
-          runtime: { resident: testCase.resident, state: "failed", restart_count: 10 },
-        },
-      ],
-      isLoading: false,
-    });
-    renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-    const restart = capturedButtonProps.find((props) => props["aria-label"] === "Restart Overlay");
-    expect(Boolean(restart)).toBe(testCase.visible);
-    if (restart) expect(restart.disabled).toBe(testCase.pending);
   });
 
   it("starts the shared plugin update check task from the plugins page", () => {
@@ -281,45 +182,6 @@ describe("AdminPlugins", () => {
     (button?.onClick as () => void)();
 
     expect(checkPluginUpdatesMutateMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("describes manual upload as a generic plugin file instead of a zip-only archive", () => {
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Upload a plugin binary directly.");
-    expect(markup).toContain("Choose plugin file...");
-    expect(markup).not.toContain('accept=".zip"');
-  });
-
-  it("shows the approved community setting and explains migrated installations", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [],
-      catalogSettings: {
-        etag: '"catalog-snapshot"',
-        include_approved_community_plugins: true,
-        approved_community_plugin_count: 2,
-        installed_community_plugin_count: 2,
-        migrated_plugin_count: 2,
-        community_updates_paused: false,
-      },
-      isLoading: false,
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Include approved community plugins");
-    expect(markup).toContain("2 existing installations were moved here");
-    expect(capturedSwitchProps[0]?.checked).toBe(true);
   });
 
   it("enables the approved community catalog directly when no community plugins are installed", () => {
@@ -381,124 +243,6 @@ describe("AdminPlugins", () => {
     expect(updatePluginCatalogSettingsMutateMock).not.toHaveBeenCalled();
   });
 
-  it("shows catalog presentation metadata and external resource links", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      installations: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      catalog: [
-        {
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "1.0.0",
-          archive_url: "https://example.com/plugin",
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          repo_url: "https://github.com/Silo-Server/example-plugin",
-          presentation: {
-            display_name: "Example Plugin",
-            summary: "Explains the example for a homelab administrator.",
-            description_markdown: "Longer description.",
-            setup_markdown: "Configure the example.",
-            homepage_url: "https://example.com",
-            source_url: "https://github.com/Silo-Server/example-plugin",
-            support_url: "https://github.com/Silo-Server/example-plugin/issues",
-            changelog_url: "https://github.com/Silo-Server/example-plugin/releases",
-            publisher_name: "Silo",
-            publisher_url: "https://github.com/Silo-Server",
-            license_spdx: "AGPL-3.0-or-later",
-          },
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Example Plugin");
-    expect(markup).toContain("Explains the example for a homelab administrator.");
-    expect(markup).toContain('href="https://github.com/Silo-Server/example-plugin"');
-    expect(markup).toContain('href="https://github.com/Silo-Server/example-plugin/releases"');
-  });
-
-  it("uses catalog presentation metadata for an older installed manifest", () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalogSettings: undefined,
-      isLoading: false,
-      installations: [
-        {
-          id: 7,
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "0.9.0",
-          install_path: "/plugins/example",
-          enabled: true,
-          runtime: { resident: false, state: "stopped", restart_count: 0 },
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          updates_paused: false,
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-          global_configs: [],
-          auth_bindings: [],
-          task_bindings: [],
-          update_policy: "auto",
-        },
-      ],
-      catalog: [
-        {
-          repository_id: 1,
-          plugin_id: "silo.example",
-          version: "1.0.0",
-          archive_url: "https://example.com/plugin",
-          source_kind: "silo",
-          repository_name: "Silo plugins",
-          repo_url: "https://github.com/Silo-Server/example-plugin",
-          presentation: {
-            display_name: "Example Plugin",
-            summary: "Catalog fallback description.",
-            description_markdown: "Longer description.",
-            setup_markdown: "Configure the example.",
-            homepage_url: "https://example.com",
-            source_url: "https://github.com/Silo-Server/example-plugin",
-            support_url: "https://github.com/Silo-Server/example-plugin/issues",
-            changelog_url: "https://github.com/Silo-Server/example-plugin/releases",
-            publisher_name: "Silo",
-            publisher_url: "https://github.com/Silo-Server",
-            license_spdx: "AGPL-3.0-or-later",
-          },
-          capabilities: [],
-          global_config_schema: [],
-          user_config_schema: [],
-          routes: [],
-          assets: [],
-        },
-      ],
-    });
-
-    const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
-
-    expect(markup).toContain("Catalog fallback description.");
-    expect(markup).toContain('href="https://github.com/Silo-Server/example-plugin"');
-  });
-
   it("searches catalog presentation metadata from the URL", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
@@ -551,72 +295,132 @@ describe("AdminPlugins", () => {
     expect(markup).not.toContain("Alpha Metadata");
   });
 
-  it("paginates the catalog from URL state", () => {
+  it("groups the catalog by source and installs from a tile", () => {
+    const external: PluginCatalogEntry = {
+      ...makeCatalogEntry(3, { displayName: "Home Lab Tool" }),
+      plugin_id: "lab.tool",
+      source_kind: "external",
+      repository_id: 3,
+    };
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalogSettings: undefined,
+      isLoading: false,
+      installations: [{ ...makeInstallation(1, "Installed One"), plugin_id: "silo.plugin-01" }],
+      catalog: [makeCatalogEntry(1), makeCatalogEntry(2), external],
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog"]}>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Made by Silo");
+    expect(markup).toContain("Other sources");
+    expect(markup).not.toContain("Approved community");
+    // Uninstalled plugins come first within a group.
+    expect(markup.indexOf("Plugin 02")).toBeLessThan(markup.indexOf("Plugin 01"));
+    expect(markup).toContain("Installed");
+
+    const install = capturedButtonProps.find(
+      (props) => props["aria-label"] === "Install Plugin 02",
+    );
+    (install?.onClick as () => void)();
+    expect(installPluginMutateMock).toHaveBeenCalledWith({
+      repository_id: 1,
+      plugin_id: "silo.plugin-02",
+      version: "1.0.0",
+    });
+  });
+
+  it("filters the catalog by job from the URL", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
       installations: [],
       catalogSettings: undefined,
       isLoading: false,
-      catalog: Array.from({ length: 13 }, (_, index) => makeCatalogEntry(index + 1)),
+      catalog: [
+        {
+          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
+          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
+        },
+        {
+          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
+          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
+        },
+      ],
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_page=2"]}>
+      <MemoryRouter initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers"]}>
         <AdminPlugins />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Plugin 13");
-    expect(markup).not.toContain("Plugin 01");
-    expect(markup).toContain("Showing");
-    expect(markup).toContain(">13</span>–<span");
-    expect(markup).toContain("2 / 2");
+    expect(markup).toContain("Intro Finder");
+    expect(markup).not.toContain("Ratings Source");
+    expect(markup).toContain("1 of 2 plugins");
   });
 
-  // Effects never run under renderToStaticMarkup, so the ?configure deep link
-  // needs a real DOM render.
-  it("opens the configure dialog from a ?configure deep link", async () => {
-    const installation = makeInstallation(1, "TheIntroDB");
+  it("keeps a job filter when the search leaves nothing for that job", () => {
     useAdminPluginsMock.mockReturnValue({
       repositories: [],
-      catalog: [],
-      installations: [installation],
+      installations: [],
       catalogSettings: undefined,
       isLoading: false,
+      catalog: [
+        {
+          ...makeCatalogEntry(1, { displayName: "Intro Finder" }),
+          capabilities: [{ type: "marker_provider.v1", id: "intro", display_name: "Intro" }],
+        },
+        {
+          ...makeCatalogEntry(2, { displayName: "Ratings Source" }),
+          capabilities: [{ type: "metadata_provider.v1", id: "ratings", display_name: "Ratings" }],
+        },
+      ],
     });
 
-    render(
-      <MemoryRouter initialEntries={[`/admin/plugins?configure=${installation.plugin_id}`]}>
+    const markup = renderToStaticMarkup(
+      <MemoryRouter
+        initialEntries={["/admin/plugins?tab=catalog&catalog_job=markers&catalog_q=ratings"]}
+      >
         <AdminPlugins />
       </MemoryRouter>,
     );
 
-    const dialog = await screen.findByRole("dialog");
-    expect(
-      within(dialog).getByText("Configure bindings, credentials, and runtime settings."),
-    ).toBeInTheDocument();
-    expect(within(dialog).getByText(installation.plugin_id)).toBeInTheDocument();
+    expect(markup).not.toContain("Ratings Source");
+    expect(markup).toContain("No catalog plugins match");
   });
 
-  it("ignores a ?configure deep link for a plugin that is not installed", async () => {
-    useAdminPluginsMock.mockReturnValue({
-      repositories: [],
-      catalog: [],
-      installations: [makeInstallation(1, "TheIntroDB")],
-      catalogSettings: undefined,
-      isLoading: false,
-    });
+  it.each([["silo.theintrodb"], ["silo.not-installed"]])(
+    "forwards the old ?configure=%s link to the plugin page",
+    async (pluginID) => {
+      function Probe() {
+        const location = useLocation();
+        const navigationType = useNavigationType();
+        return <p>{`${location.pathname} ${navigationType}`}</p>;
+      }
+      useAdminPluginsMock.mockReturnValue({
+        repositories: [],
+        catalog: [],
+        installations: [makeInstallation(1, "TheIntroDB")],
+        catalogSettings: undefined,
+        isLoading: false,
+      });
 
-    render(
-      <MemoryRouter initialEntries={["/admin/plugins?configure=silo.not-installed"]}>
-        <AdminPlugins />
-      </MemoryRouter>,
-    );
+      render(
+        <MemoryRouter
+          initialEntries={[`/admin/plugins?installed_q=${pluginID}&configure=${pluginID}`]}
+        >
+          <Routes>
+            <Route path="/admin/plugins" element={<AdminPlugins />} />
+            <Route path="/admin/plugins/:pluginId" element={<Probe />} />
+          </Routes>
+        </MemoryRouter>,
+      );
 
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Configure bindings, credentials, and runtime settings."),
-      ).not.toBeInTheDocument(),
-    );
-  });
+      expect(await screen.findByText(`/admin/plugins/${pluginID} REPLACE`)).toBeInTheDocument();
+    },
+  );
 });

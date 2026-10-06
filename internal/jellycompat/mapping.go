@@ -39,6 +39,12 @@ func newMapper(codec *ResourceIDCodec, cfg *config.Config) *mapper {
 	return &mapper{codec: codec, serverID: serverID, imageTagSigner: newImageTagSigner(imageTagSecret)}
 }
 
+// displayPreferencesID is Jellyfin's DisplayPreferencesId for a view: the
+// view's GUID in "N" format (no hyphens).
+func displayPreferencesID(viewID string) string {
+	return strings.ReplaceAll(viewID, "-", "")
+}
+
 func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 	imgTags := map[string]string{}
 	routeID := m.codec.EncodeIntID(EncodedIDLibrary, int64(library.ID))
@@ -58,7 +64,10 @@ func (m *mapper) viewFromLibrary(library upstreamUserLibrary) baseItemDTO {
 		ServerID:       m.serverID,
 		CollectionType: libraryCollectionType(library.Type),
 		SortName:       strings.ToLower(library.Name),
-		ImageTags:      imgTags,
+		// Jellyfin clients key per-library view settings on this; Jellyfin
+		// for Android TV crashes reopening a library without it.
+		DisplayPreferencesID: displayPreferencesID(routeID),
+		ImageTags:            imgTags,
 		UserData: &itemUserDataDTO{
 			Key:    routeID,
 			ItemID: routeID,
@@ -143,6 +152,15 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	); tags != nil {
 		dto.BackdropImageTags = tags
 	}
+	// Advertise the logo as Jellyfin does, so clients that check ImageTags
+	// know it exists. Episodes carry no logo of their own; theirs belongs to
+	// the series.
+	if item.LogoURL != "" && item.Type != "episode" {
+		dto.ImageTags["Logo"] = m.imageTagSigner.Tag(
+			imageTagSeed(item.ContentID, "Logo", compatCardImageSize, item.LogoPath, "", item.UpdatedAt),
+			item.LogoURL,
+		)
+	}
 	if ratio := primaryAspectRatio(item.Type); ratio != nil {
 		dto.PrimaryImageAspectRatio = ratio
 	}
@@ -201,7 +219,6 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.ImageBlurHashes = map[string]map[string]string{}
 		dto.LockedFields = []string{}
 		dto.Chapters = []map[string]any{}
-		dto.Trickplay = map[string]any{}
 		dto.MediaStreams = []mediaStreamDTO{}
 	}
 
@@ -244,6 +261,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropPath:      item.BackdropPath,
 		BackdropThumbhash: item.BackdropThumbhash,
+		LogoURL:           item.LogoURL,
 		LogoPath:          item.LogoPath,
 		UpdatedAt:         item.UpdatedAt,
 		SeasonCount:       item.SeasonCount,
@@ -349,27 +367,23 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		if wantMediaSources {
 			dto.MediaSources = make([]mediaSourceDTO, 0, len(item.Versions))
 		}
-		// Register every version's file ID as owned by this item, even when the
-		// caller didn't ask for MediaSources/MediaStreams. Skipping this breaks
-		// later /Items/{mediaSourceId} lookups (LookupMediaSourceOwner returns
-		// ok=false → 404) whenever the detail was first materialized through a
-		// list endpoint without those Fields.
-		for _, version := range item.Versions {
-			m.codec.RegisterMediaSourceOwner(int64(version.FileID), item.ContentID)
-			if !wantMediaSources && !wantMediaStreams {
-				continue
-			}
-			sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
-			streams := buildMediaStreams(routeItemID, sourceID, version)
-			if wantMediaStreams {
-				dto.MediaStreams = append(dto.MediaStreams, streams...)
-			}
-			if wantMediaSources {
-				dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+		if wantMediaSources || wantMediaStreams {
+			for _, version := range item.Versions {
+				sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+				streams := buildMediaStreams(routeItemID, sourceID, version)
+				if wantMediaStreams {
+					dto.MediaStreams = append(dto.MediaStreams, streams...)
+				}
+				if wantMediaSources {
+					dto.MediaSources = append(dto.MediaSources, detailMediaSourceDTO(sourceID, version, streams))
+				}
 			}
 		}
 		if wantField("chapters") {
 			dto.Chapters = compatChapters(firstVersion.Chapters, firstVersion.AddedAt)
+		}
+		if wantField("trickplay") {
+			dto.Trickplay = m.compatTrickplay(item.Versions)
 		}
 	} else if isPlayableItemType(item.Type) {
 		// Provider-metadata-only (unaired/missing) item: version data is
@@ -942,4 +956,25 @@ func nonNilStrings(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// compatTrickplay is Jellyfin's Trickplay member: for each media source with
+// published seek-bar previews, its one width. Nil when no version has any.
+func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[string]trickplayInfoDTO {
+	var out map[string]map[string]trickplayInfoDTO
+	for _, version := range versions {
+		grid := version.Trickplay
+		if grid == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]map[string]trickplayInfoDTO{}
+		}
+		sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+		out[sourceID] = map[string]trickplayInfoDTO{strconv.Itoa(grid.Width): {
+			Width: grid.Width, Height: grid.Height, TileWidth: grid.TileColumns, TileHeight: grid.TileRows,
+			ThumbnailCount: grid.ThumbnailCount, Interval: grid.IntervalMS, Bandwidth: grid.Bandwidth,
+		}}
+	}
+	return out
 }

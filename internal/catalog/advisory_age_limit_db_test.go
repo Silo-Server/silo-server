@@ -48,6 +48,18 @@ func TestApplyMaturityLimitsAdvisoryAge(t *testing.T) {
 		t.Fatalf("unrated setting changed the advisory predicate: %v", conditions)
 	}
 
+	// Requiring an advisory age turns the limit fail-closed: a title with no
+	// advisory age is hidden, the same shape a ceiling gives an unrated title.
+	conditions, args, next = apply(access.MaturityLimits{MaxAdvisoryAge: 10, RequireAdvisoryAge: true})
+	if !slices.Equal(conditions, []string{"(ece.advisory_age IS NOT NULL AND ece.advisory_age <= $3)"}) || !slices.Equal(args, []any{10}) || next != 4 {
+		t.Fatalf("required advisory: %v %v %d", conditions, args, next)
+	}
+	// The flag means nothing without a limit: no predicate, no bind.
+	conditions, args, next = apply(access.MaturityLimits{RequireAdvisoryAge: true})
+	if len(conditions) != 0 || len(args) != 0 || next != 3 {
+		t.Fatalf("required advisory without a limit: %v %v %d", conditions, args, next)
+	}
+
 	conditions, args, next = apply(access.MaturityLimits{MaxContentRating: "NR", MaxAdvisoryAge: 10})
 	if !slices.Equal(conditions, []string{"1 = 0"}) || len(args) != 0 || next != 3 {
 		t.Fatalf("blocked ceiling: %v %v %d", conditions, args, next)
@@ -293,6 +305,91 @@ func TestAdvisoryAgeLimitDB(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertVisible(t, got, []string{prefix + "-none", prefix + "-ten"}, movieIDs)
+	})
+
+	// The same reads with the profile requiring an advisory age. Titles with
+	// no advisory age now fall too, so under a limit of 12 only the movie
+	// rated 10 survives: no series and no episode does, because one series is
+	// rated 16 and the other has no age at all.
+	strictTwelve := access.MaturityLimits{MaxAdvisoryAge: 12, RequireAdvisoryAge: true}
+	visibleStrict := []string{prefix + "-ten"}
+
+	t.Run("strict FilterAccessibleContentIDs", func(t *testing.T) {
+		got, err := NewLibraryItemRepository(pool).FilterAccessibleContentIDs(ctx, allIDs, nil, nil, strictTwelve)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVisible(t, got, visibleStrict, allIDs)
+	})
+	t.Run("strict EnsureAccessible", func(t *testing.T) {
+		if err := items.EnsureAccessible(ctx, prefix+"-none", AccessFilter{MaturityLimits: strictTwelve}); !errors.Is(err, ErrItemNotFound) {
+			t.Fatalf("no advisory under a strict limit: err = %v, want ErrItemNotFound", err)
+		}
+		if err := items.EnsureAccessible(ctx, prefix+"-ten", AccessFilter{MaturityLimits: strictTwelve}); err != nil {
+			t.Fatalf("advisory 10 under a strict limit of 12: %v", err)
+		}
+	})
+	t.Run("strict browse", func(t *testing.T) {
+		filters := BrowseFilters{Type: "movie,series", LibraryIDs: []int{movies, shows}, SearchTerm: prefix, Limit: 50, MaturityLimits: strictTwelve}
+		result, err := NewBrowseRepository(pool).BrowsePage(ctx, filters, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, item := range result.Items {
+			got = append(got, item.ContentID)
+		}
+		if !slices.Equal(got, visibleStrict) {
+			t.Fatalf("strict browse = %v, want %v", got, visibleStrict)
+		}
+	})
+	t.Run("strict BrowseEpisodes", func(t *testing.T) {
+		shown, _, err := NewEpisodeRepository(pool).BrowseEpisodes(ctx, prefix+"-show-none", "", nil, "", BrowseFilters{Limit: 10}, AccessFilter{MaturityLimits: strictTwelve}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(shown) != 0 {
+			t.Fatalf("episodes of a series with no advisory under a strict limit = %d, want 0", len(shown))
+		}
+	})
+	t.Run("strict mixed search", func(t *testing.T) {
+		found, _, _, _, err := items.SearchPage(ctx, "Kestrel", nil, 50, 0, AccessFilter{MaturityLimits: strictTwelve}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ours []string
+		for _, item := range found {
+			if strings.HasPrefix(item.ContentID, prefix) {
+				ours = append(ours, item.ContentID)
+			}
+		}
+		if !slices.Equal(ours, visibleStrict) {
+			t.Fatalf("strict search = %v, want %v", ours, visibleStrict)
+		}
+	})
+	t.Run("strict episode catalog read model", func(t *testing.T) {
+		conditions := []string{"ece.episode_id LIKE $1"}
+		args := []any{prefix + "%"}
+		argIdx := 2
+		ApplySectionAccessFilter("ece", AccessFilter{MaturityLimits: strictTwelve}, &conditions, &args, &argIdx)
+		var count int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM episode_catalog_entries ece WHERE "+strings.Join(conditions, " AND "), args...).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("ece under a strict limit of 12 = %d episodes, want 0", count)
+		}
+	})
+	t.Run("strict ANDs with the content-rating ceiling", func(t *testing.T) {
+		movieIDs := []string{prefix + "-none", prefix + "-ten", prefix + "-thirteen", prefix + "-sixteen-r"}
+		// A loose strict limit still cannot admit the R title past a PG
+		// ceiling, and it now also drops the PG title with no advisory age.
+		got, err := NewLibraryItemRepository(pool).FilterAccessibleContentIDs(ctx, movieIDs, nil, nil,
+			access.MaturityLimits{MaxContentRating: "PG", MaxAdvisoryAge: 16, RequireAdvisoryAge: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertVisible(t, got, []string{prefix + "-ten", prefix + "-thirteen"}, movieIDs)
 	})
 }
 

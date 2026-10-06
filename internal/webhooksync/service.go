@@ -25,6 +25,10 @@ type Service struct {
 	matcher    *historyimport.Matcher
 	watch      *watchstate.Service
 	providers  map[string]Provider
+
+	// localNetwork decides whether a connection's server address may be on
+	// this server's own network. Nil limits it to the public internet.
+	localNetwork *historyimport.LocalNetworkAccess
 }
 
 func NewService(repo *Repository, importRepo *historyimport.Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -39,6 +43,14 @@ func NewService(repo *Repository, importRepo *historyimport.Repository, storePro
 			ProviderEmby:     NewEmbyProvider(),
 			ProviderJellyfin: NewJellyfinProvider(),
 		},
+	}
+}
+
+// SetLocalNetworkAccess installs the policy history import uses for server
+// addresses users supply.
+func (s *Service) SetLocalNetworkAccess(access *historyimport.LocalNetworkAccess) {
+	if s != nil {
+		s.localNetwork = access
 	}
 }
 
@@ -62,12 +74,13 @@ func (s *Service) ListConnections(ctx context.Context, userID int) ([]Connection
 	if err != nil {
 		return nil, err
 	}
+	serverCtx := s.localNetwork.Context(ctx, userID)
 	for i := range connections {
 		provider, providerErr := s.provider(connections[i].Provider)
 		if providerErr != nil {
 			continue
 		}
-		if _, available, err := provider.DiscoverUsers(ctx, &connections[i], nil); err == nil {
+		if _, available, err := provider.DiscoverUsers(serverCtx, &connections[i], nil); err == nil {
 			connections[i].AccountDiscoveryAvailable = available
 			if err := s.repo.SetDiscoveryAvailable(ctx, connections[i].ID, available); err != nil {
 				slog.WarnContext(ctx, "webhook sync: failed to persist discovery availability", "component", "webhooksync", "connection_id", connections[i].ID, "error", err)
@@ -84,6 +97,13 @@ func (s *Service) CreateConnection(ctx context.Context, userID int, input Create
 	}
 	if err := provider.ValidateCreateInput(input); err != nil {
 		return nil, err
+	}
+	// Only the Plex provider contacts the server; the others just receive
+	// its webhooks.
+	if input.Provider == ProviderPlex {
+		if _, err := s.localNetwork.CheckServerURL(ctx, userID, input.BaseURL); err != nil {
+			return nil, err
+		}
 	}
 	exists, err := s.repo.ProfileExistsForUser(ctx, userID, input.DefaultProfileID)
 	if err != nil {
@@ -168,7 +188,7 @@ func (s *Service) GetProfileMappings(ctx context.Context, userID int, id string)
 	if err != nil {
 		return nil, err
 	}
-	discovered, available, discoverErr := provider.DiscoverUsers(ctx, conn, mappings)
+	discovered, available, discoverErr := provider.DiscoverUsers(s.localNetwork.Context(ctx, conn.UserID), conn, mappings)
 	if discoverErr == nil {
 		conn.AccountDiscoveryAvailable = available
 		_ = s.repo.SetDiscoveryAvailable(ctx, conn.ID, available)
@@ -261,12 +281,16 @@ func (s *Service) ProcessWebhookBounded(ctx context.Context, secret string, r *h
 	if err != nil {
 		return s.failWebhook(ctx, conn.ID, result, err, "Provider configuration failed")
 	}
-	event, err := provider.ParseWebhook(ctx, conn, r)
+	event, err := provider.ParseWebhook(s.localNetwork.Context(ctx, conn.UserID), conn, r)
 	if err != nil {
 		result.Outcome = OutcomeRejected
 		result.Summary = "Rejected invalid " + conn.Provider + " webhook payload"
-		result.ErrorMessage = err.Error()
-		_ = s.repo.MarkWebhookError(ctx, conn.ID, err.Error())
+		message := err.Error()
+		if refused, ok := historyimport.ServerAddressMessage(err); ok {
+			message = refused
+		}
+		result.ErrorMessage = message
+		_ = s.repo.MarkWebhookError(ctx, conn.ID, message)
 		return result, err
 	}
 	if event != nil {

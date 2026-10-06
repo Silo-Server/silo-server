@@ -132,8 +132,8 @@ adds no test-send UI. Jellyfin compatibility has no corresponding operation.
 (`clearAdminNotificationRelay`) require acting-administrator authorization.
 Registration accepts an optional `relay_url` and otherwise uses the existing
 default. It preserves relay origin allowlisting, initial registration versus
-credential rotation, explicit re-registration after rejection, and atomic
-credential persistence. Responses expose only relay/deployment identifiers,
+credential rotation, a fresh registration when the relay rejects the current
+capability, and atomic credential persistence. Responses expose only relay/deployment identifiers,
 key prefix, configured status, optional request/topics metadata, and an
 `expires_at` UTC instant with millisecond precision. The reusable key is never
 returned. Clearing removes the local credential, sets the re-registration
@@ -152,7 +152,21 @@ The setup wizard offers the relay privacy disclosure beside the toggle and lets
 the administrator turn it off before finishing setup. When delivery is on and no relay credential
 is stored, the push sender self-registers with the configured relay on the
 first send; the explicit register endpoint remains for choosing a relay origin
-or rotating the credential. Servers that already had an account before this
+or rotating the credential.
+
+The relay credential maintains itself. The sender renews a capability before
+it expires. When the relay rejects the stored capability for any reason other
+than `deployment_disabled`, the sender registers a new deployment and resends,
+at most once per 15 minutes per process. Registration is stateless on the
+relay, and the relay keeps no device state, so a new deployment needs no client
+change. This covers a generation superseded by another holder of the same
+credential (a database cloned to a second server shares it), a signing key the
+relay retired, and a capability that expired past its renewal grace.
+Only an administrator's clear or a relay `deployment_disabled` response parks
+delivery behind the re-registration marker; either one stores an empty
+credential. An older server stored the rejected key along with the marker. That
+state is not parked, and the sender replaces it on the next send. If the
+relay rejects a rotation, the register endpoint registers a new deployment. Servers that already had an account before this
 default changed are pinned to off by migration and keep their prior behavior
 until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.

@@ -1,3 +1,4 @@
+import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
@@ -54,6 +55,7 @@ import type {
 import { useSeriesEpisodes } from "@/player/hooks/useSeriesEpisodes";
 import { formatTime } from "@/player/components/SeekBar";
 import { storage } from "@/utils/storage";
+import { PlaybackFullscreenRoot } from "./PlaybackFullscreenRoot";
 import { WatchPlaybackControllerContext } from "./watchPlaybackContext";
 import type { WatchPlaybackControllerValue } from "./watchPlaybackContext";
 import type { WatchPlaybackTransportControls } from "./watchPlaybackReducer";
@@ -493,6 +495,14 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
 }
 
 export function WatchPlaybackHost() {
+  return (
+    <PlaybackFullscreenRoot>
+      <WatchPlaybackHostContent />
+    </PlaybackFullscreenRoot>
+  );
+}
+
+function WatchPlaybackHostContent() {
   // The host is mounted on every screen, the login screen included; its
   // settings reads wait for a session instead of answering 401.
   const { user } = useAuth();
@@ -909,6 +919,7 @@ export function WatchPlaybackHost() {
     },
     [requestKeyValue, setPictureInPictureActive],
   );
+  const inRoom = Boolean(activeRequest?.roomId && activeRequest.roomToken);
   const handlePlaybackStateChange = useCallback(
     (snapshot: WatchPlaybackSnapshot) => {
       if (!requestKeyValue) return;
@@ -921,8 +932,13 @@ export function WatchPlaybackHost() {
       // Enter post-roll early when approaching end of a series episode.
       // Fires regardless of whether a next episode exists so the end-of-
       // series case still gets a graceful overlay instead of an HLS tail loop.
+      // A Watch Together room decides what follows for everyone: it returns to
+      // its lobby when the item finishes. The player's room exit only goes
+      // back to the room from the foreground, so post-roll would leave the
+      // member on an empty player page.
       if (
         !postRollEnteredRef.current &&
+        !inRoom &&
         seriesIdRef.current &&
         modeRef.current === "foreground" &&
         snapshot.duration > 0 &&
@@ -934,7 +950,7 @@ export function WatchPlaybackHost() {
         controller.enterPostRoll(requestKeyValue);
       }
     },
-    [requestKeyValue, updatePlaybackSnapshot, controller],
+    [requestKeyValue, updatePlaybackSnapshot, controller, inRoom],
   );
   const handlePlaybackTransportReady = useCallback(
     (controls: WatchPlaybackTransportControls | null) => {
@@ -1107,6 +1123,7 @@ export function WatchPlaybackHost() {
 }
 
 export function WatchPlaybackBar() {
+  const barRef = usePlaybackBarHeight("watch");
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback bar is unavailable outside WatchPlaybackProvider");
@@ -1130,7 +1147,10 @@ export function WatchPlaybackBar() {
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center">
+    <div
+      ref={barRef}
+      className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center"
+    >
       <div className="glass-dark border-border/70 pointer-events-auto w-full max-w-4xl rounded-2xl border px-4 py-3 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.7)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">

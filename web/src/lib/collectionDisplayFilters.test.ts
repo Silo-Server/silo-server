@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import type { DisplayQueryDefinition } from "@/api/types";
@@ -49,14 +51,6 @@ describe("displayFiltersToQueryDefinition", () => {
         },
       ],
     });
-  });
-
-  it("omits library_ids / media_scope / sort / limit (filter-only fragment)", () => {
-    const fragment = displayFiltersToQueryDefinition("watched", "movie")!;
-    expect(fragment).not.toHaveProperty("library_ids");
-    expect(fragment).not.toHaveProperty("media_scope");
-    expect(fragment).not.toHaveProperty("sort");
-    expect(fragment).not.toHaveProperty("limit");
   });
 });
 

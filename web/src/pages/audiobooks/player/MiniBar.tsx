@@ -1,3 +1,4 @@
+import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
 import { X, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { SeekBar, formatTime } from "@/player/components/SeekBar";
 import { ChaptersMenu } from "@/player/components/ChaptersMenu";
@@ -30,12 +31,14 @@ export function MiniBar({
   onClose,
   onExpand,
 }: MiniBarProps) {
+  const barRef = usePlaybackBarHeight("audiobook");
   const hasChapters = playback.chapters.length > 0;
   const hasNextChapter =
     playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;
 
   return (
     <div
+      ref={barRef}
       className="bg-background fixed right-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6"
       style={{ left: "var(--app-sidebar-offset, 0px)" }}
     >

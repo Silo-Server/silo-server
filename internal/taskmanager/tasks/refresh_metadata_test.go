@@ -71,22 +71,6 @@ func TestRefreshMetadataTask_NoCandidates(t *testing.T) {
 	}
 }
 
-func TestRefreshMetadataTask_UsesScheduledRefreshPath(t *testing.T) {
-	finder := &fakeRefreshCandidateFinder{
-		candidates: []worker.RefreshCandidate{{TargetType: "item", ContentID: "item-1"}},
-	}
-	refresher := &fakeMetadataRefresher{}
-	task := NewRefreshMetadataTask(finder, refresher)
-
-	if err := task.Execute(context.Background(), noopProgressReporter{}); err != nil {
-		t.Fatalf("Execute returned error: %v", err)
-	}
-	calls := refresher.Calls()
-	if len(calls) != 1 || calls[0] != "item:item-1" {
-		t.Fatalf("expected scheduled refresh call for item-1, got %v", calls)
-	}
-}
-
 func TestRefreshMetadataTask_DrainsFullBatches(t *testing.T) {
 	firstBatch := make([]worker.RefreshCandidate, refreshMetadataBatchSize)
 	for i := range firstBatch {

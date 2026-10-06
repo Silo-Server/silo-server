@@ -25,7 +25,8 @@ type Profile struct {
 	IsChild                    bool    `json:"is_child" example:"false"`
 	IsPrimary                  bool    `json:"is_primary" doc:"The household parent (not the server admin role)" example:"true"`
 	MaxContentRating           string  `json:"max_content_rating" doc:"Content-rating ceiling; empty means none" example:"PG-13"`
-	MaxAdvisoryAge             *int    `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null means no limit" example:"12"`
+	MaxAdvisoryAge             *int    `json:"max_advisory_age" nullable:"true" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null means no limit" example:"12"`
+	RequireAdvisoryAge         bool    `json:"require_advisory_age" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"false"`
 	QualityPreference          string  `json:"quality_preference" doc:"Free-form until the vocabulary is ratified (#135). Canonical values today: auto, original, 720p, 1080p, 2160p, 4k; empty when unset" example:"auto"`
 	Language                   string  `json:"language" doc:"Preferred audio language (ISO 639-1); empty inherits" example:"en"`
 	PreferredMetadataLanguage  string  `json:"preferred_metadata_language" doc:"Metadata language (ISO 639-1); empty inherits the library's" example:"en"`
@@ -51,7 +52,8 @@ type ProfileUpdate struct {
 	PIN                        Patch[string] `json:"pin,omitzero" minLength:"1" maxLength:"72" doc:"New PIN, 1 to 72 bytes; null removes the PIN. An empty string is rejected, not a clear" example:"1234"`
 	IsChild                    *bool         `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           Patch[string] `json:"max_content_rating,omitzero" doc:"Content-rating ceiling; null removes it" example:"PG-13"`
-	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone; null removes it" example:"12"`
+	MaxAdvisoryAge             Patch[int]    `json:"max_advisory_age,omitzero" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set; null removes it" example:"12"`
+	RequireAdvisoryAge         *bool         `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
 	QualityPreference          *string       `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
 	Language                   Patch[string] `json:"language,omitzero" doc:"Preferred audio language (ISO 639-1); null inherits" example:"en"`
 	PreferredMetadataLanguage  Patch[string] `json:"preferred_metadata_language,omitzero" doc:"Metadata language (ISO 639-1); null inherits the library's" example:"en"`
@@ -120,6 +122,10 @@ type ProfileCollection struct {
 	// updateProfile and createProfile reject unknown members, so a client must
 	// not send max_advisory_age to a server that does not report this.
 	MaxAdvisoryAgeSupported bool `json:"max_advisory_age_supported" doc:"Whether profiles accept max_advisory_age and the server enforces it" example:"true"`
+	// RequireAdvisoryAgeSupported is the same kind of flag for
+	// require_advisory_age, which arrived after max_advisory_age: a server can
+	// report the first and not the second.
+	RequireAdvisoryAgeSupported bool `json:"require_advisory_age_supported" doc:"Whether profiles accept require_advisory_age and the server enforces it" example:"true"`
 }
 
 // ProfileCollectionOutput is the listProfiles response.
@@ -137,7 +143,8 @@ type ProfileCreate struct {
 	PIN                        *string `json:"pin,omitempty" nullable:"false" minLength:"1" maxLength:"72" doc:"PIN, 1 to 72 bytes" example:"1234"`
 	IsChild                    *bool   `json:"is_child,omitempty" nullable:"false" example:"false"`
 	MaxContentRating           *string `json:"max_content_rating,omitempty" nullable:"false" doc:"Content-rating ceiling" example:"PG-13"`
-	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone" example:"12"`
+	MaxAdvisoryAge             *int    `json:"max_advisory_age,omitempty" nullable:"false" minimum:"1" maximum:"21" doc:"Advisory-age limit: titles whose advisory age (for example Common Sense Media's 13+) is above it are hidden from the profile. Titles with no advisory age are limited by max_content_rating alone unless require_advisory_age is set" example:"12"`
+	RequireAdvisoryAge         *bool   `json:"require_advisory_age,omitempty" nullable:"false" doc:"Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age" example:"true"`
 	QualityPreference          *string `json:"quality_preference,omitempty" nullable:"false" maxLength:"32" doc:"Free-form until the vocabulary is ratified (#135); v1 never validated it. Canonical values today: auto, original, 720p, 1080p, 2160p, 4k" example:"auto"`
 	Language                   *string `json:"language,omitempty" nullable:"false" doc:"Preferred audio language (ISO 639-1)" example:"en"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty" nullable:"false" doc:"Metadata language (ISO 639-1)" example:"en"`
@@ -651,9 +658,10 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		items = append(items, profile)
 	}
 	return &ProfileCollectionOutput{Body: ProfileCollection{
-		Collection:              NewCollection(items),
-		AvatarUploadEnabled:     view.AvatarUploadEnabled,
-		MaxAdvisoryAgeSupported: true,
+		Collection:                  NewCollection(items),
+		AvatarUploadEnabled:         view.AvatarUploadEnabled,
+		MaxAdvisoryAgeSupported:     true,
+		RequireAdvisoryAgeSupported: true,
 	}}, nil
 }
 
@@ -724,6 +732,7 @@ func (c ProfileCreate) toRequest() (handlers.ProfileCreateRequest, *Problem) {
 		IsChild:                    flag(c.IsChild),
 		MaxContentRating:           str(c.MaxContentRating),
 		MaxAdvisoryAge:             number(c.MaxAdvisoryAge),
+		RequireAdvisoryAge:         flag(c.RequireAdvisoryAge),
 		QualityPreference:          str(c.QualityPreference),
 		Language:                   str(c.Language),
 		PreferredMetadataLanguage:  str(c.PreferredMetadataLanguage),
@@ -879,6 +888,7 @@ func (u ProfileUpdate) toRequest() (handlers.ProfileUpdateRequest, *Problem) {
 		IsChild:                    u.IsChild,
 		MaxContentRating:           clear(u.MaxContentRating),
 		MaxAdvisoryAge:             advisoryAgePatch(u.MaxAdvisoryAge),
+		RequireAdvisoryAge:         u.RequireAdvisoryAge,
 		QualityPreference:          u.QualityPreference,
 		Language:                   clear(u.Language),
 		PreferredMetadataLanguage:  clear(u.PreferredMetadataLanguage),
@@ -961,6 +971,7 @@ func profileOf(v handlers.ProfileView) (Profile, *Problem) {
 		IsPrimary:                  v.IsPrimary,
 		MaxContentRating:           v.MaxContentRating,
 		MaxAdvisoryAge:             advisoryAgeOf(v.MaxAdvisoryAge),
+		RequireAdvisoryAge:         v.RequireAdvisoryAge,
 		QualityPreference:          v.QualityPreference,
 		Language:                   v.Language,
 		PreferredMetadataLanguage:  v.PreferredMetadataLanguage,

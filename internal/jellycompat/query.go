@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
@@ -36,6 +37,8 @@ type itemsQuery struct {
 	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
+	isNotFolder            bool // Filters=IsNotFolder or IsFolder=false: leaf items only
+	includesOnlyLeafTypes  bool // IncludeItemTypes names Episode and no Series or Season
 	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
 	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
 	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
@@ -59,6 +62,17 @@ type itemsQuery struct {
 	fieldsExplicit         bool            // true when Fields was in the request
 	startItemID            string          // raw encoded ID from StartItemId param
 	adjacentTo             string          // raw encoded ID from AdjacentTo param
+	// Jellyfin browse filters served by catalog compat predicates.
+	nameLessThan            string
+	nameStartsWithOrGreater string
+	excludeIDs              []string // decoded content IDs from ExcludeItemIds
+	studios                 []string // decoded studio names from StudioIds
+	officialRatings         []string
+	minCommunityRating      float64
+	minPremiereDate         string // YYYY-MM-DD
+	maxPremiereDate         string // YYYY-MM-DD
+	countOnly               bool   // Limit=0 was sent: only TotalRecordCount is wanted
+	limitDefaulted          bool   // Limit was absent, so limit holds the default page size
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -70,12 +84,12 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		searchTerm:             strings.TrimSpace(q.Get("SearchTerm")),
 		namePrefix:             strings.TrimSpace(firstNonEmpty(q.Get("NameStartsWith"), q.Get("StartsWith"))),
 		maxOfficialRating:      strings.TrimSpace(q.Get("MaxOfficialRating")),
-		sort:                   mapSortBy(q.Get("SortBy")),
-		recursive:              parseBool(q.Get("Recursive"), false),
-		disableImages:          !parseBool(q.Get("EnableImages"), true),
-		disableUserData:        !parseBool(q.Get("EnableUserData"), true),
-		order:                  mapSortOrder(q.Get("SortOrder")),
+
+		recursive:       parseBool(q.Get("Recursive"), false),
+		disableImages:   !parseBool(q.Get("EnableImages"), true),
+		disableUserData: !parseBool(q.Get("EnableUserData"), true),
 	}
+	result.sort, result.order = parseSort(q.Get("SortBy"), q.Get("SortOrder"))
 
 	result.genres = splitNonemptyGenres(q.Get("Genres"))
 	for year := range strings.SplitSeq(q.Get("Years"), ",") {
@@ -148,12 +162,41 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 		}
 	}
 
+	result.countOnly = strings.TrimSpace(q.Get("Limit")) == "0"
+	result.limitDefaulted = strings.TrimSpace(q.Get("Limit")) == ""
+	result.nameLessThan = strings.TrimSpace(q.Get("NameLessThan"))
+	result.nameStartsWithOrGreater = strings.TrimSpace(q.Get("NameStartsWithOrGreater"))
+	for _, raw := range splitCommaValues(q.Values("ExcludeItemIds")) {
+		if decoded, err := decodeItemID(codec, raw); err == nil && decoded != "" {
+			result.excludeIDs = append(result.excludeIDs, decoded)
+		}
+	}
+	if studioIDs := splitPipeOrCommaValues(q.Values("StudioIds")); len(studioIDs) > 0 {
+		for _, raw := range studioIDs {
+			if decoded, err := codec.DecodeStringID(EncodedIDStudio, raw); err == nil && decoded != "" {
+				result.studios = append(result.studios, decoded)
+			}
+		}
+		if len(result.studios) == 0 {
+			result.unmatchedIDFilter = true
+		}
+	}
+	result.officialRatings = splitPipeOrCommaValues(q.Values("OfficialRatings"))
+	if rating, err := strconv.ParseFloat(strings.TrimSpace(q.Get("MinCommunityRating")), 64); err == nil && rating > 0 {
+		result.minCommunityRating = rating
+	}
+	result.minPremiereDate = parsePremiereDateBound(q.Get("MinPremiereDate"), true)
+	result.maxPremiereDate = parsePremiereDateBound(q.Get("MaxPremiereDate"), false)
+
 	rawItemTypes := q.Values("IncludeItemTypes")
 	rawExcludedItemTypes := q.Values("ExcludeItemTypes")
 	result.hasItemTypeFilter = hasNonEmptyValues(rawItemTypes) || hasNonEmptyValues(rawExcludedItemTypes)
 	result.itemTypes = effectiveItemTypes(rawItemTypes, rawExcludedItemTypes)
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
+	includedTypes := mapIncludeItemTypes(rawItemTypes)
+	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
+		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
@@ -170,6 +213,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.hasRootFilter = hasAnyNonEmptyParam(q, jellyfinRootFilterParams)
 	result.isFavorite = hasFilter(q.Get("Filters"), "IsFavorite") || parseBool(q.Get("IsFavorite"), false)
 	result.isResumable = hasFilter(q.Get("Filters"), "IsResumable")
+	result.isNotFolder = hasFilter(q.Get("Filters"), "IsNotFolder") || strings.EqualFold(strings.TrimSpace(q.Get("IsFolder")), "false")
 
 	if hasFilter(q.Get("Filters"), "IsPlayed") {
 		result.isPlayed = new(true)
@@ -310,6 +354,30 @@ func buildBrowseParams(query itemsQuery) url.Values {
 	if query.namePrefix != "" {
 		params.Set("name_prefix", query.namePrefix)
 	}
+	if query.nameLessThan != "" {
+		params.Set("name_less_than", query.nameLessThan)
+	}
+	if query.nameStartsWithOrGreater != "" {
+		params.Set("name_at_least", query.nameStartsWithOrGreater)
+	}
+	if len(query.excludeIDs) > 0 {
+		params.Set("exclude_content_ids", strings.Join(query.excludeIDs, ","))
+	}
+	if len(query.studios) > 0 {
+		params.Set("studios", strings.Join(query.studios, "|"))
+	}
+	if len(query.officialRatings) > 0 {
+		params.Set("official_ratings", strings.Join(query.officialRatings, "|"))
+	}
+	if query.minCommunityRating > 0 {
+		params.Set("min_community_rating", strconv.FormatFloat(query.minCommunityRating, 'f', -1, 64))
+	}
+	if query.minPremiereDate != "" {
+		params.Set("min_premiere_date", query.minPremiereDate)
+	}
+	if query.maxPremiereDate != "" {
+		params.Set("max_premiere_date", query.maxPremiereDate)
+	}
 	if query.sort != "" {
 		params.Set("sort", query.sort)
 	}
@@ -317,6 +385,9 @@ func buildBrowseParams(query itemsQuery) url.Values {
 		params.Set("order", query.order)
 	}
 	params.Set("include_total", strconv.FormatBool(query.enableTotalRecordCount))
+	if query.countOnly {
+		params.Set("count_only", "true")
+	}
 	if query.isFavorite {
 		params.Set("is_favorite", "true")
 	}
@@ -394,6 +465,16 @@ func splitCommaValues(values []string) []string {
 				out = append(out, part)
 			}
 		}
+	}
+	return out
+}
+
+// splitPipeOrCommaValues flattens repeated values delimited by either '|'
+// (Jellyfin's binder for StudioIds and OfficialRatings) or ','.
+func splitPipeOrCommaValues(values []string) []string {
+	var out []string
+	for _, raw := range values {
+		out = append(out, splitCommaValues(strings.Split(raw, "|"))...)
 	}
 	return out
 }
@@ -558,36 +639,80 @@ func parseMediaTypes(rawValues []string) []string {
 	return result
 }
 
+// parseSort maps Jellyfin's parallel SortBy/SortOrder lists to one browse sort
+// and order. The catalog sorts by one key, so the first key Silo maps wins and
+// takes the SortOrder entry at the same position. Jellyfin sorts ascending
+// when that entry is absent; without SortBy, Silo keeps its newest-first rail
+// default. Unmapped keys alone fall back to created_at.
+func parseSort(sortBy, sortOrder string) (sort, order string) {
+	keys := strings.Split(sortBy, ",")
+	orders := strings.Split(sortOrder, ",")
+	position := 0
+	sort = catalog.BrowseSortCreatedAt
+	for i, key := range keys {
+		if mapped, ok := sortKey(key); ok {
+			sort, position = mapped, i
+			break
+		}
+	}
+	orderRaw := ""
+	if position < len(orders) {
+		orderRaw = orders[position]
+	}
+	return sort, mapSortOrder(orderRaw, strings.TrimSpace(sortBy) != "")
+}
+
+// mapSortBy returns the browse sort parseSort selects for a SortBy list.
 func mapSortBy(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(strings.Split(raw, ",")[0])) {
+	sort, _ := parseSort(raw, "")
+	return sort
+}
+
+// sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
+// natural season/episode order episode browses already use — rather than to
+// created_at.
+func sortKey(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "sortname", "name":
-		return "sort_title"
+		return catalog.BrowseSortTitle, true
 	case "datecreated":
-		return "created_at"
+		return catalog.BrowseSortCreatedAt, true
 	case "premiered", "premieredate":
-		return "release_date"
+		return catalog.BrowseSortReleaseDate, true
 	case "productionyear":
-		return "year"
+		return catalog.BrowseSortYear, true
 	case "communityrating":
-		return "rating_imdb"
+		return catalog.BrowseSortRatingIMDB, true
 	case "random":
-		return "random"
+		return "random", true
 	case "dateplayed":
-		return "created_at"
+		return catalog.BrowseSortCreatedAt, true
 	case "datelastcontentadded":
 		// Jellyfin's standard "Latest" sort for TV libraries: shows ordered
 		// by their most recently added episode (issue #202).
-		return "latest_episode_added"
+		return "latest_episode_added", true
+	case "indexnumber", "parentindexnumber", "airedepisodeorder":
+		return "", true
 	default:
-		return "created_at"
+		return "", false
 	}
 }
 
-func mapSortOrder(raw string) string {
-	if strings.EqualFold(raw, "Ascending") {
+// mapSortOrder maps one Jellyfin SortOrder entry to a browse order. Jellyfin
+// sorts an explicit SortBy ascending when SortOrder is absent (Wholphin relies
+// on this for episode lists); requests without SortBy keep Silo's
+// newest-first rail default.
+func mapSortOrder(raw string, explicitSort bool) string {
+	switch raw = strings.TrimSpace(raw); {
+	case strings.EqualFold(raw, "Ascending"):
 		return "asc"
+	case strings.EqualFold(raw, "Descending"):
+		return catalog.BrowseOrderDescending
+	case explicitSort:
+		return "asc"
+	default:
+		return catalog.BrowseOrderDescending
 	}
-	return "desc"
 }
 
 func parseRequestedFields(raw string) map[string]bool {
@@ -741,8 +866,61 @@ func (q caseInsensitiveQuery) Values(key string) []string {
 	return nil
 }
 
+// hasCompatBrowseFilters reports Jellyfin filters that only the catalog browse
+// path applies.
+func (q itemsQuery) hasCompatBrowseFilters() bool {
+	return q.nameLessThan != "" || q.nameStartsWithOrGreater != "" || len(q.excludeIDs) > 0 || len(q.studios) > 0 ||
+		len(q.officialRatings) > 0 || q.minCommunityRating > 0 || q.minPremiereDate != "" || q.maxPremiereDate != ""
+}
+
+// parsePremiereDateBound converts a Jellyfin Min/MaxPremiereDate instant to
+// the inclusive YYYY-MM-DD bound the catalog compares. Jellyfin compares the
+// instant with premiere dates at midnight UTC, so a minimum with a time of day
+// starts the next UTC day and a maximum ends on its own UTC day.
+func parsePremiereDateBound(raw string, isMin bool) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999Z0700", "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
+		t, err := time.Parse(layout, raw)
+		if err != nil {
+			continue
+		}
+		t = t.UTC()
+		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		if isMin && t.After(day) {
+			day = day.AddDate(0, 0, 1)
+		}
+		return day.Format("2006-01-02")
+	}
+	if len(raw) >= 10 {
+		if _, err := time.Parse("2006-01-02", raw[:10]); err == nil {
+			return raw[:10]
+		}
+	}
+	return ""
+}
+
 // hasIntersectingFilters selects catalog predicate composition before specialized
 // rails can discard filters. Unfiltered rails keep their episode-aware semantics.
 func (q itemsQuery) hasIntersectingFilters() bool {
-	return len(q.genres) > 0 || len(q.years) > 0 || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+	return len(q.genres) > 0 || len(q.years) > 0 || q.hasCompatBrowseFilters() || q.genreName != "" || q.personID > 0 || q.requireBackdrop || len(q.audioLanguages) > 0 || len(q.subtitleLanguages) > 0 || q.maxOfficialRating != "" || q.namePrefix != "" || (q.searchTerm != "" && (q.isFavorite || q.isPlayed != nil || q.isResumable || q.sortExplicit)) || (q.isFavorite && (q.isPlayed != nil || q.isResumable)) || (q.isResumable && q.isPlayed != nil)
+}
+
+// hasMemberFilters reports whether the request narrows results by catalog
+// fields, search, or user state.
+func (q itemsQuery) hasMemberFilters() bool {
+	return q.hasIntersectingFilters() || q.searchTerm != "" || q.isFavorite || q.isPlayed != nil || q.isResumable
+}
+
+// allowsItemType reports whether the IncludeItemTypes/ExcludeItemTypes filter,
+// if any, admits the native item type.
+func (q itemsQuery) allowsItemType(itemType string) bool {
+	return !q.hasItemTypeFilter || itemTypesContain(q.itemTypes, itemType)
+}
+
+// allowsVideo reports whether the MediaTypes filter, if any, admits video.
+func (q itemsQuery) allowsVideo() bool {
+	return !q.mediaTypesExplicit || q.mediaTypesSet["video"]
 }
