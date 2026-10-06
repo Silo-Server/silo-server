@@ -347,6 +347,13 @@ func TestPersonRefreshWorkerRateLimitBackoff(t *testing.T) {
 	if got := pause(); got != 30*time.Minute {
 		t.Fatalf("pause = %s, want the provider's 30m", got)
 	}
+	// A rate limit without a Retry-After right after doesn't shorten it.
+	w.rateLimited(rateLimitErr{})
+	if got := pause(); got != 30*time.Minute {
+		t.Fatalf("pause after a shorter rate limit = %s, want the provider's 30m", got)
+	}
+
+	now = now.Add(31 * time.Minute)
 	w.rateLimited(errors.New("timeout"))
 	w.rateLimited(rateLimitErr{})
 	if got := pause(); got != time.Minute {

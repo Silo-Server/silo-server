@@ -299,8 +299,13 @@ func (w *PersonRefreshWorker) rateLimited(err error) bool {
 	} else {
 		w.backoff = min(w.backoff*2, personRefreshMaxRateLimitBackoff)
 	}
-	wait := max(w.backoff, limited.RateLimitRetryAfter())
-	w.pausedUntil = w.now().Add(wait)
+	// A pause already longer, such as a provider's Retry-After from an
+	// earlier lookup, stands: a later rate limit never shortens it.
+	now := w.now()
+	if until := now.Add(max(w.backoff, limited.RateLimitRetryAfter())); until.After(w.pausedUntil) {
+		w.pausedUntil = until
+	}
+	wait := w.pausedUntil.Sub(now)
 	w.mu.Unlock()
 
 	slog.Warn("person refresh worker: provider rate limited; pausing background lookups", "pause", wait)
