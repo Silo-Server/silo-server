@@ -32,52 +32,10 @@ func TestNativeServerFeaturesV3ExtendTheSharedList(t *testing.T) {
 			t.Fatalf("native features omit shared feature %q", feature)
 		}
 	}
-}
-
-func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
-	first := ServerFeaturesV3()
-	second := ServerFeaturesV3()
-	expected := map[string]struct{}{
-		FeaturePlaybackPlanV3:                    {},
-		FeatureServerRemoteStreamBitratePolicyV3: {},
-		FeatureServerLocalStreamBitratePolicyV3:  {},
-		FeatureNeutralContractV3:                 {},
-		FeatureLayoutPassthrough:                 {},
-		FeatureEmbeddedSubtitlesV3:               {},
-		FeatureRouteDiagnostics:                  {},
-		FeatureDeviceQuirksV3:                    {},
-		FeatureSeekReanchorV3:                    {},
-		FeatureOutputChangeV3:                    {},
-		FeatureDirectStreamResumeV3:              {},
-		FeatureHeaderAuthenticatedMediaV3:        {},
-		FeatureAuthorizedMediaOriginsV3:          {},
-		FeatureSoftwareVideoDecodeV3:             {},
-		FeaturePlanInvalidatedV3:                 {},
-		FeaturePlanSourceDurationV3:              {},
-		FeatureOutputDisplayEvidenceV3:           {},
-	}
-	if len(first) != len(expected) {
-		t.Fatalf("server features = %v, want %d entries", first, len(expected))
-	}
-	seen := make(map[string]struct{}, len(first))
-	for _, feature := range first {
-		if _, ok := expected[feature]; !ok {
-			t.Fatalf("server features contain unexpected %q: %v", feature, first)
-		}
-		if _, duplicate := seen[feature]; duplicate {
-			t.Fatalf("server features contain duplicate %q: %v", feature, first)
-		}
-		seen[feature] = struct{}{}
-	}
-	for feature := range expected {
-		if _, ok := seen[feature]; !ok {
-			t.Fatalf("server features omitted %q: %v", feature, first)
-		}
-	}
-
-	first[0] = "mutated"
-	if second[0] != FeaturePlaybackPlanV3 {
-		t.Fatalf("feature slices share backing storage: %v", second)
+	independent := ServerFeaturesV3()
+	shared[0] = "mutated"
+	if independent[0] != FeaturePlaybackPlanV3 {
+		t.Fatalf("feature slices share backing storage: %v", independent)
 	}
 }
 
@@ -164,6 +122,56 @@ func TestResolveQualityPolicyV3CompoundRung(t *testing.T) {
 	}
 	if !hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {
 		t.Fatalf("capped 4K Medium has no cap warning: %#v", result.Warnings)
+	}
+}
+
+func TestPlanPlaybackV3CroppedRungKeepsEncoderHeight(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		width, height             int
+		rung                      string
+		wantWidth, wantHeight     int
+		wantResolution, wantScale string
+	}{
+		{"cropped 1080p on 720p rung", 1918, 700, QualityRung720pMediumV3, 1918, 700, "700p", "scale=-2:700"},
+		{"cropped 720p on 480p rung", 1024, 436, "480p", 1024, 436, "436p", "scale=-2:436"},
+		{"same class crop", 1918, 872, QualityRung1080pMediumV3, 1918, 872, "872p", "scale=-2:872"},
+		{"lower resolution", 1920, 1080, QualityRung720pMediumV3, 1280, 720, "720p", "scale=-2:720"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := bitratePolicyFixtureV3()
+			input.EffectiveFile.VideoTracks[0].Width = tc.width
+			input.EffectiveFile.VideoTracks[0].Height = tc.height
+			input.Request.QualityPreference = tc.rung
+			result := PlanPlaybackV3(input)
+			if result.Plan == nil || result.PlayMethod != PlayTranscode {
+				t.Fatalf("expected a transcode plan: %s", ExplainPlannerResultV3(result))
+			}
+			advertised := false
+			for _, quality := range result.Plan.AvailableQualities {
+				if quality.Label == tc.rung {
+					advertised = true
+				}
+			}
+			if !advertised {
+				t.Fatalf("selected rung %q is missing from the menu", tc.rung)
+			}
+			recipe := result.Plan.EffectiveRecipe
+			if optionalValueV3(recipe.Width) != tc.wantWidth || optionalValueV3(recipe.Height) != tc.wantHeight {
+				t.Fatalf("recipe dimensions = %dx%d, want %dx%d", optionalValueV3(recipe.Width), optionalValueV3(recipe.Height), tc.wantWidth, tc.wantHeight)
+			}
+			if result.TargetResolution != tc.wantResolution {
+				t.Errorf("encoder target = %q, want %q", result.TargetResolution, tc.wantResolution)
+			}
+			args := appendVideoFilterArgs(nil, TranscodeOpts{TargetResolution: result.TargetResolution})
+			var wantArgs []string
+			if tc.wantScale != "" {
+				wantArgs = []string{"-vf", tc.wantScale}
+			}
+			if !reflect.DeepEqual(args, wantArgs) {
+				t.Errorf("encoder filter args = %v, want %v", args, wantArgs)
+			}
+		})
 	}
 }
 
@@ -274,11 +282,15 @@ func TestReplanRequestV3ValidationRetainsClientBuildChannelNormalization(t *test
 		Capabilities:          start.Capabilities,
 		ClientPlaybackContext: start.ClientPlaybackContext,
 	}
+	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
 	request.ClientPlaybackContext.AppBuild = strings.Repeat("build", 20) + "\x00ignored"
 	request.ClientPlaybackContext.AppChannel = strings.Repeat("channel", 10) + "\x00ignored"
 
 	if err := request.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
+		t.Fatalf("normalized app_version = %q, want %q", got, want)
 	}
 	if got, want := request.ClientPlaybackContext.AppBuild, strings.Repeat("build", 12)+"buil"; got != want {
 		t.Fatalf("normalized app_build = %q, want %q", got, want)
@@ -294,31 +306,6 @@ func TestStartRequestV3NormalizesUnicodeAppVersionAndStripsControls(t *testing.T
 
 	if _, err := request.NormalizeAndValidate(); err != nil {
 		t.Fatalf("NormalizeAndValidate() error = %v", err)
-	}
-	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
-		t.Fatalf("normalized app_version = %q, want %q", got, want)
-	}
-}
-
-func TestReplanRequestV3NormalizesUnicodeAppVersionAndStripsControls(t *testing.T) {
-	start := validStartRequestV3()
-	request := ReplanRequestV3{
-		ProtocolVersion:       ProtocolV3,
-		PlaybackAttemptID:     start.PlaybackAttemptID,
-		ReplanRequestID:       "replan-client-version-0001",
-		FailedPlanID:          "plan:client-version-0001",
-		PlanAttemptID:         "plan-attempt-client-version-0001",
-		PlanAttemptKey:        "v3:0000000000000001",
-		AttemptCount:          1,
-		QualityPreference:     start.QualityPreference,
-		Failure:               FailureV3{Classification: "parser_failure"},
-		Capabilities:          start.Capabilities,
-		ClientPlaybackContext: start.ClientPlaybackContext,
-	}
-	request.ClientPlaybackContext.AppVersion = "\x00" + strings.Repeat("δ", 70) + "\nignored"
-
-	if err := request.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v", err)
 	}
 	if got, want := request.ClientPlaybackContext.AppVersion, strings.Repeat("δ", 64); got != want {
 		t.Fatalf("normalized app_version = %q, want %q", got, want)
@@ -372,37 +359,6 @@ func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
 	request.BandwidthEstimateKbps = &tooLow
 	if err := request.Validate(); err == nil {
 		t.Fatal("out-of-range bandwidth estimate was accepted")
-	}
-}
-
-func TestPlanAttemptKeyV3Fixture(t *testing.T) {
-	type fixture struct {
-		Name                 string   `json:"name"`
-		ServerPlanAttemptKey string   `json:"server_plan_attempt_key"`
-		ReplanEcho           string   `json:"replan_echo"`
-		AttemptedPlanKeys    []string `json:"attempted_plan_keys"`
-		ExpectedServerAction string   `json:"expected_server_action"`
-	}
-	body, err := os.ReadFile("testdata/protocol_v3/attempt_keys.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fixtures []fixture
-	if err := json.Unmarshal(body, &fixtures); err != nil {
-		t.Fatal(err)
-	}
-	for _, value := range fixtures {
-		t.Run(value.Name, func(t *testing.T) {
-			if value.ServerPlanAttemptKey == "" || value.ReplanEcho != value.ServerPlanAttemptKey {
-				t.Fatalf("opaque echo drifted: %#v", value)
-			}
-			if len(value.AttemptedPlanKeys) != 1 || value.AttemptedPlanKeys[0] != value.ServerPlanAttemptKey {
-				t.Fatalf("attempted plan keys do not echo the server token: %#v", value)
-			}
-			if value.ExpectedServerAction != "reject_already_attempted_plan" {
-				t.Fatalf("server action = %q", value.ExpectedServerAction)
-			}
-		})
 	}
 }
 
@@ -1131,6 +1087,56 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" {
 		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// A file the scanner stored without any stream metadata is either waiting for
+// its first probe or was rejected by ffprobe. Only the first is worth retrying.
+func TestPlanPlaybackV3SeparatesUnprobedFromUnreadableSources(t *testing.T) {
+	req := validStartRequestV3()
+	settings := PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
+	bare := func() *models.MediaFile {
+		return &models.MediaFile{ID: 7, FilePath: "/library/show/S01E03.mkv", FileSize: 0, SubtitleTracks: []models.SubtitleTrack{}}
+	}
+
+	unprobed := bare()
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: unprobed, EffectiveFile: unprobed, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" || !result.Terminal.Retryable {
+		t.Fatalf("unprobed result = %s", ExplainPlannerResultV3(result))
+	}
+
+	failedAt := time.Date(2026, time.October, 2, 12, 1, 3, 0, time.UTC)
+	rejected := bare()
+	rejected.ProbeFailedAt = &failedAt
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: rejected, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != TerminalSourceUnreadableV3 || result.Terminal.Retryable {
+		t.Fatalf("rejected result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Terminal.Message != TerminalSourceUnreadableMessageV3 {
+		t.Fatalf("message = %q", result.Terminal.Message)
+	}
+
+	// The server bitrate cap renames refusals it causes; it must not claim
+	// an unreadable file.
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: rejected, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3(), ServerBitrateCapKbps: 4000})
+	if result.Terminal == nil || result.Terminal.Reason != TerminalSourceUnreadableV3 {
+		t.Fatalf("capped rejected result = %s", ExplainPlannerResultV3(result))
+	}
+
+	// The effective file decides: a rejected requested file whose effective
+	// version is readable plans normally.
+	readable := detailedFixtureFileV3()
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: rejected, EffectiveFile: readable, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal != nil && (result.Terminal.Reason == TerminalSourceUnreadableV3 || result.Terminal.Reason == "source_metadata_incomplete") {
+		t.Fatalf("readable effective file result = %s", ExplainPlannerResultV3(result))
+	}
+
+	// A stale failure mark never hides metadata from a successful probe.
+	probed := detailedFixtureFileV3()
+	probed.ProbeFailedAt = &failedAt
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: probed, EffectiveFile: probed, AudioTrackIndex: 0, Settings: settings, Registry: testTransformationRegistryV3()})
+	if result.Terminal != nil && (result.Terminal.Reason == TerminalSourceUnreadableV3 || result.Terminal.Reason == "source_metadata_incomplete") {
+		t.Fatalf("probed file with failure mark result = %s", ExplainPlannerResultV3(result))
 	}
 }
 
@@ -2471,52 +2477,6 @@ func TestPlanPlaybackV3TimelineChangePreservesRouteIdentity(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3DroppingFallbackHistoryReintroducesRejectedRoute(t *testing.T) {
-	file := detailedFixtureFileV3()
-	file.FilePath = "/media/movie.mp4"
-	file.Container = "mp4"
-	file.CodecVideo = "h264"
-	file.Resolution = "1080p"
-	file.Bitrate = 8_000
-	file.VideoTracks[0] = models.VideoTrack{Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}
-	request := validStartRequestV3()
-	request.Capabilities.CodecsVideo = []string{"h264"}
-	request.Capabilities.CodecsVideoHardware = []string{"h264"}
-	request.Capabilities.Containers = []string{"mp4"}
-	request.Capabilities.MaxResolution = "1080p"
-	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{41}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
-	input := PlannerInputV3{
-		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
-		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
-	}
-	direct := PlanPlaybackV3(input)
-	if direct.Plan == nil || direct.Plan.Delivery != DeliveryOriginalHTTPV3 {
-		t.Fatalf("direct plan = %#v", direct)
-	}
-	input.AttemptedKeys = []string{PlanAttemptKeyV3(*direct.Plan, request.ClientPlaybackContext.Output.OutputContextID, nil)}
-	progressive := PlanPlaybackV3(input)
-	if progressive.Plan == nil || progressive.Plan.Delivery != DeliveryRemuxProgressiveV3 {
-		t.Fatalf("progressive fallback = %#v", progressive)
-	}
-	input.AttemptedKeys = append(input.AttemptedKeys, PlanAttemptKeyV3(*progressive.Plan, request.ClientPlaybackContext.Output.OutputContextID, nil))
-	hls := PlanPlaybackV3(input)
-	if hls.Plan == nil || hls.Plan.Delivery != DeliveryRemuxHLSV3 {
-		t.Fatalf("HLS fallback = %#v", hls)
-	}
-
-	seek := 321.25
-	input.Request.StartPosition = &seek
-	input.AttemptedKeys = nil // This is what the old seek-reanchor path did.
-	replanned := PlanPlaybackV3(input)
-	if replanned.Plan == nil || replanned.Plan.PlanID != direct.Plan.PlanID || replanned.Plan.PlanID == hls.Plan.PlanID {
-		t.Fatalf("dropped fallback history did not reproduce identity drift: direct=%#v hls=%#v replanned=%#v", direct.Plan, hls.Plan, replanned.Plan)
-	}
-	if replanned.Plan.Delivery != DeliveryOriginalHTTPV3 ||
-		replanned.Plan.Stream.Protocol != StreamHTTPProgressiveV3 || replanned.Plan.Stream.Container != "mp4" {
-		t.Fatalf("reintroduced route = %#v", replanned.Plan)
-	}
-}
-
 func TestPlanPlaybackV3AppliesDeliverySpecificCodecAndChannelLimits(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.FilePath = "/media/movie.mp4"
@@ -3037,6 +2997,88 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	result = PlanPlaybackV3(PlannerInputV3{Request: noHLS, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || len(result.Plan.AvailableQualities) != 1 || result.Plan.AvailableQualities[0].Label != "original" {
 		t.Fatalf("no-HLS qualities = %#v (%s)", result.Plan, ExplainPlannerResultV3(result))
+	}
+}
+
+// Cropped encodes sit a few pixels under the nominal class size. They must
+// land in the class the scanner labels them with, or the ladder drops the
+// same-class rungs (a 1918x872 "1080p" file offered no 1080p rungs).
+func TestSourceLadderHeightV3MatchesScannerBuckets(t *testing.T) {
+	cases := []struct {
+		width, height, want int
+	}{
+		{0, 0, 0},
+		{720, 404, 480},
+		{854, 480, 480},
+		{1276, 532, 720},
+		{1280, 720, 720},
+		{1918, 872, 1080},
+		{1920, 800, 1080},
+		{1440, 1080, 1080},
+		{1920, 1080, 1080},
+		{3836, 1600, 2160},
+		{3840, 2160, 2160},
+		{7680, 3200, 4320},
+		{7680, 4320, 4320},
+	}
+	for _, tc := range cases {
+		if got := sourceLadderHeightV3(SourceDescriptorV3{Width: tc.width, Height: tc.height}); got != tc.want {
+			t.Errorf("sourceLadderHeightV3(%dx%d) = %d, want %d", tc.width, tc.height, got, tc.want)
+		}
+	}
+}
+
+// An 8K source is above every rung, so a 4K rung must scale it to 2160 lines
+// rather than keep 4320 lines as a same-class rung would.
+func TestCompoundRungQualityResultV3Scales8KToFourK(t *testing.T) {
+	rung, ok := ladderRungForLabelV3(QualityRung2160pMediumV3)
+	if !ok {
+		t.Fatal("2160p-medium rung missing")
+	}
+	source := SourceDescriptorV3{VideoCodec: "hevc", Width: 7680, Height: 4320, BitrateKbps: 80_000}
+	got := compoundRungQualityResultV3(rung, source, 0, nil)
+	if got.Height != 2160 || got.Label != "2160p" || !got.RequiresTranscode {
+		t.Fatalf("8K on 4K Medium = %+v, want a 2160-line transcode", got)
+	}
+}
+
+func TestAvailableQualitiesV3CroppedSourceKeepsSameClassRungs(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1918, Height: 872, BitrateKbps: 10_858, DynamicRange: DynamicRangeSDRV3}
+	qualities := availableQualitiesV3(PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true},
+	}, source)
+	labels := make([]string, 0, len(qualities))
+	for _, quality := range qualities {
+		labels = append(labels, quality.Label)
+	}
+	want := []string{
+		QualityOriginalV3,
+		QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
+		QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
+		"480p",
+	}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("labels = %v, want %v", labels, want)
+	}
+}
+
+// A viewer whose account may not transcode is refused every rung at
+// admission, so the ladder must not offer them.
+func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *testing.T) {
+	source := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 960, BitrateKbps: 10_852, DynamicRange: DynamicRangeSDRV3}
+	input := PlannerInputV3{
+		Request:  validStartRequestV3(),
+		Settings: PlannerSettingsV3{TranscodeEnabled: true},
+	}
+	if got := availableQualitiesV3(input, source); len(got) < 2 {
+		t.Fatalf("allowed viewer qualities = %#v, want the transcode ladder", got)
+	}
+
+	input.Settings.ViewerTranscodeDisabled = true
+	got := availableQualitiesV3(input, source)
+	if len(got) != 1 || got[0].Label != QualityOriginalV3 || !got[0].PreservesSource {
+		t.Fatalf("restricted viewer qualities = %#v, want original only", got)
 	}
 }
 

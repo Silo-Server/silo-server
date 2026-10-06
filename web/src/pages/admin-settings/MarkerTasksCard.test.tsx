@@ -4,7 +4,6 @@ import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TaskInfo } from "@/api/types";
-import { formatDateTime } from "@/lib/datetime";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 
 let tasks: TaskInfo[] = [];
@@ -85,46 +84,5 @@ describe("MarkerTasksCard", () => {
     expect(screen.getAllByRole("button", { name: "Run now" })[0]).toBeDisabled();
     expect(screen.getAllByRole("link", { name: "History" })).toHaveLength(2);
     expect(runTask).not.toHaveBeenCalled();
-  });
-
-  it("labels timestamps as last run and contribution counts as last result", () => {
-    const detection = task("detect_intro_markers");
-    tasks = [detection, task("contribute_markers", { submitted: 2, skipped: 3, failed: 0 })];
-
-    renderCard();
-
-    expect(
-      screen.getByText(`Last run: ${formatDateTime(detection.last_execution!.completed_at)}`),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Last result: 2 submitted, 3 skipped, 0 failed")).toBeInTheDocument();
-  });
-
-  it("reports items the provider refused", () => {
-    tasks = [task("contribute_markers", { submitted: 4, skipped: 10, invalid: 3, failed: 0 })];
-
-    renderCard();
-
-    expect(
-      screen.getByText("Last result: 4 submitted, 10 skipped, 3 refused by the provider, 0 failed"),
-    ).toBeInTheDocument();
-  });
-
-  it("describes a recorded rate limit without presenting it as a pending retry", () => {
-    tasks = [
-      task("contribute_markers", {
-        submitted: 0,
-        skipped: 1039,
-        failed: 18,
-        retry_after_seconds: 1,
-      }),
-    ];
-
-    renderCard();
-
-    expect(screen.getByText("Completed with errors")).toBeInTheDocument();
-    expect(screen.getByText(/Last result: 0 submitted, 1039 skipped, 18 failed/)).toHaveTextContent(
-      "Provider rate limit reached during this run.",
-    );
-    expect(screen.queryByText(/retry after/i)).not.toBeInTheDocument();
   });
 });

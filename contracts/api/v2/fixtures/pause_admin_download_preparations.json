@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "id": "art-queued",
+      "outcome": "applied"
+    },
+    {
+      "id": "art-paused",
+      "outcome": "unchanged"
+    },
+    {
+      "id": "art-failed",
+      "outcome": "not_applicable"
+    },
+    {
+      "id": "art-gone",
+      "outcome": "not_found"
+    }
+  ]
+}

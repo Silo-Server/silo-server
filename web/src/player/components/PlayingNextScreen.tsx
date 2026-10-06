@@ -7,6 +7,7 @@ import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { preferredDateLocale } from "@/lib/datetime";
+import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 
 interface PlayingNextScreenProps {
@@ -216,7 +217,7 @@ export function PlayingNextScreen({
                     <span className="text-white/20">&bull;</span>
                   )}
                   {nextEpisode.runtime > 0 && (
-                    <span>{Math.round(nextEpisode.runtime / 60)} min</span>
+                    <span>{formatRuntimeMinutes(nextEpisode.runtime)}</span>
                   )}
                 </div>
                 {nextEpisode.overview && (

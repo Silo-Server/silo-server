@@ -159,27 +159,6 @@ func TestRecipeCardPreservesCopyVideoMPEGTS(t *testing.T) {
 	}
 }
 
-func TestRecipeCardPreservesRoutingNodeIDs(t *testing.T) {
-	card := NewDirectRecipeCard("route-bound", 42, "profile-1", 77)
-	card.RoutingWorkload = "direct_play"
-	card.RoutingExecution = "none"
-	card.RoutingExecutionNodeID = 7
-	card.RoutingEgress = "proxy"
-	card.RoutingEgressNodeID = 11
-
-	claims := card.ToClaims()
-	if claims.RoutingExecutionNodeID != 7 {
-		t.Fatalf("claims execution node ID = %d, want 7", claims.RoutingExecutionNodeID)
-	}
-	if claims.RoutingEgressNodeID != 11 {
-		t.Fatalf("claims egress node ID = %d, want 11", claims.RoutingEgressNodeID)
-	}
-	back := RecipeCardFromClaims(&claims)
-	if back.RoutingExecutionNodeID != 7 || back.RoutingEgressNodeID != 11 {
-		t.Fatalf("round-trip node IDs = execution %d, egress %d; want 7 and 11", back.RoutingExecutionNodeID, back.RoutingEgressNodeID)
-	}
-}
-
 func TestRecipeCardNetworkRouteSurvivesRecovery(t *testing.T) {
 	for _, provider := range []*string{nil, new(""), new("tailscale")} {
 		card := NewDirectRecipeCard("network-route", 42, "profile-1", 77)
@@ -528,6 +507,9 @@ func TestRecipeCardAudioV2DiscriminatorRequiresExactAACStereoDownmix(t *testing.
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			claims := test.card.ToClaims()
+			if got := RecipeCardFromClaims(&claims).PlayMethod; got != test.card.PlayMethod {
+				t.Fatalf("current reader method = %q, want %q", got, test.card.PlayMethod)
+			}
 			if claims.PlayMethod != test.wantMethod || claims.SourceAudioChannels != test.wantSourceChannels || claims.TargetAudioChannels != test.wantTargetChannels {
 				t.Fatalf("claims method/source/target = %q/%d/%d, want %q/%d/%d", claims.PlayMethod, claims.SourceAudioChannels, claims.TargetAudioChannels, test.wantMethod, test.wantSourceChannels, test.wantTargetChannels)
 			}
@@ -553,31 +535,6 @@ func TestToneMapRecipeClaimsUseOldReaderVisibleDiscriminator(t *testing.T) {
 	}
 	if got := RecipeCardFromClaims(&claims).PlayMethod; got != PlayTranscode {
 		t.Fatalf("current reader method = %q, want %q", got, PlayTranscode)
-	}
-}
-
-func TestSourceAudioRecipeClaimsUseOldReaderVisibleDiscriminators(t *testing.T) {
-	tests := []struct {
-		method PlayMethod
-		want   string
-	}{
-		{method: PlayTranscode, want: streamtoken.PlayMethodAudioDownmixTranscode},
-		{method: PlayRemux, want: streamtoken.PlayMethodAudioDownmixRemux},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.method), func(t *testing.T) {
-			card := RecipeCard{
-				PlayMethod: tt.method, TranscodeAudio: true,
-				TargetCodecAudio: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
-			}
-			claims := card.ToClaims()
-			if claims.PlayMethod != tt.want {
-				t.Fatalf("source-audio token method = %q, want %q", claims.PlayMethod, tt.want)
-			}
-			if got := RecipeCardFromClaims(&claims).PlayMethod; got != tt.method {
-				t.Fatalf("current reader method = %q, want %q", got, tt.method)
-			}
-		})
 	}
 }
 

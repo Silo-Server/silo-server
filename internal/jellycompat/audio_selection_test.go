@@ -74,6 +74,17 @@ func (m *testCompatSessionManager) StartSession(userID int, profileID string, fi
 	return session, nil
 }
 
+func (m *testCompatSessionManager) MarkStopReported(sessionID string) error {
+	if m.sessions != nil {
+		session, ok := m.sessions[sessionID]
+		if !ok {
+			return playback.ErrSessionNotFound
+		}
+		session.StopReported = true
+	}
+	return nil
+}
+
 func (m *testCompatSessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
 	m.progressCalls++
 	m.progressUpdates = append(m.progressUpdates, compatProgressCall{
@@ -88,6 +99,7 @@ func (m *testCompatSessionManager) UpdateProgress(sessionID string, position flo
 		}
 		session.Position = position
 		session.IsPaused = isPaused
+		session.StopReported = false
 	}
 	return nil
 }
@@ -182,7 +194,7 @@ func writeCompatTestFFmpeg(t *testing.T) string {
 		"case \" $* \" in\n" +
 		"  *\" -f lavfi \"*) exit 0;;\n" +
 		"esac\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}

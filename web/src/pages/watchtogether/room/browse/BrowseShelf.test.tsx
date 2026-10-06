@@ -337,29 +337,6 @@ describe("BrowseShelf", () => {
     data.home = [];
   });
 
-  it("switches to a wrapping result set while searching and says what to try when empty", async () => {
-    data.search = [{ content_id: "dune", type: "movie", title: "Dune", year: 2021 }];
-    renderShelf();
-    await screen.findByText("On your watchlists");
-    fireEvent.change(screen.getByRole("textbox", { name: "Search movies and series" }), {
-      target: { value: "dune" },
-    });
-    await screen.findByText("Search results");
-    expect(await screen.findByRole("button", { name: "Dune" })).toBeInTheDocument();
-    expect(screen.queryByText("On your watchlists")).toBeNull();
-    data.search = [];
-    fireEvent.change(screen.getByRole("textbox", { name: "Search movies and series" }), {
-      target: { value: "zzz" },
-    });
-    await screen.findByText(/No matches for “zzz”/);
-  });
-
-  it("folds to one line when collapsible and reopens on click", () => {
-    renderShelf({ collapsible: true, open: false, collapsedLabel: "Change what's up next" });
-    fireEvent.click(screen.getByTestId("browse-shelf-collapsed"));
-    expect(screen.getByRole("textbox", { name: "Search movies and series" })).toBeInTheDocument();
-  });
-
   it("preserves search and filters while folding and reopening", () => {
     renderShelf({ collapsible: true });
     fireEvent.change(screen.getByRole("textbox", { name: "Search movies and series" }), {

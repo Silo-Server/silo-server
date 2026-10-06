@@ -54,15 +54,6 @@ func (r testAdminUserRepo) GetByID(_ context.Context, id int) (*models.User, err
 	return r.users[id], nil
 }
 
-func TestRegisterRequestDeviceNilStore(t *testing.T) {
-	h := NewSettingsHandler(nil)
-	h.registerRequestDevice(context.Background(), nil, "profile-1", DeviceMetadata{
-		DeviceID:       "device-1",
-		DeviceName:     "Living Room",
-		DevicePlatform: "web",
-	})
-}
-
 type mappedTestUserStoreProvider struct {
 	stores map[int]userstore.UserStore
 }
@@ -137,39 +128,6 @@ func newIsolatedProfileTestStore(t *testing.T, suffix string) userstore.UserStor
 	return store
 }
 
-func TestEffectiveSubtitleAppearancePrefersDeviceOverride(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID:      "profile-1",
-		DeviceID:       "device-1",
-		DeviceName:     "Living Room",
-		DevicePlatform: "tvOS",
-		Key:            SubtitleAppearanceSettingKey,
-		Value:          `{"fontSize":"small"}`,
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting: %v", err)
-	}
-
-	handler := NewSettingsHandler(testUserStoreProvider{store: store})
-	req := httptest.NewRequest(http.MethodGet, "/settings/subtitle_appearance/effective", nil)
-	req.Header.Set(deviceIDHeader, "device-1")
-	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetEffectiveSubtitleAppearance(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp EffectiveSubtitleAppearanceView
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.HasDeviceOverride || resp.EffectiveValue != `{"fontSize":"small"}` || resp.GlobalValue != "" {
-		t.Fatalf("response = %#v", resp)
-	}
-}
-
 func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewSettingsHandler(testUserStoreProvider{store: store})
@@ -192,6 +150,24 @@ func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
 	}
 	if entry == nil || entry.Value != `{"fontSize":"xxlarge"}` || entry.DevicePlatform != "iOS" {
 		t.Fatalf("entry = %#v", entry)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/settings/subtitle_appearance/effective", nil)
+	req.Header.Set(deviceIDHeader, "iphone")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec = httptest.NewRecorder()
+
+	handler.HandleGetEffectiveSubtitleAppearance(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp EffectiveSubtitleAppearanceView
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasDeviceOverride || resp.EffectiveValue != `{"fontSize":"xxlarge"}` || resp.GlobalValue != "" {
+		t.Fatalf("response = %#v", resp)
 	}
 
 	req = httptest.NewRequest(http.MethodDelete, "/settings/device/subtitle_appearance", nil)
@@ -411,38 +387,6 @@ func TestAndroidNextUpSettingCanonicalGetEchoesCanonicalKey(t *testing.T) {
 	}
 }
 
-func TestAndroidNextUpSettingAliasPrefersCanonicalDeviceRow(t *testing.T) {
-	store := newProfileTestStore(t)
-	for key, value := range map[string]string{
-		legacyAndroidNextUpPromptSettingKey: "45",
-		canonicalNextUpPromptSettingKey:     "60",
-	} {
-		if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-			ProfileID: "profile-1",
-			DeviceID:  "android-tv",
-			Key:       key,
-			Value:     value,
-		}); err != nil {
-			t.Fatalf("SetDeviceSetting %s: %v", key, err)
-		}
-	}
-	handler := NewSettingsHandler(testUserStoreProvider{store: store})
-
-	resolved, err := handler.resolveEffectiveSetting(
-		context.Background(),
-		store,
-		"profile-1",
-		DeviceMetadata{DeviceID: "android-tv"},
-		legacyAndroidNextUpPromptSettingKey,
-	)
-	if err != nil {
-		t.Fatalf("resolveEffectiveSetting: %v", err)
-	}
-	if resolved.EffectiveValue != "60" || resolved.Source != "device" {
-		t.Fatalf("resolved = %#v, want canonical device value 60", resolved)
-	}
-}
-
 func TestAndroidNextUpSettingDeleteRemovesCanonicalAndLegacyRows(t *testing.T) {
 	store := newProfileTestStore(t)
 	for key, value := range map[string]string{
@@ -459,6 +403,20 @@ func TestAndroidNextUpSettingDeleteRemovesCanonicalAndLegacyRows(t *testing.T) {
 		}
 	}
 	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	resolved, err := handler.resolveEffectiveSetting(
+		context.Background(),
+		store,
+		"profile-1",
+		DeviceMetadata{DeviceID: "android-tv"},
+		legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("resolveEffectiveSetting: %v", err)
+	}
+	if resolved.EffectiveValue != "60" || resolved.Source != "device" {
+		t.Fatalf("resolved = %#v, want canonical device value 60", resolved)
+	}
+
 	req := httptest.NewRequest(
 		http.MethodDelete,
 		"/settings/device/"+legacyAndroidNextUpPromptSettingKey,

@@ -44,6 +44,23 @@ const (
 	compatPlaybackRouteUnboundCode     = "PlaybackRouteUnbound"
 )
 
+func compatSourceTargetVideoCodec(source PlaybackMediaSource) string {
+	if compatHLSCopiesVideo(source) {
+		return compatCopyCodec
+	}
+	if strings.EqualFold(strings.TrimSpace(source.TargetVideoCodec), compatVideoCodecHEVC) {
+		return compatVideoCodecHEVC
+	}
+	return compatTargetVideoCodec
+}
+
+func compatSourceVideoSampleEntry(source PlaybackMediaSource) string {
+	if compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC {
+		return playback.VideoSampleEntryHVC1
+	}
+	return ""
+}
+
 var errServerBitrateScopeUnavailable = errors.New("stream bitrate policy unavailable")
 var errServerBitrateDirectUnavailable = errors.New("direct playback exceeds server bitrate limit")
 
@@ -135,12 +152,14 @@ const (
 	compatRemuxV1PathSegment   = "remux-v1"
 	compatRemuxTSV1PathSegment = "remux-ts-v1"
 	compatRemuxDVV1PathSegment = "remux-dv-v1"
+	compatHEVCV1PathSegment    = "hevc-v1"
 )
 
 type compatAudioV2RouteContextKey struct{}
 type compatRemuxV1RouteContextKey struct{}
 type compatRemuxTSV1RouteContextKey struct{}
 type compatRemuxDVV1RouteContextKey struct{}
+type compatHEVCV1RouteContextKey struct{}
 
 func withCompatAudioV2Route(r *http.Request) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), compatAudioV2RouteContextKey{}, true))
@@ -176,6 +195,23 @@ func withCompatRemuxDVV1Route(r *http.Request) *http.Request {
 func isCompatRemuxDVV1Route(r *http.Request) bool {
 	marked, _ := r.Context().Value(compatRemuxDVV1RouteContextKey{}).(bool)
 	return marked
+}
+
+func withCompatHEVCV1Route(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), compatHEVCV1RouteContextKey{}, true))
+}
+
+func isCompatHEVCV1Route(r *http.Request) bool {
+	marked, _ := r.Context().Value(compatHEVCV1RouteContextKey{}).(bool)
+	return marked
+}
+
+func validateCompatHEVCV1Route(w http.ResponseWriter, r *http.Request, required bool) bool {
+	if isCompatHEVCV1Route(r) == required {
+		return true
+	}
+	writeError(w, http.StatusNotFound, "NotFound", "Playback route not found")
+	return false
 }
 
 func validateCompatAudioV2Route(w http.ResponseWriter, r *http.Request, required bool) bool {
@@ -217,7 +253,7 @@ func validateCompatAudioV2RouteIdentity(
 	source *PlaybackMediaSource,
 	routeItemID, routeMediaSourceID string,
 ) bool {
-	if !isCompatAudioV2Route(r) {
+	if !isCompatAudioV2Route(r) && !isCompatHEVCV1Route(r) {
 		return true
 	}
 	if playSession == nil || source == nil || routeItemID == "" || routeMediaSourceID == "" ||
@@ -247,6 +283,9 @@ func compatHLSUsesAudioCopyV1(source PlaybackMediaSource) bool {
 }
 
 func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
+	if compatHLSUsesHEVCV1Route(source) {
+		return compatHEVCV1PathSegment
+	}
 	if compatHLSUsesRemuxDVV1Route(source) {
 		return compatRemuxDVV1PathSegment
 	}
@@ -263,7 +302,14 @@ func compatHLSRoutePathSegment(source PlaybackMediaSource) string {
 }
 
 func compatHLSUsesAudioV2Route(source PlaybackMediaSource) bool {
-	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && compatHLSRequiresAudioV2(source)
+	return !source.HLSRemuxMPEGTS && !compatHLSUsesRemuxDVV1Route(source) && !compatHLSUsesHEVCV1Route(source) && compatHLSRequiresAudioV2(source)
+}
+
+// HEVC encoding uses a route older API binaries cannot serve. Those binaries
+// preserve TargetVideoCodec in shared session JSON but still execute H.264.
+// This route also includes the audio-v2 recipe when the source needs downmixing.
+func compatHLSUsesHEVCV1Route(source PlaybackMediaSource) bool {
+	return compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 }
 
 func compatHLSUsesRemuxV1Route(source PlaybackMediaSource) bool {
@@ -287,7 +333,8 @@ func compatHLSCopiesVideo(source PlaybackMediaSource) bool {
 }
 
 func compatHLSUsesFMP4(source PlaybackMediaSource) bool {
-	return compatHLSCopiesVideo(source) && !source.HLSRemuxMPEGTS
+	return (compatHLSCopiesVideo(source) && !source.HLSRemuxMPEGTS) ||
+		compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 }
 
 func compatWebOSDVMPEGTS(userAgent string, source PlaybackMediaSource) bool {
@@ -330,12 +377,28 @@ func compatSourceHasSurroundAudio(source PlaybackMediaSource) bool {
 func compatRecipeMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
 	return recipe != nil &&
 		recipe.MediaFileID == source.FileID &&
+		compatRecipeTargetVideoMatchesSource(recipe, source) &&
 		recipe.AudioTrackIndex == compatAudioTrackIndexOrDefault(source) &&
 		recipe.SourceAudioChannels == compatHLSRecipeSourceAudioChannels(source) &&
 		recipe.CopyVideoMPEGTS == source.HLSRemuxMPEGTS &&
 		recipe.SubtitleBurnIn == source.SubtitleBurnIn && (!source.SubtitleBurnIn || (recipe.SubtitleTrackIndex == source.SubtitleTrackIndex && recipe.SubtitleCodec == source.SubtitleCodec)) &&
 		(source.TargetBitrateKbps == 0 || recipe.TargetBitrateKbps == source.TargetBitrateKbps) &&
 		(source.TargetResolution == "" || recipe.TargetResolution == source.TargetResolution)
+}
+
+// compatRecipeTargetVideoMatchesSource accepts target-less cards written
+// before target codec became part of the compat session schema. New HEVC
+// sources always carry a target, so they cannot adopt that legacy H.264/card
+// ambiguity.
+func compatRecipeTargetVideoMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
+	if recipe == nil {
+		return false
+	}
+	actual := strings.TrimSpace(recipe.TargetCodecVideo)
+	if actual == "" {
+		return strings.TrimSpace(source.TargetVideoCodec) == ""
+	}
+	return strings.EqualFold(actual, compatSourceTargetVideoCodec(source))
 }
 
 // Versioned wrappers put a literal path segment in every byte URL whose
@@ -394,6 +457,18 @@ func (h *PlaybackHandler) HandleRemuxDVV1HLSSegment(w http.ResponseWriter, r *ht
 	h.HandleHLSSegment(w, withCompatRemuxDVV1Route(r))
 }
 
+func (h *PlaybackHandler) HandleHEVCV1MasterManifest(w http.ResponseWriter, r *http.Request) {
+	h.HandleMasterManifest(w, withCompatHEVCV1Route(r))
+}
+
+func (h *PlaybackHandler) HandleHEVCV1HLSManifest(w http.ResponseWriter, r *http.Request) {
+	h.HandleHLSManifest(w, withCompatHEVCV1Route(r))
+}
+
+func (h *PlaybackHandler) HandleHEVCV1HLSSegment(w http.ResponseWriter, r *http.Request) {
+	h.HandleHLSSegment(w, withCompatHEVCV1Route(r))
+}
+
 // errUpstreamReplaced signals that a concurrent request attached a different
 // upstream session to the play session while this one was being created.
 var errUpstreamReplaced = errors.New("upstream session replaced concurrently")
@@ -435,14 +510,13 @@ func (h *PlaybackHandler) requireLocalAudioDownmixCapability(ctx context.Context
 }
 
 // localAudioTransformationRegistry mirrors the native v3 registry's
-// success-only cache. A complete positive or negative capability result is
-// stable for one FFmpeg path; infrastructure and deadline failures remain
-// retryable and are never cached.
+// success-only cache. Complete positive and negative capabilities are stable
+// for one FFmpeg path; incomplete optional HEVC probes expire for a retry.
 func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) (*playback.TransformationRegistryV3, error) {
 	ffmpegPath := playback.ResolveFFmpegPath(h.FFmpegPath)
 	h.compatAudioRegistryMu.Lock()
 	defer h.compatAudioRegistryMu.Unlock()
-	if h.compatAudioRegistry != nil && h.compatAudioRegistryPath == ffmpegPath {
+	if h.compatAudioRegistryPath == ffmpegPath && !h.compatAudioRegistry.NeedsRefresh(time.Now()) {
 		return h.compatAudioRegistry, nil
 	}
 	probe := playback.ProbeTransformationRegistryWithToneMapV3Result
@@ -744,6 +818,9 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
+		return
+	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
 		return
 	}
@@ -1024,6 +1101,9 @@ func (h *PlaybackHandler) HandleHLSManifest(w http.ResponseWriter, r *http.Reque
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
 		return
 	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
+		return
+	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
 		return
 	}
@@ -1093,6 +1173,9 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if !validateCompatAudioV2RouteIdentity(w, r, playSession, source, chiURLParam(r, "id"), firstNonEmpty(r.URL.Query().Get("MediaSourceId"), r.URL.Query().Get("mediaSourceId"))) {
+		return
+	}
+	if !validateCompatHEVCV1Route(w, r, compatHLSUsesHEVCV1Route(*source)) {
 		return
 	}
 	if !validateCompatAudioV2Route(w, r, compatHLSUsesAudioV2Route(*source)) {
@@ -1488,6 +1571,18 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// Check for external subtitles first.
 	for i, sub := range file.ExternalSubtitles {
 		if externalSubtitleRouteIndex(file, i) == trackIndex {
+			// A sidecar's timing correction can change behind the same URL.
+			w.Header().Set("Cache-Control", "private, no-cache")
+			if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
+				data, err := playback.LoadExternalSubtitle(r.Context(), h.ExternalTimings, file.ID, sub)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
+					return
+				}
+				h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
+				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat)
+				return
+			}
 			// Serve ASS/SSA as raw data when requested.
 			if requestedFormat == "ass" && playback.IsASS(sub.Format) {
 				data, readErr := os.ReadFile(sub.Path)
@@ -1531,28 +1626,16 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle from storage")
 				return
 			}
-
-			// Serve downloaded ASS/SSA as raw data when requested.
-			if requestedFormat == "ass" && playback.IsASS(string(dl.Format)) {
-				h.deliverSubtitle(w, r, "ass", data)
+			// Apply the stored timing correction before conversion or windowing.
+			data, err = subtitles.DeliveryBytes(&dl, data)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to prepare subtitle")
 				return
 			}
-			if requestedFormat == "srt" && subtitleCanServeSRT(string(dl.Format)) {
-				h.deliverSubtitle(w, r, requestedFormat, data)
-				return
-			}
-			// If already VTT, serve directly.
-			if dl.Format == subtitles.FormatVTT {
-				h.deliverSubtitle(w, r, "vtt", data)
-				return
-			}
-
-			vttData, convErr := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.FFmpegPath)
-			if convErr != nil {
-				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
-				return
-			}
-			h.deliverSubtitle(w, r, "vtt", vttData)
+			// The correction can change behind the same URL.
+			w.Header().Set("Cache-Control", "private, no-cache")
+			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
+			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat)
 			return
 		}
 	}
@@ -1804,12 +1887,15 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 	}
 
 	fallback := compatScrobbleFallbackSession(session, playSession, nil, 0, false, false)
-	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallback)
-	if event, ok := h.compatScrobbleEvent(
-		r.Context(), compatScrobbleStop, playSession, upstreamSession, nil, nil,
-	); ok {
-		h.stageCompatTerminal(r.Context(), playSession, upstreamSession, transcodeNodeURL, event, false, false, 0)
-	} else if upstreamSession == nil {
+	playSession, upstreamSession, transcodeNodeURL, staged := h.stageCompatStop(r.Context(), playSession, fallback, nil, false)
+	switch {
+	case staged:
+		// stageCompatStop ran cleanup and scheduled the fallback delivery.
+	case playSession.Terminal:
+		// A concurrent stop staged its event while this request waited; that
+		// stop owns delivery, so keep its record.
+		h.cleanupPlaySession(r.Context(), playSession, upstreamSession, transcodeNodeURL)
+	case upstreamSession == nil:
 		// With no native session and no reported position, publishing a zero-value
 		// fallback could move provider progress backwards. Keep only the terminal
 		// authenticated mapping for a possible later Stopped report.
@@ -1818,7 +1904,7 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 			h.scheduleCompatTerminalHide(playSession.ID, playSession.CompatToken, playSession.ExpiresAt, 1)
 		}
 		h.cleanupPlaySession(r.Context(), playSession, nil, transcodeNodeURL)
-	} else {
+	default:
 		h.playbackStore.Delete(playSession.ID)
 		h.cleanupPlaySession(r.Context(), playSession, upstreamSession, transcodeNodeURL)
 	}
@@ -1836,12 +1922,11 @@ func (h *PlaybackHandler) teardownPlaySession(
 	fallbackSession *playback.Session,
 	positionOverride *float64,
 ) {
-	upstreamSession, transcodeNodeURL := h.compatStopSnapshot(playSession, fallbackSession)
-	if event, ok := h.compatScrobbleEvent(
-		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
-	); ok {
-		h.stageCompatTerminal(ctx, playSession, upstreamSession, transcodeNodeURL, event, true, false, 0)
-	} else if playSession.Terminal {
+	playSession, upstreamSession, transcodeNodeURL, staged := h.stageCompatStop(ctx, playSession, fallbackSession, positionOverride, true)
+	switch {
+	case staged:
+		// stageCompatStop ran cleanup and delivered the stop.
+	case playSession.Terminal:
 		// A late Stopped report without PositionTicks cannot replace a staged
 		// fallback after ActiveEncodings already removed the native session. Keep
 		// that durable event (or terminal shell) and retry its delivery instead of
@@ -1858,7 +1943,7 @@ func (h *PlaybackHandler) teardownPlaySession(
 				true,
 			)
 		}
-	} else {
+	default:
 		h.playbackStore.Delete(playSession.ID)
 		h.cleanupPlaySession(ctx, playSession, upstreamSession, transcodeNodeURL)
 	}
@@ -1897,7 +1982,14 @@ func (h *PlaybackHandler) cleanupPlaySession(
 ) {
 	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
 	if h.sessionMgr != nil {
-		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
+		// The play is over, so finish rather than stop the native session: its
+		// finish hook records the play in watch and admin history. Mid-play
+		// replacements keep using StopSession.
+		if finisher, ok := h.sessionMgr.(sessionFinisher); ok {
+			_ = finisher.FinishSession(ctx, playSession.UpstreamSessionID)
+		} else {
+			_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
+		}
 	}
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
 	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
@@ -1965,6 +2057,48 @@ func compatTerminalRetryDelay(attempt int) time.Duration {
 	return delay
 }
 
+// stageCompatStop snapshots the play's upstream session, builds its stop
+// event, and stages it, all under the upstream session's scrobble lock. A
+// report already applying or queueing a start or pause finishes first, so the
+// stop carries the position it left and stays the last event; a report that
+// takes the lock later finds the play terminal and sends nothing. Cleanup and
+// delivery run after the lock is released, since a confirmed stop can wait on
+// the provider.
+//
+// It reports staged=false, doing nothing more, when the play has no stop event
+// to send. The play it returns then is reread under the lock: a concurrent
+// stop may have staged its own event and removed the native session while
+// this one waited, and the caller must not delete that record.
+func (h *PlaybackHandler) stageCompatStop(
+	ctx context.Context,
+	playSession *PlaybackSession,
+	fallbackSession *playback.Session,
+	positionOverride *float64,
+	authoritative bool,
+) (current *PlaybackSession, upstreamSession *playback.Session, transcodeNodeURL string, staged bool) {
+	unlock := h.compatScrobbleLocks.lock(playSession.UpstreamSessionID)
+	upstreamSession, transcodeNodeURL = h.compatStopSnapshot(playSession, fallbackSession)
+	event, ok := h.compatScrobbleEvent(
+		ctx, compatScrobbleStop, playSession, upstreamSession, nil, positionOverride,
+	)
+	if !ok {
+		current = playSession
+		if reread, found := h.playbackStore.GetFinalizable(playSession.ID, playSession.CompatToken); found {
+			current = reread
+		}
+		unlock()
+		return current, upstreamSession, transcodeNodeURL, false
+	}
+	stagedSession, err := h.playbackStore.StageTerminal(playSession.ID, playSession.CompatToken, event, authoritative)
+	unlock()
+	h.finishCompatTerminalStage(
+		ctx, playSession, upstreamSession, transcodeNodeURL, event, authoritative, false, 0, stagedSession, err,
+	)
+	return playSession, upstreamSession, transcodeNodeURL, true
+}
+
+// stageCompatTerminal retries staging an already-built stop event, under the
+// scrobble lock for the same reason as stageCompatStop.
 func (h *PlaybackHandler) stageCompatTerminal(
 	ctx context.Context,
 	playSession *PlaybackSession,
@@ -1975,7 +2109,28 @@ func (h *PlaybackHandler) stageCompatTerminal(
 	cleanupDone bool,
 	attempt int,
 ) {
+	unlock := h.compatScrobbleLocks.lock(playSession.UpstreamSessionID)
 	staged, err := h.playbackStore.StageTerminal(playSession.ID, playSession.CompatToken, event, authoritative)
+	unlock()
+	h.finishCompatTerminalStage(
+		ctx, playSession, upstreamSession, transcodeNodeURL, event, authoritative, cleanupDone, attempt, staged, err,
+	)
+}
+
+// finishCompatTerminalStage cleans up after a staging attempt and delivers
+// the staged stop, or schedules a retry when staging failed.
+func (h *PlaybackHandler) finishCompatTerminalStage(
+	ctx context.Context,
+	playSession *PlaybackSession,
+	upstreamSession *playback.Session,
+	transcodeNodeURL string,
+	event watchsync.ScrobbleEvent,
+	authoritative bool,
+	cleanupDone bool,
+	attempt int,
+	staged *PlaybackSession,
+	err error,
+) {
 	if err != nil {
 		// Production durable staging installs its local marker before I/O. Keep
 		// the interface invariant for alternate stores that fail before doing so.
@@ -2290,15 +2445,11 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			)
 		}
 	}
-	var previousSession *playback.Session
-	progressUpdated := false
 	if positionReported && h.sessionMgr != nil {
-		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil && current != nil {
-			copy := *current
-			previousSession = &copy
-		}
-		err := h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused)
-		progressUpdated = err == nil
+		err := h.applyCompatReport(
+			r.Context(), playSession, findMediaSource(playSession, req.MediaSourceID),
+			positionSeconds, req.IsPaused, !stop,
+		)
 		if errors.Is(err, playback.ErrSessionNotFound) && !stop {
 			// The upstream session was reaped as stale (e.g. the client buffered
 			// far ahead and went quiet between range requests). The report proves
@@ -2306,29 +2457,35 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			// dropping it from session tracking for the rest of playback.
 			if revived := h.reviveUpstreamForReport(r.Context(), session, playSession, req.MediaSourceID); revived != nil {
 				playSession = revived
-				progressUpdated = h.sessionMgr.UpdateProgress(playSession.UpstreamSessionID, positionSeconds, req.IsPaused) == nil
-				previousSession = nil
+				// The revive sent a fresh start from the new session's state;
+				// this report is compared against that state, not the reaped one.
+				_ = h.applyCompatReport(
+					r.Context(), playSession, findMediaSource(playSession, req.MediaSourceID),
+					positionSeconds, req.IsPaused, true,
+				)
 			}
 		}
 	}
-	if progressUpdated && !stop && previousSession != nil && previousSession.IsPaused != req.IsPaused {
-		updatedSession := *previousSession
-		updatedSession.Position = positionSeconds
-		updatedSession.IsPaused = req.IsPaused
-		action := compatScrobbleStart
-		if req.IsPaused {
-			action = compatScrobblePause
+	// An ID-less Stopped report can't end the play (see below): it may be a
+	// stale stop from an earlier play of the same item. It must not touch the
+	// pause state either, since a paused session's long idle grace is what
+	// keeps a really-paused play alive (#1454 review). Mark it instead, which
+	// only hides it from the live admin view until its next progress report.
+	if stop && unidentified && h.sessionMgr != nil {
+		if marker, ok := h.sessionMgr.(interface{ MarkStopReported(string) error }); ok {
+			if err := marker.MarkStopReported(playSession.UpstreamSessionID); err == nil {
+				h.syncSessionsNow(context.WithoutCancel(r.Context()), "compat_unidentified_stop")
+			} else if !errors.Is(err, playback.ErrSessionNotFound) {
+				slog.WarnContext(r.Context(), "jellycompat could not mark an unidentified stop", "component", "jellycompat",
+					"play_session_id", playSession.ID, "error", err)
+			}
 		}
-		h.dispatchCompatScrobbleAt(
-			r.Context(), action, playSession, &updatedSession,
-			findMediaSource(playSession, req.MediaSourceID), &positionSeconds,
-		)
 	}
 	// Only the Stopped report and the report that marks the item watched change
 	// the taste profile; a position-only report does not. A Stopped report
 	// refreshes even when it carries no position: the play's earlier reports
-	// already wrote its progress, and StopSession does not run the native stop
-	// finalizer that would otherwise refresh the profile.
+	// already wrote its progress, and a stop that reaches a replica without
+	// the native session records no history there to refresh the profile.
 	refreshTasteProfile := stop
 	// Ignore early zero reports while a client is still seeking to its resume
 	// point, matching the native playback persistence rule.
@@ -2496,7 +2653,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 						h.recordCompatProgressPersistence(playSession.ID, reconstructed.DisableProgressPersistence)
 					}
 					_ = h.syncUpstreamAudioSelection(playSession, source)
-					h.dispatchCompatScrobble(ctx, compatScrobbleStart, playSession, reconstructed, &source)
+					h.sendCompatResumeStart(ctx, playSession, reconstructed, &source)
 					return playSession, nil
 				}
 			}
@@ -2591,6 +2748,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 			return errUpstreamReplaced
 		}
 		current.UpstreamSessionID = session.ID
+		current.UpstreamMediaFileID = source.FileID
 		current.UpstreamPlayMethod = method
 		current.TranscodeStarted = false
 		// A new upstream session has no committed HLS route yet. Retaining the
@@ -2620,7 +2778,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		return nil, ErrSessionNotFound
 	}
 	h.syncSessionsNow(ctx, "compat_start")
-	h.dispatchCompatScrobble(ctx, compatScrobbleStart, updated, session, &source)
+	h.sendCompatResumeStart(ctx, updated, session, &source)
 	return updated, nil
 }
 
@@ -2781,8 +2939,9 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		TargetBitrateKbps:      source.TargetBitrateKbps,
 		TargetResolution:       source.TargetResolution,
 		TargetAudioChannels:    source.TargetAudioChannels,
-		TargetCodecVideo:       compatTargetVideoCodec,
+		TargetCodecVideo:       compatSourceTargetVideoCodec(source),
 		TargetCodecAudio:       compatTargetAudioCodec,
+		VideoSampleEntry:       compatSourceVideoSampleEntry(source),
 		FFmpegPath:             h.FFmpegPath,
 		HWAccel:                h.HWAccel,
 		AudioTrackIndex:        audioTrackIndex,

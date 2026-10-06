@@ -99,6 +99,9 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 	if req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
+	if req.TrickplayEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
+	}
 
 	folder, err := h.folderRepo.Create(ctx, catalog.CreateFolderInput{
 		Paths:                    req.Paths,
@@ -108,6 +111,8 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
+		RealtimeMonitoring:       req.RealtimeMonitoring,
+		TrickplayEnabled:         req.TrickplayEnabled,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDuplicatePath) {
@@ -115,6 +120,10 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		}
 		slog.ErrorContext(ctx, "creating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to create library")
+	}
+	h.pokeRealtimeMonitor()
+	if req.TrickplayEnabled {
+		h.reconcileTrickplay()
 	}
 
 	// Seed default sections for the new library.
@@ -177,6 +186,9 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 	if req.ChapterThumbnailsEnabled != nil && *req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
 		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
 	}
+	if req.TrickplayEnabled != nil && *req.TrickplayEnabled && h.ArtworkStore == nil {
+		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
+	}
 
 	// Fetch the folder before updating so we can detect path changes.
 	oldFolder, err := h.folderRepo.GetByID(ctx, id)
@@ -198,6 +210,8 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
 		TrailerKinds:             req.TrailerKinds,
+		RealtimeMonitoring:       req.RealtimeMonitoring,
+		TrickplayEnabled:         req.TrickplayEnabled,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
@@ -208,6 +222,10 @@ func (h *LibraryHandler) UpdateLibrary(ctx context.Context, id, userID int, req 
 		}
 		slog.ErrorContext(ctx, "updating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to update library")
+	}
+	h.pokeRealtimeMonitor()
+	if req.affectsTrickplay() {
+		h.reconcileTrickplay()
 	}
 
 	// Fetch the updated folder to return it.
@@ -301,6 +319,8 @@ func (h *LibraryHandler) DeleteLibrary(ctx context.Context, id, userID int) (*mo
 		slog.ErrorContext(ctx, "queuing library delete job", "component", "api", "library_id", id, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to queue library delete")
 	}
+	// Queuing the deletion disabled the library; stop monitoring it now.
+	h.pokeRealtimeMonitor()
 
 	if h.ingester != nil {
 		canceled := h.ingester.CancelLibrary(folder.ID)

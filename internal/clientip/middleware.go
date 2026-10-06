@@ -9,6 +9,7 @@ type contextKey string
 
 const clientIPKey contextKey = "client_ip"
 const requestSchemeKey contextKey = "request_scheme"
+const requestHostKey contextKey = "request_host"
 
 // peerIPKey holds the transport-level peer address exactly as the listener saw
 // it, before Middleware overwrote RemoteAddr with the resolved client IP.
@@ -29,10 +30,12 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer := r.RemoteAddr
 			scheme := resolver.requestScheme(r)
+			host := resolver.requestHost(r)
 			ip := resolver.ClientIP(r)
 			r.RemoteAddr = ip
 			ctx := context.WithValue(r.Context(), clientIPKey, ip)
 			ctx = context.WithValue(ctx, requestSchemeKey, scheme)
+			ctx = context.WithValue(ctx, requestHostKey, host)
 			ctx = context.WithValue(ctx, peerIPKey, peer)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -79,4 +82,15 @@ func RequestScheme(r *http.Request) string {
 		return "https"
 	}
 	return "http"
+}
+
+// RequestHost returns the host[:port] the client addressed: the single
+// X-Forwarded-Host value a trusted proxy sent, else the Host header. A proxy
+// that rewrites Host to its upstream address keeps the client's host this
+// way. Without Middleware, forwarding headers are never consulted.
+func RequestHost(r *http.Request) string {
+	if host, ok := r.Context().Value(requestHostKey).(string); ok && host != "" {
+		return host
+	}
+	return r.Host
 }

@@ -141,6 +141,8 @@ export function useLibraryForm({
   const [chapterThumbnailsEnabled, setChapterThumbnailsEnabled] = useState(
     library?.chapter_thumbnails_enabled ?? false,
   );
+  const savedTrickplay = library?.trickplay_enabled ?? false;
+  const [trickplayEnabled, setTrickplayEnabled] = useState(savedTrickplay);
   // A new library follows its type's default until the switch is set:
   // detection is on for series and mixed libraries and off for movies.
   const [introDetectionChoice, setIntroDetectionEnabled] = useState<boolean | null>(
@@ -149,6 +151,9 @@ export function useLibraryForm({
   const introDetectionEnabled = introDetectionChoice ?? !settingSupport.creditsOnlyDetection;
   const [trailerKinds, setTrailerKinds] = useState<string[]>(
     library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],
+  );
+  const [realtimeMonitoring, setRealtimeMonitoring] = useState(
+    library?.realtime_monitoring ?? true,
   );
   const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
   const [chainDirty, setChainDirty] = useState(false);
@@ -274,7 +279,14 @@ export function useLibraryForm({
       chapter_thumbnails_enabled: settingSupport.chapterThumbnails && chapterThumbnailsEnabled,
       intro_detection_enabled: settingSupport.introDetection && introDetectionEnabled,
       trailer_kinds: settingSupport.trailers ? trailerKinds : [],
+      realtime_monitoring: realtimeMonitoring,
     };
+    // Sent only when it changes: servers without seek previews reject the
+    // member, and a web build can reach one during a rolling upgrade.
+    const trickplay = settingSupport.trickplay && trickplayEnabled;
+    if (trickplay !== savedTrickplay) {
+      body.trickplay_enabled = trickplay;
+    }
 
     if (library) {
       updateMutation.mutate(
@@ -336,10 +348,14 @@ export function useLibraryForm({
     setAutoTranslateMetadata,
     chapterThumbnailsEnabled,
     setChapterThumbnailsEnabled,
+    trickplayEnabled,
+    setTrickplayEnabled,
     introDetectionEnabled,
     setIntroDetectionEnabled,
     trailerKinds,
     toggleTrailerKind,
+    realtimeMonitoring,
+    setRealtimeMonitoring,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
     chainLoading,

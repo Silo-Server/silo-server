@@ -1,5 +1,5 @@
 {
-  "revision": "b472da14087930daffcb6b19354fcead719d1e96b41bc06973a342c3e7d0e500",
+  "revision": "d525bf181d1594e33a73d0d874cd8c5967ce0ae5bc254c59977a72909cdf2de1",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -9,5 +9,10 @@
   "access_groups": true,
   "password_reset_link": true,
   "password_reset_email": true,
-  "ownership_transfer": true
+  "ownership_transfer": true,
+  "account_devices": true,
+  "watch_summary": true,
+  "account_downloads": true,
+  "request_usage": true,
+  "policy_defaults": true
 }

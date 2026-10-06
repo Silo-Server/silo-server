@@ -19,16 +19,14 @@ type chromaprintStartRefiner interface {
 }
 
 type DialogueBoundaryRefiner struct {
-	config   Config
-	readFile func(string) ([]byte, error)
+	config Config
 }
 
 var htmlTagPattern = regexp.MustCompile(`<[^>]+>`)
 
 func NewDialogueBoundaryRefiner(config Config) *DialogueBoundaryRefiner {
 	return &DialogueBoundaryRefiner{
-		config:   config.normalized(),
-		readFile: os.ReadFile,
+		config: config.normalized(),
 	}
 }
 
@@ -44,11 +42,7 @@ func (r *DialogueBoundaryRefiner) RefineChromaprintStart(ctx context.Context, ca
 	if !ok {
 		return segment, false, nil
 	}
-	readFile := r.readFile
-	if readFile == nil {
-		readFile = os.ReadFile
-	}
-	data, err := readFile(subtitle.Path)
+	data, err := os.ReadFile(subtitle.Path)
 	if err != nil {
 		return segment, false, fmt.Errorf("read dialogue subtitle %q for file %d: %w", subtitle.Path, candidate.FileID, err)
 	}

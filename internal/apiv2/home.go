@@ -164,9 +164,6 @@ const (
 	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
 )
 
-// homeOperationIDs is every operation the catalog-home section registers.
-var homeOperationIDs = []string{opGetCalendar, opDismissHomeItem, opUndismissHomeItem, opGetHomeLayout, opListHomeSections, opGetHomeSectionItems, opListSectionRecipes, opListSectionRecipeCandidates}
-
 func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
 		"Upcoming and recent airings and releases in a window of the viewer's local days, grouped by day.")), reg.getCalendar)
@@ -384,8 +381,9 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 		return nil, serviceProblem(err)
 	}
 	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	sel := reg.ratingSelection(ctx)
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, sectionOf(s))
+		out.Sections = append(out.Sections, sectionOf(s, sel))
 	}
 	return &SectionCollectionOutput{Body: out}, nil
 }
@@ -402,7 +400,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionOutput{Body: sectionOf(view)}, nil
+	return &SectionOutput{Body: sectionOf(view, reg.ratingSelection(ctx))}, nil
 }
 
 // recipeDefaultConfigOf decodes a recipe's raw config document; anything that is

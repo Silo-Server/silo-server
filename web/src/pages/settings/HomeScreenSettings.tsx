@@ -14,6 +14,7 @@ import type { SettingsSectionEntry, SectionOverride } from "@/api/types";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -22,11 +23,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import SectionEditorDrawer from "@/components/sections/SectionEditorDrawer";
+import HomeLayoutTransfer from "@/components/sections/HomeLayoutTransfer";
 import RecipeGalleryModal from "@/components/RecipeGallery/RecipeGalleryModal";
 import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
+import { canAddAdminOnlyRecipes, isTraktConfig } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
 import { Plus } from "lucide-react";
 import {
@@ -47,32 +50,104 @@ import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { toast } from "sonner";
+import { v2, V2ProblemError } from "@/api/v2/request";
+import { useOptionalAuth } from "@/hooks/useAuth";
+import {
+  useEffectiveSettings,
+  useSetSettingValue,
+  type SettingIdentity,
+} from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
+
+const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
+const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
 
 interface RemovedSystemOverride {
   id: string;
 }
 
+interface SectionOverrideIds {
+  /** The profile's saved overrides for the page. */
+  savedOverrides?: SectionOverride[];
+  /** An ID for an admin section the profile has no saved override for. */
+  newId?: (sectionId: string) => string;
+  /** The section the change being saved is to, if it is to one section. */
+  changedSectionId?: string;
+}
+
+/**
+ * The override set to save for one page. A change to an admin section keeps
+ * the ID of the profile's saved override for that section, or gets one from
+ * `newId`: the server's section source policy refuses a legacy Trakt admin
+ * section's override without an ID. It also refuses a new override that
+ * leaves such a section showing, so a shown one without a saved override is
+ * left out and keeps its admin position, unless the change is to that
+ * section; the refusal then reaches the user instead of the change silently
+ * not saving. Positions are only as close to the list order as that held
+ * position allows.
+ */
 export function buildSectionOverrides(
   sections: SettingsSectionEntry[],
   removedSystemSections: RemovedSystemOverride[] = [],
+  { savedOverrides = [], newId = () => randomUUID(), changedSectionId }: SectionOverrideIds = {},
 ): SectionOverride[] {
-  return [
-    ...sections.map((s, index) => ({
+  // The server resolves the last saved override for a section.
+  const savedIds = new Map<string, string>();
+  for (const override of savedOverrides) {
+    if (override.section_id && override.id) savedIds.set(override.section_id, override.id);
+  }
+  const leftOut = (s: SettingsSectionEntry) =>
+    !s.is_custom &&
+    !s.hidden &&
+    !savedIds.has(s.id) &&
+    s.id !== changedSectionId &&
+    isTraktConfig(s.config);
+  // A section left out keeps its admin position, so the others are numbered
+  // in list order around it and never on it: the server orders sections with
+  // equal positions arbitrarily.
+  const heldPositions = new Set(sections.filter(leftOut).map((s) => s.position));
+  const overrides: SectionOverride[] = [];
+  let position = 0;
+  for (const s of sections) {
+    if (leftOut(s)) {
+      position = Math.max(position, s.position + 1);
+      continue;
+    }
+    while (heldPositions.has(position)) position += 1;
+    overrides.push({
       section_id: s.is_custom ? undefined : s.id,
-      id: s.is_custom ? s.id : undefined,
-      position: index,
+      id: s.is_custom ? s.id : (savedIds.get(s.id) ?? newId(s.id)),
+      position: position++,
       hidden: s.hidden,
       title: s.title,
       featured: s.featured,
       item_limit: s.item_limit,
       section_type: s.is_custom ? s.section_type : undefined,
       config: s.config,
-    })),
-    ...removedSystemSections.map((section) => ({
+    });
+  }
+  for (const section of removedSystemSections) {
+    overrides.push({
       section_id: section.id,
+      id: savedIds.get(section.id) ?? newId(section.id),
       removed: true,
-    })),
-  ];
+    });
+  }
+  return overrides;
+}
+
+/**
+ * Gives each admin section one new override ID and returns the same one on
+ * later calls, so a quick second save on a page reuses the IDs of the first
+ * before the saved overrides refetch.
+ */
+export function createOverrideIdSource(): (sectionId: string) => string {
+  const ids = new Map<string, string>();
+  return (sectionId) => {
+    const id = ids.get(sectionId) ?? randomUUID();
+    ids.set(sectionId, id);
+    return id;
+  };
 }
 
 export function applySectionDeletion(
@@ -129,7 +204,7 @@ export function canMutateSectionSettings(
   );
 }
 
-export function shouldRestoreSelectionState(
+function shouldRestoreSelectionState(
   currentSelectionValue: string,
   selectionValueAtSave: string,
 ): boolean {
@@ -179,6 +254,18 @@ export function buildProfileGallerySection(
   };
 }
 
+/**
+ * A permission denial carries its cause in the detail: the custom-sections
+ * refusal and the demo-mode gate both answer 403 permission_denied.
+ */
+export function sectionSaveErrorMessage(error: unknown): string {
+  const detail =
+    error instanceof V2ProblemError && error.problemType === "permission_denied"
+      ? error.problem.detail?.trim()
+      : undefined;
+  return detail ? `Failed to save section changes: ${detail}` : "Failed to save section changes";
+}
+
 export default function HomeScreenSettings() {
   const { data: libraries } = useUserLibraries();
   const { data: recipeCatalog } = useQuery({
@@ -186,6 +273,16 @@ export default function HomeScreenSettings() {
     queryFn: fetchRecipeCatalog,
     staleTime: 5 * 60 * 1000,
   });
+  const role = useOptionalAuth()?.user?.role;
+  const { data: sectionFlags } = useQuery({
+    queryKey: ["profile-section-flags"],
+    queryFn: () => v2("GET /api/v2/profile/sections/flags"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const allowAdminOnlyRecipes = canAddAdminOnlyRecipes(
+    role,
+    sectionFlags?.allow_profile_custom_sections,
+  );
 
   // Scope state
   const [scopeValue, setScopeValue] = useState("home");
@@ -200,9 +297,15 @@ export default function HomeScreenSettings() {
   const saveMutation = useSaveProfileOverrides();
   const resetMutation = useResetProfileOverrides();
   const canEditSections = canMutateSectionSettings(settingsQuery, rawOverridesQuery);
+  const homePreferences = useEffectiveSettings({ keys: HOME_PREFERENCE_KEYS });
+  const saveHomePreference = useSetSettingValue();
+  const hideWatchedItems =
+    homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
   const activeSelectionValue = scopeValue;
   const activeSelectionRef = useRef(activeSelectionValue);
   const latestSaveAttemptRef = useRef(0);
+  // New override IDs for admin sections on this page.
+  const newOverrideIdRef = useRef(createOverrideIdSource());
 
   // DnD state
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -251,6 +354,7 @@ export default function HomeScreenSettings() {
   function saveOverrides(
     sections: SettingsSectionEntry[],
     removedOverrides: RemovedSystemOverride[] = removedSystemSections,
+    changedSectionId?: string,
   ) {
     if (!canEditSections) {
       return;
@@ -259,7 +363,11 @@ export default function HomeScreenSettings() {
     const selectionValueAtSave = activeSelectionValue;
     const saveAttemptId = latestSaveAttemptRef.current + 1;
     latestSaveAttemptRef.current = saveAttemptId;
-    const overrides = buildSectionOverrides(sections, removedOverrides);
+    const overrides = buildSectionOverrides(sections, removedOverrides, {
+      savedOverrides: rawOverridesQuery.data?.overrides,
+      newId: newOverrideIdRef.current,
+      changedSectionId,
+    });
     saveMutation.mutate(
       {
         scope,
@@ -267,8 +375,8 @@ export default function HomeScreenSettings() {
         overrides,
       },
       {
-        onError: () => {
-          toast.error("Failed to save section changes");
+        onError: (error) => {
+          toast.error(sectionSaveErrorMessage(error));
           if (
             !shouldRestoreLatestSaveFailure(
               activeSelectionRef.current,
@@ -308,7 +416,7 @@ export default function HomeScreenSettings() {
     if (oldIndex === -1 || newIndex === -1) return;
     const next = arrayMove(orderedSections, oldIndex, newIndex);
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, String(active.id));
   }
 
   function handleDragCancel() {
@@ -324,7 +432,7 @@ export default function HomeScreenSettings() {
     }
     const next = orderedSections.map((s) => (s.id === id ? { ...s, hidden: !s.hidden } : s));
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, id);
   }
 
   function handleRequestDelete(section: SettingsSectionEntry) {
@@ -390,7 +498,7 @@ export default function HomeScreenSettings() {
       next = [...orderedSections, { ...updated, position: orderedSections.length }];
     }
     setOrderedSections(next);
-    saveOverrides(next);
+    saveOverrides(next, removedSystemSections, updated.id);
   }
 
   // Reset
@@ -402,6 +510,7 @@ export default function HomeScreenSettings() {
   }
 
   function handleScopeChange(value: string) {
+    newOverrideIdRef.current = createOverrideIdSource();
     setOrderedSections([]);
     setRemovedSystemSections([]);
     setActiveId(null);
@@ -423,6 +532,17 @@ export default function HomeScreenSettings() {
     setOrderedSections(next);
     setPickedRecipe(null);
     saveOverrides(next);
+  }
+
+  function handleHideWatchedItemsChange(enabled: boolean) {
+    saveHomePreference.mutate(
+      {
+        key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+        value: enabled,
+        identity: PROFILE_SCOPE,
+      },
+      { onError: () => toast.error("Failed to save Home preference") },
+    );
   }
 
   return (
@@ -447,7 +567,10 @@ export default function HomeScreenSettings() {
           setConfirmResetOpen(false);
           resetMutation.mutate(
             { scope, libraryId: libraryId ? String(libraryId) : undefined },
-            { onSuccess: () => toast.success("Sections reset to default") },
+            {
+              onSuccess: () => toast.success("Sections reset to default"),
+              onError: () => toast.error("Failed to reset section customizations"),
+            },
           );
         }}
       />
@@ -465,6 +588,29 @@ export default function HomeScreenSettings() {
         variant="destructive"
         onConfirm={handleConfirmDelete}
       />
+
+      <SettingsGroup
+        title="Home preferences"
+        description="Choose how this profile's Home screen handles completed media."
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="hide-watched-home" className="text-sm font-medium">
+              Hide watched items
+            </Label>
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
+              Remove watched items from ordinary Home sections. Featured and watch-history sections
+              keep them.
+            </p>
+          </div>
+          <Switch
+            id="hide-watched-home"
+            checked={hideWatchedItems}
+            disabled={homePreferences.isLoading || saveHomePreference.isPending}
+            onCheckedChange={handleHideWatchedItemsChange}
+          />
+        </div>
+      </SettingsGroup>
 
       <SettingsGroup
         title="Scope"
@@ -565,6 +711,13 @@ export default function HomeScreenSettings() {
         </DndContext>
       </SettingsGroup>
 
+      <SettingsGroup
+        title="Export and import"
+        description="Save this profile's Home and library layouts to a file, or load one exported from another profile or server."
+      >
+        <HomeLayoutTransfer />
+      </SettingsGroup>
+
       <SectionEditorDrawer
         mode="profile"
         open={drawerOpen}
@@ -572,6 +725,8 @@ export default function HomeScreenSettings() {
         section={drawerSection}
         libraries={libraries ?? []}
         recipeCatalog={recipeCatalog}
+        libraryScoped={scope === "library"}
+        allowAdminOnlyRecipes={allowAdminOnlyRecipes}
         onSave={handleDrawerSave}
       />
 
@@ -592,6 +747,7 @@ export default function HomeScreenSettings() {
             preset={pickedRecipe.preset}
             showBulkApply={false}
             showEnabled={false}
+            libraryScoped={scope === "library"}
             onCancel={() => setPickedRecipe(null)}
             onBackToGallery={() => {
               setPickedRecipe(null);

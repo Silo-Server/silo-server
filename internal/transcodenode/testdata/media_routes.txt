@@ -8,7 +8,9 @@ DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
+GET /downloads/prepare/{artifact_id}/progress	non-media
 GET /hw-capabilities	non-media
+POST /media-samples/run	non-media
 GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true
 HEAD /remux/{session_id}	media	playback	internal_relay	false	true
@@ -18,6 +20,7 @@ DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
 GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true
 POST /transcode/{session_id}/segment/{name}/downloaded	non-media
+POST /trickplay/extract	non-media
 # fixture 2
 POST /admin/force-reload	non-media
 POST /admin/reload-config	non-media
@@ -28,7 +31,9 @@ DELETE /downloads/artifacts/{artifact_id}	non-media
 GET /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 HEAD /downloads/artifacts/{artifact_id}	media	transfer	internal_relay	false	true
 POST /downloads/prepare	non-media
+GET /downloads/prepare/{artifact_id}/progress	non-media
 GET /hw-capabilities	non-media
+POST /media-samples/run	non-media
 GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true
 HEAD /remux/{session_id}	media	playback	internal_relay	false	true
@@ -38,3 +43,4 @@ DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
 GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true
 POST /transcode/{session_id}/segment/{name}/downloaded	non-media
+POST /trickplay/extract	non-media

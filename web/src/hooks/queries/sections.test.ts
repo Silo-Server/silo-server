@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import getHomeLayoutOk from "../../../../contracts/api/v2/fixtures/get_home_layout_ok.json";
 import getHomeSectionItemsOk from "../../../../contracts/api/v2/fixtures/get_home_section_items_ok.json";
 import getLibrarySectionItemsOk from "../../../../contracts/api/v2/fixtures/get_library_section_items_ok.json";
-import listHomeSectionsOk from "../../../../contracts/api/v2/fixtures/list_home_sections_ok.json";
 import listProfileSectionOverridesOk from "../../../../contracts/api/v2/fixtures/list_profile_section_overrides_ok.json";
 
 const mocks = vi.hoisted(() => ({
@@ -28,8 +27,6 @@ import {
   fetchHomeSectionItems,
   fetchLibrarySectionItems,
   useHomeLayout,
-  useHomeSections,
-  useLibraryLayout,
   profileSectionOverridesFromV2,
 } from "./sections";
 
@@ -55,24 +52,6 @@ describe("sections query helpers", () => {
     mocks.fetchWithSession.mockReset();
     mocks.useQuery.mockReset();
     mocks.useQuery.mockImplementation((options: unknown) => options);
-  });
-
-  it("lists home sections from v2 and keeps the { sections } shape", async () => {
-    mocks.fetchWithSession.mockResolvedValue(jsonResponse(listHomeSectionsOk));
-
-    const options = useHomeSections() as unknown as QueryOptions;
-    const response = (await options.queryFn({})) as {
-      sections: { id: string; items: unknown[] }[];
-    };
-
-    expect(options.queryKey).toEqual(["sections", "home"]);
-    expect(mocks.fetchWithSession.mock.calls[0]?.[0]).toBe("/api/v2/home/sections");
-    expect(response.sections.map((section) => section.id)).toEqual(
-      listHomeSectionsOk.sections.map((section) => section.id),
-    );
-    expect(response.sections[0]?.items).toHaveLength(
-      listHomeSectionsOk.sections[0]?.items.length ?? -1,
-    );
   });
 
   it("fetches the home layout from v2 and keeps the { sections } shape", async () => {
@@ -125,10 +104,6 @@ describe("sections query helpers", () => {
     // The card components read "" for absent art and null for an absent rating.
     expect(response.section.items[0]?.logo_url).toBe("");
     expect(response.section.items[0]?.rating_imdb).toBe(8.3);
-  });
-
-  it("exports the library layout hook", () => {
-    expect(useLibraryLayout).toBeTypeOf("function");
   });
 
   it("projects stored v2 section overrides onto the editor's override fields", () => {

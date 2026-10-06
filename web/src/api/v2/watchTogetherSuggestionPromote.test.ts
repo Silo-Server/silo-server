@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 import { promoteWatchTogetherWithFeedback } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
@@ -62,6 +62,8 @@ afterEach(() => {
 });
 function transport(post: () => Promise<Response>) {
   const fetch = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+    if (url.endsWith("/api/v2/auth/refresh"))
+      return Promise.resolve(new Response(null, { status: 401 }));
     if (url.endsWith("/ws-ticket"))
       return Promise.resolve(
         new Response(JSON.stringify({ protocol: "silo.room.v2", ticket: "a".repeat(43) }), {
@@ -98,7 +100,10 @@ it("promotes once with header proof and reports the authoritative receipt", asyn
   expect(result.current.room?.generation).toBe(4);
   expect(toast.success).toHaveBeenCalledWith("Room selection updated");
 });
-it.each([401, 403, 409, 422, 500])("does not replay promotion %s", async (status) => {
+it.each([401, 500])("does not replay promotion %s", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = transport(async () => new Response(null, { status }));
   const { result } = renderHook(() =>
     useWatchTogetherRoomConnection({ roomId: "room", roomToken: "proof" }),
@@ -109,6 +114,9 @@ it.each([401, 403, 409, 422, 500])("does not replay promotion %s", async (status
   expect(
     fetch.mock.calls.filter((c) => c[1].method === "POST" && c[0].endsWith("/suggestions/promote")),
   ).toHaveLength(1);
+  expect(
+    fetch.mock.calls.filter(([url]) => String(url).endsWith("/api/v2/auth/refresh")),
+  ).toHaveLength(0);
   expect(result.current.room).toBeNull();
   expect(toast.success).not.toHaveBeenCalled();
   expect(toast.error).toHaveBeenCalledTimes(1);

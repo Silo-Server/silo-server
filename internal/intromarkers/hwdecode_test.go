@@ -32,7 +32,7 @@ func TestTailRunnerDecodesVideoOnResolvedHardware(t *testing.T) {
 	cfg.HWAccel, cfg.HWDevice = "auto", "/dev/dri/renderD128,/dev/dri/renderD129"
 	extractor := NewChromaprintExtractor(cfg)
 	var calls int
-	extractor.hardware.resolve = fakeResolve("vaapi", &calls)
+	extractor.hardware.Resolve = fakeResolve("vaapi", &calls)
 	candidate := Candidate{FileID: 7, FilePath: "/media/show/e1.mkv", DurationSeconds: 1500, CodecVideo: "h264", CodecAudio: "aac"}
 	hardwareFirst := []mediasample.Attempt{{Hardware: true}, {}}
 
@@ -60,68 +60,13 @@ func TestTailRunnerDecodesVideoOnResolvedHardware(t *testing.T) {
 	}
 
 	for accel, want := range map[string][]mediasample.Attempt{"none": nil, "nvenc": nil, "videotoolbox": hardwareFirst, "qsv": hardwareFirst} {
-		extractor.hardware.set(accel, "")
+		extractor.hardware.Set(accel, "")
 		req := movieTailRequest(context.Background(), candidate, fingerprintWindow{Start: 900, End: 1500})
 		runner := extractor.tailRunner(context.Background(), &req)
 		if !reflect.DeepEqual(req.Attempts, want) || (want != nil) != (runner.HWAccel == accel) {
 			t.Errorf("%s: attempts %+v on %q, want %+v", accel, req.Attempts, runner.HWAccel, want)
 		}
 	}
-}
-
-func TestHardwareDecoderDoesNotCacheACanceledProbe(t *testing.T) {
-	decoder := newHardwareDecoder("auto", "")
-	var calls int
-	decoder.resolve = fakeResolve("none", &calls)
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	decoder.backend(canceled, "ffmpeg")
-	decoder.resolve = fakeResolve("qsv", &calls)
-	if accel, _ := decoder.backend(context.Background(), "ffmpeg"); accel != "qsv" || calls != 2 {
-		t.Fatalf("backend %q after %d probes, want qsv after 2", accel, calls)
-	}
-	if accel, _ := decoder.backend(context.Background(), "ffmpeg"); accel != "qsv" || calls != 2 {
-		t.Fatalf("backend %q after %d probes, want the cached qsv", accel, calls)
-	}
-}
-
-// TestHardwareDecoderRetriesAFailedAutoDetection resolves "auto" to no
-// hardware, as a smoke probe that failed under GPU contention does, and
-// expects the decoder to ask again once hardwareRetryInterval has passed or
-// the playback probe cache was invalidated, while a found backend stays
-// cached until an invalidation.
-func TestHardwareDecoderRetriesAFailedAutoDetection(t *testing.T) {
-	decoder := newHardwareDecoder("auto", "")
-	now := time.Unix(1_000_000, 0)
-	var generation uint64
-	decoder.now = func() time.Time { return now }
-	decoder.generation = func() uint64 { return generation }
-	var calls int
-	decoder.resolve = fakeResolve("none", &calls)
-	backend := func(want string, wantCalls int) {
-		t.Helper()
-		if accel, _ := decoder.backend(context.Background(), "ffmpeg"); accel != want || calls != wantCalls {
-			t.Fatalf("backend %q after %d resolutions, want %q after %d", accel, calls, want, wantCalls)
-		}
-	}
-	backend("none", 1)
-	now = now.Add(hardwareRetryInterval - time.Second)
-	backend("none", 1)
-
-	// The GPU recovers: the next resolution after the interval finds it.
-	decoder.resolve = fakeResolve("vaapi", &calls)
-	now = now.Add(time.Second)
-	backend("vaapi", 2)
-	now = now.Add(24 * time.Hour)
-	backend("vaapi", 2)
-
-	// An operator's re-probe invalidates a found backend too.
-	decoder.resolve = fakeResolve("none", &calls)
-	generation++
-	backend("none", 3)
-	decoder.resolve = fakeResolve("qsv", &calls)
-	generation++
-	backend("qsv", 4)
 }
 
 // creditsClipSegments are the scenes of a synthesized tail, in order: bright
@@ -335,12 +280,17 @@ func TestSampleTailsDecodeASourceWithAnImplausibleBitDepth(t *testing.T) {
 	if err != nil {
 		t.Skipf("ffmpeg capabilities unavailable: %v", err)
 	}
-	candidate := Candidate{FileID: 1, DurationSeconds: 120, CodecVideo: "h264", VideoBitDepth: 32}
+	candidate := Candidate{FileID: 1, DurationSeconds: 10, CodecVideo: "h264", VideoBitDepth: 32}
 	if err := caps.Require(creditsTailRequest(ctx, candidate, tailWindow(candidate), false)); err != nil {
 		t.Skipf("ffmpeg cannot run the tail pass: %v", err)
 	}
 	candidate.FilePath = filepath.Join(t.TempDir(), "source.mkv")
-	synthesizeCreditsClip(ctx, t, ffmpeg, candidate.FilePath)
+	cmd := exec.CommandContext(ctx, ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=320x180:r=10:d=10",
+		"-c:v", "libx264", "-threads", "1", "-g", "10", "-pix_fmt", "yuv420p", "-y", candidate.FilePath)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create tail fixture: %v: %s", err, output)
+	}
 
 	extractor := NewChromaprintExtractor(DefaultConfig(ffmpeg))
 	sample, err := extractor.SampleCreditsTail(ctx, candidate, false)
@@ -359,13 +309,6 @@ func TestSampleTailsDecodeASourceWithAnImplausibleBitDepth(t *testing.T) {
 	}
 }
 
-func TestHardwareDecoderReportsEachBackendsFirstFailure(t *testing.T) {
-	h := newHardwareDecoder("auto", "")
-	if !h.reportFailure("vaapi") || h.reportFailure("vaapi") || !h.reportFailure("qsv") {
-		t.Fatal("want one first failure per accelerator")
-	}
-}
-
 // TestTailRunnerTreatsAMissingStreamAsNoHardwareFailure fails a hardware
 // attempt because an output found no stream, which is the input's fault: the
 // run must end there without a hardware warning, so the caller's video-only
@@ -375,7 +318,7 @@ func TestTailRunnerTreatsAMissingStreamAsNoHardwareFailure(t *testing.T) {
 	cfg.HWAccel = "vaapi"
 	extractor := NewChromaprintExtractor(cfg)
 	var calls int
-	extractor.hardware.resolve = fakeResolve("vaapi", &calls)
+	extractor.hardware.Resolve = fakeResolve("vaapi", &calls)
 	var log bytes.Buffer
 	extractor.logger = slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	candidate := Candidate{FileID: 7, FilePath: "/media/show/e1.mkv", DurationSeconds: 1500, CodecVideo: "h264", CodecAudio: "aac"}
@@ -448,7 +391,7 @@ func TestSampleCreditsTailRetriesMissingAudioOnHardware(t *testing.T) {
 	if !strings.Contains(log.String(), "decoder=hardware:videotoolbox hardware_fallback=false") {
 		t.Fatalf("log %q, want the video-only retry decoded on VideoToolbox", log.String())
 	}
-	if !extractor.hardware.reportFailure("videotoolbox") {
+	if !extractor.hardware.FirstFailure("videotoolbox") {
 		t.Fatal("missing audio consumed the VideoToolbox hardware warning")
 	}
 }

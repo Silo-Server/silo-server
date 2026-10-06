@@ -3,6 +3,7 @@ package apiv2
 import (
 	"bufio"
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -121,16 +123,6 @@ func observationFrom(ctx context.Context) *observation {
 	return o
 }
 
-// observedClientName is the clamped X-Silo-Client name the observe middleware
-// read for this request, the name behind the `client` metric label, or ""
-// when the request did not pass through it.
-func observedClientName(ctx context.Context) string {
-	if o := observationFrom(ctx); o != nil {
-		return o.clientName
-	}
-	return ""
-}
-
 // observe is the outermost v2 chi middleware after requestID: it records the
 // request once, whatever answered it (an operation, a gate, the 404/405
 // fallbacks, or the panic recovery inside bufferResponse).
@@ -161,16 +153,19 @@ func observe(next http.Handler) http.Handler {
 				span.SetStatus(codes.Error, "server_error")
 			}
 		}
-		report(r, o, sw.status, sw.hijacked, time.Since(start))
+		report(r, o, sw.status, sw.hijacked, sw.bytes, time.Since(start))
 	})
 }
 
-// statusRecorder captures structured and raw response statuses. Unwrap lets
+// statusRecorder captures structured and raw response statuses and counts the
+// body bytes the handler wrote, before any compression (the compression
+// middleware wraps the v2 router from outside). Unwrap lets
 // http.ResponseController reach streaming capabilities on the original writer.
 type statusRecorder struct {
 	http.ResponseWriter
 	status   int
 	hijacked bool
+	bytes    int64
 }
 
 func (s *statusRecorder) WriteHeader(status int) {
@@ -184,8 +179,39 @@ func (s *statusRecorder) Write(p []byte) (int, error) {
 	if s.status == 0 {
 		s.status = http.StatusOK
 	}
-	return s.ResponseWriter.Write(p)
+	n, err := s.ResponseWriter.Write(p)
+	s.bytes += int64(n)
+	return n, err
 }
+
+// ReadFrom keeps the zero-copy path for media responses. io.Copy finds
+// io.ReaderFrom only by direct assertion, and chi's response wrapper offers it
+// only when the writer it wraps does, so without this a managed download file
+// is copied through a 32 KB buffer instead of sendfile.
+func (s *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
+	// Bytes that fall back to Write are counted there.
+	return httpstream.ForwardReadFrom(s.ResponseWriter, s, src, 0, func(n int64, _ error) {
+		// net/http commits the header only once the source yields bytes, so
+		// a handler whose copy failed at once can still send an error status.
+		if n > 0 && s.status == 0 {
+			s.status = http.StatusOK
+		}
+		s.bytes += n
+	})
+}
+
+// FlushError commits the headers like the writer it wraps would, and passes
+// that writer's flush error to http.ResponseController callers.
+func (s *statusRecorder) FlushError() error {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return http.NewResponseController(s.ResponseWriter).Flush()
+}
+
+// Flush serves http.Flusher callers, chi's wrapper among them: it offers
+// ReadFrom only when the writer it wraps can also flush.
+func (s *statusRecorder) Flush() { _ = s.FlushError() }
 
 func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
@@ -201,7 +227,7 @@ func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return conn, rw, err
 }
 
-func report(r *http.Request, o *observation, status int, hijacked bool, elapsed time.Duration) {
+func report(r *http.Request, o *observation, status int, hijacked bool, bodyBytes int64, elapsed time.Duration) {
 	name, version := o.clientName, o.clientVersion
 	major := strconv.Itoa(APIMajor)
 	method := methodLabel(r.Method)
@@ -227,6 +253,7 @@ func report(r *http.Request, o *observation, status int, hijacked bool, elapsed 
 		labelErrorCode, o.errorCode,
 		labelAuthClass, o.authClass,
 		"duration_ms", elapsed.Milliseconds(),
+		"body_bytes", bodyBytes,
 		"client_ip", clientip.FromContext(r.Context()),
 	}
 	if name != "" {

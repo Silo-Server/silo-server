@@ -111,6 +111,24 @@ describe("PluginConfigForm secrets", () => {
     );
   });
 
+  it("sends an emptied field as an explicit clear so the stored value goes", async () => {
+    const onSave = vi.fn();
+    render(
+      <PluginConfigForm
+        schema={schema}
+        value={{ region: "us-east" }}
+        configuredSecrets={["api_key"]}
+        onSave={onSave}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText("Region"));
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
+    const [, value, clearSecrets] = onSave.mock.lastCall!;
+    expect(value).toEqual({ region: "" });
+    expect(clearSecrets).toEqual([]);
+  });
+
   it("does not offer to clear a required saved secret into an invalid config", () => {
     const requiredSchema: PluginConfigSchema = {
       ...schema,
@@ -171,5 +189,33 @@ describe("PluginConfigForm secrets", () => {
     expect(onTest).toHaveBeenCalledWith("account", expect.objectContaining({ region: "us-east" }), [
       "api_key",
     ]);
+  });
+
+  it("reports each edit and staged secret removal as the entry it would save", async () => {
+    const onDraftChange = vi.fn();
+    render(
+      <PluginConfigForm
+        schema={schema}
+        value={{ region: "us-east" }}
+        configuredSecrets={["api_key"]}
+        onSave={vi.fn()}
+        onDraftChange={onDraftChange}
+      />,
+    );
+
+    await userEvent.clear(screen.getByLabelText("Region"));
+    await userEvent.type(screen.getByLabelText("Region"), "eu");
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      "account",
+      expect.objectContaining({ region: "eu" }),
+      [],
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear saved secret" }));
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      "account",
+      expect.objectContaining({ region: "eu" }),
+      ["api_key"],
+    );
   });
 });

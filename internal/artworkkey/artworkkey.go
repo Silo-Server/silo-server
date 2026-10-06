@@ -96,6 +96,25 @@ func Revision(objectPath string) string {
 	return stem[firstDot+1:]
 }
 
+// OriginalOf returns the original object of the revision a variant key
+// belongs to, for example ".../poster/original.r1.webp" for
+// ".../poster/w500.r1.webp". Repair regenerates variants from that original.
+// A key without a directory or a revision is returned unchanged.
+func OriginalOf(objectPath string) string {
+	dir := Directory(objectPath)
+	if dir == "" {
+		return objectPath
+	}
+	base := path.Base(objectPath)
+	ext := path.Ext(base)
+	stem := base[:len(base)-len(ext)]
+	dot := strings.IndexByte(stem, '.')
+	if dot < 0 {
+		return objectPath
+	}
+	return dir + OriginalVariant + stem[dot:] + ext
+}
+
 // VariantWidths returns the resize widths generated for an artwork type,
 // ordered widest first. This is the single source of truth for the variant
 // ladder: image generation, object-key expansion, garbage collection, and the

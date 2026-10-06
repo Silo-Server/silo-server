@@ -222,6 +222,48 @@ func TestSubtitleExternalSRTServesOriginalOrConvertedRepresentation(t *testing.T
 	}
 }
 
+// A sidecar written for left-to-right players reaches WebVTT clients with
+// its right-to-left lines marked; the original SRT bytes stay untouched.
+func TestSubtitleExternalLTRAuthoredSRTMarksRightToLeftLines(t *testing.T) {
+	const srtFile = "1\n00:00:01,000 --> 00:00:02,000\nماذا حدث للتو؟ -\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n...لأنه بالنسبة إليهم\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\nلقد انفجر -\n"
+	path := filepath.Join(t.TempDir(), "movie.ar.srt")
+	if err := os.WriteFile(path, []byte(srtFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &models.MediaFile{ID: 42, FilePath: "/synthetic/movie.mkv",
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: path, Format: "srt"}},
+	}
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewStreamHandler(manager, testPlaybackFileResolver{file: file})
+	request := func(track, query string) string {
+		response := httptest.NewRecorder()
+		req := playbackTestRequest(http.MethodGet,
+			"/stream/"+session.ID+"/subtitles/"+track+"?file_id=42"+query, nil,
+			map[string]string{"session_id": session.ID, "track": track})
+		handler.HandleSubtitle(response, req.WithContext(WithNativeAPIV2(req.Context())))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s%s: status %d", track, query, response.Code)
+		}
+		return response.Body.String()
+	}
+
+	vtt := request("0.vtt", "")
+	for _, line := range []string{"\u200eماذا حدث للتو؟ -", "\u200e...لأنه بالنسبة إليهم", "\u200eلقد انفجر -"} {
+		if !strings.Contains(vtt, line+"\n") {
+			t.Fatalf("WebVTT lacks marked line %q:\n%s", line, vtt)
+		}
+	}
+	if original := request("0.srt", "&"+playback.SubtitleOriginalParamV3+"=1"); original != srtFile {
+		t.Fatalf("original SRT changed: %q", original)
+	}
+}
+
 // SRT declares no encoding, so original bytes that are not UTF-8 are served
 // without a UTF-8 charset label.
 func TestOriginalSubRipDeclaresUTF8OnlyForUTF8Bytes(t *testing.T) {

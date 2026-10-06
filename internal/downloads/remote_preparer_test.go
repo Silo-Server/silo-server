@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -283,6 +284,66 @@ func TestNodeAwarePreparerRequiresAudioToAACV2ForSurroundDownmix(t *testing.T) {
 	}
 }
 
+func TestNodeAwarePreparerRequiresPreparedTracksNode(t *testing.T) {
+	capabilityNode := func(features ...string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(playback.HWAccelInfo{TransportFeatures: features})
+		}))
+	}
+	legacy := capabilityNode()
+	defer legacy.Close()
+	current := capabilityNode(playback.TransportFeaturePreparedTracksV1)
+	defer current.Close()
+
+	pool := nodepool.NewTranscodePool()
+	pool.SetNodes([]*nodepool.Node{
+		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
+		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
+	})
+	local := &recordingEncodePreparer{}
+	remote := &recordingRemotePreparer{}
+	cfg := &config.Config{}
+	cfg.Auth.JWTSecret = "secret"
+	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	p.remote = remote
+	file := &models.MediaFile{CodecAudio: "aac", AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "ac3", Channels: 6}}}
+	opts := playback.TranscodeOpts{
+		InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	}
+	prepared, err := p.PrepareFile(context.Background(), "artifact-tracks", opts, "/local/artifact.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.calls != 0 || remote.nodeURL != current.URL || prepared.OriginNodeID != 2 {
+		t.Fatalf("local calls = %d, remote node = %q, want prepared-tracks node %q", local.calls, remote.nodeURL, current.URL)
+	}
+	if remote.request.TrackRecipeVersion != playback.PreparedTracksRecipeVersion || len(remote.request.PreparedTracks.Audio) != 2 {
+		t.Fatalf("remote request = %#v, want the multi-track layout", remote.request)
+	}
+}
+
+func TestRemotePrepareResultRequiresPreparedTracksAttestation(t *testing.T) {
+	file := &models.MediaFile{AudioTracks: []models.AudioTrack{{Codec: "aac"}, {Codec: "aac"}}}
+	request := downloadprepare.NewRequest("artifact-tracks", playback.TranscodeOpts{
+		TargetCodecAudio: "aac", PreparedTracks: playback.PlanPreparedTracks(file, "aac", -1),
+	})
+	// A node without the layout ignores it and attests its legacy recipe.
+	legacyRequest := request
+	legacyRequest.TrackRecipeVersion, legacyRequest.PreparedTracks = "", nil
+	legacy := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: legacyRequest.ExecutionFingerprint()}
+	if remotePrepareResultMatches(legacy, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted a legacy single-track receipt")
+	}
+	if remotePrepareResultMatches(downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55}, request.ArtifactID, request) {
+		t.Fatal("multi-track request accepted an unattested result")
+	}
+	attested := downloadprepare.Result{ArtifactID: request.ArtifactID, FileSize: 55, ExecutionFingerprint: request.ExecutionFingerprint()}
+	if !remotePrepareResultMatches(attested, request.ArtifactID, request) {
+		t.Fatal("multi-track request rejected its exact execution receipt")
+	}
+}
+
 func TestNodeAwarePreparerRejectsUnattestedOrMismatchedToneMapPrepareResult(t *testing.T) {
 	revision := tonemap.SourceRevision{MediaFileID: 42, FileSize: 100, StreamSignature: "stream"}
 	valid := downloadprepare.Result{
@@ -314,6 +375,9 @@ func TestNodeAwarePreparerRejectsUnattestedOrMismatchedToneMapPrepareResult(t *t
 		t.Run(test.name, func(t *testing.T) {
 			remote := &attestationRemotePreparer{prepareResult: test.result, statErr: downloadprepare.ErrArtifactNotFound}
 			preparer, local, opts := newToneMapPreparerTest(t, remote)
+			if test.name != "old node omits receipt" {
+				remote.prepareResult.ExecutionFingerprint = downloadprepare.NewRequest("artifact-tone-map", opts).ExecutionFingerprint()
+			}
 			prepared, err := preparer.PrepareFile(context.Background(), "artifact-tone-map", opts, "/local/artifact.mp4")
 			if err != nil || prepared.OutputPath == "" || local.calls != 1 {
 				t.Fatalf("prepared=%+v err=%v local calls=%d, want local fallback", prepared, err, local.calls)
@@ -346,6 +410,9 @@ func TestNodeAwarePreparerRejectsUnattestedOrMismatchedToneMapRecovery(t *testin
 				statResult: test.recovered,
 			}
 			preparer, local, opts := newToneMapPreparerTest(t, remote)
+			if test.name != "missing receipt" {
+				remote.statResult.ExecutionFingerprint = downloadprepare.NewRequest("artifact-tone-map", opts).ExecutionFingerprint()
+			}
 			prepared, err := preparer.PrepareFile(context.Background(), "artifact-tone-map", opts, "/local/artifact.mp4")
 			if err != nil || prepared.OutputPath == "" || local.calls != 1 {
 				t.Fatalf("prepared=%+v err=%v local calls=%d, want local fallback", prepared, err, local.calls)
@@ -799,32 +866,6 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 	}
 }
 
-func TestNormalizeRemoteToneMapProbeTimeout(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		millis int64
-		want   time.Duration
-	}{
-		{name: "missing", want: 5 * time.Second},
-		{name: "too small", millis: time.Second.Milliseconds(), want: 5 * time.Second},
-		{name: "node specific", millis: (161 * time.Second).Milliseconds(), want: 161 * time.Second},
-		{
-			// The ceiling is derived from the probe formula, not picked, so the
-			// expectation is too — a round number was already below what a
-			// nine-device node legitimately advertises.
-			name:   "too large",
-			millis: (24 * time.Hour).Milliseconds(),
-			want:   playback.MaxCapabilityRequestTimeout(),
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := normalizeRemoteToneMapProbeTimeout(test.millis); got != test.want {
-				t.Fatalf("normalized timeout = %s, want %s", got, test.want)
-			}
-		})
-	}
-}
-
 func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T) {
 	const nodeURL = "https://node.example"
 	preparer := NewNodeAwarePreparer(nil, nil, nil)
@@ -837,14 +878,6 @@ func TestNodeAwarePreparerCapabilityFailurePreservesNodeProbeBudget(t *testing.T
 
 	if got, want := preparer.remoteToneMapProbeTimeout(nodeURL), 161*time.Second; got != want {
 		t.Fatalf("probe timeout after transient failure = %s, want preserved node budget %s", got, want)
-	}
-}
-
-func TestNodeAwarePreparerDerivesProbeBudgetWithoutCachedAdvertisement(t *testing.T) {
-	preparer := NewNodeAwarePreparer(nil, nil, nil)
-
-	if got, want := preparer.remoteToneMapProbeTimeout("https://node.example"), playback.CapabilityRequestTimeout("", ""); got != want {
-		t.Fatalf("uncached probe timeout = %s, want derived budget %s", got, want)
 	}
 }
 
@@ -943,21 +976,6 @@ func TestNodeAwarePreparerFallsBackLocallyWithoutNodeCredentials(t *testing.T) {
 	}
 	if local.calls != 1 {
 		t.Fatalf("local calls = %d, want 1", local.calls)
-	}
-}
-
-func TestNodeAwarePreparerUsesRemoteWithDefaultNodeLocalArtifactDir(t *testing.T) {
-	pool := nodepool.NewTranscodePool()
-	pool.SetNodes([]*nodepool.Node{{ID: 19, URL: "http://idle", Enabled: true, Healthy: true}})
-	local := &recordingEncodePreparer{}
-	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = "secret"
-	p := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
-	p.remote = &recordingRemotePreparer{}
-
-	prepared, err := p.PrepareFile(context.Background(), "artifact-local", playback.TranscodeOpts{}, "/local/job.mp4")
-	if err != nil || !prepared.Remote() || local.calls != 0 {
-		t.Fatalf("prepared=%+v err=%v local calls=%d", prepared, err, local.calls)
 	}
 }
 

@@ -301,6 +301,56 @@ func TestPersistSeasonsAndEpisodes_ManualRefreshReplacesNonEmptyButPreservesBlan
 	}
 }
 
+func TestPersistSeasonsAndEpisodes_ImageLockPreservesSelectedSeasonPoster(t *testing.T) {
+	const seriesID = "series-locked-season-artwork"
+
+	service, _, seasonRepo, _ := newSeasonEpisodeServiceForTest(seriesID)
+	ctx := context.Background()
+	seasonRepo.seasons[seasonKey(seriesID, 1)] = &models.Season{
+		ContentID:        "season-1",
+		SeriesID:         seriesID,
+		SeasonNumber:     1,
+		Title:            "Old Season 1",
+		PosterPath:       "artwork/series/manual-season-1/revision/original.jpg",
+		PosterSourcePath: "tmdb://manual-season-1.jpg",
+		PosterThumbhash:  "manual-thumb",
+	}
+	seasonRepo.seasons[seasonKey(seriesID, 2)] = &models.Season{
+		ContentID:    "season-2",
+		SeriesID:     seriesID,
+		SeasonNumber: 2,
+		Title:        "Old Season 2",
+	}
+
+	service.persistSeasonsAndEpisodes(
+		ctx,
+		&models.MediaItem{ContentID: seriesID, Type: "series", LockedFields: []int{int(FieldImages)}},
+		map[string]string{"tmdb": "123"},
+		"en",
+		"en",
+		[]SeasonResult{
+			{SeasonNumber: 1, Title: "New Season 1", PosterPath: "tmdb://automatic-season-1.jpg"},
+			{SeasonNumber: 2, Title: "New Season 2", PosterPath: "tmdb://automatic-season-2.jpg"},
+		},
+		nil,
+		MergeReplaceUnlocked,
+	)
+
+	selected := seasonRepo.seasons[seasonKey(seriesID, 1)]
+	if selected.PosterPath != "artwork/series/manual-season-1/revision/original.jpg" ||
+		selected.PosterSourcePath != "tmdb://manual-season-1.jpg" || selected.PosterThumbhash != "manual-thumb" {
+		t.Fatalf("selected poster was overwritten: %#v", selected)
+	}
+	if selected.Title != "New Season 1" {
+		t.Fatalf("season title = %q, want metadata refresh to update non-image fields", selected.Title)
+	}
+
+	missing := seasonRepo.seasons[seasonKey(seriesID, 2)]
+	if missing.PosterPath != "tmdb://automatic-season-2.jpg" || missing.PosterSourcePath != "tmdb://automatic-season-2.jpg" {
+		t.Fatalf("missing poster was not backfilled while images were locked: %#v", missing)
+	}
+}
+
 func TestPersistSeasonsAndEpisodes_UsesBoundedBulkCalls(t *testing.T) {
 	const seriesID = "series-bulk-persist"
 

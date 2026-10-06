@@ -429,7 +429,7 @@ func (r *CatalogResolver) applyCollectionDisplayPredicate(ctx context.Context, e
 
 func (r *CatalogResolver) resolvePersonalMembershipQueryCursor(ctx context.Context, req CatalogRequest, access AccessFilter, display string) (*CatalogResult, error) {
 	executor := r.queryExecutorForScope(req.Query.MediaScope, req.SnapshotAt)
-	executor.SourceWhere = "EXISTS (SELECT 1 FROM user_personal_collection_items cursor_membership WHERE cursor_membership.user_id=$1 AND cursor_membership.collection_id=$2 AND cursor_membership.sub_item_id='' AND cursor_membership.media_item_id=mi.content_id)"
+	executor.SourceWhere = personalMembershipSourceWhere
 	executor.SourceArgs = []any{access.UserID, req.CollectionID}
 	if req.Query.Sort.Field == "" {
 		executor.SourceOrder = []queryCursorTerm{

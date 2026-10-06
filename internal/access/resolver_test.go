@@ -97,6 +97,9 @@ func (s stubStore) ListProgress(context.Context, string, string, int, int) ([]us
 func (s stubStore) ListProgressPage(context.Context, string, string, *userstore.ProgressKey, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s stubStore) ListCompletedProgressSince(context.Context, string, time.Time, time.Time, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s stubStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }

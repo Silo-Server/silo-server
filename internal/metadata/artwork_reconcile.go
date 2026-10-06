@@ -323,6 +323,9 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		// uploads from blind bulk resets.
 		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
 		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		// Generated collection collages. A cleared row reads as a missing
+		// collage, which the next viewer's read rebuilds.
+		{name: "collection collages", table: "library_collection_poster_variants", keyCols: []artworkSweepKey{textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
 		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}

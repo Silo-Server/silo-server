@@ -58,7 +58,8 @@ lookups. Clients must reconnect with a newly minted credential. This is bounded
 revocation detection, not an instantaneous revocation guarantee.
 
 The selected message protocol retains the existing event frames (`hello`,
-`subscribe`, `subscribed`, `snapshot`, `event`, `error`) and per-channel payloads.
+`subscribe`, `subscribed`, `snapshot`, `event`, `error`) and per-channel payloads,
+plus the server-sent `access_changed` frame described below.
 The shared event implementation still applies channel eligibility, the subscribe
 grace period, inbound frame limits, snapshots, ping/pong and delivery filtering.
 The handshake version does not rewrite another domain's event payload.
@@ -67,6 +68,52 @@ connection results and frames after that authority changes.
 
 Native socket/ticket adoption and independent domain review are required before
 these two migration rows can be ratified. No bridge socket or ticket was removed.
+
+### Access changes
+
+When the recheck finds that the login session is still valid but the access the
+ticket was minted under has changed, the server sends one text frame and then a
+close frame:
+
+```json
+{"type":"access_changed"}
+```
+
+The close code is `4001` with reason `access_changed`. Access has changed when
+the account role, the effective role (an admin account's profile stopped or
+started being the primary profile), or the fingerprint of the resolved viewer
+scope differs from the ticket's, or the profile is no longer verified. The
+scope covers the visible libraries, content-rating limits, playback-quality and
+bitrate limits, and `access_policy_revision`, which a group move, a permission,
+role or quality change, and a group quality edit all bump. It also covers the
+profile's metadata-language and hidden-library preferences and the server's
+unrated-content setting, so changing those sends the signal too. A revoked or
+expired login session and a disabled or deleted account still close the
+connection without it.
+
+On either the frame or the close code, a client refetches the data the viewer's
+access decides (libraries, home sections, search, item details, collections,
+and the account's own permissions) and reconnects at once with a newly minted
+ticket; no backoff is needed. If the ticket mint, or any other request, answers
+`403` `profile_verification_required`, the profile token was invalidated by the
+same change and the client returns to profile selection or PIN entry. Clients
+that ignore unknown frame types and close codes keep today's behavior: they
+reconnect and pick up the new access on their next requests. Playback that
+already started keeps its stream token until the next start.
+
+After a role change the access token the client holds was minted under the old
+role, so the ticket mint for the reconnect answers `401` `token_refresh_required`
+(see [auth-api.md](auth-api.md#access-tokens-after-a-role-change)). The client
+refreshes the session, mints the ticket again with the new token, and does not
+sign out. The new ticket carries the new role, so the socket does not close
+again for the same change.
+
+The bridge events socket never sends this frame. It picks its channels from the
+access token's role once, at the handshake, so it rechecks the login session on
+the same interval and closes without a frame once the session ends or the
+account's role differs from the token's.
+The playback-control and Watch Together sockets share the recheck but still
+close without a frame or dedicated code when it fails.
 
 ### Owner-bound playback control handshake (v2)
 

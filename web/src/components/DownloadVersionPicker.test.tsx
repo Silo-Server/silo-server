@@ -1,12 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { FileVersion } from "@/api/types";
 
 import DownloadVersionPicker from "./DownloadVersionPicker";
-
-vi.mock("@/hooks/queries/downloads", () => ({
-  buildDirectDownloadUrl: (fileId: number) => `/api/downloads/files/${fileId}`,
-}));
 
 function version(overrides: Partial<FileVersion>): FileVersion {
   return {
@@ -38,26 +34,14 @@ describe("DownloadVersionPicker", () => {
       />,
     );
 
-    expect(screen.getByText("Larger files require more storage space.")).toBeTruthy();
-    expect(screen.queryByText("Higher quality files require more storage space.")).toBeNull();
-  });
-
-  it("describes download choices as files instead of versions", () => {
-    render(
-      <DownloadVersionPicker
-        open
-        onOpenChange={() => undefined}
-        title="A Psalm for the Wild-Built"
-        versions={[version({ file_id: 1, container: "epub", file_size: 512 * 1024 })]}
-      />,
-    );
-
     expect(
       screen.getByText("Choose a file to download. Make sure you have enough disk space."),
     ).toBeTruthy();
     expect(
       screen.queryByText("Choose a version to download. Make sure you have enough disk space."),
     ).toBeNull();
+    expect(screen.getByText("Larger files require more storage space.")).toBeTruthy();
+    expect(screen.queryByText("Higher quality files require more storage space.")).toBeNull();
   });
 
   it("allows ebook download rows to show page counts", () => {

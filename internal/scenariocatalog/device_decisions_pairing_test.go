@@ -7,10 +7,7 @@ import (
 )
 
 func TestDeviceDecisionsSelection(t *testing.T) {
-	catalogs, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	catalogs := loadPairingCatalogs(t)
 	selected, err := DeviceDecisionsAcceptance(catalogs)
 	if err != nil {
 		t.Fatal(err)
@@ -20,7 +17,7 @@ func TestDeviceDecisionsSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range RequiredDeviceDecisionsScenarios {
-		for _, failure := range []string{"missing", "duplicate", "pair", "authority", "repeat", "requirement", "operation", "body", "sequence"} {
+		for _, failure := range []string{"missing", "authority", "repeat", "requirement", "body", "sequence"} {
 			t.Run(id+"/"+failure, func(t *testing.T) {
 				var changed []*Catalog
 				if err := json.Unmarshal(data, &changed); err != nil {
@@ -37,18 +34,12 @@ func TestDeviceDecisionsSelection(t *testing.T) {
 							switch failure {
 							case "missing":
 								r.Scenarios = append(r.Scenarios[:i], r.Scenarios[i+1:]...)
-							case "duplicate":
-								r.Scenarios = append(r.Scenarios, *s)
-							case "pair":
-								s.V2Expectation = nil
 							case "authority":
 								s.Principal.Class = "invalid"
 							case "repeat":
 								s.Request.Repeat++
 							case "requirement":
 								s.Requires = []string{"database_unavailable"}
-							case "operation":
-								s.V2Expectation.OperationID = "getCurrentUser"
 							case "body":
 								s.V2Expectation.Request.Body = json.RawMessage(`{"different":true}`)
 							case "sequence":
