@@ -491,6 +491,47 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
   });
 
+  it("refreshes an open season's detail with its list for a new episode", async () => {
+    // The season's episode count changes with its episode list.
+    const queryClient = new QueryClient();
+    const seasonDetailKey = catalogKeys.itemDetail("season-1");
+    const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
+    const otherDetailKey = catalogKeys.itemDetail("movie-1");
+    queryClient.setQueryData(seasonDetailKey, { content_id: "season-1", episode_count: 1 });
+    queryClient.setQueryData(seasonEpisodesKey, { episodes: [{ content_id: "episode-1" }] });
+    queryClient.setQueryData(otherDetailKey, { content_id: "movie-1" });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-new", itemMayBeNew: true });
+
+    expect(queryClient.getQueryState(seasonDetailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+  });
+
+  it("links a season detail cached under its series to the season", async () => {
+    const queryClient = new QueryClient();
+    const seasonDetailKey = catalogKeys.seasonDetail("series-1", 1);
+    queryClient.setQueryData(seasonDetailKey, { season: { content_id: "season-1" } });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "season-1" });
+
+    expect(queryClient.getQueryState(seasonDetailKey)?.isInvalidated).toBe(true);
+  });
+
+  it("follows a cached watch detail to its series", async () => {
+    // Only the player's watch detail knows the episode's series.
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(itemKeys.watchDetail("episode-1"), {
+      content_id: "episode-1",
+      series_id: "series-1",
+    });
+    const seasonsKey = catalogKeys.seriesSeasons("series-1");
+    queryClient.setQueryData(seasonsKey, { seasons: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-1" });
+
+    expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
+  });
+
   it("stays narrowed for a progress event about an uncached item", async () => {
     // Progress on another client: the item exists, it just isn't open here.
     const queryClient = new QueryClient();

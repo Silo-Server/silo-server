@@ -29,8 +29,11 @@ interface InvalidateMediaSurfaceOptions {
   // scan just added. Only catalog events can say so; progress, favorite and
   // watchlist events are about items that already exist.
   itemMayBeNew?: boolean;
-  // Set internally for such an item when nothing in the cache names it.
+  // Set internally for such an item when nothing in the cache names it,
+  // with the items owning the cached lists, whose detail (a season's
+  // episode count) changes with them.
   refreshItemKeyedLists?: boolean;
+  listOwnerIds?: ReadonlySet<string>;
 }
 
 const MEDIA_SURFACE_REFRESH_DELAY_MS = 600;
@@ -128,6 +131,10 @@ export function removeItemFromHomeSectionCaches(
       };
     },
   );
+}
+
+function isWatchDetailQueryKey(queryKey: readonly unknown[]) {
+  return queryKey[0] === "items" && queryKey[1] === "watchDetail";
 }
 
 export function isItemDetailQueryKey(queryKey: unknown, itemId: string) {
@@ -238,11 +245,18 @@ export function relatedItemIds(queryClient: QueryClient, itemId: string): Set<st
     const owner = listOwnerId(query.queryKey);
     if (!owner) continue;
     for (const child of listedChildIds(query.state.data)) link(owner, child);
-    if (isItemDetailQueryKey(query.queryKey, owner)) {
+    // A season's detail is cached under its series, so its own ID is only
+    // in the data.
+    const seasonId = (query.state.data as { season?: { content_id?: unknown } } | undefined)?.season
+      ?.content_id;
+    if (typeof seasonId === "string") link(owner, seasonId);
+    if (isItemDetailQueryKey(query.queryKey, owner) || isWatchDetailQueryKey(query.queryKey)) {
       const seriesId = (query.state.data as ItemDetail | undefined)?.series_id;
       // A detail names its series, and derives its series title, backdrop
       // and credits from it. A season page opened directly has no cached
-      // season list, so this edge is how a series change reaches it.
+      // season list, so this edge is how a series change reaches it. A
+      // playing episode's watch detail names it too, so its progress
+      // reaches the series' watched summary.
       if (seriesId) link(seriesId, owner);
     }
   }
@@ -283,7 +297,11 @@ function shouldInvalidateMediaSurfaceQuery(
       targetItemId !== options.itemId &&
       !relatedIds?.has(targetItemId) &&
       !isWatchedKey(queryKey, options) &&
-      !(options.refreshItemKeyedLists && isItemKeyedListQuery(queryKey))
+      !(
+        options.refreshItemKeyedLists &&
+        (isItemKeyedListQuery(queryKey) ||
+          (options.listOwnerIds?.has(targetItemId) && isItemDetailQueryKey(queryKey, targetItemId)))
+      )
     ) {
       return false;
     }
@@ -353,11 +371,21 @@ export async function invalidateMediaSurfaceQueries(
     !options.watchedKeys?.length &&
     relatedIds?.size === 1 &&
     !cacheNamesItem(queryClient, options.itemId)
-      ? { ...options, refreshItemKeyedLists: true }
+      ? { ...options, refreshItemKeyedLists: true, listOwnerIds: itemKeyedListOwners(queryClient) }
       : options;
   await queryClient.invalidateQueries({
     predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds),
   });
+}
+
+// itemKeyedListOwners is the items whose children a cached list holds.
+function itemKeyedListOwners(queryClient: QueryClient): Set<string> {
+  const owners = new Set<string>();
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const owner = isItemKeyedListQuery(query.queryKey) ? listOwnerId(query.queryKey) : undefined;
+    if (owner) owners.add(owner);
+  }
+  return owners;
 }
 
 // cacheNamesItem reports whether any cached query is keyed by itemId.
