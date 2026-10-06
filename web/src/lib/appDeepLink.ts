@@ -43,7 +43,33 @@ export function buildWatchPartyDeepLink(pageOrigin: string, token: string): stri
   return buildServerDeepLink("watch-party", pageOrigin, token);
 }
 
-function buildServerDeepLink(host: string, pageOrigin: string, token: string): string | null {
+/**
+ * Builds the silo:// deep link that opens a TV sign-in approval in the app:
+ * `silo://device?server=<server_id>&url=<origin>&code=<code>`. `server` is
+ * the deployment identity (getServerIdentity), which the apps match against
+ * their saved servers because one server has several addresses; it is left
+ * out when unknown, and the apps then match `url`. The code is sent without
+ * its separator. Both the Apple and Android apps register it; the format is
+ * in docs/architecture/device-login.md.
+ */
+export function buildDeviceDeepLink(
+  serverId: string | undefined,
+  pageOrigin: string,
+  code: string,
+): string | null {
+  const origin = httpOrigin(pageOrigin);
+  const compact = code.replace(/[^A-Za-z0-9]/g, "");
+  if (!origin || !compact) return null;
+  const query = [
+    serverId ? `server=${encodeURIComponent(serverId)}` : "",
+    `url=${encodeURIComponent(origin)}`,
+    `code=${encodeURIComponent(compact)}`,
+  ].filter(Boolean);
+  return `silo://device?${query.join("&")}`;
+}
+
+/** The origin of an http(s) page the apps can talk to, or null. */
+function httpOrigin(pageOrigin: string): string | null {
   let origin: URL;
   try {
     origin = new URL(pageOrigin);
@@ -52,7 +78,12 @@ function buildServerDeepLink(host: string, pageOrigin: string, token: string): s
   }
   if (origin.username || origin.password) return null;
   if (origin.protocol !== "https:" && origin.protocol !== "http:") return null;
-  if (!token) return null;
-  const server = encodeURIComponent(origin.origin);
+  return origin.origin;
+}
+
+function buildServerDeepLink(host: string, pageOrigin: string, token: string): string | null {
+  const origin = httpOrigin(pageOrigin);
+  if (!origin || !token) return null;
+  const server = encodeURIComponent(origin);
   return `silo://${host}?server=${server}&token=${encodeURIComponent(token)}`;
 }

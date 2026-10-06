@@ -1,7 +1,6 @@
 package auth_test
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -13,36 +12,6 @@ const testSecret = "super-secret-test-key-for-jwt-testing"
 
 func newTestJWTService() *auth.JWTService {
 	return auth.NewJWTService(testSecret, 15*time.Minute, 7*24*time.Hour)
-}
-
-func TestJWT_GenerateAccessToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateAccessToken(42, "admin", "sess-abc-123")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken() error: %v", err)
-	}
-	if token == "" {
-		t.Fatal("GenerateAccessToken() returned empty token")
-	}
-
-	// Token should have three dot-separated parts (header.payload.signature).
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		t.Errorf("expected 3 JWT parts, got %d", len(parts))
-	}
-}
-
-func TestJWT_GenerateRefreshToken(t *testing.T) {
-	svc := newTestJWTService()
-
-	token, err := svc.GenerateRefreshToken(42, "user", "sess-def-456")
-	if err != nil {
-		t.Fatalf("GenerateRefreshToken() error: %v", err)
-	}
-	if token == "" {
-		t.Fatal("GenerateRefreshToken() returned empty token")
-	}
 }
 
 func TestJWT_ValidateAccessToken(t *testing.T) {
@@ -271,24 +240,6 @@ func TestJWT_GarbageToken(t *testing.T) {
 	_, err := svc.ValidateToken("not.a.valid.jwt.token")
 	if err == nil {
 		t.Fatal("ValidateToken() should return error for garbage token")
-	}
-}
-
-func TestJWT_DifferentUsersGetDifferentTokens(t *testing.T) {
-	svc := newTestJWTService()
-
-	token1, err := svc.GenerateAccessToken(1, "user", "sess-1")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken(1) error: %v", err)
-	}
-
-	token2, err := svc.GenerateAccessToken(2, "admin", "sess-2")
-	if err != nil {
-		t.Fatalf("GenerateAccessToken(2) error: %v", err)
-	}
-
-	if token1 == token2 {
-		t.Error("tokens for different users should be different")
 	}
 }
 

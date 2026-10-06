@@ -727,33 +727,6 @@ func TestAutoscanHandleUpdateSourceEnableWithoutConnectionSucceeds(t *testing.T)
 	}
 }
 
-func TestAutoscanHandleUpdateSourceEnableWithConnectionSucceeds(t *testing.T) {
-	var got autoscan.Source
-	store := &fakeAutoscanStore{
-		getSourceFn: func(id string) (autoscan.Source, error) {
-			return autoscan.Source{ID: id, PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
-		},
-		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			got = s
-			return s, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	// Full-state update: enable=true and supply the connection_id explicitly.
-	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
-		`{"enabled":true,"connection_id":"conn-1"}`, "src-1")
-	rec := httptest.NewRecorder()
-	h.HandleUpdateSource(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got.ConnectionID == nil || *got.ConnectionID != "conn-1" {
-		t.Fatalf("expected connection bound, got %+v", got.ConnectionID)
-	}
-}
-
 func TestAutoscanHandleUpdateSourceBindConnectionSucceeds(t *testing.T) {
 	var got autoscan.Source
 	store := &fakeAutoscanStore{
@@ -779,34 +752,6 @@ func TestAutoscanHandleUpdateSourceBindConnectionSucceeds(t *testing.T) {
 	}
 	if got.ConnectionID == nil || *got.ConnectionID != "conn-42" {
 		t.Fatalf("expected connection bound to conn-42, got %+v", got.ConnectionID)
-	}
-}
-
-func TestAutoscanHandleUpdateSourceUnbindConnectionSucceeds(t *testing.T) {
-	var got autoscan.Source
-	store := &fakeAutoscanStore{
-		getSourceFn: func(id string) (autoscan.Source, error) {
-			// Source starts with a connection already bound.
-			return autoscan.Source{ID: id, PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: ptr("conn-1")}, nil
-		},
-		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			got = s
-			return s, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	// Unbind: send connection_id: null explicitly with enabled: false.
-	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
-		`{"enabled":false,"connection_id":null}`, "src-1")
-	rec := httptest.NewRecorder()
-	h.HandleUpdateSource(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got.ConnectionID != nil {
-		t.Fatalf("expected connection unbound (nil), got %+v", got.ConnectionID)
 	}
 }
 
@@ -1025,12 +970,18 @@ func TestAutoscanHandleUpdateSourceRoundTripsPathRewrites(t *testing.T) {
 	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
 
 	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
-		`{"enabled":true,"connection_id":"conn-1","path_rewrites":[{"from":"/data/tv","to":"/mnt/media/tv"}]}`, "src-1")
+		`{"enabled":true,"connection_id":"conn-1","path_rewrites":[{"from":"/data/tv","to":"/mnt/media/tv"}],"source_config":{" movie_flat_paths ":" /mnt/movies ","exclusions":".downloads\n.recyclebin"},"label":"  4K Movies  "}`, "src-1")
 	rec := httptest.NewRecorder()
 	h.HandleUpdateSource(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got.ConnectionID == nil || *got.ConnectionID != "conn-1" || got.Label != "4K Movies" {
+		t.Fatalf("binding or label = %+v", got)
+	}
+	if got.SourceConfig["movie_flat_paths"] != "/mnt/movies" || got.SourceConfig["exclusions"] != ".downloads\n.recyclebin" {
+		t.Fatalf("source_config passed to repo = %#v", got.SourceConfig)
 	}
 	// The repo received the rewrite.
 	if len(got.PathRewrites) != 1 || got.PathRewrites[0].From != "/data/tv" || got.PathRewrites[0].To != "/mnt/media/tv" {
@@ -1041,38 +992,11 @@ func TestAutoscanHandleUpdateSourceRoundTripsPathRewrites(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
+	if body.SourceConfig["movie_flat_paths"] != "/mnt/movies" || body.Label != "4K Movies" {
+		t.Fatalf("response config/label = %+v", body)
+	}
 	if len(body.PathRewrites) != 1 || body.PathRewrites[0].From != "/data/tv" || body.PathRewrites[0].To != "/mnt/media/tv" {
 		t.Fatalf("response missing path_rewrites: %+v", body.PathRewrites)
-	}
-}
-
-func TestAutoscanHandleUpdateSourceRoundTripsSourceConfig(t *testing.T) {
-	var got autoscan.Source
-	store := &fakeAutoscanStore{
-		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			got = s
-			return s, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	req := newAutoscanRequest("PUT", "/api/v1/admin/autoscan/sources/src-1",
-		`{"enabled":true,"source_config":{" movie_flat_paths ":" /mnt/movies ","exclusions":".downloads\n.recyclebin"}}`, "src-1")
-	rec := httptest.NewRecorder()
-	h.HandleUpdateSource(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got.SourceConfig["movie_flat_paths"] != "/mnt/movies" || got.SourceConfig["exclusions"] != ".downloads\n.recyclebin" {
-		t.Fatalf("source_config passed to repo = %#v", got.SourceConfig)
-	}
-	var body autoscanSourceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body.SourceConfig["movie_flat_paths"] != "/mnt/movies" {
-		t.Fatalf("response source_config = %#v", body.SourceConfig)
 	}
 }
 
@@ -1313,36 +1237,6 @@ func TestAutoscanHandleListEventsRejectsBadFilters(t *testing.T) {
 	}
 	if listed {
 		t.Fatal("ListEvents should not run for invalid filters")
-	}
-}
-
-func TestAutoscanHandleUpdateSourceNormalizesLabel(t *testing.T) {
-	var got autoscan.Source
-	store := &fakeAutoscanStore{
-		updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
-			got = s
-			return s, nil
-		},
-	}
-	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
-
-	body := `{"connection_id":null,"enabled":false,"label":"  4K Movies  "}`
-	req := newAutoscanRequest("PATCH", "/api/v1/admin/autoscan/sources/src-1", body, "src-1")
-	rec := httptest.NewRecorder()
-	h.HandleUpdateSource(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
-	if got.Label != "4K Movies" {
-		t.Fatalf("stored label = %q, want %q", got.Label, "4K Movies")
-	}
-	var resp autoscanSourceResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Label != "4K Movies" {
-		t.Fatalf("response label = %q, want %q", resp.Label, "4K Movies")
 	}
 }
 

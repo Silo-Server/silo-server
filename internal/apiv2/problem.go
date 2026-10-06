@@ -23,6 +23,33 @@ const (
 	codeUnsupportedSource = "unsupported_source"
 )
 
+// External sign-in problem types (docs/architecture/external-sign-in.md).
+// account_required: the provider admitted the person, but the server has no
+// account for them and does not create one.
+var (
+	TypeNotPermitted            = ProblemType{"not_permitted", http.StatusForbidden, "Not permitted"}
+	TypeAccountRequired         = ProblemType{"account_required", http.StatusForbidden, "Account required"}
+	TypeLocalLoginDisabled      = ProblemType{"local_login_disabled", http.StatusForbidden, "Local password sign-in disabled"}
+	TypeProviderPasswordExpired = ProblemType{"password_expired", http.StatusForbidden, "Password expired"}
+	TypeEmailInUse              = ProblemType{"email_in_use", http.StatusConflict, "Email in use"}
+	TypeIdentityLinkedElsewhere = ProblemType{"identity_linked_elsewhere", http.StatusConflict, "Identity linked elsewhere"}
+	TypeProviderAlreadyEnabled  = ProblemType{"provider_already_enabled", http.StatusConflict, "Provider already enabled"}
+	TypeBreakGlassRequired      = ProblemType{"break_glass_required", http.StatusConflict, "Break-glass account required"}
+	TypeLastSignInMethod        = ProblemType{"last_sign_in_method", http.StatusConflict, "Last sign-in method"}
+	TypeProviderUnavailable     = ProblemType{"provider_unavailable", http.StatusServiceUnavailable, "Provider unavailable"}
+	// Directory linking (linkAccountIdentityWithCredentials) refusals.
+	TypeAccountDisabled       = ProblemType{"account_disabled", http.StatusForbidden, "Account disabled"}
+	TypeLocalPasswordRequired = ProblemType{"local_password_required", http.StatusConflict, "Local password required"}
+	TypeAlreadyLinked         = ProblemType{"already_linked", http.StatusConflict, "Already linked"}
+	// TypeNetworkIdentityRequired: a network identity sign-in or link came
+	// in on another address than the provider's overlay listener, so there
+	// is no overlay peer to sign in.
+	TypeNetworkIdentityRequired = ProblemType{"network_identity_required", http.StatusForbidden, "Network identity required"}
+	// TypeInvalidGrant is an OAuth completion code redeemed with a PKCE
+	// verifier that does not fit it (RFC 6749 invalid_grant).
+	TypeInvalidGrant = ProblemType{"invalid_grant", http.StatusBadRequest, "Invalid grant"}
+)
+
 // ProblemType is one entry of the shared problem catalog.
 type ProblemType struct {
 	// ID is the stable identifier and the final path segment of the type URI.
@@ -53,6 +80,7 @@ var (
 	TypeAuthenticationRequired                        = ProblemType{"authentication_required", http.StatusUnauthorized, "Authentication required"}
 	TypeInvalidToken                                  = ProblemType{"invalid_token", http.StatusUnauthorized, "Invalid token"}
 	TypeSessionExpired                                = ProblemType{"session_expired", http.StatusUnauthorized, "Session expired"}
+	TypeTokenRefreshRequired                          = ProblemType{"token_refresh_required", http.StatusUnauthorized, "Token refresh required"}
 	TypePermissionDenied                              = ProblemType{"permission_denied", http.StatusForbidden, "Permission denied"}
 	TypeProfileVerificationRequired                   = ProblemType{"profile_verification_required", http.StatusForbidden, "Profile verification required"}
 	TypePasswordChangeRequired                        = ProblemType{"password_change_required", http.StatusForbidden, "Password change required"}
@@ -76,7 +104,7 @@ var (
 	TypeCapabilityUnsupported                         = ProblemType{"capability_unsupported", http.StatusNotImplemented, "Capability unsupported"}
 	TypeDependencyUnavailable                         = ProblemType{"dependency_unavailable", http.StatusServiceUnavailable, "Dependency unavailable"}
 	TypeClientUpgradeRequired                         = ProblemType{"client_upgrade_required", http.StatusGone, "Client upgrade required"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)

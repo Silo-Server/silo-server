@@ -250,18 +250,6 @@ func TestGetProfileSectionSettings(t *testing.T) {
 	}
 }
 
-func TestGetProfileSectionFlags(t *testing.T) {
-	h := newTestHandler(t, sectionDeps(nil))
-	rec := do(t, h, http.MethodGet, "/api/v2/profile/sections/flags", "", with(bearer(memberToken), "X-Profile-Id", "p-owner"))
-	if rec.Code != 200 || rec.Body.String() != `{"allow_profile_custom_sections":true}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	var flags map[string]json.RawMessage
-	if err := json.Unmarshal(rec.Body.Bytes(), &flags); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestProfileSectionsDenied(t *testing.T) {
 	h := newTestHandler(t, sectionDeps(nil))
 	for _, op := range []struct{ method, path, body string }{

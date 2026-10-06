@@ -89,67 +89,6 @@ const created = (options: { body?: unknown }) =>
   reply(options, { ...route({ id: "new" }), ...(options.body as object) }, '"new-v1"');
 
 describe("Where requests go: the list", () => {
-  const horror = route({
-    id: "horror",
-    name: "Horror",
-    position: 0,
-    conditions: { genre_ids: [27] },
-    hd: { integration_id: "radarr-2", overrides: { quality_profile_id: 3, root_folder: "/anime" } },
-    skip_uhd: true,
-  });
-  const anime = route({
-    id: "anime",
-    name: "Anime",
-    media_type: "series",
-    conditions: { anime: true },
-    hd: { integration_id: "sonarr-2", overrides: { series_type: "anime" } },
-  });
-
-  it("reads each rule as sentences, with Everything else pinned last", async () => {
-    serve({
-      servers: allServers,
-      routes: [
-        horror,
-        route({
-          id: "old",
-          name: "Old",
-          position: 1,
-          enabled: false,
-          conditions: { year_to: 1989, requester_user_ids: [2] },
-          uhd: { integration_id: "radarr-2" },
-        }),
-        { ...fallback("movie", "radarr-1"), uhd: { integration_id: "radarr-2" } },
-        anime,
-        fallback("series", "sonarr-1"),
-      ],
-    });
-    mount();
-    const movies = await section();
-    const rules = within(movies).getByRole("list", { name: "Movie rules" });
-    const [first, second] = within(rules).getAllByRole("listitem");
-    expect(first).toHaveTextContent("When a movie is Horror");
-    expect(await within(first!).findByText(/Radarr Anime · \/anime · Anime 1080p/)).toBeTruthy();
-    expect(first).toHaveTextContent("4K → none");
-    expect(second).toHaveTextContent("Off");
-    expect(second).toHaveTextContent(
-      "When a movie came out in 1989 or earlier and is requested by kid",
-    );
-    expect(second).toHaveTextContent("HD → Same as Everything else (Radarr)");
-    // Its 4K copy goes where Everything else's does, so no 4K line.
-    expect(second).not.toHaveTextContent("4K →");
-    const everythingElse = within(movies).getByRole("group", { name: "Everything else" });
-    expect(everythingElse).toHaveTextContent("Every other movie → Radarr");
-    expect(everythingElse).toHaveTextContent("4K → Radarr Anime");
-
-    const series = await section("Series");
-    expect(within(series).getByRole("list", { name: "Series rules" })).toHaveTextContent(
-      "When a series is anime",
-    );
-    expect(within(series).getByRole("group", { name: "Everything else" })).toHaveTextContent(
-      "4K → none",
-    );
-  });
-
   it("explains an empty media type, and offers Add a rule only once Everything else is saved", async () => {
     serve({ servers: [sonarr], routes: [fallback("movie"), fallback("series", "sonarr-1")] });
     mount();

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -381,5 +382,110 @@ func TestCompletedProgressCacheFallsBackForADifferentProfile(t *testing.T) {
 	last := store.calls[len(store.calls)-1]
 	if last.profileID != "p2" || last.offset != 0 {
 		t.Fatalf("last call = %+v, want a fresh offset-0 read for p2", last)
+	}
+}
+
+// stubSinceLister serves ListCompletedProgressSince from the same fixture as
+// the offset walk, so the two forms can be compared.
+type stubSinceLister struct {
+	stubProgressLister
+	sinceCalls []int
+	sinceAt    []time.Time
+	rowsRead   int
+}
+
+func (s *stubSinceLister) ListCompletedProgressSince(_ context.Context, _ string, since, until time.Time, limit int) ([]userstore.WatchProgress, error) {
+	s.sinceCalls = append(s.sinceCalls, limit)
+	s.sinceAt = append(s.sinceAt, since)
+	var out []userstore.WatchProgress
+	for _, entry := range s.entries {
+		updatedAt, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
+		if !until.IsZero() && updatedAt.After(until) {
+			continue
+		}
+		if !updatedAt.After(since) {
+			break
+		}
+		if len(out) == limit {
+			break
+		}
+		out = append(out, entry)
+	}
+	s.rowsRead += len(out)
+	return out, nil
+}
+
+func TestCompletedProgressCacheSinceFormMatchesOffsetWalk(t *testing.T) {
+	entries := completedWalkFixture(1200)
+	cutoffs := []int{900, 400, 1100, 50}
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	for _, idx := range cutoffs {
+		notBefore, _ := time.Parse(time.RFC3339, entries[idx].UpdatedAt)
+		want, err := CompletedProgressSnapshots(t.Context(), &stubProgressLister{entries: entries}, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cache.snapshots(t.Context(), since, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cutoff %d: since form returned %d rows, offset walk %d", idx, len(got), len(want))
+		}
+	}
+	if len(since.calls) != 0 {
+		t.Fatalf("offset ListProgress used %d times, want 0", len(since.calls))
+	}
+	// 900 reads once; 400 is newer and 1100 older than the last read, 50 newer.
+	if len(since.sinceCalls) != 2 {
+		t.Fatalf("since queries = %d, want 2 (only older cutoffs re-read)", len(since.sinceCalls))
+	}
+}
+
+func TestCompletedProgressCacheSinceFormHonoursRowCap(t *testing.T) {
+	entries := completedWalkFixture(supersededProgressMaxRows + 300)
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	got, err := cache.snapshots(t.Context(), since, "p1", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != supersededProgressMaxRows || !cache.capped {
+		t.Fatalf("rows = %d capped = %v, want %d capped", len(got), cache.capped, supersededProgressMaxRows)
+	}
+	if !reflect.DeepEqual(since.sinceCalls, []int{supersededProgressMaxRows + 1}) {
+		t.Fatalf("since limits = %v, want one query asking for cap+1", since.sinceCalls)
+	}
+	if _, err := cache.snapshots(t.Context(), since, "p1", time.Time{}.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if len(since.sinceCalls) != 1 {
+		t.Fatalf("capped cache re-queried: %v", since.sinceCalls)
+	}
+}
+
+// Continue Watching asks once per in-progress page, each with an older cutoff.
+// Every completed row must be read once per request, as the offset walk does.
+func TestCompletedProgressCacheSinceFormReadsEachRowOnce(t *testing.T) {
+	entries := completedWalkFixture(2400)
+	since := &stubSinceLister{stubProgressLister: stubProgressLister{entries: entries}}
+	cache := NewCompletedProgressCache()
+	for _, idx := range []int{200, 500, 800, 1100, 1400, 1700, 2000, 2300, 2399} {
+		notBefore, _ := time.Parse(time.RFC3339, entries[idx].UpdatedAt)
+		want, err := CompletedProgressSnapshots(t.Context(), &stubProgressLister{entries: entries}, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := cache.snapshots(t.Context(), since, "p1", notBefore)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("cutoff %d: since form returned %d rows, offset walk %d", idx, len(got), len(want))
+		}
+	}
+	if since.rowsRead != 2399 {
+		t.Fatalf("rows read = %d, want 2399 (each row once)", since.rowsRead)
 	}
 }

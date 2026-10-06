@@ -11,6 +11,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import SectionEditorDrawer from "@/components/sections/SectionEditorDrawer";
 import type { SettingsSectionEntry } from "@/api/types";
 import { toast } from "sonner";
+import { randomUUID } from "@/lib/uuid";
 
 // A stored override as GET /api/v2/profile/sections returns it. We round-trip
 // these through the page state so admin-section customizations (hide/title/etc.)
@@ -145,13 +146,16 @@ export default function ProfileCustomizeHome() {
     });
 
     // For sections that have no existing override yet (admin sections still at
-    // their server defaults), synthesize a fresh admin-customization row.
+    // their server defaults), synthesize a fresh admin-customization row. It
+    // needs its own ID: the server refuses to hide a legacy Trakt admin
+    // section with an override that has none.
     for (const u of updates) {
       if (merged.some((o) => matches(o, u.id))) continue;
       const section = sections.find((s) => s.id === u.id);
       if (!section || section.is_custom) continue; // user-added sections always have an override
       merged.push({
         ...emptyOverride(),
+        id: randomUUID(),
         section_id: u.id,
         hidden: u.hidden ?? false,
         removed: u.removed ?? false,

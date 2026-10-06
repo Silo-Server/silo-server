@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  buildUserCollectionCatalogHref,
-  buildUserCollectionEditorPath,
   isCollectionReadOnly,
   toCreateCollectionBody,
   toUpdateCollectionBody,
@@ -87,29 +85,5 @@ describe("Collections helpers", () => {
     expect(updateBody.display_query_definition).toEqual(createBody.display_query_definition);
     expect(updateBody).not.toHaveProperty("watch_filter");
     expect(updateBody).not.toHaveProperty("media_filter");
-  });
-
-  it("omits display_query_definition for manual collections with no display filter", () => {
-    const builder = toUserCollectionBuilderValue(null);
-    builder.collection_type = "manual";
-    builder.display_query_definition = undefined;
-
-    const createBody = toCreateCollectionBody(builder);
-    expect(createBody.display_query_definition).toBeUndefined();
-    expect(createBody).not.toHaveProperty("watch_filter");
-  });
-
-  it("builds the create route for user collections", () => {
-    expect(buildUserCollectionEditorPath("new")).toBe("/collections/new");
-  });
-
-  it("builds the edit route for an existing user collection", () => {
-    expect(buildUserCollectionEditorPath("col-3")).toBe("/collections/col-3/edit");
-  });
-
-  it("builds the catalog route for viewing a user collection", () => {
-    expect(buildUserCollectionCatalogHref("col-3", "Shared Picks")).toBe(
-      "/catalog?source=user_collection&collection_id=col-3&title=Shared+Picks",
-    );
   });
 });

@@ -10,6 +10,7 @@ import {
 import { getDefaultQuerySortOrder } from "@/lib/querySortOptions";
 
 import { getCollectionSortOptions } from "./collectionBuilderFields";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 
 interface CollectionOrderingEditorProps {
   query: QueryDefinition;
@@ -29,7 +30,13 @@ export default function CollectionOrderingEditor({
   readOnly = false,
 }: CollectionOrderingEditorProps) {
   const orderingMode = sortConfig.mode === "manual_pins" ? "manual_pins" : "query_sort";
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    undefined,
+    shownRatingSources,
+    query.sort.field,
+  );
 
   return (
     <div className="space-y-4">

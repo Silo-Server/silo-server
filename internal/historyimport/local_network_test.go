@@ -147,7 +147,7 @@ func TestPersonalImportRefusesMetadataAddressEvenWhenTrusted(t *testing.T) {
 // run fails with the address message.
 func TestRunFetchNeedsTrustForLocalServer(t *testing.T) {
 	server := newJellyfinFetchServer(t, map[string][]jellyfinItem{"IsPlayed": nil, "IsFavorite": nil}, map[string]jellyfinItem{})
-	provider := NewJellyfinProvider(NewJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"})
+	provider := NewJellyfinProvider(newUnthrottledJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"})
 
 	_, _, err := provider.Fetch(context.Background())
 	if !errors.Is(err, netguard.ErrPrivateDestination) {

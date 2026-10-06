@@ -41,6 +41,7 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		// V2 preserves the same scoped account administration surface.
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/policy-defaults$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+$`)},
 		{http.MethodPut, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+$`)},
 		{http.MethodDelete, regexp.MustCompile(`^/api/v2/admin/users/[0-9]+$`)},

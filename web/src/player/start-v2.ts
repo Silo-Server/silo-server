@@ -12,7 +12,11 @@
 
 import type { components } from "@/api/v2/schema";
 import type { PlayerConfig } from "./context/PlayerConfigContext";
-import { playerFetchResponse, PlayerFetchError } from "./player-fetch";
+import {
+  isTransientPlayerRequestError,
+  playerFetchResponse,
+  PlayerFetchError,
+} from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
 import type { DecisionResponseV3, StartRequestV3 } from "./protocol-v3";
 import { registerSessionMutations } from "./session-mutations";
@@ -77,12 +81,6 @@ export function decisionFromWireV2(
       }
     : undefined;
   return { ...wire, playback_plan: converted } as DecisionResponseV3;
-}
-
-function isTransient(error: unknown): boolean {
-  if (error instanceof PlayerFetchError) return error.status >= 500;
-  // Network failure, timeout, abort.
-  return error instanceof TypeError || error instanceof DOMException;
 }
 
 function pause(ms: number, signal?: AbortSignal): Promise<void> {
@@ -177,7 +175,7 @@ export async function startPlaybackV2(
       }
     } catch (error) {
       if (options.signal?.aborted) throw error;
-      if (!isTransient(error) || Date.now() >= deadline) throw error;
+      if (!isTransientPlayerRequestError(error) || Date.now() >= deadline) throw error;
       await pause(Math.min(5_000, 500 * 2 ** attempt, deadline - Date.now()), options.signal);
       if (Date.now() >= deadline) throw error;
     }

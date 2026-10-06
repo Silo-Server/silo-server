@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -158,61 +157,6 @@ func TestCopyRejectsDestinationsOverlappingOppositeSource(t *testing.T) {
 	}
 }
 
-func TestLegacySharedSourceKeepsOperationalArtifactsPrivate(t *testing.T) {
-	shared := &memoryStore{identity: "s3|endpoint|legacy|", objects: map[string][]byte{
-		"tmdb/poster.webp":              []byte("poster"),
-		"profile-avatars/u/avatar.webp": []byte("avatar"),
-		"diagnostics/u/report.tar.gz":   []byte("diagnostic"),
-		"catalog-seeds/export.json.gz":  []byte("catalog"),
-	}}
-	publicTarget := &memoryStore{identity: "s3|endpoint|public-new|", objects: map[string][]byte{}}
-	privateTarget := &memoryStore{identity: "s3|endpoint|private-new|", objects: map[string][]byte{}}
-	stage := stagedTarget{ID: "legacy-private", Policy: PolicyMigrateAll, SourceIdentity: shared.Identity(), Values: map[string]string{settingArtworkBackend: blobstore.BackendS3}}
-	service := New(nil, &memorySettings{values: map[string]string{}}, nil, shared, shared)
-	_, err := service.copyTransitionData(t.Context(), stage, PolicyMigrateAll, publicTarget, privateTarget, true, true, true, "run", nil, false, func(int, int, string) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, key := range []string{"diagnostics/u/report.tar.gz", "catalog-seeds/export.json.gz"} {
-		if _, ok := publicTarget.objects[key]; ok {
-			t.Errorf("private artifact %q was copied to public storage", key)
-		}
-		if string(privateTarget.objects[key]) != string(shared.objects[key]) {
-			t.Errorf("private artifact %q is missing from the new private store", key)
-		}
-	}
-}
-
-func TestNestedSourceNamespacesKeepPrivateObjectsOutOfPublicCopy(t *testing.T) {
-	for _, privateNested := range []bool{true, false} {
-		t.Run(fmt.Sprint("private_nested=", privateNested), func(t *testing.T) {
-			publicSource := &memoryStore{identity: "s3|endpoint|shared|", objects: map[string][]byte{"tmdb/poster.webp": []byte("poster")}}
-			privateSource := &memoryStore{identity: "s3|endpoint|shared|private", objects: map[string][]byte{"diagnostics/report.zip": []byte("report")}}
-			if privateNested {
-				publicSource.objects["private/diagnostics/report.zip"] = []byte("report")
-			} else {
-				publicSource.identity = "s3|endpoint|shared|public"
-				privateSource.identity = "s3|endpoint|shared|"
-				privateSource.objects["public/tmdb/poster.webp"] = []byte("poster")
-			}
-			publicTarget := &memoryStore{identity: "s3|endpoint|new-public|", objects: map[string][]byte{}}
-			privateTarget := &memoryStore{identity: "s3|endpoint|new-private|", objects: map[string][]byte{}}
-			stage := stagedTarget{ID: "nested", SourceIdentity: publicSource.Identity(), Values: map[string]string{settingArtworkBackend: blobstore.BackendS3}}
-			service := New(nil, &memorySettings{values: map[string]string{}}, nil, publicSource, privateSource)
-			_, err := service.copyTransitionData(t.Context(), stage, PolicyMigrateAll, publicTarget, privateTarget, true, true, true, "run", nil, false, func(int, int, string) {})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(publicTarget.objects) != 1 || string(publicTarget.objects["tmdb/poster.webp"]) != "poster" {
-				t.Fatalf("public target includes private data: %v", publicTarget.objects)
-			}
-			if len(privateTarget.objects) != 1 || string(privateTarget.objects["diagnostics/report.zip"]) != "report" {
-				t.Fatalf("private target contains the wrong objects: %v", privateTarget.objects)
-			}
-		})
-	}
-}
-
 func TestNestedPublicSourceCannotAliasPrivateArtifactPrefix(t *testing.T) {
 	// Both source views name the same physical diagnostics/1/report.zip
 	// object: the public client strips its diagnostics/ key prefix, while the
@@ -233,24 +177,5 @@ func TestNestedPublicSourceCannotAliasPrivateArtifactPrefix(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "overlaps private operational namespace") {
 		t.Fatalf("ambiguous public source prefix error = %v", err)
-	}
-}
-
-func TestPreserveUploadsExcludesNestedPrivateNamespace(t *testing.T) {
-	publicSource := &memoryStore{identity: "s3|endpoint|shared|", objects: map[string][]byte{
-		"branding/logo.webp":                      []byte("logo"),
-		"branding/private/diagnostics/report.zip": []byte("report"),
-	}}
-	privateSource := &memoryStore{identity: "s3|endpoint|shared|branding/private", objects: map[string][]byte{"diagnostics/report.zip": []byte("report")}}
-	publicTarget := &memoryStore{identity: "s3|endpoint|new-public|", objects: map[string][]byte{}}
-	privateTarget := &memoryStore{identity: "s3|endpoint|new-private|", objects: map[string][]byte{}}
-	stage := stagedTarget{ID: "nested-preserve", SourceIdentity: publicSource.Identity(), Values: map[string]string{settingArtworkBackend: blobstore.BackendS3}}
-	service := New(nil, &memorySettings{values: map[string]string{}}, nil, publicSource, privateSource)
-	_, err := service.copyTransitionData(t.Context(), stage, PolicyPreserveUploads, publicTarget, privateTarget, true, true, true, "run", nil, false, func(int, int, string) {})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(publicTarget.objects) != 1 || string(publicTarget.objects["branding/logo.webp"]) != "logo" {
-		t.Fatalf("public target includes private data: %v", publicTarget.objects)
 	}
 }

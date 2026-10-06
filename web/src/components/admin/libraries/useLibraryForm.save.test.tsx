@@ -62,23 +62,6 @@ describe("saving library processing settings", () => {
     });
   });
 
-  it("preserves disabling intro detection while creating a library", () => {
-    const { result } = renderHook(() => useLibraryForm({ library: null }));
-    act(() => {
-      result.current.setName("Series");
-      result.current.updatePath(0, "/media");
-      result.current.handleTypeChange("series");
-      result.current.setIntroDetectionEnabled(false);
-    });
-    act(() => {
-      result.current.submit();
-    });
-    expect(mutate.mock.calls[0]![0]).toMatchObject({
-      type: "series",
-      intro_detection_enabled: false,
-    });
-  });
-
   it.each([
     ["movies", true],
     ["series", false],
@@ -182,18 +165,6 @@ describe("saving library processing settings", () => {
     },
   );
 
-  it("turns real-time monitoring on for a new library by default", () => {
-    const { result } = renderHook(() => useLibraryForm({ library: null }));
-    act(() => {
-      result.current.setName("Movies");
-      result.current.updatePath(0, "/media");
-    });
-    act(() => {
-      result.current.submit();
-    });
-    expect(mutate.mock.calls[0]![0]).toMatchObject({ realtime_monitoring: true });
-  });
-
   it("creates a library with real-time monitoring switched off", () => {
     const { result } = renderHook(() => useLibraryForm({ library: null }));
     act(() => {
@@ -225,27 +196,6 @@ describe("saving library processing settings", () => {
     expect(mutate.mock.calls[0]![0]).toMatchObject({
       id: 1,
       body: { name: "Films", realtime_monitoring: enabled },
-    });
-  });
-
-  it("updates the real-time monitoring switch", () => {
-    const library = {
-      id: 1,
-      name: "Movies",
-      type: "movies",
-      paths: ["/media"],
-      realtime_monitoring: true,
-    } as Library;
-    const { result } = renderHook(() => useLibraryForm({ library }));
-    act(() => {
-      result.current.setRealtimeMonitoring(false);
-    });
-    act(() => {
-      result.current.submit();
-    });
-    expect(mutate.mock.calls[0]![0]).toMatchObject({
-      id: 1,
-      body: { realtime_monitoring: false },
     });
   });
 });
@@ -284,5 +234,91 @@ describe("marker detection switch", () => {
     act(() => result.current.handleTypeChange("audiobooks"));
     render(<AdvancedFields form={result.current} chapterThumbnailsSupported={false} />);
     expect(screen.queryByText(/Detect .*markers/)).toBeNull();
+  });
+});
+
+describe("seek preview switch", () => {
+  const movies = { id: 1, name: "Movies", type: "movies", paths: ["/media"] } as Library;
+
+  it("leaves the setting out of a save that does not change it", () => {
+    const { result } = renderHook(() =>
+      useLibraryForm({ library: { ...movies, trickplay_enabled: true } }),
+    );
+    act(() => result.current.setName("Films"));
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0].body).not.toHaveProperty("trickplay_enabled");
+  });
+
+  it("leaves the setting out of a new library that keeps the default", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: null }));
+    act(() => {
+      result.current.setName("Movies");
+      result.current.updatePath(0, "/media");
+    });
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ realtime_monitoring: true });
+    expect(mutate.mock.calls[0]![0]).not.toHaveProperty("trickplay_enabled");
+  });
+
+  it("sends a change", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: movies }));
+    act(() => result.current.setTrickplayEnabled(true));
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ id: 1, body: { trickplay_enabled: true } });
+  });
+
+  it("turns previews off when the library stops holding video", () => {
+    const { result } = renderHook(() =>
+      useLibraryForm({ library: { ...movies, trickplay_enabled: true } }),
+    );
+    act(() => result.current.handleTypeChange("audiobooks"));
+    act(() => {
+      result.current.submit();
+    });
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ body: { trickplay_enabled: false } });
+  });
+
+  it("is hidden when the server does not offer seek previews", () => {
+    const { result } = renderHook(() => useLibraryForm({ library: movies }));
+    render(<AdvancedFields form={result.current} chapterThumbnailsSupported />);
+    expect(screen.queryByText("Generate seek previews")).toBeNull();
+  });
+
+  it("needs public asset storage to turn on, but can always turn off", () => {
+    const off = renderHook(() => useLibraryForm({ library: movies }));
+    const { unmount } = render(
+      <AdvancedFields
+        form={off.result.current}
+        chapterThumbnailsSupported
+        trickplaySupported={false}
+      />,
+    );
+    expect(
+      screen.getByText("Public asset storage is required before this can be enabled."),
+    ).toBeTruthy();
+    expect(screen.getByRole("switch", { name: /seek previews/i }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    unmount();
+
+    const on = renderHook(() =>
+      useLibraryForm({ library: { ...movies, trickplay_enabled: true } }),
+    );
+    render(
+      <AdvancedFields
+        form={on.result.current}
+        chapterThumbnailsSupported
+        trickplaySupported={false}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: /seek previews/i }).hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 });

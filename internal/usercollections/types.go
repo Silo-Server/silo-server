@@ -17,14 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
-// NormalizeMDBListURL accepts either a list page URL
-// (https://mdblist.com/lists/user/slug) or its JSON variant and returns the
-// canonical JSON URL. Trailing slashes are tolerated. Empty input is
-// returned unchanged so callers can keep their own validation.
-func NormalizeMDBListURL(url string) string {
-	return collectionutil.NormalizeMDBListURL(url)
-}
-
 // CanonicalMDBListURL normalizes a list URL and rejects anything that is not
 // an MDBList list page. Sync fetches that URL, so callers must use this
 // before storing or requesting.

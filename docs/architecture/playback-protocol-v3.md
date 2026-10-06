@@ -1005,6 +1005,43 @@ were scanned: a file rewritten in place while the scan read it produces a
 verdict about bytes nobody is serving, which is neither persisted nor pushed at
 any session.
 
+### 6.2 A lost connection is not a failed route
+
+When a stream that already showed frames stops because the server cannot be
+reached (a network error on the media element, a fatal HLS network error, or a
+recovery replan that gets no answer), the route did not fail and the client must
+not report it with `failure_recovery`: that operation excludes the current
+route, so a direct-play viewer would come back on a transcode. The web player
+(`web/src/player/hooks/usePlaybackSession.ts`) recovers like this instead:
+
+1. Pause, keep the position, and tell the viewer it is reconnecting. Stop
+   reporting route failures for the dead transport.
+2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
+   Each attempt is a `track_change` that changes nothing, at the saved
+   position. It keeps the current route eligible and returns a fresh plan.
+3. A network failure, a 5xx, `408`, `429`, or `replan_in_progress` waits for
+   the next attempt. Any other answer means the session did not survive (a
+   server restart answers 404), and the client starts a new attempt at the
+   saved position with the current tracks. That includes `installation_changed`:
+   a replan always carries the old session's installation and cannot succeed,
+   while a start refused that way drops the cached capabilities and waits for
+   the next attempt. A start that names no subtitle track plays without one, so
+   subtitles that were off stay off; the player keeps the granted selection
+   and sends no subtitle change until it has applied it. A refused burned-in
+   subtitle is retried without subtitles, as at an initial start.
+4. The new plan plays only if the viewer was playing. That intent is taken
+   when the recovery is requested, and until the current plan's transport has
+   shown a frame it is the intent the plan was adopted with, so the pause that
+   tearing down a failed transport forces does not count.
+5. Any adopted plan ends the cycle. When the budget runs out, the client says
+   the connection was lost and offers to try again. Leaving the player or
+   starting other playback cancels the cycle.
+
+A network failure before a transport's own first frame stays on the ordinary
+failure path, even when an earlier transport of the same viewing played: the
+new route may be one this client cannot reach. If that recovery then cannot
+reach the server, it joins the reconnect and continues the same budget.
+
 ---
 
 ## 7. Registries
@@ -1049,10 +1086,23 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 *Planner:* `adaptation_exhausted`, `adaptation_unavailable`,
 `client_hls_unsupported`, `conversion_tool_unavailable`,
 `hdr_transcode_unsupported`, `no_alternate_version`,
-`source_metadata_incomplete`, `source_unavailable`,
+`source_metadata_incomplete`, `source_unavailable`, `source_unreadable`,
 `audio_conversion_unsupported`, `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
-`subtitle_conversion_unsupported`. When a video adaptation is forced solely by a
+`subtitle_conversion_unsupported`. `source_metadata_incomplete` is retryable:
+the file has not been probed yet or lacks a field a route needs.
+`source_unreadable` is not: ffprobe rejected the effective file (empty,
+corrupt, truncated) and it carries no stream metadata. The scanner and the
+playback-time probe repair record the rejection in `media_files.probe_failed_at`
+only for a non-zero ffprobe exit with the caller's context still live, when
+ffprobe's error output names no operating-system read failure and the server
+can read the start and end of the file. A timeout, cancellation, missing
+binary, or an access failure (permission denied, I/O error or timeout on a
+mount, stale handle, vanished file) never marks a file and keeps the retryable
+`source_metadata_incomplete`; an empty file is readable and is marked. A
+successful probe clears the mark. Like the HDR and 4K refusals,
+`source_unreadable` lets the server try the item's other versions, limited to
+versions the viewer may play (library access and playback-quality ceiling). When a video adaptation is forced solely by a
 subtitle burn-in requirement and cannot execute, the terminal is
 `subtitle_conversion_unsupported` naming the subtitle rather than the underlying
 HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playback.
@@ -1138,8 +1188,11 @@ an ordinal by counting tracks, summing array lengths, or taking `max(index)+1`.
 
 Each entry carries `source` (`external` | `embedded` | `downloaded`), `delivery`
 (`sidecar` | `burn_in_only`), the `forced` / `default` / `hearing_impaired`
-flags, a `url` when deliverable, and a `font_bundle_url` for embedded ASS tracks
-with attachments. `default` reflects the source container's own default flag, so
+flags, a `url` when deliverable, a `font_bundle_url` for embedded ASS tracks
+with attachments, and a `sync_key` on external and downloaded SRT, WebVTT, ASS,
+and SSA tracks. The sync key names the track to the subtitle sync operations
+(see [subtitles-api.md](../subtitles-api.md#subtitle-sync)); it is stable across
+sessions and inventory order, and realtime sync events carry it. `default` reflects the source container's own default flag, so
 only embedded and external tracks can carry it — a downloaded subtitle is never
 `default`. `url` is present only on `sidecar` tracks, and only once a session
 exists to scope it to — but it does not depend on the current selection: a start
@@ -1201,7 +1254,10 @@ sliding window may explicitly supply `position` (nonnegative source seconds)
 and `duration` (positive seconds, at most 3600). They must request subsequent
 windows themselves; HTTP EOF ends only the requested window. ASS remains a
 complete script. PGS windows require `windowed=1` in addition to the window
-parameters. External and downloaded sidecars are always returned whole.
+parameters. External and downloaded sidecars are always returned whole, with
+their timing correction applied before any conversion (an `original=1` SRT
+included) and `Cache-Control: private, no-cache`, since a correction changes
+the bytes behind the same URL.
 
 Complete embedded text and PGS extracts are cached by source file identity,
 modification time, size, subtitle ordinal, and output format. Partial or failed

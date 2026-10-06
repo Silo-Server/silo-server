@@ -7,6 +7,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 )
 
 // Credits detection bounds, validated against frame-checked episodes and
@@ -112,11 +114,11 @@ var creditsFingerprintParams = fmt.Sprintf("tail=%.0f:%.2f;format=%s",
 	episodeCreditsTailSeconds, episodeCreditsTailFraction, ChromaprintFormat)
 
 // creditsFingerprintKey keys an episode's cached credits fingerprint.
-func creditsFingerprintKey() ArtifactKey {
-	return ArtifactKey{
+func creditsFingerprintKey() mediaartifact.Key {
+	return mediaartifact.Key{
 		Kind:             ArtifactKindCreditsFingerprint,
 		AlgorithmVersion: AlgorithmVersion,
-		ConfigHash:       ArtifactConfigHash(ArtifactKindCreditsFingerprint, creditsFingerprintParams),
+		ConfigHash:       mediaartifact.ConfigHash(ArtifactKindCreditsFingerprint, creditsFingerprintParams),
 	}
 }
 

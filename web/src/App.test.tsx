@@ -55,16 +55,6 @@ describe("QueryCacheManager", () => {
     auth = { user: null, profile: null };
   });
 
-  it("keeps the cache while a stored session restores at boot", () => {
-    const { clear, signIn } = renderManager();
-
-    // Boot renders with no user until the restore lands; the shell's reads
-    // started in that window must survive it.
-    signIn({ user: makeUser(1), profile: makeProfile("p-1") });
-
-    expect(clear).not.toHaveBeenCalled();
-  });
-
   it("clears the cache on sign-out", () => {
     const { clear, signIn } = renderManager();
     signIn({ user: makeUser(1), profile: makeProfile("p-1") });

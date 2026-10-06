@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/identity_linked_elsewhere",
+  "title": "Identity linked elsewhere",
+  "status": 409,
+  "detail": "This identity is already linked to another account",
+  "instance": "urn:silo:request:0000000000000000000002b7"
+}

@@ -4,8 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SETTING_KEYS } from "@/lib/settingsContract";
 import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const mocks = vi.hoisted(() => ({
   useEffectiveSettings: vi.fn(),
@@ -54,7 +54,7 @@ function renderScreen(props: Partial<ComponentProps<typeof PlayingNextScreen>> =
         title: "Episode Two",
         seasonNumber: 1,
         episodeNumber: 2,
-        runtime: 1800,
+        runtime: 48,
       }}
       continueWatchingItems={[]}
       videoEnded={false}
@@ -166,6 +166,7 @@ describe("PlayingNextScreen next-episode start", () => {
   it("starts the next episode as the viewer's start from Play Now or Enter", () => {
     const onPlayNow = vi.fn();
     renderScreen({ onPlayNow });
+    expect(screen.getByText("48m")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Play Now" }));
     fireEvent.keyDown(document, { key: "Enter" });

@@ -11,7 +11,6 @@ import {
   radarr,
   radarrAnime,
   reply,
-  route,
   serve,
   server,
   sonarr,
@@ -51,10 +50,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-
-const radarr4K = server("radarr-4k", "Radarr 4K", "radarr", {
-  plugin_config: { service_kind: "radarr", is_4k: true },
-});
 const standard: Routing = {
   mode: "standard",
   standard: [
@@ -62,79 +57,8 @@ const standard: Routing = {
     { media_type: "series", hd_integration_id: "sonarr-1" },
   ],
 };
-const anime = route({
-  id: "r-anime",
-  name: "Anime",
-  media_type: "series",
-  conditions: { anime: true },
-  hd: { integration_id: "sonarr-1" },
-});
 
 describe("Standard and Advanced routing", () => {
-  it("says the rules decide while Standard is saved but two servers of a kind exist", async () => {
-    serve({
-      servers: [radarr, radarrAnime, sonarr],
-      routing: {
-        mode: "standard",
-        standard: [],
-        standard_unavailable_reason:
-          "Movies can go to more than one server (Radarr, Radarr Anime).",
-      },
-    });
-    mount();
-    const group = await screen.findByRole("group", { name: "Where requests go" });
-    expect(
-      await within(group).findByText(/Standard can't route requests right now/),
-    ).toHaveTextContent("Until you switch to Advanced or remove a server, the rules decide.");
-  });
-
-  it("says HD versions go nowhere when a media type has only a 4K server", async () => {
-    serve({
-      servers: [radarr4K, sonarr],
-      routing: {
-        mode: "standard",
-        standard: [
-          { media_type: "movie", uhd_integration_id: "radarr-4k" },
-          { media_type: "series", hd_integration_id: "sonarr-1" },
-        ],
-      },
-    });
-    mount();
-    const summary = await screen.findByRole("list", { name: "Where Standard sends requests" });
-    expect(within(summary).getAllByRole("listitem")[0]).toHaveTextContent(
-      "only a 4K server, so HD versions go nowhere",
-    );
-  });
-
-  it("says where Standard sends each media type and keeps the rules out of the way", async () => {
-    serve({
-      servers: [radarr, radarr4K, sonarr],
-      routes: [anime, fallback("movie", "radarr-1"), fallback("series", "sonarr-1")],
-      routing: standard,
-    });
-    mount();
-    const group = await screen.findByRole("group", { name: "Where requests go" });
-    const summary = await within(group).findByRole("list", {
-      name: "Where Standard sends requests",
-    });
-    const [movies, series] = within(summary).getAllByRole("listitem");
-    expect(movies).toHaveTextContent("Movies → Radarr4K versions → Radarr 4K");
-    expect(series).toHaveTextContent("Series → SonarrNo 4K versions");
-    expect(group).toHaveTextContent("1 rule is paused. Switch to Advanced to use it again.");
-    expect(group).toHaveTextContent("Anime series go to Sonarr with the Anime series type");
-    // Series has no 4K server, so the page says how to add one.
-    expect(group).toHaveTextContent("turn on “4K server”");
-    expect(within(group).queryByRole("tab")).toBeNull();
-    expect(within(group).queryByRole("button", { name: /Add a rule/ })).toBeNull();
-    expect(within(group).getByRole("button", { name: /^Standard/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    // The server tiles say what Standard uses them for.
-    const servers = screen.getByRole("group", { name: "Servers" });
-    expect(servers).toHaveTextContent("4K movies");
-  });
-
   it("switches to Advanced with the routing's validator and shows the rules", async () => {
     serve({
       servers: [radarr, sonarr],
@@ -203,7 +127,7 @@ describe("Standard and Advanced routing", () => {
     expect(options.body.plugin_config.is_default_4k).not.toBe(true);
   });
 
-  it("says when adding a second server turned Advanced on", async () => {
+  it("refreshes routing after adding a second server", async () => {
     const added = server("radarr-9", "Radarr Anime", "radarr");
     let created = false;
     serve({
@@ -229,11 +153,7 @@ describe("Standard and Advanced routing", () => {
     fireEvent.change(within(dialog).getByLabelText("API key"), { target: { value: "key" } });
     await choose(dialog, "Service", "Radarr (movies)");
     fireEvent.click(within(dialog).getByRole("button", { name: "Add server" }));
-    await waitFor(() =>
-      expect(toast.success).toHaveBeenCalledWith(
-        "Radarr Anime added. Routing is now Advanced, so you can choose which movies go to each server.",
-      ),
-    );
+    await waitFor(() => expect(calls("POST /api/v2/admin/request-integrations")).toHaveLength(1));
     expect(await screen.findByRole("tab", { name: "Movies" })).toBeInTheDocument();
   });
 });

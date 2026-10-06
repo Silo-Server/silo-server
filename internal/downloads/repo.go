@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -24,6 +25,12 @@ const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, devic
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
 	pool *pgxpool.Pool
+
+	// preparations is the latest preparation queue snapshot (see
+	// attachPreparations); prepMu also makes concurrent readers share one
+	// refresh.
+	prepMu       sync.Mutex
+	preparations *preparationSnapshot
 }
 
 // NewRepository creates a new Repository backed by the given pool.
@@ -56,16 +63,37 @@ const downloadQuotaLockClassID = 0x646c6f61 // "dloa"
 // used only as its holder — fn's own statements run through the pool and
 // commit before the lock releases, so the next holder sees them.
 func (r *Repository) WithUserQuotaLock(ctx context.Context, userID int, fn func(ctx context.Context) error) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin download quota lock: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	// Do not wait on pg_advisory_xact_lock while holding a pool connection.
+	// Concurrent callers would each occupy a connection while waiting, leaving
+	// the callback unable to acquire one from a small pool and deadlocking the
+	// quota path. Polling with pg_try_advisory_xact_lock releases the connection
+	// between attempts while preserving the transaction-scoped lock once won.
+	for {
+		tx, err := r.pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin download quota lock: %w", err)
+		}
 
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, userID); err != nil {
-		return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
+		var acquired bool
+		err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, userID).Scan(&acquired)
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
+		}
+		if acquired {
+			defer func() { _ = tx.Rollback(ctx) }()
+			return fn(ctx)
+		}
+		_ = tx.Rollback(ctx)
+
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return fn(ctx)
 }
 
 // scanInto scans a single download row's columns (in downloadColumns order)
@@ -771,7 +799,9 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 // waits for an in-flight requeue to commit, so either this read sees the
 // queued artifact or the requeue's linked-download reset sees this row. The
 // reset is fenced on the artifact so a concurrent create that relinked the
-// row elsewhere is left alone.
+// row elsewhere is left alone. A preparing row whose artifact is gone was
+// linked to a job an administrator canceled meanwhile; it fails as the
+// cancel's own downloads did, since no job will ever finish it.
 func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Download, error) {
 	if d == nil || d.ArtifactID == "" {
 		return d, nil
@@ -785,6 +815,15 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 	err = tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR SHARE`, d.ArtifactID).Scan(&artifactStatus)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("checking linked artifact status: %w", err)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := tx.Exec(ctx,
+			`UPDATE downloads SET status = 'failed', error_message = $3, updated_at = now()
+			 WHERE id = $1 AND artifact_id = $2 AND status = 'preparing'`,
+			d.ID, d.ArtifactID, PreparationCanceledMessage,
+		); err != nil {
+			return nil, fmt.Errorf("failing download of canceled artifact: %w", err)
+		}
 	}
 	switch artifactStatus {
 	case "queued", "tone_map_queued", "audio_v2_queued", "tracks_v1_queued", "running", "tone_map_running", "audio_v2_running", "tracks_v1_running":
@@ -818,7 +857,9 @@ func (r *Repository) ConfirmArtifactLink(ctx context.Context, d *Download) (*Dow
 // linked to a ready artifact (recording the artifact size), and preparing→failed
 // for rows linked to a failed artifact. Returns the rows it changed so the
 // caller can publish state events. Idempotent — only 'preparing' rows are
-// touched, so re-running it is a no-op.
+// touched, so re-running it is a no-op. A preparing row whose artifact no
+// longer exists (its job was canceled) also fails, so no ordering of a
+// cancel and a create can leave a download waiting forever.
 func (r *Repository) ReconcileLinkedDownloads(ctx context.Context) (ready []*Download, failed []*Download, err error) {
 	readyRows, err := r.pool.Query(ctx,
 		`UPDATE downloads SET status = 'ready',
@@ -853,7 +894,23 @@ func (r *Repository) ReconcileLinkedDownloads(ctx context.Context) (ready []*Dow
 	if err != nil {
 		return nil, nil, err
 	}
-	return ready, failed, nil
+
+	orphanRows, err := r.pool.Query(ctx,
+		`UPDATE downloads SET status = 'failed', error_message = $1, updated_at = now()
+		 WHERE status = 'preparing' AND artifact_id IS NOT NULL
+		   AND NOT EXISTS (SELECT 1 FROM download_artifacts a WHERE a.id = downloads.artifact_id)
+		 RETURNING `+downloadColumns,
+		PreparationCanceledMessage,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reconciling downloads of canceled artifacts: %w", err)
+	}
+	orphaned, err := scanDownloads(orphanRows)
+	orphanRows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	return ready, append(failed, orphaned...), nil
 }
 
 func nilIfEmpty(s string) *string {

@@ -234,6 +234,9 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		if errors.Is(err, auth.ErrUserDisabled) {
 			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 	return TokenPairView{
@@ -242,6 +245,70 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		ExpiresIn:    pair.ExpiresIn,
 		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
 	}, nil
+}
+
+// NetworkSignInInput is a network identity sign-in as the transport received
+// it. The overlay peer travels on the request context (netaccess.Path).
+type NetworkSignInInput struct {
+	InstallationID int
+	DeviceName     string
+	IP             string
+}
+
+// NetworkSignIn signs in the overlay peer of the request through a network
+// identity provider (auth.Service.NetworkSignIn) and opens a login session.
+// v2 signInWithNetworkIdentity calls it; a failure is an *APIError.
+func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) (TokenPairView, error) {
+	pair, err := h.service.NetworkSignIn(ctx, auth.NetworkSignInInput{
+		InstallationID: in.InstallationID, DeviceName: in.DeviceName, IP: in.IP,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, auth.ErrUnknownAuthInstallation):
+			return TokenPairView{}, apiError(http.StatusNotFound, "not_found", "No enabled network sign-in provider has this installation")
+		case errors.Is(err, auth.ErrNetworkIdentityRequired):
+			return TokenPairView{}, apiError(http.StatusForbidden, "network_identity_required", "Open this server through the provider's network address to sign in this way")
+		case errors.Is(err, auth.ErrInvalidCredentials):
+			// The plugin could not identify the peer; there is no credential
+			// the person could correct.
+			return TokenPairView{}, apiError(http.StatusForbidden, "not_permitted", "This device is not permitted to sign in to this server")
+		case errors.Is(err, auth.ErrUserDisabled):
+			return TokenPairView{}, apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
+		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
+		}
+		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return TokenPairView{
+		AccessToken:  pair.AccessToken,
+		RefreshToken: pair.RefreshToken,
+		ExpiresIn:    pair.ExpiresIn,
+		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
+	}, nil
+}
+
+// externalSignInError maps the refusals of the local-password policy and of
+// external sign-in (docs/architecture/external-sign-in.md) to their codes,
+// or returns nil for any other error.
+func externalSignInError(err error) *APIError {
+	switch {
+	case errors.Is(err, auth.ErrLocalLoginDisabled):
+		return apiError(http.StatusForbidden, "local_login_disabled", "Password sign-in is turned off on this server; sign in with the server's sign-in provider")
+	case errors.Is(err, auth.ErrNotPermitted):
+		// ErrAccountRequired is one too: v1 keeps answering not_permitted,
+		// and the cause lets the v2 login answer account_required.
+		return apiError(http.StatusForbidden, "not_permitted", "This account is not permitted to sign in to this server").WithCause(err)
+	case errors.Is(err, auth.ErrEmailInUse):
+		return apiError(http.StatusConflict, "email_in_use", "An account with this email already exists. Ask an admin to connect it")
+	case errors.Is(err, auth.ErrIdentityLinkedElsewhere):
+		return apiError(http.StatusConflict, "identity_linked_elsewhere", "This sign-in is already connected to another account")
+	case errors.Is(err, auth.ErrProviderPasswordExpired):
+		return apiError(http.StatusForbidden, "password_expired", "The password has expired; change it with the sign-in provider first")
+	case errors.Is(err, auth.ErrProviderUnavailable):
+		return apiError(http.StatusServiceUnavailable, "provider_unavailable", "The sign-in provider is unavailable; try again later")
+	}
+	return nil
 }
 
 // Logout revokes the caller's login session. v1 POST /auth/logout and v2
@@ -445,6 +512,13 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 	}
 
 	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
+}
+
+// OAuthUserView projects the account read while redemption opened its login
+// session. Reading that account again could lose an already-redeemed login
+// during a temporary database failure.
+func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
+	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
 }
 
 // HandleListSessions handles GET /auth/sessions. Requires authentication.

@@ -1031,9 +1031,9 @@ var cardOverlayIDs = map[string]bool{
 	"edition": true, "multi_audio": true, "multi_sub": true,
 	"rating_imdb": true, "rating_tmdb": true, "rating_rt": true,
 	"rating_rt_audience": true, "content_rating": true, "advisory_age": true,
-	"year": true, "runtime": true, "original_language": true,
-	"studio": true, "network": true, "show_status": true,
-	"imdb_top_250": true, "rt_certified_fresh": true,
+	"request_status": true, "year": true, "runtime": true,
+	"original_language": true, "studio": true, "network": true,
+	"show_status": true, "imdb_top_250": true, "rt_certified_fresh": true,
 }
 
 // cardOverlayPositions and cardOverlayAccent mirror the per-item constraints in

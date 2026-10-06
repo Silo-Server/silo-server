@@ -134,6 +134,37 @@ func TestEbookProgressEventsPostgres(t *testing.T) {
 	if err != nil || got.Location != "legacy" || got.UpdatedAt.IsZero() {
 		t.Fatalf("legacy: %+v %v", got, err)
 	}
+
+	// Hiding history excludes the real stored row until new reading activity.
+	if _, err := pool.Exec(ctx, `CREATE TABLE user_history_hidden_items (
+ user_id integer, profile_id text, media_item_id text, hidden_before timestamptz)`); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.Get(ctx, 1, "one", "book")
+	if err != nil || got == nil {
+		t.Fatalf("stored legacy progress: %+v %v", got, err)
+	}
+	hiddenAt := got.UpdatedAt
+	if _, err := pool.Exec(ctx, `INSERT INTO user_history_hidden_items VALUES (1, 'one', 'book', $1)`, hiddenAt); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.ListByContentIDs(ctx, 1, "one", []string{"book"})
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("hidden reading history = %+v, %v; want no row", rows, err)
+	}
+	rows, err = store.ListByContentIDs(ctx, 1, "two", []string{"book"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("another profile's reading history = %+v, %v", rows, err)
+	}
+	resumed := *got
+	resumed.UpdatedAt = hiddenAt.Add(time.Second)
+	if err := store.UpsertNewer(ctx, resumed); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = store.ListByContentIDs(ctx, 1, "one", []string{"book"})
+	if err != nil || len(rows) != 1 || !rows["book"].UpdatedAt.Equal(resumed.UpdatedAt) {
+		t.Fatalf("resumed reading history = %+v, %v", rows, err)
+	}
 }
 
 func TestEbookProgressAuthorizationBeforeWrite(t *testing.T) {

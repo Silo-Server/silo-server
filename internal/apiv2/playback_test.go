@@ -144,11 +144,13 @@ func TestPlaybackV2StartUsesTypedServiceAndOpaqueIDs(t *testing.T) {
 }
 
 func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &fakePlaybackService{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
 	for _, variation := range []string{"numeric file", "protocol", "profile", "installation", "unknown field", "null start"} {
 		t.Run(variation, func(t *testing.T) {
-			deps, _ := catalogDeps(t)
-			fake := &fakePlaybackService{}
-			deps.Playback = fake
+			*fake = fakePlaybackService{}
 			body := playbackStartFixture(t)
 			switch variation {
 			case "numeric file":
@@ -164,7 +166,7 @@ func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
 			case "null start":
 				body["start_position"] = nil
 			}
-			response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
+			response := do(t, h, http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
 			if response.Code != 422 {
 				t.Fatalf("validation: %d %s", response.Code, response.Body.String())
 			}

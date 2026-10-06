@@ -8,34 +8,6 @@ import (
 	"testing"
 )
 
-func TestCompareFingerprintsFindsSharedRange(t *testing.T) {
-	left := make([]uint32, 400)
-	right := make([]uint32, 400)
-	for i := range left {
-		left[i] = uint32(i + 1000)
-		right[i] = uint32(i + 5000)
-	}
-	for i := 40; i < 300; i++ {
-		left[i] = uint32(i)
-		right[i] = uint32(i)
-	}
-
-	segments := CompareFingerprints([]fingerprintInput{
-		{Candidate: Candidate{FileID: 1, EpisodeID: "ep1", DurationSeconds: 1200}, Points: left},
-		{Candidate: Candidate{FileID: 2, EpisodeID: "ep2", DurationSeconds: 1200}, Points: right},
-	}, DefaultConfig("ffmpeg"))
-
-	if len(segments) != 2 {
-		t.Fatalf("expected two file segments, got %d", len(segments))
-	}
-	if got := segments[1].End - segments[1].Start; got < 30 {
-		t.Fatalf("expected at least 30s segment, got %.3f", got)
-	}
-	if segments[1].Algorithm != ChromaprintAlgorithm {
-		t.Fatalf("unexpected algorithm %q", segments[1].Algorithm)
-	}
-}
-
 func TestCompareFingerprintsSkipsSameEpisodePairs(t *testing.T) {
 	points := make([]uint32, 400)
 	for i := range points {
@@ -70,6 +42,11 @@ func TestCompareFingerprintsFindsSharedRangeWithOffset(t *testing.T) {
 
 	if len(segments) != 2 {
 		t.Fatalf("expected two file segments, got %d", len(segments))
+	}
+	for fileID, segment := range segments {
+		if segment.Algorithm != ChromaprintAlgorithm {
+			t.Fatalf("file %d algorithm = %q, want %q", fileID, segment.Algorithm, ChromaprintAlgorithm)
+		}
 	}
 	// 40 points in, shifted back by the Chromaprint start lead.
 	if want := 40*DefaultPointHopSeconds + chromaprintStartLeadSeconds; math.Abs(segments[1].Start-want) > 0.01 {

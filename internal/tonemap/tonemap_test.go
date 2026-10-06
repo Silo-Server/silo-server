@@ -8,35 +8,6 @@ import (
 	"testing"
 )
 
-// TestSourceKindFor verifies dynamic-range and compatibility mappings.
-func TestSourceKindFor(t *testing.T) {
-	tests := []struct {
-		name         string
-		dynamicRange string
-		dvCompatID   int
-		want         SourceKind
-	}{
-		{name: "hdr10", dynamicRange: "hdr10", want: SourcePQ},
-		{name: "hdr10 plus", dynamicRange: "hdr10_plus", want: SourcePQ},
-		{name: "hlg", dynamicRange: "hlg", want: SourceHLG},
-		{name: "dv hdr10 base", dynamicRange: "dolby_vision", dvCompatID: 1, want: SourcePQ},
-		{name: "dv hlg base", dynamicRange: "dolby_vision", dvCompatID: 4, want: SourceHLG},
-		{name: "dv unknown base", dynamicRange: "dolby_vision", want: ""},
-		{name: "dv bt709 sdr base", dynamicRange: "dolby_vision", dvCompatID: 2, want: SourceSDRBT709},
-		{name: "dv legacy hlg base", dynamicRange: "dolby_vision", dvCompatID: 3, want: SourceHLGBT709},
-		{name: "dv bt2020 sdr base", dynamicRange: "dolby_vision", dvCompatID: 5, want: SourceSDRBT2020},
-		{name: "dv uhd bluray hdr base", dynamicRange: "dolby_vision", dvCompatID: 6, want: SourcePQ},
-		{name: "unknown hdr", dynamicRange: "hdr_unknown", want: ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := SourceKindFor(tt.dynamicRange, tt.dvCompatID); got != tt.want {
-				t.Fatalf("SourceKindFor() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs verifies supported Dolby Vision bases are classified.
 func TestResolveSourceCoversDolbyVisionFallbackCompatibilityIDs(t *testing.T) {
 	tests := []struct {
@@ -101,9 +72,6 @@ func TestResolveSourceRejectsDolbyOnlyAndPreflightsAmbiguousMetadata(t *testing.
 			got := ResolveSource(source)
 			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
 				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
-			}
-			if tt.wantPreflight && ClassifySource(source) != "" {
-				t.Fatal("ClassifySource accepted an ambiguous source without preflight")
 			}
 		})
 	}

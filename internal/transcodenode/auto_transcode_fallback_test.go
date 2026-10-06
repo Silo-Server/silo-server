@@ -37,7 +37,7 @@ func writeNodeFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, log
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
-		"sleep 30\n"
+		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,9 @@ func TestHandleStartAutoFallbackReadyWithoutPipelineDoesNotWait(t *testing.T) {
 	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
 	dir := t.TempDir()
 	slowFFmpeg := filepath.Join(dir, "slow-ffmpeg.sh")
-	if err := os.WriteFile(slowFFmpeg, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+	// Capability queries finish immediately; only the software encode is slow.
+	script := "#!/bin/sh\ncase \" $* \" in\n*' -f hls '*) exec sleep 30 ;;\nesac\n"
+	if err := os.WriteFile(slowFFmpeg, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	server.watcher.Config().Playback.FFmpegPath = slowFFmpeg

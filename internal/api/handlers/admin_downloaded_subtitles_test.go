@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 	"time"
 
@@ -124,7 +123,7 @@ func TestHandleDownloadDownloadedSubtitle(t *testing.T) {
 		Provider:    subtitles.ProviderUpload,
 		Language:    "en",
 		Format:      subtitles.FormatVTT,
-		ReleaseName: "sample.vtt",
+		ReleaseName: "../unsafe/path/movie.en.srt",
 		S3Key:       "subtitles/10/en_upload_deadbeef.vtt",
 		CreatedAt:   time.Now(),
 	}
@@ -146,8 +145,8 @@ func TestHandleDownloadDownloadedSubtitle(t *testing.T) {
 	if got := rr.Header().Get("Content-Type"); got != "text/vtt; charset=utf-8" {
 		t.Fatalf("content-type = %q", got)
 	}
-	if !bytes.Contains([]byte(rr.Header().Get("Content-Disposition")), []byte("sample.vtt")) {
-		t.Fatalf("content-disposition = %q", rr.Header().Get("Content-Disposition"))
+	if got := rr.Header().Get("Content-Disposition"); got != `attachment; filename="movie.en.vtt"` {
+		t.Fatalf("content-disposition = %q", got)
 	}
 	if !bytes.Equal(rr.Body.Bytes(), content) {
 		t.Fatalf("body mismatch")
@@ -216,17 +215,17 @@ func (c *trackingHandlerBlobStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func TestSubtitleDownloadFilename(t *testing.T) {
-	sub := &subtitles.DownloadedSubtitle{
-		ID:          9,
-		ReleaseName: "../unsafe/path/movie.en.srt",
-		Format:      subtitles.FormatSRT,
+// The frozen v1 admin list serializes AdminDownloadedSubtitle; the stored
+// timing correction must stay out of it.
+func TestAdminDownloadedSubtitleV1JSONOmitsTiming(t *testing.T) {
+	row := AdminDownloadedSubtitle{ID: 1, MediaFileID: 2, Provider: "upload", Language: "en", Format: "srt",
+		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Timing: subtitles.Timing{OffsetMS: 1200, Scale: 1.001}}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got := subtitleDownloadFilename(sub)
-	if got != "movie.en.srt" {
-		t.Fatalf("filename = %q, want movie.en.srt", got)
-	}
-	if strconv.Itoa(sub.ID) == "" {
-		t.Fatal("unexpected")
+	want := `{"id":1,"media_file_id":2,"provider":"upload","language":"en","format":"srt","release_name":"","score":0,"hearing_impaired":false,"created_at":"2026-01-02T03:04:05Z","uploader_username":"","media_title":"","media_type":"","file_path":""}`
+	if string(encoded) != want {
+		t.Fatalf("v1 JSON changed:\n%s\nwant\n%s", encoded, want)
 	}
 }

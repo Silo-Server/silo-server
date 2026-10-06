@@ -102,20 +102,6 @@ func TestVersionPreferencePrefersTheItemsLastPlayedFile(t *testing.T) {
 	}
 }
 
-func TestVersionPreferenceMatchesTheSeriesLastPlayedVersion(t *testing.T) {
-	uhd := &models.MediaFile{ID: 10, Resolution: "2160p", HDR: true, CodecVideo: "hevc"}
-	web := &models.MediaFile{ID: 11, Resolution: "1080p", CodecVideo: "h264"}
-	pref := versionPreference{series: &userstore.WatchProgress{
-		LastResolution: new("1080p"),
-		LastHDR:        new(false),
-		LastCodecVideo: new("h264"),
-	}}
-
-	if got := pref.pick("ep-2", []*models.MediaFile{uhd, web}); got.ID != 11 {
-		t.Fatalf("pick = file %d, want 11 (matches the series' last-played version)", got.ID)
-	}
-}
-
 func TestResolveFileUsesTheSeriesVersionForAnEpisode(t *testing.T) {
 	store := &hintProgressStore{rows: map[string]userstore.WatchProgress{
 		"ep-1": {UpdatedAt: "2026-09-01T10:00:00Z", LastFileID: new(100), LastResolution: new("2160p")},

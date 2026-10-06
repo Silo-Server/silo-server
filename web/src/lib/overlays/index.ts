@@ -17,7 +17,7 @@ export type {
   PresetId,
 } from "./types";
 
-export { OVERLAY_REGISTRY, OVERLAY_MAP, getOverlayDef } from "./registry";
+export { OVERLAY_REGISTRY, OVERLAY_MAP, getOverlayDef, isOverlayOffered } from "./registry";
 export { OVERLAY_POSITIONS, OVERLAY_CATEGORIES, WORDMARK_TEXT } from "./types";
 export {
   buildDefaultPrefs,
@@ -27,6 +27,7 @@ export {
   isOverlaySuppressed,
   isOverlaySupportedBy,
   overlayPrefsForServer,
+  requestDownloadBarPercent,
   storedOverlayIds,
 } from "./schema";
 export type { OverlayServerSupport } from "./schema";
@@ -37,5 +38,14 @@ export {
   overlayDataFromBrowseItem,
   overlayDataFromEpisodeListItem,
   overlayDataFromSectionItem,
+  overlayDataFromWatchlistTitle,
 } from "./extractors";
-export { SAMPLE_MOVIE_DATA, SAMPLE_SHOW_DATA } from "./sample-data";
+export {
+  OVERLAY_PREVIEW_SAMPLES,
+  OVERLAY_PREVIEW_VARIANTS,
+  SAMPLE_MOVIE_DATA,
+  SAMPLE_REQUEST_DATA,
+  SAMPLE_SHOW_DATA,
+} from "./sample-data";
+export type { OverlayPreviewVariant } from "./sample-data";
+export { ATTENTION_ACCENT } from "./registry/ribbons";

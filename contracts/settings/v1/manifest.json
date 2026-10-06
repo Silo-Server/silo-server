@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 14,
+  "revision": 16,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1075,7 +1075,7 @@
       "category": "appearance",
       "label": "Poster badges",
       "description": "Which badges appear on poster cards, and where.",
-      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13."
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The server-wide default configuration stays in server_settings and is not a user setting. This key describes which badges to show, not whether to show them — that is ui.card_overlays_enabled. Revision 13 adds the advisory_age overlay id; a server below revision 13 rejects a value that contains it, so a client offers that badge only when manifest_revision is at least 13. Revision 15 adds the request_status overlay id (a watchlist title's request status on its poster) under the same rule: a client offers it only when manifest_revision is at least 15."
     },
     {
       "key": "ui.card_overlays_enabled",
@@ -1085,7 +1085,7 @@
       "resolution_order": ["profile", "default"],
       "value_schema": { "type": "boolean", "nullable": true },
       "default_value": null,
-      "platforms": ["web"],
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
       "category": "appearance",
       "label": "Card overlays enabled",
       "description": "Show overlay badges on media cards.",
@@ -1437,6 +1437,35 @@
       "description": "Show the Audiobooks section in navigation.",
       "recommended_control": "switch",
       "notes": "Contract-known local: an opt-in navigation surface, hidden by default, with existing Apple (AppNavPreferences.showAudiobooks) and Android parity. Android stores it locally at nav.show_audiobooks.local."
+    },
+    {
+      "key": "requests.watchlist_auto_request",
+      "introduced_in": 15,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "requests",
+      "label": "Request titles I add to my watchlist",
+      "description": "When you add a title that is not in the library to your watchlist, also request it.",
+      "recommended_control": "switch",
+      "notes": "Profile scope because each household member decides whether their own watchlist adds become requests. It applies only while the server-wide watchlist_requests request setting is on and the profile may request at all; a client shows it only then (GET /api/v2/requests/status reports the effective value as watchlist_requests). Request limits, approval and routing apply exactly as for the Request button. Turning it off never cancels an existing request."
+    },
+    {
+      "key": "ui.title_art",
+      "introduced_in": 16,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile", "profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "appearance",
+      "label": "Show title art",
+      "description": "Use a title's logo artwork as its name on detail pages when one is available. When off, the name is always shown as text.",
+      "recommended_control": "switch",
+      "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos."
     }
   ]
 }

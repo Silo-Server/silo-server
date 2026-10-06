@@ -43,9 +43,24 @@ var concatInputArgs = []string{"-skip_frame:v", "nokey", "-protocol_whitelist", 
 // concatListInput is the input a Samples request reads its list from.
 const concatListInput = "pipe:0"
 
+// sheetSampleSpanSeconds is how long each entry of a Sheets list lasts. With
+// B-frames, the packet after a keyframe in decode order can carry a later
+// presentation time that ends a 40 ms entry before the decoder releases the
+// keyframe, and the sample decodes nothing: 20 of 656 samples of one MP4
+// fixture did. Half a second recovered every sample of it at no measurable
+// cost. The first frame of a sample, the keyframe at or before its time, still
+// wins. Stats keep the span their cached analyses were computed with.
+const sheetSampleSpanSeconds = 0.5
+
 // buildConcatList returns the ffconcat list sampling input, whose container
-// timestamps start at inputStart, at each time.
+// timestamps start at inputStart, at each time, each entry lasting
+// sampleSpanSeconds.
 func buildConcatList(input string, seconds []float64, inputStart float64) ([]byte, error) {
+	return buildConcatListSpan(input, seconds, inputStart, sampleSpanSeconds)
+}
+
+// buildConcatListSpan is buildConcatList with entries lasting span seconds.
+func buildConcatListSpan(input string, seconds []float64, inputStart, span float64) ([]byte, error) {
 	quoted, err := concatPath(input)
 	if err != nil {
 		return nil, err
@@ -59,7 +74,7 @@ func buildConcatList(input string, seconds []float64, inputStart float64) ([]byt
 		list.WriteString("file " + quoted + "\n")
 		list.WriteString("file_packet_meta " + sampleMetadataKey + " " + formatSampleSeconds(at) + "\n")
 		list.WriteString("inpoint " + formatSampleSeconds(inpoint) + "\n")
-		list.WriteString("outpoint " + formatSampleSeconds(inpoint+sampleSpanSeconds) + "\n")
+		list.WriteString("outpoint " + formatSampleSeconds(inpoint+span) + "\n")
 	}
 	return list.Bytes(), nil
 }

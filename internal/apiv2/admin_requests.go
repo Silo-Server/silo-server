@@ -55,6 +55,9 @@ type AdminRequestSettings struct {
 	GlobalWindowDays          int  `json:"global_window_days" minimum:"1"`
 	GlobalAutoApprovalEnabled bool `json:"global_auto_approval_enabled"`
 	ForceDualQuality          bool `json:"force_dual_quality"`
+	// WatchlistRequests is optional on update so a client that predates it
+	// keeps the stored value; responses always carry it.
+	WatchlistRequests *bool `json:"watchlist_requests,omitempty" doc:"Adding a title that is not in the library to a watchlist also requests it; absent on update keeps the stored value" example:"true"`
 }
 type AdminRequestSettingsOutput struct {
 	ETag string `header:"ETag"`
@@ -311,10 +314,24 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }
 func adminSettingsOf(s mediarequests.Settings) AdminRequestSettings {
-	return AdminRequestSettings{s.RequestsEnabled, s.GlobalMaxRequests, s.GlobalWindowDays, s.GlobalAutoApprovalEnabled, s.ForceDualQuality}
+	watchlist := s.WatchlistRequests
+	return AdminRequestSettings{
+		RequestsEnabled:           s.RequestsEnabled,
+		GlobalMaxRequests:         s.GlobalMaxRequests,
+		GlobalWindowDays:          s.GlobalWindowDays,
+		GlobalAutoApprovalEnabled: s.GlobalAutoApprovalEnabled,
+		ForceDualQuality:          s.ForceDualQuality,
+		WatchlistRequests:         &watchlist,
+	}
 }
-func (b AdminRequestSettings) domain() mediarequests.Settings {
-	return mediarequests.Settings{RequestsEnabled: b.RequestsEnabled, GlobalMaxRequests: b.GlobalMaxRequests, GlobalWindowDays: b.GlobalWindowDays, GlobalAutoApprovalEnabled: b.GlobalAutoApprovalEnabled, ForceDualQuality: b.ForceDualQuality}
+
+// domain converts an update body; current supplies a field the body omits.
+func (b AdminRequestSettings) domain(current mediarequests.Settings) mediarequests.Settings {
+	watchlist := current.WatchlistRequests
+	if b.WatchlistRequests != nil {
+		watchlist = *b.WatchlistRequests
+	}
+	return mediarequests.Settings{RequestsEnabled: b.RequestsEnabled, GlobalMaxRequests: b.GlobalMaxRequests, GlobalWindowDays: b.GlobalWindowDays, GlobalAutoApprovalEnabled: b.GlobalAutoApprovalEnabled, ForceDualQuality: b.ForceDualQuality, WatchlistRequests: watchlist}
 }
 func (reg *Registry) getAdminRequestSettings(ctx context.Context, _ *struct{}) (*AdminRequestSettingsOutput, error) {
 	s, p := reg.adminRequestService()
@@ -345,7 +362,7 @@ func (reg *Registry) updateAdminRequestSettings(ctx context.Context, in *AdminRe
 	if p != nil {
 		return nil, p
 	}
-	r, err = g.UpdateSettingsConditional(ctx, v, in.Body.domain(), rev)
+	r, err = g.UpdateSettingsConditional(ctx, v, in.Body.domain(r), rev)
 	if errors.Is(err, mediarequests.ErrStaleRevision) {
 		current, e := reg.getAdminRequestSettings(ctx, &struct{}{})
 		if e != nil {
@@ -607,8 +624,6 @@ func (reg *Registry) loadAdminRequestOptions(ctx context.Context, in *AdminReque
 	}
 	return &AdminRequestOptionsOutput{Body: AdminRequestOptions{Options: options}}, nil
 }
-
-var adminRequestOperationIDs = []string{opGetAdminRequestCapabilities, opListAdminRequests, opAdminApproveRequest, opAdminDeclineRequest, opAdminCancelRequest, opAdminRetryRequest, opGetAdminRequestSettings, opUpdateAdminRequestSettings, opGetAdminRequestUserLimit, opUpdateAdminRequestUserLimit, opListRequestIntegrations, opGetRequestIntegration, opCreateRequestIntegration, opUpdateRequestIntegration, opDeleteRequestIntegration, opLoadRequestIntegrationOptions}
 
 func (c AdminRequestCapabilitiesOutputBody) capabilityState() string {
 	return configuredCapabilityState(c.Available)
