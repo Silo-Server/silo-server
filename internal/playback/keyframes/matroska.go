@@ -91,6 +91,7 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 		video     uint64
 		cuesAt    int64 = -1
 		infoAt    int64 = -1
+		tracksAt  int64 = -1
 		cues      []byte
 		haveInfo  bool
 		haveTrack bool
@@ -115,6 +116,9 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 			}
 			if p, ok := seekPosition(data, idInfo); ok {
 				infoAt = segStart + p
+			}
+			if p, ok := seekPosition(data, idTracks); ok {
+				tracksAt = segStart + p
 			}
 		case idInfo:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
@@ -159,30 +163,32 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 			return Index{}, err
 		}
 	}
-	// Info may also come after the clusters, found through the seek head.
-	// Its timestamp scale converts every cue time, so an index without it
-	// isn't trusted.
+	// Info and Tracks may also come after the clusters, found through the
+	// seek head. Info's timestamp scale converts every cue time, so an index
+	// without it isn't trusted.
 	if !haveInfo && infoAt >= 0 {
-		id, dataSize, headerLen, err := readElementHeader(r, infoAt)
-		if err != nil {
-			return Index{}, fmt.Errorf("keyframes: read info at %d: %w", infoAt, err)
-		}
-		if id != idInfo {
-			return Index{}, fmt.Errorf("keyframes: seek head points at element %#x, not Info", id)
-		}
-		data, err := readElementData(r, infoAt+headerLen, dataSize, maxMetadataSize)
+		data, err := readSeekTarget(r, infoAt, idInfo)
 		if err != nil {
 			return Index{}, err
 		}
 		timescale, duration = parseInfo(data)
 		haveInfo = true
 	}
+	if !haveTrack && tracksAt >= 0 {
+		data, err := readSeekTarget(r, tracksAt, idTracks)
+		if err != nil {
+			return Index{}, err
+		}
+		video, haveTrack = firstVideoTrack(data)
+	}
 	if cues == nil || !haveTrack || !haveInfo {
 		return Index{}, ErrNoIndex
 	}
 
-	ticks := cueTimes(cues, video)
-	if len(ticks) == 0 {
+	ticks, complete := cueTimes(cues, video)
+	if !complete || len(ticks) == 0 {
+		// A malformed cue point ends the list early; the times read so far
+		// would leave out later keyframes.
 		return Index{}, ErrNoIndex
 	}
 	sort.Slice(ticks, func(i, j int) bool { return ticks[i] < ticks[j] })
@@ -263,6 +269,41 @@ func readVint(b []byte, keepMarker bool) (value uint64, length int, ok bool) {
 
 // children calls fn for each child element in a master element's data. It
 // stops at the first malformed child.
+// readSeekTarget reads the element a seek head points at, which must be want.
+func readSeekTarget(r io.ReaderAt, at int64, want uint64) ([]byte, error) {
+	id, dataSize, headerLen, err := readElementHeader(r, at)
+	if err != nil {
+		return nil, fmt.Errorf("keyframes: read element at %d: %w", at, err)
+	}
+	if id != want {
+		return nil, fmt.Errorf("keyframes: seek head points at element %#x, not %#x", id, want)
+	}
+	return readElementData(r, at+headerLen, dataSize, maxMetadataSize)
+}
+
+// childrenComplete is children, reporting whether every child was well
+// formed: false when malformed data stopped the walk early.
+func childrenComplete(data []byte, fn func(id uint64, payload []byte)) bool {
+	for len(data) > 0 {
+		id, idLen, ok := readVint(data, true)
+		if !ok {
+			return false
+		}
+		raw, sizeLen, ok := readVint(data[idLen:], false)
+		if !ok {
+			return false
+		}
+		start := idLen + sizeLen
+		if raw > uint64(len(data)-start) {
+			return false
+		}
+		end := start + int(raw)
+		fn(id, data[start:end])
+		data = data[end:]
+	}
+	return true
+}
+
 func children(data []byte, fn func(id uint64, payload []byte)) {
 	for len(data) > 0 {
 		id, idLen, ok := readVint(data, true)
@@ -369,9 +410,10 @@ func firstVideoTrack(tracks []byte) (uint64, bool) {
 
 // cueTimes returns the CueTime of every cue point that indexes the video
 // track. Matroska muxers index video keyframes, so these are keyframe times.
-func cueTimes(cues []byte, video uint64) []uint64 {
+func cueTimes(cues []byte, video uint64) ([]uint64, bool) {
 	var times []uint64
-	children(cues, func(id uint64, point []byte) {
+	complete := true
+	complete = childrenComplete(cues, func(id uint64, point []byte) {
 		if id != idCuePoint {
 			return
 		}
@@ -380,7 +422,7 @@ func cueTimes(cues []byte, video uint64) []uint64 {
 			hasTime bool
 			isVideo bool
 		)
-		children(point, func(id uint64, v []byte) {
+		if !childrenComplete(point, func(id uint64, v []byte) {
 			switch id {
 			case idCueTime:
 				t, hasTime = readUint(v), true
@@ -391,10 +433,12 @@ func cueTimes(cues []byte, video uint64) []uint64 {
 					}
 				})
 			}
-		})
+		}) {
+			complete = false
+		}
 		if hasTime && isVideo {
 			times = append(times, t)
 		}
-	})
-	return times
+	}) && complete
+	return times, complete
 }

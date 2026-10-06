@@ -122,6 +122,33 @@ func TestReadMatroskaInfoAfterClustersThroughSeekHead(t *testing.T) {
 	}
 }
 
+// Tracks may come after the clusters too, found through the seek head.
+func TestReadMatroskaTracksAfterClustersThroughSeekHead(t *testing.T) {
+	seekHead := func(cuesPos, tracksPos uint64) []byte {
+		return el(idSeekHead,
+			el(idSeek, uintEl(idSeekID, idCues), uintEl(idSeekPosition, cuesPos)),
+			el(idSeek, uintEl(idSeekID, idTracks), uintEl(idSeekPosition, tracksPos)))
+	}
+	cuesPos := len(seekHead(0, 0)) + len(info) + len(cluster)
+	tracksPos := cuesPos + len(cues)
+	segment := el(idSegment, seekHead(uint64(cuesPos), uint64(tracksPos)), info, cluster, cues, tracks)
+	got, err := read(slices.Concat(ebmlHeader, segment))
+	wantIndex(t, got, err)
+}
+
+// A truncated cue point after a good one makes the index incomplete: the
+// good one alone would leave out later keyframes.
+func TestReadMatroskaRejectsMalformedCues(t *testing.T) {
+	good := cuePoint(0, 2)
+	truncated := cuePoint(2_216, 2)
+	truncated = truncated[:len(truncated)-3]
+	malformed := el(idCues, good, truncated)
+	_, err := read(slices.Concat(ebmlHeader, el(idSegment, info, tracks, malformed, cluster)))
+	if !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("err = %v, want ErrNoIndex", err)
+	}
+}
+
 func TestReadMatroskaUnknownSizeSegment(t *testing.T) {
 	segment := []byte{0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 	file := bytes.Join([][]byte{ebmlHeader, segment, info, tracks, cues}, nil)

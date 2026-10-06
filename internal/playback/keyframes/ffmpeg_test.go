@@ -111,24 +111,29 @@ func TestReadMatroskaMatchesFFprobe(t *testing.T) {
 // video, or the complete playlist would list durations the segments don't
 // have.
 func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
-	ffmpeg, _ := requireFFmpeg(t)
+	ffmpeg, ffprobe := requireFFmpeg(t)
 	// Regular 2s keyframes on a timeline that starts at 0.28s land exactly
 	// on every target, which float error in the planner must not skip.
+	// A second audio track FFmpeg doesn't select runs 10s past the video, so
+	// the container's duration does too; the plan must still end with the
+	// video.
 	regular := filepath.Join(t.TempDir(), "regular.mkv")
 	if out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25",
-		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
-		"-t", "10", "-c:v", "libx264", "-preset", "ultrafast",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=25:duration=10",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=10",
+		"-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000:duration=20",
+		"-map", "0", "-map", "1", "-map", "2",
+		"-c:v", "libx264", "-preset", "ultrafast",
 		"-g", "50", "-sc_threshold", "0", "-bf", "0",
 		"-c:a", "aac", "-output_ts_offset", "0.28", regular).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
 	for name, path := range map[string]string{"irregular": makeTestMKV(t, ffmpeg), "regular with an offset": regular} {
-		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, path) })
+		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, ffprobe, path) })
 	}
 }
 
-func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
+func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, ffprobe, path string) {
 	dir := t.TempDir()
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
 		"-i", path, "-map", "0:v:0", "-map", "0:a:0",
@@ -143,19 +148,52 @@ func checkPlanMatchesFFmpegHLS(t *testing.T, ffmpeg, path string) {
 	}
 	written := playlistDurations(t, filepath.Join(dir, "stream.m3u8"))
 
+	// The plan ends where the selected video does, which FFmpeg's HLS output
+	// follows; the container's duration can run past it.
 	idx := readIndex(t, path)
-	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), idx.Duration)
+	planned := SegmentDurations(PlanSegments(idx.Keyframes, 2), videoEnd(t, ffprobe, path))
 	if len(planned) != len(written) {
 		t.Fatalf("planned %d segments %v, FFmpeg wrote %d %v", len(planned), planned, len(written), written)
 	}
-	// FFmpeg measures the last segment to its last packet's end, which can
-	// differ from the container duration by a frame.
-	for i := range written[:len(written)-1] {
-		if math.Abs(planned[i]-written[i]) > 0.002 {
+	var plannedTotal, writtenTotal float64
+	for i := range written {
+		tolerance := 0.002
+		if i == len(written)-1 {
+			// FFmpeg measures the last segment to a late packet, within a
+			// frame of the video's end.
+			tolerance = 0.041
+		}
+		if math.Abs(planned[i]-written[i]) > tolerance {
 			t.Fatalf("segment %d: planned %.3fs, FFmpeg wrote %.3fs (planned %v, written %v)",
 				i, planned[i], written[i], planned, written)
 		}
+		plannedTotal += planned[i]
+		writtenTotal += written[i]
 	}
+	if math.Abs(plannedTotal-writtenTotal) > 0.041 {
+		t.Fatalf("planned %.3fs in all, FFmpeg wrote %.3fs", plannedTotal, writtenTotal)
+	}
+}
+
+// videoEnd is when the first video stream's last frame ends, from ffprobe.
+func videoEnd(t *testing.T, ffprobe, path string) float64 {
+	t.Helper()
+	out, err := exec.Command(ffprobe, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var end float64
+	for _, line := range strings.Fields(string(out)) {
+		pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
+		p, err1 := strconv.ParseFloat(pts, 64)
+		d, err2 := strconv.ParseFloat(duration, 64)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("ffprobe packet %q", line)
+		}
+		end = max(end, p+d)
+	}
+	return end
 }
 
 func playlistDurations(t *testing.T, path string) []float64 {
