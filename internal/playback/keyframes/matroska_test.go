@@ -278,6 +278,8 @@ func TestReadMatroskaWithoutIndex(t *testing.T) {
 		"no video track": el(idSegment, info, audioOnlyTracks, clusterA),
 		// Without Info the cue times can't be converted.
 		"no info": el(idSegment, tracks, cuesFor(layout{}, 0, 0), clusterA),
+		// An explicit zero scale isn't the default; Matroska requires at least 1.
+		"zero timestamp scale": el(idSegment, el(idInfo, uintEl(idTimestampScale, 0), floatEl(idDuration, 12_500)), tracks, cuesFor(layout{}, 0, 0), clusterA),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := read(slices.Concat(ebmlHeader, segment))
