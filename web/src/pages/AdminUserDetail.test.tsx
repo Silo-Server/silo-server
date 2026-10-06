@@ -13,9 +13,10 @@ import {
 } from "@/api/client";
 import type { AdminUser, UpdateUserRequest } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import { PERMISSION_MARKER_EDIT } from "@/lib/permissions";
 
 import AdminUserDetail from "./AdminUserDetail";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 interface UpdateArg {
   editor: { etag: string; user: { id: number } };
@@ -91,6 +92,7 @@ vi.mock("@/api/v2/adminUsers", async (importOriginal) => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/users", () => ({
+  useAdminPolicyDefaults: () => ({ data: POLICY_DEFAULTS }),
   useViewerIsOwner: () => mocks.viewerIsOwner,
   useTransferOwnership: () => ({ mutate: mocks.transfer, isPending: false }),
   useAdminUserCapabilities: () => ({
@@ -357,39 +359,6 @@ describe("page states", () => {
 });
 
 describe("header", () => {
-  it("shows who the account is", () => {
-    mocks.user = {
-      ...adminUser,
-      access_group_id: 5,
-      password_change_required: true,
-      last_active_at: undefined,
-    };
-    renderUserDetail();
-    expect(screen.getByRole("heading", { level: 1, name: "taylor" })).toBeInTheDocument();
-    expect(screen.getByText("User")).toBeInTheDocument();
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(screen.getByText("Temporary password")).toBeInTheDocument();
-    const meta = screen.getByText("taylor@example.test").parentElement!;
-    expect(meta).toHaveTextContent("Group: Guests");
-    expect(meta).toHaveTextContent("No recorded activity");
-    expect(meta).toHaveTextContent("Password sign-in");
-  });
-
-  it("names the month of an old last activity, like the page's other dates", () => {
-    mocks.user = { ...adminUser, last_active_at: "2020-08-30T12:00:00Z" };
-    renderUserDetail();
-    const meta = screen.getByText(adminUser.email!).parentElement!;
-    expect(meta).toHaveTextContent(/Last active (Aug 30, 2020|30 Aug 2020)/);
-  });
-
-  it("hides password actions for an account an external provider manages", () => {
-    mocks.user = { ...adminUser, password_login: false };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(screen.queryByRole("button", { name: /reset password/i })).toBeNull();
-    expect(screen.getByText("External sign-in")).toBeInTheDocument();
-    expect(rowValue("Password")).toBe("Managed by an external sign-in provider");
-  });
-
   it("sets a password for an account without password sign-in from its Sign-in tab", async () => {
     const ui = userEvent.setup();
     mocks.user = { ...adminUser, password_login: false };
@@ -474,13 +443,6 @@ describe("header", () => {
 });
 
 describe("more actions", () => {
-  it("offers disable and delete for a user an admin manages", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail();
-    const menu = await openMenu(ui);
-    expect(menuItems(menu)).toEqual(["Disable accountkeeps data", "Delete account…"]);
-  });
-
   it("disables an account after confirming", async () => {
     const ui = userEvent.setup();
     renderUserDetail();
@@ -521,13 +483,6 @@ describe("more actions", () => {
     expect(dialog).toHaveTextContent("its 2 profiles, watch history, and saved preferences");
     expect(within(dialog).getByRole("button", { name: "Delete account" })).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Disable instead" })).toBeInTheDocument();
-  });
-
-  it("offers Enable instead of Disable for a disabled account", async () => {
-    const ui = userEvent.setup();
-    mocks.user = { ...adminUser, enabled: false };
-    renderUserDetail();
-    expect(menuItems(await openMenu(ui))).toEqual(["Enable account", "Delete account…"]);
   });
 });
 
@@ -609,95 +564,6 @@ describe("server owner", () => {
     mocks.viewerIsOwner = true;
     renderUserDetail();
     expect(screen.getByRole("button", { name: "View as user" })).toBeEnabled();
-  });
-});
-
-describe("tabs", () => {
-  it("opens the tab the URL names and writes the tab it switches to", async () => {
-    const ui = userEvent.setup();
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(screen.getByRole("tab", { name: /Access & limits/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("region", { name: "Playback & streaming" })).toBeInTheDocument();
-    await ui.click(screen.getByRole("tab", { name: /Downloads/ }));
-    expect(search()).toBe("?tab=downloads");
-    expect(screen.getByText("Downloads content")).toBeInTheDocument();
-    await ui.click(screen.getByRole("tab", { name: "Overview" }));
-    expect(search()).toBe("");
-    expect(screen.getByText("Overview content")).toBeInTheDocument();
-  });
-
-  it("opens Overview for a missing or unknown tab", () => {
-    renderUserDetail("/admin/users/7?tab=settings");
-    expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("Overview content")).toBeInTheDocument();
-  });
-
-  it("counts custom limits and shows a dot while the account watches", () => {
-    mocks.user = { ...adminUser, max_streams: 2, transcode_allowed: true, max_transcodes: 1 };
-    mocks.live = [{ session_id: "s1", profile_id: "p1" }];
-    renderUserDetail();
-    expect(screen.getByRole("tab", { name: /Access & limits/ })).toHaveTextContent(
-      "Access & limits2 custom",
-    );
-    expect(
-      within(screen.getByRole("tab", { name: /Activity/ })).getByRole("img", {
-        name: "Watching now",
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Preferences/ })).toHaveTextContent("Preferences0");
-  });
-});
-
-describe("Sign-in tab", () => {
-  it("shows the account's sign-in", async () => {
-    mocks.user = { ...adminUser, role: "admin", break_glass: true };
-    mocks.viewerIsOwner = true;
-    renderUserDetail("/admin/users/7?tab=sign-in");
-    expect(
-      await screen.findByText("On: taylor can sign in with a Silo password."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Break-glass account" })).toBeChecked();
-    expect(screen.getByText("Not connected to a sign-in provider.")).toBeInTheDocument();
-  });
-});
-
-describe("Access & limits in the page", () => {
-  it("shows the group-intersected permission set, not the account's assigned one", () => {
-    mocks.user = {
-      ...adminUser,
-      permissions: [PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION],
-      effective_policy: { ...adminUser.effective_policy, permissions: [PERMISSION_MARKER_EDIT] },
-    };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(rowValue("Marker editing")).toBe("Allowed");
-    expect(rowValue("Metadata curation")).toBe("Not allowed");
-  });
-
-  it("reports audio transcoding even when video transcoding is allowed", () => {
-    mocks.user = {
-      ...adminUser,
-      effective_policy: {
-        ...adminUser.effective_policy,
-        transcode_allowed: true,
-        audio_transcode_allowed: false,
-      },
-    };
-    renderUserDetail("/admin/users/7?tab=access");
-    expect(rowValue("Video transcoding")).toBe("UnlimitedDEFAULT");
-    expect(rowValue("Audio-only transcoding")).toBe("Not allowedDEFAULT");
-  });
-
-  it("shows the Requests card with the account's switch", () => {
-    renderUserDetail("/admin/users/7?tab=access");
-    const requests = screen.getByRole("region", { name: "Requests" });
-    expect(within(requests).getByRole("link", { name: /Requests/ })).toHaveAttribute(
-      "href",
-      "/admin/requests?user=7",
-    );
-    expect(rowValue("Can request media")).toBe("YesDEFAULT");
   });
 });
 

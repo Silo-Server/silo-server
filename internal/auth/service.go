@@ -91,6 +91,9 @@ type Service struct {
 	// recheck re-checks sessions opened through an external provider at
 	// refresh; nil skips it.
 	recheck *ProviderRecheck
+	// previews caches network providers' answers about request peers for
+	// discovery (networkPreview).
+	previews networkPreviews
 }
 
 // PluginProviderSource supplies the current auth-plugin providers. The
@@ -114,6 +117,9 @@ type LoginProviderInfo struct {
 	// InstallationID is non-zero when the provider is backed by a plugin.
 	// The login UI uses it to build /api/v1/auth/oauth/{install_id}/init URLs.
 	InstallationID int `json:"installation_id,omitempty"`
+	// NetworkIdentity is who a network provider says the peer of the
+	// discovery request is; set only by DiscoverProviders.
+	NetworkIdentity *NetworkIdentityPreview `json:"network_identity,omitempty"`
 }
 
 type RegisteredProvider struct {
@@ -294,6 +300,10 @@ func (s *Service) registeredProviders() ([]RegisteredProvider, string) {
 	}
 	defaultID := ""
 	for _, registered := range all {
+		if registered.Info.Mode == ProviderModeNetwork {
+			// Never the default: it takes no password.
+			continue
+		}
 		if defaultID == "" || registered.Info.Default {
 			defaultID = registered.Info.ID
 		}
@@ -352,15 +362,39 @@ func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*m
 }
 
 // OpenOAuthSession opens the login session of a completion code being
-// redeemed, on db (nil: a new transaction), and mints its token pair. The
-// account is locked and read again, so one disabled since the callback is
-// refused and account changes serialize with the session's creation.
+// redeemed, on db (nil: a new transaction), and mints its token pair
+// (OpenIdentitySession).
 func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error) {
+	return s.OpenIdentitySession(ctx, db, IdentitySession{
+		UserID: c.UserID, IdentityID: c.IdentityID, DeviceName: c.DeviceName, IP: c.IP,
+	})
+}
+
+// IdentitySession is a login session to open for an account that signed in
+// through a provider identity.
+type IdentitySession struct {
+	UserID     int
+	IdentityID int64
+	DeviceName string
+	IP         string
+	// Network: the identity is a network provider's, refused while the
+	// account's primary provider refuses the account (primaryAuthority).
+	Network bool
+}
+
+// OpenIdentitySession opens the login session of an account that signed in
+// through a provider identity, on db (nil: a new transaction), and mints its
+// token pair. The account is locked and read again, so one disabled since
+// the provider answered is refused and account changes serialize with the
+// session's creation; the identity and its enabled installation are locked
+// too. A network identity's primary-provider refusal is read again under the
+// account lock, which a re-check that refuses the account also holds.
+func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c IdentitySession) (*TokenPair, error) {
 	if db == nil {
 		var pair *TokenPair
 		err := pgx.BeginFunc(ctx, s.sessions.pool, func(tx pgx.Tx) error {
 			var err error
-			pair, err = s.OpenOAuthSession(ctx, tx, c)
+			pair, err = s.OpenIdentitySession(ctx, tx, c)
 			return err
 		})
 		if err != nil {
@@ -370,13 +404,23 @@ func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAu
 	}
 	user, err := lockUser(ctx, db, c.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("load oauth account: %w", err)
+		return nil, fmt.Errorf("load provider account: %w", err)
 	}
 	if !user.Enabled {
 		return nil, ErrUserDisabled
 	}
-	if err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID); err != nil {
+	installationID, err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID)
+	if err != nil {
 		return nil, err
+	}
+	if c.Network {
+		authority, err := primaryAuthorityOf(ctx, db, user.ID, installationID)
+		if err != nil {
+			return nil, err
+		}
+		if authority.refused {
+			return nil, ErrNotPermitted
+		}
 	}
 	sessionID := uuid.New().String()
 	session := models.AuthSession{
@@ -403,41 +447,42 @@ func (s *Service) OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAu
 	return pair, nil
 }
 
-// lockOAuthIdentity checks the identity and enabled installation after
-// the account is locked. Lock the installation before the identity so an
-// uninstall, which deletes identities by cascade, cannot deadlock with us.
-func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, identityID int64) error {
+// lockOAuthIdentity checks the identity and enabled installation after the
+// account is locked, and answers the installation. Lock the installation
+// before the identity so an uninstall, which deletes identities by cascade,
+// cannot deadlock with us.
+func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, identityID int64) (int, error) {
 	var installationID int
 	err := db.QueryRow(ctx, `SELECT plugin_installation_id FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2`, identityID, userID).Scan(&installationID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("read oauth identity: %w", err)
+		return 0, fmt.Errorf("read oauth identity: %w", err)
 	}
 	var enabled bool
 	err = db.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1 FOR SHARE`, installationID).Scan(&enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("lock oauth installation: %w", err)
+		return 0, fmt.Errorf("lock oauth installation: %w", err)
 	}
 	if !enabled {
-		return ErrProviderUnavailable
+		return 0, ErrProviderUnavailable
 	}
 	var lockedIdentityID int64
 	err = db.QueryRow(ctx, `SELECT id FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2 AND plugin_installation_id = $3 FOR UPDATE`,
 		identityID, userID, installationID).Scan(&lockedIdentityID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotPermitted
+		return 0, ErrNotPermitted
 	}
 	if err != nil {
-		return fmt.Errorf("lock oauth identity: %w", err)
+		return 0, fmt.Errorf("lock oauth identity: %w", err)
 	}
-	return nil
+	return installationID, nil
 }
 
 // LinkOAuthIdentity finishes a linking flow: the identity the plugin
@@ -531,12 +576,31 @@ func (s *Service) DiscoverProviders(ctx context.Context) (ProviderDiscovery, err
 		if registered.Info.ID == LocalProviderID && !localAllowed {
 			continue
 		}
-		listed = append(listed, registered.Info)
-		defaultListed = defaultListed || registered.Info.ID == defaultID
+		info := registered.Info
+		if info.Mode == ProviderModeNetwork {
+			// Offered only to a request its own overlay listener proxied, from
+			// a peer the plugin will sign in.
+			provider, ok := registered.Provider.(*PluginProvider)
+			if !ok || provider == nil {
+				continue
+			}
+			if info.NetworkIdentity = s.networkPreview(ctx, provider); info.NetworkIdentity == nil {
+				continue
+			}
+		}
+		listed = append(listed, info)
+		defaultListed = defaultListed || info.ID == defaultID
 	}
 	discovery := ProviderDiscovery{Providers: listed}
+	firstPrimary := true
 	for i := range listed {
-		listed[i].Default = listed[i].ID == defaultID || (!defaultListed && i == 0)
+		// Without the configured default, the first provider that is not a
+		// network one is the default: a network provider takes no password.
+		fallback := !defaultListed && firstPrimary && listed[i].Mode != ProviderModeNetwork
+		if listed[i].Mode != ProviderModeNetwork {
+			firstPrimary = false
+		}
+		listed[i].Default = listed[i].ID == defaultID || fallback
 		if listed[i].Mode == ProviderModeCredentials {
 			discovery.PasswordLogin = true
 		}

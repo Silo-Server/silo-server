@@ -65,7 +65,7 @@ export default function HeroCrewLine({
   if (!hasDirectors && !hasWriters && !hasAuthors && !hasGenres) return null;
 
   return (
-    <div className="text-muted-foreground text-[13px]">
+    <div className="text-muted-foreground text-[0.8125rem]">
       {hasAuthors && (
         <>
           <span className="text-muted-foreground/60">By </span>

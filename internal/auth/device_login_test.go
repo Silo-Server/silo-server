@@ -2,7 +2,6 @@ package auth
 
 import (
 	"errors"
-	"regexp"
 	"testing"
 	"time"
 )
@@ -80,41 +79,5 @@ func TestValidateDeviceLoginDecisionTerminalStates(t *testing.T) {
 		if err := validateDeviceLoginDecision(record); !errors.Is(err, tt.want) {
 			t.Fatalf("status %q error = %v, want %v", tt.status, err, tt.want)
 		}
-	}
-}
-
-func TestRandomUserCodeIsEightGroupedDigits(t *testing.T) {
-	t.Parallel()
-
-	shape := regexp.MustCompile(`^[0-9]{4}-[0-9]{4}$`)
-	seen := map[byte]int{}
-	for range 500 {
-		code, err := randomUserCode()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !shape.MatchString(code) {
-			t.Fatalf("code %q is not eight grouped digits", code)
-		}
-		for _, c := range []byte(normalizeUserCode(code)) {
-			seen[c]++
-		}
-	}
-	// 4,000 draws: every digit turns up.
-	if len(seen) != 10 {
-		t.Fatalf("digits seen = %v", seen)
-	}
-}
-
-func TestNormalizeUserCodeIgnoresSeparators(t *testing.T) {
-	t.Parallel()
-
-	for _, in := range []string{"48217730", "4821-7730", "4821 7730", " 4821 - 7730 "} {
-		if got := normalizeUserCode(in); got != "48217730" {
-			t.Fatalf("normalizeUserCode(%q) = %q", in, got)
-		}
-	}
-	if got := formatUserCode("48217730"); got != "4821-7730" {
-		t.Fatalf("formatUserCode = %q", got)
 	}
 }

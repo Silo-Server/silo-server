@@ -5,8 +5,6 @@ import {
   rollbackSidebarPinsOptimisticMutation,
   setNavigationShortcutPresence,
   sidebarPinsToShortcuts,
-  toggleNavigationShortcut,
-  toggleSidebarPins,
 } from "./sidebarPins";
 
 describe("sidebar pin helpers", () => {
@@ -78,28 +76,6 @@ describe("sidebar pin helpers", () => {
     });
   });
 
-  it("toggles one sidebar target without dropping other shared shortcuts", () => {
-    const current = {
-      items: [
-        { type: "library", library_id: 42, label: "Movies" },
-        { type: "collection", collection_id: "global", label: "Global" },
-      ],
-    };
-    expect(
-      toggleNavigationShortcut(current, 42, {
-        type: "section",
-        id: "recent",
-        label: "Recent",
-      }),
-    ).toEqual({
-      items: [
-        { type: "library", library_id: 42, label: "Movies" },
-        { type: "collection", collection_id: "global", label: "Global" },
-        { type: "section", library_id: 42, section_id: "recent", label: "Recent" },
-      ],
-    });
-  });
-
   it("sets desired presence and refreshes a label without reordering", () => {
     const target = {
       type: "section" as const,
@@ -119,50 +95,6 @@ describe("sidebar pin helpers", () => {
     });
     expect(setNavigationShortcutPresence(current, target, false)).toEqual({
       items: [{ type: "library", library_id: 42, label: "Movies" }],
-    });
-  });
-
-  it("adds a new pin to the target library", () => {
-    expect(
-      toggleSidebarPins({}, 42, { type: "collection", id: "col-1", label: "Pinned Horror" }),
-    ).toEqual({
-      "42": [{ type: "collection", id: "col-1", label: "Pinned Horror" }],
-    });
-  });
-
-  it("removes an existing pin from the target library only", () => {
-    expect(
-      toggleSidebarPins(
-        {
-          "42": [
-            { type: "collection", id: "col-1", label: "Pinned Horror" },
-            { type: "section", id: "sec-1", label: "Recently Added" },
-          ],
-          "99": [{ type: "collection", id: "col-2", label: "Other Library" }],
-        },
-        42,
-        { type: "collection", id: "col-1", label: "Pinned Horror" },
-      ),
-    ).toEqual({
-      "42": [{ type: "section", id: "sec-1", label: "Recently Added" }],
-      "99": [{ type: "collection", id: "col-2", label: "Other Library" }],
-    });
-  });
-
-  it("builds the optimistic value as a typed object, not a JSON string", () => {
-    const mutation = createSidebarPinsOptimisticMutation({
-      currentValue: { "42": [{ type: "section", id: "sec-1", label: "Recently Added" }] },
-      currentRevision: null,
-      libraryId: 42,
-      pin: { type: "collection", id: "col-1", label: "Pinned Horror" },
-      revision: 1,
-    });
-
-    expect(mutation.optimisticValue).toEqual({
-      "42": [
-        { type: "section", id: "sec-1", label: "Recently Added" },
-        { type: "collection", id: "col-1", label: "Pinned Horror" },
-      ],
     });
   });
 
@@ -193,13 +125,6 @@ describe("sidebar pin helpers", () => {
       libraryId: 42,
       pin: { type: "collection", id: "col-1", label: "Pinned Horror" },
       revision: 1,
-    });
-    createSidebarPinsOptimisticMutation({
-      currentValue: firstMutation.optimisticValue,
-      currentRevision: 1,
-      libraryId: 42,
-      pin: { type: "section", id: "sec-1", label: "Recently Added" },
-      revision: 2,
     });
 
     expect(

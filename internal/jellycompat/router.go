@@ -184,9 +184,14 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
+	playbackHandler.PlaySync = deps.SubtitlePlaySync
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
+		// The PostgreSQL repository also stores sidecar timing corrections.
+		if timings, ok := subtitleRepo.(subtitles.ExternalTimingLookup); ok {
+			playbackHandler.ExternalTimings = timings
+		}
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections

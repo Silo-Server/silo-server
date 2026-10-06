@@ -98,8 +98,10 @@ afterEach(() => {
 it("installs the nested v2 session and continues household setup", async () => {
   mount();
   await fill();
+  expect(screen.getByLabelText("Email")).toBeDisabled();
   send();
   await screen.findByText("Household setup");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({
       access_token: accepted.tokens.access_token,
@@ -253,14 +255,7 @@ it("keeps a link invitation usable when the address already has an account", asy
   expect(posts()).toHaveLength(2);
   expect(auth.completeLogin).not.toHaveBeenCalled();
 });
-it("does not send an address for an emailed invitation", async () => {
-  mount();
-  await fill();
-  expect(screen.getByLabelText("Email")).toBeDisabled();
-  send();
-  await screen.findByText("Household setup");
-  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
-});
+
 it("keeps a link invitation in the browser on Android", async () => {
   const agent = vi
     .spyOn(navigator, "userAgent", "get")

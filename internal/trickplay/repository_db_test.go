@@ -216,7 +216,7 @@ func TestClaimPublishAndServeDB(t *testing.T) {
 		t.Fatal("another server published")
 	}
 	if ok, err := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{
-		Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 360, SheetBytes: []int{200_000, 180_000, 150_000, 60_000, 30_000},
+		Recipe: testRecipe, StoreIdentity: testStore, Height: 168, Count: 360, SheetBytes: []int{180_000, 200_000, 150_000, 60_000, 30_000},
 	}); err != nil || !ok {
 		t.Fatalf("publish: %v %t", err, ok)
 	}

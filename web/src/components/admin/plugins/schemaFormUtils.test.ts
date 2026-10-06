@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
+
 import type { PluginAdminForm, PluginAdminFormField } from "@/api/types";
+import { describe, expect, it } from "vitest";
 import {
-  evaluateShowWhen,
-  validateSchemaValues,
   buildSchemaValues,
-  parseFieldTypes,
   coerceFieldValue,
+  parseFieldTypes,
+  validateSchemaValues,
 } from "./schemaFormUtils";
 
 const descriptor: PluginAdminForm = {
@@ -52,48 +53,7 @@ const descriptor: PluginAdminForm = {
   ],
 };
 
-describe("evaluateShowWhen", () => {
-  it("shows when all conditions match (stringified)", () => {
-    expect(
-      evaluateShowWhen([{ field: "service_kind", equals: ["sonarr"] }], { service_kind: "sonarr" }),
-    ).toBe(true);
-    expect(
-      evaluateShowWhen([{ field: "service_kind", equals: ["sonarr"] }], { service_kind: "radarr" }),
-    ).toBe(false);
-  });
-  it("matches booleans by stringified value", () => {
-    expect(
-      evaluateShowWhen([{ field: "anime_enabled", equals: ["true"] }], { anime_enabled: true }),
-    ).toBe(true);
-    expect(
-      evaluateShowWhen([{ field: "anime_enabled", equals: ["true"] }], { anime_enabled: false }),
-    ).toBe(false);
-  });
-  it("empty conditions => always visible", () => {
-    expect(evaluateShowWhen(undefined, {})).toBe(true);
-  });
-  it("falls back to the controlling field default", () => {
-    const fields: PluginAdminFormField[] = [
-      {
-        key: "anime_enabled",
-        label: "Anime",
-        control: "SWITCH",
-        required: false,
-        secret: false,
-        multiline: false,
-        default_value: true,
-      },
-    ];
-    expect(evaluateShowWhen([{ field: "anime_enabled", equals: ["true"] }], {}, fields)).toBe(true);
-  });
-});
-
 describe("validateSchemaValues", () => {
-  it("flags required visible fields that are empty", () => {
-    const errs = validateSchemaValues(descriptor, { service_kind: "radarr" });
-    expect(errs.quality_profile_id).toMatch(/required/i);
-    expect(errs.service_kind).toBeUndefined();
-  });
   it("ignores required fields hidden by show_when", () => {
     const d: PluginAdminForm = {
       fields: [

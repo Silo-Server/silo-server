@@ -179,7 +179,7 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		Status: v.Status, ShowStatus: v.ShowStatus,
 		RatingIMDB: v.RatingIMDB, RatingTMDB: v.RatingTMDB, RatingRTCritic: v.RatingRTCritic, RatingRTAudience: v.RatingRTAudience,
 		OriginalLanguage: v.OriginalLanguage, Overview: v.Overview, ReleaseDate: v.ReleaseDate, LastAirDate: v.LastAirDate, AddedAt: instantPtr(v.AddedAt),
-		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash,
+		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,

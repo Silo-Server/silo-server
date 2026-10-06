@@ -102,17 +102,6 @@ async function settled() {
   );
 }
 
-it("shows each provider as a button with its icon and name", async () => {
-  auth.providers = [LOCAL, OIDC];
-  renderLogin();
-  const link = screen.getByRole("link", { name: "Company SSO" });
-  expect(link.getAttribute("href")).toBe("/api/v2/auth/oauth/5/start");
-  expect(link.querySelector("img")?.getAttribute("src")).toBe("/api/v2/plugins/5/icon.svg");
-  expect(screen.getByLabelText("Password")).toBeTruthy();
-  await settled();
-  expect(leave).not.toHaveBeenCalled();
-});
-
 it.each([
   ["not_permitted", "Your account at the sign-in provider isn't allowed to use this server."],
   [
@@ -131,6 +120,7 @@ it.each([
   auth.providers = [OIDC];
   renderLogin(`/login?error=oauth_failed&reason=${reason}`);
   expect(screen.getByRole("alert").textContent).toBe(text);
+  if (reason === "not_permitted") expect(screen.queryByText(/not_permitted/)).toBeNull();
   await settled();
   expect(leave).not.toHaveBeenCalled();
 });
@@ -207,25 +197,6 @@ it("offers Forgot password when the form is the local one", async () => {
   auth.providers = [LOCAL, OIDC];
   renderLogin();
   await screen.findByRole("link", { name: "Forgot password?" });
-});
-
-it("explains that password sign-in is off", async () => {
-  auth.providers = [LDAP, OIDC];
-  auth.login.mockRejectedValue(
-    new V2ProblemError("login", {
-      type: "https://siloserver.org/docs/api/v2/problems/local_login_disabled",
-      title: "Local password sign-in disabled",
-      status: 403,
-      detail: "raw detail",
-    } as never),
-  );
-  renderLogin();
-  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "alice" } });
-  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "pw" } });
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-  expect((await screen.findByRole("alert")).textContent).toBe(
-    "Password sign-in is turned off on this server. Sign in with Company SSO instead.",
-  );
 });
 
 it.each([

@@ -135,3 +135,26 @@ func TestSanitizeJSONRedactsURLFormsWithSpaces(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeTextMasksCredentials(t *testing.T) {
+	for _, text := range []string{
+		"desc = api_key=SECRET",
+		"node https://node.example/prepare?token=SECRET&x=1: 502",
+		`upstream said {"access_token": "SECRET"}`,
+		"Authorization: Bearer SECRET",
+		"open rtsp://user:SECRET@camera/stream failed",
+		"X-Emby-Token=SECRET, password: SECRET",
+	} {
+		got := SanitizeText(text)
+		if strings.Contains(got, "SECRET") || !strings.Contains(got, Placeholder) {
+			t.Fatalf("SanitizeText(%q) = %q", text, got)
+		}
+	}
+}
+
+func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
+	const text = "ffmpeg: No space left on device (/media/Movies/A: B (2020).mkv)"
+	if got := SanitizeText(text); got != text {
+		t.Fatalf("SanitizeText changed ordinary text: %q", got)
+	}
+}

@@ -39,7 +39,7 @@ export default function DetailOverview({
       <p
         ref={textRef}
         className={`text-muted-foreground leading-7 ${
-          compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[15px]"
+          compact ? "text-sm" : "text-foreground/72 text-sm sm:text-[0.9375rem]"
         } ${clamp && !expanded ? "line-clamp-3" : ""} ${
           translating ? "animate-pulse opacity-50" : ""
         }`}

@@ -10,8 +10,9 @@ values use the 300-second default. Negative request values return HTTP 400.
 The start response echoes `throttle_seconds` after arming the throttler.
 When throttling is enabled, the API rejects a missing or mismatched echo and
 stops the rejected remote transport. Disabled requests remain compatible with
-nodes that omit this field. Deploy updated transcode nodes before enabling
-throttling on API servers that require this attestation.
+nodes that omit this field. Throttling is on unless an administrator turns it
+off, so update transcode nodes before the API servers that require this
+attestation.
 
 Recipe cards and signed reconstruction claims preserve the resolved threshold.
 Remote reconstruction and FFmpeg restarts re-arm the same policy. Local native

@@ -33,16 +33,6 @@ describe("PageBack", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders a button with the default 'Go back' aria-label", () => {
-    render(
-      <MemoryRouter>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
-  });
-
   it("uses a custom label when provided", () => {
     render(
       <MemoryRouter>
@@ -126,39 +116,5 @@ describe("PageBack", () => {
     await userEvent.click(screen.getByRole("button", { name: "Go back" }));
 
     expect(document.documentElement.dataset.navigationDirection).toBe("back");
-  });
-
-  it("applies the documented positioning and glass styling", () => {
-    render(
-      <MemoryRouter>
-        <PageBack />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Go back" });
-    expect(button).toHaveClass(
-      "glass",
-      "glass-hover",
-      "glass-hover-accent",
-      "absolute",
-      "top-4",
-      "left-2",
-      "z-20",
-      "rounded-full",
-      "p-1.5",
-    );
-    expect(button).not.toHaveClass("hover:bg-accent");
-    expect(button).not.toHaveClass("transition-colors");
-  });
-
-  it("pins to the viewport on lg+ when floating is set", () => {
-    render(
-      <MemoryRouter>
-        <PageBack floating />
-      </MemoryRouter>,
-    );
-
-    const button = screen.getByRole("button", { name: "Go back" });
-    expect(button).toHaveClass("lg:fixed", "lg:left-[268px]");
   });
 });

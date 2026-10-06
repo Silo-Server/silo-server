@@ -35,7 +35,7 @@ jobs:
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
         contains(fromJSON('["main","apiv2"]'), github.event.workflow_run.head_branch)))
-    runs-on: ${{ inputs.platform == 'linux/amd64' && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-docker-amd64"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04-arm' }}
+    runs-on: ${{ inputs.platform == 'linux/amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 90
     permissions:
       contents: read

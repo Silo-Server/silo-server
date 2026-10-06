@@ -214,6 +214,7 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		}
 		resp.PosterURL = imageURLs[item.ContentID].posterURL
 		resp.BackdropURL = imageURLs[item.ContentID].backdropURL
+		resp.LogoURL = imageURLs[item.ContentID].logoURL
 		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
 	}

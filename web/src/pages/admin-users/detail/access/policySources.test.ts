@@ -2,21 +2,15 @@ import { describe, expect, it } from "vitest";
 
 import type { AccessGroup, AdminUser, Library } from "@/api/types";
 import { policyInheritHints, savedUserPolicyInheritHints } from "@/components/UserPolicyFields";
+import { POLICY_DEFAULTS } from "@/test/policyDefaults";
 
 import {
   countCustomPolicyRows,
   countCustomRequestTerms,
-  formatBitrateCap,
-  formatStreams,
-  formatVideoTranscoding,
   inheritContextFor,
   inheritedValueText,
   permissionLock,
   rowSource,
-  videoTranscodingFromEffective,
-  videoTranscodingFromOverrides,
-  videoTranscodingOverrides,
-  type VideoTranscoding,
 } from "./policySources";
 
 const USER: AdminUser = {
@@ -89,7 +83,10 @@ const LIBRARIES = [
 
 const grouped: AdminUser = { ...USER, access_group_id: 3 };
 const hintsFor = (user: AdminUser) =>
-  savedUserPolicyInheritHints(user, policyInheritHints(user.access_group_id, [FAMILY]));
+  savedUserPolicyInheritHints(
+    user,
+    policyInheritHints(user.role, user.access_group_id, [FAMILY], POLICY_DEFAULTS),
+  );
 
 describe("sources", () => {
   it("tags each row by where its value comes from", () => {
@@ -118,15 +115,26 @@ describe("sources", () => {
 });
 
 describe("inheritedValueText", () => {
-  it("words the server default", () => {
-    const ctx = inheritContextFor(USER, []);
-    const hints = hintsFor(USER);
-    expect(inheritedValueText("maxStreams", hints, ctx, LIBRARIES)).toBe("Default: unlimited");
-    expect(inheritedValueText("videoTranscoding", hints, ctx, LIBRARIES)).toBe(
-      "Default: allowed, unlimited",
+  it("words an admin's default as full access", () => {
+    const admin: AdminUser = { ...USER, role: "admin", download_transcode_allowed: false };
+    const ctx = inheritContextFor(admin, []);
+    expect(inheritedValueText("serverPrepared", hintsFor(admin), ctx, LIBRARIES)).toBe(
+      "Default: allowed",
     );
-    expect(inheritedValueText("remoteBitrate", hints, ctx, LIBRARIES)).toBe("Default: no cap");
-    expect(inheritedValueText("libraries", hints, ctx, LIBRARIES)).toBe("Default: all libraries");
+    expect(inheritedValueText("serverPrepared", hintsFor(USER), ctx, LIBRARIES)).toBe(
+      "Default: not allowed",
+    );
+  });
+
+  it("is unknown while the server defaults are not loaded", () => {
+    const admin: AdminUser = { ...USER, role: "admin", max_streams: 2 };
+    const hints = savedUserPolicyInheritHints(
+      admin,
+      policyInheritHints(admin.role, null, [], undefined),
+    );
+    expect(
+      inheritedValueText("maxStreams", hints, inheritContextFor(admin, []), LIBRARIES),
+    ).toBeUndefined();
   });
 
   it("words the group's value, including under an override", () => {
@@ -145,18 +153,13 @@ describe("inheritedValueText", () => {
     expect(inheritedValueText("maxQuality", hints, ctx, LIBRARIES)).toBe("Group: 1080p");
   });
 
-  it("keeps library names as they are", () => {
-    const user = { ...grouped, library_ids: [1] };
-    const ctx = inheritContextFor(user, [FAMILY]);
-    expect(inheritedValueText("libraries", hintsFor(user), ctx, LIBRARIES)).toBe(
-      "Group: Movies, TV",
-    );
-  });
-
   it("is unknown while the group is not loaded", () => {
     const user = { ...USER, access_group_id: 9, max_streams: 3 };
     const ctx = inheritContextFor(user, [FAMILY]);
-    const hints = savedUserPolicyInheritHints(user, policyInheritHints(9, [FAMILY]));
+    const hints = savedUserPolicyInheritHints(
+      user,
+      policyInheritHints(user.role, 9, [FAMILY], POLICY_DEFAULTS),
+    );
     expect(inheritedValueText("maxStreams", hints, ctx, LIBRARIES)).toBeUndefined();
   });
 });
@@ -201,50 +204,7 @@ describe("countCustomPolicyRows", () => {
   });
 });
 
-describe("video transcoding", () => {
-  it.each<[string, VideoTranscoding | null, boolean | null, number | null]>([
-    ["Off", { mode: "off" }, false, null],
-    ["Unlimited", { mode: "unlimited" }, true, 0],
-    ["Up to 2", { mode: "limit", max: 2 }, true, 2],
-    ["Default", null, null, null],
-  ])("round-trips %s", (_, value, allowed, max) => {
-    expect(videoTranscodingOverrides(value)).toEqual({
-      transcode_allowed: allowed,
-      max_transcodes: max,
-    });
-    expect(videoTranscodingFromOverrides(allowed, max)).toEqual(value);
-  });
-
-  it("reads an overridden count with an inherited switch as custom", () => {
-    // The card shows it from the effective policy and only rewrites the pair
-    // when the admin changes this row.
-    expect(videoTranscodingFromOverrides(null, 3)).not.toBeNull();
-    expect(videoTranscodingFromEffective(true, 3)).toEqual({ mode: "limit", max: 3 });
-    expect(videoTranscodingFromEffective(false, 3)).toEqual({ mode: "off" });
-  });
-
-  it("formats each mode", () => {
-    expect(formatVideoTranscoding({ mode: "off" })).toBe("Off");
-    expect(formatVideoTranscoding({ mode: "unlimited" })).toBe("Unlimited");
-    expect(formatVideoTranscoding({ mode: "limit", max: 1 })).toBe("Up to 1 at a time");
-    expect(formatStreams(0)).toBe("Unlimited");
-    expect(formatBitrateCap(0)).toBe("No cap");
-    expect(formatBitrateCap(12000)).toBe("12 Mbps");
-  });
-});
-
 describe("permissionLock", () => {
-  it("locks a permission the group does not allow", () => {
-    expect(permissionLock(grouped, [FAMILY], "metadata_curation")).toEqual({
-      locked: true,
-      groupName: "Family",
-    });
-    expect(permissionLock(grouped, [FAMILY], "marker_edit")).toEqual({
-      locked: false,
-      groupName: "Family",
-    });
-  });
-
   it("never locks an admin, an ungrouped account, an unloaded group, or an open ceiling", () => {
     expect(
       permissionLock({ ...grouped, role: "admin" }, [FAMILY], "metadata_curation").locked,

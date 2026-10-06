@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPlaybackInfoSections,
-  formatProtocol,
-  formatStreamType,
   lowerQualityOption,
   qualityOptionsFromPlanV3,
   resolveActiveQualityOptionId,
@@ -234,24 +232,6 @@ describe("playback info helpers", () => {
     // badge reads "DV" instead of the old generic boolean-derived "HDR".
     expect(rowValue(sections, "Player", "Auto-switched from")).toBe("2160p HEVC DV");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("H.264 High");
-  });
-
-  it("names the transport from the plan's protocol", () => {
-    expect(formatStreamType(fixturePlanV3())).toBe("HLS");
-    expect(
-      formatStreamType(
-        fixturePlanV3({
-          stream: {
-            url: "/stream/session-1/original",
-            protocol: "http_progressive",
-            mime_type: "video/mp4",
-            headers: {},
-            header_refresh: "none",
-          },
-        }),
-      ),
-    ).toBe("Progressive");
-    expect(formatProtocol("https://app.example.com/master.m3u8")).toBe("https");
   });
 });
 

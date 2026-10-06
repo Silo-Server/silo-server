@@ -360,6 +360,18 @@ func TestSeriesUserDataRollupParity(t *testing.T) {
 	if rollup.seasonDetail.SeasonUserData == nil || *rollup.seasonDetail.SeasonUserData != want[3] {
 		t.Fatalf("season user_data = %+v, want %+v", rollup.seasonDetail.SeasonUserData, want[3])
 	}
+	// Each detail names the season of its play target, taken from the row
+	// that chose the target rather than a second episode read.
+	var targetSeason int
+	if err := pool.QueryRow(ctx, `SELECT season_number FROM episodes WHERE content_id=$1`, rollup.seriesDetail.PlayContentID).Scan(&targetSeason); err != nil {
+		t.Fatalf("series play target %q: %v", rollup.seriesDetail.PlayContentID, err)
+	}
+	if got := rollup.seriesDetail.PlaySeasonNumber; got == nil || *got != targetSeason {
+		t.Fatalf("series play_season_number = %v, want %d for %s", got, targetSeason, rollup.seriesDetail.PlayContentID)
+	}
+	if got := rollup.seasonDetail; got.PlayContentID == "" || got.PlaySeasonNumber == nil || *got.PlaySeasonNumber != 3 {
+		t.Fatalf("season 3 play target = %q in season %v, want an episode of season 3", got.PlayContentID, got.PlaySeasonNumber)
+	}
 	if got := rollup.seasonByNumber; got.UserData == nil || *got.UserData != want[3] || got.EpisodeCount != perSeason {
 		t.Fatalf("season 3 by number: user_data = %+v, episode_count = %d; want %+v, %d", got.UserData, got.EpisodeCount, want[3], perSeason)
 	}

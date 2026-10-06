@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -195,7 +196,10 @@ func TestPlayableTargetsPostgresMatchesGeneral(t *testing.T) {
 		}
 	}
 
-	intPtr := func(v int) *int { return &v }
+	episodeSeasons := make(map[string]int, len(episodes))
+	for _, ep := range episodes {
+		episodeSeasons[ep.contentID] = ep.season
+	}
 	var inputs []PlayableTargetInput
 	for _, movie := range movieIDs {
 		inputs = append(inputs, PlayableTargetInput{ContentID: movie, Type: "movie"}, PlayableTargetInput{ContentID: movie, Type: "movie", PreferredContentID: movie})
@@ -258,12 +262,12 @@ func TestPlayableTargetsPostgresMatchesGeneral(t *testing.T) {
 	} {
 		access := scope.access
 		query := PlayableTargetQuery{UserID: userID, ProfileID: profileID, LibraryIDs: scope.libraryIDs, Items: inputs, Access: access, ProgressStore: sqlPath}
-		got, err := resolver.Resolve(ctx, query)
+		got, err := resolver.ResolveTargets(ctx, query)
 		if err != nil {
 			t.Fatalf("SQL-path resolve: %v", err)
 		}
 		query.ProgressStore = generalPathProgressStore{delegate: sqlPath}
-		want, err := resolver.Resolve(ctx, query)
+		want, err := resolver.ResolveTargets(ctx, query)
 		if err != nil {
 			t.Fatalf("general resolve: %v", err)
 		}
@@ -271,8 +275,16 @@ func TestPlayableTargetsPostgresMatchesGeneral(t *testing.T) {
 			t.Fatal("fixture resolved no targets; the comparison would be vacuous")
 		}
 		for _, input := range inputs {
-			if got[input.Key()] != want[input.Key()] {
-				t.Errorf("access %+v libraries %v, card %+v: SQL path %q, general %q", access, scope.libraryIDs, input, got[input.Key()], want[input.Key()])
+			if !reflect.DeepEqual(got[input.Key()], want[input.Key()]) {
+				t.Errorf("access %+v libraries %v, card %+v: SQL path %+v, general %+v", access, scope.libraryIDs, input, got[input.Key()], want[input.Key()])
+			}
+			// Both paths must report the season the target was seeded in,
+			// specials and negative seasons included.
+			if target, ok := got[input.Key()]; ok {
+				season, isEpisode := episodeSeasons[target.ContentID]
+				if isEpisode != (target.SeasonNumber != nil) || (isEpisode && *target.SeasonNumber != season) {
+					t.Errorf("card %+v: target %s season %v, seeded in season %d (episode %v)", input, target.ContentID, target.SeasonNumber, season, isEpisode)
+				}
 			}
 		}
 		if len(got) != len(want) {

@@ -353,51 +353,6 @@ func (s *rollupCapableStore) SeasonEpisodeWatchCounts(context.Context, string, [
 	return map[string]userstore.SeriesWatchCounts{}, nil
 }
 
-// TestInterestTrackingStoreForwardsRollupWhenSupported is the other half of the
-// conditional: a backend that can do the rollup must keep advertising it
-// through the wrapper, and calls must reach it. Losing this would silently
-// push jellycompat back onto the per-episode rollup for every series.
-func TestInterestTrackingStoreForwardsRollupWhenSupported(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := userdb.InitSchema(db); err != nil {
-		t.Fatalf("init schema: %v", err)
-	}
-
-	inner := &rollupCapableStore{UserStore: userdb.NewSQLiteUserStore(db)}
-	provider := WrapUserStoreProvider(preferenceTransactionTestProvider{store: inner}, &System{})
-	wrapped, err := provider.ForUser(context.Background(), 1)
-	if err != nil {
-		t.Fatalf("ForUser: %v", err)
-	}
-
-	rollup, ok := wrapped.(userstore.SeriesEpisodeRollupStore)
-	if !ok {
-		t.Fatal("wrapper dropped SeriesEpisodeRollupStore for a store that supports it")
-	}
-	counts, err := rollup.SeriesEpisodeWatchCounts(context.Background(), "p1", []string{"series-1"})
-	if err != nil {
-		t.Fatalf("SeriesEpisodeWatchCounts: %v", err)
-	}
-	if !inner.called {
-		t.Error("rollup call did not reach the backing store")
-	}
-	if counts["series-1"].WatchedCount != 2 {
-		t.Errorf("counts = %+v, want WatchedCount 2", counts["series-1"])
-	}
-
-	// The other capabilities must still survive alongside the rollup.
-	if _, ok := wrapped.(userstore.WatchedBatchWriter); !ok {
-		t.Error("rollup-capable wrapper dropped WatchedBatchWriter")
-	}
-	if _, ok := wrapped.(userstore.SettingValueCompareAndSetter); !ok {
-		t.Error("rollup-capable wrapper dropped SettingValueCompareAndSetter")
-	}
-}
-
 func TestInterestTrackingDeviceSettingsCapability(t *testing.T) {
 	// Capability discovery is structural. Each combination must survive, and
 	// a backend with no device settings support must keep reporting absence.

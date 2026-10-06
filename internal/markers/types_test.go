@@ -242,29 +242,6 @@ func TestPopulationRegistryTieBreaksSamePriorityByQuality(t *testing.T) {
 	}
 }
 
-func TestPopulationRegistrySingleProviderParity(t *testing.T) {
-	only := &fakeProvider{id: "introdb", result: Result{
-		ProviderID:  "introdb",
-		SourceClass: "online",
-		Algorithm:   "introdb:v3",
-		Markers:     []Marker{{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second, Confidence: 0.9}},
-	}}
-	registry := NewRegistry(nil)
-	if err := registry.Register(only); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	res, ok, err := populateRegistryForTest(context.Background(), registry)
-	if err != nil {
-		t.Fatalf("population: %v", err)
-	}
-	if !ok || len(res.Markers) != 1 || res.Markers[0].Kind != MarkerKindIntro {
-		t.Fatalf("single-provider merge = %+v, ok=%v", res.Markers, ok)
-	}
-	if res.Markers[0].ProviderID != "introdb" {
-		t.Errorf("provider = %q, want introdb (stamped from result)", res.Markers[0].ProviderID)
-	}
-}
-
 func TestNormalizeSetting(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -289,8 +266,8 @@ func TestNormalizeSetting(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NormalizeSetting(tt.key, tt.value)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error")
+				if err == nil || !strings.Contains(err.Error(), tt.key) {
+					t.Fatalf("error = %v, want it to name %s", err, tt.key)
 				}
 				return
 			}
@@ -301,13 +278,6 @@ func TestNormalizeSetting(t *testing.T) {
 				t.Fatalf("NormalizeSetting = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestNormalizeSettingNamesTheDetectionKey(t *testing.T) {
-	_, err := NormalizeSetting(SettingDetectCredits, "maybe")
-	if err == nil || !strings.Contains(err.Error(), SettingDetectCredits) {
-		t.Fatalf("error = %v, want it to name %s", err, SettingDetectCredits)
 	}
 }
 

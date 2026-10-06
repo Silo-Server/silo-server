@@ -150,52 +150,6 @@ func (g *ArtworkRevisionGarbageCollector) Run(ctx context.Context) (ArtworkRevis
 	return stats, err
 }
 
-func processArtworkRevisionGCBatch(
-	candidates []artworkRevisionGCCandidate,
-	process func(artworkRevisionGCCandidate) (artworkRevisionGCOutcome, error),
-	retry func(artworkRevisionGCCandidate, error) error,
-) (ArtworkRevisionGCStats, error) {
-	stats := ArtworkRevisionGCStats{Claimed: len(candidates)}
-	var firstErr error
-	for _, candidate := range candidates {
-		outcome, err := process(candidate)
-		if err != nil {
-			stats.Retried++
-			if retryErr := retry(candidate, err); retryErr != nil && firstErr == nil {
-				firstErr = retryErr
-			}
-			continue
-		}
-		switch outcome {
-		case artworkRevisionGCRetried:
-			stats.Retried++
-		case artworkRevisionGCReferenced:
-			stats.Referenced++
-		case artworkRevisionGCDeletionPendingHeal:
-			// Run accounts this deletion only after the shared final guard
-			// confirms that the durable tombstone can be removed.
-			continue
-		case artworkRevisionGCDeleted:
-			stats.Deleted++
-		case artworkRevisionGCDeletedAndHealed:
-			stats.Deleted++
-			stats.Healed++
-		}
-	}
-	return stats, firstErr
-}
-
-type artworkRevisionGCOutcome int
-
-const (
-	artworkRevisionGCSuperseded artworkRevisionGCOutcome = iota
-	artworkRevisionGCReferenced
-	artworkRevisionGCRetried
-	artworkRevisionGCDeletionPendingHeal
-	artworkRevisionGCDeleted
-	artworkRevisionGCDeletedAndHealed
-)
-
 type artworkRevisionGCCandidate struct {
 	id           int64
 	originalPath string
@@ -289,7 +243,7 @@ func (g *ArtworkRevisionGarbageCollector) parkClaimed(ctx context.Context, ids [
 
 // processCandidatesToHeal locks the current manifests before checking references
 // and deleting objects in one storage call. Re-caching must wait until deletion
-// and the durable tombstones commit, just as in the single-candidate path.
+// and the durable tombstones commit.
 func (g *ArtworkRevisionGarbageCollector) processCandidatesToHeal(
 	ctx context.Context,
 	candidates []artworkRevisionGCCandidate,
@@ -389,46 +343,6 @@ func (g *ArtworkRevisionGarbageCollector) processCandidatesToHeal(
 	}
 	stats.Referenced = len(parked)
 	return pending, stats, nil
-}
-
-func (g *ArtworkRevisionGarbageCollector) processCandidateToHeal(
-	ctx context.Context,
-	candidate artworkRevisionGCCandidate,
-	workerID string,
-) (artworkRevisionGCOutcome, *artworkRevisionGCPendingHeal, error) {
-	pending, stats, err := g.processCandidatesToHeal(ctx, []artworkRevisionGCCandidate{candidate}, workerID)
-	if err != nil {
-		return artworkRevisionGCSuperseded, nil, err
-	}
-	if len(pending) > 0 {
-		return artworkRevisionGCDeletionPendingHeal, &pending[0], nil
-	}
-	if stats.Retried > 0 {
-		return artworkRevisionGCRetried, nil, nil
-	}
-	if stats.Referenced > 0 {
-		return artworkRevisionGCReferenced, nil, nil
-	}
-	return artworkRevisionGCSuperseded, nil, nil
-}
-
-func (g *ArtworkRevisionGarbageCollector) processCandidate(
-	ctx context.Context,
-	candidate artworkRevisionGCCandidate,
-	workerID string,
-) (artworkRevisionGCOutcome, error) {
-	outcome, pending, err := g.processCandidateToHeal(ctx, candidate, workerID)
-	if err != nil || pending == nil {
-		return outcome, err
-	}
-	healResult, err := g.finishPendingHeals(ctx, []artworkRevisionGCPendingHeal{*pending}, workerID)
-	if err != nil {
-		return artworkRevisionGCSuperseded, err
-	}
-	if _, healed := healResult.healedPaths[pending.originalPath]; healed {
-		return artworkRevisionGCDeletedAndHealed, nil
-	}
-	return artworkRevisionGCDeleted, nil
 }
 
 // finishPendingHeals uses one guarded, batched reference sweep to finalize the

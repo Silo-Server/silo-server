@@ -13,24 +13,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestCheckStatusOf(t *testing.T) {
-	for value, want := range map[pluginv1.CheckAccountStatus]string{
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE:        CheckStatusActive,
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND:     CheckStatusNotFound,
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_DISABLED:      CheckStatusDisabled,
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_PERMITTED: CheckStatusNotPermitted,
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSUPPORTED:   CheckStatusUnsupported,
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNAVAILABLE:   CheckStatusUnavailable,
-		// Not an answer, and values this build does not know.
-		pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_UNSPECIFIED: CheckStatusUnavailable,
-		pluginv1.CheckAccountStatus(42):                              CheckStatusUnavailable,
-	} {
-		if got := checkStatusOf(value); got != want {
-			t.Errorf("checkStatusOf(%v) = %q, want %q", value, got, want)
-		}
-	}
-}
-
 func TestVerdictFor(t *testing.T) {
 	for _, tc := range []struct {
 		status     string

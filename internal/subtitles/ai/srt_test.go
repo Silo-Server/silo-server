@@ -25,6 +25,11 @@ func TestParseCuesSRT(t *testing.T) {
 	if len(cues[1].Lines) != 2 {
 		t.Errorf("cue 1 lines = %#v", cues[1].Lines)
 	}
+	wantSRT := "1\n00:00:01,000 --> 00:00:02,500\nHello world\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\nLine one\nLine two\n\n"
+	if got := string(SerializeSRT(cues)); got != wantSRT {
+		t.Fatalf("serialized SRT = %q, want %q", got, wantSRT)
+	}
 }
 
 func TestParseCuesVTT(t *testing.T) {
@@ -45,30 +50,6 @@ func TestParseCuesVTT(t *testing.T) {
 	}
 	if cues[1].Start != time.Minute {
 		t.Errorf("cue 1 start = %v, want 1m", cues[1].Start)
-	}
-}
-
-func TestSerializeRoundTrip(t *testing.T) {
-	orig := []SubtitleCue{
-		{Start: time.Second, End: 2500 * time.Millisecond, Lines: []string{"Hello world"}},
-		{Start: 3 * time.Second, End: 4 * time.Second, Lines: []string{"Line one", "Line two"}},
-	}
-
-	reparsed, err := ParseCues(SerializeSRT(orig))
-	if err != nil {
-		t.Fatalf("reparse: %v", err)
-	}
-	if len(reparsed) != len(orig) {
-		t.Fatalf("round-trip changed cue count: got %d, want %d", len(reparsed), len(orig))
-	}
-	for i := range orig {
-		if reparsed[i].Start != orig[i].Start || reparsed[i].End != orig[i].End {
-			t.Errorf("cue %d timing drifted: %v..%v vs %v..%v",
-				i, reparsed[i].Start, reparsed[i].End, orig[i].Start, orig[i].End)
-		}
-		if len(reparsed[i].Lines) != len(orig[i].Lines) {
-			t.Errorf("cue %d line count changed: %#v", i, reparsed[i].Lines)
-		}
 	}
 }
 

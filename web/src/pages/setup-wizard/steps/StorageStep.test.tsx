@@ -146,18 +146,6 @@ describe("StorageStep", () => {
     expect(markDone).not.toHaveBeenCalled();
   });
 
-  it("locks the backend when artwork is already stored", () => {
-    serverStatusMock.mockReturnValue({
-      data: { artwork_storage: { backend: "local", locked: true, status_known: true } },
-      isPending: false,
-      isError: false,
-    });
-    setup();
-    render(<StorageStep />);
-    expect(screen.getByRole("combobox", { name: "Storage" })).toBeDisabled();
-    expect(screen.getByText(/Locked: files have already been stored/)).toBeInTheDocument();
-  });
-
   // After the first scan the server refuses a new private location with 409;
   // the wizard has no transition flow, so the location fields are read-only.
   it("locks the private bucket location once files are stored", async () => {
@@ -168,6 +156,8 @@ describe("StorageStep", () => {
     });
     setup();
     render(<StorageStep />);
+    expect(screen.getByRole("combobox", { name: "Storage" })).toBeDisabled();
+    expect(screen.getByText(/Locked: files have already been stored/)).toBeInTheDocument();
     // Redis, public S3, and the private bucket each have a "Set up" toggle.
     const toggles = screen.getAllByRole("button", { name: "Set up" });
     await userEvent.click(toggles[toggles.length - 1]!);

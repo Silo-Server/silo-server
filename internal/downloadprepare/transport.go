@@ -38,8 +38,11 @@ const (
 
 var (
 	artifactIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+	logSessionIDPattern = regexp.MustCompile(`^download-prepare-[A-Za-z0-9_-]{1,128}$`)
 	ErrArtifactNotFound = errors.New("remote download artifact not found")
 	ErrRelayReadIdle    = errors.New("remote download artifact read stalled")
+	// ErrProgressUnsupported means the node predates the progress endpoint.
+	ErrProgressUnsupported = errors.New("remote download prepare progress unsupported")
 )
 
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -105,6 +108,21 @@ type Request struct {
 	TrackRecipeVersion string                   `json:"track_recipe_version,omitempty"`
 	PreparedTracks     *playback.PreparedTracks `json:"prepared_tracks,omitempty"`
 	TotalDuration      float64                  `json:"total_duration,omitempty"`
+	// LogSessionID labels the node's FFmpeg log lines with the durable job's
+	// key (playback.DownloadPrepareLogSessionID), so every attempt of one
+	// artifact reads as one stream. It never affects bytes, so the execution
+	// fingerprint excludes it; older nodes ignore it.
+	LogSessionID string `json:"log_session_id,omitempty"`
+}
+
+// Progress is a node's live reading for one prepare attempt. Running is false
+// when the node has no encode in flight under the id.
+type Progress struct {
+	ArtifactID      string  `json:"artifact_id"`
+	Running         bool    `json:"running"`
+	EncodedSeconds  float64 `json:"encoded_seconds" minimum:"0"`
+	DurationSeconds float64 `json:"duration_seconds" minimum:"0"`
+	Speed           float64 `json:"speed" minimum:"0"`
 }
 
 // Result identifies a completed artifact without exposing the node's local
@@ -232,6 +250,7 @@ func (r Request) ValidToneMapAttestation() bool {
 // deliberately excluding the idempotency handle.
 func (r Request) ExecutionFingerprint() string {
 	r.ArtifactID = ""
+	r.LogSessionID = ""
 	data, err := json.Marshal(r)
 	if err != nil {
 		return ""
@@ -268,6 +287,7 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		TotalDuration:              opts.TotalDuration,
+		LogSessionID:               opts.SessionID,
 	}
 	if opts.PreparedTracks != nil {
 		request.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
@@ -316,7 +336,17 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		NodeType:                   "transcode",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              sink,
+		SessionID:                  r.logSessionID(),
 	}
+}
+
+// logSessionID admits only the job-key shape the API sends, so a request can
+// never label node logs as some other playback session.
+func (r Request) logSessionID() string {
+	if logSessionIDPattern.MatchString(r.LogSessionID) {
+		return r.LogSessionID
+	}
+	return ""
 }
 
 // RemotePreparer executes and manages artifacts on a selected transcode node.
@@ -390,6 +420,38 @@ func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID s
 		attestation.FileSize = size
 	}
 	return attestation, nil
+}
+
+// Progress reads a node's live progress for one prepare attempt. It returns
+// ErrProgressUnsupported when the node answers 404, which only nodes that
+// predate the endpoint do: a current node reports an unknown id as not running.
+func (p HTTPPreparer) Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Progress, error) {
+	if !ValidArtifactID(artifactID) {
+		return Progress{}, fmt.Errorf("remote download prepare progress: invalid artifact id")
+	}
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/prepare/"+url.PathEscape(artifactID)+"/progress", nil)
+	if err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: %w", err)
+	}
+	resp, err := p.client().Do(httpReq)
+	if err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusNotFound {
+		return Progress{}, ErrProgressUnsupported
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Progress{}, responseError(resp, "remote download prepare progress")
+	}
+	var progress Progress
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&progress); err != nil {
+		return Progress{}, fmt.Errorf("remote download prepare progress: decode response: %w", err)
+	}
+	if progress.ArtifactID != artifactID || progress.EncodedSeconds < 0 || progress.DurationSeconds < 0 || progress.Speed < 0 {
+		return Progress{}, fmt.Errorf("remote download prepare progress: invalid response")
+	}
+	return progress, nil
 }
 
 func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error {

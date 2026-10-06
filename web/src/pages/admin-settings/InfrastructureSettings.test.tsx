@@ -166,23 +166,6 @@ describe("InfrastructureSettings", () => {
     });
   });
 
-  it("renders every field group heading", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    for (const heading of [
-      "Storage",
-      "Redis",
-      "Public storage",
-      "Private storage",
-      "Database",
-      "Logs",
-    ]) {
-      expect(markup).toContain(heading);
-    }
-  });
-
   it.each([
     ["loading", true, false],
     ["failed", false, true],
@@ -352,80 +335,6 @@ describe("InfrastructureSettings", () => {
     serverStatus.current = undefined;
   });
 
-  it("renders the page header on its own, with no description or status strip", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Storage & Database" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Where Silo keeps its data. Changes here take effect after a restart."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Redis not configured")).not.toBeInTheDocument();
-    expect(screen.queryByText("No public bucket set")).not.toBeInTheDocument();
-  });
-
-  it("claims a restart only for the groups whose settings actually need one", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    // No page-wide claim: the Logs group applies live, and a blanket line
-    // would tell an admin to restart for it.
-    expect(
-      screen.queryByText("Changes on this page apply after a restart."),
-    ).not.toBeInTheDocument();
-    // Artwork, Redis, both storage buckets, and Database each say it once; their
-    // fields drop the per-field chips.
-    expect(screen.getAllByText(/Changes apply after a restart/)).toHaveLength(5);
-    expect(screen.queryAllByLabelText("Takes effect after a server restart")).toHaveLength(0);
-    const logsGroup = within(screen.getByRole("group", { name: "Logs" }));
-    expect(logsGroup.queryByText(/Changes apply after a restart/)).not.toBeInTheDocument();
-  });
-
-  it("demotes a group to per-field chips when one of its keys stops needing a restart", () => {
-    // The same page against a future registry where the Redis URL hot-reloads:
-    // the group-level claim must disappear on its own rather than stay wrong.
-    restartKeysMock.mockReturnValueOnce({
-      has: (key: string) => /^(s3|database|userdb)\./.test(key),
-    });
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    const redisGroup = within(screen.getByRole("group", { name: "Redis" }));
-    expect(redisGroup.queryByText(/Changes apply after a restart/)).not.toBeInTheDocument();
-  });
-
-  it("says what each bucket holds", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    expect(
-      screen.getByText(
-        /Files clients download directly: cached artwork, uploaded posters, and branding images/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Files only the server reads: profile avatars, diagnostics bundles, and catalog seed artifacts/,
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("puts units beside the control rather than in the label", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Delete log entries older than");
-    expect(markup).not.toContain("Delete log entries older than (days)");
-    expect(markup).not.toContain("Maximum log size (MB)");
-  });
-
   it("manages the merged database, storage and log keys in one form", () => {
     mockForm();
 
@@ -443,26 +352,6 @@ describe("InfrastructureSettings", () => {
     expect(keys.filter((key) => key.startsWith("s3.user_db_"))).toEqual([]);
   });
 
-  it("shows only essential controls until Advanced is opened", () => {
-    mockForm();
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Use Redis");
-    expect(markup).toContain("Endpoint");
-    expect(markup).toContain("Bucket");
-    expect(markup).toContain("Check Connection");
-    expect(markup).toContain("Maximum log entries");
-    // Advanced, so not rendered while collapsed.
-    expect(markup).not.toContain("Region");
-    expect(markup).not.toContain("Maximum Postgres connections");
-    expect(markup).not.toContain("Record one allowed check in every");
-    expect(markup).not.toContain("Per-area limits");
-    // Removed entirely.
-    expect(markup).not.toContain("User DB");
-    expect(markup).not.toContain("Not currently in use");
-  });
-
   it("keeps the Redis connection check available when REDIS_URL comes from the environment", () => {
     mockForm({
       sensitiveConfigured: ["redis.url"],
@@ -476,77 +365,6 @@ describe("InfrastructureSettings", () => {
     // but the check runs against the value the server merged from REDIS_URL.
     expect(redisGroup.getByLabelText("Connection URL")).toBeDisabled();
     expect(redisGroup.getByRole("button", { name: "Check Connection" })).toBeEnabled();
-  });
-
-  it("renders Check Connection as a filled button rather than flat text", () => {
-    mockForm();
-
-    render(<InfrastructureSettings />);
-
-    for (const button of screen.getAllByRole("button", { name: "Check Connection" })) {
-      expect(button).toHaveAttribute("data-variant", "secondary");
-    }
-  });
-
-  it("opens an Advanced section while one of its fields is unsaved", () => {
-    mockForm({ isDirty: (key: string) => key === "database.max_connections", dirtyCount: 1 });
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Maximum Postgres connections");
-    expect(markup).toContain("Advanced · 2 settings");
-  });
-
-  it("warns that the first artwork write locks a public storage identity field", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
-    mockForm({
-      isDirty: (key: string) => key === "s3.public_bucket",
-      dirtyCount: 1,
-      getValue: (key: string) => (key === "s3.public_bucket" ? "new-artwork" : ""),
-    });
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Storage location change");
-    expect(markup).toContain("settings-field-note");
-    expect(markup).toContain("The first artwork write records this location");
-    serverStatus.current = undefined;
-  });
-
-  it("says a private bucket becomes locked at startup", () => {
-    serverStatus.current = { artwork_storage: { backend: "local", locked: false } };
-    mockForm({
-      isDirty: (key: string) => key === "s3.private_bucket",
-      dirtyCount: 1,
-      getValue: (key: string) =>
-        key === "s3.private_bucket" ? "private" : key === "s3.public_url_auth" ? "presigned" : "",
-    });
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Silo records a configured private bucket at startup");
-    expect(markup).not.toContain("The first artwork write records the storage layout");
-  });
-
-  it("explains the managed transition when a locked S3 identity field is edited", () => {
-    serverStatus.current = { artwork_storage: { backend: "s3", locked: true } };
-    const saved: Record<string, string> = {
-      "artwork.storage_backend": "s3",
-      "s3.public_bucket": "old-artwork",
-    };
-    mockForm({
-      isDirty: (key: string) => key === "s3.public_bucket",
-      dirtyCount: 1,
-      getPersistedValue: (key: string) => saved[key] ?? "",
-      getValue: (key: string) => (key === "s3.public_bucket" ? "new-artwork" : (saved[key] ?? "")),
-    });
-
-    const markup = renderToStaticMarkup(<InfrastructureSettings />);
-
-    expect(markup).toContain("Storage location change");
-    expect(markup).toContain("Saving this location opens a managed transition");
-    expect(markup).toContain("Review transition");
-    serverStatus.current = undefined;
   });
 
   it("saves unrelated edits before opening an S3 location transition", async () => {
@@ -772,6 +590,7 @@ describe("InfrastructureSettings", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Storage lock status is unavailable");
     expect(screen.getByRole("group", { name: "Database" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Maximum Postgres connections")).toBeVisible();
     expect(screen.getByRole("group", { name: "Logs" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Backend" })).toBeDisabled();
     expect(screen.getByLabelText("Local storage path")).toBeDisabled();

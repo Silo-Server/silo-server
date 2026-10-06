@@ -57,6 +57,13 @@ type PlaybackSession struct {
 	TranscodeStarted           bool
 	ProgressPersistenceKnown   bool
 	DisableProgressPersistence bool
+	// ResumeScrobble* record the start scrobble sent when UpstreamSessionID
+	// began, while a client report may still correct its position (#1712):
+	// the upstream session it was sent for, the position it carried, and when.
+	// Queueing a correction, pause, or resume clears ResumeScrobbleUpstreamID.
+	ResumeScrobbleUpstreamID string
+	ResumeScrobblePosition   float64
+	ResumeScrobbleSentAt     time.Time
 	// Terminal hides a play session from stream and progress routing after
 	// ActiveEncodings cleanup while retaining the authenticated mapping long
 	// enough for a later Stopped report to publish its authoritative position.

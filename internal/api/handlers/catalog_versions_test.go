@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,9 +138,7 @@ func TestCatalogVersionsHTTP(t *testing.T) {
 			}
 		})
 	}
-	// Pair the old handler's full-detail work with the current endpoint using the
-	// same real file repository and warm database. This measures handler work in
-	// process; it does not include network transport or a production media server.
+	// The narrow versions endpoint preserves the full-detail response for both kinds.
 	for _, kind := range []string{"movie", "audiobook"} {
 		t.Run("paired/"+kind, func(t *testing.T) {
 			oldHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -155,38 +152,15 @@ func TestCatalogVersionsHTTP(t *testing.T) {
 				}
 				writeJSON(w, http.StatusOK, detail.Versions)
 			})
-			var before, after []time.Duration
-			var bytes int
-			for i := range 32 {
-				outputs := [2]*httptest.ResponseRecorder{}
-				for j := range 2 {
-					which := (i + j) % 2
-					r := request("/catalog/items/"+prefix+kind+"/versions", true, access.Scope{})
-					rec := httptest.NewRecorder()
-					start := time.Now()
-					if which == 0 {
-						oldHandler.ServeHTTP(rec, r)
-					} else {
-						router.ServeHTTP(rec, r)
-					}
-					elapsed := time.Since(start)
-					outputs[which] = rec
-					if i >= 2 {
-						if which == 0 {
-							before = append(before, elapsed)
-						} else {
-							after = append(after, elapsed)
-						}
-					}
-				}
-				if outputs[0].Code != 200 || outputs[1].Code != 200 || outputs[0].Body.String() != outputs[1].Body.String() {
-					t.Fatalf("before/after response differs: %s / %s", outputs[0].Body.String(), outputs[1].Body.String())
-				}
-				bytes = outputs[1].Body.Len()
+			outputs := [2]*httptest.ResponseRecorder{}
+			for i, handler := range []http.Handler{oldHandler, router} {
+				r := request("/catalog/items/"+prefix+kind+"/versions", true, access.Scope{})
+				outputs[i] = httptest.NewRecorder()
+				handler.ServeHTTP(outputs[i], r)
 			}
-			slices.Sort(before)
-			slices.Sort(after)
-			t.Logf("30 paired warm in-process HTTP requests; %s: p50 %s -> %s; p95 %s -> %s; identical %d-byte JSON", kind, before[14], after[14], before[28], after[28], bytes)
+			if outputs[0].Code != 200 || outputs[1].Code != 200 || outputs[0].Body.String() != outputs[1].Body.String() {
+				t.Fatalf("before/after response differs: %s / %s", outputs[0].Body.String(), outputs[1].Body.String())
+			}
 		})
 	}
 }

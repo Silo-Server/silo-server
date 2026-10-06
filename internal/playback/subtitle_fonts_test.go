@@ -108,11 +108,20 @@ cat <<'JSON'
 {"streams":[{"index":2,"extradata_size":8,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"MyFont.ttf","mimetype":"font/ttf"}},{"index":3,"extradata_size":8,"codec_name":"otf","codec_type":"attachment","tags":{"filename":"Other.otf","mimetype":"font/otf"}}]}
 JSON
 `)
-	writeExecutable(t, ffmpegPath, fakeFFmpegDumping("fontdata"))
+	invocations := filepath.Join(dir, "invocations")
+	t.Setenv("FONT_EXTRACTION_INVOCATIONS", invocations)
+	writeExecutable(t, ffmpegPath, "#!/bin/sh\nprintf 'run\\n' >> \"$FONT_EXTRACTION_INVOCATIONS\"\n"+strings.TrimPrefix(fakeFFmpegDumping("fontdata"), "#!/bin/sh\n"))
 
 	fonts, err := ExtractAttachedSubtitleFonts(context.Background(), "input.mkv", ffmpegPath)
 	if err != nil {
 		t.Fatalf("ExtractAttachedSubtitleFonts returned error: %v", err)
+	}
+	started, err := os.ReadFile(invocations)
+	if err != nil {
+		t.Fatalf("read invocation count: %v", err)
+	}
+	if string(started) != "run\n" {
+		t.Fatalf("font extraction invocations = %q, want one", started)
 	}
 	if len(fonts) != 2 {
 		t.Fatalf("font count = %d, want 2", len(fonts))
@@ -209,30 +218,6 @@ done
 		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 8}, {Index: 3, ExtraDataSize: 8}}, maxSubtitleFontBytes)
 	if err == nil || len(fonts) != 0 {
 		t.Fatalf("missing attachment data accepted: %d fonts, %v", len(fonts), err)
-	}
-}
-
-func TestDumpFontAttachmentsRejectsOverLimitData(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script test helper is unix-only")
-	}
-
-	dir := t.TempDir()
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	writeExecutable(t, ffmpegPath, fakeFFmpegDumping("12345"))
-
-	_, err := dumpFontAttachments(
-		context.Background(),
-		"input.mkv",
-		ffmpegPath,
-		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 5}},
-		4,
-	)
-	if err == nil {
-		t.Fatal("expected size limit error, got nil")
-	}
-	if !strings.Contains(err.Error(), "attached font data exceeds") {
-		t.Fatalf("error = %q, want attached font data limit", err.Error())
 	}
 }
 

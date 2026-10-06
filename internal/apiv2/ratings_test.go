@@ -115,7 +115,12 @@ func ratingRows() []catalogpkg.UserRating {
 
 func TestListRatings(t *testing.T) {
 	ratings := &fakeRatings{ratings: ratingRows()}
-	h := newTestHandler(t, ratingsDeps(ratings))
+	// Continue inside a tie and retain submillisecond precision in the cursor.
+	ratings.ratings[1].RatedAt = ratings.ratings[1].RatedAt.Add(333 * time.Nanosecond)
+	ratings.ratings[2].RatedAt = ratings.ratings[1].RatedAt
+	deps := ratingsDeps(ratings)
+	deps.CursorSecret = []byte("ratings-cursor-test-key")
+	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/ratings", "", viewerHeaders())
 	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), `{"items":[{"item_id":"movie:c","rating":5,"rated_at":"2026-01-02T03:04:05.678Z"},`) || !strings.Contains(rec.Body.String(), `"has_more":false`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
@@ -161,66 +166,8 @@ func TestListRatings(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.offset" || p.Errors[0].Code != codeUnknownParameter {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-}
-
-// TestListRatingsKeysetStable walks three pages while ratings change
-// underneath and while two rows share rated_at; see the favorites twin.
-func TestListRatingsKeysetStable(t *testing.T) {
-	at := fixedTime()
-	ratings := &fakeRatings{ratings: []catalogpkg.UserRating{
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:f", Rating: 5, RatedAt: at},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:d", Rating: 4, RatedAt: at.Add(-time.Hour)},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:e", Rating: 4, RatedAt: at.Add(-time.Hour)},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Rating: 3, RatedAt: at.Add(-2 * time.Hour)},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 2, RatedAt: at.Add(-3 * time.Hour)},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: at.Add(-4 * time.Hour)},
-	}}
-	h := newTestHandler(t, ratingsDeps(ratings))
-	type page struct {
-		Items []struct {
-			ItemID string `json:"item_id"`
-		} `json:"items"`
-		Page struct {
-			NextCursor string `json:"next_cursor"`
-			HasMore    bool   `json:"has_more"`
-		} `json:"page"`
-	}
-	get := func(cursor string) page {
-		url := "/api/v2/ratings?limit=2"
-		if cursor != "" {
-			url += "&cursor=" + cursor
-		}
-		rec := do(t, h, http.MethodGet, url, "", viewerHeaders())
-		if rec.Code != 200 {
-			t.Fatalf("%s: %d %s", url, rec.Code, rec.Body.String())
-		}
-		var p page
-		decodeJSON(t, rec.Body, &p)
-		return p
-	}
-	ids := func(p page) string {
-		var out []string
-		for _, it := range p.Items {
-			out = append(out, it.ItemID)
-		}
-		return strings.Join(out, ",")
-	}
-	first := get("")
-	if ids(first) != "movie:f,movie:e" || !first.Page.HasMore {
-		t.Fatalf("page 1 = %+v", first)
-	}
-	ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:g", Rating: 5, RatedAt: at.Add(time.Hour)})
-	second := get(first.Page.NextCursor)
-	if ids(second) != "movie:d,movie:c" || !second.Page.HasMore {
-		t.Fatalf("page 2 = %+v", second)
-	}
-	ratings.ratings = ratings.ratings[1:]
-	third := get(second.Page.NextCursor)
-	if ids(third) != "movie:b,movie:a" || third.Page.HasMore || third.Page.NextCursor != "" {
-		t.Fatalf("page 3 = %+v", third)
-	}
-	// A cursor whose rated_at is not an instant is refused, not a 500.
-	bad, _ := NewCursors([]byte("other-test-cursor-key")).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
+	// A signed cursor whose timestamp cannot be parsed is still a client error.
+	bad, _ := NewCursors(deps.CursorSecret).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
 }
 

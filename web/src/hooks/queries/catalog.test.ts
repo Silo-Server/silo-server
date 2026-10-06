@@ -152,7 +152,16 @@ describe("catalog browse and facets on the v2 contract", () => {
       window_cursor: "opaque-window",
       page: { has_more: true, next_cursor: "next-boundary" },
     });
-    const signal = new AbortController().signal;
+    const controller = new AbortController();
+    const signal = controller.signal;
+    // The caller's abort reaches the in-flight request's signal.
+    let forwarded: boolean | undefined;
+    const respond = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementationOnce(async (input, init) => {
+      controller.abort();
+      forwarded = init?.signal?.aborted;
+      return respond(input, init);
+    });
     const result = await fetchCatalogPage(
       { source: "query", q: "Heat", query_definition: createEmptyQueryDefinition() },
       60,
@@ -165,7 +174,7 @@ describe("catalog browse and facets on the v2 contract", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body).toMatchObject({ cursor: "previous-boundary", skip_total: true });
     expect(body).not.toHaveProperty("seek");
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBe(signal);
+    expect(forwarded).toBe(true);
     expect(result).toMatchObject({
       snapshot: "opaque-window",
       next_cursor: "next-boundary",
