@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -58,5 +59,48 @@ func TestExtractTextSharesInFlightFill(t *testing.T) {
 	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("extract ran %d times, want 1", got)
+	}
+}
+
+// A fill that commits after ExtractText finds it in progress, but before
+// ExtractText waits for it, is still reused: the next lookup finds it, and
+// the source isn't demuxed again.
+func TestExtractTextReusesAFillThatCommitsBeforeTheWait(t *testing.T) {
+	cache, source := newTestCache(t)
+	holder := cache.beginFill(source, 0, "srt")
+	if holder == nil {
+		t.Fatal("couldn't reserve the fill")
+	}
+	if _, err := holder.Tee(io.Discard).Write([]byte("SHARED")); err != nil {
+		t.Fatal(err)
+	}
+	afterBusyTextFill = func() {
+		afterBusyTextFill = nil
+		if err := holder.Commit(); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterBusyTextFill = nil })
+
+	extracts := 0
+	data, err := cache.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) {
+		extracts++
+		return []byte("AGAIN"), nil
+	})
+	if err != nil || string(data) != "SHARED" || extracts != 0 {
+		t.Fatalf("ExtractText = %q, %v after %d extracts; want the committed fill and none", data, err, extracts)
+	}
+}
+
+// Without a cache directory there's no fill to share: ExtractText extracts.
+func TestExtractTextWithoutACacheExtracts(t *testing.T) {
+	cache := NewSubtitleCache(func() string { return "" })
+	extracts := 0
+	data, err := cache.ExtractText(t.Context(), "/media/movie.mkv", 0, "srt", func(context.Context) ([]byte, error) {
+		extracts++
+		return []byte("DATA"), nil
+	})
+	if err != nil || string(data) != "DATA" || extracts != 1 {
+		t.Fatalf("ExtractText = %q, %v after %d extracts; want one extract", data, err, extracts)
 	}
 }
