@@ -2169,7 +2169,7 @@ func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogR
 			}
 			def, ok := scopeLibraryCollectionDefinition(def, collection)
 			if !ok {
-				return nil, nil
+				return collection.Title, nil, nil
 			}
 			items, err := r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), stripCatalogUserScope(access))
 			return collection.Title, items, err
