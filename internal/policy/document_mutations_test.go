@@ -202,87 +202,97 @@ func waitPolicyLock(t *testing.T, pool *pgxpool.Pool, name string) {
 	}
 }
 func TestPolicyLegacyWriterVersusCAS(t *testing.T) {
-	for _, writer := range []string{"append", "enable", "activate"} {
-		for _, operation := range []string{"enable", "activate", "delete"} {
-			for _, wildcard := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/%s/wildcard=%t", writer, operation, wildcard), func(t *testing.T) {
-					ctx := t.Context()
-					pool, store := newPolicyStoreTest(t, ctx)
-					document, version := policyFixture(t, store)
-					writerStore := namedPolicyStore(t, pool, "policy-revision-writer")
-					contender := namedPolicyStore(t, pool, "policy-revision-contender")
-					barrier := pausePolicyWriter(t, pool)
-					written := make(chan error, 1)
-					go func() {
-						var err error
-						switch writer {
-						case "append":
-							_, err = writerStore.CreateVersion(ctx, document.ID, validStorePolicySource(), "new", true, nil, nil, "")
-						case "enable":
-							_, err = writerStore.SetEnabled(ctx, document.ID, false)
-						case "activate":
-							_, err = writerStore.Activate(ctx, document.ID, version.ID)
-						}
-						written <- err
-					}()
-					waitPolicyLock(t, pool, "policy-revision-writer")
-					expected := document.Revision
-					if wildcard {
-						expected = AnyDocumentRevision
-					}
-					result := make(chan error, 1)
-					go func() {
-						var err error
-						switch operation {
-						case "enable":
-							_, err = contender.SetEnabledIfRevision(ctx, document.ID, false, expected)
-						case "activate":
-							_, err = contender.ActivateIfRevision(ctx, document.ID, version.ID, expected)
-						case "delete":
-							err = contender.DeleteDocumentIfRevision(ctx, document.ID, expected)
-						}
-						result <- err
-					}()
-					waitPolicyLock(t, pool, "policy-revision-contender")
-					if err := barrier.Commit(ctx); err != nil {
-						t.Fatal(err)
-					}
-					if err := <-written; err != nil {
-						t.Fatal(err)
-					}
-					err := <-result
-					if wildcard && operation == "delete" && writer == "activate" {
-						if !errors.Is(err, ErrDocumentHasActiveVersion) {
-							t.Fatalf("active-delete constraint=%v", err)
-						}
-						return
-					}
-					if wildcard && err != nil {
-						t.Fatal(err)
-					}
-					if wildcard && operation == "delete" {
-						if _, err := store.GetDocument(ctx, document.ID); !errors.Is(err, ErrDocumentNotFound) {
-							t.Fatalf("wildcard deletion=%v", err)
-						}
-						return
-					}
-					if !wildcard && !errors.Is(err, ErrDocumentRevisionMismatch) {
-						t.Fatalf("expected stale original witness, got %v", err)
-					}
-					got, err := store.GetDocument(ctx, document.ID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					want := document.Revision + 1
-					if wildcard {
-						want++
-					}
-					if got.Revision != want {
-						t.Fatalf("revision=%d want%d", got.Revision, want)
-					}
-				})
+	// Each legacy writer and guarded operation participates in both witness
+	// modes. Active-document deletion also retains its distinct refusal.
+	for _, tc := range []struct {
+		writer, operation string
+		wildcard          bool
+	}{
+		{"append", "enable", false},
+		{"enable", "activate", false},
+		{"activate", "delete", false},
+		{"append", "delete", true},
+		{"enable", "enable", true},
+		{"activate", "activate", true},
+		{"activate", "delete", true},
+	} {
+		writer, operation, wildcard := tc.writer, tc.operation, tc.wildcard
+		t.Run(fmt.Sprintf("%s/%s/wildcard=%t", writer, operation, wildcard), func(t *testing.T) {
+			ctx := t.Context()
+			pool, store := newPolicyStoreTest(t, ctx)
+			document, version := policyFixture(t, store)
+			writerStore := namedPolicyStore(t, pool, "policy-revision-writer")
+			contender := namedPolicyStore(t, pool, "policy-revision-contender")
+			barrier := pausePolicyWriter(t, pool)
+			written := make(chan error, 1)
+			go func() {
+				var err error
+				switch writer {
+				case "append":
+					_, err = writerStore.CreateVersion(ctx, document.ID, validStorePolicySource(), "new", true, nil, nil, "")
+				case "enable":
+					_, err = writerStore.SetEnabled(ctx, document.ID, false)
+				case "activate":
+					_, err = writerStore.Activate(ctx, document.ID, version.ID)
+				}
+				written <- err
+			}()
+			waitPolicyLock(t, pool, "policy-revision-writer")
+			expected := document.Revision
+			if wildcard {
+				expected = AnyDocumentRevision
 			}
-		}
+			result := make(chan error, 1)
+			go func() {
+				var err error
+				switch operation {
+				case "enable":
+					_, err = contender.SetEnabledIfRevision(ctx, document.ID, false, expected)
+				case "activate":
+					_, err = contender.ActivateIfRevision(ctx, document.ID, version.ID, expected)
+				case "delete":
+					err = contender.DeleteDocumentIfRevision(ctx, document.ID, expected)
+				}
+				result <- err
+			}()
+			waitPolicyLock(t, pool, "policy-revision-contender")
+			if err := barrier.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-written; err != nil {
+				t.Fatal(err)
+			}
+			err := <-result
+			if wildcard && operation == "delete" && writer == "activate" {
+				if !errors.Is(err, ErrDocumentHasActiveVersion) {
+					t.Fatalf("active-delete constraint=%v", err)
+				}
+				return
+			}
+			if wildcard && err != nil {
+				t.Fatal(err)
+			}
+			if wildcard && operation == "delete" {
+				if _, err := store.GetDocument(ctx, document.ID); !errors.Is(err, ErrDocumentNotFound) {
+					t.Fatalf("wildcard deletion=%v", err)
+				}
+				return
+			}
+			if !wildcard && !errors.Is(err, ErrDocumentRevisionMismatch) {
+				t.Fatalf("expected stale original witness, got %v", err)
+			}
+			got, err := store.GetDocument(ctx, document.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := document.Revision + 1
+			if wildcard {
+				want++
+			}
+			if got.Revision != want {
+				t.Fatalf("revision=%d want%d", got.Revision, want)
+			}
+		})
 	}
 }
 

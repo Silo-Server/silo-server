@@ -7,6 +7,11 @@ interface SaveBarProps {
   onDiscard: () => void;
   isSaving: boolean;
   saveLabel?: string;
+  /**
+   * False while nothing staged can be saved as it stands, e.g. every edit is
+   * waiting on a reload after another admin's change. Discard stays available.
+   */
+  canSave?: boolean;
 }
 
 function plural(count: number, word: string) {
@@ -26,6 +31,7 @@ export function SaveBar({
   onDiscard,
   isSaving,
   saveLabel = "Save",
+  canSave = true,
 }: SaveBarProps) {
   if (dirtyCount <= 0) return null;
 
@@ -59,7 +65,7 @@ export function SaveBar({
             <Button
               size="sm"
               onClick={() => onSave()}
-              disabled={isSaving}
+              disabled={isSaving || !canSave}
               className="rounded-full bg-[var(--settings-accent)] text-[#15151a] hover:bg-[var(--settings-accent)] hover:brightness-110"
             >
               {isSaving ? "Saving..." : saveLabel}

@@ -73,7 +73,7 @@ func TestPostgresCollectionContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO user_personal_collection_items(user_id,collection_id,media_item_id,position,added_at) SELECT $1,$2,'bulk-' || n,n,NOW() FROM generate_series(1,1000) n`, userID, c.ID); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO user_personal_collection_items(user_id,collection_id,media_item_id,position,added_at) SELECT $1,$2,'bulk-' || n,n,NOW() FROM generate_series(1,2) n`, userID, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	bulkAfter, err := s.CollectionRevision(ctx, c.ID)

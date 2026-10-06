@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 12
+const Revision = 16
 
 // Setting keys, one constant per definition.
 const (
@@ -25,6 +25,8 @@ const (
 	DownloadsKeepWatched = "downloads.keep_watched"
 	// Download over Wi-Fi only
 	DownloadsWifiOnly = "downloads.wifi_only"
+	// Hide watched items from Home
+	HomeHideWatchedItems = "home.hide_watched_items"
 	// Primary menu
 	NavPrimaryMenu = "nav.primary_menu"
 	// Navigation shortcuts
@@ -95,6 +97,8 @@ const (
 	PlayerVideoSkipBackSeconds = "player.video_skip_back_seconds"
 	// Video fast-forward interval
 	PlayerVideoSkipForwardSeconds = "player.video_skip_forward_seconds"
+	// Request titles I add to my watchlist
+	RequestsWatchlistAutoRequest = "requests.watchlist_auto_request"
 	// Search scope
 	SearchMediaScope = "search.media_scope"
 	// Match device caption settings
@@ -141,6 +145,8 @@ const (
 	UiThemeMusicLoop = "ui.theme_music_loop"
 	// Time format
 	UiTimeFormat = "ui.time_format"
+	// Show title art
+	UiTitleArt = "ui.title_art"
 )
 
 // Remote lists every key the server stores.
@@ -148,6 +154,7 @@ var Remote = []string{
 	CatalogMetadataLanguage,
 	CatalogMetadataLanguageOverrides,
 	CatalogShowAdvisoryAge,
+	HomeHideWatchedItems,
 	NavPrimaryMenu,
 	NavShortcuts,
 	PlaybackAudioLanguage,
@@ -179,6 +186,7 @@ var Remote = []string{
 	PlayerVideoGravity,
 	PlayerVideoSkipBackSeconds,
 	PlayerVideoSkipForwardSeconds,
+	RequestsWatchlistAutoRequest,
 	SearchMediaScope,
 	UiCardOverlays,
 	UiCardOverlaysEnabled,
@@ -201,6 +209,7 @@ var Remote = []string{
 	UiThemeMusicEnabled,
 	UiThemeMusicLoop,
 	UiTimeFormat,
+	UiTitleArt,
 }
 
 // ClientLocal lists keys the contract defines but the server never stores.

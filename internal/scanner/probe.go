@@ -4,13 +4,18 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
@@ -61,8 +66,10 @@ type ffprobeDisp = mediaprobe.Disposition
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
 // ffprobePath is the path to the ffprobe binary. filePath is the media file to probe.
 func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
+	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
+	// can tell an unreadable source from damaged content; stdout stays JSON.
 	cmd := exec.CommandContext(ctx, ffprobePath,
-		"-v", "quiet",
+		"-v", "error",
 		"-print_format", "json",
 		"-show_format",
 		"-show_streams",
@@ -97,6 +104,174 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	return probe, nil
 }
 
+// IsProbeRejection reports whether err, returned by ProbeFile for filePath
+// under ctx, means ffprobe ran to completion and refused the file's content:
+// a non-zero exit status while the caller's context was still live, for a file
+// this process can read, with no sign that ffprobe itself hit a read failure.
+// Zero-byte, corrupt, and truncated media end this way.
+//
+// ffprobe exits the same way when it cannot read the file (permission denied,
+// an I/O error or timeout on a network mount, a stale handle, a file that
+// vanished). Those say nothing about the content and stay retryable, so two
+// independent checks run before the failure is blamed on the file: ffprobe's
+// own error output is searched for operating-system access errors, which
+// catches a read that failed anywhere in the file; and the file is opened and
+// read at its start and its end, where container indexes live, which catches
+// the failure without depending on ffprobe's wording. Either one finding an
+// access problem logs it and answers false. A canceled or timed-out probe, a
+// process killed by a signal, a missing binary, or unparseable output is not a
+// rejection either.
+func IsProbeRejection(ctx context.Context, filePath string, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() <= 0 {
+		return false
+	}
+	accessErr := probeStderrAccessFailure(exitErr.Stderr)
+	if accessErr == nil {
+		accessErr = boundedProbeInputReadable(ctx, filePath)
+	}
+	if accessErr != nil {
+		slog.WarnContext(ctx, "scanner: ffprobe failed because the file could not be read; check its permissions and the storage it lives on",
+			"component", "scanner",
+			"path", filePath,
+			"error", accessErr,
+		)
+		return false
+	}
+	return true
+}
+
+// probeAccessFailureMarkers are operating-system error strings (strerror text,
+// lowercased) that mean ffprobe could not read its input, as opposed to
+// reading it and finding the content invalid.
+var probeAccessFailureMarkers = []string{
+	"input/output error",
+	"permission denied",
+	"operation not permitted",
+	"no such file or directory",
+	"stale file handle",
+	"stale nfs file handle",
+	"timed out",
+	"transport endpoint is not connected",
+	"host is down",
+	"no route to host",
+	"network is unreachable",
+	"network is down",
+	"connection reset",
+	"connection refused",
+	"resource temporarily unavailable",
+	"too many open files",
+	"cannot allocate memory",
+	"no such device",
+}
+
+// probeStderrAccessFailure returns the first ffprobe error line that names an
+// access failure, or nil when its output only describes the content.
+func probeStderrAccessFailure(stderr []byte) error {
+	for _, line := range strings.Split(string(stderr), "\n") {
+		lower := strings.ToLower(line)
+		for _, marker := range probeAccessFailureMarkers {
+			if strings.Contains(lower, marker) {
+				return fmt.Errorf("ffprobe: %s", strings.TrimSpace(line))
+			}
+		}
+	}
+	return nil
+}
+
+// The storage check after a failed probe touches the same storage ffprobe just
+// failed on, so on a stalled network mount its open or read can block in the
+// kernel indefinitely. It therefore runs off the caller's goroutine, bounded by
+// the caller's context and probeReadableTimeout. A check that does not answer
+// in time is reported as a storage problem: the failure is not blamed on the
+// file and stays retryable.
+//
+// A blocked syscall cannot be canceled, so the goroutine of a timed-out check
+// lingers until the kernel returns. probeReadableSlots caps how many such
+// goroutines can exist: a check holds its slot until its syscalls return, not
+// until its caller gives up, and when every slot is taken the check is skipped
+// and the failure is treated as a storage problem rather than queueing more
+// work behind the stall.
+var (
+	probeReadableTimeout = 5 * time.Second
+	probeReadableSlots   = make(chan struct{}, 4)
+	// probeReadableCheck is the check itself; tests substitute it.
+	probeReadableCheck = probeInputReadable
+)
+
+var (
+	errProbeReadableTimeout = errors.New("storage check did not finish in time; the storage may be stalled")
+	errProbeReadableBusy    = errors.New("storage checks are already waiting on stalled storage; skipped")
+)
+
+// boundedProbeInputReadable runs probeReadableCheck within the bounds above
+// and returns its error, or a storage-problem error when it was skipped,
+// timed out, or abandoned because ctx ended.
+func boundedProbeInputReadable(ctx context.Context, filePath string) error {
+	// One read of each setting: the lingering goroutine must release the slot
+	// it took, not whatever the variables hold by the time its syscall returns.
+	slots, check, timeout := probeReadableSlots, probeReadableCheck, probeReadableTimeout
+	select {
+	case slots <- struct{}{}:
+	default:
+		return errProbeReadableBusy
+	}
+	done := make(chan error, 1)
+	go func() {
+		err := check(filePath)
+		// Free the slot before publishing: a caller that receives the
+		// answer and immediately checks again must find it available.
+		<-slots
+		done <- err
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return errProbeReadableTimeout
+	case <-ctx.Done():
+		return fmt.Errorf("storage check abandoned: %w", ctx.Err())
+	}
+}
+
+// probeInputReadableBytes is how much probeInputReadable reads at each end of
+// the file: enough to touch real storage, small next to ffprobe's own reads.
+const probeInputReadableBytes = 64 << 10
+
+// probeInputReadable reports why this process cannot read filePath, or nil
+// when it can. It reads the start and the end of the file, where container
+// headers and indexes (an MP4 moov atom written last) live. An empty file is
+// readable: its emptiness is a content problem.
+func probeInputReadable(filePath string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", filePath)
+	}
+	buf := make([]byte, probeInputReadableBytes)
+	if _, err := f.ReadAt(buf, 0); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if tail := info.Size() - probeInputReadableBytes; tail > 0 {
+		if _, err := f.ReadAt(buf, tail); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+	}
+	return nil
+}
+
 // ProbePrimaryVideoTrack runs a bounded metadata-only FFprobe and returns the
 // first playable video stream using the scanner's authoritative normalization.
 // It does not scan packets or persist any result.
@@ -112,7 +287,7 @@ func FFprobePathFromFFmpeg(ffmpegPath string) string {
 // convertProbeData transforms raw ffprobe JSON output into ProbeData.
 func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	pd := &ProbeData{
-		Container: detectContainer(raw.Format.FormatName),
+		Container: containerForFile(raw.Format.FormatName, raw.Format.Filename),
 	}
 
 	if duration, ok := durationFromProbeMetadata(raw); ok {
@@ -753,6 +928,28 @@ func normalizeFormatTags(raw map[string]string) map[string]string {
 	return out
 }
 
+// containerForFile is detectContainer refined by the file's extension where
+// the format name alone is ambiguous. FFprobe names both MPEG-TS (188-byte
+// packets) and Blu-ray/AVCHD BDAV streams (192-byte packets, .m2ts/.mts)
+// "mpegts", but a client that plays .ts progressively cannot be assumed to
+// read BDAV, so those files report "m2ts" and direct play only to clients
+// that claim that container.
+func containerForFile(formatName, filePath string) string {
+	container := detectContainer(formatName)
+	if container == containerMPEGTS {
+		switch strings.ToLower(filepath.Ext(filePath)) {
+		case ".m2ts", ".mts":
+			return containerBDAV
+		}
+	}
+	return container
+}
+
+const (
+	containerMPEGTS = "ts"
+	containerBDAV   = "m2ts"
+)
+
 // detectContainer maps ffprobe format names to common container names.
 func detectContainer(formatName string) string {
 	// ffprobe format_name can contain multiple names separated by commas
@@ -768,7 +965,7 @@ func detectContainer(formatName string) string {
 		case "avi":
 			return "avi"
 		case "mpegts":
-			return "ts"
+			return containerMPEGTS
 		case "flv":
 			return "flv"
 		case "ogg":

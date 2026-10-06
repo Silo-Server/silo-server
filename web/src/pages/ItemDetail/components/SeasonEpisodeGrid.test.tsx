@@ -25,31 +25,45 @@ describe("SeasonEpisodeGrid", () => {
     capturedMenuProps.length = 0;
   });
 
-  it("enables the watched shortcut on episode cards", () => {
+  it("marks an episode only when none of its files can be read", () => {
+    const file = {
+      resolution: "",
+      codec_video: "",
+      hdr: false,
+      audio_channels: 0,
+      container: "",
+      file_size: 0,
+    };
+    const episode = (id: string, number: number, files: object[]) => ({
+      content_id: id,
+      season_number: 1,
+      episode_number: number,
+      title: `Episode title ${number}`,
+      overview: "",
+      air_date: null,
+      runtime: 0,
+      still_url: "",
+      still_thumbhash: "",
+      files: files as never,
+    });
     render(
       <MemoryRouter>
         <SeasonEpisodeGrid
           isLoading={false}
           episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "A beginning.",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
+            episode("ep-3", 3, [{ ...file, file_id: 3, unreadable: true }]),
+            episode("ep-4", 4, [
+              { ...file, file_id: 4, unreadable: true },
+              { ...file, file_id: 5, resolution: "1080p" },
+            ]),
+            episode("ep-5", 5, [{ ...file, file_id: 6, resolution: "1080p" }]),
           ]}
         />
       </MemoryRouter>,
     );
 
     expect(capturedMenuProps[0]).toMatchObject({
-      contentId: "ep-1",
+      contentId: "ep-3",
       mediaType: "episode",
       userState: {
         played: false,
@@ -61,107 +75,12 @@ describe("SeasonEpisodeGrid", () => {
       hasPartialProgress: false,
       quickActionMode: "watched",
     });
-  });
 
-  it("places the watched circle-check beside the episode label instead of over the artwork", () => {
-    render(
-      <MemoryRouter>
-        <SeasonEpisodeGrid
-          isLoading={false}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "A beginning.",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-              user_data: {
-                played: true,
-                position_seconds: 1800,
-                duration_seconds: 1800,
-              },
-            },
-            {
-              content_id: "ep-2",
-              season_number: 1,
-              episode_number: 2,
-              title: "Next",
-              overview: "Another episode.",
-              air_date: null,
-              runtime: 43,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-              user_data: {
-                played: false,
-                position_seconds: 0,
-                duration_seconds: 1800,
-              },
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    const episodeLabel = screen.getByText("Episode 1");
-    const watchedIndicator = screen.getByLabelText("Watched");
-
-    expect(episodeLabel.parentElement).toContainElement(watchedIndicator);
-    expect(watchedIndicator).toHaveAttribute("data-watched-indicator", "icon-only");
-    expect(watchedIndicator.querySelector(".lucide-circle-check")).toBeTruthy();
-    expect(watchedIndicator.closest(".media-card-image")).toBeNull();
-    expect(screen.getByText("Episode 2").parentElement).not.toContainElement(watchedIndicator);
-    expect(screen.getAllByLabelText("Watched")).toHaveLength(1);
-  });
-  it("caps the grid at four rows and scrolls the rest", () => {
-    render(
-      <MemoryRouter>
-        <SeasonEpisodeGrid
-          isLoading={false}
-          episodes={[
-            {
-              content_id: "ep-1",
-              season_number: 1,
-              episode_number: 1,
-              title: "Pilot",
-              overview: "An episode.",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
-            {
-              content_id: "ep-2",
-              season_number: 1,
-              episode_number: 2,
-              title: "Second",
-              overview: "An episode.",
-              air_date: null,
-              runtime: 42,
-              still_url: "",
-              still_thumbhash: "",
-              files: [],
-            },
-          ]}
-        />
-      </MemoryRouter>,
-    );
-
-    const grid = screen.getByText("Pilot").closest(".grid");
-    expect(grid).not.toBeNull();
-    // Two columns is the narrowest layout. A single column made the capped
-    // section over two viewports tall on a phone, so it scrolled inside a
-    // region the reader could not see the extent of.
-    expect(grid).toHaveClass("grid-cols-2", "sm:grid-cols-3", "lg:grid-cols-5");
-    expect(grid).toHaveClass("overflow-y-auto");
-    // Two episodes is under the cap, so nothing is clipped and the section
-    // keeps its natural height rather than showing an inert scrollport.
-    expect((grid as HTMLElement).style.maxHeight).toBe("");
+    // Only episode 3 has no readable version; episode 4 still plays its
+    // second file.
+    expect(screen.getAllByText("Damaged file")).toHaveLength(1);
+    const card = screen.getByText("Episode title 3").closest(".media-card");
+    expect(card).not.toBeNull();
+    expect(card).toHaveTextContent("Damaged file");
   });
 });

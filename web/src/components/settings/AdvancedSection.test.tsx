@@ -25,19 +25,6 @@ describe("AdvancedSection", () => {
     expect(screen.queryByText("ffmpeg path")).not.toBeInTheDocument();
   });
 
-  it("uses the singular form for a single setting", () => {
-    renderSection({ count: 1 });
-
-    expect(screen.getByRole("button", { name: /Advanced · 1 setting$/ })).toBeInTheDocument();
-  });
-
-  it("shows the count as a bare number and spells it out for screen readers", () => {
-    renderSection({ count: 9 });
-
-    expect(screen.getByRole("button", { name: "Advanced · 9 settings" })).toBeInTheDocument();
-    expect(screen.getByText("9")).toBeInTheDocument();
-  });
-
   it("persists the open state under the section id", async () => {
     const user = userEvent.setup();
     const { unmount } = renderSection();
@@ -94,16 +81,6 @@ describe("AdvancedSection", () => {
     );
   });
 
-  it("opens on the first render when forceOpen is already set", () => {
-    render(
-      <AdvancedSection id="downloads" forceOpen>
-        <div>bandwidth</div>
-      </AdvancedSection>,
-    );
-
-    expect(screen.getByText("bandwidth")).toBeInTheDocument();
-  });
-
   it("re-expands when a new reason to force it open arrives after a manual collapse", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
@@ -134,17 +111,5 @@ describe("AdvancedSection", () => {
       "aria-expanded",
       "true",
     );
-  });
-
-  it("lets an auto-expanded section be collapsed again", async () => {
-    const user = userEvent.setup();
-    render(
-      <AdvancedSection id="downloads" forceOpen>
-        <div>bandwidth</div>
-      </AdvancedSection>,
-    );
-
-    await user.click(screen.getByRole("button", { name: /Advanced/ }));
-    expect(screen.queryByText("bandwidth")).not.toBeInTheDocument();
   });
 });

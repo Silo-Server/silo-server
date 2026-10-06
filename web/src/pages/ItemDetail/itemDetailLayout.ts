@@ -64,8 +64,17 @@ export function getSeasonDisplayTitle(season: Season): string {
   return `Season ${season.season_number}`;
 }
 
+export function formatEpisodeCount(count: number): string {
+  return `${count} ${count === 1 ? "episode" : "episodes"}`;
+}
+
 export function formatSeasonMeta(season: Season): string {
-  return `${season.episode_count} episodes`;
+  return formatEpisodeCount(season.episode_count);
+}
+
+/** Watched progress for a season card, e.g. "1 of 2 episodes". */
+export function formatSeasonProgress(season: Season, watchedCount: number): string {
+  return `${watchedCount} of ${formatEpisodeCount(season.episode_count)}`;
 }
 
 export function resolveEpisodeSiblingSeason(

@@ -309,14 +309,7 @@ describe("admin section captured snapshots", () => {
     expect(writes[0]!.args.body?.reset_profiles).toBe(false);
     expect(dialog).toBeInTheDocument();
   });
-  it("restricts the admin editor collection picker to library collections", async () => {
-    rows[0]!.section_type = "collection";
-    rows[0]!.config = { library_collection_id: "public" };
-    await setup();
-    fireEvent.click(screen.getByRole("button", { name: "Edit a" }));
-    await screen.findByText("Collection picker");
-    expect(mocks.collectionOptions).toEqual(["public"]);
-  });
+
   it("preserves collection recipe metadata on a title-only save", async () => {
     rows[0]!.section_type = "collection";
     rows[0]!.config = {
@@ -327,6 +320,8 @@ describe("admin section captured snapshots", () => {
     };
     await setup();
     fireEvent.click(screen.getByRole("button", { name: "Edit a" }));
+    await screen.findByText("Collection picker");
+    expect(mocks.collectionOptions).toEqual(["public"]);
     fireEvent.change(await screen.findByDisplayValue("Original A"), {
       target: { value: "Renamed" },
     });

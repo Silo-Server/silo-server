@@ -3,6 +3,8 @@ package intromarkers
 import (
 	"context"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -16,19 +18,23 @@ func TestDialogueBoundaryRefinerMovesStartPastEarlyDialogue(t *testing.T) {
 		Confidence: 0.85,
 		Algorithm:  ChromaprintAlgorithm,
 	}
+	subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte(swatS05E02IntroLeadInSRT), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spanishPath := filepath.Join(t.TempDir(), "episode.es.srt")
+	if err := os.WriteFile(spanishPath, []byte("1\n00:05:22,000 --> 00:05:24,000\nSigue hablando.\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	candidate := Candidate{
 		FileID:        636600,
 		AudioLanguage: "eng",
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/episode.en.srt", Language: "en", Format: "srt"},
+			{Path: spanishPath, Language: "es", Format: "srt"},
+			{Path: subtitlePath, Language: "en", Format: "srt"},
 		},
 	}
-	refiner := &DialogueBoundaryRefiner{
-		config: cfg,
-		readFile: func(path string) ([]byte, error) {
-			return []byte(swatS05E02IntroLeadInSRT), nil
-		},
-	}
+	refiner := NewDialogueBoundaryRefiner(cfg)
 
 	refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
 	if err != nil {
@@ -51,19 +57,18 @@ func TestDialogueBoundaryRefinerMovesStartPastEarlyDialogue(t *testing.T) {
 func TestDialogueBoundaryRefinerIgnoresMusicCues(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	segment := Segment{Start: 100, End: 150, Confidence: 0.85, Algorithm: ChromaprintAlgorithm}
+	subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte("1\n00:01:40,000 --> 00:01:48,000\n♪ Opening theme ♪\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	candidate := Candidate{
 		FileID:        1,
 		AudioLanguage: "en",
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/episode.en.srt", Language: "en", Format: "srt"},
+			{Path: subtitlePath, Language: "en", Format: "srt"},
 		},
 	}
-	refiner := &DialogueBoundaryRefiner{
-		config: cfg,
-		readFile: func(path string) ([]byte, error) {
-			return []byte("1\n00:01:40,000 --> 00:01:48,000\n♪ Opening theme ♪\n\n"), nil
-		},
-	}
+	refiner := NewDialogueBoundaryRefiner(cfg)
 
 	refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
 	if err != nil {
@@ -77,19 +82,18 @@ func TestDialogueBoundaryRefinerIgnoresMusicCues(t *testing.T) {
 func TestDialogueBoundaryRefinerKeepsMinimumRemainingDuration(t *testing.T) {
 	cfg := DefaultConfig("ffmpeg")
 	segment := Segment{Start: 100, End: 112, Confidence: 0.85, Algorithm: ChromaprintAlgorithm}
+	subtitlePath := filepath.Join(t.TempDir(), "episode.en.srt")
+	if err := os.WriteFile(subtitlePath, []byte("1\n00:01:40,000 --> 00:01:45,000\nStill talking.\n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	candidate := Candidate{
 		FileID:        1,
 		AudioLanguage: "en",
 		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/episode.en.srt", Language: "en", Format: "srt"},
+			{Path: subtitlePath, Language: "en", Format: "srt"},
 		},
 	}
-	refiner := &DialogueBoundaryRefiner{
-		config: cfg,
-		readFile: func(path string) ([]byte, error) {
-			return []byte("1\n00:01:40,000 --> 00:01:45,000\nStill talking.\n\n"), nil
-		},
-	}
+	refiner := NewDialogueBoundaryRefiner(cfg)
 
 	refined, ok, err := refiner.RefineChromaprintStart(context.Background(), candidate, segment)
 	if err != nil {
@@ -97,24 +101,6 @@ func TestDialogueBoundaryRefinerKeepsMinimumRemainingDuration(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("refinement should not leave too-short intro, got %+v", refined)
-	}
-}
-
-func TestSelectDialogueSubtitlePrefersAudioLanguage(t *testing.T) {
-	candidate := Candidate{
-		AudioLanguage: "eng",
-		ExternalSubtitles: []models.ExternalSubtitle{
-			{Path: "/episode.es.srt", Language: "es", Format: "srt"},
-			{Path: "/episode.en.srt", Language: "en", Format: "srt"},
-		},
-	}
-
-	subtitle, ok := selectDialogueSubtitle(candidate)
-	if !ok {
-		t.Fatal("expected subtitle selection")
-	}
-	if subtitle.Path != "/episode.en.srt" {
-		t.Fatalf("selected %q, want English sidecar", subtitle.Path)
 	}
 }
 

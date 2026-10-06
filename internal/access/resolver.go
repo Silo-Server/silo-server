@@ -118,6 +118,8 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
 	}
 
+	scope.PreferencesDegraded = preferences.Degraded
+
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs
 	if len(disabled) > 0 {

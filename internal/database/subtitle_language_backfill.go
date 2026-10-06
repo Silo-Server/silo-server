@@ -43,13 +43,18 @@ const subtitleLanguageBackfillMaxPasses = 3
 //
 // RunDB rather than RunTx so each id window commits on its own.
 func subtitleLanguageBackfillMigration() *goose.Migration {
-	return goose.NewGoMigration(
+	m := goose.NewGoMigration(
 		subtitleLanguageBackfillVersion,
 		&goose.GoFunc{RunDB: backfillSubtitleLanguages},
 		// The previous spelling is not recorded, so there is nothing to
 		// restore; a rescan re-derives every tag from the files.
 		&goose.GoFunc{RunDB: func(context.Context, *sql.DB) error { return nil }},
 	)
+	// Go migrations registered in code have no source path; name them so
+	// migration progress logs identify them. goose requires the name to start
+	// with the version.
+	m.Source = fmt.Sprintf("%d_subtitle_language_backfill.go", subtitleLanguageBackfillVersion)
+	return m
 }
 
 // subtitleLanguageColumns are the media_files jsonb arrays whose elements

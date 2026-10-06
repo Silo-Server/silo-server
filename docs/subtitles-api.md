@@ -437,3 +437,157 @@ DELETE requires `If-Match`: missing validators return 428, stale validators or a
 A 204 confirms metadata removal only. Object cleanup is best effort using the accepted immutable-object deletion service. An uncertain database response never triggers cleanup or proves that metadata survived. This operation is non-retryable: there is no durable receipt, automatic replay, physical-erasure guarantee, or orphan reconciler. Inspect current metadata after uncertainty before deciding on another attempt; even absence is not proof of physical cleanup. Missing dependencies return 503 and unexpected errors are redacted.
 
 The bundled viewer subtitle search dialogs and track selector have no stored-subtitle deletion action. Administrator deletion and subtitle-preference removal are separate caller families. Native viewer-deletion inventories remain a coordination prerequisite; no new viewer deletion UI or Jellyfin behavior is introduced.
+
+## Subtitle sync
+
+Sync aligns a subtitle to its file's audio and stores a timing correction that
+every delivery path applies; the subtitle's bytes never change. It works on
+stored subtitles and on subtitle files next to the media (sidecars), which
+Silo never writes. See [subtitle sync](architecture/subtitle-sync.md) for the
+algorithm and job model. Anyone with access to the file may sync a subtitle or
+set its timing; demo mode refuses both.
+
+### Finding a subtitle to sync
+
+Each playback inventory track that can be synced carries a `sync_key`
+(external and downloaded SRT, WebVTT, ASS, and SSA tracks): `stored-{id}` for a
+stored subtitle, `external-{hash}` for a sidecar. Treat it as opaque. The
+operations below take the media file and the key.
+
+`GET /api/v2/subtitles/sync/status` (`getSubtitleSyncStatus`) is the capability
+probe: `state` says whether sync is available, `auto_sync` whether subtitles
+are synced automatically (server setting `subtitles.auto_sync`, on by
+default), and `external` whether sidecars can be synced.
+
+With `auto_sync` on, nobody has to ask. A downloaded or uploaded subtitle is
+synced when it is added. Any other subtitle that was never synced, a sidecar or
+a stored one, is synced the first time a player is served it, through any
+playback or Jellyfin subtitle route. Its job has `trigger: auto` and no
+requester. A subtitle someone already synced or retimed is left as it is.
+
+### Operations
+
+| Operation | Route | Notes |
+|---|---|---|
+| `listSubtitleSync` | `GET /api/v2/subtitles/{media_file_id}/sync` | Every syncable subtitle of the file: stored ones, then sidecars. A sidecar that cannot be read is left out. |
+| `getSubtitleSync` | `GET /api/v2/subtitles/{media_file_id}/sync/{key}` | One subtitle, and the `ETag` that `setSubtitleTiming` takes. The validator follows the timing, not job progress, so the read does not answer `If-None-Match`. |
+| `startSubtitleSync` | `POST /api/v2/subtitles/{media_file_id}/sync/{key}` | `202` with the subtitle and its job: a new one, or the active one (coalescing). A request after the job finished starts another, which reaches the same timing. |
+| `setSubtitleTiming` | `PUT /api/v2/subtitles/{media_file_id}/sync/{key}/timing` | Replaces the correction; `{offset_ms: 0, scale: 1}` restores the original timing. Needs `If-Match` (`428` without, `412` when stale). |
+
+Each returns `SubtitleSyncState`: `key`, `media_file_id`, `source`
+(`downloaded` or `external`), `stored_subtitle_id` for a stored subtitle,
+`language`, `format`, `label` (the release name, or the sidecar's file name),
+`timing` (`{offset_ms, scale}`: original time `t` plays at `t * scale +
+offset_ms`), and `sync`, the latest job, when it has one. A key the file does
+not have returns `404`.
+
+### Jobs
+
+A job (`SubtitleSyncJobState`) has `id`, `status`, `trigger` (`auto` or
+`manual`), `created_at`, and, once finished, `finished_at`, `confidence` (0..1,
+the share of sampled audio windows that agree), and `result` (the correction
+found). While it is active it also has `phase` and `progress` (0..1); a failed
+job has `failure`.
+
+| Status | Meaning |
+|---|---|
+| `pending`, `running` | Queued or aligning; see `phase`. |
+| `synced` | Applied `result` to the subtitle. |
+| `already_synced` | The current timing is right; nothing changed. |
+| `no_match` | No correction lines the subtitle up with the audio; it most likely belongs to another release or title. Timing unchanged. |
+| `failed` | The job could not finish. Timing unchanged. |
+
+| Phase | Meaning |
+|---|---|
+| `queued` | Waiting for a free worker. |
+| `analyzing` | Reading the file's speech; most of a job's time. Skipped when the speech is cached. |
+| `matching` | Aligning the subtitle's cues with the speech; under a second. |
+
+| Failure | Meaning |
+|---|---|
+| `subtitle_changed` | The subtitle, its file on disk, or its timing changed while the job ran. |
+| `no_audio` | The media file has no audio the server can read. |
+| `unavailable` | No server or node could analyze the audio now; try again later. |
+| `error` | Anything else. |
+
+### Following a sync
+
+Playback sessions of the file receive two realtime events, on every API server
+when an event bus is configured. Both are best effort; the operations above are
+authoritative.
+
+- `subtitle_sync_updated` (`session_id`, `file_id`, `sync_key`, `subtitle_id`
+  for a stored subtitle, `timing`, `job`) at each step of a job: queued, every
+  progress update, and the outcome. `job` has the `SubtitleSyncJobState`
+  shape. `timing` is the subtitle's correction when the update is sent,
+  including one another viewer set while the job ran.
+- `subtitle_timing_changed` (`session_id`, `file_id`, `sync_key`,
+  `subtitle_id` for a stored subtitle, optional `track`) whenever a subtitle's
+  timing changed: an applied sync, or a timing set or reset.
+
+A synced job has applied its result by the time it reports `synced`: the
+track's URL already serves the new timing. A client shows the change as applied
+once it has fetched the track again and its new cues are on screen. A suggested
+flow:
+
+1. `startSubtitleSync`, and show the job as in progress.
+2. Update the progress from `subtitle_sync_updated`; without realtime, poll
+   `getSubtitleSync` every few seconds while the job is `pending` or `running`.
+3. On `synced`, fetch the track again if it is on screen, then say it is
+   synced, with the correction. On `already_synced`, `no_match`, or `failed`,
+   say so; the timing did not change.
+4. On `subtitle_timing_changed` for the track on screen, fetch it again.
+
+An automatic sync of the track on screen should go unnoticed: show no progress
+for an `auto` job the viewer did not start, keep the current cues on screen
+until the refetched ones are loaded, and say nothing when they swap in. The
+subtitle menu can still show the result and offer a reset.
+
+Corrected bytes reach every delivery path: playback subtitle routes, the
+Jellyfin subtitle stream, offline downloads (see [downloads](downloads-api.md)),
+and AI translation sources. Those responses are `Cache-Control: private,
+no-cache`, since the bytes change behind the same URL. Device delays
+(`player.subtitle_sync_ms`) still apply on top. The frozen v1 bridge exposes
+neither timing nor sync but serves corrected bytes.
+
+Replacing the media file (a new file hash or size at the same path) resets the
+timing of every stored subtitle of that file, removes its sidecar corrections,
+and removes its sync history: a correction measured against one release's
+audio does not fit another.
+
+## Stored subtitle sync
+
+The stored-subtitle operations below predate sidecar sync and keep working for
+stored subtitles; `stored-{id}` with the operations above is equivalent.
+
+Every stored-subtitle projection (`GET /api/v2/subtitles/{media_file_id}`,
+provider download, upload, viewer metadata) carries `timing`
+(`{offset_ms, scale}`: original time `t` plays at `t * scale + offset_ms`;
+`{0, 1}` when uncorrected) and, when the subtitle has one, `sync`: its latest
+job (`SubtitleSyncJob`: the job fields above plus `subtitle_id`).
+Viewer metadata (`getViewerSubtitleMetadata`) omits `sync`: its validator
+follows the subtitle's revision, which job progress does not change.
+
+`POST /api/v2/subtitles/stored/{id}/sync` (`syncStoredSubtitle`) returns `202`
+with `job`: a new job, or the subtitle's active one. It requires file access
+only: the stored bytes never change, and anyone who can play the file can reset
+the timing. Formats other than SRT, WebVTT, ASS, and SSA return `422`.
+Demo mode refuses it. It coalesces on the subtitle's active job: a repeated
+request returns that job. A request repeated after it finished starts another
+job, which aligns the same stored bytes and reaches the same timing.
+
+`GET /api/v2/subtitles/stored/{id}/sync` (`getStoredSubtitleSync`) returns
+`subtitle` with `timing` and `sync` and needs file access only. Poll it while a
+job is `pending` or `running`. Its `ETag` is the validator for
+`setStoredSubtitleTiming`; it follows the subtitle's revision rather than job
+progress, so the read does not answer `If-None-Match`.
+
+`PUT /api/v2/subtitles/stored/{id}/timing` (`setStoredSubtitleTiming`) replaces
+the correction, for a manual adjustment or a reset to `{offset_ms: 0, scale: 1}`.
+It requires file access and `If-Match` with the validator from
+`getStoredSubtitleSync` (`getViewerSubtitleMetadata` returns the same one).
+`offset_ms` is within ±600000 and `scale` within 0.9..1.1. It returns the
+updated `subtitle` and its new `ETag`; a missing validator returns `428` and a
+stale one `412`.
+
+The administrator download returns the stored bytes, without the correction.

@@ -18,7 +18,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   }),
 }));
 
-vi.mock("@/hooks/queries/people", () => ({
+vi.mock("@/hooks/queries/personSearch", () => ({
   usePersonSearch: () => ({
     data: [],
     isLoading: false,
@@ -31,6 +31,10 @@ import {
   type GuidedFormState,
 } from "./CollectionGuidedRulesEditor";
 import CollectionGuidedRulesEditor from "./CollectionGuidedRulesEditor";
+
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
 
 function emptyState(): GuidedFormState {
   return {
@@ -395,16 +399,9 @@ describe("CollectionGuidedRulesEditor original language field", () => {
       />,
     );
 
+    expect(markup).toContain("Media Type");
     expect(markup).toContain("Original Language");
     expect(markup).toContain("English");
-  });
-
-  it("renders the media type control", () => {
-    const markup = renderToStaticMarkup(
-      <CollectionGuidedRulesEditor value={createEmptyQueryDefinition()} onChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Media Type");
   });
 
   it("renders ebook book-native filters without audiobook narrator or video-only filters", () => {

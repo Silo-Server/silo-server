@@ -58,7 +58,7 @@ func TestResolveDirectFileTranslatesMissingFileToNotFound(t *testing.T) {
 func TestResolveFileTranslatesMissingFileToNotFound(t *testing.T) {
 	svc := serviceWithFileRepo(missingFileRepo{err: scanner.ErrFileNotFound})
 
-	_, err := svc.resolveFile(context.Background(), CreateRequest{FileID: 4242})
+	_, err := svc.resolveFile(context.Background(), 7, CreateRequest{FileID: 4242}, catalog.AccessFilter{})
 	if !errors.Is(err, catalog.ErrItemNotFound) {
 		t.Fatalf("err = %v, want catalog.ErrItemNotFound", err)
 	}

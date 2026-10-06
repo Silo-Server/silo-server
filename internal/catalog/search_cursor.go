@@ -52,6 +52,8 @@ type searchCursorSQL struct {
 	after        *SearchCursor
 	jump         bool
 	countArgs    []any
+	exactSQL     string
+	exactArgs    []any
 	err          error
 }
 
@@ -61,6 +63,21 @@ func searchFTSTerms() []queryCursorTerm {
 		terms = append(terms, queryCursorTerm{expression: expression, kind: cursorKindNumber, descending: true, nullsLast: false})
 	}
 	return append(terms, queryCursorTerm{expression: searchLowerTitleExpression, kind: cursorKindText, nullsLast: true}, queryCursorTerm{expression: cursorContentIDColumn, kind: cursorKindText, nullsLast: true})
+}
+
+// searchCursorKeyColumns projects each searchFTSTerms key from the page CTE
+// as text, in the order cursorRows decodes them. The exact episode tier and the
+// general query share it so either one can continue the other's cursor.
+func searchCursorKeyColumns() string {
+	keys := ""
+	for _, term := range searchFTSTerms() {
+		expression := "page." + term.expression
+		if term.expression == searchLowerTitleExpression {
+			expression = "LOWER(page.title)"
+		}
+		keys += ", (" + expression + ")::text"
+	}
+	return keys
 }
 
 func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, itemTypes []string, limit int, after *SearchCursor, filter AccessFilter, includeTotal bool, request ...SearchCursorOptions) (SearchCursorPage, error) {
@@ -86,12 +103,12 @@ func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, ite
 	if after == nil && searchOptions(request).GroupByWork && eligibleForFuzzy(parsed) {
 		probeOptions := searchOptions(request)
 		probeOptions.GroupByWork = false
-		probe, _, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, probeOptions)
+		probe, probeKeys, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, probeOptions)
 		if err != nil {
 			return SearchCursorPage{}, err
 		}
 		if len(probe) < fuzzyFallbackThreshold {
-			return r.searchCombinedCursorPage(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, request...)
+			return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, &searchFTSBlock{items: probe, keys: probeKeys}, request...)
 		}
 		after = &SearchCursor{Mode: searchCursorFTS}
 	}
@@ -100,7 +117,7 @@ func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, ite
 		return SearchCursorPage{}, err
 	}
 	if after == nil && eligibleForFuzzy(parsed) && len(items) < fuzzyFallbackThreshold {
-		return r.searchCombinedCursorPage(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, request...)
+		return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, &searchFTSBlock{items: items, keys: keys}, request...)
 	}
 	page := SearchCursorPage{Items: items, Total: total, TotalExact: includeTotal, HasMore: len(items) > limit, Scope: &SearchCursor{Mode: searchCursorFTS}}
 	if page.HasMore {
@@ -128,7 +145,25 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 		defer cancel()
 		_ = tx.Rollback(rollbackCtx)
 	}()
-	rows, err := tx.Query(ctx, sql, args...)
+	if !includeTotal && options.exactSQL != "" {
+		rows, err := tx.Query(ctx, options.exactSQL, searchPlanArgs(options.exactArgs)...)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		wrapped := &cursorRows{Rows: rows, terms: searchFTSTerms()}
+		items, err := scanItems(wrapped)
+		rows.Close()
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if len(items) == limit {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, nil, 0, err
+			}
+			return items, wrapped.keys, 0, nil
+		}
+	}
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -140,7 +175,7 @@ func (r *ItemRepository) searchFTSCursorRows(ctx context.Context, parsed parsedS
 	}
 	total := 0
 	if includeTotal {
-		if err := tx.QueryRow(ctx, countSQL, options.countArgs...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, countSQL, searchPlanArgs(options.countArgs)...).Scan(&total); err != nil {
 			return nil, nil, 0, err
 		}
 	}
@@ -212,6 +247,13 @@ type searchCandidate struct {
 	cursor *SearchCursor
 }
 
+// A probe below fuzzyFallbackThreshold contains the entire accessible FTS
+// family. Preserve its cursor tuples when handing it to sparse augmentation.
+type searchFTSBlock struct {
+	items []*models.MediaItem
+	keys  []QueryCursor
+}
+
 func fuzzySQLTerms() []queryCursorTerm {
 	return []queryCursorTerm{{expression: "fuzzy_rank", kind: cursorKindNumber, descending: true}, {expression: "fuzzy_full_rank", kind: cursorKindNumber, descending: true}, {expression: searchLowerTitleExpression, kind: cursorKindText, nullsLast: true}, {expression: cursorContentIDColumn, kind: cursorKindText, nullsLast: true}}
 }
@@ -233,12 +275,21 @@ func boolCursorValue(value bool) QueryCursorValue {
 }
 
 func (r *ItemRepository) combinedSearchCandidates(ctx context.Context, parsed parsedSearchQuery, itemTypes []string, filter AccessFilter, request ...SearchCursorOptions) ([]searchCandidate, bool, error) {
-	rawOptions := searchOptions(request)
-	rawOptions.GroupByWork = false
-	fts, ftsKeys, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, rawOptions)
-	if err != nil {
-		return nil, false, err
+	return r.combinedSearchCandidatesWithFTS(ctx, parsed, itemTypes, filter, nil, request...)
+}
+
+func (r *ItemRepository) combinedSearchCandidatesWithFTS(ctx context.Context, parsed parsedSearchQuery, itemTypes []string, filter AccessFilter, block *searchFTSBlock, request ...SearchCursorOptions) ([]searchCandidate, bool, error) {
+	var err error
+	if block == nil {
+		rawOptions := searchOptions(request)
+		rawOptions.GroupByWork = false
+		fts, keys, _, fetchErr := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, filter, false, false, 0, rawOptions)
+		if fetchErr != nil {
+			return nil, false, fetchErr
+		}
+		block = &searchFTSBlock{items: fts, keys: keys}
 	}
+	fts, ftsKeys := block.items, block.keys
 	if len(fts) >= fuzzyFallbackThreshold {
 		return nil, false, fmt.Errorf("%w: sparse search family changed", ErrCatalogCursorChanged)
 	}
@@ -274,7 +325,7 @@ func (r *ItemRepository) combinedSearchCandidates(ctx context.Context, parsed pa
 	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
 		return nil, false, err
 	}
-	rows, err := tx.Query(ctx, sql, args...)
+	rows, err := tx.Query(ctx, sql, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -338,7 +389,11 @@ func (r *ItemRepository) combinedSearchCandidates(ctx context.Context, parsed pa
 }
 
 func (r *ItemRepository) searchCombinedCursorPage(ctx context.Context, parsed parsedSearchQuery, itemTypes []string, limit int, after *SearchCursor, filter AccessFilter, includeTotal bool, request ...SearchCursorOptions) (SearchCursorPage, error) {
-	candidates, truncated, err := r.combinedSearchCandidates(ctx, parsed, itemTypes, filter, request...)
+	return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, after, filter, includeTotal, nil, request...)
+}
+
+func (r *ItemRepository) searchCombinedCursorPageWithFTS(ctx context.Context, parsed parsedSearchQuery, itemTypes []string, limit int, after *SearchCursor, filter AccessFilter, includeTotal bool, block *searchFTSBlock, request ...SearchCursorOptions) (SearchCursorPage, error) {
+	candidates, truncated, err := r.combinedSearchCandidatesWithFTS(ctx, parsed, itemTypes, filter, block, request...)
 	if err != nil {
 		return SearchCursorPage{}, err
 	}

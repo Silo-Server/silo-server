@@ -83,7 +83,10 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	// evaluate the base layer only as a copy remux, tagged as the strip writes it.
 	req.EnableDirectPlay = boolPtr(false)
 	profile.hlsRemuxSampleEntry = playback.VideoSampleEntryHVC1
-	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode)
+	// Keep the negotiated encoder available if a later subtitle selection
+	// requires burning into the video instead of copying the HDR10 base layer.
+	allowHEVCEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
+	stripped := h.buildPlaybackSource(routeItemID, playSessionID, compatHDR10BaseVersion(source.Version), profile, req, allow4KTranscode, allowHEVCEncoding)
 	if !stripped.HLSRemux {
 		return source
 	}

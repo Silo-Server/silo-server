@@ -613,9 +613,6 @@ func scanResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
 	}
-	if result.Skipped {
-		resp.Skipped = 1
-	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New
 		resp.Updated = result.ScanResult.Updated

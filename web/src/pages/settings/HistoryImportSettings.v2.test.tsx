@@ -4,11 +4,20 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import HistoryImportSettings from "./HistoryImportSettings";
 import { useHistoryImportRun } from "@/hooks/queries/history-import";
-const state = vi.hoisted(() => ({ refresh: vi.fn(), login: vi.fn(), createRun: vi.fn() }));
+import { V2ProblemError } from "@/api/v2/request";
+const state = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  login: vi.fn(),
+  createRun: vi.fn(),
+  createError: null as Error | null,
+  role: "user",
+  primary: false,
+}));
 vi.mock("@/components/realtimeEventsContext", () => ({ useEventChannel: vi.fn() }));
 vi.mock("@/hooks/useCurrentProfile", () => ({
-  useCurrentProfile: () => ({ profile: { id: "p" } }),
+  useCurrentProfile: () => ({ profile: { id: "p", name: "Member", is_primary: state.primary } }),
 }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ user: { role: state.role } }) }));
 vi.mock("@/hooks/queries/profiles", () => ({
   useProfiles: () => ({ data: [{ id: "p", name: "Member" }] }),
 }));
@@ -20,6 +29,7 @@ vi.mock("@/hooks/queries/history-import", () => ({
         id: "saved",
         status: "canceling",
         source_type: "plex",
+        profile_id: "p",
         connection_mode: "plex_oauth",
         terminal: false,
         cancelable: false,
@@ -39,7 +49,11 @@ vi.mock("@/hooks/queries/history-import", () => ({
   }),
   useHistoryImportRun: vi.fn(),
   useLoginEmbyConnect: () => ({ isPending: false, mutateAsync: state.login }),
-  useCreateHistoryImportRun: () => ({ isPending: false, mutateAsync: state.createRun }),
+  useCreateHistoryImportRun: () => ({
+    isPending: false,
+    mutateAsync: state.createRun,
+    error: state.createError,
+  }),
 }));
 const unavailableRun = () =>
   ({
@@ -49,6 +63,9 @@ const unavailableRun = () =>
   }) as unknown as ReturnType<typeof useHistoryImportRun>;
 beforeEach(() => {
   vi.mocked(useHistoryImportRun).mockImplementation(unavailableRun);
+  state.role = "user";
+  state.primary = false;
+  state.createError = null;
 });
 afterEach(cleanup);
 it("monitors the latest persisted run and lets failed polling be refreshed", () => {
@@ -124,4 +141,55 @@ it("counts skipped items once in a running import's progress", () => {
 
   expect(screen.getByText("13 / 13 processed")).toBeTruthy();
   expect(screen.getAllByText("An import item could not be processed.")).toHaveLength(2);
+});
+
+it("imports only into the member's own profile when it isn't the primary profile", () => {
+  renderPage();
+  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
+  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
+  expect(screen.queryByText(/into Member/)).toBeNull();
+});
+
+it("lets the primary profile choose the profile and names each run's profile", () => {
+  state.primary = true;
+  renderPage();
+  expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
+  expect(screen.getByText(/into Member/)).toBeTruthy();
+});
+
+it("lets an admin choose the profile", () => {
+  state.role = "admin";
+  renderPage();
+  expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
+});
+
+it("keeps the server's message for a secondary profile's refused import", () => {
+  // A secondary profile only imports into itself, so a 403 is some other
+  // refusal (demo mode here) and must not be reworded as a cross-profile one.
+  state.createError = new V2ProblemError("createHistoryImportRun", {
+    type: "https://silo.example/problems/forbidden",
+    title: "Forbidden",
+    status: 403,
+    detail: "This action is not available in demo mode.",
+    instance: "/api/v2/history-imports/runs",
+  });
+  renderPage();
+  const alerts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
+  expect(alerts.some((text) => text.includes("Ask the primary profile"))).toBe(false);
+  expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
+});
+
+it("keeps the server's message for a refused import by the primary profile", () => {
+  state.primary = true;
+  state.createError = new V2ProblemError("createHistoryImportRun", {
+    type: "https://silo.example/problems/forbidden",
+    title: "Forbidden",
+    status: 403,
+    detail: "Verify the primary profile PIN to import into another profile",
+    instance: "/api/v2/history-imports/runs",
+  });
+  renderPage();
+  const alerts = screen.getAllByRole("alert").map((alert) => alert.textContent ?? "");
+  expect(alerts.some((text) => text.includes("This profile can only import"))).toBe(false);
+  expect(alerts.some((text) => text.includes(state.createError!.message))).toBe(true);
 });

@@ -17,14 +17,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
-// NormalizeMDBListURL accepts either a list page URL
-// (https://mdblist.com/lists/user/slug) or its JSON variant and returns the
-// canonical JSON URL. Trailing slashes are tolerated. Empty input is
-// returned unchanged so callers can keep their own validation.
-func NormalizeMDBListURL(url string) string {
-	return collectionutil.NormalizeMDBListURL(url)
-}
-
 // CanonicalMDBListURL normalizes a list URL and rejects anything that is not
 // an MDBList list page. Sync fetches that URL, so callers must use this
 // before storing or requesting.
@@ -37,6 +29,7 @@ type SourceMode string
 const (
 	SourceModeMDBList     SourceMode = "mdblist_json"
 	SourceModeTMDBPreset  SourceMode = "tmdb_preset"
+	SourceModeTMDBList    SourceMode = "tmdb_list"
 	SourceModeTraktPreset SourceMode = "trakt_preset"
 )
 
@@ -92,6 +85,8 @@ func (c SourceConfig) DisplayURL() string {
 			return fmt.Sprintf("tmdb://%s/%s/%s", c.Preset, c.MediaType, c.TimeWindow)
 		}
 		return fmt.Sprintf("tmdb://%s/%s", c.Preset, c.MediaType)
+	case SourceModeTMDBList:
+		return c.URL
 	case SourceModeTraktPreset:
 		if c.Preset == "recommended" {
 			return fmt.Sprintf("trakt://%s/%s/%s", c.Preset, c.MediaType, c.ProfileID)

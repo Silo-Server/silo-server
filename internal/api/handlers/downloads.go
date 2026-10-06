@@ -790,6 +790,12 @@ func (h *DownloadHandler) HandleArtwork(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind := chi.URLParam(r, "kind")
+	if kind == "series_poster" {
+		// A v2-only kind; the frozen v1 route answers 404 for it before
+		// checking the download, so an inactive download still gets 404 here.
+		h.writeAssetError(w, "artwork", id, downloads.ErrAssetNotFound)
+		return
+	}
 	if err := h.svc.ServeArtwork(r.Context(), w, r, userID, profileID, deviceID, id, kind, requestAccessFilter(r)); err != nil {
 		h.writeAssetError(w, "artwork", id, err)
 		return
@@ -821,6 +827,10 @@ func (h *DownloadHandler) writeAssetError(w http.ResponseWriter, asset, id strin
 		errors.Is(err, downloads.ErrAssetNotFound),
 		errors.Is(err, catalog.ErrItemNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Not found")
+	case errors.Is(err, downloads.ErrAssetUnavailable):
+		// The service already logged the store failure; the frozen v1
+		// answer stays the 500 it has always been.
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve download asset")
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		writeError(w, http.StatusBadRequest, "invalid_subtitle_ref", "Invalid subtitle reference")
 	case errors.Is(err, downloads.ErrDownloadNotActive):

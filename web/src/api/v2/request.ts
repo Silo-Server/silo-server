@@ -7,7 +7,8 @@
  * Documented non-2xx responses are RFC 9457 Problem Details and are thrown as
  * `V2ProblemError`; anything the contract does not describe (an HTML error
  * page, an unparseable body) is a `V2TransportError`; a failed fetch rejects
- * with the network error itself.
+ * with the network error itself. A read the server does not finish answering
+ * within its deadline is a `V2TimeoutError`.
  *
  * Session handling (bearer token, refresh-then-retry on 401, profile and
  * device headers) is the same machinery the v1 client uses, shared through
@@ -20,6 +21,7 @@ import {
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "../client";
+import { API_READ_TIMEOUT_MS, startRequestDeadline } from "../requestDeadline";
 import { v2Operations } from "./operations";
 import { problemId } from "./problemId";
 import type { components, paths } from "./schema";
@@ -46,6 +48,23 @@ const authExchangeOperations = new Set<V2OperationKey>([
   "POST /api/v2/auth/device/start",
   "POST /api/v2/auth/device/poll",
 ]);
+
+// Reads sent as POST because their input is a JSON document. They wait for
+// the server only as long as a GET does.
+const readOnlyPostOperations = new Set<V2OperationKey>(["POST /api/v2/catalog/query"]);
+
+/**
+ * The deadline a request gets when its caller sets none: reads fail with
+ * `V2TimeoutError` after `API_READ_TIMEOUT_MS`. Writes have no deadline, since
+ * abandoning one leaves its outcome unknown, and uploads may legitimately run
+ * for minutes.
+ */
+function defaultTimeoutMs(method: string, key: V2OperationKey): number | false {
+  if (method === "GET" || method === "HEAD" || readOnlyPostOperations.has(key)) {
+    return API_READ_TIMEOUT_MS;
+  }
+  return false;
+}
 
 /** The operation id the spec assigns to a `METHOD /path`. */
 export type V2OperationId<K extends V2OperationKey> = (typeof v2Operations)[K];
@@ -184,6 +203,12 @@ interface CommonOptions {
   retryAuthentication?: boolean;
   /** Inspect metadata from a successfully decoded response, such as its ETag. */
   onResponse?: (response: Response) => void;
+  /**
+   * How long to wait for the complete response before failing with
+   * `V2TimeoutError`; `false` waits indefinitely. Reads default to
+   * `API_READ_TIMEOUT_MS`, other requests to no limit.
+   */
+  timeoutMs?: number | false;
 }
 
 export type V2RequestOptions<K extends V2OperationKey> = CommonOptions &
@@ -280,6 +305,24 @@ export class V2TransportError extends Error {
     this.name = "V2TransportError";
     this.operationId = operationId;
     this.status = status;
+  }
+}
+
+/**
+ * The server did not answer within the request's deadline: it accepted the
+ * connection and then went quiet (a frozen process, a black-holed network, a
+ * stuck reverse proxy). A caller's own abort is not this; it rejects with the
+ * caller's reason.
+ */
+export class V2TimeoutError extends Error {
+  readonly operationId: string;
+  readonly timeoutMs: number;
+
+  constructor(operationId: string, timeoutMs: number) {
+    super(`${operationId}: the server did not respond within ${Math.round(timeoutMs / 1000)} s`);
+    this.name = "V2TimeoutError";
+    this.operationId = operationId;
+    this.timeoutMs = timeoutMs;
   }
 }
 
@@ -404,8 +447,49 @@ export async function v2<K extends V2OperationKey>(
     headers["X-Profile-Token"] = snapshot.profileToken ?? "";
   }
 
+  const url = buildUrl(route, options.path, options.query);
+  const timeoutMs = options.timeoutMs ?? defaultTimeoutMs(method, key);
+  if (timeoutMs === false) {
+    return sendV2(key, url, init, snapshot, options);
+  }
+  // The deadline covers the whole exchange, body included: a server can send
+  // the headers and then stall.
+  const deadline = startRequestDeadline(
+    timeoutMs,
+    () => new V2TimeoutError(v2Operations[key], timeoutMs),
+    options.signal,
+  );
+  init.signal = deadline.signal;
+  try {
+    return await sendV2(key, url, init, snapshot, options);
+  } catch (err) {
+    // A network or abort failure after the deadline fired is the deadline's
+    // doing; a server answer or a context change that arrived in time stands.
+    if (
+      deadline.expired &&
+      !(
+        err instanceof V2ProblemError ||
+        err instanceof V2TransportError ||
+        err instanceof StaleApiRequestContextError
+      )
+    ) {
+      throw deadline.signal.reason;
+    }
+    throw err;
+  } finally {
+    deadline.dispose();
+  }
+}
+
+async function sendV2<K extends V2OperationKey>(
+  key: K,
+  url: string,
+  init: RequestInit,
+  snapshot: ProfileRequestContextSnapshot | undefined,
+  options: CommonOptions,
+): Promise<V2Result<K>> {
   const { res, requestProfileId, requestProfileToken } = await fetchWithSession(
-    buildUrl(route, options.path, options.query),
+    url,
     init,
     snapshot,
     options.retryAuthentication !== false && !authExchangeOperations.has(key),

@@ -448,6 +448,42 @@ func (r *LibraryItemRepository) Delete(ctx context.Context, contentID string, fo
 // its surviving media_files rows and syncPresentLibraryState re-inserts the
 // membership from those rows.
 func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int, protectedPathPrefixes []string) (int, int, []string, error) {
+	return r.reconcileMemberships(ctx, folderID, nil, protectedPathPrefixes, false)
+}
+
+// ReconcileItemMemberships removes stale memberships and orphaned items only
+// for the supplied content IDs. File presence is checked across the whole
+// folder, so a version outside the scanned subtree preserves its membership.
+// An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileItemMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, protectedPathPrefixes, false)
+}
+
+// ReconcileRelinkedItems cleans up after code outside the scanner relinks
+// files away from the listed items. It removes their memberships in the folder
+// when no present file there still links to them, and deletes those left with
+// no membership and no file rows at all. An item that still has file rows is
+// kept: those files may sit under an unreachable root, which only a scan can
+// tell, and the scan's orphan check covers them. An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileRelinkedItems(ctx context.Context, folderID int, contentIDs []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, nil, true)
+}
+
+// reconcileMemberships limits removal to contentIDs when it is non-nil. With
+// onlyFileless, orphans that still have file rows are left for a scan.
+func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string, onlyFileless bool) (int, int, []string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mil.content_id = ANY($2::text[])"
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("beginning membership reconciliation transaction: %w", err)
@@ -460,7 +496,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// series (no remaining chapters) are cleaned up separately by the manga scan.
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_item_libraries mil
-		WHERE mil.media_folder_id = $1
+		WHERE mil.media_folder_id = $1`+itemPredicate+`
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM media_files mf
@@ -475,7 +511,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			  AND mi.type = 'manga'
 		  )
 		RETURNING mil.content_id
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("deleting stale folder memberships: %w", err)
 	}
@@ -500,15 +536,29 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// protected-root pass. The latter no longer have a membership to return from
 	// the DELETE above, but their surviving media_files row still ties them to
 	// this folder so they can be reconsidered after the root recovers.
-	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	// Relink cleanup considers every listed item: one an earlier relink kept
+	// because it still had files has no membership left to remove here, yet
+	// may just have lost its last file.
+	orphanCandidates := removedContentIDs
+	if onlyFileless {
+		orphanCandidates = contentIDs
+	}
+	orphanIDs, err := collectOrphanIDs(ctx, tx, orphanCandidates)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
-	if err != nil {
-		return 0, 0, nil, err
+	if onlyFileless {
+		orphanIDs, err = excludeOrphansWithFiles(ctx, tx, orphanIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	} else {
+		previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID, contentIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	}
-	orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	if len(orphanIDs) > 0 {
 
 		// Exempt orphans whose files sit under an unreachable root: the files
@@ -583,17 +633,23 @@ func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs [
 	return deletedContentIDs, imageDirs, nil
 }
 
-func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, contentIDs []string) ([]string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mf.content_id = ANY($2::text[])"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT mf.content_id
 		FROM media_files mf
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1`+itemPredicate+`
 		  AND mf.content_id IS NOT NULL
 		  AND mf.content_id <> ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
 		  )
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
 	}
@@ -601,6 +657,25 @@ func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
 		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+// excludeOrphansWithFiles returns the orphanIDs no media_files row links to.
+func excludeOrphansWithFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string) ([]string, error) {
+	if len(orphanIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = cid)
+	`, orphanIDs)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans that still have files: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting fileless orphans: %w", err)
 	}
 	return ids, nil
 }

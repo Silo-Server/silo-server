@@ -56,7 +56,13 @@ func (s *Service) SyncSubscriptionPage(ctx context.Context, userID int, profileI
 	if err != nil {
 		return SubscriptionSyncPage{}, err
 	}
-	items, err := s.subscriptionEpisodeItems(ctx, sub, episodes)
+	items, err := s.subscriptionEpisodeItems(ctx, sub, episodes, true, filter)
+	if err != nil {
+		return SubscriptionSyncPage{}, err
+	}
+	// The lock below rejects the page if the monitor (and so its quality)
+	// changed since this plan was made.
+	plan, err := s.planMonitorEntries(ctx, sub, items)
 	if err != nil {
 		return SubscriptionSyncPage{}, err
 	}
@@ -65,15 +71,17 @@ func (s *Service) SyncSubscriptionPage(ctx context.Context, userID int, profileI
 		last := episodes[len(episodes)-1]
 		out.Next = &catalog.EpisodePagePosition{SeasonNumber: last.SeasonNumber, EpisodeNumber: last.EpisodeNumber, ContentID: last.ContentID}
 	}
-	err = s.subRepo.WithLocked(ctx, userID, profileID, deviceID, id, func(locked *Subscription, tx pgx.Tx) error {
-		if err := check(locked); err != nil {
-			return err
-		}
-		if !locked.Active || !locked.UpdatedAt.Equal(sub.UpdatedAt) {
-			return ErrStatusConflict
-		}
-		out.Registered, err = s.registerSubscriptionItems(ctx, locked, items, managedRegistryStore{tx})
-		return err
+	rows, err := s.registerMonitorPlan(ctx, sub, plan, func(register func(*Subscription, pgx.Tx) error) error {
+		return s.subRepo.WithLocked(ctx, userID, profileID, deviceID, id, func(locked *Subscription, tx pgx.Tx) error {
+			if err := check(locked); err != nil {
+				return err
+			}
+			if !locked.Active || !locked.UpdatedAt.Equal(sub.UpdatedAt) {
+				return ErrStatusConflict
+			}
+			return register(locked, tx)
+		})
 	})
+	out.Registered = len(rows)
 	return out, err
 }

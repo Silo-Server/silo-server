@@ -608,6 +608,21 @@ func (s *Service) ListRunsPage(ctx context.Context, userID int, after *RunKey, l
 	return s.repo.ListRunsPageForUser(ctx, userID, after, limit)
 }
 
+// ListRunsPageForProfile is ListRunsPage limited to runs that write into
+// profileID.
+func (s *Service) ListRunsPageForProfile(ctx context.Context, userID int, profileID string, after *RunKey, limit int) ([]Run, bool, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	return s.repo.ListRunsPageForProfile(ctx, userID, profileID, after, limit)
+}
+
+// UserStore returns the account's profile store, which callers use to decide
+// which of the account's profiles the acting profile may import for.
+func (s *Service) UserStore(ctx context.Context, userID int) (userstore.UserStore, error) {
+	return s.stores.ForUser(ctx, userID)
+}
+
 func (s *Service) ListActiveRuns(ctx context.Context, userID int) ([]Run, error) {
 	return s.repo.ListActiveRunsForUser(ctx, userID)
 }
@@ -693,16 +708,6 @@ func IsNotFoundError(err error) bool {
 		errors.Is(err, ErrProfileNotFound) ||
 		errors.Is(err, ErrConnectSessionNotFound) ||
 		errors.Is(err, ErrPlexSessionNotFound)
-}
-
-func shouldWriteImportedProgress(record Record, localProgress *localProgressRow) bool {
-	if localProgress == nil {
-		return true
-	}
-	if record.UpdatedAt.IsZero() {
-		return false
-	}
-	return record.UpdatedAt.After(localProgress.UpdatedAt)
 }
 
 func toConnectServerResponses(servers []ConnectServer) []ConnectServerResponse {

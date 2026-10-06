@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 const (
@@ -85,15 +86,19 @@ type CacheResult struct {
 
 // Cacher downloads and stores image variants to S3.
 type Cacher struct {
-	s3                ObjectPutter
-	revisionTracker   ArtworkRevisionTracker
-	httpClient        *http.Client
+	s3              ObjectPutter
+	revisionTracker ArtworkRevisionTracker
+	httpClient      *http.Client
+	// trustedClient fetches for requests whose context carries
+	// netguard.WithPrivateAccess. Its netguard transport may reach the
+	// server's local network but still refuses blocked addresses.
+	trustedClient     *http.Client
 	enforcePublicURLs bool
 }
 
 // New creates a new Cacher backed by the given ObjectPutter.
 func New(s3 ObjectPutter) *Cacher {
-	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), enforcePublicURLs: true}
+	return &Cacher{s3: s3, httpClient: newSecureHTTPClient(), trustedClient: newTrustedHTTPClient(), enforcePublicURLs: true}
 }
 
 // SetArtworkRevisionTracker wires durable revision lifecycle tracking. The
@@ -102,13 +107,6 @@ func (c *Cacher) SetArtworkRevisionTracker(tracker ArtworkRevisionTracker) {
 	if c != nil {
 		c.revisionTracker = tracker
 	}
-}
-
-func newWithHTTPClient(s3 ObjectPutter, client *http.Client) *Cacher {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &Cacher{s3: s3, httpClient: client}
 }
 
 // CacheImage implements metadata.ImageCacher using the internal Cache method.
@@ -480,14 +478,21 @@ func normalizeImageLanguage(language string) string {
 }
 
 // downloadImage fetches the image at the given URL, enforcing size, timeout,
-// and public-network limits.
+// and network limits: public addresses only, or the local network too when
+// ctx carries netguard.WithPrivateAccess.
 func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse URL: %w", err)
 	}
+	client := c.httpClient
 	if c.enforcePublicURLs {
-		if err := validatePublicImageURL(parsed); err != nil {
+		if netguard.PrivateAccess(ctx) {
+			if err := validateImageURL(parsed); err != nil {
+				return nil, err
+			}
+			client = c.trustedClient
+		} else if err := validatePublicImageURL(parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -499,7 +504,6 @@ func (c *Cacher) downloadImage(ctx context.Context, rawURL string) ([]byte, erro
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	client := c.httpClient
 	if client == nil {
 		client = newSecureHTTPClient()
 	}
@@ -542,17 +546,40 @@ func newSecureHTTPClient() *http.Client {
 	}
 }
 
-func validatePublicImageURL(u *url.URL) error {
+// newTrustedHTTPClient returns the client for trusted requests. The
+// netguard transport checks every address it dials, redirect hops included,
+// and uses its trusted pool because those requests carry
+// netguard.WithPrivateAccess.
+func newTrustedHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: netguard.NewTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return http.ErrUseLastResponse
+			}
+			return validateImageURL(req.URL)
+		},
+	}
+}
+
+func validateImageURL(u *url.URL) error {
 	if u == nil {
 		return fmt.Errorf("empty URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
-	host := u.Hostname()
-	if host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("URL host is required")
 	}
+	return nil
+}
+
+func validatePublicImageURL(u *url.URL) error {
+	if err := validateImageURL(u); err != nil {
+		return err
+	}
+	host := u.Hostname()
 	if addr, err := netip.ParseAddr(host); err == nil && !isPublicAddr(addr) {
 		return fmt.Errorf("private image host %q is not allowed", host)
 	}

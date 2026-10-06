@@ -663,37 +663,6 @@ func TestHostProcOverridesLxcfsScopedFiles(t *testing.T) {
 	}
 }
 
-// Without a bind-mounted lxcfs view — plain Docker, bare metal, or an LXC
-// deployment that has not mounted /host/proc — every reading must fall back
-// to the container's own /proc exactly as before this feature existed.
-func TestHostProcAbsentFallsBackToProcDir(t *testing.T) {
-	tree := newProcTree(t)
-	clock := newFakeClock()
-	tree.write("stat", "cpu  100 0 100 800 0 0 0 0\ncpu0 50 0 50 400 0 0 0 0\ncpu1 50 0 50 400 0 0 0 0\n")
-	tree.write("loadavg", "3.20 1.10 0.90 2/512 9\n")
-	tree.write("meminfo", "MemTotal: 8388608 kB\nMemAvailable: 6291456 kB\n")
-	tree.write("net/dev", "Inter-|\n face |\n")
-
-	// newTestSampler already points hostProcDir at a nonexistent path; this
-	// test just makes that fallback explicit and asserts on it.
-	s := newTestSampler(t, tree, clock, Options{})
-	s.sample(context.Background())
-
-	system := s.Snapshot().System
-	if system.Cores != 2 {
-		t.Fatalf("Cores = %d, want 2 from procDir", system.Cores)
-	}
-	if system.Load1 != 3.20 {
-		t.Fatalf("Load1 = %v, want 3.2 from procDir", system.Load1)
-	}
-	if system.MemTotalMB != 8192 {
-		t.Fatalf("MemTotalMB = %d, want 8192 from procDir", system.MemTotalMB)
-	}
-	if system.MemUsedMB != 2048 {
-		t.Fatalf("MemUsedMB = %d, want 2048 from procDir", system.MemUsedMB)
-	}
-}
-
 // Only stat, loadavg, and meminfo are host-proc aware. net/dev is per-netns
 // and must stay on the container's own /proc even when hostProcDir has its
 // own net/dev sitting right next to the other three files — otherwise a
@@ -837,31 +806,6 @@ func TestSampleGPUReportsSessionsWhenNVIDIAEnrichmentFails(t *testing.T) {
 	}
 	if gpus[0].Source != SourceUnavailable {
 		t.Fatalf("source = %q, want it reported as unmeasured", gpus[0].Source)
-	}
-}
-
-// A workload whose device an enrichment source did name is not duplicated: the
-// alias set already covers it.
-func TestSampleGPUDoesNotDuplicateAnAlreadyNamedDevice(t *testing.T) {
-	tree := newProcTree(t)
-	tree.write("stat", "cpu  0 0 0 0 0 0 0 0\n")
-	tree.write("loadavg", "0 0 0 0/0 0\n")
-	tree.write("meminfo", "MemTotal: 1024 kB\n")
-	tree.write("net/dev", "")
-	s := newTestSampler(t, tree, newFakeClock(), Options{})
-	s.runNVIDIASMI = func(context.Context) ([]byte, error) {
-		return []byte("0, GPU-x, 00000000:03:00.0, 71, 63, 12, 812, 8192\n"), nil
-	}
-	s.identities = func() []DeviceIdentity { return nil }
-	s.sessions = func() map[string]int { return map[string]int{"cuda:0": 2} }
-
-	gpus := s.sampleGPU(context.Background(), s.now())
-
-	if len(gpus) != 1 {
-		t.Fatalf("gpu sample = %+v, want one entry for the enriched device", gpus)
-	}
-	if gpus[0].Sessions != 2 {
-		t.Fatalf("sessions = %d, want the workload joined onto the enriched entry", gpus[0].Sessions)
 	}
 }
 

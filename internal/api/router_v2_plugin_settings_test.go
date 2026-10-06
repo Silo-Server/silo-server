@@ -28,7 +28,9 @@ func (v2WiringTokens) ValidateToken(string) (*auth.Claims, error) {
 
 type v2WiringSessions struct{}
 
-func (v2WiringSessions) IsValid(context.Context, string) (bool, error) { return true, nil }
+func (v2WiringSessions) ActiveSessionRole(context.Context, string) (string, bool, error) {
+	return "user", true, nil
+}
 
 type v2WiringViewer struct{}
 

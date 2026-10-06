@@ -60,19 +60,15 @@ describe("MatchItemDialog", () => {
       <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
     );
 
+    expect(markup).toContain("Search");
+    expect(markup).toContain("Inception");
+    expect(markup).toContain("(2010)");
+    expect(markup).toContain("movie");
     expect(markup).toContain('id="match-title"');
     expect(markup).toContain('id="match-year"');
     expect(markup).toContain('id="match-imdb"');
     expect(markup).toContain('id="match-tmdb"');
     expect(markup).toContain('id="match-tvdb"');
-  });
-
-  it("renders a search button", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Search");
   });
 
   it("renders candidate list when search returns results", () => {
@@ -205,16 +201,6 @@ describe("MatchItemDialog", () => {
     );
 
     expect(markup).toContain("No candidates found");
-  });
-
-  it("displays current item summary with title, year, and type badge", () => {
-    const markup = renderToStaticMarkup(
-      <MatchItemDialog item={baseItem} open={true} onOpenChange={() => {}} />,
-    );
-
-    expect(markup).toContain("Inception");
-    expect(markup).toContain("(2010)");
-    expect(markup).toContain("movie");
   });
 
   it("renders local media rows when file paths are available", () => {

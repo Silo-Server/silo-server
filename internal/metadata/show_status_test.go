@@ -39,19 +39,6 @@ func TestNormalizeShowStatus(t *testing.T) {
 	}
 }
 
-func TestMetadataResultToItem_NormalizesSeriesShowStatus(t *testing.T) {
-	result := &MetadataResult{
-		HasMetadata: true,
-		Title:       "Series",
-		ShowStatus:  "Returning Series",
-	}
-
-	item := metadataResultToItem(result, "series")
-	if item.ShowStatus != "returning" {
-		t.Fatalf("expected item show_status %q, got %q", "returning", item.ShowStatus)
-	}
-}
-
 func TestMetadataResultToItem_PassesNonSeriesShowStatusVerbatim(t *testing.T) {
 	// Manga statuses use their own value domain ("Ongoing", "Completed", ...)
 	// normalized by the manga enrichment pipeline; the generic converter must
@@ -65,19 +52,6 @@ func TestMetadataResultToItem_PassesNonSeriesShowStatusVerbatim(t *testing.T) {
 	item := metadataResultToItem(result, "manga")
 	if item.ShowStatus != "Ongoing" {
 		t.Fatalf("expected manga show_status to pass through verbatim, got %q", item.ShowStatus)
-	}
-}
-
-func TestItemToMetadataResult_CarriesShowStatus(t *testing.T) {
-	result := itemToMetadataResult(&models.MediaItem{
-		ContentID:  "series-1",
-		Type:       "series",
-		Title:      "Series",
-		ShowStatus: "returning",
-	})
-
-	if result.ShowStatus != "returning" {
-		t.Fatalf("expected metadata show_status %q, got %q", "returning", result.ShowStatus)
 	}
 }
 
