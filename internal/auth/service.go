@@ -33,7 +33,25 @@ var (
 	// ErrPasswordChangeRequired refuses a sign-in surface that cannot offer
 	// the password change a temporary password requires.
 	ErrPasswordChangeRequired = errors.New("password change required")
+	// ErrSessionCheckUnavailable is a refresh that could not read the state
+	// it judges (the login session, the account, or the provider re-check's
+	// records) because the store failed or timed out. The refresh token was
+	// not judged: the session stays valid and the caller retries later.
+	ErrSessionCheckUnavailable = errors.New("login session could not be checked")
 )
+
+// SessionCheckRetryAfterSeconds is the Retry-After of every answer to a
+// session or credential check that failed in the store (the v1 and v2 auth
+// gate, refresh, the proxy media grant, Jellyfin compat): long enough not to
+// hammer a recovering database, short enough that a brief outage does not
+// stall playback for long.
+const SessionCheckRetryAfterSeconds = 5
+
+// sessionCheckUnavailable wraps a store failure met while judging a refresh,
+// so callers can tell it from a refused session with errors.Is.
+func sessionCheckUnavailable(op string, err error) error {
+	return fmt.Errorf("%s: %w: %w", op, ErrSessionCheckUnavailable, err)
+}
 
 const (
 	MinimumPasswordLength = 8
@@ -973,7 +991,12 @@ func (s *Service) EndImpersonation(ctx context.Context, sessionID string, impers
 }
 
 // Refresh validates the refresh token, checks that the associated session is
-// still valid, and issues a new token pair.
+// still valid, and issues a new token pair. A token that does not verify is
+// an invalid-token error and a session or account that no longer holds is
+// ErrSessionRevoked; a store failure while checking either is
+// ErrSessionCheckUnavailable, which ends nothing. A provider answer the
+// re-check received but could not apply (errAnswerNotApplied) refuses the
+// token: the store answered, so a retry would only repeat the failure.
 func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair, error) {
 	claims, err := s.jwt.ValidateToken(refreshToken)
 	if err != nil {
@@ -988,7 +1011,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		if IsSessionNotFound(err) {
 			return nil, ErrSessionRevoked
 		}
-		return nil, fmt.Errorf("getting session: %w", err)
+		return nil, sessionCheckUnavailable("getting session", err)
 	}
 	if session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
 		return nil, ErrSessionRevoked
@@ -999,13 +1022,16 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		if IsNotFound(err) {
 			return nil, ErrSessionRevoked
 		}
-		return nil, fmt.Errorf("getting user: %w", err)
+		return nil, sessionCheckUnavailable("getting user", err)
 	}
 	if !user.Enabled {
 		return nil, ErrSessionRevoked
 	}
 	if err := s.validateImpersonator(ctx, session.ImpersonatorUserID); err != nil {
-		return nil, err
+		if errors.Is(err, ErrSessionRevoked) {
+			return nil, err
+		}
+		return nil, sessionCheckUnavailable("checking impersonator", err)
 	}
 
 	// Slide the session window forward so an active client never hits the
@@ -1023,7 +1049,15 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if rechecked {
 		verdict, err := s.recheck.check(ctx, session)
 		if err != nil {
-			return nil, err
+			if errors.Is(err, ErrSessionRevoked) || errors.Is(err, ErrProviderUnavailable) {
+				return nil, err
+			}
+			if errors.Is(err, errAnswerNotApplied) {
+				// Not an outage: retrying would ask the provider again and
+				// fail the same way, so the token is refused as before.
+				return nil, fmt.Errorf("re-checking provider identity: %w", err)
+			}
+			return nil, sessionCheckUnavailable("re-checking provider identity", err)
 		}
 		absoluteAge = verdict == verdictAbsoluteAge
 	}
@@ -1043,7 +1077,7 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
 		switch {
 		case !IsSessionNotFound(err):
-			return nil, fmt.Errorf("extending session: %w", err)
+			return nil, sessionCheckUnavailable("extending session", err)
 		case rechecked:
 			// A check on another node (a role change, a refused account)
 			// revoked the session while this refresh waited for it.

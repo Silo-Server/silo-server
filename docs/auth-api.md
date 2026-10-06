@@ -225,6 +225,30 @@ the client caches the account's role, it reads `GET /account/me` again so role-g
 controls appear or disappear. Long-lived Apple notification display tokens are not
 refused; their requests run with the account's current role.
 
+### When the server cannot check a session
+
+Requests that pass the shared auth gate, media requests included, look up their login
+session (or API key) in the database. When that lookup fails, because the database is
+unreachable or the query errors, the server has not judged the credential and does not
+answer 401. It answers `503` with `Retry-After`: v2 `dependency_unavailable`, v1 error code
+`service_unavailable`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
+cannot read the session or account. Whether the session is still valid is unknown, so a
+client keeps its tokens, waits `Retry-After` seconds and retries; it signs out only on a
+401. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
+too. The Jellyfin surface keeps its session and answers `503` when its session check or
+its stream and HLS authorization cannot read the session from the database, when a due
+token refresh cannot reach the database, and when that refresh meets an unreachable
+sign-in provider under the `fail_closed` outage policy.
+
+Routes that check credentials outside the shared auth gate, refresh, the proxy media grant
+and the Jellyfin session and stream checks may still treat a failed lookup as no session and
+answer 401 or refuse the request. Examples are plugin content routes, theme-song grants,
+Jellyfin admin API keys, Jellyfin image routes (which fall back to anonymous access), the
+Jellyfin websocket, and the v2 socket-ticket check used by the events, playback-control,
+watch-together and admin-logs sockets (a watch-together re-check that fails closes the
+room). None of them is a token refresh, so a client that signs out only on a refresh 401
+stays signed in and retries.
+
 ## Device sign-in
 
 A TV opens a request, shows its code and QR link, and polls; a person approves
@@ -268,7 +292,7 @@ public) reports which of these operations the server serves, including
 | `POST /account/identities/link-network` (`linkAccountIdentityWithNetwork`) | the account's own login session, through the network provider's overlay | Links the network identity of the requesting device. Body, required and non-null: `installation_id` (the network provider from `listAuthProviders`) and `password` (the account's local password). Answers 201 like `linkAccountIdentityWithCredentials`. Refusals: 403 `network_identity_required`, 422 `validation_failed` at `body.password`, 409 `local_password_required`, 403 `not_permitted`, 403 `permission_denied`, 409 `identity_linked_elsewhere` or `already_linked`, 404 `not_found`, 503 `provider_unavailable`, 429. Spends the `login` rate-limit budget. |
 | `DELETE /account/identities/{id}` (`deleteAccountIdentity`) | the account's own login session | Refused with 409 `last_sign_in_method` unless the account can still sign in with its local password or another identity. API keys and impersonation sessions get 403. |
 | `GET /admin/users/{id}/identities` (`listAdminUserIdentities`) | acting admin | Adds `external_subject`, `issuer` and `last_check_status`: what the provider said at `last_checked_at` about the identity, from a sign-in or a re-check (`active`, `not_found`, `disabled`, `not_permitted`, `unsupported`, `unavailable`, or `none` before the first). |
-| `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. |
+| `POST /auth/refresh` (`refreshSession`) | the refresh token | A session opened through the provider is re-checked with it when due (see below). A refused account ends the session (401 `session_expired`). Under the `fail_closed` outage policy, an unreachable provider answers 503 `provider_unavailable`; the session stays valid and the client retries later. A database that cannot be read answers 503 `dependency_unavailable` with `Retry-After` (see [When the server cannot check a session](#when-the-server-cannot-check-a-session)). A provider answer the server received but could not apply, where a retry would not help, is 401 `invalid_token`: a refusal that could not be applied, a role sync that rolled back, or a replacement refresh token that could not be stored (the provider may accept only that token now). A refusal whose revocation rolled back stays on record and ends the session at the next check, and an unapplied active answer stays due. Any other database failure after an active answer is the retryable 503 above. |
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
 | `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`; the v1 route answers `owner_protected`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |

@@ -1280,6 +1280,10 @@ func (f *fakeSessionService) Refresh(_ context.Context, token string) (handlers.
 		// fail_closed outage policy (the v1 handler answers 401 with this
 		// cause).
 		return handlers.RefreshedTokensView{}, fmt.Errorf("refresh: %w", auth.ErrProviderUnavailable)
+	case "store-down":
+		// The session store could not be read (the v1 handler answers 503
+		// service_unavailable with this cause).
+		return handlers.RefreshedTokensView{}, fmt.Errorf("refresh: %w", auth.ErrSessionCheckUnavailable)
 	}
 	return handlers.RefreshedTokensView{}, &handlers.APIError{Status: 401, Code: "invalid_token", Message: "Invalid or expired refresh token"}
 }

@@ -5,8 +5,13 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -22,7 +27,9 @@ const claimsKey contextKey = "claims"
 // SessionValidator checks a login session on every access-token request.
 // ActiveSessionRole reports whether the session is still active (not revoked
 // or expired) and the current role of the account it belongs to, in one
-// lookup; auth.SessionRepository implements it.
+// lookup; auth.SessionRepository implements it. It answers active=false with
+// no error for a missing, revoked or expired session; an error means the
+// session could not be checked, and the caller must not treat it as ended.
 type SessionValidator interface {
 	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
 }
@@ -32,13 +39,17 @@ type TokenValidator interface {
 	ValidateToken(tokenStr string) (*auth.Claims, error)
 }
 
-// APIKeyValidator looks up an API key by its full key string.
+// APIKeyValidator looks up an API key by its full key string. An unknown key
+// is auth.ErrAPIKeyNotFound; any other error means the key could not be
+// checked.
 type APIKeyValidator interface {
 	GetByKey(ctx context.Context, key string) (*models.APIKey, error)
 	UpdateLastUsed(ctx context.Context, id int64) error
 }
 
-// APIKeyUserLoader loads a user by ID for API key authentication.
+// APIKeyUserLoader loads a user by ID for API key authentication. A missing
+// account is an error matching auth.IsNotFound; any other error means the
+// account could not be checked.
 type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
@@ -76,6 +87,11 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 // role in the access token, so a token minted before an admin changed the
 // account's role is refused with ReasonTokenRefreshRequired: the session
 // stays valid, and a refresh issues a token carrying the new role.
+//
+// A lookup that fails (the database is unreachable or times out) judges
+// nothing about the credential, so it is answered with a retryable 503
+// (writeCredentialCheckUnavailable), never a 401 that tells the client its
+// sign-in is gone.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)
@@ -94,12 +110,20 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 
 			apiKey, err := am.apiKeyValidator.GetByKey(r.Context(), token)
+			if err != nil && !errors.Is(err, auth.ErrAPIKeyNotFound) {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
 			if err != nil || apiKey == nil || apiKey.UserID <= 0 || am.apiKeyUserLoader == nil {
 				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
 			}
 
 			user, err := am.apiKeyUserLoader.GetByID(r.Context(), apiKey.UserID)
+			if err != nil && !auth.IsNotFound(err) {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
 			if err != nil || user == nil || user.ID <= 0 {
 				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
@@ -140,7 +164,11 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 
 			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
-			if err != nil || !active {
+			if err != nil {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
+			if !active {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
@@ -423,6 +451,32 @@ func writePasswordChangeRequired(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   CodePasswordChangeRequired,
 		Message: "Choose a new password to continue",
+	})
+}
+
+// CodeServiceUnavailable is the error code of a request whose credential
+// could not be checked because the store holding login sessions, API keys or
+// accounts did not answer. The credential was not judged: the client keeps
+// its session and retries after Retry-After. internal/apiv2 renders it as the
+// dependency_unavailable problem type. Add, never rename.
+const CodeServiceUnavailable = "service_unavailable"
+
+// CredentialCheckRetryAfterSeconds is the Retry-After a failed credential
+// check carries (auth.SessionCheckRetryAfterSeconds).
+const CredentialCheckRetryAfterSeconds = auth.SessionCheckRetryAfterSeconds
+
+// writeCredentialCheckUnavailable writes the 503 for a credential check that
+// failed in the store rather than refusing the credential.
+func writeCredentialCheckUnavailable(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "credential check failed; answering 503", "component", "auth", "error", logredact.SanitizeText(err.Error()))
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(CredentialCheckRetryAfterSeconds))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   CodeServiceUnavailable,
+		Message: "Sign-in could not be checked right now; try again shortly",
 	})
 }
 

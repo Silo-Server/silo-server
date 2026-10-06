@@ -210,8 +210,8 @@ func (d *denialWriter) Write(p []byte) (int, error) {
 // code, and on the reason the gate recorded where one code covers denials v2
 // must tell apart (internal/api/middleware, Reason* constants, pinned by
 // TestDenialCodesAreStable there). A human message is never parsed.
-// Retry-After is carried over; the legacy X-RateLimit-* fields are not part of
-// v2 and are dropped.
+// Retry-After is carried over on 429 and 503; the legacy X-RateLimit-* fields
+// are not part of v2 and are dropped.
 func (d *denialWriter) problem() *Problem {
 	var legacy struct {
 		Error   string `json:"error"`
@@ -242,6 +242,15 @@ func (d *denialWriter) problem() *Problem {
 			p = p.WithHeader("Retry-After", ra)
 		} else {
 			p = p.WithRetryAfter(1)
+		}
+	case apimw.CodeServiceUnavailable:
+		// The credential could not be checked (the session store did not
+		// answer). Not a 401: the client keeps its session and retries.
+		p = NewProblem(TypeDependencyUnavailable, "The sign-in could not be checked right now; retry after the Retry-After delay.")
+		if ra := d.header.Get("Retry-After"); ra != "" {
+			p = p.WithHeader("Retry-After", ra)
+		} else {
+			p = p.WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
 	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)

@@ -3,10 +3,14 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -70,10 +74,13 @@ type RefreshedTokensView struct {
 }
 
 // Refresh exchanges a refresh token for a new pair. v1 POST /auth/refresh and
-// v2 refreshSession both call it. A revoked session is 401 session_revoked;
-// any other failure is 401 invalid_token, as on v1. A provider re-check that
-// could not reach the provider under the fail_closed outage policy keeps the
-// v1 answer but carries auth.ErrProviderUnavailable, which v2 answers as 503.
+// v2 refreshSession both call it. A revoked session is 401 session_revoked.
+// A store failure while checking the session (auth.ErrSessionCheckUnavailable)
+// is a retryable 503 service_unavailable carrying that cause: the token was
+// not judged, so the client must keep it. Any other failure is 401
+// invalid_token, as on v1. A provider re-check that could not reach the
+// provider under the fail_closed outage policy keeps the v1 answer but
+// carries auth.ErrProviderUnavailable, which v2 answers as 503.
 func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (RefreshedTokensView, error) {
 	if refreshToken == "" {
 		return RefreshedTokensView{}, &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: "Refresh token is required", Field: "refresh_token"}
@@ -82,6 +89,18 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 	if err != nil {
 		if errors.Is(err, auth.ErrSessionRevoked) {
 			return RefreshedTokensView{}, apiError(http.StatusUnauthorized, "session_revoked", "Session has been revoked")
+		}
+		if errors.Is(err, auth.ErrSessionCheckUnavailable) {
+			if ctx.Err() == nil {
+				slog.WarnContext(ctx, "refresh could not check the login session; answering 503", "component", "auth", "error", logredact.SanitizeText(err.Error()))
+			}
+			return RefreshedTokensView{}, &APIError{
+				Status:     http.StatusServiceUnavailable,
+				Code:       apimw.CodeServiceUnavailable,
+				Message:    "The session could not be checked right now; try again shortly",
+				RetryAfter: apimw.CredentialCheckRetryAfterSeconds,
+				cause:      auth.ErrSessionCheckUnavailable,
+			}
 		}
 		invalid := apiError(http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
 		if errors.Is(err, auth.ErrProviderUnavailable) {
