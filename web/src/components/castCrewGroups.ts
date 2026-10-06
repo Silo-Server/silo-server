@@ -12,10 +12,11 @@ export interface CrewGroup {
 
 /**
  * Headline crew for a title's "Cast & Crew" row: the director (or series
- * creator) first, then writers. Series creators are stored as Director credits.
+ * creator) first, then writers. A series leads with its Creator credits and
+ * falls back to its Director credits when it has none.
  */
 export function buildCrewGroups(crew: CrewMember[], leadRole: "Director" | "Creator"): CrewGroup[] {
-  const leads = crew.filter((c) => c.job === "Director");
+  const leads = leadCredits(crew, leadRole);
   // A writer-director already has a card in the lead group.
   const leadKeys = new Set(leads.map((c) => c.person_id || c.name));
   return [
@@ -35,4 +36,12 @@ export function buildCrewGroups(crew: CrewMember[], leadRole: "Director" | "Crea
       max: 3,
     },
   ];
+}
+
+function leadCredits(crew: CrewMember[], leadRole: "Director" | "Creator"): CrewMember[] {
+  if (leadRole === "Creator") {
+    const creators = crew.filter((c) => c.job === "Creator");
+    if (creators.length > 0) return creators;
+  }
+  return crew.filter((c) => c.job === "Director");
 }

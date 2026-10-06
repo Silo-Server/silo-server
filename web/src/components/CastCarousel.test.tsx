@@ -99,6 +99,18 @@ describe("CastCarousel", () => {
     expect(markup).not.toContain("Writers");
   });
 
+  it("leads a series with its Creator credits ahead of its directors", () => {
+    const [leads] = buildCrewGroups(
+      [
+        { name: "Michelle MacLaren", job: "Director", person_id: "person-201" },
+        { name: "Vince Gilligan", job: "Creator", person_id: "person-200" },
+      ],
+      "Creator",
+    );
+
+    expect(leads?.members.map((c) => c.name)).toEqual(["Vince Gilligan"]);
+  });
+
   it("renders the plain cast row without dividers when no crew groups are passed", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
