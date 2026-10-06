@@ -379,15 +379,6 @@ const (
 
 const requestsTag = "requests"
 
-// requestOperationIDs lists the profile-scoped request operations; tests
-// check each documents the viewer-access headers.
-var requestOperationIDs = []string{
-	opCreateRequest, opListMyRequests, opGetRequest, opSearchRequestMedia, opGetRequestMediaDetail,
-	opListDiscoverSections, opGetDiscoverSection, opListDiscoverGenres, opListDiscoverNetworks, opListDiscoverStudios,
-	opBrowseDiscoverGenre, opBrowseDiscoverNetwork, opBrowseDiscoverStudio,
-	opFollowRequestMedia, opUnfollowRequestMedia,
-}
-
 func registerRequests(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 

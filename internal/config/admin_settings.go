@@ -9,7 +9,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 )
@@ -17,8 +20,11 @@ import (
 const (
 	cloudflareURLMode                  = "cloudflare_token"
 	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
-	chapterThumbnailSoftwareToneMapKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 )
+
+// ChapterThumbnailSoftwareToneMapSettingKey lets chapter thumbnail extraction
+// tone-map HDR frames on the CPU when no hardware tone mapper is available.
+const ChapterThumbnailSoftwareToneMapSettingKey = "playback.chapter_thumbnail_software_tone_map_enabled"
 
 // PlaybackTranscodeHardwareToneMapSettingKey and
 // PlaybackTranscodeSoftwareToneMapSettingKey are server-wide execution policy
@@ -56,6 +62,45 @@ const (
 	AccessUnratedContentAllow = "allow"
 )
 
+// CatalogExtraRatingSourcesSettingKey lists, comma-separated, the rating
+// sources clients show in addition to IMDb and TMDB, which are always shown:
+// sources metadata plugins declare, such as rt_critic. Empty, the
+// default, shows only IMDb and TMDB, because the owners of the other scores
+// restrict how others may display them. See internal/ratingsources.
+const CatalogExtraRatingSourcesSettingKey = "catalog.extra_rating_sources"
+
+// ParseRatingSourceList splits a CatalogExtraRatingSourcesSettingKey value
+// into source names, dropping blanks, duplicates, and malformed names.
+func ParseRatingSourceList(raw string) []string {
+	sources, _ := splitRatingSourceList(raw)
+	return sources
+}
+
+// splitRatingSourceList splits a comma-separated list of rating source names
+// into trimmed, lowercased, deduplicated names, skipping blanks. Malformed
+// names are left out; the first one is returned so a save can refuse it.
+func splitRatingSourceList(raw string) (sources []string, malformed string) {
+	seen := map[string]struct{}{}
+	for _, entry := range strings.Split(raw, ",") {
+		source := strings.ToLower(strings.TrimSpace(entry))
+		if source == "" {
+			continue
+		}
+		if !models.ValidRatingSourceID(source) {
+			if malformed == "" {
+				malformed = source
+			}
+			continue
+		}
+		if _, dup := seen[source]; dup {
+			continue
+		}
+		seen[source] = struct{}{}
+		sources = append(sources, source)
+	}
+	return sources, malformed
+}
+
 // Shared server-setting keys used by playback and prepared-download policy
 // readers. Keep them here with the effective admin-setting defaults.
 const (
@@ -78,6 +123,9 @@ const StorageTransitionTargetKey = "storage.transition.target"
 // same reason as the reconcile checkpoint.
 const ArtworkStorageSweepCheckpointKey = "artwork.storage_sweep_checkpoint"
 
+// MediaImageSweepCheckpointKey stores durable per-namespace listing progress.
+const MediaImageSweepCheckpointKey = "media_images.sweep_checkpoint"
+
 // ChapterThumbnailOriginalsCleanupKey is the machine-managed checkpoint for the
 // one-time cleanup of full-size chapter thumbnail originals, kept out of the
 // administrator settings API like the other storage checkpoints.
@@ -87,9 +135,111 @@ const ChapterThumbnailOriginalsCleanupKey = "chapter_thumbnails.originals_cleanu
 // worker per CPU core, resolved when the task runs.
 const MetadataImageWorkersSettingKey = "metadata.image_workers"
 
+// PreviewImageWidthSettingKey is the width of the preview images the server
+// makes from video: chapter thumbnails and the thumbnails of seek-preview
+// sheets. Changing it makes both again.
+const PreviewImageWidthSettingKey = "playback.preview_image_width"
+
+// Bounds of PreviewImageWidthSettingKey, in pixels. Widths are even.
+const (
+	DefaultPreviewImageWidth = 300
+	MinPreviewImageWidth     = 160
+	MaxPreviewImageWidth     = 640
+)
+
+// PreviewImageWidth reads a stored PreviewImageWidthSettingKey value: an
+// unset or unparsable value is the default, and any other is brought within
+// bounds and made even, as validation would have required.
+func PreviewImageWidth(value string) int {
+	width, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil {
+		return DefaultPreviewImageWidth
+	}
+	return min(max(width, MinPreviewImageWidth), MaxPreviewImageWidth) &^ 1
+}
+
 // MarkersDetectionWorkersSettingKey sizes local intro detection: how many
 // seasons are analyzed at once and how many ffmpeg processes read audio.
 const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
+
+// ServerLANDiscoverySettingKey advertises the API server on the local network
+// (DNS-SD service _silo._tcp, internal/landiscovery) so clients can find it
+// without an address. The responder starts with the API listener, so a change
+// takes effect on restart.
+const ServerLANDiscoverySettingKey = "server.lan_discovery"
+
+// External sign-in settings (docs/architecture/external-sign-in.md).
+const (
+	// AuthLocalPasswordLoginSettingKey turns local password sign-in on or off
+	// server-wide. Off, only break-glass admin accounts may sign in with a
+	// local password; turning it off requires at least one of them. The
+	// "silo auth local-login enable" command turns it back on.
+	AuthLocalPasswordLoginSettingKey = "auth.local_password_login"
+	// AuthEmailAutoMatchSettingKey links a first external sign-in to the
+	// unlinked account holding the same email, but only when the provider
+	// says the email is verified. Off by default: an email match lets whoever
+	// controls the address at the provider take the account over. Silo does
+	// not verify account emails either, so whoever registers or sets that
+	// address on a Silo account first is the one matched; the match ends the
+	// account's existing sessions, device approvals and API keys.
+	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
+	// provider check may be before a session refresh asks the provider again.
+	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
+	// AuthProviderRecheckOutagePolicySettingKey decides what a refresh does
+	// when the provider cannot be reached for a due re-check.
+	AuthProviderRecheckOutagePolicySettingKey = "auth.provider_recheck_outage_policy"
+	// AuthRefreshTokenExpirySettingKey is the login-session lifetime. It is
+	// also the absolute age a provider that cannot re-check an account
+	// allows: such a session ends that long after the provider last vouched
+	// for it, and the account's API keys and Audiobookshelf sessions are
+	// revoked once the person has not signed in through the provider for
+	// that long.
+	AuthRefreshTokenExpirySettingKey = "auth.refresh_token_expiry"
+)
+
+// Values for AuthProviderRecheckOutagePolicySettingKey: keep the session and
+// retry at the next refresh, or refuse the refresh until the provider answers.
+const (
+	AuthRecheckFailOpen   = "fail_open"
+	AuthRecheckFailClosed = "fail_closed"
+)
+
+// DefaultAuthProviderRecheckInterval is AuthProviderRecheckIntervalSettingKey
+// when no valid value is stored.
+const DefaultAuthProviderRecheckInterval = 12 * time.Hour
+
+// AuthProviderRecheckInterval parses a stored
+// AuthProviderRecheckIntervalSettingKey value. An empty or invalid value is
+// the default.
+func AuthProviderRecheckInterval(raw string) time.Duration {
+	parsed, err := parseDuration(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return DefaultAuthProviderRecheckInterval
+	}
+	return parsed
+}
+
+// DefaultAuthRefreshTokenExpiry is AuthRefreshTokenExpirySettingKey when no
+// valid value is stored.
+const DefaultAuthRefreshTokenExpiry = 30 * 24 * time.Hour
+
+// AuthRefreshTokenExpiry parses a stored AuthRefreshTokenExpirySettingKey
+// value. An empty or invalid value is the default.
+func AuthRefreshTokenExpiry(raw string) time.Duration {
+	parsed, err := parseDuration(strings.TrimSpace(raw))
+	if err != nil || parsed <= 0 {
+		return DefaultAuthRefreshTokenExpiry
+	}
+	return parsed
+}
+
+// ServerSettingsMutationLock names the advisory lock every server_settings
+// mutation holds for its transaction. Writers of state that a setting's
+// validation reads (such as the break-glass accounts that
+// AuthLocalPasswordLoginSettingKey requires) take it too, so the check and
+// the write cannot interleave.
+const ServerSettingsMutationLock = "silo:server_settings:mutation"
 
 // adminSettingDefaults is the effective value shown by the Admin UI when no
 // row exists in server_settings. Keep these values aligned with the runtime
@@ -110,6 +260,12 @@ var adminSettingDefaults = map[string]string{
 	"branding.login_subtitle":   "Sign in with an existing account.",
 	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
 	"theme.catalog_url":         DefaultThemeCatalogURL,
+
+	ServerLANDiscoverySettingKey:              "true",
+	AuthLocalPasswordLoginSettingKey:          "true",
+	AuthEmailAutoMatchSettingKey:              "false",
+	AuthProviderRecheckIntervalSettingKey:     "12h",
+	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
 	"database.max_connections":   "20",
 	"s3.public_path_style":       "true",
@@ -159,16 +315,21 @@ var adminSettingDefaults = map[string]string{
 	"playback.chapter_thumbnail_execution":           "local",
 	"playback.chapter_thumbnail_node_capacity":       "1",
 	"playback.chapter_thumbnail_hdr_policy":          "best_effort",
-	chapterThumbnailSoftwareToneMapKey:               "false",
-	PlaybackTranscodeHardwareToneMapSettingKey:       "false",
-	PlaybackTranscodeSoftwareToneMapSettingKey:       "false",
+	"playback.preview_image_width":                   "300",
+	"playback.trickplay_interval_seconds":            "10",
+	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_execution":                   "local",
+	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
+	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
+	PlaybackTranscodeSoftwareToneMapSettingKey:       "true",
 	CatalogScopeVersionsToLibrarySettingKey:          "false",
 	AccessUnratedContentSettingKey:                   AccessUnratedContentHide,
+	CatalogExtraRatingSourcesSettingKey:              "",
 	"playback.watched_threshold":                     "90",
 	"playback.min_resume_threshold":                  "5",
-	Allow4KTranscodeSettingKey:                       "false",
-	"enable_transcode_throttle":                      "false",
-	"transcode_throttle_seconds":                     "300",
+	Allow4KTranscodeSettingKey:                       "true",
+	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
+	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
 	"audiobookshelf_compat.enabled":           "true",
 	"jellyfin_compat.enabled":                 "true",
@@ -205,6 +366,9 @@ var adminSettingDefaults = map[string]string{
 	"subtitle_ai.live_asr_chunk_seconds":  "30",
 	"subtitle_ai.transcribe_quota_jobs":   "0",
 	"subtitle_ai.transcribe_quota_period": "day",
+	"subtitles.auto_sync":                 "true",
+	"subtitles.sync_execution":            "prefer_transcode_nodes",
+	"subtitles.sync_node_capacity":        "1",
 	"metadata_ai.enabled":                 "false",
 	"metadata_ai.on_view":                 "off",
 
@@ -354,6 +518,17 @@ func EffectiveAdminSettings(stored map[string]string) map[string]string {
 	return effective
 }
 
+// AdminSettingEnabled reads a stored boolean setting as the Admin UI shows
+// it: an absent or empty value is the setting's default, so a runtime reader
+// and an untouched settings form cannot disagree.
+func AdminSettingEnabled(key, stored string) bool {
+	value := strings.TrimSpace(stored)
+	if value == "" {
+		value = adminSettingDefaults[key]
+	}
+	return strings.EqualFold(value, "true")
+}
+
 func applyLegacyAdminSettingFallback(effective, stored map[string]string, canonical, legacy string) {
 	if stored[canonical] != "" {
 		return
@@ -393,11 +568,11 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	switch key {
 	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey,
-		chapterThumbnailSoftwareToneMapKey, PlaybackTranscodeHardwareToneMapSettingKey,
+		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
-		Allow4KTranscodeSettingKey, "enable_transcode_throttle", "audiobookshelf_compat.enabled",
+		Allow4KTranscodeSettingKey, playback.TranscodeThrottleEnabledSettingKey, "audiobookshelf_compat.enabled",
 		"jellyfin_compat.enabled", "jellyfin_compat.web_enabled", "recommendations.enabled",
-		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled",
+		"subtitle_ai.enabled", "subtitle_ai.transcribe_enabled", "metadata_ai.enabled", "subtitles.auto_sync",
 		"download.enabled", "download.transcode_enabled", DownloadLocalTranscodeFallbackSettingKey,
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
@@ -411,11 +586,24 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.server_channels.mention_requesters", "notifications.web_push_enabled",
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
-		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style":
+		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
 		return normalizeAdminBool(key, value)
+
+	case AuthProviderRecheckIntervalSettingKey:
+		parsed, err := parseDuration(value)
+		if err != nil || parsed < 5*time.Minute || parsed > 30*24*time.Hour {
+			return "", fmt.Errorf("%s must be a duration between 5m and 30d", key)
+		}
+		return value, nil
+	case AuthProviderRecheckOutagePolicySettingKey:
+		return normalizeAdminEnum(key, value, AuthRecheckFailOpen, AuthRecheckFailClosed)
 
 	case AccessUnratedContentSettingKey:
 		return normalizeAdminEnum(key, value, AccessUnratedContentHide, AccessUnratedContentAllow)
+
+	case CatalogExtraRatingSourcesSettingKey:
+		return normalizeRatingSourceList(key, value)
 
 	case "artwork.storage_backend":
 		return normalizeAdminEnum(key, value, "auto", "local", "s3")
@@ -438,13 +626,26 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 0, 256)
 	case MarkersDetectionWorkersSettingKey:
 		return normalizeAdminInt(key, value, 1, 64)
-	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity":
+	case "playback.chapter_thumbnail_workers", "playback.chapter_thumbnail_node_capacity", "subtitles.sync_node_capacity":
 		return normalizeAdminInt(key, value, 1, 1024)
+	case PreviewImageWidthSettingKey:
+		normalized, err := normalizeAdminInt(key, value, MinPreviewImageWidth, MaxPreviewImageWidth)
+		if err != nil {
+			return "", err
+		}
+		if width, _ := strconv.Atoi(normalized); width%2 != 0 {
+			return "", fmt.Errorf("%s must be an even number of pixels", key)
+		}
+		return normalized, nil
+	case "playback.trickplay_interval_seconds":
+		return normalizeAdminInt(key, value, 5, 60)
+	case "playback.trickplay_workers":
+		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "playback.min_resume_threshold":
 		return normalizeAdminInt(key, value, 1, 99)
-	case "transcode_throttle_seconds":
+	case playback.TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
 	case playbackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)
@@ -556,7 +757,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminEnum(key, value,
 			string(PlaybackEgressPreferProxy), string(PlaybackEgressProxyOnly),
 			string(PlaybackEgressPreferAPI), string(PlaybackEgressAPIOnly))
-	case "playback.chapter_thumbnail_execution":
+	case "playback.chapter_thumbnail_execution", "playback.trickplay_execution", "subtitles.sync_execution":
 		return normalizeAdminEnum(key, value, "local", "prefer_transcode_nodes", "transcode_nodes_only")
 	case "playback.chapter_thumbnail_hdr_policy":
 		return normalizeAdminEnum(key, value, "disabled", "best_effort")
@@ -789,6 +990,19 @@ func ValidateArtworkStorageSettings(effective map[string]string) error {
 		return fmt.Errorf("artwork.storage_backend s3 requires s3.public_bucket")
 	}
 	return nil
+}
+
+// normalizeRatingSourceList canonicalizes a comma-separated list of rating
+// source names: trimmed, lowercased, and deduplicated. A name that is not a
+// well-formed source name is an error rather than silently dropped. A
+// well-formed name no enabled plugin declares is kept but shows nothing (see
+// ratingsources.Build).
+func normalizeRatingSourceList(key, value string) (string, error) {
+	sources, malformed := splitRatingSourceList(value)
+	if malformed != "" {
+		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
+	}
+	return strings.Join(sources, ","), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

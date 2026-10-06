@@ -18,12 +18,13 @@ import (
 // fakeCatalog backs the catalog-items operations: it records the request
 // the seam received and answers a fixed page.
 type fakeCatalog struct {
-	sourceOrder bool
-	err         error
-	lastReq     catalogpkg.CatalogRequest
-	lastViewer  handlers.ItemViewer
-	lastGroup   bool
-	lastGroups  catalogpkg.AudiobookGroupsQuery
+	sourceOrder        bool
+	unreadableEpisodes bool
+	err                error
+	lastReq            catalogpkg.CatalogRequest
+	lastViewer         handlers.ItemViewer
+	lastGroup          bool
+	lastGroups         catalogpkg.AudiobookGroupsQuery
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
@@ -116,7 +117,7 @@ func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id st
 	return &catalogpkg.ItemDetail{ContentID: id, Type: "movie", Title: "Heat", Year: 1995, Genres: []string{"Crime"}, Tagline: "A Los Angeles crime saga",
 		RatingSources: []catalogpkg.ItemRatingSourceInfo{
 			{Source: models.RatingSourceIMDB, Score: 83, Votes: &imdbVotes},
-			{Source: models.RatingSourceMDBList, Score: 86},
+			{Source: "mdblist", Score: 86},
 		},
 		Cast:           []catalogpkg.CastCredit{{Name: "Al Pacino", Character: "Vincent Hanna", PersonID: "7"}},
 		SeasonUserData: &catalogpkg.SeasonUserData{Played: true, WatchedCount: 1, LastFileID: &fileID},
@@ -158,7 +159,12 @@ func (f *fakeCatalog) ItemEpisodes(_ context.Context, _ handlers.ItemViewer, id 
 	if id != "series:severance-S01" {
 		return nil, notFoundItem()
 	}
-	return []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}, nil
+	episodes := []handlers.EpisodeView{fakeEpisode(1), fakeEpisode(2)}
+	if f.unreadableEpisodes {
+		episodes[0].Files[0].Unreadable = true
+		episodes[0].Files = append(episodes[0].Files, handlers.EpisodeFileView{FileID: 203, Resolution: "1080p"})
+	}
+	return episodes, nil
 }
 
 func fakeSeason() handlers.SeasonView {
@@ -453,6 +459,7 @@ func TestQueryCatalogItems(t *testing.T) {
 
 func TestGetCatalogItem(t *testing.T) {
 	deps, fake := catalogDeps(t)
+	fake.unreadableEpisodes = true
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?library_id=2&file_id=120", "", viewerHeaders())
 	if rec.Code != 200 {
@@ -497,6 +504,16 @@ func TestGetCatalogItem(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/items/series:severance-S01/episodes", "", viewerHeaders())
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"air_date":"2022-02-18"`) || !strings.Contains(rec.Body.String(), `"files":[{"file_id":"201"`) || !strings.Contains(rec.Body.String(), `"user_data":{"watched_count":1,"unplayed_count":0,"in_progress_count":0,"played":true}`) {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var episodePage struct {
+		Items []struct {
+			Files []map[string]json.RawMessage `json:"files"`
+		} `json:"items"`
+	}
+	decodeJSON(t, rec.Body, &episodePage)
+	if len(episodePage.Items) != 2 || len(episodePage.Items[0].Files) != 2 ||
+		string(episodePage.Items[0].Files[0]["unreadable"]) != "true" || episodePage.Items[0].Files[1]["unreadable"] != nil {
+		t.Fatalf("episode file readability = %+v", episodePage)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/series:nope/episodes", "", viewerHeaders()), TypeNotFound)
 }

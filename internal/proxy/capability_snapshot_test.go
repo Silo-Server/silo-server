@@ -239,6 +239,11 @@ func TestProxyCapabilitiesReportNoHardware(t *testing.T) {
 	if len(info.Transformations) == 0 {
 		t.Fatal("no transformations advertised; the report has nothing the planner can use")
 	}
+	for _, transformation := range info.Transformations {
+		if transformation.Name == "" || transformation.RecipeVersion == "" {
+			t.Fatalf("advertised transformation is missing identity: %#v", transformation)
+		}
+	}
 
 	// The walk's smoke encodes are what this change exists to stop paying for,
 	// on every proxy, every fifteen minutes.

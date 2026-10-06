@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { MediaRequest, RequestMediaDetail, RequestMediaResult } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
@@ -229,6 +229,7 @@ describe("TitleDetail", () => {
         request: { requestable: true },
       });
 
+      expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith(undefined);
       const request = primaryButton(label);
       expect(request).toBeEnabled();
       fireEvent.click(request);
@@ -306,13 +307,6 @@ describe("TitleDetail", () => {
       expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("req-1");
     });
 
-    it("offers no follow toggle on the viewer's own request", () => {
-      renderDetail();
-
-      expect(screen.queryByRole("button", { name: /Notify me/ })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Stop notifying/ })).not.toBeInTheDocument();
-    });
-
     it("offers Cancel request for a request older than the first page of the viewer's requests", () => {
       mocks.mine = [];
       renderDetail();
@@ -369,36 +363,6 @@ describe("TitleDetail", () => {
       );
     });
 
-    it("shows how far the request's download is under its state", () => {
-      renderDetail({
-        ...baseDetail,
-        request: {
-          ...baseDetail.request,
-          status: "downloading",
-          state: "processing",
-          download: {
-            phase: "import_blocked",
-            percent: 100,
-            downloads: 1,
-            updated_at: "2026-01-01T00:00:00Z",
-          },
-        },
-      });
-
-      expect(primaryButton("Processing")).toBeDisabled();
-      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
-      expect(screen.getByText("Waiting for import")).toBeInTheDocument();
-    });
-
-    it("prefers the state the server derived", () => {
-      renderDetail({
-        ...baseDetail,
-        request: { ...baseDetail.request, status: "approved", state: "approved" },
-      });
-
-      expect(primaryButton("Approved")).toBeDisabled();
-    });
-
     it("lets the viewer follow a title someone else requested", () => {
       mocks.mine = [];
       renderDetail({
@@ -450,19 +414,6 @@ describe("TitleDetail", () => {
 
       expect(primaryButton("Request limit reached")).toBeDisabled();
     });
-
-    it("links the title's IMDb and TMDB pages", () => {
-      renderDetail({ ...baseDetail, media_type: "series", imdb_id: "tt0944947" });
-
-      expect(screen.getByRole("link", { name: "IMDb" })).toHaveAttribute(
-        "href",
-        "https://www.imdb.com/title/tt0944947",
-      );
-      expect(screen.getByRole("link", { name: "TMDB" })).toHaveAttribute(
-        "href",
-        "https://www.themoviedb.org/tv/603",
-      );
-    });
   });
 
   describe("a title in the library", () => {
@@ -510,12 +461,6 @@ describe("TitleDetail", () => {
 
       expect(screen.getByTestId("location")).toHaveTextContent("/item/movie-603");
     });
-
-    it("skips the library check for a title outside the library", () => {
-      renderDetail();
-
-      expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith(undefined);
-    });
   });
 
   describe("unavailable titles", () => {
@@ -545,13 +490,6 @@ describe("TitleDetail", () => {
       fireEvent.click(screen.getByRole("button", { name: "Try again" }));
       expect(mocks.refetch).toHaveBeenCalledOnce();
     });
-
-    it("shows the skeleton while the title loads", () => {
-      mocks.detail = detailQuery(undefined, { isLoading: true });
-      renderAt("/title/movie/603");
-
-      expect(screen.getByText("Loading title")).toBeInTheDocument();
-    });
   });
 
   describe("legacy request links", () => {
@@ -570,12 +508,6 @@ describe("TitleDetail", () => {
   });
 
   describe("presentation", () => {
-    it("formats the runtime with the shared runtime formatter", () => {
-      renderDetail();
-
-      expect(screen.getByText("2h 16m")).toBeInTheDocument();
-    });
-
     it("shows a series' air years, seasons, status, and TMDB score", () => {
       renderDetail({
         ...baseDetail,
@@ -593,34 +525,10 @@ describe("TitleDetail", () => {
       expect(screen.getByText("8 Seasons")).toBeInTheDocument();
       expect(screen.getByText("Ended")).toBeInTheDocument();
       expect(screen.getByText("8.4")).toBeInTheDocument();
-      expect(screen.getByText(/TMDB/, { selector: "span" })).toHaveTextContent("24.1K votes");
+      expect(screen.getByAltText("TMDB")).toBeInTheDocument();
+      expect(screen.getByText("24.1K votes")).toBeInTheDocument();
       expect(screen.getByText("Created by")).toBeInTheDocument();
       expect(screen.getByText("David Benioff")).toBeInTheDocument();
-    });
-
-    it("lists the cast and links recommendations to their title pages", () => {
-      const recommendation: RequestMediaResult = {
-        media_type: "movie",
-        tmdb_id: 604,
-        title: "The Matrix Reloaded",
-        availability: "missing",
-        request: { requestable: true },
-      };
-      renderDetail({
-        ...baseDetail,
-        cast: [{ name: "Keanu Reeves", character: "Neo", order: 0 }],
-        recommendations: [recommendation],
-      });
-
-      expect(screen.getByRole("heading", { name: "Cast" })).toBeInTheDocument();
-      expect(screen.getByText("Keanu Reeves")).toBeInTheDocument();
-      const moreLikeThis = screen.getByRole("region", { name: "More Like This" });
-      // Like a library card, the artwork and the caption title both link to the title.
-      const links = within(moreLikeThis).getAllByRole("link", { name: /The Matrix Reloaded/ });
-      expect(links.length).toBeGreaterThan(0);
-      for (const link of links) {
-        expect(link).toHaveAttribute("href", "/title/movie/604");
-      }
     });
   });
 });

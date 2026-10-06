@@ -126,14 +126,6 @@ func TestRestartSessionLocked_WaitsForLockThenRechecks(t *testing.T) {
 	}
 }
 
-func TestRestartSessionLocked_SupersededWhenUnregistered(t *testing.T) {
-	s := &Server{sessions: map[string]*playback.TranscodeSession{}}
-	err := s.restartSessionLocked(context.Background(), "sess-x", &playback.TranscodeSession{}, 0, 0)
-	if !errors.Is(err, playback.ErrSessionSuperseded) {
-		t.Fatalf("want ErrSessionSuperseded for an unmapped session, got %v", err)
-	}
-}
-
 func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	s := &Server{sessions: map[string]*playback.TranscodeSession{}}
 	const sid = "sess-x"

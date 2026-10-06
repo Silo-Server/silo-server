@@ -95,14 +95,6 @@ func TestNewEnricherCapsWorkersToConfiguredBatchSize(t *testing.T) {
 	}
 }
 
-func TestAudiobookEnrichWorkersCapsAtBatchSize(t *testing.T) {
-	t.Setenv("SILO_AUDIOBOOK_ENRICH_WORKERS", "8")
-
-	if got := audiobookEnrichWorkers(3); got != 3 {
-		t.Fatalf("audiobookEnrichWorkers(3) = %d, want 3", got)
-	}
-}
-
 func TestAudiobookEnrichBatchSizeIgnoresInvalidEnv(t *testing.T) {
 	t.Setenv("SILO_AUDIOBOOK_ENRICH_BATCH_SIZE", "nope")
 

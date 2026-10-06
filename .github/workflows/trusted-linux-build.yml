@@ -35,7 +35,7 @@ jobs:
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
         contains(fromJSON('["main","apiv2"]'), github.event.workflow_run.head_branch)))
-    runs-on: ${{ inputs.platform == 'linux/amd64' && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-docker-amd64"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04-arm' }}
+    runs-on: ${{ inputs.platform == 'linux/amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -65,24 +65,14 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Set up pnpm for manual builds
+      - name: Download shared frontend bundle for manual builds
         if: github.event_name == 'workflow_dispatch'
-        uses: pnpm/action-setup@v4
+        uses: actions/download-artifact@v4
         with:
-          version: 10
-
-      - name: Set up Node.js for manual builds
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Build frontend for manual builds
-        if: github.event_name == 'workflow_dispatch'
-        working-directory: web
-        run: pnpm install --frozen-lockfile && pnpm run build
+          name: frontend-dist-${{ github.run_id }}-${{ github.sha }}
+          path: web/dist
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
 
       - name: Set up Go
         uses: actions/setup-go@v6

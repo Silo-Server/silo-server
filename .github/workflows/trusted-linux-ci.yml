@@ -25,12 +25,109 @@ env:
 
 
 jobs:
-  # The Go gate is four jobs so that lint, the contract checks, the test suite
-  # and the DB-backed pins run side by side; each one alone is shorter than a
-  # serial job would be. They share the composite setup action under
-  # .github/actions.
+  # Selection runs on a hosted runner and uses trusted tools from main, even
+  # when a PR checks out an older or modified copy of those tools. Every
+  # private-runner job waits for it, so it does nothing else.
+  #
+  # The tools come from a sparse checkout of this workflow's own commit on
+  # main rather than `uses: Silo-Server/silo-server/...@main`, which downloads
+  # a tarball of the whole repository (about 290 MB) and took 15-20 s per job.
+  # Pinning to job.workflow_sha gives every run, including a re-run, tools
+  # from the same commit as its job list. The checkout holds no Go files,
+  # which gofmt in go-lint would otherwise see.
+  select:
+    name: Select CI jobs
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.plan.outputs.go }}
+      web: ${{ steps.plan.outputs.web }}
+    steps:
+      # The plan compares trees, so it needs the full history but not the
+      # file contents. A sparse checkout also fetches with blob:none, so only
+      # the sparse paths' contents are downloaded.
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          sparse-checkout: .github/actions
+          persist-credentials: false
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Select jobs from the complete PR diff
+        id: plan
+        uses: ./.ci-tools/.github/actions/ci-tools
+        with:
+          operation: plan
+
+  # These gate every run but do not feed job selection, so they run beside
+  # it instead of delaying the private-runner jobs.
+  repo-checks:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Test CI helper changes
+        run: |
+          if [ -f .github/actions/ci-tools/test_select_jobs.py ]; then
+            python3 .github/actions/ci-tools/test_select_jobs.py
+          fi
+          if [ -f scripts/test_lint_changed.py ]; then
+            python3 scripts/test_lint_changed.py
+          fi
+      - name: Verify no local paths leaked into committed docs
+        run: make verify-local-paths
+      # Linux checks out two paths that differ only in case without
+      # complaint; macOS and Windows builds then fail. Like the selection
+      # tools, the checker comes from this workflow's commit on main, so a
+      # branch cannot skip it by deleting or editing its own copy, and a
+      # branch cut before the checker existed is checked too. A change to the
+      # checker gates later runs once it merges; its tests run in Go test.
+      # After the PR checkout, which would otherwise clean it away.
+      - name: Check out the case-collision checker from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /scripts/ci/casecollisions/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # The checker uses only the standard library, so it needs a toolchain
+      # but no module cache.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Equivalent to make verify-case-collisions with main's checker. It
+      # lists the files tracked in the PR checkout; .ci-tools is untracked.
+      - name: Verify no tracked paths collide ignoring case
+        run: |
+          go build -o "$RUNNER_TEMP/casecollisions" ./.ci-tools/scripts/ci/casecollisions
+          "$RUNNER_TEMP/casecollisions"
+
+  # Contract assertions run once in the full suite; artifact generation and
+  # semantic comparison retain their separate gate. PG17 race tests and
+  # pgvector query-budget pins use independent disposable databases.
   go-lint:
     name: Go lint
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-lint"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -39,6 +136,21 @@ jobs:
           # golangci-lint needs the merge base to tell this branch's lines from
           # the ones it inherited.
           fetch-depth: 0
+          persist-credentials: false
+
+      # After the PR checkout, which would otherwise clean it away, and
+      # before any PR code runs.
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       - name: Set up Go
@@ -64,6 +176,7 @@ jobs:
       # Without the second cache both lint steps below analyzed all of ./...
       # from scratch on every run, which was most of the old job's time.
       - name: Restore the golangci-lint binary
+        if: runner.environment == 'github-hosted'
         id: golangci-lint-binary
         uses: actions/cache@v4
         with:
@@ -72,9 +185,23 @@ jobs:
 
       - name: Install golangci-lint
         if: steps.golangci-lint-binary.outputs.cache-hit != 'true'
-        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+        run: |
+          binary="$(go env GOPATH)/bin/golangci-lint"
+          if [ -x "$binary" ] && go version -m "$binary" | awk \
+            -v version="$GOLANGCI_LINT_VERSION" -v toolchain="$(go env GOVERSION)" '
+              NR == 1 { built_with = ($NF == toolchain) }
+              $1 == "mod" && $2 == "github.com/golangci/golangci-lint/v2" {
+                correct_module = ($3 == version)
+              }
+              END { exit !(built_with && correct_module) }
+            '; then
+            echo "Using golangci-lint ${GOLANGCI_LINT_VERSION} built with $(go env GOVERSION)"
+          else
+            go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+          fi
 
       - name: Restore the golangci-lint analysis cache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ~/.cache/golangci-lint
@@ -90,14 +217,14 @@ jobs:
       # falls from here.
       - name: Lint changed lines
         env:
-          # A PR carries its target branch; a push to main compares against
-          # main's own history, which leaves the merge base at HEAD and lints
-          # nothing new. Read through the environment rather than interpolated
-          # into the script.
-          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          golangci-lint run --new-from-merge-base="origin/${BASE_REF}" ./...
+          # Immutable PR base or exact pre-push revision. Missing push history
+          # triggers conservative full analysis rather than an empty diff.
+          BASE_REF: ${{ github.event_name == 'push' && github.event.before || github.event_name == 'pull_request' && github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
+          LINT_CHANGED_CI: '1'
+          LINT_CHANGED_BASE_MODE: ${{ github.event_name == 'push' && 'revision' || 'merge-base' }}
+        uses: ./.ci-tools/.github/actions/ci-tools
+        with:
+          operation: lint
 
       # The inventory's lint rule (recovering a router from a handler) has to
       # hold over the whole tree, not only the lines a branch touched: an old
@@ -107,6 +234,8 @@ jobs:
 
   go-verify:
     name: Go contract checks
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-verify"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -147,24 +276,12 @@ jobs:
       # inventory one-to-one, so a new route without a ledger entry, or a
       # stale entry for a removed route, fails here.
       - name: Verify the v2 migration ledger covers the route inventory
-        run: make verify-migration-ledger
+        run: make verify-migration-ledger CONTRACT_GO_TESTS=0
 
-      # Every tier-1 row in a migration wave needs an executable scenario
-      # catalog before that wave's first section PR. The catalogs are
-      # schema-checked and reconciled against the ledger here; the executor
-      # runs their public subset under make test-go and the rest locally
-      # against an empty database named by SILO_SCENARIO_DATABASE_URL (a
-      # dedicated variable: the executor truncates, so it never shares
-      # SILO_TEST_DATABASE_URL with the other DB-gated packages).
-      - name: Verify the tier-1 scenario catalogs cover their waves
-        run: make verify-scenario-catalogs
-
-      # The executor's offline run-vs-skip decision reads a committed list of
-      # the routes the no-database API router registers, because the sealed
-      # router cannot be walked from outside internal/api. This regenerates
-      # that list from the real router and fails if the committed file drifted.
-      - name: Verify the offline route set matches the API router
-        run: make verify-offline-routes
+      # Ledger/schema, scenario coverage, offline routes, fixture freshness
+      # and fixture-schema assertions remain in make test-go. It is always
+      # selected with this job. Never share SILO_SCENARIO_DATABASE_URL with
+      # the integration or query-budget databases: the executor truncates.
 
       # The v2 OpenAPI artifact is rendered from the Go registries and the
       # binary serves the committed bytes, so a registration change that does
@@ -173,30 +290,48 @@ jobs:
       - name: Verify the v2 OpenAPI artifact is current
         run: make verify-apiv2-openapi
 
-      # Spec lint and the semantic diff against the PR's base. A breaking
+      # Semantic diff against the PR's base. Spec lint belongs to go-test. A breaking
       # change fails unless contracts/api/v2/breaking-approvals.json names
       # that exact operation, rule and fingerprint; after the LOCKED marker
       # nothing is approvable. On a push to main the base is main itself, so
       # both documents are identical and the diff tool compares nothing (an
-      # approval a just-merged PR carried is not stale there); the lint still
-      # runs. The base is read through the environment, as the lint step
+      # approval a just-merged PR carried is not stale there). The base is read
+      # through the environment, as the lint step
       # does, never interpolated into the script.
-      - name: Verify the v2 contract diff and spec lint
+      - name: Verify the v2 contract diff
         env:
           BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          make verify-apiv2-contract BASE_REF="origin/${BASE_REF}"
-
-      # The v2 fixtures are generated through the real router and every body
-      # is validated against the committed OpenAPI schema its index names, so
-      # a client testing against them tests against what the server sends.
-      - name: Verify the v2 contract fixtures are current and valid
-        run: make verify-apiv2-fixtures
+          make verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/${BASE_REF}"
 
   go-test:
     name: Go test
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-test"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: test
+
+      # Owns all package assertions, including ledger/scenario/offline/spec
+      # and fixture generation/schema checks previously repeated in verify.
+      # Compiles every package on the way; no separate build step is needed.
+      - name: Test
+        run: make test-go
+
+  go-integration:
+    name: Go integration
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-integration"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     services:
       watch-party-postgres:
         image: postgres:17-alpine
@@ -216,25 +351,24 @@ jobs:
         uses: actions/checkout@v5
         with:
           persist-credentials: false
-
       - name: Set up Go
         uses: ./.github/actions/setup-go
         with:
-          cache-name: test
+          cache-name: integration
 
-      # Runs the settings-contract gate among everything else: the embedded
-      # manifest must parse, satisfy its own schema, hold every structural
-      # invariant, and agree with the live settings registry on keys and
-      # defaults. Without this job those tests exist but never run.
       - name: Test Watch Party coordination against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
-        run: go test -race -count=1 ./internal/watchtogether/
+        run: |
+          : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
+          go test -race -count=1 ./internal/watchtogether/
 
       - name: Test history import cancellation and profile authorization against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
-        run: go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' ./migrations/ ./internal/historyimport/ ./internal/api/handlers/
+        run: |
+          : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
+          go test -race -count=1 -run '^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' ./migrations/ ./internal/historyimport/ ./internal/api/handlers/
 
       # 20260925144545 moves marker claims between rows that share a payload
       # while the payload index still exists. The replay seeds a winner-first
@@ -243,11 +377,10 @@ jobs:
       - name: Test the marker claim migration against Postgres
         env:
           SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/watch_party?sslmode=disable
-        run: go test -race -count=1 -run '^TestMarkerContributionClaimsByTargetMigrationPostgres$' ./migrations/
+        run: |
+          : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
+          go test -race -count=1 -run '^TestMarkerContributionClaimsByTargetMigrationPostgres$' ./migrations/
 
-      # Compiles every package on the way, so there is no separate build step.
-      - name: Test
-        run: make test-go
 
   # make test-go has no database, so every DB-backed test in it skips, and go
   # test counts a skip as a pass. This job migrates a fresh database and runs
@@ -255,8 +388,12 @@ jobs:
   # is missing, skipped or failing, so a PR that turns a pinned budget into an
   # N+1 fails here. It is a job of its own so it adds no time to go-test, and
   # because the full schema needs pgvector, which go-test's image lacks.
+  # The long external sign-in suite has its own database job below so it can
+  # run beside these pins instead of extending this job's critical path.
   go-db-pins:
     name: Go DB pins
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-pins"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     services:
       # The image docker-compose.yml runs: the schema needs pgvector.
@@ -303,8 +440,66 @@ jobs:
       - name: Test image cache cleanup resumption against Postgres
         run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
 
+      - name: Test device sign-in against Postgres
+        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+
+  # External sign-in tests are isolated from the query pins because several of
+  # them intentionally create and mutate the same account state. Keeping them
+  # in one fresh database preserves their ordering while allowing the long
+  # suite to run in parallel with the query-budget job above.
+  go-db-auth:
+    name: Go DB external auth
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: silo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d silo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          cache-name: db-auth
+
+      # A throwaway key: it only has to pass the bootstrap length check, and
+      # nothing encrypted with it outlives the job.
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+
+      # Account resolution and linking, the local-password policy, the OAuth
+      # flow store across nodes, provider re-checks, network identity sign-in
+      # and linking, compatibility routing, and the Owner and break-glass
+      # identity guards. The break-glass guards run first because they skip on
+      # a database that already holds a break-glass account.
+      - name: Test external sign-in against Postgres
+        run: |
+          go test -race -count=1 -run '^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' ./internal/api/handlers/
+          go test -race -count=1 -run '^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' ./internal/auth/
+          go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
+          go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
+
   web:
     name: Web
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     defaults:
       run:
@@ -327,17 +522,40 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Use the persistent pnpm store
+        if: runner.environment == 'self-hosted'
+        run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
         run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: pnpm run lint
+        env:
+          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
+            mkdir -p "$cache_dir"
+            pnpm run lint --cache --cache-strategy content --cache-location "$cache_dir/eslint-${CACHE_ID}"
+          else
+            pnpm run lint
+          fi
 
       - name: Format check
-        run: pnpm run format:check
+        env:
+          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
+            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
+            mkdir -p "$cache_dir"
+            pnpm run format:check --cache --cache-strategy content --cache-location "$cache_dir/prettier-${CACHE_ID}"
+          else
+            pnpm run format:check
+          fi
 
       - name: Typecheck and build
         run: pnpm run build
@@ -348,6 +566,7 @@ jobs:
         run: pnpm run budget:check
 
       - name: Upload frontend bundle for image builds
+        if: github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist-${{ github.sha }}
@@ -362,7 +581,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
         working-directory: .
@@ -376,12 +595,11 @@ jobs:
         working-directory: .
         run: make verify-apiv2-web-types
 
-      - name: Verify no local paths leaked into committed docs
-        working-directory: .
-        run: make verify-local-paths
 
   web-test:
     name: Web test (${{ matrix.shard }}/2)
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
@@ -402,8 +620,14 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: pnpm
+          cache: ${{ runner.environment == 'github-hosted' && 'pnpm' || '' }}
+          package-manager-cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Use the persistent pnpm store
+        if: runner.environment == 'self-hosted'
+        working-directory: web
+        run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
         working-directory: web
@@ -415,3 +639,28 @@ jobs:
       # deterministically, so every file runs exactly once.
       - name: Test
         run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/2"
+
+  result:
+    name: CI result
+    if: always()
+    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Require every selected job to pass
+        uses: ./.ci-tools/.github/actions/ci-tools
+        env:
+          CI_JOB_RESULTS: ${{ toJSON(needs) }}
+        with:
+          operation: check

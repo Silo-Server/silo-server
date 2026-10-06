@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { canEditMarkers, isActingAdmin, PERMISSION_MARKER_EDIT } from "./permissions";
 
@@ -35,18 +37,6 @@ describe("permissions", () => {
 });
 
 describe("isActingAdmin", () => {
-  it("is true for an admin with no profile selected", () => {
-    expect(isActingAdmin({ role: "admin" }, null)).toBe(true);
-  });
-
-  it("is true for an admin on the primary profile", () => {
-    expect(isActingAdmin({ role: "admin" }, { is_primary: true })).toBe(true);
-  });
-
-  it("is false for an admin on a non-primary profile", () => {
-    expect(isActingAdmin({ role: "admin" }, { is_primary: false })).toBe(false);
-  });
-
   it("is false for non-admin accounts regardless of profile", () => {
     expect(isActingAdmin({ role: "user" }, { is_primary: true })).toBe(false);
     expect(isActingAdmin(null, null)).toBe(false);

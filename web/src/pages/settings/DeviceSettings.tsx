@@ -20,11 +20,12 @@ import {
   useClearSettingValue,
   useEffectiveSettings,
   useSetSettingValue,
+  useStoredSettingValues,
 } from "@/hooks/queries/settingValues";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
-import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
 
@@ -271,6 +272,20 @@ function DeviceDetail({
     profileId: targetProfileId,
   };
 
+  // While a profile value outranks the device's own (ui.title_art's "apply to
+  // all devices"), the effective read answers with the profile row only. The
+  // device row it passes over is read here so it stays visible and resettable.
+  const profileWideKeys = supportedKeys.filter(
+    (key) =>
+      SETTING_DEFINITIONS[key].resolutionOrder[0] === "profile" &&
+      settings[key]?.source === "profile",
+  );
+  const { data: storedOnDevice } = useStoredSettingValues({
+    keys: profileWideKeys,
+    identity,
+    enabled: canUseDeviceSettings,
+  });
+
   // The subtitle appearance panel edits its object locally so dragging a
   // colour or opacity feels instant, persisting each patch as it lands. The
   // server value reasserts itself whenever the panel is (re)opened.
@@ -430,6 +445,7 @@ function DeviceDetail({
           keys={supportedKeys}
           ownerLabel={ownerLabel}
           devicePlatform={device.device_platform}
+          storedOnDevice={storedOnDevice}
           disabled={setValue.isPending || clearValue.isPending}
           onChange={(key: SettingKey, value: unknown) =>
             setValue.mutate(

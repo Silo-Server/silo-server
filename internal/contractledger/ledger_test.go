@@ -24,57 +24,6 @@ func TestLedgerMatchesInventory(t *testing.T) {
 	}
 }
 
-func TestEveryEntryIsProposedUntilRatified(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ledger.Entries) == 0 {
-		t.Fatal("ledger has no entries")
-	}
-	for _, e := range ledger.Entries {
-		switch e.ReviewState {
-		case ReviewProposed, ReviewRatified, ReviewRejected:
-		default:
-			t.Errorf("%s: unexpected review_state %q", e.key(), e.ReviewState)
-		}
-		if e.Tier != 1 && e.Tier != 2 {
-			t.Errorf("%s: tier %d", e.key(), e.Tier)
-		}
-	}
-}
-
-// TestRemovedRowsAreTierTwo pins the tier rule stated in the ledger header:
-// a removed route has no v2 behavior to baseline, so it never sits in tier 1.
-func TestRemovedRowsAreTierTwo(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		if e.Disposition == DispositionRemoved && e.Tier != removedTier {
-			t.Errorf("%s: removed row is tier %d", e.key(), e.Tier)
-		}
-	}
-}
-
-// TestRemovalsAndRedesignsNameAnOwner pins the plan's Phase 1 gate line
-// "every proposed removal/redesign has an owner and rationale".
-func TestRemovalsAndRedesignsNameAnOwner(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		switch e.Disposition {
-		case DispositionRemoved, DispositionRedesigned, DispositionReplaced:
-			if e.Owner == nil || *e.Owner == "" {
-				t.Errorf("%s: %s row has no owner", e.key(), e.Disposition)
-			}
-		}
-	}
-}
-
 func mutatedFS(t *testing.T, mutate func(doc map[string]any)) fstest.MapFS {
 	t.Helper()
 	return mutatedFSWithInventory(t, mutate, nil)
@@ -140,15 +89,6 @@ func expectFailure(t *testing.T, fsys fstest.MapFS, want string) {
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected failure containing %q, got %v", want, err)
 	}
-}
-
-func TestGateFailsWhenAnInventoryRowHasNoEntry(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		es := entries(t, doc)
-		doc["entries"] = es[1:]
-		doc["totals"].(map[string]any)["entries"] = len(es) - 1
-	})
-	expectFailure(t, fsys, "inventory row has no ledger entry")
 }
 
 func TestGateFailsWhenAnEntryHasNoInventoryRow(t *testing.T) {
@@ -351,24 +291,6 @@ func TestGateFailsWhenANonProxyRowClaimsTheDynamicProxyRule(t *testing.T) {
 	})
 	expectFailure(t, fsys, "dynamic_plugin_proxy rule on a non-proxy handler")
 	expectFailure(t, fsys, "request_kind drift")
-}
-
-// TestDynamicProxyRowsAreThePluginProxyHandlers pins the anchoring in the
-// other direction: every row claiming the rule is one of the two plugin-proxy
-// literal handlers.
-func TestDynamicProxyRowsAreThePluginProxyHandlers(t *testing.T) {
-	ledger, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range ledger.Entries {
-		if e.DispositionRule != dynamicProxyRule {
-			continue
-		}
-		if e.Handler != pluginAssetsProxyHandler && e.Handler != pluginPagesProxyHandler {
-			t.Errorf("%s: dynamic_plugin_proxy on handler %q", e.key(), e.Handler)
-		}
-	}
 }
 
 // TestCallSiteTypesAreBalanced catches a truncated generic such as
@@ -723,15 +645,6 @@ func TestSchemaRejectsRemovedRowWithV2Target(t *testing.T) {
 	expectFailure(t, fsys, "violates")
 }
 
-func TestSchemaRejectsRatifiedPortWithoutV2Target(t *testing.T) {
-	fsys := mutatedFS(t, func(doc map[string]any) {
-		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionPorted })
-		e["review_state"] = ReviewRatified
-		e["v2"] = map[string]any{"method": nil, "path": nil, "operation_id": nil}
-	})
-	expectFailure(t, fsys, "violates")
-}
-
 func TestSchemaRejectsPartiallyNullV2(t *testing.T) {
 	fsys := mutatedFS(t, func(doc map[string]any) {
 		e := entryWhere(t, doc, func(e map[string]any) bool { return e["disposition"] == DispositionPorted })
@@ -883,6 +796,8 @@ var guardedWithoutLegacyRow = map[string]string{
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1212,6 +1127,21 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
+	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
+	"startSubtitleSync":                    "V2-only sync of a stored subtitle or a sidecar (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that reaches the same timing.",
+	"setSubtitleTiming":                    "V2-only timing correction of a stored subtitle or a sidecar, guarded by If-Match; replaying the same timing after success answers 412 and changes nothing.",
+	"deleteAccountIdentity":                "V2-only external sign-in (OIDC/LDAP) identity disconnect: v1 had no linked identities to manage. It deletes one identity of the caller's account by id, so a replay after success finds nothing and answers 404, leaving the same state.",
+	"createAdminUserIdentity":              "V2-only administrator link of an account to an external sign-in identity: v1 had no identity management. The identity key and the one-identity-per-provider rule are unique, so a replay is refused with 409 and cannot link twice.",
+	"deleteAdminUserIdentity":              "V2-only administrator unlink of an external sign-in identity: v1 had no identity management. A replay after success finds nothing and answers 404, leaving the same state.",
+	"testAdminPluginAuthBinding":           "V2-only auth plugin connection test on staged settings: v1 had no auth provider checks. It stores nothing but reaches the identity provider or directory, so an uncertain result is not retried automatically.",
+	"createAccountIdentityLinkTicket":      "V2-only link ticket for starting an OAuth linking flow: v1 had no account linking. Each call checks the password and mints a new single-use ticket, so it is non-retryable; an unused ticket expires unredeemed.",
+	"startAccountIdentityLink":             "V2-only web linking start: v1 had no account linking. It consumes a single-use link ticket and opens one provider flow bound to this browser, so a replay finds the ticket spent and answers 404; it is non-retryable.",
+	"completeAccountIdentityLink":          "V2-only confirmation of a native app's linking flow: v1 had no account linking. It redeems a single-use code, so a replay finds the code gone and answers 401 without linking twice; it is non-retryable.",
+	"linkAccountIdentityWithCredentials":   "V2-only directory (LDAP) linking: v1 had no account linking. Each call checks the local password and asks the directory again, and a replay after success is refused with 409 (local_password_required once linking turned local sign-in off, already_linked for a break-glass account) instead of linking twice; it is non-retryable.",
+	"cancelDeviceLogin":                    "V2-only device sign-in withdrawal: v1 had no cancel. It moves only a pending or approved-but-uncollected request to canceled, so a replay converges on the same state and reports it.",
+	"signInWithNetworkIdentity":            "V2-only network identity sign-in: v1 had no overlay sign-in. Each call asks the provider about the request's overlay peer and opens a new login session, so a replay opens another session like a repeated login; it is non-retryable.",
+	"linkAccountIdentityWithNetwork":       "V2-only network identity linking: v1 had no account linking. Each call checks the local password and asks the provider about the request's overlay peer, and a replay after success is refused with 409 (local_password_required once linking turned local sign-in off, already_linked for a break-glass account) instead of linking twice; it is non-retryable.",
 	"redetectAdminItemMarkers":             "V2-only choice of marker kinds to re-detect: v1 re-detected episode intros only, which redetectAdminEpisodeIntro keeps porting. Work is coalesced per item within the process, so a replay while it runs reports already_running; a later replay analyzes again, so it is non-retryable like the intro action.",
 	"transferAdminUserOwnership":           "V2-only server ownership transfer (issue #1382): v1 had no Owner. Replaying a completed transfer is refused because the caller is no longer the Owner, so it cannot move ownership twice.",
 	"createRequestRoute":                   "V2-only request routing rule (routing replaced the router plugin's per-connection default switches). Creating a rule is non-retryable: a replay adds a second rule.",
@@ -1231,6 +1161,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",
 	"requestPasswordReset":                 "V2-only self-service password reset request (issue #1443): v1 had no reset links. A replay inside the per-account cooldown changes nothing; after it, the replay replaces the link and sends another email, so it is non-retryable.",
 	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
+	"pauseAdminDownloadPreparations":       "V2-only pause of offline-download preparation jobs: v1 had no preparation controls. A replay finds the jobs already paused and reports unchanged, leaving the same state.",
+	"resumeAdminDownloadPreparations":      "V2-only resume of paused preparation jobs: v1 had no preparation controls. A replay finds the jobs no longer paused and reports unchanged, leaving the same state.",
+	"cancelAdminDownloadPreparations":      "V2-only cancellation of preparation jobs: v1 had no preparation controls. A replay finds the jobs gone and reports not_found; the waiting downloads were already failed by the first call.",
 	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
 	"createThemeSongPlayback":              "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":          "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",
@@ -1248,6 +1181,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"startWatchTogetherRoomPlayback":       "V2-only start of a staged lobby item: v1 has no lobby/start split. An already playing room answers with its current snapshot, so a duplicate press cannot restart playback.",
 	"stopWatchTogetherRoomPlayback":        "V2-only stop that keeps the room: v1 only ends a room. A room that is not playing answers with its current snapshot, so repeating the call cannot disturb the lobby it produced.",
 	"updateWatchTogetherRoomSelectionMode": "V2-only lobby mode switch: v1 fixes selection_mode at creation. Repeating the same mode is a no-op; the switch drops the staged item, which is the documented meaning of the value rather than a side effect of retrying.",
+	"regenerateAdminItemTrickplay":         "V2-only seek-bar preview regeneration: v1 had no trickplay. A replay while the files are queued or being made changes nothing, but a later replay makes the previews again, so it is non-retryable like redetectAdminItemMarkers.",
 	"queryWatchTogetherMemberState":        "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
 }
 

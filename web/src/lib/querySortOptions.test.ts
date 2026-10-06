@@ -1,8 +1,33 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { getQuerySortOptions, normalizeQuerySortForScope } from "./querySortOptions";
 
 describe("getQuerySortOptions", () => {
+  it("offers a Rotten Tomatoes sort only when the server shows that source", () => {
+    const fields = (shownRatingSources?: ReadonlySet<string>) =>
+      getQuerySortOptions({ shownRatingSources }).map((option) => option.value);
+
+    expect(fields(new Set(["imdb", "tmdb"]))).not.toContain("rating_rt_critic");
+    expect(fields(new Set(["imdb", "tmdb"]))).toContain("rating_imdb");
+    expect(fields(new Set(["imdb", "tmdb", "rt_audience"]))).toEqual(
+      expect.arrayContaining(["rating_rt_audience"]),
+    );
+    expect(fields(new Set(["imdb", "tmdb", "rt_audience"]))).not.toContain("rating_rt_critic");
+    expect(fields()).toContain("rating_rt_critic");
+  });
+
+  it("keeps a hidden rating sort that is already chosen", () => {
+    const fields = getQuerySortOptions({
+      shownRatingSources: new Set(["imdb", "tmdb"]),
+      keepSortField: "rating_rt_critic",
+    }).map((option) => option.value);
+
+    expect(fields).toContain("rating_rt_critic");
+    expect(fields).not.toContain("rating_rt_audience");
+  });
+
   it("allows ebook book-native sorts without enabling narrator", () => {
     const fields = getQuerySortOptions({ relevanceScope: "ebook" }).map((option) => option.value);
 

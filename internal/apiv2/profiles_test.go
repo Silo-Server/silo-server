@@ -13,13 +13,15 @@ import (
 )
 
 func TestUpdateProfile(t *testing.T) {
-	profiles := &fakeProfiles{view: fixtureProfileView()}
+	view := fixtureProfileView()
+	view.QualityPreference = "1080p"
+	profiles := &fakeProfiles{view: view}
 	h := newTestHandler(t, pilotDeps(nil, profiles))
 	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura","subtitle_mode":"always","allowed_library_ids":["3","4"]}`, with(bearer(memberToken), "X-Profile-Id", "p-owner"))
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"auto","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
+	want := `{"id":"p-owner","name":"Laura","avatar":"preset:fox","avatar_url":"/avatars/presets/fox.png","avatar_source":"preset","has_pin":false,"is_child":false,"is_primary":true,"max_content_rating":"","max_advisory_age":null,"require_advisory_age":false,"quality_preference":"1080p","language":"en","preferred_metadata_language":"","subtitle_language":"","subtitle_mode":"auto","auto_skip_intro":true,"auto_skip_credits":false,"auto_skip_recap":false,"auto_play_next_preview":false,"show_forced_subtitles":false,"library_restrictions_enabled":false,"allowed_library_ids":["3"],"max_playback_quality":"1080p","created_at":"2026-01-02T03:04:05.000Z","updated_at":"2026-01-02T03:04:05.000Z"}` + "\n"
 	if rec.Body.String() != want {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
@@ -162,6 +164,8 @@ func TestUpdateProfileValidation(t *testing.T) {
 
 func TestUpdateProfileDecisions(t *testing.T) {
 	auth := bearer(memberToken)
+	profiles := &fakeProfiles{}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
@@ -174,7 +178,7 @@ func TestUpdateProfileDecisions(t *testing.T) {
 		{&handlers.APIError{Status: 500, Code: TypeInternalError.ID, Message: "Failed to store profile preferences"}, TypeInternalError},
 		{errStore, TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		p := requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, auth), tc.want)
 		if tc.want == TypeValidationFailed && (len(p.Errors) != 1 || p.Errors[0].Location != "body.max_playback_quality") {
 			t.Fatalf("errors = %+v", p.Errors)
@@ -188,8 +192,7 @@ func TestUpdateProfileDecisions(t *testing.T) {
 	// is verified. An API key passes the viewer-access gate without the PIN
 	// (SkipPINVerification), and v1 verifyProfileToken still refuses it (no
 	// login session, no profile token), so the v2 verifier refuses it too.
-	profiles := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h := newTestHandler(t, pilotDeps(nil, profiles))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, with(bearer(apiKeyToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	if err := profiles.last.VerifyProfile("p-primary-locked"); !errors.Is(err, access.ErrProfileUnverified) {
 		t.Fatalf("api key stood in for the PIN: %v", err)
@@ -220,24 +223,6 @@ func TestUpdateProfileDenied(t *testing.T) {
 	demo := pilotDeps(nil, nil)
 	demo.DemoSettings = fakeSettings{demo: true}
 	requireProblem(t, do(t, newTestHandler(t, demo), http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, bearer(memberToken)), TypePermissionDenied)
-}
-
-// A legacy stored quality_preference (the pre-validation schema default) is
-// served unchanged: the read model documents canonical values but does not
-// constrain what older profiles carry.
-func TestUpdateProfileServesLegacyStoredEnum(t *testing.T) {
-	view := fixtureProfileView()
-	view.QualityPreference = "1080p"
-	profiles := &fakeProfiles{view: view}
-	h := newTestHandler(t, pilotDeps(nil, profiles))
-
-	rec := do(t, h, http.MethodPatch, "/api/v2/profiles/p-owner", `{"name":"Laura"}`, bearer(memberToken))
-	if rec.Code != 200 {
-		t.Fatal(rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"quality_preference":"1080p"`) {
-		t.Fatalf("body = %s", rec.Body.String())
-	}
 }
 
 func TestListProfiles(t *testing.T) {
@@ -319,6 +304,8 @@ func TestCreateProfileValidation(t *testing.T) {
 
 func TestCreateProfileDecisions(t *testing.T) {
 	auth := with(bearer(memberToken), "X-Profile-Id", "p-owner")
+	profiles := &fakeProfiles{}
+	h := newTestHandler(t, pilotDeps(nil, profiles))
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
@@ -330,13 +317,12 @@ func TestCreateProfileDecisions(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Invalid avatar", Field: "avatar"}, TypeValidationFailed},
 		{errors.New("boom"), TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, auth), tc.want)
 	}
 	// A PIN-locked primary profile manages the household only once the
 	// gate verified it by X-Profile-Token.
-	profiles := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h := newTestHandler(t, pilotDeps(nil, profiles))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	if rec := do(t, h, http.MethodPost, "/api/v2/profiles", `{"name":"Kid"}`, with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 201 {
 		t.Fatalf("verified: %d %s", rec.Code, rec.Body.String())
@@ -375,8 +361,7 @@ func TestDeleteProfile(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-missing", "", auth), TypeNotFound)
 	// A PIN-locked primary profile manages the household only once the
 	// gate verified it by X-Profile-Token.
-	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h = newTestHandler(t, pilotDeps(nil, locked))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	if rec := do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", with(with(bearer(memberToken), "X-Profile-Id", "p-primary-locked"), "X-Profile-Token", "t")); rec.Code != 204 {
 		t.Fatalf("verified: %d %s", rec.Code, rec.Body.String())
@@ -388,7 +373,7 @@ func TestDeleteProfile(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
 		{errors.New("boom"), TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		requireProblem(t, do(t, h, http.MethodDelete, "/api/v2/profiles/p-owner", "", auth), tc.want)
 	}
 }
@@ -444,8 +429,7 @@ func TestListHouseholdSessions(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions?offset=1", "", bearer(memberToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", nil), TypeAuthenticationRequired)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
-	locked := &fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
-	h = newTestHandler(t, pilotDeps(nil, locked))
+	*profiles = fakeProfiles{view: fixtureProfileView(), lockedPrimary: "p-primary-locked"}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")), TypeProfileVerificationRequired)
 	for _, tc := range []struct {
 		err  error
@@ -454,7 +438,7 @@ func TestListHouseholdSessions(t *testing.T) {
 		{&handlers.APIError{Status: http.StatusForbidden, Code: "forbidden", Message: "Profile management requires the primary profile or admin access"}, TypePermissionDenied},
 		{&handlers.APIError{Status: http.StatusInternalServerError, Code: TypeInternalError.ID, Message: "Playback sessions are not configured"}, TypeInternalError},
 	} {
-		h := newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: tc.err}))
+		*profiles = fakeProfiles{err: tc.err}
 		requireProblem(t, do(t, h, http.MethodGet, "/api/v2/profiles/household/sessions", "", bearer(memberToken)), tc.want)
 	}
 	unwired := pilotDeps(nil, nil)

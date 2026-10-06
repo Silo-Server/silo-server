@@ -1,16 +1,53 @@
-# DB-backed query-budget pins. CI runs them against a freshly migrated
-# Postgres; locally, `make test-db-pins` runs them against the database named
-# by SILO_TEST_DATABASE_URL.
+# DB-backed pins. CI runs them against a freshly migrated Postgres; locally,
+# `make test-db-pins` runs them against the database named by
+# SILO_TEST_DATABASE_URL.
 #
 # One test per line: the package directory, then the top-level test name.
 # Each test asserts how many statements, rows or resolver calls an operation
-# costs, that a query plan uses its index, or the result parity that such a
-# budget relies on. The runner (scripts/ci/dbpins) fails when a listed test is
-# missing, skipped or failing, so a pin cannot switch itself off by skipping on
-# an unset database URL or an unmigrated schema.
+# costs, that a query plan uses its index, the result parity that such a
+# budget relies on, or behavior that only a migrated schema can show. The
+# runner (scripts/ci/dbpins) fails when a listed test is missing, skipped or
+# failing, so a pin cannot switch itself off by skipping on an unset database
+# URL or an unmigrated schema.
 #
-# Add a pin in the same change that sets its budget. It must pass on a freshly
-# migrated database without skipping.
+# Add a pin in the same change that sets its budget or adds the test. It must
+# pass on a freshly migrated database without skipping.
+
+# Seek preview jobs preserve bigint IDs, fence attempts, and protect issued URLs.
+./internal/trickplay TestTrickplayQueuesBigintMediaFileIDsDB
+./internal/trickplay TestExpiredLeaseRejectsCompletionBeforeReconcileDB
+./internal/trickplay TestSameOwnerReclaimRejectsPriorAttemptDB
+./internal/trickplay TestRegenerateFencesOlderWorkersDB
+./internal/trickplay TestRevisionProtectionIsMonotonicAndFollowsTheRevisionDB
+./internal/trickplay TestRevisionProtectionReusesCoveredExpiryDB
+./internal/trickplay TestServiceRecordsFailureWithClaimTokenDB
+./internal/trickplay TestRetiredTrickplayOutlivesIssuedURLsDB
+./internal/trickplay TestReaderProtectsLatestSheetExpiryDB
+./internal/trickplay TestReaderWithholdsRevisionDisplacedWhileSigningDB
+./internal/trickplay TestDisabledLibraryStopsServingAndRemovesPublishedWorkDB
+
+# Media image sweeps resume bounded listings without losing partial prefixes.
+./internal/blobgc TestCollectorDeletesSingleImagesS3DB
+./internal/blobgc TestCollectorRetriesSingleObjectAfterPartialDeleteDB
+./internal/blobgc TestCollectorUsesOneConnectionDB
+./internal/blobgc TestSweeperUsesOneConnectionDB
+./internal/blobgc TestSweeperResumesAfterBoundedRunDB
+./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
+./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
+
+# Chapter width replacement has one extraction and upload across API replicas.
+./internal/chapterthumbs TestWidthBackfillSerializesReplicasPostgres
+./internal/chapterthumbs TestWidthChangeDuringFirstChapterExtractionDB
+./internal/chapterthumbs TestTerminatedChapterWorkerCannotReplaceCurrentBlobDB
+
+# Chapter image URLs retain exact issued expiry in one batched transaction.
+./internal/chapterthumbs TestRetiredChapterImagesOutliveIssuedURLsDB
+./internal/chapterthumbs TestChapterURLWithholdsImageRetiredWhileSigningDB
+./internal/chapterthumbs TestChapterURLProtectionSerializesFileDeletionDB
+./internal/chapterthumbs TestChapterURLProtectionBatchesFilesDB
+./internal/chapterthumbs TestChapterImageReusePreservesIssuedURLProtectionDB
+./internal/chapterthumbs TestChapterImageReuseWaitsForCollectorDB
+./internal/catalog TestGetItemVersionsBatchesChapterImages
 
 # Schema: every content_id-family foreign key cascades on update, so the online
 # re-id can rename an item whatever child rows it has (#933).
@@ -28,14 +65,46 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
+# Seek previews: one availability lookup per item or episode page.
+./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
+./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
+./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
+
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
 ./internal/catalog TestQueryExecutorTerminalPageTotals
 ./internal/catalog TestJellycompatPredicatesPostgres
 
+# PostgreSQL search: stored documents preserve ranking and cursor tuples;
+# sparse first pages reuse one FTS probe, and trigger work stays bounded.
+./migrations TestMediaSearchDocumentsMigrationPostgres
+./migrations TestEpisodeSearchRefreshMigrationPostgres
+./migrations TestEpisodeExactSearchIndexMigrationPostgres
+./internal/catalog TestMediaSearchDocumentsPostgres
+./internal/catalog TestSearchOptimizedAccuracyPostgres
+./internal/catalog TestSearchSparseProbeReusePostgres
+./internal/catalog TestSearchUsesCustomPlansPostgres
+./internal/catalog TestSearchCursorPostgres
+./internal/catalog TestSearchCursorMixedAndGroupsPostgres
+./internal/catalog TestEpisodeSearchPostgresAndDocumentSource
+./internal/catalog TestEpisodeSearchOverviewVectorRefreshesOnOverviewUpdate
+./internal/catalog TestEpisodeSearchRefreshWorkPostgres
+./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
+./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
+
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query.
+# watch-progress query, and the PostgreSQL path picks what the general path
+# picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
+./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
+./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
+./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
+./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
+
+# Continue Watching: only an in-progress episode sets how far back the
+# superseded walk reads the profile's completed rows.
+./internal/catalog TestSupersededCutoffIgnoresInProgressMoviesPostgres
 
 # Keyset pages: ratings and collection continuations read an index in page
 # order, with no Sort node.
@@ -53,12 +122,18 @@
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateDebtQueries
 ./internal/metadata TestRefreshSeriesEpisodeMetadataStateRetainsFailureDuringIncompleteSync
 
+# Item merges and orphan cleanup handle webhook sync state after the Plex sync
+# tables were dropped.
+./internal/metadata TestSyncMergeStepsAfterPlexTableDropPostgres
+./internal/catalog TestOrphanCleanupAfterPlexTableDropPostgres
+
 # Corrected matches preserve destination IDs and remove rejected source IDs.
 ./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
 
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
+./internal/sections TestNextUpModeStatementBudgetPostgres
 
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
@@ -75,3 +150,37 @@
 # Artwork storage sweep: the GC-schedule lookup its anomaly guard consults must
 # count armed candidates only, never parked (live) ones.
 ./internal/metadata TestArtworkSweepScheduledOriginalsPostgres
+
+./internal/trickplay TestStaleReconcileCannotDowngradeConcurrentUpgradeDB
+./internal/api/handlers TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres
+./internal/trickplay TestReaderRevalidatesServingWhileSigningDB
+./internal/trickplay TestAdminClassifiesIneligibleFilesDB
+./internal/trickplay TestAdminReclassifiesTrackedIneligibleFilesDB
+./internal/trickplay TestAdminRejectsUnsupportedLibraryTypesDB
+./internal/trickplay TestAdminRetryKeepsPublishedPreviewsDB
+./internal/trickplay TestAdminResolvesMultiEpisodeFileDB
+./migrations TestChapterReplacementAtomicallyQueuesImagesPostgres
+
+./internal/trickplay TestOptOutReconcilePreservesConcurrentClaimDB
+./internal/trickplay TestReconcileUsesOneConnectionDB
+
+./internal/chapterthumbs TestCompletedWidthScanRechecksLibraryEligibilityDB
+./internal/chapterthumbs TestPriorityChapterRequestSurvivesReplicaContentionDB
+./internal/scanner TestChapterLockSessionsRespectPoolBudgetDB
+./internal/scanner TestChapterLockFailedConnectReleasesBudgetDB
+./internal/scanner TestChapterLockSessionsSerializeDistinctPoolsDB
+./internal/chapterthumbs TestChapterBudgetRetainsQueuedUnprobedFileDB
+
+./internal/chapterthumbs TestWidthBackfillDefersCatalogScansUntilRetryDB
+./internal/scanner TestChapterLockReusesHealthySessionsDB
+# Seek preview workers stop after a library or file becomes ineligible.
+./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
+./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
+./internal/trickplay TestIneligibleFilesCannotProgressAndCanFinishDB
+./internal/trickplay TestTypeChangeReconcilePreservesConcurrentClaimDB
+
+# Seek preview discovery follows current eligibility and retains issued URLs.
+./internal/trickplay TestLibraryTypeChangeSuppressesAndRetiresTrickplayDB
+./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
+./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
+./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB

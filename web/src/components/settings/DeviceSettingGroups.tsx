@@ -17,7 +17,7 @@ import type { EffectiveSetting } from "@/hooks/queries/settingValues";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
-import { controlKindFor, optionsFor } from "@/lib/settingsDisplay";
+import { controlKindFor, formatSettingValue, optionsFor } from "@/lib/settingsDisplay";
 import { cn } from "@/lib/utils";
 
 const EMPTY_SELECT_VALUE = "__empty__";
@@ -38,6 +38,13 @@ export interface DeviceSettingGroupsProps {
    * the device already stores a value, which must stay clearable.
    */
   devicePlatform?: string;
+  /**
+   * Values the device stores for keys whose profile value outranks the
+   * device's own (ui.title_art's "apply to all devices"). The effective answer
+   * names only the profile row then, so a retained device row needs this to
+   * stay visible and resettable.
+   */
+  storedOnDevice?: Partial<Record<SettingKey, unknown>>;
   disabled?: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
   onReset: (key: SettingKey) => void;
@@ -50,16 +57,18 @@ export function DeviceSettingGroups({
   keys,
   ownerLabel,
   devicePlatform,
+  storedOnDevice,
   disabled = false,
   onChange,
   onReset,
   onOpenPanel,
 }: DeviceSettingGroupsProps) {
-  const storedHere = new Set(
-    (Object.keys(settings) as SettingKey[]).filter(
+  const storedHere = new Set([
+    ...(Object.keys(settings) as SettingKey[]).filter(
       (key) => settings[key]?.scope === "profile_device",
     ),
-  );
+    ...(Object.keys(storedOnDevice ?? {}) as SettingKey[]),
+  ]);
   return (
     <div className="space-y-4">
       {groupDeviceSettings(keys, {
@@ -72,6 +81,7 @@ export function DeviceSettingGroups({
               key={key}
               settingKey={key}
               effective={settings[key]}
+              storedOnDevice={storedOnDevice}
               ownerLabel={ownerLabel}
               disabled={disabled}
               onChange={onChange}
@@ -88,6 +98,7 @@ export function DeviceSettingGroups({
 interface DeviceSettingRowProps {
   settingKey: SettingKey;
   effective: EffectiveSetting | undefined;
+  storedOnDevice: Partial<Record<SettingKey, unknown>> | undefined;
   ownerLabel: string;
   disabled: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
@@ -98,6 +109,7 @@ interface DeviceSettingRowProps {
 function DeviceSettingRow({
   settingKey,
   effective,
+  storedOnDevice,
   ownerLabel,
   disabled,
   onChange,
@@ -107,10 +119,19 @@ function DeviceSettingRow({
   const definition = SETTING_DEFINITIONS[settingKey];
   if (!definition) return null;
 
+  // A key that resolves its profile value first (ui.title_art's "apply to all
+  // devices") ignores device values while one is set, so a device edit here
+  // would save without effect.
+  const profileWide =
+    effective?.source === "profile" && definition.resolutionOrder[0] === "profile";
+  // The device row the profile value passes over is still stored, still
+  // counted as a change, and still this device's choice once the profile
+  // value goes.
+  const retainedHere = profileWide && storedOnDevice !== undefined && settingKey in storedOnDevice;
   // "Changed here" means a row exists at this exact device, which is also what
   // makes the reset meaningful — reset clears that row rather than copying the
   // profile value into it.
-  const changedHere = effective?.scope === "profile_device";
+  const changedHere = effective?.scope === "profile_device" || retainedHere;
   const locked = effective?.constraint_kind === "locked";
   const constrained = Boolean(effective?.constrained);
   const value = effective?.value ?? definition.defaultValue;
@@ -149,6 +170,14 @@ function DeviceSettingRow({
             {constraintExplanation(effective)}
           </p>
         ) : null}
+        {profileWide ? (
+          <p className="text-muted-foreground text-[12.5px] leading-relaxed">
+            {retainedHere
+              ? `Set for all devices on this profile, so this device's own choice (${retainedValueLabel(settingKey, storedOnDevice?.[settingKey])}) isn't used right now. `
+              : "Set for all devices on this profile. "}
+            Turn off &ldquo;Apply to all devices&rdquo; to choose per device.
+          </p>
+        ) : null}
       </div>
 
       <div
@@ -177,12 +206,19 @@ function DeviceSettingRow({
           settingKey={settingKey}
           effective={effective}
           value={value}
-          disabled={disabled || locked}
+          disabled={disabled || locked || profileWide}
           onChange={onChange}
           onOpenPanel={onOpenPanel}
         />
       </div>
     </div>
+  );
+}
+
+function retainedValueLabel(settingKey: SettingKey, value: unknown): string {
+  return formatSettingValue(
+    settingKey,
+    value === null || value === undefined ? null : String(value),
   );
 }
 
@@ -245,6 +281,7 @@ function DeviceSettingControl({
     return (
       <span className="order-1 flex min-h-11 items-center sm:order-none sm:min-h-0">
         <Switch
+          aria-label={definition.label}
           checked={value === true}
           disabled={disabled}
           onCheckedChange={(checked) => onChange(settingKey, checked)}

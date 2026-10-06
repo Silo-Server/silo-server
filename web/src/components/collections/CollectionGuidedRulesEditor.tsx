@@ -1,4 +1,5 @@
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useMemo } from "react";
 
 import {
@@ -446,10 +447,21 @@ export default function CollectionGuidedRulesEditor({
     : isAudiobookLibrary
       ? "Unlistened"
       : "Unwatched";
-  const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const shownRatingSources = useShownRatingSources();
+  const sortOptions = getCollectionSortOptions(
+    allowPersonalizedSorts,
+    sortRelevanceScope,
+    shownRatingSources,
+    state.sortField,
+  );
   const selectedSort = normalizeQuerySortForScope(
     { field: state.sortField, order: state.sortOrder },
-    { includePersonalized: allowPersonalizedSorts, relevanceScope: sortRelevanceScope },
+    {
+      includePersonalized: allowPersonalizedSorts,
+      relevanceScope: sortRelevanceScope,
+      shownRatingSources,
+      keepSortField: state.sortField,
+    },
   );
 
   function update(patch: Partial<GuidedFormState>) {

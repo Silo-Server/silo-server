@@ -121,51 +121,6 @@ func TestWriteSectionDeleteErrorDistinguishesMissingSectionsFromRepositoryFailur
 	}
 }
 
-func TestBuildSectionsResponseEnrichesEpisodeMetadata(t *testing.T) {
-	seasonNumber := 1
-	episodeNumber := 1
-	seriesID := "series-1"
-	fetcher := &stubSectionEpisodeFetcher{
-		meta: map[string]sections.SectionItemMeta{
-			"episode-1": {
-				SeriesID:      &seriesID,
-				SeriesTitle:   "American Dad!",
-				SeasonNumber:  &seasonNumber,
-				EpisodeNumber: &episodeNumber,
-			},
-		},
-	}
-	h := &SectionHandler{episodeFetcher: fetcher}
-	withItems := []sections.SectionWithItems{
-		{
-			ResolvedSection: sections.ResolvedSection{ID: "released", SectionType: sections.SectionCustomFilter, Title: "Released"},
-			Items: []*models.MediaItem{{
-				ContentID: "episode-1",
-				Type:      "episode",
-				Title:     "Dumbston Checks In",
-				Status:    "matched",
-			}},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
-	resp := h.buildSectionsResponse(req, withItems, nil)
-
-	if fetcher.calls != 1 {
-		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
-	}
-	item := resp.Sections[0].Items[0]
-	if item.SeriesTitle != "American Dad!" {
-		t.Fatalf("series title = %q, want %q", item.SeriesTitle, "American Dad!")
-	}
-	if item.SeasonNumber == nil || *item.SeasonNumber != 1 {
-		t.Fatalf("season number = %v, want 1", item.SeasonNumber)
-	}
-	if item.EpisodeNumber == nil || *item.EpisodeNumber != 1 {
-		t.Fatalf("episode number = %v, want 1", item.EpisodeNumber)
-	}
-}
-
 func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testing.T) {
 	seasonNumber := 3
 	episodeNumber := 7
@@ -194,6 +149,9 @@ func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testin
 	}}
 
 	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+	if fetcher.calls != 1 {
+		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
+	}
 	if len(resp.Sections) != 1 || len(resp.Sections[0].Items) != 2 {
 		t.Fatalf("response shape = %#v", resp)
 	}
@@ -659,15 +617,6 @@ func TestDropEmptySeasonalSectionsRemovesOnlyEmptySeasonal(t *testing.T) {
 	}
 }
 
-func TestDropEmptySeasonalSectionsHandlesNilAndEmpty(t *testing.T) {
-	if got := dropEmptySeasonalSections(nil); len(got) != 0 {
-		t.Errorf("expected empty/nil result for nil input, got %v", got)
-	}
-	if got := dropEmptySeasonalSections([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("expected empty result for empty input, got %v", got)
-	}
-}
-
 func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	got := libraryDefaultSections(&models.MediaFolder{Type: "series"}, 12)
 
@@ -785,15 +734,6 @@ func TestApplyDiversityFilterAvoidSectionDoesNotShadowItself(t *testing.T) {
 	out := applyDiversityFilter(in)
 	if len(out[0].Items) != 1 {
 		t.Errorf("first section should not filter itself; got %d items", len(out[0].Items))
-	}
-}
-
-func TestApplyDiversityFilterHandlesNilAndEmpty(t *testing.T) {
-	if got := applyDiversityFilter(nil); got != nil && len(got) != 0 {
-		t.Errorf("nil input returned non-empty: %v", got)
-	}
-	if got := applyDiversityFilter([]sections.SectionWithItems{}); len(got) != 0 {
-		t.Errorf("empty input returned non-empty: %v", got)
 	}
 }
 

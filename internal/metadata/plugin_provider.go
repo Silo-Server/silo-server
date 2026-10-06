@@ -64,7 +64,11 @@ type PluginProvider struct {
 	// look an item up by (lookup_provider_ids). GetMetadata runs when the item
 	// carries any of them, even without an ID of the provider's own.
 	lookupProviderIDs []string
-	clientFactory     pluginMetadataClientFactory
+	// declaredRatingSources are the rating sources of its own the capability
+	// declared (rating_sources); GetMetadata keeps them alongside Silo's
+	// built-in sources.
+	declaredRatingSources map[string]struct{}
+	clientFactory         pluginMetadataClientFactory
 }
 
 func NewPluginProvider(settings map[string]string, resolver pluginMetadataResolver) (*PluginProvider, error) {
@@ -125,6 +129,7 @@ func NewPluginProviderFromCapability(
 	capabilityID string,
 	displayName string,
 	lookupProviderIDs []string,
+	ratingSources []models.RatingSourceDefinition,
 	resolver pluginMetadataResolver,
 ) (*PluginProvider, error) {
 	if resolver == nil {
@@ -133,12 +138,20 @@ func NewPluginProviderFromCapability(
 	if displayName == "" {
 		displayName = capabilityID
 	}
+	var declared map[string]struct{}
+	if len(ratingSources) > 0 {
+		declared = make(map[string]struct{}, len(ratingSources))
+		for _, source := range ratingSources {
+			declared[source.Source] = struct{}{}
+		}
+	}
 	return &PluginProvider{
-		installationID:    installationID,
-		capabilityID:      capabilityID,
-		displayName:       displayName,
-		lookupProviderIDs: lookupProviderIDs,
-		clientFactory:     resolver.MetadataProviderClient,
+		installationID:        installationID,
+		capabilityID:          capabilityID,
+		displayName:           displayName,
+		lookupProviderIDs:     lookupProviderIDs,
+		declaredRatingSources: declared,
+		clientFactory:         resolver.MetadataProviderClient,
 	}, nil
 }
 
@@ -289,8 +302,8 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		ContentRating:        response.GetItem().GetContentRating(),
 		AdvisoryAge:          advisoryAge,
 		AdvisorySource:       advisorySource,
-		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
-		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug()),
+		Ratings:              ratingsFromStruct(response.GetItem().GetRatings(), p.declaredRatingSources),
+		RatingSources:        ratingSourcesFromStruct(response.GetItem().GetRatings(), p.Slug(), p.declaredRatingSources),
 		People:               peopleFromRecords(response.GetItem().GetPeople()),
 		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
 		PosterPath:           response.GetItem().GetPosterPath(),
@@ -386,12 +399,18 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 		return nil, err
 	}
 
-	response, err := client.GetImages(ctx, &pluginv1.GetImagesRequest{
+	pluginRequest := &pluginv1.GetImagesRequest{
 		ProviderId:  providerID,
 		ItemType:    req.ContentType,
 		ProviderIds: providerIDs,
 		Language:    req.Language,
-	})
+	}
+	if req.SeasonNumber != nil {
+		seasonNumber := int32(*req.SeasonNumber)
+		pluginRequest.SeasonNumber = &seasonNumber
+	}
+
+	response, err := client.GetImages(ctx, pluginRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +424,10 @@ func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]Rem
 			Language:   image.GetLanguage(),
 			Width:      int(image.GetWidth()),
 			Height:     int(image.GetHeight()),
+		}
+		if image.SeasonNumber != nil {
+			seasonNumber := int(image.GetSeasonNumber())
+			ri.SeasonNumber = &seasonNumber
 		}
 		// Extract rating from the metadata struct if the plugin provided it.
 		if md := image.GetMetadata(); md != nil {
@@ -511,7 +534,7 @@ func (p *PluginProvider) GetEpisodes(ctx context.Context, req EpisodesRequest) (
 			Overview:      episode.GetOverview(),
 			AirDate:       episode.GetAirDate(),
 			Runtime:       int(episode.GetRuntime()),
-			Ratings:       ratingsFromStruct(episode.GetRatings()),
+			Ratings:       ratingsFromStruct(episode.GetRatings(), p.declaredRatingSources),
 			StillPath:     episode.GetStillPath(),
 		})
 	}
@@ -574,7 +597,12 @@ func stringMapFromStruct(value *structpb.Struct) map[string]string {
 	return result
 }
 
-func ratingsFromStruct(value *structpb.Struct) Ratings {
+// ratingsFromStruct reads the four flat ratings a plugin sends. IMDb and TMDB
+// are Silo's own and always kept. The Rotten Tomatoes scores are kept only
+// when the plugin declared rt_critic or rt_audience, the same rule
+// ratings.sources follows, so a plugin that does not declare them cannot fill
+// the columns another provider's declaration shows.
+func ratingsFromStruct(value *structpb.Struct, declared map[string]struct{}) Ratings {
 	var ratings Ratings
 	if value == nil {
 		return ratings
@@ -589,10 +617,14 @@ func ratingsFromStruct(value *structpb.Struct) Ratings {
 			ratings.IMDB = number
 		case "tmdb":
 			ratings.TMDB = number
-		case "rt_critic":
-			ratings.RTCritic = number
-		case "rt_audience":
-			ratings.RTAudience = number
+		case models.RatingSourceRTCritic:
+			if _, ok := declared[models.RatingSourceRTCritic]; ok {
+				ratings.RTCritic = number
+			}
+		case models.RatingSourceRTAudience:
+			if _, ok := declared[models.RatingSourceRTAudience]; ok {
+				ratings.RTAudience = number
+			}
 		}
 	}
 	return ratings
@@ -607,19 +639,23 @@ const maxExactVotes = 1 << 53
 // a 0-100 scale and votes omitted when unknown.
 //
 // The Struct is the plugin's word, so each entry is validated on its own and a
-// bad one is dropped without affecting the rest: an unknown source name, a
-// score that is missing, non-finite or outside 0-100 drops the source, and a
-// negative, fractional or non-numeric vote count drops only the count.
-func ratingSourcesFromStruct(value *structpb.Struct, provider string) map[string]RatingSource {
+// bad one is dropped without affecting the rest: a source name that is neither
+// built in nor one the capability declared, a score that is missing,
+// non-finite or outside 0-100 drops the source, and a negative, fractional or
+// non-numeric vote count drops only the count.
+func ratingSourcesFromStruct(value *structpb.Struct, provider string, declared map[string]struct{}) map[string]RatingSource {
 	sources := value.GetFields()["sources"].GetStructValue()
 	if sources == nil {
 		return nil
 	}
 	result := make(map[string]RatingSource, len(sources.GetFields()))
 	for rawName, rawEntry := range sources.GetFields() {
-		name := models.NormalizeRatingSource(rawName)
+		name := strings.ToLower(strings.TrimSpace(rawName))
+		if _, ok := declared[name]; !ok && !models.IsBuiltinRatingSource(name) {
+			continue
+		}
 		entry := rawEntry.GetStructValue()
-		if name == "" || entry == nil {
+		if entry == nil {
 			continue
 		}
 		scoreValue, ok := entry.GetFields()["score"].GetKind().(*structpb.Value_NumberValue)

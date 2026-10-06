@@ -109,27 +109,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, [dirtyCount]);
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
-  // In-app navigation is guarded by `UnsavedChangesGuard`, which blocks the
-  // router for as long as this registration is live. Reporting through a module
-  // store rather than owning the prompt keeps the hook usable where no guard is
-  // mounted (the setup wizard) and outside a router entirely.
+  // The shared registry guards tab close and reload. `UnsavedChangesGuard`
+  // also blocks in-app navigation while this registration is live. Reporting
+  // through the registry keeps the hook usable without a router or guard,
+  // including the setup wizard.
   useReportUnsavedChanges(dirtyCount > 0);
-
-  // Every admin settings tab stages edits and only writes them through the
-  // SaveBar, so closing or reloading the tab would silently drop them. One
-  // guard here covers all tabs, and it is the only thing the browser lets us
-  // intercept: a tab close or reload never reaches the router.
-  useEffect(() => {
-    if (dirtyCount === 0) return;
-    function warnOnUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      // Older browsers only show the prompt for a truthy returnValue; the text
-      // itself is ignored everywhere.
-      event.returnValue = "";
-    }
-    window.addEventListener("beforeunload", warnOnUnload);
-    return () => window.removeEventListener("beforeunload", warnOnUnload);
-  }, [dirtyCount]);
 
   const isDirty = useCallback((key: string) => dirty.has(key), [dirty]);
 

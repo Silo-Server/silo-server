@@ -141,6 +141,11 @@ type Dependencies struct {
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// SubtitlePlaySync aligns a subtitle the first time a client is served
+	// it, when it was never synced; nil leaves that to a request.
+	SubtitlePlaySync subtitles.PlaySyncer
+	// Trickplay serves seek-bar preview sheets; nil answers 404.
+	Trickplay TrickplaySheets
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling

@@ -178,15 +178,57 @@ func TestHLSPlanningRegistryV3EnablesValidatedLocalToneMapWithoutRestart(t *test
 	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 		return capabilities, nil
 	}
-	settings := &mutablePlaybackSettingsV3{values: map[string]string{}}
+	settings := &mutablePlaybackSettingsV3{values: map[string]string{
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
+	}}
 	handler.SettingsRepo = settings
 
 	if handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
 		t.Fatal("disabled tone-map policy widened the local transformation registry")
 	}
-	settings.values["playback.transcode_software_tone_map_enabled"] = "true"
+	settings.values[config.PlaybackTranscodeSoftwareToneMapSettingKey] = "true"
 	if !handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
 		t.Fatal("enabled validated tone-map executor was not available without restart")
+	}
+}
+
+// TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes
+// verifies that, with tone mapping enabled, a recipe without a tone-map step
+// neither waits on nor fails with the local tone-map probe.
+func TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.PlaybackConfig = func() config.PlaybackConfig {
+		return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true}
+	}
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "2", Available: true},
+	}))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
+	}}
+	var probes atomic.Int32
+	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
+		probes.Add(1)
+		return nil, context.DeadlineExceeded
+	}
+	h264 := playback.TransformationV3{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: "2"}
+
+	sdr := playback.PlannerResultV3{Plan: &playback.PlanV3{Transformations: []playback.TransformationV3{h264}}}
+	if transportErr := handler.validateLocalTransportCapabilitiesV3(context.Background(), sdr); transportErr != nil {
+		t.Fatalf("SDR recipe rejected: %#v", transportErr)
+	}
+	if got := probes.Load(); got != 0 {
+		t.Fatalf("SDR recipe ran %d tone-map probes, want 0", got)
+	}
+
+	toneMapped := playback.PlannerResultV3{Plan: &playback.PlanV3{Transformations: []playback.TransformationV3{h264, {
+		Name: playback.TransformationHDRToSDRToneMapV3, Executor: playback.ExecutorServerV3,
+		RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
+	}}}}
+	transportErr := handler.validateLocalTransportCapabilitiesV3(context.Background(), toneMapped)
+	if transportErr == nil || !transportErr.retryable || !errors.Is(transportErr.cause, context.DeadlineExceeded) {
+		t.Fatalf("tone-mapped recipe error = %#v, want retryable probe deadline", transportErr)
 	}
 }
 
@@ -1881,7 +1923,7 @@ func TestPrepareTransportV3ClassifiesExhaustedRemoteLiveValidation(t *testing.T)
 				result,
 				mediaAuthModeV3{},
 			)
-			if transportErr == nil || transportErr.retryable != tt.wantRetryable ||
+			if transportErr == nil || transportErr.reason != transcodeStartFailedReasonV3 || transportErr.retryable != tt.wantRetryable ||
 				(tt.wantCause != nil && !errors.Is(transportErr.cause, tt.wantCause)) ||
 				(tt.wantCause == nil && transportErr.cause != nil) {
 				t.Fatalf("transport error = %#v, want retryable=%t wrapping %v", transportErr, tt.wantRetryable, tt.wantCause)

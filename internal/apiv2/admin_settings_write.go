@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -96,6 +97,10 @@ func registerAdminSettingsWrite(reg *Registry) {
 	op := func(path, id, summary string) Operation {
 		o := Operation{Operation: humaOp("PUT", Prefix+"/admin/settings"+path, id, "admin-settings", summary), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNonRetryable}
 		o.MaxBodyBytes = 1 << 20
+		// Turning auth.local_password_login off without a usable
+		// break-glass admin is refused.
+		o.Description = "Turning auth.local_password_login off while no enabled break-glass admin can sign in with a password is 409 break_glass_required."
+		o.Errors = append(o.Errors, http.StatusConflict)
 		return o
 	}
 	Register(reg, op("", "updateAdminSettings", "Validate and merge captured settings under the existing transaction guard; prerequisite probes and runtime notifications are not replayable receipts."), func(ctx context.Context, in *AdminSettingsUpdateInput) (*AdminSettingsUpdateOutput, error) {
