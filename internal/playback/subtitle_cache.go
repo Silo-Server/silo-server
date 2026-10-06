@@ -399,8 +399,9 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 	// Share another request's extraction rather than demuxing the source a
 	// second time: look the track up, else reserve the fill, else wait for
 	// whoever holds it and look again. A fill that commits between a busy
-	// reservation and the wait is found by the next lookup. The rounds are
-	// bounded, so a cache that can't take a fill (disabled, unwritable)
+	// reservation and the wait is found by the next lookup, and one that
+	// commits during the last wait by the lookup after the loop. The rounds
+	// are bounded, so a cache that can't take a fill (disabled, unwritable)
 	// falls through to extracting without one.
 	var fill *SubtitleCacheFill
 	for round := 0; round < textFillRounds && fill == nil; round++ {
@@ -418,13 +419,14 @@ func (c *SubtitleCache) ExtractText(ctx context.Context, inputPath string, track
 			return nil, err
 		}
 	}
-	if fill != nil {
-		// A previous filler may have committed between the lookup above and
-		// this reservation; reuse its entry rather than extracting again.
-		if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+	// Another filler may have committed since the last lookup: between it
+	// and this reservation, or during the last round's wait. Reuse its entry
+	// rather than extracting again.
+	if data, ok := c.LookupText(inputPath, trackIndex, format); ok {
+		if fill != nil {
 			fill.Discard()
-			return data, nil
 		}
+		return data, nil
 	}
 	data, err := extract(ctx)
 	if err != nil {
@@ -449,6 +451,11 @@ const textFillRounds = 3
 // afterBusyTextFill runs when ExtractText finds another fill in progress,
 // before it waits; tests use it to finish that fill in between.
 var afterBusyTextFill func()
+
+// afterTextFillWaitCapture runs once waitForTextFill holds an in-flight
+// fill's done channel, before it blocks on it; tests use it to act while a
+// request is waiting.
+var afterTextFillWaitCapture func()
 
 func normalizeCachedTextSubtitleFormat(format string) string {
 	switch strings.ToLower(strings.TrimPrefix(strings.TrimSpace(format), ".")) {

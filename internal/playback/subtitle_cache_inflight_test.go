@@ -39,13 +39,12 @@ func TestExtractTextSharesInFlightFill(t *testing.T) {
 		results[0], errs[0] = cache.ExtractText(context.Background(), source, 0, "srt", extract)
 	}()
 	<-started
-	// Release the first extraction only once the second request has found
-	// it in progress, so the test exercises the shared fill, not a later
-	// cache hit.
+	// Release the first extraction only once the second request is waiting
+	// on it, so the test exercises the shared fill, not a later cache hit.
 	busy := make(chan struct{})
 	var busyOnce sync.Once
-	afterBusyTextFill = func() { busyOnce.Do(func() { close(busy) }) }
-	t.Cleanup(func() { afterBusyTextFill = nil })
+	afterTextFillWaitCapture = func() { busyOnce.Do(func() { close(busy) }) }
+	t.Cleanup(func() { afterTextFillWaitCapture = nil })
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -95,6 +94,47 @@ func TestExtractTextReusesAFillThatCommitsBeforeTheWait(t *testing.T) {
 	})
 	if err != nil || string(data) != "SHARED" || extracts != 0 {
 		t.Fatalf("ExtractText = %q, %v after %d extracts; want the committed fill and none", data, err, extracts)
+	}
+}
+
+// A fill that commits during the last round's wait is reused too: the rounds
+// run out with no reservation, and the lookup after them finds the entry.
+func TestExtractTextReusesAFillThatCommitsDuringTheLastWait(t *testing.T) {
+	cache, source := newTestCache(t)
+	reserve := func() *SubtitleCacheFill {
+		holder := cache.beginFill(source, 0, "srt")
+		if holder == nil {
+			t.Fatal("couldn't reserve the fill")
+		}
+		if _, err := holder.Tee(io.Discard).Write([]byte("SHARED")); err != nil {
+			t.Fatal(err)
+		}
+		return holder
+	}
+	holder := reserve()
+	waits := 0
+	afterTextFillWaitCapture = func() {
+		waits++
+		if waits < textFillRounds {
+			// Each earlier filler gives up and another takes over.
+			holder.Discard()
+			holder = reserve()
+			return
+		}
+		if err := holder.Commit(); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { afterTextFillWaitCapture = nil })
+
+	extracts := 0
+	data, err := cache.ExtractText(t.Context(), source, 0, "srt", func(context.Context) ([]byte, error) {
+		extracts++
+		return []byte("AGAIN"), nil
+	})
+	if err != nil || string(data) != "SHARED" || extracts != 0 || waits != textFillRounds {
+		t.Fatalf("ExtractText = %q, %v after %d extracts and %d waits; want the committed fill, no extract, %d waits",
+			data, err, extracts, waits, textFillRounds)
 	}
 }
 
