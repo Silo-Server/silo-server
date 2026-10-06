@@ -41,3 +41,12 @@ func TestCollectionRailQueryAccessIntersectsExplicitLibrary(t *testing.T) {
 		t.Fatalf("blocked access = %v, want non-nil empty scope", blocked.AllowedLibraryIDs)
 	}
 }
+
+// A profile allowed no library must stay denied when a collection row copies
+// its scope: an empty list means none, while nil means every library.
+func TestCollectionRailQueryAccessKeepsEmptyScopeDenying(t *testing.T) {
+	got := collectionRailQueryAccess(catalog.AccessFilter{AllowedLibraryIDs: []int{}}, nil, []int{})
+	if got.AllowedLibraryIDs == nil || len(got.AllowedLibraryIDs) != 0 {
+		t.Fatalf("empty scope = %#v, want non-nil empty scope", got.AllowedLibraryIDs)
+	}
+}
