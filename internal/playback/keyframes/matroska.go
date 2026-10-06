@@ -125,7 +125,10 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 			if err != nil {
 				return Index{}, err
 			}
-			timescale, duration = parseInfo(data)
+			var ok bool
+			if timescale, duration, ok = parseInfo(data); !ok {
+				return Index{}, ErrNoIndex
+			}
 			haveInfo = true
 		case idTracks:
 			data, err := readElementData(r, dataAt, dataSize, maxMetadataSize)
@@ -171,7 +174,10 @@ func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 		if err != nil {
 			return Index{}, err
 		}
-		timescale, duration = parseInfo(data)
+		var ok bool
+		if timescale, duration, ok = parseInfo(data); !ok {
+			return Index{}, ErrNoIndex
+		}
 		haveInfo = true
 	}
 	if !haveTrack && tracksAt >= 0 {
@@ -368,19 +374,24 @@ func seekPosition(seekHead []byte, target uint64) (int64, bool) {
 	return pos, found
 }
 
-func parseInfo(info []byte) (timescale int64, duration float64) {
-	timescale = defaultTimescale
+// parseInfo reads Info's timestamp scale, defaulting when it is absent, and
+// duration. ok is false for an explicit scale Matroska doesn't allow (zero)
+// or that doesn't fit: cue times scaled by a guess would plan wrong segments.
+func parseInfo(info []byte) (timescale int64, duration float64, ok bool) {
+	timescale, ok = defaultTimescale, true
 	children(info, func(id uint64, v []byte) {
 		switch id {
 		case idTimestampScale:
 			if s := int64(readUint(v)); s > 0 {
 				timescale = s
+			} else {
+				ok = false
 			}
 		case idDuration:
 			duration = readFloat(v)
 		}
 	})
-	return timescale, duration
+	return timescale, duration, ok
 }
 
 func firstVideoTrack(tracks []byte) (uint64, bool) {
