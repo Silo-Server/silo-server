@@ -321,6 +321,20 @@ function readStringPayload(
   return null;
 }
 
+// What the viewer wants once a stalled native HLS stream's reload finishes:
+// whether to play, and where (in element time). Play, pause and seek requests
+// made during the reload update it.
+interface StallRecovery {
+  playing: boolean;
+  position: number;
+}
+
+// Whether the viewer has playback paused. The reload behind a stall recovery
+// pauses the element, so during one the recovery's intent says instead.
+function viewerPaused(video: HTMLVideoElement, recovery: StallRecovery | null): boolean {
+  return recovery ? !recovery.playing : video.paused;
+}
+
 export function VideoPlayer({
   title,
   year,
@@ -433,10 +447,10 @@ export function VideoPlayer({
   // element has not reached yet — including a reanchor still being replanned —
   // is the position playback is heading to, so the next skip starts there.
   const pendingSeekTimeRef = useRef<number | null>(null);
-  // True while a stalled native HLS stream reloads to resume playback. The
+  // Set while a stalled native HLS stream reloads to resume playback. The
   // reload pauses the element, so `video.paused` doesn't say whether the
-  // viewer is playing then.
-  const stallRecoveryPendingRef = useRef(false);
+  // viewer is playing then; see viewerPaused.
+  const stallRecoveryRef = useRef<StallRecovery | null>(null);
   useEffect(() => {
     pendingSeekTimeRef.current = pendingSeekTime;
   }, [pendingSeekTime]);
@@ -1004,6 +1018,9 @@ export function VideoPlayer({
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
         rememberPendingSeek(seconds);
         setCurrentTime(seconds);
+        // A stall reload would otherwise restore its own position over this
+        // seek once the stream's metadata arrives.
+        if (stallRecoveryRef.current) stallRecoveryRef.current.position = nativeSeconds;
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;
@@ -1065,7 +1082,11 @@ export function VideoPlayer({
 
       if (watchTogether.room) {
         const video = videoRef.current;
-        const result = watchTogetherSync.requestTransport("seek", seconds, video?.paused ?? true);
+        const result = watchTogetherSync.requestTransport(
+          "seek",
+          seconds,
+          video ? viewerPaused(video, stallRecoveryRef.current) : true,
+        );
         if (result.ok) {
           // Hold the requested position in the controls immediately. The media
           // element still waits for the room's scheduled transport command, and
@@ -1903,9 +1924,11 @@ export function VideoPlayer({
       if (!stallRecoveryHandler) return;
       video.removeEventListener("loadedmetadata", stallRecoveryHandler);
       stallRecoveryHandler = null;
-      // Drops the pause() interceptor below, back to the prototype's.
+      // Drops the play() and pause() interceptors below, back to the
+      // prototype's.
       delete (video as { pause?: unknown }).pause;
-      stallRecoveryPendingRef.current = false;
+      delete (video as { play?: unknown }).play;
+      stallRecoveryRef.current = null;
     };
 
     // Safari's native HLS can stop fetching segments mid-stream while still
@@ -1917,22 +1940,29 @@ export function VideoPlayer({
       // Hold the seek bar at the frozen position while the reload resets it.
       rememberPendingSeek(toMediaTime(position, timelineOffsetRef.current));
       clearStallRecovery();
-      // A pause asked for during the reload (the controls, a room or remote
-      // command, a subtitle translation) must stick. The reload has already
-      // paused the element, so those pause() calls change nothing and fire no
-      // event; note them here instead of resuming over them.
-      let pauseRequested = false;
+      // Play and pause requests during the reload (the controls, a room or
+      // remote command, a subtitle translation) must stick, the latest
+      // winning. The reload has already paused the element, so they change
+      // nothing on it and fire no event; note them here instead, and act on
+      // them once the stream is back.
+      const recovery: StallRecovery = { playing: true, position };
       const pause = HTMLMediaElement.prototype.pause;
       video.pause = () => {
-        pauseRequested = true;
+        recovery.playing = false;
+        setPlaying(false);
         pause.call(video);
       };
-      stallRecoveryPendingRef.current = true;
+      video.play = () => {
+        recovery.playing = true;
+        setPlaying(true);
+        return Promise.resolve();
+      };
+      stallRecoveryRef.current = recovery;
       stallRecoveryHandler = () => {
         clearStallRecovery();
         if (destroyed) return;
-        video.currentTime = position;
-        if (pauseRequested) {
+        video.currentTime = recovery.position;
+        if (!recovery.playing) {
           setPlaying(false);
           return;
         }
@@ -2827,9 +2857,7 @@ export function VideoPlayer({
       if (watchTogether.replacementReason) return;
       const video = videoRef.current;
       if (!video) return;
-      // During a stall reload the element is paused but the viewer is still
-      // playing, so a toggle pauses.
-      const paused = video.paused && !stallRecoveryPendingRef.current;
+      const paused = viewerPaused(video, stallRecoveryRef.current);
       const shouldPlay = action === "toggle" ? paused : action === "play";
       if (
         watchTogetherRoomId &&
@@ -2905,7 +2933,8 @@ export function VideoPlayer({
         singleClickRevertRef.current = null;
         surfaceTapTimerRef.current = setTimeout(() => {
           surfaceTapTimerRef.current = null;
-          const willPlay = videoRef.current?.paused ?? false;
+          const video = videoRef.current;
+          const willPlay = video ? viewerPaused(video, stallRecoveryRef.current) : false;
           singleClickRevertRef.current = willPlay ? "pause" : "play";
           setPlayback(willPlay ? "play" : "pause");
         }, DOUBLE_CLICK_WINDOW_MS);
