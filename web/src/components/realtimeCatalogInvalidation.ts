@@ -24,9 +24,11 @@ export function invalidateCatalogState(
   if (libraryId !== undefined) {
     void queryClient.invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" });
   }
-  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId }).then(() => {
-    bumpHomeRefreshSignal(queryClient);
-  });
+  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId, itemMayBeNew: true }).then(
+    () => {
+      bumpHomeRefreshSignal(queryClient);
+    },
+  );
   if (includeLibraryLists) {
     void queryClient.invalidateQueries({
       queryKey: adminKeys.libraries(),

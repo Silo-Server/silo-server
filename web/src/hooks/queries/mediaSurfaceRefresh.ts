@@ -25,6 +25,12 @@ interface InvalidateMediaSurfaceOptions {
   watchedKeys?: Array<readonly unknown[]>;
   skipItemDetail?: boolean;
   skipSimilarItems?: boolean;
+  // The item may be one this client has never seen, such as an episode a
+  // scan just added. Only catalog events can say so; progress, favorite and
+  // watchlist events are about items that already exist.
+  itemMayBeNew?: boolean;
+  // Set internally for such an item when nothing in the cache names it.
+  refreshItemKeyedLists?: boolean;
 }
 
 const MEDIA_SURFACE_REFRESH_DELAY_MS = 600;
@@ -276,7 +282,8 @@ function shouldInvalidateMediaSurfaceQuery(
       targetItemId &&
       targetItemId !== options.itemId &&
       !relatedIds?.has(targetItemId) &&
-      !isWatchedKey(queryKey, options)
+      !isWatchedKey(queryKey, options) &&
+      !(options.refreshItemKeyedLists && isItemKeyedListQuery(queryKey))
     ) {
       return false;
     }
@@ -300,6 +307,13 @@ function shouldInvalidateMediaSurfaceQuery(
   }
 
   return isWatchedKey(queryKey, options);
+}
+
+// isItemKeyedListQuery reports a list of a series' or season's children, keyed
+// by the parent: a season list, a season's detail and episodes, or an item's
+// episodes. A new child can't be traced to its parent's lists from the cache.
+function isItemKeyedListQuery(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === "catalog" && (queryKey[1] === "series" || queryKey[3] === "episodes");
 }
 
 // isWatchedKey is a prefix match on purpose: everything under a watched key
@@ -328,24 +342,21 @@ export async function invalidateMediaSurfaceQueries(
   // that predates the mutation satisfy the invalidation and land in the cache
   // as fresh.
   const relatedIds = options.itemId ? relatedItemIds(queryClient, options.itemId) : undefined;
-  // An item nothing in the cache knows about, such as an episode a scan just
-  // added, can't be traced to the lists that should now show it, so its
-  // event refreshes as if unscoped by item, as it did before narrowing. A
-  // caller that names the keys it changed (watchedKeys) has scoped it already.
+  // A new item nothing in the cache knows about, such as an episode a scan
+  // just added, can't be traced to the season or series lists that should now
+  // show it, so its event refreshes every such list. Other items' detail
+  // stays narrowed away. A caller that names the keys it changed
+  // (watchedKeys) has scoped it already.
   const scoped =
+    options.itemMayBeNew &&
     options.itemId &&
     !options.watchedKeys?.length &&
     relatedIds?.size === 1 &&
     !cacheNamesItem(queryClient, options.itemId)
-      ? { ...options, itemId: undefined }
+      ? { ...options, refreshItemKeyedLists: true }
       : options;
   await queryClient.invalidateQueries({
-    predicate: (query) =>
-      shouldInvalidateMediaSurfaceQuery(
-        query.queryKey,
-        scoped,
-        scoped.itemId ? relatedIds : undefined,
-      ),
+    predicate: (query) => shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds),
   });
 }
 

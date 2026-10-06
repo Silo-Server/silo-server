@@ -471,9 +471,38 @@ describe("invalidateMediaSurfaceQueries", () => {
     const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
     queryClient.setQueryData(seasonEpisodesKey, { episodes: [{ content_id: "episode-1" }] });
 
-    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-new" });
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-new", itemMayBeNew: true });
 
     expect(queryClient.getQueryState(seasonEpisodesKey)?.isInvalidated).toBe(true);
+  });
+
+  it("keeps other items' detail out of an unknown new item's refresh", async () => {
+    // An episode is playing while a scan adds another: its watch detail and
+    // series lists' detail aren't about the new episode.
+    const queryClient = new QueryClient();
+    const playingKey = itemKeys.watchDetail("episode-1");
+    const seasonsKey = catalogKeys.seriesSeasons("series-1");
+    queryClient.setQueryData(playingKey, { content_id: "episode-1" });
+    queryClient.setQueryData(seasonsKey, { seasons: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-new", itemMayBeNew: true });
+
+    expect(queryClient.getQueryState(playingKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(seasonsKey)?.isInvalidated).toBe(true);
+  });
+
+  it("stays narrowed for a progress event about an uncached item", async () => {
+    // Progress on another client: the item exists, it just isn't open here.
+    const queryClient = new QueryClient();
+    const playingKey = itemKeys.watchDetail("episode-1");
+    const seasonEpisodesKey = catalogKeys.itemEpisodes("season-1");
+    queryClient.setQueryData(playingKey, { content_id: "episode-1" });
+    queryClient.setQueryData(seasonEpisodesKey, { episodes: [{ content_id: "episode-1" }] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "episode-elsewhere" });
+
+    expect(queryClient.getQueryState(playingKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(seasonEpisodesKey)?.isInvalidated).toBe(false);
   });
 
   it("narrows series-keyed queries to the event's series", async () => {
