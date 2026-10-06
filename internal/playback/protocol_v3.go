@@ -85,6 +85,10 @@ const (
 	// NativeServerFeaturesV3).
 	FeatureMarkerThumbnailsV3 = "marker_thumbnails_v1"
 	FeatureSubripSidecarV3    = "subrip_sidecar_v1"
+	// FeatureSurroundBitstreamConversionV3 tells a client the server may
+	// convert a multichannel track it would decode to PCM into E-AC-3 or AC-3
+	// 5.1 that its sink validates (decision_reason surround_bitstream_conversion).
+	FeatureSurroundBitstreamConversionV3 = "surround_bitstream_conversion_v1"
 	// FeatureHLSSubtitleRenditionsV3 is the client's statement that it plays
 	// a subtitle carried as a WebVTT SUBTITLES rendition of the plan's HLS
 	// stream (subtitle.hls_rendition) instead of a sidecar artifact. A
@@ -304,7 +308,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureSurroundBitstreamConversionV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -397,6 +401,8 @@ const (
 // executor must run; the registry keys availability by the same names.
 const (
 	TransformationAudioToAACV3      = "audio_to_aac"
+	TransformationAudioToEAC3V3     = "audio_to_eac3"
+	TransformationAudioToAC3V3      = "audio_to_ac3"
 	TransformationVideoToH264V3     = "video_to_h264"
 	TransformationVideoToHEVCV3     = "video_to_hevc"
 	TransformationServerDV7HDR10V3  = "server_dv7_to_hdr10"
@@ -406,6 +412,8 @@ const (
 	TransformationVideoToH264RecipeVersionV3     = "2"
 	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
+	TransformationAudioToEAC3RecipeVersionV3     = "1"
+	TransformationAudioToAC3RecipeVersionV3      = "1"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
 	// TransformationServerDV7HDR10RecipeVersionV3 2 also removes the Profile 7
 	// enhancement-layer NAL units (see DV7ToHDR10BitstreamFilter), so an
