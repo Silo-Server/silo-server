@@ -39,13 +39,19 @@ func TestExtractTextSharesInFlightFill(t *testing.T) {
 		results[0], errs[0] = cache.ExtractText(context.Background(), source, 0, "srt", extract)
 	}()
 	<-started
+	// Release the first extraction only once the second request has found
+	// it in progress, so the test exercises the shared fill, not a later
+	// cache hit.
+	busy := make(chan struct{})
+	var busyOnce sync.Once
+	afterBusyTextFill = func() { busyOnce.Do(func() { close(busy) }) }
+	t.Cleanup(func() { afterBusyTextFill = nil })
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		results[1], errs[1] = cache.ExtractText(context.Background(), source, 0, "srt", extract)
 	}()
-	// The second request is either waiting on the fill or has not reached
-	// ExtractText yet; neither may start a second extraction.
+	<-busy
 	close(release)
 	wg.Wait()
 
