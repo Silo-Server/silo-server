@@ -20,6 +20,10 @@ runs:
     - name: Install libvips
       shell: bash
       run: |
+        # The disposable private runner image already includes these headers.
+        if pkg-config --exists vips; then
+          exit 0
+        fi
         # libvips and its dependencies use the runner's official Ubuntu sources.
         test -f /etc/apt/sources.list.d/ubuntu.sources
         apt_options=(
@@ -46,6 +50,7 @@ runs:
       run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
 
     - name: Restore the Go build and module cache
+      if: runner.environment == 'github-hosted'
       uses: actions/cache@v4
       with:
         path: |

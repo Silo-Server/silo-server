@@ -24,6 +24,13 @@ func TestAFTKRTHigh10OverrideIsExactAndPreservesVideo(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 
+	withoutFeature := req
+	withoutFeature.ClientFeatures = []string{FeaturePlaybackPlanV3}
+	withoutOptIn := PlanPlaybackV3(PlannerInputV3{Request: withoutFeature, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+	if withoutOptIn.Plan != nil && (withoutOptIn.Plan.Delivery == DeliveryOriginalHTTPV3 || len(withoutOptIn.Plan.AppliedQuirks) != 0) {
+		t.Fatalf("unadvertised quirk applied: %#v", withoutOptIn.Plan)
+	}
+
 	req.ClientPlaybackContext.Device.Model = "AFTKA"
 	withoutExactEvidence := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if withoutExactEvidence.Plan != nil && withoutExactEvidence.Plan.Delivery == DeliveryOriginalHTTPV3 {
@@ -98,29 +105,6 @@ func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	withoutRuntime := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
 	if withoutRuntime.Plan == nil || len(withoutRuntime.Plan.AppliedQuirks) != 0 || len(withoutRuntime.Plan.RuntimeCorrections) != 0 {
 		t.Fatalf("unadvertised correction applied: %#v", withoutRuntime.Plan)
-	}
-}
-
-func TestDeviceQuirkProtocolRequiresTopLevelFeature(t *testing.T) {
-	file := &models.MediaFile{
-		ID: 42, FilePath: "/media/high10.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
-		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High 10", Level: 52, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 10, VideoRange: "SDR", VideoRangeType: "SDR"}},
-		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
-	}
-	req := quirkRequestV3()
-	req.Capabilities.Containers = []string{"mkv"}
-	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
-
-	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVAFTKRTHigh10V3 {
-		t.Fatalf("top-level advertisement: %#v", result)
-	}
-
-	without := quirkRequestV3()
-	without.ClientFeatures = []string{FeaturePlaybackPlanV3}
-	if deviceQuirkProtocolAvailableV3(without) {
-		t.Fatal("quirk protocol enabled without advertisement")
 	}
 }
 

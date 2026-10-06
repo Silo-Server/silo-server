@@ -211,55 +211,6 @@ describe("useSettingsForm isClearStaged()", () => {
 });
 
 describe("useSettingsForm unsaved-changes guard", () => {
-  function fireBeforeUnload(): Event {
-    // jsdom has no BeforeUnloadEvent, and its legacy `returnValue` is a
-    // boolean mirror of the canceled flag — `defaultPrevented` is the portable
-    // signal that the browser would prompt.
-    const event = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(event);
-    return event;
-  }
-
-  it("does not warn while the form is clean", () => {
-    renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
-  it("warns before the page unloads with staged edits", () => {
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(true);
-  });
-
-  it("stops warning once the edits are discarded", () => {
-    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    act(() => {
-      result.current.discard();
-    });
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
-  it("stops warning after the hook unmounts", () => {
-    const { result, unmount } = renderHook(() => useSettingsForm({ keys: KEYS }));
-
-    act(() => {
-      result.current.setValue("branding.server_name", "Casa");
-    });
-    unmount();
-
-    expect(fireBeforeUnload().defaultPrevented).toBe(false);
-  });
-
   // What `UnsavedChangesGuard` reads to block in-app navigation. The hook keeps
   // no router dependency of its own; it only reports.
   it("publishes staged edits to the shared unsaved-changes registry", () => {

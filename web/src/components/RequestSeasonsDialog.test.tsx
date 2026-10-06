@@ -54,6 +54,9 @@ describe("RequestSeasonsDialog", () => {
 
   it("leaves an untouched pick to the server", () => {
     const dialog = open(series({ seasons: [season(1), season(2, { availability: "available" })] }));
+    const available = within(dialog).getByRole("switch", { name: "Season 2" });
+    expect(available).toBeDisabled();
+    expect(available).toHaveAccessibleDescription(/In library/);
     fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 1" }));
     expect(mocks.create.mock.calls[0]![0]).not.toHaveProperty("seasons");
   });
@@ -79,11 +82,39 @@ describe("RequestSeasonsDialog", () => {
     expect(mocks.create.mock.calls[0]![0]).toMatchObject({ seasons: [2] });
   });
 
-  it("describes why a season can't be picked", () => {
-    const dialog = open(series({ seasons: [season(1, { availability: "available" })] }));
-    const toggle = within(dialog).getByRole("switch", { name: "Season 1" });
-    expect(toggle).toBeDisabled();
-    expect(toggle).toHaveAccessibleDescription(/In library/);
+  it("picks the latest season with one click", () => {
+    const dialog = open(
+      series({ seasons: [season(1), season(2), season(3, { air_date: "2999-01-01" })] }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Latest season" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 2" }));
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({ seasons: [2] });
+  });
+
+  it("picks the upcoming seasons with one click", () => {
+    const dialog = open(
+      series({
+        seasons: [
+          season(1, { availability: "available" }),
+          season(2),
+          season(3, { air_date: "2999-01-01" }),
+          season(4, { air_date: undefined, episode_count: 0 }),
+        ],
+      }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Upcoming seasons" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request Seasons 3–4" }));
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({ seasons: [3, 4] });
+  });
+
+  it("offers no latest-season shortcut when that season is in the library", () => {
+    const dialog = open(
+      series({
+        seasons: [season(1), season(2), season(3, { availability: "available" })],
+      }),
+    );
+    expect(within(dialog).queryByRole("button", { name: "Latest season" })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "Upcoming seasons" })).toBeNull();
   });
 
   it("waits for a refetch before sending from loaded detail", () => {

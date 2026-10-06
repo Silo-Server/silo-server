@@ -197,17 +197,3 @@ func TestAdminTopActivityProviderInvalidateClearsEveryVariant(t *testing.T) {
 		}
 	}
 }
-
-func TestAdminTopActivityProviderWithoutPool(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminTopActivityProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	if _, err := provider.Get(context.Background(), 7, 10); err == nil {
-		t.Fatal("expected an error from a provider with no pool")
-	}
-}

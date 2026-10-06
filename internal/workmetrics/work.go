@@ -70,7 +70,7 @@ func Category(key string) string {
 		return "recommendations"
 	case "seed_content_availability", "rebuild_release_interest":
 		return workloadNotifications
-	case "reconcile_requests", "refresh_request_downloads", "reconcile_watch_history", "database_maintenance", "cleanup_client_diagnostics", "cleanup_operational_log", "cleanup_orphaned_media_items", "setting_mutations_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates":
+	case "reconcile_requests", "refresh_request_downloads", "reconcile_watch_history", "database_maintenance", "cleanup_client_diagnostics", "cleanup_operational_log", "cleanup_orphaned_media_items", "setting_mutations_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates", "recheck_external_identities":
 		return "maintenance"
 	default:
 		if strings.HasPrefix(key, "plugin:") || strings.HasPrefix(key, "plugin_") {

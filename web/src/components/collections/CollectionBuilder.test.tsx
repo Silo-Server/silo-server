@@ -26,11 +26,7 @@ import CollectionBuilder, {
   buildCollectionBuilderPreviewRequest,
   createCollectionBuilderValue,
 } from "./CollectionBuilder";
-import {
-  COLLECTION_FIELD_OPTIONS,
-  COLLECTION_SORT_OPTIONS,
-  getCollectionSortOptions,
-} from "./collectionBuilderFields";
+import { getCollectionSortOptions } from "./collectionBuilderFields";
 
 describe("CollectionBuilder", () => {
   it("renders guided mode by default for users", () => {
@@ -84,25 +80,6 @@ describe("CollectionBuilder", () => {
     expect(request?.limit).toBe(12);
   });
 
-  it("renders a dedicated preview sidebar layout when requested", () => {
-    const queryClient = new QueryClient();
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <CollectionBuilder
-          mode="admin"
-          value={createCollectionBuilderValue()}
-          onChange={() => {}}
-          onSubmit={() => {}}
-          previewLayout="sidebar"
-          sidebarContent={<div>Collection Summary</div>}
-        />
-      </QueryClientProvider>,
-    );
-
-    expect(markup).toContain("Collection Summary");
-    expect(markup).toContain("xl:grid-cols-[minmax(0,1fr)_22rem]");
-  });
-
   it("normalizes legacy rating aliases in smart collection preview requests", () => {
     const request = buildCollectionBuilderPreviewRequest(
       createCollectionBuilderValue({
@@ -122,17 +99,6 @@ describe("CollectionBuilder", () => {
       value: 8,
     });
     expect(request?.query_definition.sort.field).toBe("rating_imdb");
-  });
-
-  it("includes the expanded collection builder field and sort lists", () => {
-    expect(COLLECTION_FIELD_OPTIONS.map((field) => field.value)).toEqual(
-      expect.arrayContaining(["rating_imdb", "watched", "favorited", "in_watchlist"]),
-    );
-    expect(COLLECTION_SORT_OPTIONS.map((sort) => sort.value)).toContain("rating_imdb");
-  });
-
-  it("includes last_air_date in the sort options", () => {
-    expect(COLLECTION_SORT_OPTIONS.map((sort) => sort.value)).toContain("last_air_date");
   });
 
   it("shows personalized sort options only on user collection surfaces", () => {

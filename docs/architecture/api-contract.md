@@ -335,9 +335,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   then the profile, acting-admin, or permission gate. A gate's denial is re-rendered as the
   matching Problem Details document by switching on the v1 body's machine-readable `error` and
   `reason`; the decision itself is the v1 gate's, and a locked profile keeps its own
-  `profile_verification_required` type so clients still know to ask for the PIN, and a session
+  `profile_verification_required` type so clients still know to ask for the PIN, a session
   holding a temporary password keeps `password_change_required` so clients route to the
-  password change. A gate the
+  password change, and an access token minted before the account's role changed gets
+  `token_refresh_required` so clients refresh instead of signing out. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
@@ -625,7 +626,9 @@ required, invalid token, session expired, permission denied, profile verificatio
 resource not found, method not allowed, resource conflict, idempotency conflict, payload too
 large, unsupported media type, rate limit exceeded, capability disabled, dependency unavailable,
 client upgrade required, and internal error. Domain-specific types are added only when a client
-needs distinct corrective behavior.
+needs distinct corrective behavior. `token_refresh_required` (401) is one: the login
+session is valid but the access token predates a change to the account's role, so the client
+refreshes and retries instead of signing out.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;
@@ -1294,7 +1297,10 @@ surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`
 membership reads answer a body instead of a bare `204`; `setRating` answers `422` (typed
 `out_of_range`) where v1 answered `400`; the list responses carry `page` instead of `has_more`;
 the watchlist list still hides fully-watched series as v1 does; and the v2 access filter carries
-no device id because the v2 listener reads no device header.
+no device id because the v2 listener reads no device header. `listWatchlist`,
+`getWatchlistEntry` and v1 `GET /watchlist` first move watchlist entries for titles
+outside the library that have since arrived onto this list; see
+[Watchlist titles](#watchlist-titles).
 
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
@@ -1832,9 +1838,60 @@ Request state gains `following` and `requested_by_viewer`, and
 `GET /api/v2/requests/status` advertises `follow_supported`. The frozen v1
 surface has no follow operation and does not carry these fields.
 
+Requests carry `source`: `direct` for a request someone made, `watchlist` for
+one a watchlist add made. It is an open set; the admin queue reads it too.
+Discovery results (search, the Discover sections and browse operations, and a
+title detail's recommendations) and the title detail carry `in_watchlist`,
+true when the acting profile has the title on its watchlist, in or out of the
+library.
+
 Native Apple and Android request migrations accompany this contract change;
 integrate those client changes before retiring their v1 routes. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
+
+### Watchlist titles
+
+A profile can keep movies and series the library doesn't have on its watchlist,
+by TMDB ID, under the `watchlist` tag:
+
+- `GET /api/v2/watchlist/titles` (`listWatchlistTitles`) pages the entries by
+  `limit` and a signed cursor over `(added_at DESC, title id DESC)`, bound to the
+  account, profile and viewer policy. Each `WatchlistTitle` carries the current
+  `tmdb_id`, a snapshot for display (`title`, `year`, `release_date`,
+  `poster_path`, `vote_average`, `content_rating`), `added_at`, `status` and the
+  viewer's `request` state, with `download` while it downloads. `status` is
+  `active`, `needs_review` (TMDB now lists the title twice) or `removed` (TMDB
+  no longer lists it); it is an open set and clients read an unknown value as
+  `active`. Titles above the viewer's rating ceiling are omitted, and `has_more`
+  is decided from the raw rows.
+- `PUT /api/v2/watchlist/titles/{media_type}/{tmdb_id}` (`addWatchlistTitle`)
+  answers `200` with `{media_type, tmdb_id, added_at, item_id?, request}`. When
+  exactly one library item the viewer can see has the title, it is added to the
+  library watchlist instead and `item_id` names it. A TMDB ID TMDB doesn't have,
+  or a title above the ceiling, is `404`. The add may also request the title
+  (below).
+- `DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}`
+  (`deleteWatchlistTitle`) answers `204` whether or not the entry existed. It
+  accepts a title's current or former TMDB ID and also removes the matching
+  library watchlist entry.
+
+The three operations belong to the requests surface: while requests are off
+they answer `409 capability_disabled` and the stored entries are kept. The two
+mutations are profile-scoped, demo-restricted and `non_retryable`.
+`GET /api/v2/requests/status` advertises `watchlist_titles_supported`, false
+while requests are off, and
+`watchlist_requests` when an add by the acting profile will also request the
+title: requests are on, the admin's `watchlist_requests` setting and the
+profile's `requests.watchlist_auto_request` setting are both on, and the
+account may request.
+
+Library reads promote: `listWatchlistTitles`, `listWatchlist`,
+`getWatchlistEntry`, a catalog query with `source: "watchlist"`, the home
+Watchlist section and item detail `user_state` first move entries whose title
+reached the library onto the library watchlist, keeping `added_at`, with the
+side effects of a manual add. The frozen v1 routes gain no field. jellycompat
+has no view of these entries. There is no new realtime event. See
+[External watchlist titles](external-watchlist.md).
 
 ### History imports
 
@@ -1939,6 +1996,15 @@ can involve another user store: it is bounded by the request deadline and a five
 cleanup deadline, and failures leave the settings unchanged. Cleanup may already have
 committed if the later connection transaction fails, so the operation remains
 non-retryable and does not promise an atomic cross-store mutation.
+
+Token refresh uses a separate advisory lock per connection across API nodes. A
+waiting caller reloads the complete connection before deciding whether to refresh.
+Persistence locks the existing row and compares its account binding and previous
+credential set before updating only credentials and the connection error. A
+removed row or replaced sign-in makes the old refresh fail; refresh never
+recreates a deleted row or overwrites the new sign-in. Disconnect waits for an
+in-flight refresh before deleting the row. Concurrent preference changes, sync
+cursors, timestamps and rate-limit deferrals survive token rotation.
 
 The full connection metadata read has no ETag: provider capabilities, display labels,
 credential availability and configuration schemas may change independently of the
@@ -2056,6 +2122,11 @@ recreated integration from its deleted predecessor. A missing settings or accoun
 limit row has a version-zero default representation; a nonexistent target account
 returns 404. Row locks and conditional upserts arbitrate concurrent writers. Explicit
 wildcards overwrite atomically; first-party clients never supply them automatically.
+
+The v2 request settings add `watchlist_requests` (default on): whether a
+watchlist add of a title outside the library requests it. An update that omits
+it keeps the stored value, and so does every v1 settings write; responses
+always carry it.
 
 Settings and limits expose only their editable fields (plus the target account ID
 for limits), without volatile metadata. Integration reads include persisted public

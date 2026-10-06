@@ -219,7 +219,6 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.ImageBlurHashes = map[string]map[string]string{}
 		dto.LockedFields = []string{}
 		dto.Chapters = []map[string]any{}
-		dto.Trickplay = map[string]any{}
 		dto.MediaStreams = []mediaStreamDTO{}
 	}
 
@@ -382,6 +381,9 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 		}
 		if wantField("chapters") {
 			dto.Chapters = compatChapters(firstVersion.Chapters, firstVersion.AddedAt)
+		}
+		if wantField("trickplay") {
+			dto.Trickplay = m.compatTrickplay(item.Versions)
 		}
 	} else if isPlayableItemType(item.Type) {
 		// Provider-metadata-only (unaired/missing) item: version data is
@@ -954,4 +956,25 @@ func nonNilStrings(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// compatTrickplay is Jellyfin's Trickplay member: for each media source with
+// published seek-bar previews, its one width. Nil when no version has any.
+func (m *mapper) compatTrickplay(versions []catalog.FileVersion) map[string]map[string]trickplayInfoDTO {
+	var out map[string]map[string]trickplayInfoDTO
+	for _, version := range versions {
+		grid := version.Trickplay
+		if grid == nil {
+			continue
+		}
+		if out == nil {
+			out = map[string]map[string]trickplayInfoDTO{}
+		}
+		sourceID := m.codec.EncodeIntID(EncodedIDMediaSource, int64(version.FileID))
+		out[sourceID] = map[string]trickplayInfoDTO{strconv.Itoa(grid.Width): {
+			Width: grid.Width, Height: grid.Height, TileWidth: grid.TileColumns, TileHeight: grid.TileRows,
+			ThumbnailCount: grid.ThumbnailCount, Interval: grid.IntervalMS, Bandwidth: grid.Bandwidth,
+		}}
+	}
+	return out
 }

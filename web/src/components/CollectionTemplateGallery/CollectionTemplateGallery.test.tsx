@@ -66,7 +66,15 @@ vi.mock("@/hooks/queries/profiles", () => ({
 
 vi.mock("@/hooks/queries/collectionSurfaceRefresh", () => ({
   invalidateAdminCollectionQueries: vi.fn(),
+  invalidateUserCollectionQueries: vi.fn(),
 }));
+
+vi.mock("@/hooks/queries/libraries", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/libraries")>(
+    "@/hooks/queries/libraries",
+  );
+  return { ...actual, useUserLibraries: () => ({ data: [] }) };
+});
 
 const catalogResponse = {
   categories: [
@@ -169,19 +177,6 @@ describe("CollectionTemplateGallery", () => {
     vi.clearAllMocks();
   });
 
-  it("loads and displays templates grouped by category", async () => {
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
-    // Section labels render once in headings; pills render once each as well.
-    expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Popular").length).toBeGreaterThan(0);
-    expect(screen.getByText("Core Defaults")).toBeInTheDocument();
-  });
-
   it("filters templates by search across title and description", async () => {
     const user = userEvent.setup();
     renderGallery();
@@ -195,33 +190,6 @@ describe("CollectionTemplateGallery", () => {
     expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
   });
 
-  it("opens the config form when a template card is selected", async () => {
-    const user = userEvent.setup();
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Trending Movies This Week"));
-    // The drawer renders the explicit submit button.
-    expect(screen.getByRole("button", { name: /Create Collection/i })).toBeInTheDocument();
-  });
-
-  it("does not preselect an ineligible initial library for TV templates", async () => {
-    const user = userEvent.setup();
-    renderGallery();
-
-    await waitFor(() => {
-      expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByText("Trakt Popular Shows"));
-
-    expect(screen.getByRole("button", { name: /TV Shows/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Movies$/i })).not.toBeInTheDocument();
-  });
-
   it("dispatches to the TMDB import endpoint when submitting a TMDB template", async () => {
     const user = userEvent.setup();
     renderGallery();
@@ -229,6 +197,11 @@ describe("CollectionTemplateGallery", () => {
     await waitFor(() => {
       expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
     });
+
+    expect(screen.getByText("Trakt Popular Shows")).toBeInTheDocument();
+    expect(screen.getAllByText("Trending").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Popular").length).toBeGreaterThan(0);
+    expect(screen.getByText("Core Defaults")).toBeInTheDocument();
 
     fetchMock.mockImplementation((path: string) => {
       if (path === "GET /api/v2/admin/collections/templates")
@@ -244,6 +217,7 @@ describe("CollectionTemplateGallery", () => {
     });
 
     await user.click(screen.getByText("Trending Movies This Week"));
+    expect(screen.getByRole("button", { name: /Create Collection/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
@@ -274,6 +248,8 @@ describe("CollectionTemplateGallery", () => {
     });
 
     await user.click(screen.getByText("Trakt Popular Shows"));
+    expect(screen.getByRole("button", { name: /TV Shows/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Movies$/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Create Collection/i }));
 
     await waitFor(() => {
@@ -481,6 +457,60 @@ describe("CollectionTemplateGallery", () => {
         expect.objectContaining({
           path: { bundle_id: "core_defaults" },
           body: expect.objectContaining({ library_ids: ["1"] }),
+        }),
+      );
+    });
+  });
+});
+
+// Personal mode lists what GET /collections/templates returns, which the server
+// limits to sources a personal collection can import (#1640).
+describe("CollectionTemplateGallery in user mode", () => {
+  const userCatalog = {
+    categories: [catalogResponse.categories[0], catalogResponse.categories[2]],
+  };
+
+  function renderUserGallery() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={client}>
+        <CollectionTemplateGallery mode="user" open onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    fetchMock.mockImplementation((path: string) => {
+      if (path === "GET /api/v2/collections/templates") return Promise.resolve(userCatalog);
+      if (path === "POST /api/v2/collections/import/tmdb") {
+        return Promise.resolve({ collection: { id: "personal-1" } });
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("creates a personal collection from a TMDB template", async () => {
+    const user = userEvent.setup();
+    renderUserGallery();
+
+    await waitFor(() => {
+      expect(screen.getByText("Trending Movies This Week")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Core Defaults")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Trending Movies This Week"));
+    await user.click(screen.getByRole("button", { name: /Create Collection/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "POST /api/v2/collections/import/tmdb",
+        expect.objectContaining({
+          body: expect.objectContaining({ preset: "trending", media_type: "movie" }),
         }),
       );
     });

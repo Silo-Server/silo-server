@@ -9,6 +9,10 @@ not the TV could reach it. Two `/api/v2` operations fix that. Tracking issue:
 Silo-Server/silo-server#1268; client work: Silo-Server/silo-apple#341 and
 Silo-Server/silo-android#352.
 
+Finding a server a client does not know yet (LAN advertisement, overlay
+short names) is [server-discovery.md](server-discovery.md); it hands clients
+candidates that this identity confirms.
+
 ## Identity
 
 `GET /api/v2/system/identity` is public and answers `{"server_id": …}`.

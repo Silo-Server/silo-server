@@ -37,7 +37,7 @@ export function useSubmitMediaRequest() {
   );
 
   const isSubmitting = useCallback(
-    (item: RequestMediaResult) => pendingKeys.has(resultKey(item)),
+    (item: Pick<RequestMediaResult, "media_type" | "tmdb_id">) => pendingKeys.has(resultKey(item)),
     [pendingKeys],
   );
 

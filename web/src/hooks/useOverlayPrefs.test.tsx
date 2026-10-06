@@ -290,24 +290,38 @@ describe("useOverlayPrefs", () => {
   // ui.card_overlays validation is all-or-nothing, so one overlay id the
   // server's schema predates would fail every badge save on that server. With
   // the revision unknown, an id the server already stored is still accepted.
-  it.each([
-    { name: "a revision-12 server", revision: 12, storedAdvisory: false, kept: false },
-    { name: "a revision-13 server", revision: 13, storedAdvisory: false, kept: true },
-    { name: "an unknown revision", revision: undefined, storedAdvisory: false, kept: false },
-    {
-      name: "an unknown revision with a stored advisory badge",
-      revision: undefined,
-      storedAdvisory: true,
-      kept: true,
-    },
-  ])("writes advisory_age only where it is accepted: $name", async (c) => {
+  it.each(
+    (
+      [
+        ["advisory_age", 13],
+        ["request_status", 15],
+      ] as const
+    ).flatMap(([id, since]) => [
+      {
+        id,
+        name: `a revision-${since - 1} server`,
+        revision: since - 1,
+        stored: false,
+        kept: false,
+      },
+      { id, name: `a revision-${since} server`, revision: since, stored: false, kept: true },
+      { id, name: "an unknown revision", revision: undefined, stored: false, kept: false },
+      {
+        id,
+        name: "an unknown revision with it stored",
+        revision: undefined,
+        stored: true,
+        kept: true,
+      },
+    ]),
+  )("writes $id only where it is accepted: $name", async (c) => {
     mocks.profileId = "profile-1";
-    mocks.effective = c.storedAdvisory
+    mocks.effective = c.stored
       ? (effectiveOverlayValue({
           version: 2,
           preset: "classic",
           order: [],
-          items: { advisory_age: { enabled: true, position: "bottom-right" } },
+          items: { [c.id]: { enabled: true, position: "bottom-right" } },
         }).data as Record<string, { value: unknown }>)
       : {};
     mocks.v2.mockImplementation(async (operation: string) => {
@@ -328,17 +342,17 @@ describe("useOverlayPrefs", () => {
         "pending",
       );
     });
-    expect(result.current.isOverlaySupported("advisory_age")).toBe(c.kept);
+    expect(result.current.isOverlaySupported(c.id)).toBe(c.kept);
 
     const next = buildDefaultPrefs();
     next.preset = "pill";
-    next.order = ["advisory_age", "year"];
-    next.items.advisory_age = { enabled: true, position: "bottom-right" };
+    next.order = [c.id, "year"];
+    next.items[c.id] = { enabled: true, position: "bottom-right" };
     act(() => result.current.setPrefs(next));
 
     const written = mocks.setValue.mock.calls[0]![0].value as CardOverlayPrefs;
-    expect("advisory_age" in written.items).toBe(c.kept);
-    expect(written.order).toEqual(c.kept ? ["advisory_age", "year"] : ["year"]);
+    expect(c.id in written.items).toBe(c.kept);
+    expect(written.order).toEqual(c.kept ? [c.id, "year"] : ["year"]);
     expect(written.items.year).toEqual(next.items.year);
   });
 
@@ -371,27 +385,6 @@ describe("useOverlayPrefs", () => {
     });
   });
 
-  it("prefers a stored profile document over the admin defaults", async () => {
-    mocks.profileId = "profile-1";
-    mocks.v2.mockResolvedValue({
-      enabled: true,
-      defaults: JSON.stringify({ version: 2, preset: "vibrant", order: [], items: {} }),
-    });
-    mocks.effective = effectiveOverlayValue({
-      version: 2,
-      preset: "minimal",
-      order: [],
-      items: {},
-    }).data as Record<string, { value: unknown }>;
-
-    const { result } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
-
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-
-    expect(result.current.hasOverride).toBe(true);
-    expect(result.current.prefs?.preset).toBe("minimal");
-  });
-
   // A snapshot of today's server values would pin the profile to them; only
   // deleting the stored document keeps it tracking later admin changes.
   it("deletes the profile document so the profile follows the server defaults again", async () => {
@@ -410,6 +403,8 @@ describe("useOverlayPrefs", () => {
 
     const { result, rerender } = renderHook(() => useOverlayPrefs(), { wrapper: createWrapper() });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.hasOverride).toBe(true);
+    expect(result.current.prefs?.preset).toBe("minimal");
 
     await act(async () => {
       await result.current.resetPrefs();

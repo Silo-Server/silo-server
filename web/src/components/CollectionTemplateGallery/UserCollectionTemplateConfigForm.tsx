@@ -5,7 +5,6 @@ import type {
   ImportUserMDBListCollectionRequest,
   ImportUserTMDBCollectionRequest,
   ImportUserTMDBListCollectionRequest,
-  ImportUserTraktCollectionRequest,
   UserCollectionMediaFilter,
   UserCollectionSyncSchedule,
   UserCollectionWatchFilter,
@@ -14,7 +13,6 @@ import {
   useImportUserMDBListCollection,
   useImportUserTMDBCollection,
   useImportUserTMDBListCollection,
-  useImportUserTraktCollection,
 } from "@/hooks/queries/userCollectionImports";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import {
@@ -94,7 +92,6 @@ function templateDefaultSchedule(cron: string | undefined): ScheduleChoice {
 
 export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated }: Props) {
   const tmdbMutation = useImportUserTMDBCollection();
-  const traktMutation = useImportUserTraktCollection();
   const mdblistMutation = useImportUserMDBListCollection();
   const tmdbListMutation = useImportUserTMDBListCollection();
   const { data: libraries = [] } = useUserLibraries();
@@ -127,10 +124,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const limitInvalid = limit.trim().length > 0 && parsedLimit === undefined;
   const isPending =
-    tmdbMutation.isPending ||
-    traktMutation.isPending ||
-    mdblistMutation.isPending ||
-    tmdbListMutation.isPending;
+    tmdbMutation.isPending || mdblistMutation.isPending || tmdbListMutation.isPending;
   const missingMDBListURL = template.source === "mdblist" && mdblistUrl.trim().length === 0;
   const invalidTMDBListURL = template.source === "tmdb_list" && !isValidTMDBListURL(tmdbListUrl);
   const submitDisabled = isPending || limitInvalid || missingMDBListURL || invalidTMDBListURL;
@@ -162,16 +156,6 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
         time_window: template.tmdb.time_window,
       };
       tmdbMutation.mutate(body, { onSuccess: onCreated });
-      return;
-    }
-
-    if (template.source === "trakt" && template.trakt) {
-      const body: ImportUserTraktCollectionRequest = {
-        ...sharedFields,
-        preset: template.trakt.preset,
-        media_type: template.trakt.media_type,
-      };
-      traktMutation.mutate(body, { onSuccess: onCreated });
       return;
     }
 

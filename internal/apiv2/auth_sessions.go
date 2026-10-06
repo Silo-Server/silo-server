@@ -19,18 +19,31 @@ import (
 
 // AuthProvider is one way to sign in.
 type AuthProvider struct {
-	ID             string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
-	DisplayName    string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
-	Mode           string `json:"mode" doc:"How the provider authenticates: credentials (login) or oauth (the OAuth handshake)" example:"credentials"`
-	Default        bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
-	IconURL        string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
-	InstallationID ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
+	ID                string `json:"id" doc:"Provider id; the value login takes as provider" example:"local"`
+	DisplayName       string `json:"display_name" doc:"Label for the sign-in button" example:"Silo account"`
+	Mode              string `json:"mode" doc:"How the provider authenticates: credentials (login), oauth (the OAuth handshake) or network (signInWithNetworkIdentity: the provider's network says who owns the device; listed only to a request that arrived through that network). Clients ignore modes they do not know" example:"credentials"`
+	Default           bool   `json:"default" doc:"Whether this is the provider login uses when none is named" example:"true"`
+	IconURL           string `json:"icon_url,omitempty" doc:"Icon shown next to the button; absent when the provider ships none" example:"https://plugins.example.test/icon.svg"`
+	InstallationID    ID     `json:"installation_id,omitempty" doc:"Plugin installation backing the provider; absent for the built-in provider" example:"3"`
+	NativeStartPath   string `json:"native_start_path,omitempty" doc:"Path of startNativeOAuthLogin below the server base, for an oauth provider while OAuth sign-in is served (a public URL is configured); absent for credentials providers. An app appends it to its saved server base URL, which keeps a reverse proxy's path prefix, adds the PKCE and state parameters, and opens the result in the system browser. An oauth provider without it offers no native sign-in" example:"/api/v2/auth/oauth/3/native/start"`
+	NetworkSignInPath string `json:"network_sign_in_path,omitempty" doc:"Path of signInWithNetworkIdentity below the server base, for a network provider; absent for other modes. An app appends it to its saved server base URL and POSTs {} to sign in, with no password and no browser" example:"/api/v2/auth/network/5/sign-in"`
+	// NetworkIdentity is who the network provider says owns the requesting
+	// device, for a "Continue as" label.
+	NetworkIdentity *AuthProviderNetworkIdentity `json:"network_identity,omitempty" doc:"Who the network provider says owns the device that sent this request, for a Continue as label; present only for a network provider. It authorizes nothing: signInWithNetworkIdentity asks the provider again"`
+}
+
+// AuthProviderNetworkIdentity is the owner of the requesting device as a
+// network provider names them.
+type AuthProviderNetworkIdentity struct {
+	DisplayName string `json:"display_name" doc:"Name at the provider; may be empty" example:"Alice Example"`
+	Username    string `json:"username" doc:"Login name at the provider; may be empty" example:"alice@example.test"`
 }
 
 // AuthProviderCollection is the listAuthProviders response: the bounded list
 // of configured providers, not paginated.
 type AuthProviderCollection struct {
 	Collection[AuthProvider]
+	PasswordLogin bool `json:"password_login" doc:"Whether any listed provider takes a username and password. False on a server whose only sign-in is an OAuth provider with local password sign-in turned off: apps and TVs then hide the password form" example:"true"`
 }
 
 // AuthProviderCollectionOutput is the listAuthProviders response.
@@ -156,8 +169,11 @@ func registerAuthSessions(reg *Registry) {
 	refresh := humaOp(http.MethodPost, Prefix+"/auth/refresh", "refreshSession", "auth",
 		"Exchange a refresh token for a new token pair.")
 	// A revoked session is 401 session_expired; any other refusal is 401
-	// invalid_token.
-	refresh.Errors = []int{http.StatusUnauthorized}
+	// invalid_token. A session opened through an external sign-in provider
+	// whose due re-check could not reach the provider, under the fail_closed
+	// outage policy, is 503 provider_unavailable: the session stays valid
+	// and the client retries later.
+	refresh.Errors = []int{http.StatusUnauthorized, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions", opListSessions, "auth",
@@ -195,16 +211,30 @@ func (reg *Registry) listAuthProviders(ctx context.Context, _ *struct{}) (*AuthP
 	if reg.deps.Sessions == nil {
 		return nil, unavailable(loginDomain)
 	}
-	providers := reg.deps.Sessions.ListProviders()
-	items := make([]AuthProvider, 0, len(providers))
-	for _, p := range providers {
+	discovery, err := reg.deps.Sessions.DiscoverProviders(ctx)
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	items := make([]AuthProvider, 0, len(discovery.Providers))
+	for _, p := range discovery.Providers {
 		item := AuthProvider{ID: p.ID, DisplayName: p.DisplayName, Mode: p.Mode, Default: p.Default, IconURL: reg.authProviderIcon(ctx, p)}
 		if p.InstallationID != 0 {
 			item.InstallationID = IDFromInt(int64(p.InstallationID))
+			if p.Mode == auth.ProviderModeOAuth && reg.deps.OAuth != nil {
+				if reg.deps.OAuth.NativeSignInAvailable() {
+					item.NativeStartPath = auth.NativeStartPath(Prefix, p.InstallationID)
+				}
+			}
+			if p.Mode == auth.ProviderModeNetwork {
+				item.NetworkSignInPath = networkSignInPath(p.InstallationID)
+				if p.NetworkIdentity != nil {
+					item.NetworkIdentity = &AuthProviderNetworkIdentity{DisplayName: p.NetworkIdentity.DisplayName, Username: p.NetworkIdentity.Username}
+				}
+			}
 		}
 		items = append(items, item)
 	}
-	return &AuthProviderCollectionOutput{Body: AuthProviderCollection{NewCollection(items)}}, nil
+	return &AuthProviderCollectionOutput{Body: AuthProviderCollection{Collection: NewCollection(items), PasswordLogin: discovery.PasswordLogin}}, nil
 }
 
 func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput) (*RefreshSessionOutput, error) {
@@ -213,6 +243,9 @@ func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput
 	}
 	pair, err := reg.deps.Sessions.Refresh(ctx, in.Body.RefreshToken)
 	if err != nil {
+		if errors.Is(err, auth.ErrProviderUnavailable) {
+			return nil, NewProblem(TypeProviderUnavailable, "The sign-in provider could not confirm the account. Try again later; the session stays valid.")
+		}
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
 			if apiErr.Code == "session_revoked" {

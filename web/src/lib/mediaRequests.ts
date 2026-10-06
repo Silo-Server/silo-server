@@ -280,6 +280,37 @@ export function defaultRequestSeasons(seasons: RequestMediaSeason[], now = new D
     .map((season) => season.season_number);
 }
 
+/**
+ * The series' latest regular season: the newest one that has aired, or the
+ * first announced one when none has. Null when that season can't be requested.
+ */
+export function latestRequestSeason(
+  seasons: RequestMediaSeason[],
+  now = new Date(),
+): number | null {
+  const regular = seasons.filter((season) => season.season_number > 0);
+  const aired = regular.filter((season) => seasonHasAired(season, now));
+  const latest = aired.length
+    ? aired.reduce((a, b) => (b.season_number > a.season_number ? b : a))
+    : regular
+        .filter((season) => season.air_date)
+        .reduce<RequestMediaSeason | null>(
+          (a, b) => (a === null || b.season_number < a.season_number ? b : a),
+          null,
+        );
+  return latest && seasonRequestable(latest) ? latest.season_number : null;
+}
+
+/** The requestable regular seasons that haven't aired yet, announced or not. */
+export function upcomingRequestSeasons(seasons: RequestMediaSeason[], now = new Date()): number[] {
+  return seasons
+    .filter(
+      (season) =>
+        season.season_number > 0 && seasonRequestable(season) && !seasonHasAired(season, now),
+    )
+    .map((season) => season.season_number);
+}
+
 /** "2022 · 9 episodes", or "Not announced" before TMDB dates or fills the season. */
 export function formatRequestSeasonMeta(season: RequestMediaSeason): string {
   const parts: string[] = [];

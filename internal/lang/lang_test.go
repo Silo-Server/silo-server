@@ -33,6 +33,14 @@ func TestPrimaryLanguage(t *testing.T) {
 	}
 }
 
+func TestISO6392(t *testing.T) {
+	for in, want := range map[string]string{"en": "eng", "eng": "eng", "pt-BR": "por", "zh-Hant": "zho", "fr": "fra", "fil": "fil", "": "", "und": "", "x-private": "", "unknown": ""} {
+		if got := ISO6392(in); got != want {
+			t.Errorf("ISO6392(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCanonical(t *testing.T) {
 	cases := []struct {
 		in, want string

@@ -297,7 +297,7 @@ func TestResolveHWAccelWithFFmpegUsesNVIDIADeviceNodesWithoutDRM(t *testing.T) {
 func TestResolveHWAccelPassesThroughConfiguredBackends(t *testing.T) {
 	setupHWAccelTest(t)
 
-	for _, configured := range []string{"nvenc", "qsv", "vaapi", "none", "custom"} {
+	for _, configured := range []string{"nvenc", "qsv", "vaapi", "videotoolbox", "none", "custom"} {
 		t.Run(configured, func(t *testing.T) {
 			if got := ResolveHWAccelWithFFmpeg(configured, "/does/not/exist/ffmpeg", ""); got != configured {
 				t.Fatalf("ResolveHWAccelWithFFmpeg(%q) = %q, want unchanged", configured, got)
@@ -383,7 +383,13 @@ func TestDetectHWAccelOmitsBackendsWithoutCandidateHardware(t *testing.T) {
 	env.addRenderDevice(t, "renderD128", "0x8086")
 	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
 
-	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
+	info, err := DetectHWAccelWithFFmpegContextResult(context.Background(), hwAccelAuto, ffmpeg.path, "")
+	if err != nil {
+		t.Fatalf("DetectHWAccelWithFFmpegContextResult: %v", err)
+	}
+	if info.Resolved != transcodeHWQSV {
+		t.Fatalf("Resolved = %q, want qsv", info.Resolved)
+	}
 	backends := make([]string, 0, len(info.DetectedBackends))
 	for _, entry := range info.DetectedBackends {
 		backends = append(backends, entry.Backend)
@@ -394,6 +400,7 @@ func TestDetectHWAccelOmitsBackendsWithoutCandidateHardware(t *testing.T) {
 	if !info.IntelDetected {
 		t.Fatal("IntelDetected = false, want true")
 	}
+	awaitNoProbesInFlight(t)
 }
 
 func TestDetectedBackendJSONShape(t *testing.T) {
@@ -1132,16 +1139,6 @@ func successfulVideoToolboxProbe() fakeFFmpegProbe {
 	return fakeFFmpegProbe{videotoolbox: true, h264VT: true, hevcVT: true, smokeOK: true}
 }
 
-func TestResolveHWAccelWithFFmpegDarwinUsesVideoToolbox(t *testing.T) {
-	setupHWAccelTest(t)
-	currentGOOS = "darwin"
-	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "videotoolbox" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
-	}
-}
-
 func TestResolveHWAccelWithFFmpegContextDarwinHonorsCallerDeadline(t *testing.T) {
 	setupHWAccelTest(t)
 	currentGOOS = "darwin"
@@ -1217,14 +1214,6 @@ func TestVideoToolboxProbeSmokesBothEncodersInPortableBitrateMode(t *testing.T) 
 		if !strings.Contains(string(log), want) {
 			t.Fatalf("probe log missing %q:\n%s", want, log)
 		}
-	}
-}
-
-func TestExplicitVideoToolboxBypassesFFmpegProbe(t *testing.T) {
-	setupHWAccelTest(t)
-
-	if got := ResolveHWAccelWithFFmpeg("videotoolbox", "/does/not/exist/ffmpeg", ""); got != "videotoolbox" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
 	}
 }
 
@@ -1306,14 +1295,27 @@ func TestCachedVideoToolboxProbeRetriesNegativeResultsAfterExpiry(t *testing.T) 
 	videoToolboxProbeRetryDelay = 0
 	t.Cleanup(func() { videoToolboxProbeRetryDelay = oldDelay })
 
-	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{})
-	if result := cachedVideoToolboxProbe(ffmpeg.path); result.available {
+	dir := t.TempDir()
+	ffmpegPath, markerPath := filepath.Join(dir, "ffmpeg"), filepath.Join(dir, "recovered")
+	script := fmt.Sprintf(`#!/bin/sh
+case "$*" in
+ *-hwaccels*) echo videotoolbox ;;
+ *-encoders*) echo "h264_videotoolbox hevc_videotoolbox" ;;
+ *) test -e %q ;;
+esac
+`, markerPath)
+	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if result := cachedVideoToolboxProbe(ffmpegPath); result.available {
 		t.Fatal("failing fake should probe unavailable")
 	}
 
-	// The hardware "recovers": the same binary now answers every probe.
-	writeFakeFFmpegScript(t, ffmpeg.path, ffmpeg.logPath, successfulVideoToolboxProbe())
-	if result := cachedVideoToolboxProbe(ffmpeg.path); !result.available {
+	// Recovery changes only the marker; executable identity stays unchanged.
+	if err := os.WriteFile(markerPath, []byte("ready"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if result := cachedVideoToolboxProbe(ffmpegPath); !result.available {
 		t.Fatalf("expired negative result should re-probe, got reason %q", result.reason)
 	}
 }

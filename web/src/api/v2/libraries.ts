@@ -46,6 +46,8 @@ export function libraryFromV2(library: LibraryV2): Library {
     chapter_thumbnails_enabled: library.chapter_thumbnails_enabled,
     chapter_thumbnails_supported: library.chapter_thumbnails_supported,
     intro_detection_enabled: library.intro_detection_enabled,
+    trickplay_enabled: library.trickplay_enabled,
+    trickplay_supported: library.trickplay_supported,
     trailer_kinds: library.trailer_kinds,
     realtime_monitoring: library.realtime_monitoring,
     sort_order: library.sort_order,
@@ -74,6 +76,7 @@ export function libraryCreateToV2(body: CreateLibraryRequest): V2Body<"POST /api
     ...(body.intro_detection_enabled === undefined
       ? {}
       : { intro_detection_enabled: body.intro_detection_enabled }),
+    ...(body.trickplay_enabled === undefined ? {} : { trickplay_enabled: body.trickplay_enabled }),
     ...(body.trailer_kinds === undefined ? {} : { trailer_kinds: body.trailer_kinds }),
     ...(body.realtime_monitoring === undefined
       ? {}

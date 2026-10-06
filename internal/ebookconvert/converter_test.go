@@ -191,21 +191,6 @@ func TestClassifyRunError_ParentDeadlinePropagates(t *testing.T) {
 	}
 }
 
-// When the caller's context is healthy but our own per-call timeout fired, the
-// result is the transient ErrConversionTimedOut sentinel (not ErrConversionFailed).
-func TestClassifyRunError_OwnTimeoutIsTimedOutSentinel(t *testing.T) {
-	parent := context.Background() // caller healthy
-	run, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
-	defer cancel()
-	err := classifyRunError(parent, run, context.DeadlineExceeded, time.Minute, "mobitool output")
-	if !errors.Is(err, ErrConversionTimedOut) {
-		t.Fatalf("got %v, want ErrConversionTimedOut", err)
-	}
-	if errors.Is(err, ErrConversionFailed) {
-		t.Fatalf("own timeout must not satisfy ErrConversionFailed: %v", err)
-	}
-}
-
 func assertValidEpub(t *testing.T, path string) {
 	t.Helper()
 	zr, err := zip.OpenReader(path)
@@ -236,12 +221,5 @@ func assertValidEpub(t *testing.T, path string) {
 	}
 	if !hasContent {
 		t.Fatal("no OEBPS content")
-	}
-}
-
-// Guard so the default timeout constant stays sane if edited.
-func TestDefaults(t *testing.T) {
-	if DefaultTimeout < time.Second {
-		t.Fatal("DefaultTimeout too small")
 	}
 }

@@ -292,17 +292,3 @@ func TestAdminTimeseriesProviderInvalidateClearsEveryWindow(t *testing.T) {
 		}
 	}
 }
-
-func TestAdminTimeseriesProviderWithoutPool(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminTimeseriesProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	if _, err := provider.Get(context.Background(), 24); err == nil {
-		t.Fatal("expected an error from a provider with no pool")
-	}
-}

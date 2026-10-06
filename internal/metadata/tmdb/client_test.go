@@ -1573,3 +1573,56 @@ func TestCloneMediaDetailCopiesEveryReference(t *testing.T) {
 		}
 	}
 }
+
+func TestFindByExternalID(t *testing.T) {
+	var gotPath, gotSource string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotSource = r.URL.Query().Get("external_source")
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/find/tt0137523":
+			_, _ = w.Write([]byte(`{"movie_results":[{"id":550,"title":"Fight Club","release_date":"1999-10-15","poster_path":"/p.jpg"}],"tv_results":[{"id":77,"name":"Fight Club TV","first_air_date":"2001-01-01"}],"person_results":[{"id":1}]}`))
+		case "/find/81189":
+			_, _ = w.Write([]byte(`{"movie_results":[],"tv_results":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	defer client.Close()
+	client.SetBaseURL(server.URL)
+
+	results, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt0137523")
+	if err != nil {
+		t.Fatalf("FindByExternalID: %v", err)
+	}
+	if gotPath != "/find/tt0137523" || gotSource != "imdb_id" {
+		t.Fatalf("request = %s source %q", gotPath, gotSource)
+	}
+	want := []MediaResult{
+		{ID: 550, MediaType: "movie", Title: "Fight Club", ReleaseDate: "1999-10-15", Year: 1999, PosterPath: "/p.jpg"},
+		{ID: 77, MediaType: "series", Title: "Fight Club TV", ReleaseDate: "2001-01-01", Year: 2001},
+	}
+	if !reflect.DeepEqual(results, want) {
+		t.Fatalf("results = %+v, want %+v", results, want)
+	}
+
+	empty, err := client.FindByExternalID(t.Context(), ExternalSourceTVDB, "81189")
+	if err != nil || len(empty) != 0 || gotSource != "tvdb_id" {
+		t.Fatalf("empty find = %+v, %v (source %q)", empty, err, gotSource)
+	}
+
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, "tt-missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("404 error = %v, want ErrNotFound", err)
+	}
+	if _, err := client.FindByExternalID(t.Context(), "facebook_id", "x"); err == nil {
+		t.Fatal("unsupported source should fail before any request")
+	}
+	if _, err := client.FindByExternalID(t.Context(), ExternalSourceIMDb, " "); err == nil {
+		t.Fatal("empty id should fail before any request")
+	}
+}

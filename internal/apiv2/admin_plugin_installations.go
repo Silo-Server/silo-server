@@ -8,9 +8,11 @@ import (
 	"slices"
 	"strconv"
 
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
@@ -128,6 +130,12 @@ type AdminPluginCapability struct {
 	Subscriptions []string                  `json:"subscriptions"`
 	ConfigSchema  []AdminPluginConfigSchema `json:"config_schema"`
 	Metadata      PluginJSONValue           `json:"metadata"`
+	// SignInMode, CallbackURL and PostLogoutRedirectURL describe an
+	// auth_provider.v1 capability whether or not a binding row exists yet,
+	// so the admin page can show a fresh installation's registration URLs.
+	SignInMode            string  `json:"sign_in_mode,omitempty" enum:"oauth,credentials,network" doc:"How an auth_provider.v1 capability signs people in: oauth (a provider button and browser handshake, such as OIDC), credentials (a username and password form, such as LDAP) or network (a network access plugin, such as Tailscale, that signs in the owner of the device a request came from; one network binding may be on beside the one oauth or credentials binding). Omitted for other capability types" example:"oauth"`
+	CallbackURL           *string `json:"callback_url,omitempty" doc:"On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	PostLogoutRedirectURL *string `json:"post_logout_redirect_url,omitempty" doc:"On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/login"`
 }
 type AdminPluginConfigValue struct {
 	Key               string          `json:"key"`
@@ -135,13 +143,17 @@ type AdminPluginConfigValue struct {
 	ConfiguredSecrets []string        `json:"configured_secrets" doc:"Secret fields that hold a value on the server"`
 }
 type AdminPluginAuthBinding struct {
-	CapabilityID  string  `json:"capability_id"`
-	Enabled       bool    `json:"enabled"`
-	DisplayOrder  int     `json:"display_order"`
-	AutoProvision bool    `json:"auto_provision"`
-	DefaultLogin  bool    `json:"default_login"`
-	CreatedAt     Instant `json:"created_at"`
-	UpdatedAt     Instant `json:"updated_at"`
+	CapabilityID  string `json:"capability_id"`
+	Enabled       bool   `json:"enabled"`
+	DisplayOrder  int    `json:"display_order"`
+	AutoProvision bool   `json:"auto_provision"`
+	DefaultLogin  bool   `json:"default_login"`
+	// CallbackURL and PostLogoutRedirectURL are what the administrator
+	// registers at an OAuth provider for this binding.
+	CallbackURL           string  `json:"callback_url" doc:"Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
+	PostLogoutRedirectURL string  `json:"post_logout_redirect_url" doc:"Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/login"`
+	CreatedAt             Instant `json:"created_at"`
+	UpdatedAt             Instant `json:"updated_at"`
 }
 type AdminPluginTaskBinding struct {
 	CapabilityID string          `json:"capability_id"`
@@ -288,7 +300,11 @@ func adminPluginCapabilitiesOf(views []handlers.PluginCapabilityView) ([]AdminPl
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, AdminPluginCapability{Type: v.Type, ID: v.ID, DisplayName: v.DisplayName, Description: v.Description, Subscriptions: NonNil(v.Subscriptions), ConfigSchema: schemas, Metadata: NonNilMap(PluginJSONValue(v.Metadata))})
+		capability := AdminPluginCapability{Type: v.Type, ID: v.ID, DisplayName: v.DisplayName, Description: v.Description, Subscriptions: NonNil(v.Subscriptions), ConfigSchema: schemas, Metadata: NonNilMap(PluginJSONValue(v.Metadata))}
+		if v.Type == sdkcapability.AuthProvider {
+			capability.SignInMode = auth.ProviderModeForAuthModes(v.AuthModes)
+		}
+		out = append(out, capability)
 	}
 	return out, nil
 }
@@ -340,7 +356,7 @@ func adminPluginRuntimeOf(v *handlers.PluginRuntimeView) AdminPluginRuntime {
 	return out
 }
 
-func adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginInstallation, error) {
+func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginInstallation, error) {
 	caps, err := adminPluginCapabilitiesOf(v.Capabilities)
 	if err != nil {
 		return AdminPluginInstallation{}, err
@@ -363,13 +379,43 @@ func adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginIn
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})
 	}
+	if svc := reg.deps.OAuth; svc != nil {
+		for i := range out.Capabilities {
+			if out.Capabilities[i].SignInMode != auth.ProviderModeOAuth {
+				continue
+			}
+			postLogout, callback := svc.PostLogoutRedirectURL(), ""
+			if postLogout != "" {
+				callback = svc.CallbackURL(Prefix, v.ID)
+			}
+			out.Capabilities[i].CallbackURL, out.Capabilities[i].PostLogoutRedirectURL = &callback, &postLogout
+		}
+	}
 	for _, b := range v.AuthBindings {
-		out.AuthBindings = append(out.AuthBindings, AdminPluginAuthBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: b.AutoProvision, DefaultLogin: b.DefaultLogin, CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)})
+		binding := AdminPluginAuthBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: b.AutoProvision, DefaultLogin: b.DefaultLogin, CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)}
+		if svc := reg.deps.OAuth; svc != nil && authBindingIsOAuth(v.Capabilities, b.CapabilityID) {
+			binding.PostLogoutRedirectURL = svc.PostLogoutRedirectURL()
+			if binding.PostLogoutRedirectURL != "" {
+				binding.CallbackURL = svc.CallbackURL(Prefix, v.ID)
+			}
+		}
+		out.AuthBindings = append(out.AuthBindings, binding)
 	}
 	for _, b := range v.TaskBindings {
 		out.TaskBindings = append(out.TaskBindings, AdminPluginTaskBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, Trigger: NonNilMap(PluginJSONValue(b.Trigger)), CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)})
 	}
 	return out, nil
+}
+
+// authBindingIsOAuth reports whether the installation's auth_provider.v1
+// capability capabilityID signs in through the OAuth handshake.
+func authBindingIsOAuth(capabilities []handlers.PluginCapabilityView, capabilityID string) bool {
+	for _, c := range capabilities {
+		if c.Type == sdkcapability.AuthProvider && c.ID == capabilityID {
+			return auth.ProviderModeForAuthModes(c.AuthModes) == auth.ProviderModeOAuth
+		}
+	}
+	return false
 }
 
 type adminPluginCatalogPosition struct{ PluginID, Version string }
@@ -469,7 +515,7 @@ func registerAdminPluginInventory(reg *Registry) {
 				}
 				break
 			}
-			item, err := adminPluginInstallationOf(r)
+			item, err := reg.adminPluginInstallationOf(r)
 			if err != nil {
 				return nil, serviceProblem(err)
 			}

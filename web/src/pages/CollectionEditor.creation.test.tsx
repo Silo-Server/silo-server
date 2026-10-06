@@ -119,6 +119,9 @@ it("creates a personal manual collection from the new collection route", () => {
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "My picks" } });
   fireEvent.change(screen.getByLabelText("Collection Mode"), { target: { value: "manual" } });
   fireEvent.click(screen.getByRole("button", { name: "Save Collection" }));
+  const body = mocks.create.mock.calls[0]![0].body;
+  expect(body.display_query_definition).toBeUndefined();
+  expect(body).not.toHaveProperty("watch_filter");
   expect(mocks.create).toHaveBeenCalledWith(
     expect.objectContaining({
       body: expect.objectContaining({
@@ -205,18 +208,6 @@ it("offers a retry when a personal collection fails to load", () => {
   expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
 });
 
-it("points a missing admin collection back to the collection board", () => {
-  mocks.adminSnapshotError = collectionProblem(404);
-  show(true, true);
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Collection not found" }),
-  ).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
-    "href",
-    "/admin/collections",
-  );
-});
-
 it("offers a retry when an admin collection fails to load", () => {
   mocks.adminSnapshotError = collectionProblem(500);
   show(true, true);
@@ -238,5 +229,9 @@ it("lets a 404 replace an admin collection that was already loaded", () => {
   expect(
     screen.getByRole("heading", { level: 1, name: "Collection not found" }),
   ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "All collections" })).toHaveAttribute(
+    "href",
+    "/admin/collections",
+  );
   expect(screen.queryByTestId("manual-items")).not.toBeInTheDocument();
 });

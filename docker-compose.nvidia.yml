@@ -6,7 +6,10 @@ services:
           devices:
             - driver: nvidia
               count: ${NVIDIA_GPU_COUNT:-1}
-              capabilities: [gpu]
+              # "video" mounts the NVENC/NVDEC driver libraries. Listing only
+              # "gpu" leaves the toolkit default (compute,utility), so FFmpeg
+              # sees the GPU but falls back to software encoding.
+              capabilities: [gpu, compute, utility, video]
 
   # Optional distributed-mode example. Most single-host installs should
   # just use the integrated service above.
@@ -17,4 +20,4 @@ services:
   #        devices:
   #          - driver: nvidia
   #            count: ${NVIDIA_GPU_COUNT:-1}
-  #            capabilities: [gpu]
+  #            capabilities: [gpu, compute, utility, video]

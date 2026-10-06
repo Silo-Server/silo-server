@@ -116,20 +116,38 @@ make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
 make verify-local-paths
+make verify-case-collisions
 ```
+
+PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
+bindings, workflow changes, unknown inputs, and unavailable diffs run both
+groups. Ordinary Markdown documentation runs the documentation checks. Pushes
+and manual runs keep the full gate. The `CI result` job rejects failed, canceled,
+missing, or unexpectedly skipped work; only jobs excluded by the selection may
+skip. Selection tools come from the trusted reusable workflow's main branch.
+
+The full Go suite owns the ledger, scenario, offline-route, spec, and fixture
+assertions. The contract job retains generator freshness checks and the semantic
+API comparison. Its `CONTRACT_GO_TESTS=0` flag avoids repeating assertions; local
+verify targets remain complete by default. `Go integration` runs the existing
+PostgreSQL 17 race tests separately from the unit suite and the pgvector database
+used by `Go DB pins`. Its database is also separate from the truncating scenario
+executor's database.
 
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a
 stale artifact or fixture tree.
 
 `make test-go` has no database, so every DB-backed test in it skips. The
-`Go DB pins` CI job covers the query-budget pins listed in
+`Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
-and runs `make test-db-pins`, which fails when a listed test is missing,
-skipped or failing. A test that pins a statement count or query plan belongs in
-that list, added in the same change. Run it yourself when you change database
-or query code or add a pin. It needs a disposable, migrated database; with the
-PostgreSQL service from [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
+and runs `make test-db-pins`, which checks those budgets and then the database
+contracts in `scripts/ci/db-contracts.txt`. Both lists fail when a named test is
+missing, skipped or failing. A test that pins a statement count or query plan
+belongs in the budget list, added in the same change. Run this target when you
+change database or query code or add a pin. It needs a disposable, migrated
+database; with the PostgreSQL service from
+[DEVELOPMENT.md](DEVELOPMENT.md#local-development)
 running under the Compose defaults:
 
 ```sh
@@ -139,6 +157,14 @@ DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only
 make test-db-pins
 ```
+
+When retiring a duplicate test, name the surviving test that exercises the
+production behavior. Preserve unique assertions there before deleting the
+duplicate. If that keeper needs Postgres, it must run in CI: query budgets
+belong in `scripts/ci/db-pins.txt`; other database contracts belong in
+`scripts/ci/db-contracts.txt`. `make test-db-pins` is the CI entry point for both
+lists. To run only the database contracts, use `make test-db-contracts` against
+the same disposable, migrated database.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch

@@ -4,8 +4,10 @@ import {
   Building2,
   Calendar,
   Clock,
+  Download,
   Film,
   Globe,
+  Hourglass,
   Languages,
   LayoutTemplate,
   Monitor,
@@ -13,6 +15,7 @@ import {
   Shield,
   Star,
   Subtitles,
+  TriangleAlert,
   Tv,
   Users,
   Volume2,
@@ -40,6 +43,9 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
   calendar: Calendar,
   globe: Globe,
   users: Users,
+  download: Download,
+  hourglass: Hourglass,
+  alert: TriangleAlert,
 };
 
 // Inline brand marks. Each is a tiny SVG component that fills currentColor so
@@ -124,15 +130,6 @@ function AV1Mark(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-function TomatoMark(props: SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 16 16" fill="currentColor" {...props}>
-      <circle cx="8" cy="9" r="5.5" />
-      <path d="M8 3.5c1-1.5 2.5-2 3.5-2C11 3 9.5 3.5 8 3.5z" />
-    </svg>
-  );
-}
-
 type BrandIcon = (props: SVGProps<SVGSVGElement>) => ReactElement;
 
 const BRAND_ICONS: Partial<Record<OverlayIconId, BrandIcon>> = {
@@ -141,7 +138,6 @@ const BRAND_ICONS: Partial<Record<OverlayIconId, BrandIcon>> = {
   "dolby-vision": DolbyVisionMark,
   atmos: AtmosMark,
   av1: AV1Mark,
-  tomato: TomatoMark,
 };
 
 interface OverlayIconProps {

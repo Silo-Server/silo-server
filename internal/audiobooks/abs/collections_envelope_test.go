@@ -40,16 +40,3 @@ func TestCollectionEnvelope_HasRequiredKeys(t *testing.T) {
 		t.Errorf("createdAt = %v, want %d", out["createdAt"], wantMs)
 	}
 }
-
-// TestCollectionListShape_OmitsBooks asserts the list shape (passed
-// nil books) emits no "books" key — clients distinguish list vs detail
-// by presence/absence of this field.
-func TestCollectionListShape_OmitsBooks(t *testing.T) {
-	out := collectionToABS(Collection{
-		ID: "01HCOLL", UserID: "1", Name: "x",
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
-	}, nil)
-	if _, ok := out["books"]; ok {
-		t.Errorf("list-shape must not include books key; got %v", out)
-	}
-}

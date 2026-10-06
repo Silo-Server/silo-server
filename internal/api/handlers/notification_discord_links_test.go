@@ -90,6 +90,9 @@ func TestNotificationDiscordLinkConsentAndCallback(t *testing.T) {
 }
 
 func TestNotificationDiscordCallbackFailures(t *testing.T) {
+	fake := new(fakeDiscordLinkBackend)
+	links := handlers.NewDiscordLinkHandler(fake, notifications.NewSettings(discordLinkSettings{}), "https://server.example.test")
+	h := apiv2.NewHandler(apiv2.Dependencies{NotificationDiscordLinks: links})
 	for _, tc := range []struct {
 		name, query, result string
 		available           bool
@@ -103,9 +106,7 @@ func TestNotificationDiscordCallbackFailures(t *testing.T) {
 		{"exchange-failure", "state=state&code=code", "exchange_failed", true, errors.New("private provider detail"), 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &fakeDiscordLinkBackend{available: tc.available, state: "state", userID: 17, exchangeErr: tc.exchangeErr}
-			links := handlers.NewDiscordLinkHandler(fake, notifications.NewSettings(discordLinkSettings{}), "https://server.example.test")
-			h := apiv2.NewHandler(apiv2.Dependencies{NotificationDiscordLinks: links})
+			*fake = fakeDiscordLinkBackend{available: tc.available, state: "state", userID: 17, exchangeErr: tc.exchangeErr}
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v2/notifications/discord/link/callback?"+tc.query, nil))
 			if rec.Code != 302 || rec.Header().Get("Location") != "/settings/notifications?discord_error="+tc.result || fake.consumeCalls != tc.consumes || fake.exchangeCalls != tc.exchanges {

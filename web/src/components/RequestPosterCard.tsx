@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Library, Loader2, Plus } from "lucide-react";
+import { Bookmark, BookmarkCheck, Library, Loader2, Plus } from "lucide-react";
 import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -22,11 +22,15 @@ import MediaCardArtwork, {
 import { RequestReasonBadge, RequestStatusBadge } from "@/components/RequestStatusBadge";
 import { Button } from "@/components/ui/button";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import {
+  mediaItemMenuIconClassName,
+  mediaItemMenuTriggerClassName,
+} from "@/components/mediaItemMenuTrigger";
 
 // The badge takes the top-right corner and truncates before it reaches the
 // Library chip on the left.
 const BADGE_CLASS = "ml-auto max-w-full shrink-0";
-const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[12px] font-medium";
+const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
 type DiscoverProps = {
   variant: "discover";
@@ -35,6 +39,13 @@ type DiscoverProps = {
   onRequest?: () => void;
   /** Shows the pending state on the hover Request action. Ignored when onRequest is omitted. */
   isSubmitting?: boolean;
+  /**
+   * Called when the hover watchlist action is clicked; it reads
+   * item.in_watchlist. Omit to suppress the action.
+   */
+  onToggleWatchlist?: () => void;
+  /** Disables the hover watchlist action while a change is in flight. */
+  isWatchlistPending?: boolean;
   /** When true, fills the parent (use inside grids). Default: the viewer's carousel card width. */
   fluid?: boolean;
 };
@@ -72,12 +83,21 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
       item={props.item}
       isSubmitting={props.isSubmitting}
       onRequest={props.onRequest}
+      onToggleWatchlist={props.onToggleWatchlist}
+      isWatchlistPending={props.isWatchlistPending}
       fluid={props.fluid}
     />
   );
 }
 
-function DiscoverCard({ item, isSubmitting, onRequest, fluid }: Omit<DiscoverProps, "variant">) {
+function DiscoverCard({
+  item,
+  isSubmitting,
+  onRequest,
+  onToggleWatchlist,
+  isWatchlistPending,
+  fluid,
+}: Omit<DiscoverProps, "variant">) {
   const requestable = item.request.requestable;
   const availableInLibrary = item.availability === "available" && !item.request.status;
   const state: RequestDisplayState | undefined = item.request.status
@@ -109,6 +129,16 @@ function DiscoverCard({ item, isSubmitting, onRequest, fluid }: Omit<DiscoverPro
             title={`${item.title} (${[formatMediaType(item.media_type), item.year].filter(Boolean).join(" · ")})`}
             pending={Boolean(isSubmitting)}
             onRequest={onRequest}
+          />
+        ) : null
+      }
+      cornerAction={
+        onToggleWatchlist ? (
+          <WatchlistAction
+            title={item.title}
+            inWatchlist={Boolean(item.in_watchlist)}
+            pending={Boolean(isWatchlistPending)}
+            onToggle={onToggleWatchlist}
           />
         ) : null
       }
@@ -149,14 +179,14 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
           {progress ? <p className={DETAIL_CLASS}>{progress}</p> : null}
           {request.last_error ? (
             <p
-              className="text-destructive mt-1 line-clamp-2 text-[12px] leading-snug font-medium"
+              className="text-destructive mt-1 line-clamp-2 text-[0.75rem] leading-snug font-medium"
               title={request.last_error}
             >
               {request.last_error}
             </p>
           ) : request.outcome_reason ? (
             <p
-              className="text-muted-foreground mt-1 line-clamp-2 text-[12px] leading-snug"
+              className="text-muted-foreground mt-1 line-clamp-2 text-[0.75rem] leading-snug"
               title={request.outcome_reason}
             >
               {request.outcome_reason}
@@ -197,6 +227,7 @@ function ExternalTitleCard({
   dim,
   badge,
   action,
+  cornerAction,
   children,
 }: {
   title: string;
@@ -211,6 +242,8 @@ function ExternalTitleCard({
   badge?: ReactNode;
   /** The hover action in the card's centre slot. */
   action?: ReactNode;
+  /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
+  cornerAction?: ReactNode;
   /** Request details below the caption. Shown whatever the caption setting; pass null for none. */
   children?: ReactNode;
 }) {
@@ -252,6 +285,11 @@ function ExternalTitleCard({
           </div>
         ) : null}
         {action}
+        {cornerAction ? (
+          <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
+            {cornerAction}
+          </div>
+        ) : null}
       </div>
       {showCaption || children ? (
         <div className={MEDIA_CARD_CAPTION_CLASS}>
@@ -272,7 +310,8 @@ function ExternalTitleCard({
   );
 }
 
-function RequestAction({
+/** The centred hover Request action on a TMDB title's poster card. */
+export function RequestAction({
   title,
   pending,
   onRequest,
@@ -293,7 +332,7 @@ function RequestAction({
       }}
       className={cn(
         MEDIA_CARD_CENTER_ACTION_CLASS,
-        "h-9 gap-1.5 px-3.5 text-[12px] font-semibold whitespace-nowrap hover:scale-105",
+        "h-9 gap-1.5 px-3.5 text-[0.75rem] font-semibold whitespace-nowrap hover:scale-105",
         // Keep the pending state in view after the pointer leaves the card.
         pending && "pointer-events-auto opacity-100",
       )}
@@ -313,12 +352,54 @@ function RequestAction({
   );
 }
 
+/** The hover watchlist toggle in a TMDB title's poster corner. */
+export function WatchlistAction({
+  title,
+  inWatchlist,
+  pending,
+  onToggle,
+}: {
+  title: string;
+  inWatchlist: boolean;
+  pending: boolean;
+  onToggle: () => void;
+}) {
+  const Icon = inWatchlist ? BookmarkCheck : Bookmark;
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      aria-pressed={inWatchlist}
+      aria-label={
+        inWatchlist ? `Remove ${title} from your watchlist` : `Add ${title} to your watchlist`
+      }
+      title={inWatchlist ? "On Watchlist" : "Add to Watchlist"}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        mediaItemMenuTriggerClassName("poster"),
+        inWatchlist && "text-primary",
+        // Keep the pending state in view after the pointer leaves the card.
+        pending && "pointer-events-auto opacity-100",
+      )}
+    >
+      <Icon
+        className={cn(mediaItemMenuIconClassName("poster"), inWatchlist && "fill-primary/20")}
+        aria-hidden
+      />
+    </button>
+  );
+}
+
 function LibraryChip({ contentID, title }: { contentID: string; title: string }) {
   return (
     <ViewTransitionLink
       to={`/item/${encodeURIComponent(contentID)}`}
       aria-label={`Open ${title} in library`}
-      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
+      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
     >
       <Library className="size-3 shrink-0" strokeWidth={2.4} aria-hidden />
       Library

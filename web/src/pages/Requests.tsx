@@ -24,6 +24,7 @@ import {
 } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
+import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
@@ -184,6 +185,7 @@ function DiscoverTab() {
   const networks = useDiscoverNetworks();
   const genres = useDiscoverGenres();
   const { submit, isSubmitting } = useSubmitMediaRequest();
+  const watchlist = useWatchlistTitleToggle();
 
   if (discovery.isLoading) return <DiscoverRowsSkeleton />;
 
@@ -210,6 +212,7 @@ function DiscoverTab() {
             section={section}
             isSubmitting={isSubmitting}
             onRequest={submit}
+            watchlist={watchlist}
           />
         ))
       )}
@@ -245,10 +248,12 @@ function DiscoverRow({
   section,
   isSubmitting,
   onRequest,
+  watchlist,
 }: {
   section: RequestDiscoverySection;
   isSubmitting: (item: RequestMediaResult) => boolean;
   onRequest: (item: RequestMediaResult) => void;
+  watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
   if (section.results.length === 0) return null;
   return (
@@ -263,6 +268,8 @@ function DiscoverRow({
           item={item}
           isSubmitting={isSubmitting(item)}
           onRequest={() => onRequest(item)}
+          onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
+          isWatchlistPending={watchlist.isPending(item)}
         />
       ))}
     </MediaCarousel>

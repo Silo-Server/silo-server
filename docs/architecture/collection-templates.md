@@ -98,9 +98,14 @@ Every built-in template ships two files named after its ID:
 The raw plate keeps typography reproducible without generating the image again. Raw plates must
 stay out of `web/public/`: the same test fails if
 `web/public/images/collection-templates/raw` exists. `TestBuiltinCatalog` checks that every
-poster path sits under `/images/collection-templates/`. No test checks image dimensions or
-catches an orphaned asset (#1641), so size files by hand and delete both when you remove a
-template.
+poster path sits under `/images/collection-templates/`.
+`TestBuiltinTemplateAssetsHaveTemplates` fails on any file in either directory without a
+registered template. No test checks image dimensions, so size files by hand.
+
+When you remove a template, delete its raw plate. Its final JPG may still be in use: a collection
+created from the template keeps the template's poster path unless the poster was copied into
+artwork storage. Keep the JPG and add the ID to `retiredTemplatePosterIDs` in `templates_test.go`
+until no stored poster path can point at it.
 
 Art rules:
 

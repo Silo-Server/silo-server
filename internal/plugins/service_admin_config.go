@@ -82,11 +82,7 @@ func (s *Service) SetGlobalConfigWithClears(
 		if err != nil {
 			return err
 		}
-		for field := range clearSet {
-			delete(merged, field)
-		}
-		projection := globalConfigValidationProjection(manifest, key, merged, value)
-		if err := ValidateGlobalConfigValue(manifest, key, projection); err != nil {
+		if err := applyGlobalConfigClears(manifest, key, merged, value, clearSet); err != nil {
 			return &ConfigValidationError{Message: err.Error(), Cause: err}
 		}
 
@@ -108,7 +104,12 @@ func (s *Service) SetGlobalConfigWithClears(
 	if !saved {
 		return fmt.Errorf("persist plugin config: concurrent updates did not settle")
 	}
+	return s.afterGlobalConfigSaved(ctx, installationID)
+}
 
+// afterGlobalConfigSaved restarts the plugin on its new configuration and
+// notifies lifecycle hooks.
+func (s *Service) afterGlobalConfigSaved(ctx context.Context, installationID int) error {
 	var stopErr error
 	if s.host != nil {
 		if err := s.host.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
@@ -223,6 +224,57 @@ func (s *Service) mergeStoredConfig(
 		}
 	}
 	return merged, expectedUpdatedAt, nil
+}
+
+// applyGlobalConfigClears finishes a merged config entry and validates it:
+// it removes the secrets in clearSet, drops the fields the admin cleared
+// (dropClearedConfigFields) and checks the declared projection against the
+// schema. Both a save and a staged connection test use it.
+func applyGlobalConfigClears(
+	manifest *pluginv1.PluginManifest,
+	key string,
+	merged map[string]any,
+	value map[string]any,
+	clearSet map[string]struct{},
+) error {
+	for field := range clearSet {
+		delete(merged, field)
+	}
+	dropClearedConfigFields(manifest, key, merged, value)
+	projection := globalConfigValidationProjection(manifest, key, merged, value)
+	return ValidateGlobalConfigValue(manifest, key, projection)
+}
+
+// dropClearedConfigFields removes from merged every declared, non-secret
+// top-level field the admin sent as an explicit empty string or null, so
+// the plugin's default applies: a save merges into the stored value, so an
+// emptied field must clear what was stored rather than keep it (or store an
+// empty value that fails its schema). A field holding a secret, or secrets
+// nested inside it, is left to the secret merge: a blank secret keeps the
+// stored one and only clear_secrets removes it. Fields the schema and admin
+// form do not declare (plugin-owned state) are never cleared this way.
+func dropClearedConfigFields(
+	manifest *pluginv1.PluginManifest,
+	key string,
+	merged map[string]any,
+	value map[string]any,
+) {
+	public, _ := GlobalConfigFieldSets(manifest, key)
+	for _, field := range public {
+		if incoming, sent := value[field]; sent && isClearedConfigValue(incoming) {
+			delete(merged, field)
+		}
+	}
+}
+
+// isClearedConfigValue reports whether a submitted config value asks to
+// clear its field: null or a blank string.
+func isClearedConfigValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	text, isString := value.(string)
+	return isString && strings.TrimSpace(text) == ""
 }
 
 func globalConfigValidationProjection(

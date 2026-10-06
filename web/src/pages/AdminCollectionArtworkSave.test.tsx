@@ -6,6 +6,10 @@ import type { Library, LibraryCollection } from "@/api/types";
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { CollectionForm, CollectionEditForm } from "./adminCollectionsShared";
 
+vi.mock("@/hooks/queries/ratingsCapability", () => ({
+  useShownRatingSources: () => new Set(["imdb", "tmdb"]),
+}));
+
 const mocks = vi.hoisted(() => ({ request: vi.fn(), warning: vi.fn(), error: vi.fn() }));
 vi.mock("@/api/v2/request", async () => ({
   ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),

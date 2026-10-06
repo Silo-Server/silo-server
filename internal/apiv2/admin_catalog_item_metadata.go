@@ -85,5 +85,8 @@ func (reg *Registry) updateAdminItemMetadata(ctx context.Context, in *AdminItemM
 	if err != nil {
 		return nil, collectionProblem(err)
 	}
-	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail)}, nil
+	// The operation is gated on metadata curation, so the editor gets every
+	// stored rating back.
+	detail.ViewerCurates = true
+	return &CatalogItemDetailOutput{Body: catalogItemDetailOf(detail, reg.ratingSelection(ctx))}, nil
 }

@@ -128,6 +128,8 @@ func TestAdminCollectionGroupReadsAndCreateReachService(t *testing.T) {
 }
 
 func TestAdminCollectionGroupMutationsEnforceGuards(t *testing.T) {
+	f := newFakeAdminCollectionGroups()
+	h := adminCollectionGroupsTestHandler(t, f)
 	for _, tc := range []struct{ method, path, body string }{
 		{"PATCH", "/admin/collection-groups/g1", `{"name":"Updated"}`},
 		{"DELETE", "/admin/collection-groups/g1", ""},
@@ -135,8 +137,7 @@ func TestAdminCollectionGroupMutationsEnforceGuards(t *testing.T) {
 		{"PUT", "/admin/collection-groups/g1/collections/order?move_omitted=reject", `{"ordered_ids":["c2","c1"]}`},
 	} {
 		t.Run(tc.method+tc.path, func(t *testing.T) {
-			f := newFakeAdminCollectionGroups()
-			h := adminCollectionGroupsTestHandler(t, f)
+			*f = *newFakeAdminCollectionGroups()
 			path := Prefix + tc.path
 			readPath, _, _ := strings.Cut(path, "?")
 			tag := do(t, h, "GET", readPath, "", bearer(adminToken)).Header().Get("ETag")

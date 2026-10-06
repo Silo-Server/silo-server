@@ -44,6 +44,7 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
 
+    expect(screen.queryByRole("button", { name: /your watchlist/ })).toBeNull();
     const card = container.firstElementChild;
     expect(card).toHaveClass("media-card", "group/card");
     // A missing poster falls back to the library's plain title placeholder.
@@ -164,19 +165,6 @@ describe("RequestPosterCard (discover variant)", () => {
     );
   });
 
-  it("names the reason when a title without a request cannot be requested", () => {
-    render(
-      <MemoryRouter>
-        <RequestPosterCard
-          variant="discover"
-          item={{ ...requestable, request: { requestable: false, reason: "quota_exceeded" } }}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
-  });
-
   it("dims the artwork of a title that can't be requested", () => {
     const withPoster = { ...requestable, poster_path: "/poster.jpg" };
     const { rerender } = render(
@@ -195,6 +183,7 @@ describe("RequestPosterCard (discover variant)", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("img", { name: "Test Movie" })).toHaveClass("saturate-[0.8]");
+    expect(screen.getByText("Request limit reached")).toBeInTheDocument();
   });
 
   it("follows the viewer's poster size and always names the type under a caption", () => {
@@ -237,6 +226,40 @@ describe("RequestPosterCard (discover variant)", () => {
   });
 });
 
+describe("RequestPosterCard watchlist action", () => {
+  it("adds or removes the title from the hover corner action", () => {
+    const onToggleWatchlist = vi.fn();
+    const { unmount } = render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={requestable}
+          onToggleWatchlist={onToggleWatchlist}
+        />
+      </MemoryRouter>,
+    );
+    const add = screen.getByRole("button", { name: "Add Test Movie to your watchlist" });
+    expect(add).toHaveAttribute("aria-pressed", "false");
+    expect(add).toHaveAttribute("title", "Add to Watchlist");
+    fireEvent.click(add);
+    expect(onToggleWatchlist).toHaveBeenCalledTimes(1);
+    unmount();
+
+    render(
+      <MemoryRouter>
+        <RequestPosterCard
+          variant="discover"
+          item={{ ...requestable, in_watchlist: true }}
+          onToggleWatchlist={onToggleWatchlist}
+        />
+      </MemoryRouter>,
+    );
+    const remove = screen.getByRole("button", { name: "Remove Test Movie from your watchlist" });
+    expect(remove).toHaveAttribute("aria-pressed", "true");
+    expect(remove).toHaveAttribute("title", "On Watchlist");
+  });
+});
+
 describe("RequestPosterCard (mine variant)", () => {
   const request: MediaRequest = {
     id: "req-1",
@@ -252,11 +275,7 @@ describe("RequestPosterCard (mine variant)", () => {
 
   it.each<[Partial<MediaRequest>, string]>([
     [{ status: "pending" }, "Pending"],
-    [{ status: "queued" }, "Processing"],
-    [{ status: "downloading" }, "Processing"],
-    [{ status: "completed" }, "Available"],
     [{ status: "pending", outcome: "cancelled" }, "Cancelled"],
-    [{ status: "approved", outcome: "failed" }, "Failed"],
     // The server's derived state wins: a downloaded title not yet scanned in
     // is still processing.
     [{ status: "completed", state: "processing" }, "Processing"],

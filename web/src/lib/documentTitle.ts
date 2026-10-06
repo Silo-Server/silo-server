@@ -32,6 +32,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   playback: "Playback Settings",
   profiles: "Profile Settings",
   libraries: "Library Settings",
+  requests: "Request Settings",
   "history-import": "History Import Settings",
   "plex-webhooks": "Webhook Sync Settings",
   "webhook-sync": "Webhook Sync Settings",

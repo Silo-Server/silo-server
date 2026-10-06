@@ -6,12 +6,14 @@ const mocks = vi.hoisted(() => ({
   v2: vi.fn(),
   useQueries: vi.fn(),
   useQuery: vi.fn(),
+  getQueryState: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   keepPreviousData: Symbol("keepPreviousData"),
   useQueries: (...args: unknown[]) => mocks.useQueries(...args),
   useQuery: (...args: unknown[]) => mocks.useQuery(...args),
+  useQueryClient: () => ({ getQueryState: mocks.getQueryState }),
 }));
 
 vi.mock("@/api/v2/request", () => ({
@@ -19,7 +21,12 @@ vi.mock("@/api/v2/request", () => ({
 }));
 
 import type { CatalogResponse } from "@/api/types";
-import { createCatalogSearchState, useCatalogWindow } from "./catalog";
+import {
+  createCatalogSearchState,
+  useCatalogWindow,
+  useLibraryHasItems,
+  type CatalogPage,
+} from "./catalog";
 
 function makePage(offset: number, limit = 60): CatalogResponse {
   return {
@@ -49,6 +56,7 @@ describe("useCatalogWindow", () => {
     mocks.v2.mockReset();
     mocks.useQueries.mockReset();
     mocks.useQuery.mockReset();
+    mocks.getQueryState.mockReset();
   });
 
   it("requests only the visible distant window and one buffer on each side", () => {
@@ -91,6 +99,55 @@ describe("useCatalogWindow", () => {
       ),
     ).toEqual([60, 120]);
   });
+
+  it.each<
+    [
+      string,
+      { status?: string; fetchStatus?: string; isInvalidated?: boolean },
+      Partial<CatalogPage>,
+    ]
+  >([
+    ["a different root cursor", {}, { snapshot: "old-window" }],
+    ["a locally shortened page", {}, { items: [] }],
+    ["a missing continuation", {}, { next_cursor: undefined }],
+    ["a refreshing page", { fetchStatus: "fetching" }, {}],
+    ["a failed page", { status: "error" }, {}],
+  ])(
+    "seeks independently after %s instead of reusing its boundary",
+    async (_name, flags, patch) => {
+      const page0 = {
+        ...makePage(0),
+        snapshot: "current-window",
+        next_cursor: "next-boundary",
+      };
+      mocks.useQuery.mockReturnValue({ data: page0, isLoading: false });
+      mocks.useQueries.mockImplementation(({ queries }) =>
+        queries.map(() => ({ isLoading: true })),
+      );
+      mocks.getQueryState.mockReturnValue({
+        status: "success",
+        fetchStatus: "idle",
+        isInvalidated: false,
+        ...flags,
+        data: { ...page0, ...patch },
+      });
+      mocks.v2.mockResolvedValue({ items: [], total: 0, page: { has_more: false } });
+      renderHook(() =>
+        useCatalogWindow(createCatalogSearchState("query", { q: "star" }), {
+          visibleRange: [60, 119],
+        }),
+      );
+      await mocks.useQueries.mock.calls.at(-1)?.[0].queries[0].queryFn({
+        signal: new AbortController().signal,
+      });
+      expect(mocks.v2).toHaveBeenCalledExactlyOnceWith(
+        "POST /api/v2/catalog/query",
+        expect.objectContaining({
+          body: expect.objectContaining({ cursor: "current-window", seek: 60 }),
+        }),
+      );
+    },
+  );
 
   it("separates filter edits and server-resolved sort from cached explicit-sort windows", () => {
     const state = createCatalogSearchState("favorites");
@@ -464,5 +521,53 @@ describe("useCatalogWindow", () => {
       body: { limit, skip_total: true, seek: 120, cursor: page0Data.snapshot },
       signal,
     });
+  });
+});
+
+describe("useLibraryHasItems", () => {
+  beforeEach(() => {
+    mocks.v2.mockReset();
+    mocks.useQuery.mockReset();
+    mocks.useQuery.mockReturnValue({ data: undefined });
+  });
+
+  it("reads one unfiltered item of the library without a total", async () => {
+    mocks.v2.mockResolvedValue({ items: [], total: 0, total_exact: false });
+
+    renderHook(() => useLibraryHasItems(7, { enabled: true }));
+
+    const options = mocks.useQuery.mock.calls[0]?.[0] as {
+      queryKey: readonly unknown[];
+      queryFn: (context: { signal: AbortSignal }) => Promise<CatalogPage>;
+      select: (page: CatalogPage) => boolean;
+      enabled: boolean;
+    };
+    expect(options.enabled).toBe(true);
+    expect(options.queryKey).toEqual([
+      "catalog",
+      "list",
+      expect.objectContaining({ library_id: 7, include_total: false, limit: 1, offset: 0 }),
+    ]);
+
+    const page = await options.queryFn({ signal: new AbortController().signal });
+    expect(mocks.v2).toHaveBeenCalledWith(
+      "POST /api/v2/catalog/query",
+      expect.objectContaining({
+        body: expect.objectContaining({
+          library_id: "7",
+          limit: 1,
+          skip_total: true,
+          groups: [],
+        }),
+      }),
+    );
+    expect(options.select(page)).toBe(false);
+    expect(options.select({ ...page, items: makePage(0, 1).items })).toBe(true);
+  });
+
+  it("stays idle until enabled", () => {
+    renderHook(() => useLibraryHasItems(7, { enabled: false }));
+
+    expect(mocks.useQuery.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ enabled: false }));
   });
 });
