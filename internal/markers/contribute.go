@@ -234,12 +234,18 @@ func submissionErrorText(err error) string {
 // assignment of its own: gRPC renders a status as "desc = api_key=...", where
 // the outer pair's value is the inner one.
 func maskKeyValueSecrets(msg string) string {
-	// A secret's quoted value is masked whole first, quotes kept. Other
-	// quoted pairs are left for the pass below, which looks inside them.
+	// A secret's quoted value is masked whole first, quotes kept. Another
+	// pair's quoted value is scanned in place, since this match consumes it
+	// and the pass below would only see up to its first inner quote:
+	// desc="api_key='...' rejected".
 	msg = quotedKeyValueInText.ReplaceAllStringFunc(msg, func(pair string) string {
 		m := quotedKeyValueInText.FindStringSubmatchIndex(pair)
 		if !logredact.SecretKey(strings.ReplaceAll(pair[m[2]:m[3]], "-", "_")) {
-			return pair
+			valueStart, valueEnd := m[6], m[7]
+			if valueStart < 0 {
+				valueStart, valueEnd = m[8], m[9]
+			}
+			return pair[:valueStart] + maskKeyValueSecrets(pair[valueStart:valueEnd]) + pair[valueEnd:]
 		}
 		quote := pair[m[5]]
 		return pair[:m[5]] + string(quote) + logredact.Placeholder + string(quote)
