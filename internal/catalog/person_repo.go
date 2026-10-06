@@ -645,22 +645,69 @@ const maxPersonConflictResolutions = 4
 // inside one transaction so it commits atomically (or not at all). Returns
 // pgx.ErrNoRows if the row no longer exists (e.g. merged away concurrently).
 func (r *PersonRepository) Update(ctx context.Context, p models.Person) error {
-	err := r.applyUpdate(ctx, p)
-	if err == nil || !isDuplicateKeyError(err) {
+	_, err := r.update(ctx, p, nil)
+	return err
+}
+
+// ErrPersonIdentityChanged reports that a person's provider ids are no longer
+// the ones a metadata lookup asked about.
+var ErrPersonIdentityChanged = errors.New("person's provider ids changed")
+
+// UpdateRefreshed is Update for a metadata refresh's result: it writes p only
+// while the person still has the identity the lookup asked about, checked
+// under the write's row lock. An admin's correction made during the lookup
+// wins, and ErrPersonIdentityChanged is returned. It returns the identity it
+// stored, which resolving an id conflict can change from p's.
+func (r *PersonRepository) UpdateRefreshed(ctx context.Context, p models.Person, lookedUp PersonIdentity) (PersonIdentity, error) {
+	return r.update(ctx, p, &lookedUp)
+}
+
+func (r *PersonRepository) update(ctx context.Context, p models.Person, guard *PersonIdentity) (PersonIdentity, error) {
+	err := r.applyUpdate(ctx, p, guard)
+	if err == nil {
+		return PersonIdentityOf(p), nil
+	}
+	if !isDuplicateKeyError(err) {
+		return PersonIdentity{}, err
+	}
+	return r.updateResolvingConflicts(ctx, p, guard)
+}
+
+// checkPersonIdentity locks the person's row and, with a guard, checks it
+// still has the guarded provider ids. pgx.ErrNoRows means the person is gone.
+func checkPersonIdentity(ctx context.Context, tx pgx.Tx, id int64, guard *PersonIdentity) error {
+	if guard == nil {
+		return nil
+	}
+	var same bool
+	if err := tx.QueryRow(ctx, `
+		SELECT tmdb_id IS NOT DISTINCT FROM $2
+			AND imdb_id IS NOT DISTINCT FROM $3
+			AND tvdb_id IS NOT DISTINCT FROM $4
+		FROM people WHERE id = $1
+		FOR UPDATE`,
+		id, guard.TmdbID, guard.ImdbID, guard.TvdbID,
+	).Scan(&same); err != nil {
 		return err
 	}
-	return r.updateResolvingConflicts(ctx, p)
+	if !same {
+		return ErrPersonIdentityChanged
+	}
+	return nil
 }
 
 // applyUpdate writes all non-key fields on a person and enqueues a search
 // reindex for the items they appear in, all in one transaction.
-func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person) error {
+func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person, guard *PersonIdentity) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin person update tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := checkPersonIdentity(ctx, tx, p.ID, guard); err != nil {
+		return err
+	}
 	affected, err := execPersonUpdate(ctx, tx, p)
 	if err != nil {
 		return err
@@ -682,14 +729,19 @@ func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person) err
 // reconciling external-id collisions (merge or drop) as they arise. The write is
 // retried after each resolution via a savepoint so a failed attempt does not
 // poison the transaction; the whole thing commits atomically once the write
-// lands. Bounded by maxPersonConflictResolutions so it cannot spin.
-func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p models.Person) error {
+// lands. Bounded by maxPersonConflictResolutions so it cannot spin. It
+// returns the identity it stored: resolving a conflict can restore an id or
+// fold in a merged person's.
+func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p models.Person, guard *PersonIdentity) (PersonIdentity, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin person merge tx: %w", err)
+		return PersonIdentity{}, fmt.Errorf("begin person merge tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := checkPersonIdentity(ctx, tx, p.ID, guard); err != nil {
+		return PersonIdentity{}, err
+	}
 	var affected int64
 	for attempt := 0; ; attempt++ {
 		affected, err = tryPersonUpdate(ctx, tx, p)
@@ -697,34 +749,34 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 			break
 		}
 		if !isDuplicateKeyError(err) || attempt >= maxPersonConflictResolutions {
-			return err
+			return PersonIdentity{}, err
 		}
 		field, value, ok := conflictingExternalID(extractConstraint(err), p)
 		if !ok {
 			// Unique violation on a constraint we do not know how to reconcile.
-			return err
+			return PersonIdentity{}, err
 		}
 		resolved, resolveErr := r.resolveExternalIDConflict(ctx, tx, &p, field, value)
 		if resolveErr != nil {
-			return resolveErr
+			return PersonIdentity{}, resolveErr
 		}
 		if !resolved {
-			return err
+			return PersonIdentity{}, err
 		}
 	}
 
 	if affected == 0 {
 		// Survivor was deleted concurrently (e.g. merged into another row); there
 		// is nothing left to persist for this id.
-		return pgx.ErrNoRows
+		return PersonIdentity{}, pgx.ErrNoRows
 	}
 	if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
-		return err
+		return PersonIdentity{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit person merge tx: %w", err)
+		return PersonIdentity{}, fmt.Errorf("commit person merge tx: %w", err)
 	}
-	return nil
+	return PersonIdentityOf(p), nil
 }
 
 // execPersonUpdate writes all non-key person fields and returns the rows affected.

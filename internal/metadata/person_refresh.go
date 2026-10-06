@@ -58,7 +58,7 @@ func (e *PersonAnsweredRateLimitedError) RateLimitRetryAfter() time.Duration { r
 
 type personRefreshRepo interface {
 	Get(ctx context.Context, id int64) (*models.Person, error)
-	Update(ctx context.Context, person models.Person) error
+	UpdateRefreshed(ctx context.Context, person models.Person, lookedUp catalog.PersonIdentity) (catalog.PersonIdentity, error)
 	MarkRefreshAttempt(ctx context.Context, id int64) error
 	StartRefreshAttemptUnlessStartedSince(ctx context.Context, id int64, since time.Time) (bool, error)
 	RecordRefreshOutcome(ctx context.Context, id int64, identity catalog.PersonIdentity, outcome catalog.PersonRefreshOutcome) error
@@ -311,7 +311,28 @@ func (s *PersonRefreshService) refreshPerson(
 		return nil, err
 	}
 
-	if err := s.repo.Update(ctx, refreshed); err != nil {
+	stored, err := s.repo.UpdateRefreshed(ctx, refreshed, catalog.PersonIdentityOf(*person))
+	if errors.Is(err, catalog.ErrPersonIdentityChanged) {
+		// An admin corrected the person's ids during the lookup. The answer is
+		// about the old ones, so neither it nor an outcome is stored; the
+		// correction already made the person due under the new ids.
+		slog.InfoContext(ctx, "person refresh: person's ids changed during the lookup; answer not stored", "component", "metadata",
+			"person_id", id,
+		)
+		current, getErr := s.repo.Get(ctx, id)
+		if errors.Is(getErr, pgx.ErrNoRows) || (getErr == nil && current == nil) {
+			return nil, ErrPersonNotFound
+		}
+		if getErr != nil {
+			return nil, fmt.Errorf("load person %d: %w", id, getErr)
+		}
+		if rateLimited {
+			// The sweep still needs to hear about the limit.
+			return current, &PersonAnsweredRateLimitedError{RetryAfter: retryAfter}
+		}
+		return current, nil
+	}
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The row was merged into another person concurrently; there is no
 			// longer anything to refresh under this id.
@@ -320,7 +341,10 @@ func (s *PersonRefreshService) refreshPerson(
 		s.recordRefreshOutcome(ctx, *person, catalog.PersonRefreshFailed)
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
-	// The answer is about the ids just stored, which a provider can extend.
+	// The answer is about the ids just stored: a provider can extend them,
+	// and resolving an id conflict can restore one or fold in a merged
+	// person's.
+	refreshed.TmdbID, refreshed.ImdbID, refreshed.TvdbID = stored.TmdbID, stored.ImdbID, stored.TvdbID
 	s.recordRefreshOutcome(ctx, refreshed, catalog.PersonRefreshAnswered)
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)
 

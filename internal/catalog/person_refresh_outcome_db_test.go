@@ -514,3 +514,73 @@ func TestRecordRefreshOutcomeStampsMissingAttemptPostgres(t *testing.T) {
 		t.Fatal("an answered person is a never-looked-up candidate again")
 	}
 }
+
+// A refresh's result doesn't overwrite an id correction made during the
+// lookup: the write checks the ids the lookup asked about under its row lock.
+func TestUpdateRefreshedKeepsAnIDCorrectionPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "refresh-race")
+	lookedUp := identityOf(t, pool, id)
+	person, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	corrected := *person
+	corrected.TmdbID += "-corrected"
+	if err := repo.Update(ctx, corrected); err != nil {
+		t.Fatal(err)
+	}
+	refreshed := *person
+	refreshed.Bio = "About the old id"
+	if _, err := repo.UpdateRefreshed(ctx, refreshed, lookedUp); !errors.Is(err, ErrPersonIdentityChanged) {
+		t.Fatalf("err = %v, want ErrPersonIdentityChanged", err)
+	}
+	if got := identityOf(t, pool, id); got.TmdbID != corrected.TmdbID {
+		t.Fatalf("tmdb id = %q, want the correction %q", got.TmdbID, corrected.TmdbID)
+	}
+
+	// With the ids unchanged the write goes through.
+	refreshed.TmdbID = corrected.TmdbID
+	stored, err := repo.UpdateRefreshed(ctx, refreshed, identityOf(t, pool, id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != PersonIdentityOf(refreshed) {
+		t.Fatalf("stored identity %v, want %v", stored, PersonIdentityOf(refreshed))
+	}
+}
+
+// When a refresh adds an id another person holds and the two can't be merged,
+// the write keeps the person's own value, and reports the identity it stored
+// rather than the refreshed one.
+func TestUpdateRefreshedReportsTheStoredIdentityPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	id := seedRefreshPerson(t, pool, "keeps-id")
+	other := seedRefreshPerson(t, pool, "holds-imdb")
+	imdb := fmt.Sprintf("nm-held-%d", other)
+	if _, err := pool.Exec(ctx, `UPDATE people SET imdb_id = $2 WHERE id = $1`, other, imdb); err != nil {
+		t.Fatal(err)
+	}
+	lookedUp := identityOf(t, pool, id)
+	person, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refreshed := *person
+	refreshed.ImdbID = imdb
+	stored, err := repo.UpdateRefreshed(ctx, refreshed, lookedUp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored != lookedUp || identityOf(t, pool, id) != lookedUp {
+		t.Fatalf("stored identity %v (row %v), want %v", stored, identityOf(t, pool, id), lookedUp)
+	}
+	// Recording against the stored identity lands.
+	if err := repo.RecordRefreshOutcome(ctx, id, stored, PersonRefreshAnswered); err != nil {
+		t.Fatal(err)
+	}
+}
