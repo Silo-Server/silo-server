@@ -67,6 +67,7 @@ export default function SeriesContent({
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Creator"), [item.crew]);
 
   const title = item.title ?? "";
   const firstYear = item.first_air_date?.slice(0, 4);
@@ -253,15 +254,9 @@ export default function SeriesContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {((item.cast?.length ?? 0) > 0 ||
-        buildCrewGroups(item.crew ?? [], "Creator").some((g) => g.members.length > 0)) && (
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
         <DetailSection title="Cast & Crew">
-          <CastCarousel
-            cast={item.cast ?? []}
-            crewGroups={buildCrewGroups(item.crew ?? [], "Creator")}
-            limit={12}
-            prefetchPeople
-          />
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
 

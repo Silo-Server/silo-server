@@ -85,6 +85,7 @@ export default function MovieContent({
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
   const [mediaInfoOpen, setMediaInfoOpen] = useState(false);
+  const crewGroups = useMemo(() => buildCrewGroups(item.crew ?? [], "Director"), [item.crew]);
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
 
   // Version selection state — drives the Play button and inline stream popovers.
@@ -414,15 +415,9 @@ export default function MovieContent({
 
       {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
-      {((item.cast?.length ?? 0) > 0 ||
-        buildCrewGroups(item.crew ?? [], "Director").some((g) => g.members.length > 0)) && (
+      {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
         <DetailSection title="Cast & Crew">
-          <CastCarousel
-            cast={item.cast ?? []}
-            crewGroups={buildCrewGroups(item.crew ?? [], "Director")}
-            limit={12}
-            prefetchPeople
-          />
+          <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
 
