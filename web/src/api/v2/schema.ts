@@ -21680,6 +21680,8 @@ export interface components {
       identities: boolean;
       /** @description Whether auth binding and auth plugin changes apply without a server restart */
       live_provider_changes: boolean;
+      /** @description Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in, refused with not_permitted only while the provider refuses the person. False when network sign-in is not served; servers without the field turn local password sign-in off on such a link, as for other providers */
+      network_link_keeps_password: boolean;
       /** @description Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network */
       network_sign_in: boolean;
       /** @description Whether refreshSession re-checks sessions opened through the external provider with that provider (auth.provider_recheck_interval, auth.provider_recheck_outage_policy), and admin identities report last_check_status */

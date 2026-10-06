@@ -51,6 +51,9 @@ type ExternalSignInCapabilities struct {
 	// provider (a network access plugin such as Tailscale), which needs no
 	// password or browser.
 	NetworkSignIn bool `json:"network_sign_in" doc:"Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network"`
+	// NetworkLinkKeepsPassword tells clients which consequence of linking a
+	// network identity to describe: servers before it turned the password off.
+	NetworkLinkKeepsPassword bool `json:"network_link_keeps_password" doc:"Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in, refused with not_permitted only while the provider refuses the person. False when network sign-in is not served; servers without the field turn local password sign-in off on such a link, as for other providers"`
 }
 
 // ExternalSignInCapabilitiesOutput is the getExternalSignInCapabilities
@@ -334,6 +337,7 @@ func registerExternalSignIn(reg *Registry) {
 				out.Body.ConnectionTest = svc.ConnectionTestAvailable()
 				out.Body.CredentialsLinking = svc.CredentialsLinkingAvailable()
 				out.Body.NetworkSignIn = svc.NetworkLinkingAvailable() && reg.deps.Sessions != nil
+				out.Body.NetworkLinkKeepsPassword = out.Body.NetworkSignIn
 			}
 			return out, nil
 		})

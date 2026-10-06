@@ -257,6 +257,9 @@ public) reports which of these operations the server serves, including
 `network_sign_in` (`signInWithNetworkIdentity` and
 `linkAccountIdentityWithNetwork`; see
 [Network identity](architecture/external-sign-in.md#network-identity)).
+`network_link_keeps_password` says linking a network identity keeps the
+account's local password sign-in; clients use it to describe what connecting
+does, because servers without it turn the password off.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |

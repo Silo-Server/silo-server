@@ -1,5 +1,5 @@
 {
-  "revision": "cf5d430e08bbf554e6b2b0b1059724253fda155248f66d6f39edea8465e248c7",
+  "revision": "7adbf3cc98d9654da106868d0c95ee6205d4a822876cd50b9d27015adad0f691",
   "state": "available",
   "available": true,
   "identities": true,
@@ -9,5 +9,6 @@
   "live_provider_changes": true,
   "provider_recheck": true,
   "credentials_linking": true,
-  "network_sign_in": true
+  "network_sign_in": true,
+  "network_link_keeps_password": true
 }
