@@ -88,9 +88,11 @@ func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *Local
 // Authenticate validates the username/password pair against the database.
 // Returns ErrInvalidCredentials if the user is not found or the password
 // does not match. Returns ErrUserDisabled if the user's account is disabled,
-// and ErrLocalLoginDisabled when the server turned local password sign-in
-// off and the account is not a break-glass admin. Every password surface
-// (v1, v2, Jellyfin and Audiobookshelf compatibility) reaches this check.
+// ErrLocalLoginDisabled when the server turned local password sign-in off
+// and the account is not a break-glass admin, and ErrNotPermitted while a
+// network identity provider refuses the account's person (networkRefused).
+// Every password surface (v1, v2, Jellyfin and Audiobookshelf compatibility)
+// reaches this check.
 // The username may also be the account's email address (see LookupLogin).
 func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*models.User, error) {
 	user, err := LookupLogin(ctx, p.users, creds.Username)
@@ -112,9 +114,10 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 		return nil, ErrUserDisabled
 	}
 
-	// The server-wide switch is checked after the password, so a refusal
-	// does not tell a stranger which names have accounts. Break-glass admins
-	// are exempt so the server can always be recovered.
+	// The server-wide switch and a network provider's refusal are checked
+	// after the password, so a refusal does not tell a stranger which names
+	// have accounts. Break-glass admins are exempt so the server can always
+	// be recovered.
 	if !user.BreakGlass {
 		allowed, err := p.users.LocalPasswordLoginAllowed(ctx)
 		if err != nil {
@@ -122,6 +125,13 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 		}
 		if !allowed {
 			return nil, ErrLocalLoginDisabled
+		}
+		refused, err := networkRefused(ctx, p.users.pool, user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if refused {
+			return nil, ErrNotPermitted
 		}
 	}
 

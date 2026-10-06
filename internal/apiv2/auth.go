@@ -85,8 +85,9 @@ func registerAuth(reg *Registry) {
 	login := humaOp(http.MethodPost, Prefix+"/auth/login", "login", "auth",
 		"Authenticate with a username and password and open a login session.")
 	// Wrong credentials are 401 invalid_token; a disabled account, turned-off
-	// local password sign-in (local_login_disabled) or a directory refusal
-	// (not_permitted, password_expired) is 403, and so is a directory sign-in
+	// local password sign-in (local_login_disabled), a directory refusal
+	// (not_permitted, password_expired) or a network provider's refusal of
+	// the account's person (not_permitted) is 403, and so is a directory sign-in
 	// with no account while account creation is off (account_required); an
 	// account a directory sign-in cannot create or link is 409 (email_in_use,
 	// identity_linked_elsewhere).

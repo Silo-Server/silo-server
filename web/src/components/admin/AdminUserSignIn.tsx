@@ -43,6 +43,7 @@ import {
   authPluginInstallations,
   authProviderName,
   identityCheckStatusText,
+  isNetworkSignIn,
 } from "@/lib/externalSignInAdmin";
 import { cn } from "@/lib/utils";
 import { FeedbackLine, type Feedback } from "@/components/admin/FeedbackLine";
@@ -169,6 +170,7 @@ function LinkIdentityDialog({
     candidates[0];
   const [installationId, setInstallationId] = useState<string>("");
   const selected = installationId || (preferred ? String(preferred.id) : "");
+  const selectedInstallation = candidates.find((candidate) => String(candidate.id) === selected);
   const [subject, setSubject] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -192,7 +194,6 @@ function LinkIdentityDialog({
       return;
     }
     setError(null);
-    const installation = candidates.find((candidate) => String(candidate.id) === selected);
     link.mutate(
       {
         userId: user.id,
@@ -209,7 +210,7 @@ function LinkIdentityDialog({
       {
         onSuccess: () => {
           onLinked(
-            `${user.username} is connected to ${installation ? authProviderName(installation) : "the provider"}.`,
+            `${user.username} is connected to ${selectedInstallation ? authProviderName(selectedInstallation) : "the provider"}.`,
           );
           onClose();
         },
@@ -239,7 +240,9 @@ function LinkIdentityDialog({
               {user.username} will sign in with this provider account.
               {user.break_glass
                 ? " As a break-glass account it keeps its Silo password."
-                : " Connecting turns off password sign-in for this account."}
+                : selectedInstallation && isNetworkSignIn(selectedInstallation)
+                  ? " It keeps its Silo password too."
+                  : " Connecting turns off password sign-in for this account."}
             </DialogDescription>
           </DialogHeader>
           {error ? (

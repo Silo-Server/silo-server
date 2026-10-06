@@ -746,7 +746,10 @@ const scheduledRecheckBatch = 100
 // nothing for it (staleProviderAuth). An identity at an enabled primary
 // provider is also due while its account has a live login session opened
 // through a network identity: those sessions defer to it (primaryAuthorityOf),
-// but their refresh re-checks only the network identity.
+// but their refresh re-checks only the network identity. A network identity
+// of an account that keeps its local password is due without any credential
+// to bound: its refusal also blocks that password (networkRefused), and its
+// next active answer lifts the block.
 //
 // At an installation that is no longer an enabled sign-in provider nobody
 // can be asked, so the pass only bounds the API keys and Audiobookshelf
@@ -765,6 +768,10 @@ var idleIdentityCondition = `
 			OR (NOT u.local_password_login_enabled
 				AND COALESCE(i.last_authenticated_at, i.linked_at) <= NOW() - make_interval(secs => $3))))
 	AND (EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = i.user_id)
+		OR (EXISTS (SELECT 1 FROM users u WHERE u.id = i.user_id AND u.local_password_login_enabled)
+			AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
+				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled
+					AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `))
 		OR EXISTS (SELECT 1 FROM abs_sessions a WHERE a.user_id = i.user_id AND a.revoked_at IS NULL
 			AND (a.expires_at IS NULL OR a.expires_at > NOW()))
 		OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.identity_id = i.id AND s.revoked_at IS NULL AND s.expires_at > NOW()

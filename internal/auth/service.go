@@ -685,6 +685,15 @@ func (s *Service) loginWithProvider(
 				if !allowed {
 					return ErrLocalLoginDisabled
 				}
+				// A re-check refusing the person holds this row lock too, so
+				// a refusal cannot land between this check and the session.
+				refused, err := networkRefused(ctx, tx, current.ID)
+				if err != nil {
+					return err
+				}
+				if refused {
+					return ErrNotPermitted
+				}
 			}
 			if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 				return err

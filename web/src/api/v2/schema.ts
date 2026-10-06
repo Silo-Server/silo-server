@@ -87,7 +87,7 @@ export interface paths {
     put?: never;
     /**
      * Link the network identity of this device (such as its Tailscale login) to the caller's account.
-     * @description Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking (local password sign-in turns off unless the account is break-glass; audited). listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in.
+     * @description Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking except one: the account keeps its local password sign-in (audited). While the provider refuses the person at a re-check, that password is refused with not_permitted too, except for a break-glass account, until the provider vouches for the person again. listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in.
      */
     post: operations["linkAccountIdentityWithNetwork"];
     delete?: never;
@@ -5023,7 +5023,7 @@ export interface paths {
     put?: never;
     /**
      * Link an account to an external sign-in identity by the provider's exact subject.
-     * @description The installation must have a sign-in binding. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to that installation is 409 already_linked. Linking turns the account's local password sign-in off unless it is a break-glass account. Only the server Owner may change another admin's sign-in.
+     * @description The installation must have a sign-in binding. An identity linked to another account is 409 identity_linked_elsewhere; an account already linked to that installation is 409 already_linked. Linking turns the account's local password sign-in off unless it is a break-glass account or the installation is a network identity provider. Only the server Owner may change another admin's sign-in.
      */
     post: operations["createAdminUserIdentity"];
     delete?: never;
@@ -5044,7 +5044,7 @@ export interface paths {
     post?: never;
     /**
      * Unlink an external sign-in identity from an account.
-     * @description The account may be left without a way to sign in: an account linked to a provider has local password sign-in off. Setting a password with updateAdminUser turns it back on. Only the server Owner may change another admin's sign-in.
+     * @description The account may be left without a way to sign in: an account linked to an OIDC or LDAP provider has local password sign-in off. Setting a password with updateAdminUser turns it back on. Only the server Owner may change another admin's sign-in.
      */
     delete: operations["deleteAdminUserIdentity"];
     options?: never;
