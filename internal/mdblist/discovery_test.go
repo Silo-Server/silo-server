@@ -104,9 +104,18 @@ func assertErrorOmitsAPIKey(t *testing.T, err error, apiKey string) {
 		if msg := e.Error(); strings.Contains(msg, apiKey) {
 			t.Fatalf("error chain leaks the API key: %q", strings.ReplaceAll(msg, apiKey, "[KEY]"))
 		}
+		// What errors.As hands out must be masked too.
 		var urlErr *url.Error
-		if errors.As(e, &urlErr) && strings.Contains(urlErr.URL, apiKey) {
-			t.Fatalf("url.Error.URL leaks the API key: %q", strings.ReplaceAll(urlErr.URL, apiKey, "[KEY]"))
+		if errors.As(e, &urlErr) {
+			for _, text := range []string{urlErr.URL, urlErr.Error(), errorText(urlErr.Err)} {
+				if strings.Contains(text, apiKey) {
+					t.Fatalf("url.Error from errors.As leaks the API key: %q", strings.ReplaceAll(text, apiKey, "[KEY]"))
+				}
+			}
+		}
+		var netErr net.Error
+		if errors.As(e, &netErr) && strings.Contains(netErr.Error(), apiKey) {
+			t.Fatalf("net.Error from errors.As leaks the API key: %q", strings.ReplaceAll(netErr.Error(), apiKey, "[KEY]"))
 		}
 	}
 }
@@ -197,4 +206,11 @@ func TestTransportErrorKeepsTimeoutClassification(t *testing.T) {
 	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		t.Fatalf("sanitized error lost its timeout classification: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
 	}
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

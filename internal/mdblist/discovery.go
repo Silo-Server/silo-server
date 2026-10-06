@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -165,9 +166,16 @@ func sanitizeAPIKeyError(err error, apiKey string) error {
 	if err == nil {
 		return nil
 	}
-	err = logredact.SanitizeURLError(err)
+	return maskAPIKeyError(logredact.SanitizeURLError(err), apiKey)
+}
+
+// maskAPIKeyError wraps err in a redactedError when its message holds the key.
+func maskAPIKeyError(err error, apiKey string) error {
+	if err == nil {
+		return nil
+	}
 	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
-		err = redactedError{message: redactAPIKey(msg, apiKey), cause: err}
+		return redactedError{message: redactAPIKey(msg, apiKey), cause: err, apiKey: apiKey}
 	}
 	return err
 }
@@ -175,15 +183,50 @@ func sanitizeAPIKeyError(err error, apiKey string) error {
 // redactedError carries a masked message. It has no Unwrap, so walking the
 // chain with errors.Unwrap cannot reach the unmasked text; errors.Is and
 // errors.As still see the cause, which keeps sentinel matching and net.Error
-// timeout classification working at any depth.
+// timeout classification working at any depth. What As hands out is masked
+// too: a *url.Error or net.Error found in the cause would otherwise quote
+// the key in its own message.
 type redactedError struct {
 	message string
 	cause   error
+	apiKey  string
 }
 
 func (e redactedError) Error() string        { return e.message }
 func (e redactedError) Is(target error) bool { return errors.Is(e.cause, target) }
-func (e redactedError) As(target any) bool   { return errors.As(e.cause, target) }
+
+func (e redactedError) As(target any) bool {
+	if !errors.As(e.cause, target) {
+		return false
+	}
+	switch found := target.(type) {
+	case **url.Error:
+		if *found != nil {
+			clone := **found
+			clone.URL = redactAPIKey(clone.URL, e.apiKey)
+			clone.Err = maskAPIKeyError(clone.Err, e.apiKey)
+			*found = &clone
+		}
+	case *net.Error:
+		if *found != nil && redactAPIKey((*found).Error(), e.apiKey) != (*found).Error() {
+			*found = redactedNetError{
+				redactedError: redactedError{message: redactAPIKey((*found).Error(), e.apiKey), cause: *found, apiKey: e.apiKey},
+				net:           *found,
+			}
+		}
+	}
+	return true
+}
+
+// redactedNetError is a net.Error with a masked message that still reports
+// the timeout it wraps.
+type redactedNetError struct {
+	redactedError
+	net net.Error
+}
+
+func (e redactedNetError) Timeout() bool   { return e.net.Timeout() }
+func (e redactedNetError) Temporary() bool { return e.net.Temporary() } //nolint:staticcheck // net.Error requires it.
 
 // redactAPIKey masks every occurrence of the API key, raw or query-escaped.
 func redactAPIKey(text, apiKey string) string {
