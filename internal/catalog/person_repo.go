@@ -660,38 +660,46 @@ func (r *PersonRepository) UpdateRefreshed(ctx context.Context, p models.Person,
 	return r.update(ctx, p, &lookedUp)
 }
 
+// update writes p, retrying as a whole when Postgres picks it as a deadlock
+// victim: two writes that each take the other's id wait on each other in
+// the unique index, and the retry finds the survivor's committed state.
 func (r *PersonRepository) update(ctx context.Context, p models.Person, guard *PersonIdentity) (PersonIdentity, error) {
-	err := r.applyUpdate(ctx, p, guard)
-	if err == nil {
-		return PersonIdentityOf(p), nil
-	}
-	if !isDuplicateKeyError(err) {
+	var stored PersonIdentity
+	err := retryOnDeadlock(ctx, func() error {
+		err := r.applyUpdate(ctx, p, guard)
+		if err == nil {
+			stored = PersonIdentityOf(p)
+			return nil
+		}
+		if !isDuplicateKeyError(err) {
+			return err
+		}
+		stored, err = r.updateResolvingConflicts(ctx, p, guard)
+		return err
+	})
+	if err != nil {
 		return PersonIdentity{}, err
 	}
-	return r.updateResolvingConflicts(ctx, p, guard)
+	return stored, nil
 }
 
-// checkPersonIdentity locks the person's row and, with a guard, checks it
-// still has the guarded provider ids. pgx.ErrNoRows means the person is gone.
-func checkPersonIdentity(ctx context.Context, tx pgx.Tx, id int64, guard *PersonIdentity) error {
+// missedPersonUpdate explains a person write that matched no row: the person
+// is gone (pgx.ErrNoRows), or, under a guard, their provider ids changed.
+// The guard itself is in the write's WHERE clause, so it is checked
+// atomically with the write and takes no lock ahead of the conflict
+// resolver's ordered ones.
+func missedPersonUpdate(ctx context.Context, tx pgx.Tx, id int64, guard *PersonIdentity) error {
 	if guard == nil {
-		return nil
+		return pgx.ErrNoRows
 	}
-	var same bool
-	if err := tx.QueryRow(ctx, `
-		SELECT tmdb_id IS NOT DISTINCT FROM $2
-			AND imdb_id IS NOT DISTINCT FROM $3
-			AND tvdb_id IS NOT DISTINCT FROM $4
-		FROM people WHERE id = $1
-		FOR UPDATE`,
-		id, guard.TmdbID, guard.ImdbID, guard.TvdbID,
-	).Scan(&same); err != nil {
-		return err
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM people WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return fmt.Errorf("check person %d: %w", id, err)
 	}
-	if !same {
+	if exists {
 		return ErrPersonIdentityChanged
 	}
-	return nil
+	return pgx.ErrNoRows
 }
 
 // applyUpdate writes all non-key fields on a person and enqueues a search
@@ -703,16 +711,14 @@ func (r *PersonRepository) applyUpdate(ctx context.Context, p models.Person, gua
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := checkPersonIdentity(ctx, tx, p.ID, guard); err != nil {
-		return err
-	}
-	affected, err := execPersonUpdate(ctx, tx, p)
+	affected, err := execPersonUpdate(ctx, tx, p, guard)
 	if err != nil {
 		return err
 	}
 	if affected == 0 {
-		// The row was deleted out from under us (e.g. merged away concurrently).
-		return pgx.ErrNoRows
+		// The row was deleted out from under us (e.g. merged away
+		// concurrently), or its ids no longer match the guard.
+		return missedPersonUpdate(ctx, tx, p.ID, guard)
 	}
 	if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
 		return err
@@ -737,12 +743,9 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := checkPersonIdentity(ctx, tx, p.ID, guard); err != nil {
-		return PersonIdentity{}, err
-	}
 	var affected int64
 	for attempt := 0; ; attempt++ {
-		affected, err = tryPersonUpdate(ctx, tx, p)
+		affected, err = tryPersonUpdate(ctx, tx, p, guard)
 		if err == nil {
 			break
 		}
@@ -764,9 +767,11 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 	}
 
 	if affected == 0 {
-		// Survivor was deleted concurrently (e.g. merged into another row); there
-		// is nothing left to persist for this id.
-		return PersonIdentity{}, pgx.ErrNoRows
+		// Survivor was deleted concurrently (e.g. merged into another row), so
+		// there is nothing left to persist for this id, or its ids no longer
+		// match the guard. A merge changes only p before the retried write,
+		// never the survivor's stored ids, so the guard holds across retries.
+		return PersonIdentity{}, missedPersonUpdate(ctx, tx, p.ID, guard)
 	}
 	if err := reindexPersonItems(ctx, tx, p.ID); err != nil {
 		return PersonIdentity{}, err
@@ -782,8 +787,13 @@ func (r *PersonRepository) updateResolvingConflicts(ctx context.Context, p model
 // the last lookup's outcome was about another identity: it is cleared and the
 // person is due now, so one the providers didn't know under the old id isn't
 // left out of the sweep for good. The attempt time stays, so the person isn't
-// taken for one never looked up. The SET list reads the row's old ids.
-func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, error) {
+// taken for one never looked up. The SET list reads the row's old ids. With a
+// guard the write matches only while the row still has the guarded ids.
+func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, error) {
+	var g PersonIdentity
+	if guard != nil {
+		g = *guard
+	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE people SET name=$2, sort_name=$3, bio=$4, birth_date=$5, death_date=$6,
 			birthplace=$7, homepage=$8, photo_path=$9, photo_source_path=$10, photo_thumbhash=$11,
@@ -794,10 +804,14 @@ func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, e
 				THEN 0 ELSE metadata_refresh_failures END,
 			metadata_refresh_due_at = CASE WHEN (tmdb_id, imdb_id, tvdb_id) IS DISTINCT FROM ($12, $13, $14)
 				THEN NOW() ELSE metadata_refresh_due_at END
-		WHERE id = $1`,
+		WHERE id = $1
+			AND (NOT $16::boolean OR (tmdb_id IS NOT DISTINCT FROM $17
+				AND imdb_id IS NOT DISTINCT FROM $18
+				AND tvdb_id IS NOT DISTINCT FROM $19))`,
 		p.ID, p.Name, p.SortName, p.Bio, p.BirthDate, p.DeathDate,
 		p.Birthplace, p.Homepage, p.PhotoPath, p.PhotoSourcePath, p.PhotoThumbhash,
 		p.TmdbID, p.ImdbID, p.TvdbID, p.PlexGUID,
+		guard != nil, g.TmdbID, g.ImdbID, g.TvdbID,
 	)
 	if err != nil {
 		return 0, err
@@ -807,12 +821,12 @@ func execPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, e
 
 // tryPersonUpdate runs execPersonUpdate inside a savepoint so a unique violation
 // rolls back only the attempt, leaving the surrounding transaction usable.
-func tryPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person) (int64, error) {
+func tryPersonUpdate(ctx context.Context, tx pgx.Tx, p models.Person, guard *PersonIdentity) (int64, error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin person update savepoint: %w", err)
 	}
-	affected, err := execPersonUpdate(ctx, sp, p)
+	affected, err := execPersonUpdate(ctx, sp, p, guard)
 	if err != nil {
 		_ = sp.Rollback(ctx)
 		return 0, err

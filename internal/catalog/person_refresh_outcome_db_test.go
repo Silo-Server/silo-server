@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -443,5 +444,52 @@ func TestUpdateRefreshedReportsTheStoredIdentityPostgres(t *testing.T) {
 	// Recording against the stored identity lands.
 	if err := repo.RecordRefreshOutcome(ctx, id, stored, PersonRefreshAnswered); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Two refreshes that each add the other person's id resolve their conflicts
+// at once. The guard takes no lock ahead of the resolver's ordered ones, so
+// neither deadlocks.
+func TestUpdateRefreshedConcurrentConflictsDontDeadlockPostgres(t *testing.T) {
+	repo, pool := personRefreshTestRepo(t)
+	ctx := context.Background()
+	for round := range 10 {
+		a := seedRefreshPerson(t, pool, fmt.Sprintf("swap-a-%d", round))
+		b := seedRefreshPerson(t, pool, fmt.Sprintf("swap-b-%d", round))
+		for _, id := range []int64{a, b} {
+			if _, err := pool.Exec(ctx, `UPDATE people SET imdb_id = $2 WHERE id = $1`, id, fmt.Sprintf("nm-swap-%d", id)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		refresh := func(id, otherID int64) (models.Person, PersonIdentity) {
+			person, err := repo.Get(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lookedUp := identityOf(t, pool, id)
+			person.ImdbID = identityOf(t, pool, otherID).ImdbID
+			return *person, lookedUp
+		}
+		pa, ga := refresh(a, b)
+		pb, gb := refresh(b, a)
+
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		for _, w := range []struct {
+			p models.Person
+			g PersonIdentity
+		}{{pa, ga}, {pb, gb}} {
+			go func() {
+				<-start
+				_, err := repo.UpdateRefreshed(ctx, w.p, w.g)
+				errs <- err
+			}()
+		}
+		close(start)
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
 	}
 }
