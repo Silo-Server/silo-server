@@ -126,13 +126,17 @@ and manual runs keep the full gate. The `CI result` job rejects failed, canceled
 missing, or unexpectedly skipped work; only jobs excluded by the selection may
 skip. Selection tools come from the trusted reusable workflow's main branch.
 
-The full Go suite owns the ledger, scenario, offline-route, spec, and fixture
-assertions. The contract job retains generator freshness checks and the semantic
-API comparison. Its `CONTRACT_GO_TESTS=0` flag avoids repeating assertions; local
-verify targets remain complete by default. `Go integration` runs the existing
-PostgreSQL 17 race tests separately from the unit suite and the pgvector database
-used by `Go DB pins`. Its database is also separate from the truncating scenario
-executor's database.
+`Go test` runs the full Go suite, which owns the ledger, scenario,
+offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
+after lint: the generator freshness checks and the semantic API comparison. The
+contract checks pass `CONTRACT_GO_TESTS=0` to avoid repeating the suite's
+assertions; local verify targets remain complete by default. `Go integration`
+runs its race tests against two databases of its own: a PostgreSQL 17 database
+for the Watch Party, history import, and marker claim migration tests, and a
+migrated pgvector database for the tests that need the full schema. `Go DB pins`
+and `Go DB external auth` each start a separate pgvector database, and the unit
+suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
+scenario executor, which truncates its database, gets none of these databases.
 
 Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
 `make apiv2-fixtures` and commit what they write; the gates above fail on a

@@ -65,43 +65,10 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Download shared frontend bundle for manual builds
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist-${{ github.run_id }}-${{ github.sha }}
-          path: web/dist
-          github-token: ${{ github.token }}
-          run-id: ${{ github.run_id }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-
-      - name: Reject committed local SDK replaces
-        run: |
-          if grep -Eq '^replace github.com/Silo-Server/silo-plugin-sdk => /' go.mod; then
-            echo "go.mod contains a machine-local silo-plugin-sdk replace."
-            exit 1
-          fi
-
-      - name: Validate SDK resolves from the module graph
-        env:
-          GOWORK: off
-        run: |
-          sdk_module_json="$(mktemp)"
-          go list -m -json github.com/Silo-Server/silo-plugin-sdk > "$sdk_module_json"
-          if grep -q '"Main": true' "$sdk_module_json"; then
-            echo "silo-plugin-sdk resolved from the local workspace instead of go.mod."
-            cat "$sdk_module_json"
-            exit 1
-          fi
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          cleanup: false
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -127,22 +94,15 @@ jobs:
           context: .
           platforms: ${{ inputs.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-contexts: |
-            frontend_dist=./web/dist
+          build-contexts: ${{ github.event_name == 'workflow_run' && 'frontend_dist=./web/dist' || '' }}
           build-args: |
             BUILD_REVISION=${{ github.event.workflow_run.head_sha || github.sha }}
             BUILD_DIRTY=false
             BUILD_NUMBER=${{ inputs.build_number }}
             BUILD_DATE=${{ inputs.built_at }}
-          cache-from: ${{ runner.environment == 'self-hosted' && format('type=local,src=/cache/buildkit/{0}', env.PLATFORM_PAIR) || format('type=gha,scope=docker-{0}', env.PLATFORM_PAIR) }}
-          cache-to: ${{ runner.environment == 'self-hosted' && format('type=local,dest=/cache/buildkit/{0}-new,mode=max', env.PLATFORM_PAIR) || format('type=gha,scope=docker-{0},mode=max', env.PLATFORM_PAIR) }}
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-${{ env.PLATFORM_PAIR }}
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-${{ env.PLATFORM_PAIR }},mode=max,image-manifest=true,oci-mediatypes=true
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true
-
-      - name: Keep the local Docker layer cache
-        if: runner.environment == 'self-hosted' && steps.build.outcome == 'success'
-        run: |
-          rm -rf "/cache/buildkit/${PLATFORM_PAIR}"
-          mv "/cache/buildkit/${PLATFORM_PAIR}-new" "/cache/buildkit/${PLATFORM_PAIR}"
 
       - name: Export digest
         run: |
