@@ -643,6 +643,32 @@ describe("AdminAccessGroups", () => {
     adminUsers.data = [];
   });
 
+  it("doesn't offer adding a retried user who has since joined the group", async () => {
+    withGuestsGroup();
+    adminUsers.data = [member(8, "sam", "user", 2)];
+    adminUsers.update.mockReset().mockRejectedValueOnce(new Error("This user's group changed."));
+    const user = userEvent.setup();
+    renderPage("/admin/access-groups/1");
+    const members = await screen.findByRole("region", { name: "Members" });
+
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    await user.click(within(await screen.findByRole("dialog")).getByRole("checkbox"));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /Add 1 selected/ }),
+    );
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Move" }),
+    );
+    await within(members).findByRole("alert");
+
+    // sam is in this group now, so the retry has no one left to add.
+    adminUsers.data = [member(8, "sam", "user", 1)];
+    await user.click(within(members).getByRole("button", { name: "Add users" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: /Add\s+selected/ })).toBeDisabled();
+    adminUsers.data = [];
+  });
+
   it("names members that could not be moved", async () => {
     withGuestsGroup();
     adminUsers.data = [member(7, "taylor", "user", 1), member(8, "sam", "user", 1)];

@@ -323,6 +323,9 @@ function AddUsersDialog({
   const eligible = users
     .filter((user) => user.role !== "admin" && String(user.access_group_id) !== String(group.id))
     .sort((a, b) => a.username.localeCompare(b.username));
+  // A retry can preselect a user who has since become ineligible (already in
+  // this group, say); only eligible ones count.
+  const selectedEligible = eligible.filter((user) => chosen.has(user.id));
   const query = search.trim().toLowerCase();
   const shown = query
     ? eligible.filter(
@@ -383,10 +386,10 @@ function AddUsersDialog({
           </Button>
           <Button
             type="button"
-            disabled={chosen.size === 0}
-            onClick={() => onChoose(eligible.filter((user) => chosen.has(user.id)))}
+            disabled={selectedEligible.length === 0}
+            onClick={() => onChoose(selectedEligible)}
           >
-            Add {chosen.size > 0 ? chosen.size : ""} selected
+            Add {selectedEligible.length > 0 ? selectedEligible.length : ""} selected
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -413,7 +416,9 @@ function ConfirmMoveDialog({
   const bySource = new Map<string, AdminUser[]>();
   for (const user of move.users) {
     const key = user.access_group_id == null ? "none" : String(user.access_group_id);
-    bySource.set(key, [...(bySource.get(key) ?? []), user]);
+    const sourceUsers = bySource.get(key);
+    if (sourceUsers) sourceUsers.push(user);
+    else bySource.set(key, [user]);
   }
   const count = move.users.length;
   const unresolved = [...bySource.keys()].some(
