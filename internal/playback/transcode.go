@@ -1612,13 +1612,19 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-c:a", "copy")
 	case "opus":
 		args = append(args, "-c:a", "libopus", "-b:a", "192k", "-ac", "2")
-	case "eac3":
-		// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
-		// count so we preserve surround when possible.
-		args = append(args, "-c:a", "eac3", "-b:a", "384k")
-	case "ac3":
-		// Legacy Dolby Digital; universal AVR support.
-		args = append(args, "-c:a", "ac3", "-b:a", "448k")
+	case audioCodecEAC3, audioCodecAC3:
+		if opts.TargetAudioChannels == surroundBitstreamChannelsV3 {
+			// The frozen audio_to_eac3 / audio_to_ac3 recipe the v3 planner
+			// promises: 48 kHz 5.1 at 640 kbps.
+			args = append(args, surroundBitstreamAudioArgsV3(codec)...)
+		} else if codec == audioCodecEAC3 {
+			// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
+			// count so we preserve surround when possible.
+			args = append(args, "-c:a", "eac3", "-b:a", "384k")
+		} else {
+			// Legacy Dolby Digital; universal AVR support.
+			args = append(args, "-c:a", "ac3", "-b:a", "448k")
+		}
 	default:
 		channels, bitrateKbps := ResolveAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))

@@ -28,6 +28,7 @@ type TransformationRegistryV3 struct {
 }
 
 var errHEVCEncoderUnavailableV3 = errors.New("libx265 encoder unavailable")
+var errSurroundEncoderUnavailableV3 = errors.New("surround bitstream encoder unavailable")
 
 const transformationProbeRetryDelayV3 = 15 * time.Second
 
@@ -61,16 +62,22 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	normalizeRecipeErr, normalizeRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "stereo", aacTimestampNormalizeFilterV3)
 	downmixRecipeErr, downmixRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "5.1", stereoDownmixBoostFilterV3)
 	hevcRecipeErr, hevcRecipeContextErr := probeHEVCRecipeV3(ctx, ffmpegPath, encoders)
+	eac3RecipeErr, eac3RecipeContextErr := probeSurroundBitstreamRecipeV3(ctx, ffmpegPath, encoders, surroundBitstreamCodecEAC3V3)
+	ac3RecipeErr, ac3RecipeContextErr := probeSurroundBitstreamRecipeV3(ctx, ffmpegPath, encoders, surroundBitstreamCodecAC3V3)
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationServerDV7HDR10V3, RecipeVersion: "1", Available: bytes.Contains(bsfs, []byte("dovi_rpu")), RequiredCapability: "ffmpeg_bsf:dovi_rpu", PromisedDynamicRange: DynamicRangeHDR10V3, ValidatedClaims: DV7ToHDR10ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")) && normalizeRecipeErr == nil && downmixRecipeErr == nil, RequiredCapability: "ffmpeg_encoder:aac+ffmpeg_filter_smoke:timestamp_normalization_and_stereo_downmix_v4", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
+		{Name: TransformationAudioToEAC3V3, RecipeVersion: TransformationAudioToEAC3RecipeVersionV3, Available: ffmpegErr == nil && eac3RecipeErr == nil, RequiredCapability: "ffmpeg_encoder:eac3+ffmpeg_encode_smoke:5.1_640k_fmp4", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
+		{Name: TransformationAudioToAC3V3, RecipeVersion: TransformationAudioToAC3RecipeVersionV3, Available: ffmpegErr == nil && ac3RecipeErr == nil, RequiredCapability: "ffmpeg_encoder:ac3+ffmpeg_encode_smoke:5.1_640k_fmp4", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimH264DecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},
 		{Name: TransformationVideoToHEVCV3, RecipeVersion: TransformationVideoToHEVCRecipeVersionV3, Available: ffmpegErr == nil && hevcEncoderAvailableV3(encoders) && hevcRecipeErr == nil, RequiredCapability: "ffmpeg_encoder:hevc+ffmpeg_encode_smoke:main_8bit_sdr", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimHEVCDecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},
 		{Name: TransformationHDRToSDRToneMapV3, RecipeVersion: TransformationHDRToSDRToneMapRecipeVersionV3, Available: len(toneMapCapabilities) > 0, RequiredCapability: "ffmpeg_filter:hdr_to_sdr_tonemap", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimHDRMetadataRemovedV3, ClaimSDRBT709OutputV3}, TerminalReason: TerminalHDRTranscodeUnsupportedV3},
 	})
 	if hevcRecipeContextErr != nil ||
-		(!errors.Is(hevcRecipeErr, errHEVCEncoderUnavailableV3) && audioRecipeProbeInfrastructureError(hevcRecipeErr) != nil) {
+		(!errors.Is(hevcRecipeErr, errHEVCEncoderUnavailableV3) && audioRecipeProbeInfrastructureError(hevcRecipeErr) != nil) ||
+		eac3RecipeContextErr != nil || surroundRecipeProbeInfrastructureError(eac3RecipeErr) != nil ||
+		ac3RecipeContextErr != nil || surroundRecipeProbeInfrastructureError(ac3RecipeErr) != nil {
 		// Keep baseline capabilities usable, but retry incomplete optional
 		// probing after a short delay instead of caching HEVC absence forever.
 		registry.refreshAfter = time.Now().Add(transformationProbeRetryDelayV3)
@@ -84,9 +91,10 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 		normalizeRecipeContextErr,
 		audioRecipeProbeInfrastructureError(downmixRecipeErr),
 		downmixRecipeContextErr,
-		// Optional HEVC failure, including its own smoke deadline, only
-		// removes HEVC. A canceled inventory caller still invalidates the
-		// snapshot rather than publishing an incomplete capability report.
+		// Optional HEVC and surround failures, including their own smoke
+		// deadlines, only remove those recipes. A canceled inventory caller
+		// still invalidates the snapshot rather than publishing an incomplete
+		// capability report.
 		ctx.Err(),
 	)
 }
@@ -102,6 +110,29 @@ func probeAudioRecipeFilterV3(ctx context.Context, ffmpegPath, channelLayout, fi
 		"-frames:a", "1", "-af", filter,
 		"-f", "null", "-",
 	).Run()
+	probeContextErr := probeCtx.Err()
+	cancelProbe()
+	return probeErr, probeContextErr
+}
+
+// probeSurroundBitstreamRecipeV3 encodes one frame of silent 5.1 with the
+// frozen surround recipe into fragmented MP4, the container the HLS remux
+// writes. delay_moov matches the HLS muxer: the dec3/dac3 box needs a parsed
+// packet. A build that lacks the encoder, or rejects the layout, bitrate, or
+// muxing, does not advertise the transformation.
+func probeSurroundBitstreamRecipeV3(ctx context.Context, ffmpegPath string, encoders []byte, codec string) (error, error) {
+	if !bytes.Contains(encoders, []byte(" "+codec+" ")) {
+		return errSurroundEncoderUnavailableV3, nil
+	}
+	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
+	args := []string{
+		ffmpegFlagHideBanner, ffmpegLogLevelArg, ffmpegLogLevelError,
+		"-f", ffmpegInputFormatLavfiV3, "-i", "anullsrc=r=48000:cl=5.1",
+		"-frames:a", "1",
+	}
+	args = append(args, surroundBitstreamAudioArgsV3(codec)...)
+	args = append(args, "-f", "mp4", "-movflags", "+frag_keyframe+empty_moov+delay_moov+default_base_moof", "pipe:1")
+	probeErr := exec.CommandContext(probeCtx, ffmpegPath, args...).Run()
 	probeContextErr := probeCtx.Err()
 	cancelProbe()
 	return probeErr, probeContextErr
@@ -141,6 +172,15 @@ func audioRecipeProbeInfrastructureError(err error) error {
 		return nil
 	}
 	return err
+}
+
+// surroundRecipeProbeInfrastructureError treats a build without the encoder
+// as a capability result, like a non-zero FFmpeg exit.
+func surroundRecipeProbeInfrastructureError(err error) error {
+	if errors.Is(err, errSurroundEncoderUnavailableV3) {
+		return nil
+	}
+	return audioRecipeProbeInfrastructureError(err)
 }
 
 // h264EncodersV3 lists every H.264 encoder the transcode pipeline can select

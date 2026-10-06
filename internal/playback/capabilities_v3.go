@@ -495,7 +495,7 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 		}
 	}
 	if containsFoldV3(request.Capabilities.CodecsAudio, source.AudioCodec) {
-		claim.Reason = "client_decode_supported"
+		claim.Reason = audioClaimClientDecodeV3
 		return true, false, claim
 	}
 	if passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) {
