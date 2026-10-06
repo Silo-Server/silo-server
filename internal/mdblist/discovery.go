@@ -189,9 +189,11 @@ func maskAPIKeyError(err error, apiKey string) error {
 // redactedError carries a masked message. It has no Unwrap, so walking the
 // chain with errors.Unwrap cannot reach the unmasked text; errors.Is and
 // errors.As still see the cause, which keeps sentinel matching and net.Error
-// timeout classification working at any depth. What As hands out is masked
-// too: a *url.Error or net.Error found in the cause would otherwise quote
-// the key in its own message.
+// timeout classification working at any depth. What As hands out for a
+// *url.Error or net.Error target is masked too, as either would otherwise
+// quote the key in its own message. Any other target type gets the cause's
+// own value, unmasked: a caller extracting another error type must not log
+// its text.
 type redactedError struct {
 	message string
 	cause   error
