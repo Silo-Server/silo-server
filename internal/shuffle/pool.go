@@ -181,12 +181,48 @@ func (s *Service) resolveCollection(ctx context.Context, scope Scope, access cat
 	return scopeInfo{pool: p, title: title}, nil
 }
 
+// sampleDraws are the sizes of the random samples a library pick tries, in
+// order, before it reads the library's whole pool. A large library almost
+// always answers from the first, small sample; a small one, or a viewer whose
+// limits leave little of the library, falls through to the full read, which
+// is cheap for exactly those pools.
+var sampleDraws = []int{64, 1024}
+
+// sampleIDRange selects the lowest and highest media_files id a sample draws
+// between. Tests narrow it to their own files, which a shared database would
+// otherwise leave too sparse to sample.
+var sampleIDRange = `SELECT min(id) AS lo, max(id) AS hi FROM media_files`
+
 // pick returns a random playable item from the pool that the shuffle has not
 // handed out this cycle and that is not in exclude, or "" when none is left.
 // shuffleID is empty before the shuffle row exists.
+//
+// Ordering a whole library by random() reads every item in it, which takes
+// seconds on a library of a million episodes, so a library pick first draws
+// a sample (see sampleCTE) and picks among the sampled items. Each item is
+// equally likely either way. Only the full read can report that nothing is
+// left.
 func pick(ctx context.Context, q querier, p pool, access catalog.AccessFilter, shuffleID string, exclude []string) (string, error) {
+	if p.libraryID > 0 {
+		for _, draws := range sampleDraws {
+			contentID, err := pickFrom(ctx, q, p, access, shuffleID, exclude, draws)
+			if err != nil || contentID != "" {
+				return contentID, err
+			}
+		}
+	}
+	return pickFrom(ctx, q, p, access, shuffleID, exclude, 0)
+}
+
+// pickFrom is one pick query: over a sample of draws random files when draws
+// is positive, or over the whole pool.
+func pickFrom(ctx context.Context, q querier, p pool, access catalog.AccessFilter, shuffleID string, exclude []string, draws int) (string, error) {
 	args := []any{}
-	source := candidates(p, access, &args)
+	var sql string
+	if draws > 0 {
+		sql = sampleCTE(p.libraryID, draws, &args)
+	}
+	source := candidates(p, access, draws > 0, &args)
 	if source == "" {
 		return "", nil
 	}
@@ -199,11 +235,17 @@ func pick(ctx context.Context, q querier, p pool, access catalog.AccessFilter, s
 	if len(exclude) > 0 {
 		filters = append(filters, fmt.Sprintf("NOT (candidate.content_id = ANY(%s))", bind(&args, exclude)))
 	}
-	sql := `SELECT candidate.content_id FROM (` + source + `) candidate`
+	sql += `SELECT candidate.content_id FROM (` + source + `) candidate`
 	if len(filters) > 0 {
 		sql += ` WHERE ` + strings.Join(filters, " AND ")
 	}
 	sql += ` ORDER BY random() LIMIT 1`
+	if p.libraryID > 0 {
+		// Libraries range from a few files to a million, so plan each
+		// execution for its bound library rather than settling on one
+		// generic plan for all of them.
+		args = append([]any{pgx.QueryExecModeCacheDescribe}, args...)
+	}
 	var contentID string
 	err := q.QueryRow(ctx, sql, args...).Scan(&contentID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -215,11 +257,40 @@ func pick(ctx context.Context, q querier, p pool, access catalog.AccessFilter, s
 	return contentID, nil
 }
 
+// sampleCTE defines shuffle_sample: the movies and episodes of a few random
+// files in libraryID. It draws ids uniformly from media_files' id range and
+// keeps each present file in the library that is its item's lowest-id present
+// file there, so an item with several files is no likelier than one with a
+// single file. Every item in the library is then equally likely to be
+// sampled, and a uniform pick among the sampled items in the pool is a
+// uniform pick from the pool.
+func sampleCTE(libraryID, draws int, args *[]any) string {
+	return fmt.Sprintf(`WITH shuffle_sample AS MATERIALIZED (
+		SELECT COALESCE(mf.episode_id, mf.content_id) AS content_id
+		FROM (
+			SELECT bounds.lo + floor(random() * (bounds.hi - bounds.lo + 1))::bigint AS id
+			FROM (%s) bounds, generate_series(1, %s)
+		) draw
+		JOIN media_files mf ON mf.id = draw.id
+		WHERE mf.media_folder_id = %s AND mf.missing_since IS NULL AND (
+			(mf.episode_id IS NOT NULL AND NOT EXISTS (
+				SELECT 1 FROM media_files lower_file
+				WHERE lower_file.episode_id = mf.episode_id AND lower_file.media_folder_id = mf.media_folder_id
+					AND lower_file.missing_since IS NULL AND lower_file.id < mf.id))
+			OR (mf.episode_id IS NULL AND NOT EXISTS (
+				SELECT 1 FROM media_files lower_file
+				WHERE lower_file.content_id = mf.content_id AND lower_file.episode_id IS NULL
+					AND lower_file.media_folder_id = mf.media_folder_id
+					AND lower_file.missing_since IS NULL AND lower_file.id < mf.id))
+		)
+	) `, sampleIDRange, bind(args, draws), bind(args, libraryID))
+}
+
 // playable reports whether contentID is still in the pool for this viewer:
 // present, reachable, and within the viewer's limits.
 func playable(ctx context.Context, q querier, p pool, access catalog.AccessFilter, contentID string) (bool, error) {
 	args := []any{}
-	source := candidates(p, access, &args)
+	source := candidates(p, access, false, &args)
 	if source == "" {
 		return false, nil
 	}
@@ -232,34 +303,41 @@ func playable(ctx context.Context, q querier, p pool, access catalog.AccessFilte
 }
 
 // candidates is the pool's playable items as one SQL relation with a
-// content_id column, or "" when the pool holds no kind of media.
-func candidates(p pool, access catalog.AccessFilter, args *[]any) string {
+// content_id column, or "" when the pool holds no kind of media. sampled
+// limits it to the items in shuffle_sample (see sampleCTE).
+func candidates(p pool, access catalog.AccessFilter, sampled bool, args *[]any) string {
 	branches := make([]string, 0, 2)
 	if p.movies {
-		branches = append(branches, movieCandidates(p, access, args))
+		branches = append(branches, movieCandidates(p, access, sampled, args))
 	}
 	if p.episodes {
-		branches = append(branches, episodeCandidates(p, access, args))
+		branches = append(branches, episodeCandidates(p, access, sampled, args))
 	}
 	return strings.Join(branches, " UNION ALL ")
 }
 
 // movieCandidates selects the pool's movies the viewer may see and play.
-func movieCandidates(p pool, access catalog.AccessFilter, args *[]any) string {
+func movieCandidates(p pool, access catalog.AccessFilter, sampled bool, args *[]any) string {
 	conditions := []string{"mi.type = 'movie'"}
 	if len(p.movieIDs) > 0 {
 		conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY(%s)", bind(args, p.movieIDs)))
 	}
+	if sampled {
+		conditions = append(conditions, "mi.content_id IN (SELECT content_id FROM shuffle_sample)")
+	}
 	conditions = appendItemAccess("mi", "mi.content_id", access, conditions, args)
-	conditions = append(conditions, playableFileExists("mf.content_id = mi.content_id", p.libraryID, access, args))
+	conditions = append(conditions, playableFile("mi.content_id", "mf.content_id", p.libraryID, sampled, access, args))
 	return `SELECT mi.content_id FROM media_items mi WHERE ` + strings.Join(conditions, " AND ")
 }
 
 // episodeCandidates selects the pool's episodes the viewer may see and play.
 // Maturity and library access come from the parent series, as everywhere else
 // in the catalog. Specials play like any other episode.
-func episodeCandidates(p pool, access catalog.AccessFilter, args *[]any) string {
+func episodeCandidates(p pool, access catalog.AccessFilter, sampled bool, args *[]any) string {
 	conditions := []string{}
+	if sampled {
+		conditions = append(conditions, "e.content_id IN (SELECT content_id FROM shuffle_sample)")
+	}
 	switch {
 	case p.hasSeason:
 		conditions = append(conditions,
@@ -278,7 +356,7 @@ func episodeCandidates(p pool, access catalog.AccessFilter, args *[]any) string 
 		conditions = append(conditions, "("+strings.Join(members, " OR ")+")")
 	}
 	conditions = appendItemAccess("si", "e.series_id", access, conditions, args)
-	conditions = append(conditions, playableFileExists("mf.episode_id = e.content_id", p.libraryID, access, args))
+	conditions = append(conditions, playableFile("e.content_id", "mf.episode_id", p.libraryID, sampled, access, args))
 	return `SELECT e.content_id FROM episodes e JOIN media_items si ON si.content_id = e.series_id AND si.type = 'series' WHERE ` +
 		strings.Join(conditions, " AND ")
 }
@@ -299,18 +377,27 @@ func appendItemAccess(alias, libraryKey string, access catalog.AccessFilter, con
 	return conditions
 }
 
-// playableFileExists requires a present file in an enabled library that the
-// viewer may play, and in libraryID when it is set.
-func playableFileExists(join string, libraryID int, access catalog.AccessFilter, args *[]any) string {
-	conditions := []string{join, "mf.missing_since IS NULL", "pf.enabled = TRUE"}
+// playableFile requires a present file of the item named by key, in an
+// enabled library, that the viewer may play, and in libraryID when it is set.
+// fileKey is the media_files column naming the item.
+//
+// For a library pool that is not sampled, the check is written as membership
+// in the library's playable files, so the planner can start from a small
+// library's files instead of testing every movie or episode on the server.
+// Otherwise it is a probe per item.
+func playableFile(key, fileKey string, libraryID int, sampled bool, access catalog.AccessFilter, args *[]any) string {
+	conditions := []string{"mf.missing_since IS NULL", "pf.enabled = TRUE"}
 	if libraryID > 0 {
 		conditions = append(conditions, fmt.Sprintf("mf.media_folder_id = %s", bind(args, libraryID)))
 	}
 	var fileAccess []string
 	fileAccess, *args = catalog.MediaFileAccessSQL("mf", access, *args)
 	conditions = append(conditions, fileAccess...)
-	return `EXISTS (SELECT 1 FROM media_files mf JOIN media_folders pf ON pf.id = mf.media_folder_id WHERE ` +
-		strings.Join(conditions, " AND ") + `)`
+	files := ` FROM media_files mf JOIN media_folders pf ON pf.id = mf.media_folder_id WHERE ` + strings.Join(conditions, " AND ")
+	if libraryID > 0 && !sampled {
+		return key + ` IN (SELECT ` + fileKey + files + `)`
+	}
+	return `EXISTS (SELECT 1` + files + ` AND ` + fileKey + ` = ` + key + `)`
 }
 
 // bind appends value to args and returns its placeholder.
