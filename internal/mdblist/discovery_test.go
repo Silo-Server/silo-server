@@ -206,6 +206,15 @@ func TestTransportErrorKeepsTimeoutClassification(t *testing.T) {
 	if !errors.As(err, &netErr) || !netErr.Timeout() {
 		t.Fatalf("sanitized error lost its timeout classification: %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
 	}
+	// The *url.Error As hands out is masked, and still classifies its cause.
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		t.Fatalf("no *url.Error in %q", strings.ReplaceAll(err.Error(), secretKey, "[KEY]"))
+	}
+	assertErrorOmitsAPIKey(t, urlErr, secretKey)
+	if !urlErr.Timeout() || !urlErr.Temporary() { //nolint:staticcheck // Temporary is what's being preserved.
+		t.Fatalf("masked *url.Error: Timeout %v, Temporary %v; want both", urlErr.Timeout(), urlErr.Temporary()) //nolint:staticcheck // as above.
+	}
 }
 
 func errorText(err error) string {

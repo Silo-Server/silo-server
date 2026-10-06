@@ -175,7 +175,13 @@ func maskAPIKeyError(err error, apiKey string) error {
 		return nil
 	}
 	if msg := err.Error(); redactAPIKey(msg, apiKey) != msg {
-		return redactedError{message: redactAPIKey(msg, apiKey), cause: err, apiKey: apiKey}
+		masked := redactedError{message: redactAPIKey(msg, apiKey), cause: err, apiKey: apiKey}
+		// A *url.Error asks its Err directly whether it timed out, so a masked
+		// net.Error has to answer too.
+		if ne, ok := err.(net.Error); ok { //nolint:errorlint // url.Error asserts its Err directly, so only err itself counts.
+			return redactedNetError{redactedError: masked, net: ne}
+		}
+		return masked
 	}
 	return err
 }
