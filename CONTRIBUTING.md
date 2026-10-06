@@ -287,6 +287,11 @@ Provide evidence that fits the change:
 - **Changes to a screen:** before-and-after screenshots of the same screen with
   the same data, one pair per affected surface. Add a short recording when
   motion, timing, focus movement, or a multi-step flow matters.
+- **Web app and web admin:** desktop and mobile web are separate surfaces. When
+  the change is also visible at a phone-width viewport, include before-and-after
+  captures for both desktop and mobile web (or a short recording that covers
+  both). Desktop-only screenshots are not enough unless the pull request shows
+  the change is desktop-only and mobile layout is unaffected.
 - **Server changes no client shows yet:** before-and-after excerpts of the API
   response for the same request, trimmed to the fields that changed, such as the
   ordered list of result titles.
