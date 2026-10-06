@@ -86,7 +86,7 @@ describe("CastCarousel", () => {
         <CastCarousel
           cast={[]}
           crewGroups={buildCrewGroups(
-            [{ name: "Vince Gilligan", job: "Director", person_id: "person-200" }],
+            [{ name: "Vince Gilligan", job: "Creator", person_id: "person-200" }],
             "Creator",
           )}
         />
@@ -109,6 +109,31 @@ describe("CastCarousel", () => {
     );
 
     expect(leads?.members.map((c) => c.name)).toEqual(["Vince Gilligan"]);
+  });
+
+  it("captions a series' directors as directors when it has no Creator credits", () => {
+    const [leads] = buildCrewGroups(
+      [{ name: "Michelle MacLaren", job: "Director", person_id: "person-201" }],
+      "Creator",
+    );
+
+    expect(leads?.role).toBe("Director");
+    expect(leads?.members.map((c) => c.name)).toEqual(["Michelle MacLaren"]);
+  });
+
+  it("keeps a writer who is a director past the lead cap in the Writers group", () => {
+    const [, writers] = buildCrewGroups(
+      [
+        { name: "First Director", job: "Director", person_id: "person-300" },
+        { name: "Second Director", job: "Director", person_id: "person-301" },
+        { name: "Third Director", job: "Director", person_id: "person-302" },
+        { name: "First Director", job: "Writer", person_id: "person-300" },
+        { name: "Third Director", job: "Writer", person_id: "person-302" },
+      ],
+      "Director",
+    );
+
+    expect(writers?.members.map((c) => c.name)).toEqual(["Third Director"]);
   });
 
   it("renders the plain cast row without dividers when no crew groups are passed", () => {
