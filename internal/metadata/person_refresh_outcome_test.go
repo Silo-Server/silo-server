@@ -157,3 +157,67 @@ func TestPersonRefreshRecordsOutcomeAfterTimeout(t *testing.T) {
 		t.Fatalf("recorded outcomes = %v, want [failed]", repo.outcomes)
 	}
 }
+
+// hookPersonProvider answers after running hook, standing in for whatever
+// happens while the lookup is out.
+type hookPersonProvider struct {
+	hook   func()
+	detail *PersonDetailResult
+}
+
+func (p hookPersonProvider) Slug() string       { return "tmdb" }
+func (p hookPersonProvider) Name() string       { return "tmdb" }
+func (p hookPersonProvider) ForTypes() []string { return []string{"person"} }
+
+func (p hookPersonProvider) GetPersonDetail(context.Context, PersonDetailRequest) (*PersonDetailResult, error) {
+	p.hook()
+	return p.detail, nil
+}
+
+// An admin's id correction made during the lookup wins: the answer, about the
+// old id, is neither stored nor recorded as an outcome.
+func TestPersonRefreshKeepsAnIDCorrectionMadeDuringTheLookup(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{ID: 7, Name: "Person", TmdbID: "7"})
+	corrected := models.Person{ID: 7, Name: "Person", TmdbID: "70"}
+	provider := hookPersonProvider{
+		hook:   func() { repo.persons[7] = corrected },
+		detail: &PersonDetailResult{Name: "Person", Bio: "About the old id"},
+	}
+	service := &PersonRefreshService{repo: repo}
+
+	got, err := service.refreshPersonWithProviders(context.Background(), 7, []Provider{provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TmdbID != "70" || got.Bio != "" {
+		t.Fatalf("returned %+v, want the corrected person unchanged", got)
+	}
+	if repo.persons[7] != corrected {
+		t.Fatalf("stored %+v, want the correction kept", repo.persons[7])
+	}
+	if len(repo.outcomes) != 0 {
+		t.Fatalf("recorded outcomes %v, want none", repo.outcomes)
+	}
+}
+
+// The answered outcome is recorded for the identity the update stored, which
+// resolving an id conflict can change from the refreshed person's.
+func TestPersonRefreshRecordsTheStoredIdentity(t *testing.T) {
+	repo := newFakePersonRefreshRepo(models.Person{ID: 7, Name: "Person", TmdbID: "7"})
+	stored := catalog.PersonIdentity{TmdbID: "7", ImdbID: "nm-restored"}
+	repo.storedIdentity = &stored
+	service := &PersonRefreshService{repo: repo}
+
+	got, err := service.refreshPersonWithProviders(context.Background(), 7, []Provider{
+		stubPersonProvider{slug: "tmdb", detail: &PersonDetailResult{Name: "Person"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(repo.identities, []catalog.PersonIdentity{stored}) {
+		t.Fatalf("recorded identities %v, want [%v]", repo.identities, stored)
+	}
+	if catalog.PersonIdentityOf(*got) != stored {
+		t.Fatalf("returned identity %v, want %v", catalog.PersonIdentityOf(*got), stored)
+	}
+}
