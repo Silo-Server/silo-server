@@ -3149,23 +3149,29 @@ func TestAvailableQualitiesV3LowerVersionServes4KWithout4KTranscode(t *testing.T
 }
 
 // The lower version is offered at the plain resolution that plays it
-// unchanged, which needs a class whose height does not scale it down.
+// unchanged, which needs a class whose height does not scale it down and a
+// requested version tall enough that the same preference does not keep it.
 func TestLowerVersionLabelV3(t *testing.T) {
+	uhd := SourceDescriptorV3{Width: 3840, Height: 2160}
 	cases := []struct {
+		requested     SourceDescriptorV3
 		width, height int
 		want          string
 	}{
-		{1920, 1080, "1080p"},
-		{1920, 800, "1080p"},
-		{1280, 720, "720p"},
-		{2560, 1440, ""},
-		{854, 480, ""},
-		{0, 0, ""},
+		{uhd, 1920, 1080, "1080p"},
+		{uhd, 1920, 800, "1080p"},
+		{uhd, 1280, 720, "720p"},
+		{uhd, 2560, 1440, ""},
+		{uhd, 854, 480, ""},
+		{uhd, 0, 0, ""},
+		// A width-only 4K source fits a 1080p preference itself.
+		{SourceDescriptorV3{Width: 3840, Height: 1080}, 1920, 1080, ""},
+		{SourceDescriptorV3{Width: 3840, Height: 1080}, 1280, 720, "720p"},
 	}
 	for _, tc := range cases {
-		got, ok := lowerVersionLabelV3(SourceDescriptorV3{Width: tc.width, Height: tc.height})
+		got, ok := lowerVersionLabelV3(tc.requested, SourceDescriptorV3{Width: tc.width, Height: tc.height})
 		if got != tc.want || ok != (tc.want != "") {
-			t.Errorf("lowerVersionLabelV3(%dx%d) = %q, %v, want %q", tc.width, tc.height, got, ok, tc.want)
+			t.Errorf("lowerVersionLabelV3(%dx%d, %dx%d) = %q, %v, want %q", tc.requested.Width, tc.requested.Height, tc.width, tc.height, got, ok, tc.want)
 		}
 	}
 }
