@@ -29,13 +29,13 @@ const (
 
 // adminTopActivityWatchSourceFilter keeps only history written by playback on
 // this server, so the leaderboards count what people actually played here.
+// Playback from Silo and Jellyfin clients both writes `playback` rows.
 // Marking something watched is not a play: `manual` rows (Silo clients) and
 // `jellycompat` rows (Jellyfin clients) are all marks, and marking a series
-// writes one row per episode. Jellyfin playback records progress but no
-// history row. This is an allowlist rather than a denylist of known providers
-// because plugin watch providers store their own arbitrary keys in `source` —
-// a denylist would silently count any newly installed provider's imported
-// backlog as local plays.
+// writes one row per episode. This is an allowlist rather than a denylist of
+// known providers because plugin watch providers store their own arbitrary
+// keys in `source` — a denylist would silently count any newly installed
+// provider's imported backlog as local plays.
 const adminTopActivityWatchSourceFilter = `COALESCE(h.source, 'legacy') IN ('legacy', 'playback')`
 
 // adminTopActivityQuerier is the part of a pool or transaction the
