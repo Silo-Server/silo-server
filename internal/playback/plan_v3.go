@@ -559,8 +559,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// so the video stays a copy instead of falling through to a transcode.
 		progressiveChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassProgressiveV3, source.AudioChannels)
 		hlsChannelLimited := !noAudioTrack && deliveryExceedsMaxChannelsV3(input.Request, DeliveryClassHLSV3, source.AudioChannels)
-		progressiveAudioOK := noAudioTrack || !progressiveChannelLimited &&
-			deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
+		progressiveCodecAudioOK := noAudioTrack || deliverySupportsAudioClaimV3(input.Request, DeliveryClassProgressiveV3, source.AudioCodec, audioClaims, audioOK)
 		hlsCodecAudioOK := noAudioTrack || hlsNativeAudioCodecV3(source.AudioCodec) &&
 			deliverySupportsAudioClaimV3(input.Request, DeliveryClassHLSV3, source.AudioCodec, audioClaims, audioOK)
 		// AAC frames in Matroska use a millisecond packet clock while each frame
@@ -570,7 +569,8 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// through the versioned timestamp-normalization recipe. Native original
 		// playback above remains byte-for-byte direct play.
 		firefoxAACTimingQuirk, normalizeMatroskaAAC := firefoxMatroskaAACTimingQuirkV3(source, input.Request)
-		progressiveTranscodeAudio := !progressiveAudioOK || normalizeMatroskaAAC
+		progressiveCodecTranscodeAudio := !progressiveCodecAudioOK || normalizeMatroskaAAC
+		progressiveTranscodeAudio := progressiveCodecTranscodeAudio || progressiveChannelLimited
 		hlsCodecTranscodeAudio := !hlsCodecAudioOK || normalizeMatroskaAAC
 		hlsTranscodeAudio := hlsCodecTranscodeAudio || hlsChannelLimited
 		hlsAudioQuirk, hlsAudioQuirkOK := hlsEAC3AudioCorrectionV3(source, input.Request)
@@ -594,10 +594,12 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		if progressiveTranscodeAudio && deliveryAvailableV3(input.Request, DeliveryClassProgressiveV3) {
 			progressiveAudioConvertOK = input.progressiveRemuxRegistry().Available(TransformationAudioToAACV3)
 		}
-		if progressiveTranscodeAudio && hlsTranscodeAudio {
+		if progressiveCodecTranscodeAudio && hlsCodecTranscodeAudio {
 			// Each delivery consults only its own eligible executor pool. A
 			// progressive proxy may run the conversion without implying that an
-			// HLS transcode node can, and vice versa.
+			// HLS transcode node can, and vice versa. A conversion forced only by
+			// a channel ceiling is not terminal: the video transcode below can
+			// still downmix through its own executor pool.
 			audioConvertOK := progressiveAudioConvertOK ||
 				hlsDeliveryOK && input.hlsRemuxRegistry().Available(TransformationAudioToAACV3)
 			if !audioConvertOK {
@@ -673,9 +675,11 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				// may still play over progressive. The terminal is reported once
 				// every remux recipe is exhausted.
 				hlsRouteOK = false
-				hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
-				if hlsQuirkConvertsAudio {
+				switch {
+				case hlsQuirkConvertsAudio:
 					hlsAudioConversionUnavailable = "The device-specific HLS route requires the validated AAC conversion toolchain."
+				case hlsCodecTranscodeAudio:
+					hlsAudioConversionUnavailable = "The HLS route requires the validated AAC conversion toolchain."
 				}
 			}
 			if hlsRouteOK {
@@ -2112,9 +2116,11 @@ func deliveryExceedsMaxChannelsV3(request StartRequestV3, deliveryClass string, 
 }
 
 // audioRemuxFitsServerCapV3 reports whether a video-copy remux that converts
-// the selected audio to AAC stays inside the administrator's bitrate cap. The
-// file's total bitrate already counts the audio track the AAC output replaces,
-// so adding the full AAC rate is an upper bound. The source descriptor's rate
+// the selected audio to AAC stays inside the administrator's bitrate cap, or
+// the client's bandwidth cap when that is lower: the planner has already folded
+// the two into Request.BandwidthCapKbps. The file's total bitrate already
+// counts the audio track the AAC output replaces, so adding the full AAC rate
+// is an upper bound. The source descriptor's rate
 // can be the video track's alone and would undercount. An unknown total cannot
 // be bounded and needs the budgeted transcode.
 func audioRemuxFitsServerCapV3(input PlannerInputV3, file *models.MediaFile, aacChannels int) bool {
@@ -2129,7 +2135,7 @@ func audioRemuxFitsServerCapV3(input PlannerInputV3, file *models.MediaFile, aac
 		return false
 	}
 	_, aacKbps := ResolveAACOutputV3(aacChannels, 0)
-	return totalBitrateKbps+aacKbps <= input.ServerBitrateCapKbps
+	return totalBitrateKbps+aacKbps <= optionalValueV3(input.Request.BandwidthCapKbps)
 }
 
 // deliverySupportsPlanV3 applies the capability limits scoped to the delivery
