@@ -76,6 +76,7 @@ import {
   type WatchRouteRequest,
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
+import { useCanUploadSubtitles } from "@/hooks/useCanUploadSubtitles";
 import { markPlaybackIntent } from "@/player/first-frame";
 
 const WatchPage = lazy(() =>
@@ -579,6 +580,7 @@ function WatchPlaybackHostContent() {
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
+  const canUploadSubtitles = useCanUploadSubtitles();
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
   // does not, or nobody knows yet. settingsCapabilitiesSupportKey collapses the
@@ -1152,6 +1154,7 @@ function WatchPlaybackHostContent() {
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
           canEditMarkers={canEditMarkers}
+          canUploadSubtitles={canUploadSubtitles}
           playbackRequestKey={requestKeyValue}
           onNavigateEpisode={handleNavigateEpisode}
           onEnded={handleEnded}

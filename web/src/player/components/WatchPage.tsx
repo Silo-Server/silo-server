@@ -170,6 +170,7 @@ function WatchPagePlayer({
   autoSkipRecap,
   autoPlayNextPreview,
   canEditMarkers,
+  canUploadSubtitles,
   seriesContext,
   onNavigateEpisode,
   onEnded,
@@ -688,6 +689,7 @@ function WatchPagePlayer({
       markerSegments={selectedVersion?.marker_segments}
       autoPlayNextPreview={autoPlayNextPreview}
       canEditMarkers={canEditMarkers}
+      canUploadSubtitles={canUploadSubtitles}
       onMarkersEdited={(fileId, markers) =>
         setPlaybackVersions((current) =>
           patchVersionMarkers(

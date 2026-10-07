@@ -30,7 +30,7 @@ function mockProviderStatus(status: Promise<unknown>) {
   );
 }
 
-async function openAddSubtitles() {
+function renderMenu(uploadEnabled?: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={queryClient}>
@@ -42,9 +42,14 @@ async function openAddSubtitles() {
         onDelayChange={() => {}}
         mediaFileId={42}
         playerConfig={config}
+        uploadEnabled={uploadEnabled}
       />
     </QueryClientProvider>,
   );
+}
+
+async function openAddSubtitles(uploadEnabled?: boolean) {
+  renderMenu(uploadEnabled);
   await waitFor(() =>
     expect(mocks.v2).toHaveBeenCalledWith(config, "GET /api/v2/subtitles/providers/status", {}),
   );
@@ -60,6 +65,25 @@ it("keeps upload but hides online search when the server reports no providers", 
   await waitFor(() => expect(screen.queryByText("Search online")).not.toBeInTheDocument());
   expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("button", { name: "Close" })).toHaveFocus());
+});
+
+it("hides upload but keeps online search without the subtitle_upload permission", async () => {
+  mockProviderStatus(Promise.resolve({ enabled: true, providers: ["opensubtitles"] }));
+  await openAddSubtitles(false);
+  expect(screen.queryByText("Upload form")).not.toBeInTheDocument();
+  expect(screen.getByText("Search online")).toBeInTheDocument();
+});
+
+it("hides Add Subtitles when upload is not permitted and no providers are configured", async () => {
+  mockProviderStatus(Promise.resolve({ enabled: false, providers: [] }));
+  renderMenu(false);
+  await waitFor(() =>
+    expect(mocks.v2).toHaveBeenCalledWith(config, "GET /api/v2/subtitles/providers/status", {}),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Enable captions" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("menuitem", { name: "Add Subtitles…" })).not.toBeInTheDocument(),
+  );
 });
 
 it.each([

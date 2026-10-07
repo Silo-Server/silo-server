@@ -9,7 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -55,10 +58,21 @@ func subtitleMultipart(t *testing.T, h http.Handler, path, filename string, data
 	h.ServeHTTP(rec, req)
 	return rec
 }
+
+// grantSubtitleUpload replaces the subtitle_upload gate with one that sees
+// member 1 holding the given permissions.
+func grantSubtitleUpload(deps *Dependencies, permissions ...string) {
+	users := map[int]*models.User{
+		1: {ID: 1, Role: "user", Enabled: true, Permissions: permissions},
+		2: {ID: 2, Role: "admin", Enabled: true},
+	}
+	deps.PermissionGates[policy.PermissionSubtitleUpload] = apimw.NewPermissionMiddleware(fakeUsers{users}, nil, nil).RequireSubtitleUpload
+}
 func TestSubtitleUploadV2MultipartAndLimits(t *testing.T) {
 	deps, _ := catalogDeps(t)
 	f := new(fakeSubtitleUploads)
 	deps.SubtitleUploads = f
+	grantSubtitleUpload(&deps, policy.PermissionSubtitleUpload)
 	h := newTestHandler(t, deps)
 	fields := map[string]string{"media_file_id": "42", "language": "fr", "language_override": "true", "hearing_impaired": "true", "release_name": "Synthetic"}
 	rec := subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("synthetic bytes"), fields, true)
@@ -74,6 +88,22 @@ func TestSubtitleUploadV2MultipartAndLimits(t *testing.T) {
 	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("x"), fields, true), TypeValidationFailed)
 	if f.calls != 1 {
 		t.Fatal("rejected multipart reached upload service")
+	}
+}
+func TestSubtitleUploadV2RequiresPermission(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	f := new(fakeSubtitleUploads)
+	deps.SubtitleUploads = f
+	grantSubtitleUpload(&deps, policy.PermissionMarkerEdit)
+	h := newTestHandler(t, deps)
+	fields := map[string]string{"media_file_id": "42"}
+	requireProblem(t, subtitleMultipart(t, h, "/subtitles/upload", "synthetic.en.srt", []byte("synthetic bytes"), fields, true), TypePermissionDenied)
+	if f.calls != 0 {
+		t.Fatal("upload without subtitle_upload reached the upload service")
+	}
+	// Detection stores nothing and stays open without the permission.
+	if rec := subtitleMultipart(t, h, "/subtitles/detect-language", "synthetic.en.srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nHello\n"), nil, true); rec.Code != http.StatusOK {
+		t.Fatal(rec.Code, rec.Body.String())
 	}
 }
 func TestSubtitleDetectionV2DoesNotRequireStorage(t *testing.T) {

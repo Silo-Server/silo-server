@@ -189661,7 +189661,7 @@
     },
     "/api/v2/subtitles/upload": {
       "post": {
-        "description": "Store a user subtitle file. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit.",
+        "description": "Store a user subtitle file. Requires the subtitle_upload permission. An enabled admin holds it implicitly while using the primary profile or declaring no profile; any other profile needs it assigned. Without it the request is 403 permission_denied. Send once: content deduplication does not provide durable replay across a later deletion or metadata edit.",
         "operationId": "uploadSubtitle",
         "parameters": [
           {
@@ -189858,8 +189858,9 @@
         "tags": [
           "subtitles"
         ],
-        "x-silo-class": "profile_scoped",
+        "x-silo-class": "permission_gated",
         "x-silo-demo-restricted": true,
+        "x-silo-permission": "subtitle_upload",
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }

@@ -40,6 +40,8 @@ interface SubtitleMenuProps {
   audioTracks?: PlayerAudioTrack[];
   /** Timing and sync state of the file's syncable tracks (stored and sidecar files). */
   subtitleSync?: SubtitleSync;
+  /** Whether the viewer may upload subtitle files; defaults to allowed. */
+  uploadEnabled?: boolean;
 }
 
 const DELAY_STEP_MS = 100;
@@ -72,6 +74,7 @@ export function SubtitleMenu({
   getSubtitleStartPosition,
   audioTracks,
   subtitleSync,
+  uploadEnabled = true,
 }: SubtitleMenuProps) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -364,7 +367,7 @@ export function SubtitleMenu({
             <TimingControls sync={subtitleSync} entry={activeSyncEntry} />
           )}
           <div className="shrink-0 border-t border-white/10 py-1">
-            {mediaFileId && playerConfig && (
+            {mediaFileId && playerConfig && (uploadEnabled || onlineSearchEnabled) && (
               <button
                 ref={(el) => {
                   menuItemsRef.current[menuItemIndex + 1] = el;
@@ -430,6 +433,7 @@ export function SubtitleMenu({
             playerConfig={playerConfig}
             isOpen={searchOpen}
             onlineSearchEnabled={onlineSearchEnabled}
+            uploadEnabled={uploadEnabled}
             onClose={() => setSearchOpen(false)}
             onSubtitleDownloaded={(subtitle) => {
               setSearchOpen(false);

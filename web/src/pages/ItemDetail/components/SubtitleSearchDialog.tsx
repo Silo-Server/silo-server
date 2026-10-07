@@ -37,6 +37,8 @@ interface SubtitleSearchDialogProps {
   onOpenChange: (open: boolean) => void;
   version: FileVersion | null;
   title: string;
+  /** Whether the viewer holds subtitle_upload; the server enforces it either way. */
+  uploadEnabled: boolean;
 }
 
 const providerInfo: Record<string, { abbr: string; className: string }> = {
@@ -80,6 +82,7 @@ export default function SubtitleSearchDialog({
   onOpenChange,
   version,
   title,
+  uploadEnabled,
 }: SubtitleSearchDialogProps) {
   const downloadSubtitleMutation = useDownloadSubtitle();
   const uploadSubtitleMutation = useUploadSubtitle();
@@ -242,7 +245,7 @@ export default function SubtitleSearchDialog({
 
         <TooltipProvider delayDuration={250}>
           <div className="overlay-scroll min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
-            {version && (
+            {version && uploadEnabled && (
               <SubtitleUploadForm
                 mediaFileId={version.file_id}
                 upload={handleUpload}

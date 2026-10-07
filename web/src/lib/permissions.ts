@@ -2,6 +2,7 @@ import type { Profile, User } from "@/api/types";
 
 export const PERMISSION_METADATA_CURATION = "metadata_curation";
 export const PERMISSION_MARKER_EDIT = "marker_edit";
+export const PERMISSION_SUBTITLE_UPLOAD = "subtitle_upload";
 
 /**
  * Whether the account is currently acting with admin powers. Admin powers are
@@ -49,6 +50,13 @@ export function canEditMarkers(
   profile: Pick<Profile, "is_primary"> | null,
 ) {
   return hasPermission(user, PERMISSION_MARKER_EDIT, profile);
+}
+
+export function canUploadSubtitles(
+  user: Pick<User, "role" | "permissions"> | null | undefined,
+  profile: Pick<Profile, "is_primary"> | null,
+) {
+  return hasPermission(user, PERMISSION_SUBTITLE_UPLOAD, profile);
 }
 
 export function hasAssignedPermission(permissions: string[] | undefined, permission: string) {

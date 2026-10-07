@@ -88,6 +88,7 @@ import InviteCodesTab from "./admin-settings/InviteCodesTab";
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
+  PERMISSION_SUBTITLE_UPLOAD,
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
@@ -785,7 +786,7 @@ function UserForm({
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
   const [permissions, setPermissions] = useState<string[]>(
-    user?.permissions ?? [PERMISSION_MARKER_EDIT],
+    user?.permissions ?? [PERMISSION_MARKER_EDIT, PERMISSION_SUBTITLE_UPLOAD],
   );
   // Policy fields inherit from the access group unless explicitly overridden.
   const [policy, setPolicy] = useState(() => policyStateFromUser(user ?? null));
@@ -798,6 +799,7 @@ function UserForm({
   const enabledId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
+  const subtitleUploadId = useId();
   const maxProfilesId = useId();
   const accessGroupSelectId = useId();
   const createMutation = useCreateUser();
@@ -1125,6 +1127,23 @@ function UserForm({
                 onCheckedChange={(checked) =>
                   setPermissions((current) =>
                     setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
+                  )
+                }
+              />
+            </div>
+            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+              <div>
+                <Label htmlFor={subtitleUploadId}>Subtitle Upload</Label>
+                <p className="text-muted-foreground text-xs">
+                  Upload subtitle files that everyone with access to the item can use.
+                </p>
+              </div>
+              <Switch
+                id={subtitleUploadId}
+                checked={hasAssignedPermission(permissions, PERMISSION_SUBTITLE_UPLOAD)}
+                onCheckedChange={(checked) =>
+                  setPermissions((current) =>
+                    setAssignedPermission(current, PERMISSION_SUBTITLE_UPLOAD, checked),
                   )
                 }
               />

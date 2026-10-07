@@ -243,7 +243,7 @@ func (h *AuthHandler) Login(ctx context.Context, in LoginInput) (TokenPairView, 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil),
+		User:         buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -284,7 +284,7 @@ func (h *AuthHandler) NetworkSignIn(ctx context.Context, in NetworkSignInInput) 
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(pair.User, effectiveDownloadAllowed(ctx, pair.User, h.accessGroups), nil, nil),
+		User:         buildUserResponse(pair.User, effectiveAccountPolicy(ctx, pair.User, h.accessGroups), nil, nil),
 	}, nil
 }
 
@@ -511,14 +511,14 @@ func (h *AuthHandler) CurrentUser(ctx context.Context, claims *auth.Claims) (Use
 		return UserView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}
 
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), claims.ImpersonatorUserID, impersonator), nil
 }
 
 // OAuthUserView projects the account read while redemption opened its login
 // session. Reading that account again could lose an already-redeemed login
 // during a temporary database failure.
 func (h *AuthHandler) OAuthUserView(ctx context.Context, user *models.User) UserView {
-	return buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)
+	return buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)
 }
 
 // HandleListSessions handles GET /auth/sessions. Requires authentication.
@@ -606,41 +606,57 @@ func (h *AuthHandler) HandleSignup(w http.ResponseWriter, r *http.Request) {
 
 // --- Helper functions ---
 
-func buildLoginResponse(pair *auth.TokenPair, user *models.User, downloadAllowed bool, impersonator *models.User) loginResponse {
+func buildLoginResponse(pair *auth.TokenPair, user *models.User, policy accountPolicy, impersonator *models.User) loginResponse {
 	return loginResponse{
 		AccessToken:  pair.AccessToken,
 		RefreshToken: pair.RefreshToken,
 		ExpiresIn:    pair.ExpiresIn,
-		User:         buildUserResponse(user, downloadAllowed, impersonatorUserID(impersonator), impersonator),
+		User:         buildUserResponse(user, policy, impersonatorUserID(impersonator), impersonator),
 	}
 }
 
-// effectiveDownloadAllowed resolves the account's download gate through the
-// inherit/override policy (user override, else access group, else permissive
-// default). A failed group lookup reports downloads as unavailable rather than
-// falling back to the raw account value, which is not meaningful on its own.
-func effectiveDownloadAllowed(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) bool {
+// accountPolicy is the slice of the effective access policy the account
+// payload reports, so clients show only what the server's gates allow.
+type accountPolicy struct {
+	DownloadAllowed bool
+	Permissions     []string
+}
+
+// effectiveAccountPolicy resolves the account's download gate and permissions
+// through the inherit/override policy (user override, else access group, else
+// permissive default), the same resolution the route gates enforce. A failed
+// group lookup fails closed: no downloads and no permissions, matching the
+// gates, which deny when the policy cannot be resolved.
+func effectiveAccountPolicy(ctx context.Context, user *models.User, groups access.GroupPolicyProvider) accountPolicy {
 	if user == nil {
-		return false
+		return accountPolicy{Permissions: []string{}}
 	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, groups)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to resolve effective download policy", "component", "api", "user_id", user.ID, "error", err)
-		return false
+		slog.WarnContext(ctx, "failed to resolve effective account policy", "component", "api", "user_id", user.ID, "error", err)
+		return accountPolicy{Permissions: []string{}}
 	}
-	return effective.DownloadAllowed
+	policy := accountPolicy{DownloadAllowed: effective.DownloadAllowed, Permissions: []string{}}
+	if user.Enabled {
+		policy.Permissions = auth.PolicyPermissions(effective)
+	}
+	return policy
 }
 
-func buildUserResponse(user *models.User, downloadAllowed bool, impersonatorUserID *int, impersonator *models.User) UserView {
+func buildUserResponse(user *models.User, policy accountPolicy, impersonatorUserID *int, impersonator *models.User) UserView {
 	resp := UserView{
 		ID:              user.ID,
 		Username:        user.Username,
 		Email:           user.Email,
 		Role:            user.Role,
-		Permissions:     auth.EffectivePermissions(user),
-		DownloadAllowed: downloadAllowed,
+		Permissions:     policy.Permissions,
+		DownloadAllowed: policy.DownloadAllowed,
 		// An impersonating administrator is not restricted (auth.Service.Refresh).
 		PasswordChangeRequired: user.PasswordChangeRequired && impersonatorUserID == nil,
+	}
+	if resp.Permissions == nil {
+		// v1 clients iterate permissions; never serialize it as null.
+		resp.Permissions = []string{}
 	}
 	if impersonatorUserID != nil {
 		resp.Impersonation = &ImpersonationView{

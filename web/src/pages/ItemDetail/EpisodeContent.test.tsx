@@ -123,6 +123,7 @@ vi.mock("@/hooks/queries/ratings", () => ({
 vi.mock("@/hooks/queries/subtitles", () => ({
   useDeleteSubtitlePreference: () => ({ mutate: vi.fn() }),
   useSetSubtitlePreference: () => ({ mutate: vi.fn() }),
+  useCanAddSubtitles: () => true,
 }));
 
 vi.mock("@/components/CastCarousel", () => ({

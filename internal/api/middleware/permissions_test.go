@@ -200,3 +200,44 @@ func TestRequireMetadataCurationForItem_GroupLookupFailureIsForbidden(t *testing
 		t.Fatalf("status = %d, want %d when the group policy cannot be resolved", code, http.StatusForbidden)
 	}
 }
+
+// The legacy gates apply the access group's permission mask, as the
+// PDP-backed gates and the account payload do.
+func TestLegacyPermissionGatesApplyGroupPermissionMask(t *testing.T) {
+	groupID := int64(3)
+	user := &models.User{
+		ID:            7,
+		Role:          "user",
+		Enabled:       true,
+		AccessGroupID: &groupID,
+		Permissions:   []string{string(auth.PermissionMarkerEdit), string(auth.PermissionMetadataCuration)},
+	}
+	masked := middlewareGroupProvider{group: &access.GroupPolicy{AllowedPermissions: []string{}}}
+	unmasked := middlewareGroupProvider{group: &access.GroupPolicy{}}
+
+	if code := runMetadataCurationMiddlewareWithGroup(user, []int{1}, masked); code != http.StatusForbidden {
+		t.Fatalf("curation status = %d, want %d when the group masks metadata_curation", code, http.StatusForbidden)
+	}
+	if code := runMetadataCurationMiddlewareWithGroup(user, []int{1}, unmasked); code != http.StatusNoContent {
+		t.Fatalf("curation status = %d, want %d when the group does not mask", code, http.StatusNoContent)
+	}
+
+	runMarker := func(groups access.GroupPolicyProvider) int {
+		mw := NewPermissionMiddleware(fakePermissionUserLoader{user: user}, nil, nil, groups)
+		next := mw.RequireMarkerEdit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		}))
+		rec := httptest.NewRecorder()
+		next.ServeHTTP(rec, requestWithItemID("user"))
+		return rec.Code
+	}
+	if code := runMarker(masked); code != http.StatusForbidden {
+		t.Fatalf("marker status = %d, want %d when the group masks marker_edit", code, http.StatusForbidden)
+	}
+	if code := runMarker(unmasked); code != http.StatusNoContent {
+		t.Fatalf("marker status = %d, want %d when the group does not mask", code, http.StatusNoContent)
+	}
+	if code := runMarker(middlewareGroupProvider{err: errors.New("group store down")}); code != http.StatusForbidden {
+		t.Fatalf("marker status = %d, want %d when the group policy cannot be resolved", code, http.StatusForbidden)
+	}
+}

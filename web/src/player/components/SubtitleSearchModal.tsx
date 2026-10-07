@@ -18,8 +18,10 @@ interface SubtitleSearchModalProps {
    * player can show its automatic sync while it runs.
    */
   onSubtitleDownloaded: (subtitle?: StoredSubtitle) => void;
-  /** False hides the online-search section; manual upload stays available. */
+  /** False hides the online-search section. */
   onlineSearchEnabled?: boolean;
+  /** False hides manual upload; the viewer lacks subtitle_upload. */
+  uploadEnabled?: boolean;
 }
 
 interface ProviderInfo {
@@ -47,6 +49,7 @@ export function SubtitleSearchModal({
   onClose,
   onSubtitleDownloaded,
   onlineSearchEnabled = true,
+  uploadEnabled = true,
 }: SubtitleSearchModalProps) {
   const [selectedLang, setSelectedLang] = useState("en");
   const [results, setResults] = useState<SubtitleResult[]>([]);
@@ -286,15 +289,17 @@ export function SubtitleSearchModal({
           </button>
         </div>
 
-        <SubtitleUploadForm
-          mediaFileId={mediaFileId}
-          upload={handleUpload}
-          detectLanguage={handleDetectLanguage}
-          onSuccess={handleUploadSuccess}
-          onError={setError}
-          variant="player"
-          defaultLanguage={selectedLang}
-        />
+        {uploadEnabled && (
+          <SubtitleUploadForm
+            mediaFileId={mediaFileId}
+            upload={handleUpload}
+            detectLanguage={handleDetectLanguage}
+            onSuccess={handleUploadSuccess}
+            onError={setError}
+            variant="player"
+            defaultLanguage={selectedLang}
+          />
+        )}
 
         {onlineSearchEnabled && (
           <div className="border-b border-white/10 px-4 py-2">

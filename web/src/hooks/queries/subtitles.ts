@@ -167,6 +167,15 @@ export function useSubtitleProviderStatus() {
   });
 }
 
+/**
+ * Whether the "Add subtitles" action has anything to offer: a manual upload the
+ * viewer may make, or online search, which fails open like the probe above.
+ */
+export function useCanAddSubtitles(canUpload: boolean) {
+  const providerStatus = useSubtitleProviderStatus();
+  return canUpload || providerStatus.data?.enabled !== false;
+}
+
 // Subtitle preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
 function invalidateItemDetails(queryClient: ReturnType<typeof useQueryClient>): Promise<unknown> {

@@ -3,7 +3,11 @@ import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
-import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
+import {
+  useCanAddSubtitles,
+  useDeleteSubtitlePreference,
+  useSetSubtitlePreference,
+} from "@/hooks/queries/subtitles";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -49,6 +53,7 @@ import {
 } from "@/lib/permissions";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
+import { useCanUploadSubtitles } from "@/hooks/useCanUploadSubtitles";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -65,6 +70,8 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const qualityPreference = useQualityPreference(currentProfile?.quality_preference);
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
+  const canUploadSubtitles = useCanUploadSubtitles();
+  const canAddSubtitles = useCanAddSubtitles(canUploadSubtitles);
   const [editOpen, setEditOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
@@ -402,7 +409,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                   : undefined
               }
               onSearchSubtitles={
-                (item.versions?.length ?? 0) > 0 ? () => setSubtitleSearchOpen(true) : undefined
+                canAddSubtitles && (item.versions?.length ?? 0) > 0
+                  ? () => setSubtitleSearchOpen(true)
+                  : undefined
               }
               qualityPreference={qualityPreference}
               audioSelectionMode={audioSelectionMode}
@@ -474,6 +483,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         onOpenChange={setSubtitleSearchOpen}
         version={selectedVersion}
         title={title}
+        uploadEnabled={canUploadSubtitles}
       />
       {canCurateMetadata && (
         <MediaInfoDialog

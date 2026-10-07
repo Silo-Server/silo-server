@@ -176,10 +176,26 @@ framing and other fields. Supported filename extensions are SRT, VTT, ASS, SSA,
 and SUB. The filename determines format; the file part can use
 `application/octet-stream`.
 
-Authentication and profile gates precede multipart parsing. The shared service
-checks file and parent-item access before storage and derives uploader identity
-from the authenticated account. Demo mode refuses uploads. Language selection
-retains filename, metadata and content detection with a manual fallback;
+Uploading requires the `subtitle_upload` account permission. An acting admin
+holds it implicitly; anyone else needs it assigned and allowed by their access
+group's `allowed_permissions`. It is granted to new accounts by default and can
+be revoked per account or per group. Without it the request is `403`
+`permission_denied` and the form is not read. Clients show manual upload when
+the caller acts as admin (role `admin` with the primary profile or no profile
+declared) or when `permissions` from `GET /api/v2/account/me` lists
+`subtitle_upload`. That list holds an admin's assigned permissions only, so the
+acting-admin case must be checked separately. Online search and provider
+downloads do not depend on the permission. Revoking the
+permission leaves existing uploads in place. Language detection
+(`POST /api/v2/subtitles/detect-language`) stores nothing and stays open to any
+viewer. The frozen `POST /api/v1/subtitles/upload` does not check the
+permission.
+
+Authentication, profile, and permission gates precede multipart parsing. The
+shared service checks file and parent-item access before storage and derives
+uploader identity from the authenticated account. Demo mode refuses uploads.
+Language selection retains filename, metadata and content detection with a
+manual fallback;
 `language_override=true` explicitly selects the supplied valid language. Success
 returns the same `200` public `subtitle` projection as provider download.
 

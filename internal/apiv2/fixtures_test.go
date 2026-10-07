@@ -1851,6 +1851,7 @@ func fixtureDeps() Dependencies {
 	deps.AdminUnmatchedFiles = &fakeAdminUnmatched{}
 	deps.AdminCatalogImages = &fakeAdminImages{}
 	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
+	grantSubtitleUpload(&deps, policy.PermissionSubtitleUpload)
 	deps.LibraryJobs = &fixtureAdminCollectionJobs{fakeLibraryJobs: *deps.LibraryJobs.(*fakeLibraryJobs)}
 	deps.LibrarySections = &fakeLibraryViews{}
 	deps.LibraryCollections = &fakeLibraryViews{}

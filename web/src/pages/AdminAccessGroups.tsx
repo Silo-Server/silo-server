@@ -53,7 +53,11 @@ import {
   useUpdateRequestGroupLimit,
 } from "@/hooks/queries/admin/requests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
+import {
+  PERMISSION_MARKER_EDIT,
+  PERMISSION_METADATA_CURATION,
+  PERMISSION_SUBTITLE_UPLOAD,
+} from "@/lib/permissions";
 import {
   describeInheritedValue,
   formatRequestApproval,
@@ -74,7 +78,7 @@ import {
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
 
-// The two assignable permissions (mirrors auth.assignablePermissions). A group
+// The assignable permissions (mirrors auth.assignablePermissions). A group
 // mask of `null` means "all assignable"; a list narrows to those named.
 const ASSIGNABLE_PERMISSIONS: Array<{ value: string; label: string; description: string }> = [
   {
@@ -86,6 +90,11 @@ const ASSIGNABLE_PERMISSIONS: Array<{ value: string; label: string; description:
     value: PERMISSION_MARKER_EDIT,
     label: "Marker editing",
     description: "Create and adjust intro / credit markers.",
+  },
+  {
+    value: PERMISSION_SUBTITLE_UPLOAD,
+    label: "Subtitle upload",
+    description: "Upload subtitle files that everyone with access to the item can use.",
   },
 ];
 

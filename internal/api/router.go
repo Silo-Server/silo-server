@@ -526,6 +526,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
 	var metadataCurationAccess func(http.Handler) http.Handler
 	var markerEditAccess func(http.Handler) http.Handler
+	var subtitleUploadAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
@@ -633,20 +634,30 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		if deps.PolicySystem != nil {
-			markerEditAccess = apimw.NewPolicyPermissionMiddleware(
+			// Account-scoped gates do not resolve target libraries.
+			accountPermissions := apimw.NewPolicyPermissionMiddleware(
 				userRepo,
-				nil, // marker gate does not resolve target libraries
+				nil,
 				checkPrimaryProfile,
 				permissionPDP,
 				accessGroupStore,
-			).RequireMarkerEdit
+			)
+			markerEditAccess = accountPermissions.RequireMarkerEdit
+			subtitleUploadAccess = accountPermissions.RequireSubtitleUpload
 		} else {
 			// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 			markerEditAccess = apimw.NewPermissionMiddleware(
 				userRepo,
 				nil,
 				checkPrimaryProfile,
+				accessGroupStore,
 			).RequireMarkerEdit
+			subtitleUploadAccess = apimw.NewPermissionMiddleware(
+				userRepo,
+				nil,
+				checkPrimaryProfile,
+				accessGroupStore,
+			).RequireSubtitleUpload
 		}
 	}
 	if deps.SessionMgr != nil && userRepo != nil {
@@ -2278,7 +2289,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		settingsRepo,
 		compatUsers,
 	)
-	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, settingsRepo)
+	v2deps := v2Dependencies(deps, authMiddleware, viewerAccessMiddleware, requireActingAdmin, metadataCurationAccess, markerEditAccess, subtitleUploadAccess, settingsRepo)
 	v2deps.CompatConnectInfo = compatConnectInfoHandler
 	// Server identity is public discovery data, so it reads through the raw
 	// settings repo: a SECRET_KEY rotation must not change who the server is.
@@ -5086,6 +5097,7 @@ func v2Dependencies(
 	actingAdmin func(http.Handler) http.Handler,
 	metadataCuration func(http.Handler) http.Handler,
 	markerEdit func(http.Handler) http.Handler,
+	subtitleUpload func(http.Handler) http.Handler,
 	settings catalog.SettingsStore,
 ) apiv2.Dependencies {
 	out := apiv2.Dependencies{
@@ -5103,6 +5115,9 @@ func v2Dependencies(
 	}
 	if markerEdit != nil {
 		out.PermissionGates[policy.PermissionMarkerEdit] = markerEdit
+	}
+	if subtitleUpload != nil {
+		out.PermissionGates[policy.PermissionSubtitleUpload] = subtitleUpload
 	}
 	if settings != nil {
 		out.DemoSettings = settings

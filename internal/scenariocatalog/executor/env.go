@@ -370,7 +370,7 @@ func (e *Env) Reseed() {
 		) VALUES (
 			'Default Group', 'Applied automatically to newly created users.', true, NULL, '',
 			true, false, 5, 5,
-			ARRAY['marker_edit'], true
+			ARRAY['marker_edit', 'subtitle_upload'], true
 		)`,
 		`DELETE FROM server_settings WHERE key IN ('demo.enabled','signup.enabled','server.public_url','branding.server_name','sections.allow_profile_custom_sections')`,
 	} {

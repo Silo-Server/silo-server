@@ -345,7 +345,7 @@ func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, devi
 	if err != nil {
 		return TokenPairView{}, err
 	}
-	return TokenPairView(buildLoginResponse(pair, user, effectiveDownloadAllowed(ctx, user, h.groupPolicyProvider()), actor)), nil
+	return TokenPairView(buildLoginResponse(pair, user, effectiveAccountPolicy(ctx, user, h.groupPolicyProvider()), actor)), nil
 }
 
 // ownershipTransferrer moves the server Owner role. *auth.UserRepository

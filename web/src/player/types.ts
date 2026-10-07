@@ -294,6 +294,8 @@ export interface WatchPageProps {
   autoSkipRecap?: boolean;
   autoPlayNextPreview?: boolean;
   canEditMarkers?: boolean;
+  /** Whether the viewer may upload subtitle files; the server enforces it either way. */
+  canUploadSubtitles?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
   onEnded?: (state?: PlaybackExitState) => void | Promise<void>;

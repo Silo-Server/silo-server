@@ -11,6 +11,7 @@ import { useAdminUserDownloadSummary } from "@/hooks/queries/admin/userActivity"
 import {
   PERMISSION_MARKER_EDIT,
   PERMISSION_METADATA_CURATION,
+  PERMISSION_SUBTITLE_UPLOAD,
   hasAssignedPermission,
 } from "@/lib/permissions";
 import type { ResolvedRequestTerms } from "@/lib/requestAccess";
@@ -121,6 +122,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
 
   const marker = hasAssignedPermission(effective.permissions, PERMISSION_MARKER_EDIT);
   const curate = hasAssignedPermission(effective.permissions, PERMISSION_METADATA_CURATION);
+  const uploadSubtitles = hasAssignedPermission(effective.permissions, PERMISSION_SUBTITLE_UPLOAD);
   const videoText = videoTranscodingText(
     videoTranscodingFromEffective(effective.transcode_allowed, effective.max_transcodes),
   );
@@ -158,7 +160,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
       <SummaryLine
         icon={<LayoutGrid />}
         title={libraryListText(effective.library_ids, libraries)}
-        detail={`${marker ? "Can" : "Can't"} edit markers · ${curate ? "can" : "can't"} curate metadata`}
+        detail={`${marker ? "Can" : "Can't"} edit markers · ${curate ? "can" : "can't"} curate metadata · ${uploadSubtitles ? "can" : "can't"} upload subtitles`}
       />
       <SummaryLine
         icon={<Play />}
