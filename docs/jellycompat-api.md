@@ -36,7 +36,10 @@ reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
 uses its child episodes. Parent reads and mutation responses derive `Played`,
 `PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
-parent's favorite status; an empty parent remains unplayed. A combined
+parent's favorite status; an empty parent remains unplayed. As in Jellyfin,
+reads derive `PlayedPercentage` from the resume position, so a watched movie or
+episode with no resume point omits it, while a played series or season reports
+100. A combined
 played/favorite update commits the child progress and history together with the
 series or season's favorite status; a storage failure rolls back the entire
 update. Marking played or unplayed clears the resume position unless the request
