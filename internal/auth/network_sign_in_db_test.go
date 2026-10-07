@@ -259,6 +259,15 @@ func TestNetworkRefusalBlocksLocalPasswordDB(t *testing.T) {
 		}
 	}
 
+	// An identity that answered unsupported, with nothing to bound, is still
+	// asked again, so a plugin that gains checks can refuse the person.
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, last_checked_at = NOW() - INTERVAL '13 hours' WHERE id = $1`,
+		networkIdentityID, CheckStatusUnsupported)
+	if due, err := env.recheck.IdleRecheckDue(ctx); err != nil || !due {
+		t.Fatalf("re-check due after an unsupported answer = %v, %v; want due", due, err)
+	}
+	exec(`UPDATE plugin_auth_identities SET last_check_status = $2 WHERE id = $1`, networkIdentityID, CheckStatusNotFound)
+
 	// So does one that arrives while a refusal waits to be applied.
 	exec(`UPDATE plugin_auth_identities SET last_check_status = $2, pending_refusal = $3 WHERE id = $1`,
 		networkIdentityID, CheckStatusActive, CheckStatusNotFound)

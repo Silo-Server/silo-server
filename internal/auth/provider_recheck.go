@@ -771,8 +771,9 @@ const scheduledRecheckBatch = 100
 // through a network identity: those sessions defer to it (primaryAuthorityOf),
 // but their refresh re-checks only the network identity. A network identity
 // of an account that keeps its local password is due without any credential
-// to bound: its refusal also blocks that password (networkRefused), and its
-// next active answer lifts the block.
+// to bound, even after an unsupported answer (a plugin may gain checks): its
+// refusal also blocks that password (networkRefused), and its next active
+// answer lifts the block.
 //
 // At an installation that is no longer an enabled sign-in provider nobody
 // can be asked, so the pass only bounds the API keys and Audiobookshelf
@@ -785,7 +786,9 @@ var idleIdentityCondition = `
 		OR i.last_checked_at <= NOW() - make_interval(secs => $1)
 		OR (i.last_check_status = 'unavailable' AND i.last_checked_at <= NOW() - make_interval(secs => $2)))
 	AND EXISTS (SELECT 1 FROM users u WHERE u.id = i.user_id AND NOT u.break_glass
-		AND NOT (i.last_check_status = 'unsupported' AND u.local_password_login_enabled)
+		AND NOT (i.last_check_status = 'unsupported' AND u.local_password_login_enabled
+			AND NOT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = i.plugin_installation_id
+				AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `))
 		AND (EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
 				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled)
 			OR (NOT u.local_password_login_enabled
