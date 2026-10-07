@@ -977,35 +977,28 @@ func TestHandlePlaybackPositionlessStoppedUsesQueuedReportPosition(t *testing.T)
 	f := newResumeScrobbleFixture(0)
 	f.handler.tm = playback.NewTranscodeManager()
 	scrobbler := newGatedCompatWatchScrobbler()
-	scrobbler.blockStart = 1
 	f.handler.WatchScrobbler = &confirmingGatedCompatWatchScrobbler{scrobbler}
+	f.startStream(t)
 
-	started := make(chan error, 1)
-	go func() {
-		_, err := f.handler.ensureUpstreamPlayback(context.Background(), f.session, "play-1", f.source, "direct")
-		started <- err
-	}()
-	<-scrobbler.entered
-	reported := make(chan int, 1)
-	go func() { reported <- f.postReport(551, false) }()
-	waitForCompatScrobbleWaiter(t, f.handler, "upstream-started")
+	// Hold the lock as an in-flight report does and apply its position once
+	// Stopped queues behind it. Mutex waiters can acquire the lock in either order.
+	unlock := sync.OnceFunc(f.handler.compatScrobbleLocks.lock("upstream-started"))
+	defer unlock()
 	stopped := make(chan int, 1)
 	go func() {
 		stopped <- f.postStopped(`{"PlaySessionId":"play-1","MediaSourceId":"` + f.source.ID + `"}`)
 	}()
-	waitForCompatScrobbleHolders(t, f.handler, "upstream-started", 3)
-	close(scrobbler.release)
-	if err := <-started; err != nil {
-		t.Fatalf("ensureUpstreamPlayback: %v", err)
+	waitForCompatScrobbleWaiter(t, f.handler, "upstream-started")
+	if err := f.mgr.UpdateProgress("upstream-started", 551, false); err != nil {
+		t.Fatalf("update progress: %v", err)
 	}
-	for _, done := range []chan int{reported, stopped} {
-		if code := <-done; code != http.StatusNoContent {
-			t.Fatalf("report status = %d", code)
-		}
+	unlock()
+	if code := <-stopped; code != http.StatusNoContent {
+		t.Fatalf("stopped status = %d", code)
 	}
 
 	calls, _ := scrobbler.snapshot()
-	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("start", 551), scrobbleAt("stop", 551))
+	assertCompatScrobbles(t, calls, scrobbleAt("start", 0), scrobbleAt("stop", 551))
 }
 
 // A position-less Stopped report that waited while another stop staged its

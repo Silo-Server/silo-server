@@ -27,12 +27,15 @@ func (f *fakeSourceWrites) UpdateAdminAutoscanSource(_ context.Context, id strin
 	return f.CreateAdminAutoscanSource(context.Background(), in)
 }
 func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
+	f := new(fakeSourceWrites)
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	deps.AdminAutoscanSourceWrites = nil
+	missing := NewHandler(deps)
 	for _, method := range []string{"POST", "PUT"} {
 		t.Run(method, func(t *testing.T) {
-			f := new(fakeSourceWrites)
-			deps := pilotDeps(nil, nil)
-			deps.AdminAutoscanSourceWrites = f
-			h := NewHandler(deps)
+			*f = fakeSourceWrites{}
 			path := Prefix + "/admin/autoscan/sources"
 			status := 201
 			body := `{"plugin_id":"plugin","capability_id":"cap","enabled":true,"path_rewrites":[{"from":"a","to":"b"}]}`
@@ -67,8 +70,30 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String())
 				}
 			}
-			deps.AdminAutoscanSourceWrites = nil
-			requireProblem(t, do(t, NewHandler(deps), method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, method, path, body, bearer(adminToken)), TypeDependencyUnavailable)
 		})
+	}
+}
+
+// A missing required server is a validation problem that names the field, so
+// a client can point the operator at the connection picker.
+func TestAdminAutoscanSourceWriteConnectionRequiredProblem(t *testing.T) {
+	f := &fakeSourceWrites{err: handlers.ErrAdminAutoscanSourceConnectionRequired}
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	for method, path := range map[string]string{
+		"POST": Prefix + "/admin/autoscan/sources",
+		"PUT":  Prefix + "/admin/autoscan/sources/source",
+	} {
+		body := `{"plugin_id":"silo.autoscan.arr","capability_id":"arr","enabled":true,"path_rewrites":[]}`
+		if method == "PUT" {
+			body = `{"enabled":true,"connection_id":null,"path_rewrites":[]}`
+		}
+		rec := do(t, h, method, path, body, bearer(adminToken))
+		requireProblem(t, rec, TypeValidationFailed)
+		if !strings.Contains(rec.Body.String(), `"location":"body.connection_id"`) || !strings.Contains(rec.Body.String(), `"code":"required"`) {
+			t.Fatalf("%s problem = %s, want a required body.connection_id error", method, rec.Body.String())
+		}
 	}
 }

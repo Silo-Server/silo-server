@@ -1,7 +1,15 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
-import { Activity, AlertTriangle, ChevronRight, Clock, Loader, ScanLine } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  ChevronRight,
+  Clock,
+  Loader,
+  Pause,
+  ScanLine,
+} from "lucide-react";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useTasksIncludingHidden } from "@/hooks/queries/admin/tasks";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
@@ -299,6 +307,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                       running={runningPreparations}
                       queued={preparationCounts.queued}
                       retrying={preparationCounts.retrying}
+                      paused={preparationCounts.paused}
                       failed={preparationCounts.failed_recent}
                       onNavigate={() => setOpen(false)}
                     />
@@ -425,12 +434,14 @@ function PreparationsSummary({
   running,
   queued,
   retrying,
+  paused,
   failed,
   onNavigate,
 }: {
   running: AdminDownloadPreparation[];
   queued: number;
   retrying: number;
+  paused: number;
   failed: number;
   onNavigate: () => void;
 }) {
@@ -444,7 +455,7 @@ function PreparationsSummary({
     retrying > 0 ? `${retrying.toLocaleString()} waiting to retry` : "",
   ].filter(Boolean);
 
-  if (visible.length === 0 && waiting.length === 0 && failed === 0) {
+  if (visible.length === 0 && waiting.length === 0 && paused === 0 && failed === 0) {
     return <EmptyRow>No downloads being prepared</EmptyRow>;
   }
   return (
@@ -462,6 +473,12 @@ function PreparationsSummary({
         >
           <Clock className="h-3 w-3 shrink-0" aria-hidden="true" />
           {waiting.join(" · ")}
+        </div>
+      )}
+      {paused > 0 && (
+        <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+          <Pause className="h-3 w-3 shrink-0" aria-hidden="true" />
+          {paused.toLocaleString()} paused
         </div>
       )}
       {failed > 0 && (

@@ -254,9 +254,11 @@ func registerWatch(reg *Registry) {
 		Class: ClassProfileScoped,
 		// Profile scoped without a required header, as v1 GET /watch/{id}:
 		// the catalog answer needs only the account's access; the profile,
-		// when declared, adds its progress and preferences.
-		ProfileOptional: true,
-		ServiceBacked:   true,
+		// when declared, adds its progress and preferences. A household
+		// with a limited profile must name one.
+		ProfileOptional:      true,
+		HouseholdProfileGate: true,
+		ServiceBacked:        true,
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",

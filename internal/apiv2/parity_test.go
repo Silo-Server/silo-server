@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -31,21 +33,29 @@ func (f fakeTokens) ValidateToken(tok string) (*auth.Claims, error) {
 }
 
 // fakeSessions maps each active login session to its account's current role;
-// a session it does not list is revoked or expired.
+// a session it does not list is revoked or expired. storeDownSession is one
+// the store cannot look up.
 type fakeSessions struct{ roles map[string]string }
 
+const storeDownSession = "s-store-down"
+
 func (f fakeSessions) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+	if id == storeDownSession {
+		return "", false, errors.New("checking session validity: dial tcp: connection refused")
+	}
 	role, ok := f.roles[id]
 	return role, ok, nil
 }
 
 type fakeUsers struct{ users map[int]*models.User }
 
+// GetByID reports a missing account the way the repository does, as
+// auth.ErrNotFound: the auth gate tells it from a store failure.
 func (f fakeUsers) GetByID(_ context.Context, id int) (*models.User, error) {
 	if u, ok := f.users[id]; ok {
 		return u, nil
 	}
-	return nil, errors.New("no user")
+	return nil, auth.ErrNotFound
 }
 
 type fakeResolver struct{}
@@ -57,7 +67,7 @@ func (fakeResolver) Resolve(_ context.Context, in access.ResolveInput) (access.S
 	switch in.ProfileID {
 	case "":
 		return access.Scope{UserID: in.UserID, ProfileVerified: true}, nil
-	case "p-owner", "p-primary":
+	case "p-owner", "p-primary", "p-kid":
 		return access.Scope{UserID: in.UserID, ProfileID: in.ProfileID, ProfileVerified: true}, nil
 	case "p-locked", "p-primary-locked":
 		// An API-key credential is exempt from the PIN at the gate, and the
@@ -104,7 +114,47 @@ const (
 	// demotedToken is member 1's session token minted while the account was
 	// an admin: the session is valid but the role changed since.
 	demotedToken = "tok-demoted"
+	// householdToken is account 4's session. Account 4's household has a
+	// PIN-protected primary profile and a TV-Y7 child profile, so the
+	// household profile gate refuses its requests without X-Profile-Id.
+	householdToken = "tok-household"
+	// householdAPIKeyToken is an API key owned by account 4.
+	householdAPIKeyToken = "sa_household"
+	// storeDownToken is member 1's token for a session the store cannot
+	// look up (the database is unreachable).
+	storeDownToken = "tok-store-down"
 )
+
+// householdUserID is the account whose household has limited profiles.
+const householdUserID = 4
+
+// fakeHouseholdStore answers only ListProfiles; any other store call panics
+// on the embedded nil interface.
+type fakeHouseholdStore struct {
+	userstore.UserStore
+	profiles []userstore.Profile
+}
+
+func (s fakeHouseholdStore) ListProfiles(context.Context) ([]userstore.Profile, error) {
+	return s.profiles, nil
+}
+
+// fakeHouseholds lists each account's profiles for the household profile
+// gate. Only householdUserID has a limited profile; every other account's
+// profiles are unrestricted, so it keeps account scope without a header.
+type fakeHouseholds struct{}
+
+func (fakeHouseholds) ForUser(_ context.Context, userID int) (userstore.UserStore, error) {
+	if userID == householdUserID {
+		return fakeHouseholdStore{profiles: []userstore.Profile{
+			{ID: "p-primary-locked", IsPrimary: true, PINHash: "hash"},
+			{ID: "p-kid", MaxContentRating: "TV-Y7"},
+		}}, nil
+	}
+	return fakeHouseholdStore{profiles: []userstore.Profile{{ID: "p-owner", IsPrimary: true}}}, nil
+}
+
+func (fakeHouseholds) Close() error { return nil }
 
 type fakeAPIKeys struct{ keys map[string]*models.APIKey }
 
@@ -126,9 +176,11 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		impersonatedToken:      {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
 		temporaryPasswordToken: {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, PasswordChangeRequired: true},
 		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		householdToken:         {UserID: householdUserID, Role: "user", SessionID: "s5", TokenType: auth.TokenTypeAccess},
+		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
 	}
-	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
-	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user"}}, keys, fakeUsers{users})
+	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}, householdAPIKeyToken: {ID: 11, UserID: householdUserID}}}
+	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user", "s5": "user"}}, keys, fakeUsers{users})
 }
 
 func parityDeps(demo bool) Dependencies {
@@ -136,6 +188,7 @@ func parityDeps(demo bool) Dependencies {
 		1: {ID: 1, Role: "user", Enabled: true, Permissions: []string{}},
 		2: {ID: 2, Role: "admin", Enabled: true},
 		3: {ID: 3, Role: "admin", Enabled: true},
+		4: {ID: 4, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}},
 	}
 	primary := func(_ context.Context, userID int, profileID string) (bool, bool, error) {
 		switch profileID {
@@ -147,12 +200,13 @@ func parityDeps(demo bool) Dependencies {
 		return false, false, nil
 	}
 	return Dependencies{
-		CursorSecret: []byte("synthetic-test-cursor-key"),
-		Auth:         fakeAuth(users),
-		ViewerAccess: apimw.NewViewerAccessMiddleware(fakeResolver{}),
-		ActingAdmin:  apimw.RequireActingAdmin(primary),
+		CursorSecret:     []byte("synthetic-test-cursor-key"),
+		Auth:             fakeAuth(users),
+		ViewerAccess:     apimw.NewViewerAccessMiddleware(fakeResolver{}),
+		HouseholdProfile: apimw.NewHouseholdProfileGate(fakeHouseholds{}).Require,
+		ActingAdmin:      apimw.RequireActingAdmin(primary, nil),
 		PermissionGates: map[string]func(http.Handler) http.Handler{
-			"marker_edit": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary).RequireMarkerEdit,
+			"marker_edit": apimw.NewPermissionMiddleware(fakeUsers{users}, nil, primary, nil).RequireMarkerEdit,
 		},
 		DemoSettings: fakeSettings{demo: demo},
 	}
@@ -185,6 +239,9 @@ func TestMiddlewareParity(t *testing.T) {
 		{"authenticated: no credential", ClassAuthenticated, nil, TypeAuthenticationRequired, false},
 		{"authenticated: bad token", ClassAuthenticated, bearer("nope"), TypeInvalidToken, false},
 		{"authenticated: expired session", ClassAuthenticated, bearer(expiredToken), TypeSessionExpired, false},
+		// The store could not look the session up: retry, do not sign out.
+		{"authenticated: session store down", ClassAuthenticated, bearer(storeDownToken), TypeDependencyUnavailable, false},
+		{"profile: session store down", ClassProfileScoped, with(bearer(storeDownToken), "X-Profile-Id", "p-owner"), TypeDependencyUnavailable, false},
 		// The session is valid but the account's role changed after the
 		// token was minted; the client refreshes instead of signing out.
 		{"authenticated: role changed", ClassAuthenticated, bearer(demotedToken), TypeTokenRefreshRequired, false},
@@ -268,6 +325,21 @@ func TestAPIKeyDenialProblems(t *testing.T) {
 				t.Fatalf("v2 denial contains legacy fields: %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestSessionStoreOutageIsRetryable: a login session the store could not look
+// up is a 503 dependency_unavailable with the gate's Retry-After, never the
+// 401 session_expired that makes a client sign out.
+func TestSessionStoreOutageIsRetryable(t *testing.T) {
+	h := newTestHandler(t, parityDeps(false))
+	rec := do(t, h, http.MethodGet, Prefix+"/account/me", "", bearer(storeDownToken))
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if got := rec.Header().Get("Retry-After"); got != strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds) {
+		t.Fatalf("Retry-After = %q", got)
+	}
+	if strings.Contains(rec.Body.String(), "connection refused") {
+		t.Fatalf("problem leaks the store error: %s", rec.Body.String())
 	}
 }
 
@@ -367,7 +439,7 @@ func TestGateOrderMatchesV1(t *testing.T) {
 		requireProblem(t, rec, TypePermissionDenied)
 	}
 	// The chain itself, so a reordering that the demo probe cannot see still fails.
-	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false, "")
+	chain, missing := gateChain(deps, ClassProfileScoped, "", true, false, false, "")
 	if missing != "" || len(chain) != 5 {
 		t.Fatalf("profile-scoped chain = %d gates, missing %q; want auth, demo, rate limit, viewer access, profile", len(chain), missing)
 	}

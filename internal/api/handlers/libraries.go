@@ -751,7 +751,6 @@ func (h *LibraryHandler) runFolderScanAsync(scanID string, folder *models.MediaF
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -809,7 +808,6 @@ func (h *LibraryHandler) runSubtreeScanAsync(scanID string, folder *models.Media
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 			"elapsed", time.Since(start).Round(time.Millisecond),
 		)
 	}()
@@ -855,7 +853,6 @@ func (h *LibraryHandler) runFileScanAsync(scanID string, folder *models.MediaFol
 			"matched_files", result.MatchedFiles,
 			"retried_items", result.RetriedItems,
 			"still_unmatched_warnings", result.StillUnmatchedWarnings,
-			"skipped", result.Skipped,
 		)
 	}()
 }
@@ -965,9 +962,6 @@ func scanRunResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		MatchedFiles:           result.MatchedFiles,
 		RetriedItems:           result.RetriedItems,
 		StillUnmatchedWarnings: result.StillUnmatchedWarnings,
-	}
-	if result.Skipped {
-		resp.Skipped = 1
 	}
 	if result.ScanResult != nil {
 		resp.New = result.ScanResult.New

@@ -66,6 +66,9 @@ func (f *fakeAdminAccounts) TransferAdminOwnership(_ context.Context, id int) er
 	return f.transferErr
 }
 func (f *fakeAdminAccounts) ImpersonateAdminAccount(context.Context, int, string, string) (handlers.TokenPairView, error) {
+	if f.err != nil {
+		return handlers.TokenPairView{}, f.err
+	}
 	if f.allowImpersonation {
 		return handlers.TokenPairView{AccessToken: "fixture-access", RefreshToken: "fixture-refresh", ExpiresIn: 3600, User: handlers.UserView{ID: 7, Username: "sample", Role: "user"}}, nil
 	}
@@ -77,6 +80,12 @@ func (*fakeAdminAccounts) ListAdminAccountProfiles(context.Context, int) ([]hand
 }
 
 func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
+	f := fixtureAdminAccounts()
+	users := new(fakeAdminUsers)
+	deps := requestDeps(fixtureRequests())
+	deps.AdminAccounts = f
+	deps.AdminUsers = users
+	h := NewHandler(deps)
 	for _, tc := range []struct {
 		name string
 		ids  []int
@@ -87,12 +96,9 @@ func TestAdminAccountEffectiveLibraryAccess(t *testing.T) {
 		{name: "restricted", ids: []int{3, 7}, want: `["3","7"]`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := fixtureAdminAccounts()
+			*f = *fixtureAdminAccounts()
 			f.snapshot.User.EffectivePolicy.LibraryIDs = tc.ids
-			deps := requestDeps(fixtureRequests())
-			deps.AdminAccounts = f
-			deps.AdminUsers = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
-			h := NewHandler(deps)
+			*users = fakeAdminUsers{users: []handlers.AdminUserView{f.snapshot.User}}
 			for _, path := range []string{Prefix + "/admin/users/7", Prefix + "/admin/users"} {
 				reply := do(t, h, http.MethodGet, path, "", actingRequestAdmin)
 				if reply.Code != http.StatusOK {
@@ -191,6 +197,14 @@ func TestAdminAccountCreateAndErrors(t *testing.T) {
 	if profiles.Code != 200 || !strings.Contains(profiles.Body.String(), `"id":"profile-1"`) {
 		t.Fatal(profiles.Code, profiles.Body.String())
 	}
+}
+
+func TestAdminImpersonationRevokedSource(t *testing.T) {
+	deps := requestDeps(fixtureRequests())
+	accounts := fixtureAdminAccounts()
+	accounts.err = auth.ErrSessionRevoked
+	deps.AdminAccounts = accounts
+	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, Prefix+"/admin/users/7/impersonate", "", actingRequestAdmin), TypeAuthenticationRequired)
 }
 
 // TestAdminUserIPLocation classifies each address the way stream location

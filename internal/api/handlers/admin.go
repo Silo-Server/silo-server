@@ -138,6 +138,7 @@ type ImpersonationService interface {
 type AdminHandler struct {
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
+	loginSessions      adminLoginSessionStore
 	SessionsLoader     *PlaybackSessionsLoader
 	storeProv          userstore.UserStoreProvider
 	accountProvisioner *auth.AccountProvisioner
@@ -191,13 +192,17 @@ func NewAdminHandler(
 	pool *pgxpool.Pool,
 	storeProv userstore.UserStoreProvider,
 ) *AdminHandler {
-	return &AdminHandler{
+	h := &AdminHandler{
 		userRepo:           userRepo,
 		pool:               pool,
 		storeProv:          storeProv,
 		accountProvisioner: auth.NewAccountProvisioner(userRepo, storeProv),
 		logLevelCounts:     cache.NewTTLCache[adminLogLevelCounts](),
 	}
+	if pool != nil {
+		h.loginSessions = auth.NewSessionRepository(pool)
+	}
+	return h
 }
 
 // --- Request/Response types ---
@@ -1190,6 +1195,10 @@ func (h *AdminHandler) HandleImpersonateUser(w http.ResponseWriter, r *http.Requ
 		}
 		if errors.Is(err, auth.ErrAlreadyImpersonating) {
 			writeError(w, http.StatusConflict, "already_impersonating", "An impersonation session is already active")
+			return
+		}
+		if errors.Is(err, auth.ErrSessionRevoked) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
 			return
 		}
 		if errors.Is(err, auth.ErrImpersonationNotAllowed) {

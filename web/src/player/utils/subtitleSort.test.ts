@@ -77,26 +77,14 @@ describe("findPreferredSubtitleIndex", () => {
     expect(findPreferredSubtitleIndex(tracks, "en-US")).toBe(1);
   });
 
-  it("prefers embedded over external for same language", () => {
+  it.each([
+    ["embedded over external", "embedded", "external"],
+    ["external over downloaded", "external", "downloaded"],
+    ["embedded over downloaded", "embedded", "downloaded"],
+  ] as const)("prefers %s for the same language", (_name, preferred, other) => {
     const tracks = [
-      makeSub({ index: 0, source: "external", language: "en" }),
-      makeSub({ index: 1, source: "embedded", language: "en" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers external over downloaded", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "downloaded", language: "en" }),
-      makeSub({ index: 1, source: "external", language: "en" }),
-    ];
-    expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
-  });
-
-  it("prefers embedded over downloaded", () => {
-    const tracks = [
-      makeSub({ index: 0, source: "downloaded", language: "en" }),
-      makeSub({ index: 1, source: "embedded", language: "en" }),
+      makeSub({ index: 0, source: other, language: "en" }),
+      makeSub({ index: 1, source: preferred, language: "en" }),
     ];
     expect(findPreferredSubtitleIndex(tracks, "en")).toBe(1);
   });

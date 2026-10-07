@@ -450,9 +450,13 @@ This bounds the response, not the provider fetch or normalization work, and
 provides no snapshot or continuation guarantee. The web requests 500 candidates
 and displays the refinement notice when needed.
 
-Apply requires nonempty provider IDs and runs the existing synchronous
-identity-preserving metadata pipeline. It returns `content_id` and `updated`;
-it is not a queued job. Neither web mutation automatically retries or refreshes
+Apply requires nonempty provider IDs and runs the synchronous metadata
+pipeline. It returns `content_id` and `updated`; it is not a queued job. The
+returned `content_id` differs from the path ID when the item moved: a `local-`
+item takes its provider-anchored ID, and an item whose match the choice
+corrects moves to the ID its new identity derives (see
+[deterministic content IDs](architecture/deterministic-content-id.md#re-anchor-on-a-corrected-match)).
+Callers holding the old ID should switch to the returned one. Neither web mutation automatically retries or refreshes
 and replays authentication. Frozen v1 responses and parsing order remain
 unchanged. These administration flows have web consumers; Apple, Android and
 Jellyfin have no corresponding caller in the migration inventory.

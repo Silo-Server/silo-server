@@ -67,6 +67,7 @@ describe("SettingsLayout", () => {
     expect(markup).not.toContain("/settings/profiles");
     expect(markup).not.toContain(">Profiles<");
     expect(markup).not.toContain("/settings/account");
+    expect(markup).not.toContain("/settings/sessions");
   });
 
   it("shows the profiles section for non-admin users on their primary profile", () => {
@@ -84,6 +85,7 @@ describe("SettingsLayout", () => {
     expect(markup).toContain("/settings/profiles");
     expect(markup).toContain(">Profiles<");
     expect(markup).toContain("/settings/account");
+    expect(markup).toContain("/settings/sessions");
   });
 
   it("filters personal settings sections from the search box", async () => {

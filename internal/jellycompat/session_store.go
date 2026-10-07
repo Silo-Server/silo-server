@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // ErrSessionNotFound is returned when a compat session does not exist.
@@ -89,31 +92,51 @@ func (s *SessionStore) Put(session Session) error {
 
 // Get returns a compat session when it exists and is not expired.
 // If the session's remaining lifetime is less than half the configured TTL,
-// ExpiresAt is extended by the full TTL (sliding window).
+// ExpiresAt is extended by the full TTL (sliding window). A persistent store
+// that cannot be read reports the session as missing; callers that must tell
+// the two apart use Lookup.
 func (s *SessionStore) Get(token string) (*Session, bool) {
+	session, err := s.Lookup(context.Background(), token)
+	if err != nil {
+		if !errors.Is(err, ErrSessionNotFound) {
+			slog.Warn("jellycompat session store load failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		}
+		return nil, false
+	}
+	return session, true
+}
+
+// Lookup is Get that reports why no session came back: ErrSessionNotFound
+// for a token with no live session (or one whose stored tokens cannot be
+// decrypted), any other error for a persistent store that could not be read,
+// which judges nothing about the token.
+func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, error) {
 	s.mu.RLock()
 	session, ok := s.sessions[token]
 	s.mu.RUnlock()
 	if ok {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
 			s.Delete(token)
-			return nil, false
+			return nil, ErrSessionNotFound
 		}
 		s.maybeExtendSession(&session, token)
 		sessionCopy := session
-		return &sessionCopy, true
+		return &sessionCopy, nil
 	}
 
-	if s.repo == nil {
-		return nil, false
+	// A token Postgres cannot take as text (invalid UTF-8 or a NUL byte)
+	// matches no session; querying with it would fail like an outage.
+	if s.repo == nil || !auth.ValidTextKey(token) {
+		return nil, ErrSessionNotFound
 	}
 
-	persisted, err := s.repo.GetByToken(context.Background(), token, s.now())
+	persisted, err := s.repo.GetByToken(ctx, token, s.now())
+	if errors.Is(err, errSessionUnreadable) {
+		slog.WarnContext(ctx, "jellycompat session cannot be decrypted; treating it as signed out", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+		return nil, ErrSessionNotFound
+	}
 	if err != nil {
-		if !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store load failed", "token", token, "error", err)
-		}
-		return nil, false
+		return nil, err
 	}
 
 	s.maybeExtendSession(persisted, token)
@@ -123,7 +146,7 @@ func (s *SessionStore) Get(token string) (*Session, bool) {
 	s.mu.Unlock()
 
 	sessionCopy := *persisted
-	return &sessionCopy, true
+	return &sessionCopy, nil
 }
 
 // maybeExtendSession extends the session's ExpiresAt if more than half the TTL has elapsed.
@@ -143,7 +166,7 @@ func (s *SessionStore) maybeExtendSession(session *Session, token string) {
 
 	if s.repo != nil {
 		if err := s.repo.Upsert(context.Background(), *session); err != nil {
-			slog.Warn("jellycompat session store extend failed", "token", token, "error", err)
+			slog.Warn("jellycompat session store extend failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
 }
@@ -155,7 +178,7 @@ func (s *SessionStore) Delete(token string) {
 	s.mu.Unlock()
 	if s.repo != nil {
 		if err := s.repo.DeleteByToken(context.Background(), token); err != nil && !errors.Is(err, ErrSessionNotFound) {
-			slog.Warn("jellycompat session store delete failed", "token", token, "error", err)
+			slog.Warn("jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
 		}
 	}
 }

@@ -1,5 +1,5 @@
 {
-  "revision": "474cf00fccb2a52176a6f8c658872d5f62a0213ff0f4b8862a01aac94a91c379",
+  "revision": "a113d10e3d27bf5114c6dcd0bf7bed9e33157a08096c0f3e9cf1b9813eddce41",
   "state": "available",
   "allowed": true,
   "bounded_creation": true,
@@ -36,5 +36,9 @@
   "transcode_user_allowed": true,
   "season_download": false,
   "series_monitoring": false,
-  "monitoring_modes": []
+  "monitoring_modes": [],
+  "bulk_quality": true,
+  "monitor_quality": true,
+  "preparation_progress": true,
+  "direct_download_links": false
 }

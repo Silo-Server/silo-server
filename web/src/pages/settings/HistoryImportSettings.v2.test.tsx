@@ -157,10 +157,20 @@ it("lets the primary profile choose the profile and names each run's profile", (
   expect(screen.getByText(/into Member/)).toBeTruthy();
 });
 
-it("lets an admin choose the profile", () => {
+it("lets an admin's primary profile choose the profile", () => {
   state.role = "admin";
+  state.primary = true;
   renderPage();
   expect(screen.getByRole("combobox", { name: "Import into profile" })).toBeTruthy();
+});
+
+it("imports only into its own profile from an admin's non-primary profile", () => {
+  // The server refuses a non-primary profile's cross-profile import even on
+  // an admin account, so the picker must not offer it.
+  state.role = "admin";
+  renderPage();
+  expect(screen.queryByRole("combobox", { name: "Import into profile" })).toBeNull();
+  expect(screen.getByText(/The history goes into your profile, Member\./)).toBeTruthy();
 });
 
 it("keeps the server's message for a secondary profile's refused import", () => {

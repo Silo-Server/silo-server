@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -58,10 +59,22 @@ func TestProfileHeaderRequiredMatchesGateChain(t *testing.T) {
 	}
 }
 
+// The generator has no runtime dependencies. Cache immutable JSON while each
+// consumer receives its own bytes and decoded schema objects.
+var generatedOpenAPI = sync.OnceValues(func() (string, error) {
+	raw, err := GenerateOpenAPI()
+	return string(raw), err
+})
+
+func generatedOpenAPIBytes() ([]byte, error) {
+	raw, err := generatedOpenAPI()
+	return []byte(raw), err
+}
+
 // generatedDocument decodes the generator's output for the tests that walk it.
 func generatedDocument(t *testing.T) map[string]any {
 	t.Helper()
-	raw, err := GenerateOpenAPI()
+	raw, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}

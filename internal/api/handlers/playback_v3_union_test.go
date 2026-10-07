@@ -1923,7 +1923,7 @@ func TestPrepareTransportV3ClassifiesExhaustedRemoteLiveValidation(t *testing.T)
 				result,
 				mediaAuthModeV3{},
 			)
-			if transportErr == nil || transportErr.retryable != tt.wantRetryable ||
+			if transportErr == nil || transportErr.reason != transcodeStartFailedReasonV3 || transportErr.retryable != tt.wantRetryable ||
 				(tt.wantCause != nil && !errors.Is(transportErr.cause, tt.wantCause)) ||
 				(tt.wantCause == nil && transportErr.cause != nil) {
 				t.Fatalf("transport error = %#v, want retryable=%t wrapping %v", transportErr, tt.wantRetryable, tt.wantCause)

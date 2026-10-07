@@ -2307,11 +2307,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      a 260px blank strip on the banner's left (issue #1290). The admin
      area is its own shell: AdminLayout publishes `data-admin-shell` and
      draws a fixed 240px sidebar (`w-[240px]` / `lg:ml-[240px]`), and the
-     audiobook MiniBar can be open there.                              */
+     audiobook MiniBar can be open there.
+
+     The breakpoint is Tailwind's `lg` (64rem), where both shells show their
+     sidebar. A rem media query follows the browser's default font size, so
+     a fixed 1024px here kept the offset while a larger browser font had
+     already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
   }
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     :root[data-app-shell] {
       --app-sidebar-offset: 260px;
     }
@@ -2358,10 +2363,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      since it is `z-50` against the sidebar's `z-40`/`45` it painted over the
      logo on the way in and left a gap on the way out.
 
-     Breakpoint deliberately matches `--app-sidebar-offset` (1024px) rather than
-     Tailwind's `lg` (64rem): `html[data-text-scale]` re-bases rem, so at large
-     text those two diverge and the compensation must follow whichever query
-     actually changes the margin it is compensating for. */
+     Breakpoint deliberately matches `--app-sidebar-offset` (64rem): the
+     compensation must follow whichever query actually changes the margin it is
+     compensating for. `html[data-text-scale]` does not move it; rem in a media
+     query resolves against the browser's default font size, not the root
+     element's. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
@@ -2373,7 +2379,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow-x: clip;
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     .impersonation-banner {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }

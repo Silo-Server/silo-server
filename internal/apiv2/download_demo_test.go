@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 )
 
@@ -98,5 +99,15 @@ func TestDownloadCapabilityReportsDemoRestriction(t *testing.T) {
 	off := newTestHandler(t, demoDownloadDeps(false))
 	if out := read(t, off, member); out.Allowed == nil || !*out.Allowed {
 		t.Fatalf("member capability refused with demo off: %+v", out.Allowed)
+	}
+
+	// direct_download_links follows the wiring of the link operation.
+	if out := read(t, off, member); out.DirectDownloadLinks {
+		t.Fatal("direct_download_links reported without a link service")
+	}
+	linked := demoDownloadDeps(false)
+	linked.DirectDownloadLinks = handlers.NewDownloadHandler(nil)
+	if out := read(t, newTestHandler(t, linked), member); !out.DirectDownloadLinks {
+		t.Fatal("direct_download_links not reported with a link service")
 	}
 }

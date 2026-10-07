@@ -53,4 +53,45 @@ describe("deviceSettingGroups", () => {
     expect(manifestPlatformFor("Roku")).toBeNull();
     expect(manifestPlatformFor(undefined)).toBeNull();
   });
+
+  // The web player never reads these: speed is set in the player per session,
+  // subtitle timing has no offset control, and HDR comes from what the browser
+  // reports it can display. Offering them for a browser saves a value that
+  // changes nothing.
+  const NATIVE_ONLY_PLAYER_KEYS = [
+    "player.playback_speed",
+    "player.subtitle_sync_ms",
+    "player.hdr_enabled",
+    "player.audio_sync_ms",
+  ] as const;
+
+  function shownKeys(devicePlatform: string, stored: string[] = []) {
+    return groupDeviceSettings(undefined, {
+      devicePlatform,
+      keysWithStoredValues: new Set(stored),
+    }).flatMap((group) => group.keys as string[]);
+  }
+
+  it.each(["Windows Web", "macOS Web", "iOS Web", "Android Web", "Linux Web", "Web"])(
+    "does not offer player settings the web player ignores on %s",
+    (platform) => {
+      const shown = shownKeys(platform);
+      for (const key of NATIVE_ONLY_PLAYER_KEYS) expect(shown).not.toContain(key);
+      // Settings the web player does honour stay.
+      expect(shown).toContain("playback.audio_language");
+      expect(shown).toContain("playback.auto_play_next");
+    },
+  );
+
+  it.each(["tvOS", "iOS", "iPadOS", "macOS", "android", "android-tv"])(
+    "still offers them on the native %s app",
+    (platform) => {
+      const shown = shownKeys(platform);
+      for (const key of NATIVE_ONLY_PLAYER_KEYS) expect(shown).toContain(key);
+    },
+  );
+
+  it("keeps a value a browser already stores visible so it can be cleared", () => {
+    expect(shownKeys("Windows Web", ["player.playback_speed"])).toContain("player.playback_speed");
+  });
 });
