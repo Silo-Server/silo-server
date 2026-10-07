@@ -276,6 +276,19 @@ func Normalize(raw string) (system string, age *int, ok bool) {
 	return "", nil, false
 }
 
+// AdultAge is the minimum age from which a rating counts as adult.
+const AdultAge = 18
+
+// IsAdult reports whether a raw content rating resolves to AdultAge or over
+// (NC-17, R18, FSK 18). R and TV-MA resolve to 17 and are not adult. An
+// unrated or unrecognized rating is not adult either: this is a presentation
+// rule for what a surface promotes, not an access check, so unlike
+// StoredRating it does not treat unknown text as restricted.
+func IsAdult(raw string) bool {
+	_, age, ok := Normalize(raw)
+	return ok && age != nil && *age >= AdultAge
+}
+
 // ratingTokens lists the lookup keys to try for a rating string, most specific
 // first. The MPAA rating is often written with its reason attached ("Rated R
 // for strong language"), so when the whole string is not a rating, the first

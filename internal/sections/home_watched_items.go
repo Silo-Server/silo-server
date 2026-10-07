@@ -15,22 +15,35 @@ import (
 // Failure is fail-open: an unavailable preference store must not make media
 // disappear from Home unexpectedly.
 func HideWatchedItemsFromHome(ctx context.Context, store userstore.UserStore, profileID string) bool {
+	return profileBoolSetting(ctx, store, profileID, settingskeys.HomeHideWatchedItems)
+}
+
+// ShowAdultInFeatured resolves whether the acting profile lets adult titles
+// appear in Home featured sections. Failure reads as false, so an unavailable
+// preference store keeps them out, which is also the default.
+func ShowAdultInFeatured(ctx context.Context, store userstore.UserStore, profileID string) bool {
+	return profileBoolSetting(ctx, store, profileID, settingskeys.HomeShowAdultInFeatured)
+}
+
+// profileBoolSetting resolves one boolean setting for a profile. Any failure
+// reads as false; each caller documents why false is its safe answer.
+func profileBoolSetting(ctx context.Context, store userstore.UserStore, profileID, key string) bool {
 	if store == nil || profileID == "" {
 		return false
 	}
 
 	contract, err := settingscontract.Load()
 	if err != nil {
-		slog.WarnContext(ctx, "hide-watched Home preference unavailable: loading settings contract failed",
-			"component", "sections", "profile_id", profileID, "error", err)
+		slog.WarnContext(ctx, "Home preference unavailable: loading settings contract failed",
+			"component", "sections", "key", key, "profile_id", profileID, "error", err)
 		return false
 	}
 	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
 		settingsresolve.Context{ProfileID: profileID},
-		[]string{settingskeys.HomeHideWatchedItems}, nil)
+		[]string{key}, nil)
 	if err != nil {
-		slog.WarnContext(ctx, "hide-watched Home preference unavailable: reading setting values failed",
-			"component", "sections", "profile_id", profileID, "error", err)
+		slog.WarnContext(ctx, "Home preference unavailable: reading setting values failed",
+			"component", "sections", "key", key, "profile_id", profileID, "error", err)
 		return false
 	}
 	if len(resolved) != 1 {

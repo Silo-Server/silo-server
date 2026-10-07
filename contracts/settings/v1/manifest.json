@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 16,
+  "revision": 17,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1005,6 +1005,21 @@
       "label": "Hide watched items from Home",
       "description": "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
       "recommended_control": "switch"
+    },
+    {
+      "key": "home.show_adult_in_featured",
+      "introduced_in": 17,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web", "ios", "tvos", "macos", "android", "android_tv"],
+      "category": "navigation",
+      "label": "Show adult titles in Featured",
+      "description": "Let titles certified 18 or over appear in Home featured sections. When off, they are left out; the profile's rating limit always applies first.",
+      "recommended_control": "switch",
+      "notes": "Profile scope because it is a viewing preference, not a parental control: the profile's max_content_rating is what restricts a profile, and it is applied before this setting, so turning this on never shows a title the limit hides. Default false: Featured is the most prominent surface and advances on its own, so adult titles appear there only for profiles that ask. Adult means a content_rating that resolves to a minimum age of 18 or over (NC-17, R18, FSK 18); R and TV-MA resolve to 17 and are unaffected, and unrated or unrecognized ratings are not treated as adult. Only Home featured sections are filtered; other Home rows, library sections, browse and search are unchanged. A client shows the switch off and disabled for a child profile or a profile with a max_content_rating."
     },
     {
       "key": "ui.library_page_state",

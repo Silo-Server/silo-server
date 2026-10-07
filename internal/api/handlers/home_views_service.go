@@ -39,6 +39,11 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 		withItems, userStates = h.filterWatchedHomeSections(ctx, withItems, resolved)
 		withItems = dropEmptyWatchedHomeSections(withItems)
 	}
+	if !h.homeShowsAdultInFeatured(ctx) {
+		// Also before the diversity pass, so an adult title cut from
+		// Featured can't suppress the same title in a later section.
+		withItems = dropEmptyAdultFeaturedSections(filterAdultFeaturedSections(withItems))
+	}
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
 	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.ImageSize, userStates)
@@ -90,6 +95,9 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 			// The direct section endpoint returns the section even if the
 			// filter empties it; only aggregate Home drops such sections.
 			items, userStates = h.filterWatchedHomeSections(ctx, items, []sections.ResolvedSection{s})
+		}
+		if !h.homeShowsAdultInFeatured(ctx) {
+			items = filterAdultFeaturedSections(items)
 		}
 		resp := h.buildSectionsWithUserStates(ctx, items, nil, viewer.Access, viewer.ImageSize, userStates)
 		if len(resp.Sections) == 0 {
