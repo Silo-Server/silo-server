@@ -253,6 +253,7 @@ export const notificationKeys = {
 export const historyImportKeys = {
   all: ["history-imports"] as const,
   sources: () => ["history-imports", "sources"] as const,
+  capability: () => ["history-imports", "capability"] as const,
   runs: (limit = 10) => ["history-imports", "runs", limit] as const,
   run: (id?: string) => ["history-imports", "run", id] as const,
   plexCheck: (sessionId?: string) => ["history-imports", "plex-check", sessionId] as const,

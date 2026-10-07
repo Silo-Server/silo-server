@@ -562,6 +562,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media
@@ -1806,6 +1807,7 @@ DELETE /api/v2/favorites/{item_id}	non-media
 GET /api/v2/favorites/{item_id}	non-media
 PUT /api/v2/favorites/{item_id}	non-media
 GET /api/v2/history	non-media
+GET /api/v2/history-imports/capability	non-media
 POST /api/v2/history-imports/emby-connect/login	non-media
 POST /api/v2/history-imports/plex/auth/check	non-media
 POST /api/v2/history-imports/plex/auth/pin	non-media

@@ -1574,6 +1574,19 @@ admitted before the setting was turned off fails with the same message. v1 run
 responses and realtime history-import events carry the same safe summaries as
 the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
 
+A Plex import races the addresses plex.tv advertised for the selected server, up to
+eight, and keeps the first that returns a library listing for the rest of the run. A
+session-backed run (`plex_session_id`) takes the list from the stored session; a client
+holding its own token sends the preferred address in `plex_base_url` and the rest in
+`plex_base_urls` (up to 31). When any address is HTTPS, cleartext ones are dropped,
+because each probe carries the Plex token. Addresses the account may not reach under
+the policy above are skipped, and the run is refused only when none remain; the eight
+raced are the first that remain. The Plex token is removed from any redirect that
+leaves the host it was sent to or downgrades from HTTPS to HTTP.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
+`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
+member, so check the capability before sending the field.
+
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.
 Already committed history effects are retained. Historical personal jobs without durable
