@@ -3082,6 +3082,94 @@ func TestAvailableQualitiesV3ViewerTranscodeDisabledPublishesOriginalOnly(t *tes
 	}
 }
 
+// A 4K version that may not be transcoded offers the qualities its
+// lower-resolution version serves: that version as it is, then the rungs a
+// transcode of it can reach. Original stays the 4K version.
+func TestAvailableQualitiesV3LowerVersionServes4KWithout4KTranscode(t *testing.T) {
+	requested := SourceDescriptorV3{VideoCodec: "hevc", Width: 3840, Height: 2160, BitrateKbps: 69_000, DynamicRange: DynamicRangeHDR10V3}
+	lower := SourceDescriptorV3{VideoCodec: "h264", Width: 1920, Height: 1080, BitrateKbps: 26_000, DynamicRange: DynamicRangeSDRV3}
+	input := PlannerInputV3{
+		Request:      validStartRequestV3(),
+		Settings:     PlannerSettingsV3{TranscodeEnabled: true, HardwareToneMapEnabled: true},
+		LowerVersion: &LowerVersionV3{Requested: requested, Lower: lower},
+	}
+	labels := func(qualities []AvailableQualityV3) []string {
+		out := make([]string, 0, len(qualities))
+		for _, quality := range qualities {
+			out = append(out, quality.Label)
+		}
+		return out
+	}
+
+	// The planner may be planning either version; the menu is the same.
+	for _, source := range []SourceDescriptorV3{requested, lower} {
+		got := availableQualitiesV3(input, source)
+		want := []string{
+			QualityOriginalV3, "1080p",
+			QualityRung1080pHighV3, QualityRung1080pMediumV3, QualityRung1080pLowV3,
+			QualityRung720pHighV3, QualityRung720pMediumV3, QualityRung720pLowV3,
+			"480p",
+		}
+		if !reflect.DeepEqual(labels(got), want) {
+			t.Fatalf("labels = %v, want %v", labels(got), want)
+		}
+		if got[0].Height != 2160 || got[0].BitrateKbps != 69_000 || !got[0].PreservesSource {
+			t.Fatalf("original entry = %#v, want the 4K version", got[0])
+		}
+		if got[1] != (AvailableQualityV3{Label: "1080p", DisplayName: "1080p", Height: 1080, BitrateKbps: 26_000}) {
+			t.Fatalf("lower version entry = %#v", got[1])
+		}
+	}
+
+	// A viewer who may not transcode can still switch to the lower version.
+	restricted := input
+	restricted.Settings.ViewerTranscodeDisabled = true
+	if got := labels(availableQualitiesV3(restricted, requested)); !reflect.DeepEqual(got, []string{QualityOriginalV3, "1080p"}) {
+		t.Fatalf("restricted viewer labels = %v", got)
+	}
+
+	// The 4K source's own ladder applies whenever the lower version is not
+	// how lower qualities are reached.
+	for name, mutate := range map[string]func(*PlannerInputV3){
+		"4K transcode allowed": func(in *PlannerInputV3) { in.Settings.Allow4KTranscode = true },
+		"transcode disabled":   func(in *PlannerInputV3) { in.Settings.TranscodeEnabled = false },
+		"no HLS": func(in *PlannerInputV3) {
+			in.Request = validStartRequestV3()
+			delete(in.Request.ClientPlaybackContext.Deliveries, DeliveryClassHLSV3)
+		},
+	} {
+		changed := input
+		mutate(&changed)
+		withoutLower := changed
+		withoutLower.LowerVersion = nil
+		if got, want := availableQualitiesV3(changed, requested), availableQualitiesV3(withoutLower, requested); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: qualities = %v, want the source ladder %v", name, labels(got), labels(want))
+		}
+	}
+}
+
+// The lower version is offered at the plain resolution that plays it
+// unchanged, which needs a class whose height does not scale it down.
+func TestLowerVersionLabelV3(t *testing.T) {
+	cases := []struct {
+		width, height int
+		want          string
+	}{
+		{1920, 1080, "1080p"},
+		{1920, 800, "1080p"},
+		{1280, 720, "720p"},
+		{2560, 1440, ""},
+		{854, 480, ""},
+		{0, 0, ""},
+	}
+	for _, tc := range cases {
+		got, ok := lowerVersionLabelV3(SourceDescriptorV3{Width: tc.width, Height: tc.height})
+		if got != tc.want || ok != (tc.want != "") {
+			t.Errorf("lowerVersionLabelV3(%dx%d) = %q, %v, want %q", tc.width, tc.height, got, ok, tc.want)
+		}
+	}
+}
+
 func TestAvailableQualitiesV3UnknownSourceHeightPublishesNoFixedRungs(t *testing.T) {
 	request := validStartRequestV3()
 	qualities := availableQualitiesV3(PlannerInputV3{

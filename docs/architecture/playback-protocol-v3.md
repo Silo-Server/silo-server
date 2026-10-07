@@ -1323,6 +1323,18 @@ remaining candidates until one produces a plan. A refused lower-resolution
 candidate therefore does not hide a later 4K version that can direct-play or
 remux without video encoding.
 
+A 4K version whose 4K transcoding is disabled takes its lower qualities from a
+lower-resolution version instead, when the item has one and the request allows
+version fallback. The menu is then `original` (the requested 4K version), the
+first non-4K version in fallback order at its plain resolution class (`1080p`
+or `720p`, with that version's height and bitrate; omitted when the version is
+taller than its class), and the rungs a transcode of that version can serve.
+Choosing any of them refuses the 4K source, so the fallback plays the lower
+version: unchanged for its plain label or a rung it fits, transcoded for a lower
+rung. `original` returns to the 4K version. The menu stays the same while the
+lower version plays. It needs HLS and transcoding enabled, because the 4K
+refusal under any other policy is not one the fallback acts on.
+
 | label | display_name | height | kbps |
 | --- | --- | --- | --- |
 | `2160p-high` | 4K High | 2160 | 40000 |

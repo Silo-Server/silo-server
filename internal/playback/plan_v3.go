@@ -48,8 +48,12 @@ type PlannerInputV3 struct {
 	ServerBitrateCapKbps int
 	RequestedFile        *models.MediaFile
 	EffectiveFile        *models.MediaFile
-	AudioTrackIndex      int
-	Settings             PlannerSettingsV3
+	// LowerVersion names the version that serves lower qualities when the
+	// requested version is 4K and 4K transcoding is disabled. Nil when the
+	// item has no such version or the caller did not look for one.
+	LowerVersion    *LowerVersionV3
+	AudioTrackIndex int
+	Settings        PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
 	Registry *TransformationRegistryV3
 	// ProgressiveRemuxRegistry, HLSRemuxRegistry, and HLSVideoRegistry report
@@ -753,37 +757,100 @@ func hlsVideoSampleEntryV3(source SourceDescriptorV3, request StartRequestV3, dv
 // gates pass. Registry availability is deliberately not consulted: it can
 // trigger lazy node-capability fetches, which source-preserving starts must
 // never pay for, and a rung whose toolchain is missing degrades to a retryable
-// terminal at replan time.
+// terminal at replan time. A 4K version that may not be transcoded publishes
+// the qualities its lower-resolution version serves instead.
 func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
-	return availableQualitiesForRouteV3(input, source)
+	if lowerVersionServesQualitiesV3(input) {
+		return lowerVersionQualitiesV3(input)
+	}
+	return append([]AvailableQualityV3{originalQualityEntryV3(source)}, transcodeRungsV3(input, input.EffectiveFile, source)...)
 }
 
-// availableQualitiesForRouteV3 keeps source-preserving HDR planning lazy while
-// still advertising the choices the configured policy allows. Selecting a
-// lower HDR rung performs the executor capability lookup during the replan;
-// building the menu itself never probes local or pooled executors.
-func availableQualitiesForRouteV3(input PlannerInputV3, source SourceDescriptorV3) []AvailableQualityV3 {
-	qualities := []AvailableQualityV3{{
+// originalQualityEntryV3 is the menu entry that plays source unchanged.
+func originalQualityEntryV3(source SourceDescriptorV3) AvailableQualityV3 {
+	return AvailableQualityV3{
 		Label:           QualityOriginalV3,
 		Height:          source.Height,
 		BitrateKbps:     source.BitrateKbps,
 		PreservesSource: true,
-	}}
+	}
+}
+
+// LowerVersionV3 describes the version of an item that serves lower
+// qualities when the requested version is 4K and 4K transcoding is disabled.
+type LowerVersionV3 struct {
+	// Requested is the version the viewer asked for. The menu's original
+	// entry stays this version even while the lower version plays.
+	Requested SourceDescriptorV3
+	// Lower is the first non-4K version in the handler's fallback order, the
+	// one a lower quality moves playback to.
+	Lower SourceDescriptorV3
+}
+
+// lowerVersionServesQualitiesV3 reports whether lower qualities come from
+// another version. A lower quality on the 4K source is then refused with
+// no_alternate_version, and the handler's alternate-version fallback plays
+// the lower version: unchanged when the quality fits it, transcoded when the
+// quality is lower still. Without HLS or transcoding the 4K source is refused
+// for a reason the fallback does not act on, so the menu stays as it was.
+func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
+	return input.LowerVersion != nil && !input.Settings.Allow4KTranscode && input.Settings.TranscodeEnabled &&
+		deliveryAvailableV3(input.Request, DeliveryClassHLSV3)
+}
+
+// lowerVersionQualitiesV3 is the menu of a 4K version whose lower qualities
+// come from its lower-resolution version: original, the lower version at its
+// resolution class (for example "1080p"), which plays it unchanged, and the
+// transcode rungs below that version.
+func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
+	lower := input.LowerVersion.Lower
+	qualities := []AvailableQualityV3{originalQualityEntryV3(input.LowerVersion.Requested)}
+	if label, ok := lowerVersionLabelV3(lower); ok {
+		qualities = append(qualities, AvailableQualityV3{
+			Label:       label,
+			DisplayName: label,
+			Height:      lower.Height,
+			BitrateKbps: lower.BitrateKbps,
+		})
+	}
+	return append(qualities, transcodeRungsV3(input, nil, lower)...)
+}
+
+// lowerVersionLabelV3 names the plain resolution preference that plays the
+// lower version unchanged: the planner preserves a source no taller than the
+// preference's height. Only the 1080p and 720p classes qualify. "480p" is also
+// a fixed transcode rung, and a source taller than its class, such as
+// 2560x1440 in the 1080p class, would be scaled down.
+func lowerVersionLabelV3(lower SourceDescriptorV3) (string, bool) {
+	class := sourceLadderHeightV3(lower)
+	if (class != 1080 && class != 720) || lower.Height <= 0 || lower.Height > class {
+		return "", false
+	}
+	return strconv.Itoa(class) + "p", true
+}
+
+// transcodeRungsV3 lists the fixed rungs a transcode of source can serve:
+// none when the policy forbids transcoding it. HDR rungs are advertised from
+// the configured policy alone, keeping source-preserving HDR planning lazy:
+// selecting one performs the executor capability lookup during the replan;
+// building the menu never probes local or pooled executors.
+func transcodeRungsV3(input PlannerInputV3, file *models.MediaFile, source SourceDescriptorV3) []AvailableQualityV3 {
 	if source.Height <= 0 {
 		// Fixed rungs must sit strictly below a known source height; unknown
 		// probe metadata cannot prove that any advertised rung avoids upscaling.
-		return qualities
+		return nil
 	}
 	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || !input.Settings.TranscodeEnabled || input.Settings.ViewerTranscodeDisabled {
-		return qualities
+		return nil
 	}
-	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
-		return qualities
+	if is4KSourceV3(file, source) && !input.Settings.Allow4KTranscode {
+		return nil
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 &&
 		tonemap.NewPolicy(input.Settings.HardwareToneMapEnabled, input.Settings.SoftwareToneMapEnabled) == tonemap.PolicyNone {
-		return qualities
+		return nil
 	}
+	var qualities []AvailableQualityV3
 	for _, rung := range ladderRungsV3 {
 		if !ladderRungPublishableV3(rung, source) {
 			continue
@@ -1084,7 +1151,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 	}
 	if source.DynamicRange != "" && source.DynamicRange != DynamicRangeSDRV3 {
-		base.AvailableQualities = availableQualitiesForRouteV3(input, source)
+		base.AvailableQualities = availableQualitiesV3(input, source)
 	}
 	plan := base
 	plan.Delivery = DeliveryTranscodeHLSV3
