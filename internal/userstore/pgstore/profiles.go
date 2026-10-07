@@ -24,7 +24,7 @@ func scanProfile(scanner interface {
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
-		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &createdAt, &updatedAt,
+		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &p.PINRevision, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, 
 		       require_advisory_age,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-		       show_forced_subtitles, max_playback_quality, created_at, updated_at
+		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
 		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
 
 	p, err := scanProfile(row)
@@ -135,7 +135,7 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 		       require_advisory_age,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-		       show_forced_subtitles, max_playback_quality, created_at, updated_at
+		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
 		FROM user_profiles WHERE user_id = $1 ORDER BY created_at ASC`, s.userID)
 	if err != nil {
 		return nil, fmt.Errorf("listing profiles: %w", err)
@@ -205,6 +205,11 @@ func updateProfile(
 			}
 			addArg("pin_hash", string(hash))
 		}
+		// The user_profiles_pin_revision trigger advances pin_revision in
+		// this same UPDATE whenever pin_hash changes, which invalidates every
+		// token minted for the old PIN, and only this profile's. It lives in
+		// the database so writers that do not know the column (an older node
+		// during a rolling deploy, manual SQL) advance it too.
 	}
 	if u.IsChild != nil {
 		addArg("is_child", *u.IsChild)

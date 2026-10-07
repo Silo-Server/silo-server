@@ -1250,8 +1250,7 @@ func main() {
 		shutdownWork = append(shutdownWork, done)
 	}
 	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
-	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
-		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
+	redisBootstrapAvailable := normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil
 
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.
@@ -2678,6 +2677,11 @@ func main() {
 
 		deps.RateLimitMW = rateLimitMW
 	}
+	// Profile PIN lockout is a security limit, independent of request rate
+	// limiting: it counts in Redis whenever Redis is configured, so every node
+	// shares one budget per profile even with ratelimit.backend at its memory
+	// default, and is process-local only on a Redis-less deployment.
+	deps.ProfilePINAttempts = ratelimit.NewProfilePINAttemptLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -3441,6 +3445,8 @@ func main() {
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
 			SessionSyncer:    deps.SessionSyncer,
 			SubtitlePlaySync: subtitlePlaySync,
+			// One PIN budget per profile across the native and Jellyfin logins.
+			ProfilePINAttempts: deps.ProfilePINAttempts,
 		}
 
 		// Wire direct dependencies when DB is available.

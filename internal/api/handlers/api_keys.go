@@ -40,13 +40,12 @@ type APIKeyHandler struct {
 	// Owners, when set, keeps other admins from minting, revoking or
 	// retiering keys on the server Owner's account.
 	Owners ownerTargetChecker
-	// Stores, Users and ProfileTokens hold personal key creation to the
-	// household manager (canManageHouseholdAs). A key skips profile PIN
-	// verification, so minting one from a child profile would hand that
-	// profile every other profile on the account. Without Stores creation
-	// fails closed; Users and ProfileTokens verify a PIN-locked primary on v1.
+	// Stores and ProfileTokens hold personal key creation to the household
+	// manager (canManageHouseholdAs). A key skips profile PIN verification, so
+	// minting one from a child profile would hand that profile every other
+	// profile on the account. Without Stores creation fails closed;
+	// ProfileTokens verifies a PIN-locked primary on v1.
 	Stores        userstore.UserStoreProvider
-	Users         userLookup
 	ProfileTokens *access.ProfileTokenService
 }
 
@@ -216,7 +215,7 @@ func (h *APIKeyHandler) HandleCreateAPIKey(w http.ResponseWriter, r *http.Reques
 	// when it has a PIN; a child profile on the admin's account may not mint
 	// a key that would skip every profile's PIN.
 	allowed, err := h.MayCreatePersonalAPIKey(r.Context(), claims.UserID, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileToken(r, h.Users, h.ProfileTokens, profileID)
+		return verifyProfileToken(r, h.Stores, h.ProfileTokens, profileID)
 	})
 	if err != nil {
 		writeProfileManagementPermissionError(w, err)

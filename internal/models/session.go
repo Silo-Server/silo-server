@@ -9,6 +9,7 @@ type AuthSession struct {
 	DeviceName             string     // human-readable device name: the reported one, else the User-Agent
 	IPAddress              string     // optional IP address
 	CreatedAt              time.Time  // when the session was created
+	LastSeenAt             *time.Time // last authenticated request; nil until recorded
 	ExpiresAt              time.Time  // when the session expires
 	RevokedAt              *time.Time // nil if active, set when revoked
 	ImpersonatorUserID     *int

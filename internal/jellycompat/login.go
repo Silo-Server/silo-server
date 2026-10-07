@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -32,6 +33,10 @@ type LoginResolver struct {
 	sessions       *SessionStore
 	tokenGenerator func() string
 	now            func() time.Time
+	// pinAttempts is the native API's profile PIN limiter, so password#pin
+	// guesses here count against the same per-profile budget. Nil allows
+	// every attempt.
+	pinAttempts *ratelimit.AttemptLimiter
 }
 
 // NewLoginResolver creates a new login resolver using direct auth service.
@@ -49,6 +54,12 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 		tokenGenerator: tokenGenerator,
 		now:            now,
 	}
+}
+
+// WithPINAttempts sets the per-profile PIN attempt limiter and returns r.
+func (r *LoginResolver) WithPINAttempts(l *ratelimit.AttemptLimiter) *LoginResolver {
+	r.pinAttempts = l
+	return r
 }
 
 // Resolve authenticates the account and profile, returning a compat session.
@@ -108,6 +119,12 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		if pinCandidate == "" {
 			return nil, fmt.Errorf("%w: use password#pin format to access PIN-protected profiles", ErrProfileHasPIN)
 		}
+		// A locked profile fails like a wrong PIN: Jellyfin clients have no
+		// lockout response, so only the message says why.
+		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
+		if _, ok := r.pinAttempts.Reserve(ctx, attemptKey); !ok {
+			return nil, fmt.Errorf("%w: too many incorrect PINs for profile %s; try again later", ErrInvalidPIN, profile.Name)
+		}
 		valid, verifyErr := store.VerifyPIN(ctx, profile.ID, pinCandidate)
 		if verifyErr != nil {
 			return nil, fmt.Errorf("verifying profile PIN: %w", verifyErr)
@@ -115,6 +132,7 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		if !valid {
 			return nil, fmt.Errorf("%w: incorrect PIN for profile %s", ErrInvalidPIN, profile.Name)
 		}
+		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
 	now := r.now()

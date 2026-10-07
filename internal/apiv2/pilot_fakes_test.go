@@ -1174,6 +1174,7 @@ type fakeSessionService struct {
 	// sessions overrides the default live-session set; pageCalls records
 	// every ListSessionsPage query.
 	sessions  []*models.AuthSession
+	current   *models.AuthSession
 	pageCalls []sessionPageQuery
 	// loggedOut, ended and revoked record the session ids the calls received.
 	loggedOut []string
@@ -1195,6 +1196,10 @@ type fakeSessionService struct {
 	// 7 as a request from off the overlay; lastNetwork is its last input.
 	networkPeer bool
 	lastNetwork handlers.NetworkSignInInput
+}
+
+func (f *fakeSessionService) CurrentLoginSession(context.Context, int, string) (*models.AuthSession, error) {
+	return f.current, nil
 }
 
 func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {

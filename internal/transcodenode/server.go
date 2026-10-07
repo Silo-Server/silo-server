@@ -2334,7 +2334,8 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
-		ContentType: playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
+		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
 		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps,
 		Abort:                  abort,

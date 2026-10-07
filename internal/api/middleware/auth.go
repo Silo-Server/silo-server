@@ -61,18 +61,21 @@ type AuthMiddleware struct {
 	apiKeyValidator  APIKeyValidator  // nil if API keys not configured
 	apiKeyUserLoader APIKeyUserLoader // nil if API keys not configured
 
-	apiKeyLastUsed *auth.APIKeyLastUsedTracker
+	apiKeyLastUsed  *auth.APIKeyLastUsedTracker
+	sessionLastSeen *auth.SessionLastSeenTracker
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware with the given token validator
 // and session validator.
 func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidator, akul APIKeyUserLoader) *AuthMiddleware {
+	updater, _ := sv.(auth.SessionLastSeenUpdater)
 	return &AuthMiddleware{
 		tokenValidator:   tv,
 		sessionValidator: sv,
 		apiKeyValidator:  akv,
 		apiKeyUserLoader: akul,
 		apiKeyLastUsed:   auth.NewAPIKeyLastUsedTracker(akv, nil),
+		sessionLastSeen:  auth.NewSessionLastSeenTracker(updater, nil),
 	}
 }
 
@@ -176,6 +179,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
+			am.sessionLastSeen.Touch(claims.SessionID)
 		}
 
 		// Populate activity log context if present (set by activitylog middleware upstream)

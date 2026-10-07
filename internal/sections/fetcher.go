@@ -2560,8 +2560,8 @@ func applySectionLibraryScopeToQuery(def catalog.QueryDefinition, libraryID *int
 			def.LibraryIDs = append([]int(nil), libraryIDs...)
 			break
 		}
-		scoped := intersectLibraryIDs(def.LibraryIDs, libraryIDs)
-		if len(scoped) == 0 {
+		scoped, none := catalog.AccessFilter{AllowedLibraryIDs: libraryIDs}.LibraryScope(def.LibraryIDs)
+		if none {
 			return def, false
 		}
 		def.LibraryIDs = scoped
@@ -2844,17 +2844,12 @@ func collectionRailQueryAccess(filter catalog.AccessFilter, libraryID *int, libr
 		return result
 	}
 
-	if effectiveLibraryIDs == nil {
-		result.AllowedLibraryIDs = []int{*libraryID}
-		return result
+	result.AllowedLibraryIDs = effectiveLibraryIDs
+	scoped, none := result.LibraryScope([]int{*libraryID})
+	if none {
+		scoped = []int{}
 	}
-	for _, id := range effectiveLibraryIDs {
-		if id == *libraryID {
-			result.AllowedLibraryIDs = []int{*libraryID}
-			return result
-		}
-	}
-	result.AllowedLibraryIDs = []int{}
+	result.AllowedLibraryIDs = scoped
 	return result
 }
 
@@ -3400,29 +3395,6 @@ func fetchSortClause(sort, order string) string {
 	}
 }
 
-func intersectLibraryIDs(a, b []int) []int {
-	if len(a) == 0 || len(b) == 0 {
-		return nil
-	}
-	allowed := make(map[int]struct{}, len(b))
-	for _, value := range b {
-		allowed[value] = struct{}{}
-	}
-	var result []int
-	seen := make(map[int]struct{})
-	for _, value := range a {
-		if _, ok := allowed[value]; !ok {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
-}
-
 // applyConfigTypeFilter adds a WHERE condition for the config's filter_type.
 func applyConfigTypeFilter(alias string, filterType string, conditions *[]string, args *[]any, argIdx *int) {
 	if filterType == "" {
@@ -3843,17 +3815,8 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 	if libraryID != nil {
 		scopeIDs = []int{*libraryID}
 	}
-	allowedFolders := filter.AllowedLibraryIDs
-	if len(scopeIDs) > 0 {
-		if allowedFolders != nil {
-			allowedFolders = intersectLibraryIDs(scopeIDs, allowedFolders)
-			if len(allowedFolders) == 0 {
-				return []*models.MediaItem{}, 0, nil
-			}
-		} else {
-			allowedFolders = scopeIDs
-		}
-	} else if allowedFolders != nil && len(allowedFolders) == 0 {
+	allowedFolders, none := filter.LibraryScope(scopeIDs)
+	if none {
 		return []*models.MediaItem{}, 0, nil
 	}
 

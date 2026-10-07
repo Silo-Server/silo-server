@@ -1132,6 +1132,8 @@ export interface ItemDetail {
   };
   content_id: string;
   play_content_id?: string;
+  /** The season of `play_content_id` when it is an episode. */
+  play_season_number?: number;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
@@ -4795,8 +4797,8 @@ export interface RateLimitConfig {
   active_backend?: string;
   /**
    * Whether the Redis backend can be selected at all (GET responses only).
-   * Sentinel and REDIS_URL deployments have no stored `redis.url`, so only the
-   * server can answer this.
+   * REDIS_URL deployments have no stored `redis.url`, so only the server can
+   * answer this.
    */
   redis_available?: boolean;
 }

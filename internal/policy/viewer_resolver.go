@@ -93,7 +93,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			return access.Scope{}, access.ErrProfileNotFound
 		}
 		var err error
-		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
+		profileVerified, err = access.VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
 			return access.Scope{}, err
 		}

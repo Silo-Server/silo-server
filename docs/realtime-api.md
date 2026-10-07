@@ -95,8 +95,10 @@ On either the frame or the close code, a client refetches the data the viewer's
 access decides (libraries, home sections, search, item details, collections,
 and the account's own permissions) and reconnects at once with a newly minted
 ticket; no backoff is needed. If the ticket mint, or any other request, answers
-`403` `profile_verification_required`, the profile token was invalidated by the
-same change and the client returns to profile selection or PIN entry. Clients
+`403` `profile_verification_required`, the profile token no longer verifies
+the profile and the client returns to profile selection or PIN entry. An access
+change does not cause that by itself: a profile token is bound to the profile's
+own PIN, so only a change to that PIN ends it. Clients
 that ignore unknown frame types and close codes keep today's behavior: they
 reconnect and pick up the new access on their next requests. Playback that
 already started keeps its stream token until the next start.

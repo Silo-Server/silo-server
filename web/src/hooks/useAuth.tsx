@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { endSessionWithProvider } from "@/api/v2/providerLogout";
-import { clearSignedOut, markSignedOut } from "@/lib/externalSignIn";
+import { clearSignedOut, markSignedOut, markSessionEnded } from "@/lib/externalSignIn";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -85,6 +85,7 @@ interface AuthState {
    * for "Not you? Switch account" before signing in as someone else.
    */
   logoutOfSiloOnly: () => void;
+  clearLoginSession: () => void;
   selectProfile: (profile: Profile, profileToken?: string) => void;
   verifyProfilePin: (profileId: string, pin: string) => Promise<ProfileVerification>;
   clearProfile: () => void;
@@ -466,6 +467,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // session alone: the server answers no provider sign-out for it anyway.
   const logout = useCallback(() => endSession(!isImpersonating), [endSession, isImpersonating]);
   const logoutOfSiloOnly = useCallback(() => endSession(false), [endSession]);
+  // A successful session revocation already ended the server session.
+  const clearLoginSession = useCallback(() => {
+    markSessionEnded("signed-out");
+    clearAuthState();
+    void refreshSignInProviders();
+  }, [clearAuthState, refreshSignInProviders]);
 
   const verifyProfilePin = useCallback(
     async (profileId: string, pin: string): Promise<ProfileVerification> => {
@@ -520,7 +527,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch {
           // The admin session is gone too; fall through to sign-in.
         }
-        if (isCurrent()) clearActiveAuthState();
+        if (isCurrent()) {
+          markSessionEnded("ended");
+          clearActiveAuthState();
+        }
       })().finally(() => {
         if (sessionRejectionRef.current?.handling === handling) sessionRejectionRef.current = null;
       });
@@ -792,6 +802,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         endImpersonation,
         logout,
         logoutOfSiloOnly,
+        clearLoginSession,
         selectProfile,
         verifyProfilePin,
         clearProfile,

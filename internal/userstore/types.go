@@ -15,6 +15,11 @@ type Profile struct {
 	// access.MaturityLimits.MaxAdvisoryAge); 0 means no limit and is stored
 	// as NULL.
 	MaxAdvisoryAge int
+	// PINRevision advances whenever this profile's PIN is set, changed or
+	// cleared. Profile verification tokens are bound to it, so a PIN change
+	// invalidates the profile's outstanding tokens while edits to any other
+	// field, or to another profile, leave them valid.
+	PINRevision int64
 	// RequireAdvisoryAge hides titles with no advisory age from the profile
 	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
 	// with a MaxAdvisoryAge limit.

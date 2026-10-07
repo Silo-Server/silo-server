@@ -148,12 +148,17 @@ func (input PlannerInputV3) hlsVideoRegistry() *TransformationRegistryV3 {
 }
 
 type PlannerResultV3 struct {
-	Plan             *PlanV3
-	Terminal         *TerminalV3
-	PlayMethod       PlayMethod
-	TranscodeAudio   bool
-	TargetVideoCodec string
-	TargetAudioCodec string
+	Plan           *PlanV3
+	Terminal       *TerminalV3
+	PlayMethod     PlayMethod
+	TranscodeAudio bool
+	// RemuxResumeLeadingPictureDrop asks a progressive remux that starts past
+	// zero to drop the open-GOP leading pictures macOS Firefox rejects. It is
+	// best effort: an executor whose FFmpeg lacks the filter serves the plain
+	// copy, so it never narrows where the route may run.
+	RemuxResumeLeadingPictureDrop bool
+	TargetVideoCodec              string
+	TargetAudioCodec              string
 	// SourceAudioChannels freezes the selected input track's channel count for
 	// source-sensitive encode recipes such as multichannel-to-stereo downmixing.
 	SourceAudioChannels int
@@ -637,7 +642,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				candidate.Claims.Subtitles = remuxSubtitle.Claims
 				finalizePlanIdentityV3(&candidate, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 				if deliverySupportsPlanV3(input.Request, DeliveryClassProgressiveV3, candidate) && !planAttemptedV3(candidate, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-					return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
+					return PlannerResultV3{Plan: &candidate, PlayMethod: PlayRemux, TranscodeAudio: progressiveTranscodeAudio, RemuxResumeLeadingPictureDrop: firefoxMacOSHEVCResumeLeadingPictureDropV3(source, input.Request), TargetAudioCodec: candidate.EffectiveRecipe.AudioCodec, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, progressiveAudioChannels, progressiveTranscodeAudio), TargetAudioChannels: progressiveAudioChannels, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec, DownloadedSubtitleID: remuxSubtitle.DownloadedSubtitleID}, true
 				}
 				return PlannerResultV3{}, false
 			}

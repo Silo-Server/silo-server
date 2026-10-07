@@ -38,7 +38,7 @@ func (h *SettingValuesHandler) identityRequestFrom(r *http.Request, key string) 
 		LibraryID:       query.Get("library_id"),
 		SeriesID:        query.Get("series_id"),
 		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.UserRepo, h.ProfileTokens, profileID)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
 		},
 	}
 }
@@ -249,7 +249,7 @@ func (h *SettingValuesHandler) effectiveQueryFrom(r *http.Request, keys []string
 		LibraryIDs:      parseIntCSV(query.Get("library_ids")),
 		SeriesIDs:       splitCSV(query.Get("series_ids")),
 		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.UserRepo, h.ProfileTokens, profileID)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
 		},
 	}
 }

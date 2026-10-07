@@ -742,6 +742,18 @@ func classifyToneMapPreflightError(err error) error {
 	return fmt.Errorf("tone-map source preflight failed: %w", err)
 }
 
+// hlsMuxMaxDelayMicros is the -max_delay, in microseconds, of every HLS
+// transcode. Jellyfin uses the same value.
+const hlsMuxMaxDelayMicros = 5_000_000
+
+// HLSMPEGTSTimestampOffset90k is how far, in 90 kHz ticks, ffmpeg's MPEG-TS
+// muxer shifts every PTS and DTS of an HLS MPEG-TS segment: twice
+// -max_delay, 10 s for hlsMuxMaxDelayMicros. With -copyts a segment's video
+// PTS is the source time plus this offset, so a WebVTT X-TIMESTAMP-MAP for
+// those segments must add it too or players show cues that much early.
+// fMP4 segments carry no such shift.
+const HLSMPEGTSTimestampOffset90k = 2 * hlsMuxMaxDelayMicros * 90_000 / 1_000_000
+
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
 	opts = normalizeTranscodeOpts(opts)
@@ -851,7 +863,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	args = append(args,
 		"-max_muxing_queue_size", "2048",
-		"-max_delay", "5000000",
+		"-max_delay", strconv.Itoa(hlsMuxMaxDelayMicros),
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", opts.SegmentDuration),
 		// Bound real playlists as well as synthetic ones. Segment files remain on

@@ -188,7 +188,11 @@ type Dependencies struct {
 	PersonRefreshQueue    handlers.PersonRefreshQueue
 	PersonRefresher       handlers.PersonRefresher
 	RateLimitMW           *ratelimit.Middleware
-	ClientIPResolver      *clientip.Resolver
+	// ProfilePINAttempts bounds wrong profile PIN guesses per profile,
+	// shared with the Jellyfin login so both count against one budget.
+	// Nil gets a process-local limiter.
+	ProfilePINAttempts *ratelimit.AttemptLimiter
+	ClientIPResolver   *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -1079,6 +1083,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
 		}
 		profileHandler.ProfileTokens = profileTokenService
+		profileHandler.PINAttempts = deps.ProfilePINAttempts
+		if profileHandler.PINAttempts == nil {
+			profileHandler.PINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
 		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs)
@@ -1143,11 +1151,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
 			// Household management: a primary profile acting for another
-			// profile on its own account. Without both of these the widening
-			// is unavailable rather than unguarded.
-			if userRepo != nil {
-				settingValuesHandler.UserRepo = userRepo
-			}
+			// profile on its own account. Without the token service a
+			// PIN-locked primary cannot widen rather than widening unguarded.
 			settingValuesHandler.ProfileTokens = profileTokenService
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
@@ -1160,9 +1165,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
-		if userRepo != nil {
-			deviceHandler.UserRepo = userRepo
-		}
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
@@ -2419,7 +2421,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -2514,6 +2516,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminUsers = adminHandler
 		v2deps.AdminPlaybackHistory = adminHandler
 		v2deps.AdminAccounts = adminHandler
+		v2deps.AdminLoginSessions = adminHandler
 		v2deps.AdminDevices = adminHandler
 		if adminHandler.AdminDevicesAvailable() {
 			v2deps.AdminAccountDevices = adminHandler
@@ -2845,6 +2848,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
+		v2deps.AdminProfileSections = sectionHandler
 	}
 	if sectionSettingsHandler != nil {
 		v2deps.SectionFlags = sectionSettingsHandler
@@ -3138,7 +3142,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Use(demoGuard.Guard)
 				}
 
-				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 				r.Route("/api-keys", func(r chi.Router) {
 					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
 					r.Get("/", apiKeyHandler.HandleListAPIKeys)
@@ -5221,19 +5225,14 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 }
 
 // newPersonalAPIKeyHandler builds the account-scoped API key handler with the
-// household check its creation path runs. A nil user repository stays a nil
-// interface so the PIN check fails closed instead of calling through it.
+// household check its creation path runs.
 func newPersonalAPIKeyHandler(
 	repo *auth.APIKeyRepository,
 	stores userstore.UserStoreProvider,
-	users *auth.UserRepository,
 	tokens *access.ProfileTokenService,
 ) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
-	if users != nil {
-		h.Users = users
-	}
 	h.ProfileTokens = tokens
 	return h
 }

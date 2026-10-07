@@ -82,6 +82,7 @@ const AdminDownloadPreparationsRefresh = lazy(
   () => import("@/components/AdminDownloadPreparationsRefresh"),
 );
 const SettingsLayout = lazy(() => import("@/pages/SettingsLayout"));
+const SignedInSessions = lazy(() => import("@/pages/settings/SignedInSessions"));
 const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));
@@ -560,6 +561,18 @@ function AppRoutes() {
                   }
                 >
                   <Route index element={<AccountSettings />} />
+                </Route>
+                <Route
+                  path="/settings/sessions"
+                  element={
+                    <RequirePrimaryOrAdmin>
+                      <UICustomizedLayout>
+                        <SettingsLayout />
+                      </UICustomizedLayout>
+                    </RequirePrimaryOrAdmin>
+                  }
+                >
+                  <Route index element={<SignedInSessions />} />
                 </Route>
                 {/* Remaining settings use profile-scoped values and require a profile. */}
                 <Route

@@ -629,7 +629,7 @@ func (h *SettingValuesHandler) clearSettingValue(
 		return apiError(http.StatusNotFound, policyErrorNotFound, "No value is set at this scope")
 	}
 	auditSettingsForOther(ctx, settingsAuditRecord{
-		Action:          "clear",
+		Action:          settingsAuditActionClear,
 		ActorProfileID:  actingProfileID(ctx),
 		TargetProfileID: identity.ProfileID,
 		TargetUserID:    eventUserID,

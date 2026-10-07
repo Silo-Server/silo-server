@@ -2400,7 +2400,7 @@ func (r *CatalogResolver) fetchAllSearchCandidates(ctx context.Context, req Cata
 }
 
 func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter, []string, bool) {
-	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(req.Query.LibraryIDs, access)
+	allowedLibraryIDs, earlyEmpty := access.LibraryScope(req.Query.LibraryIDs)
 	if earlyEmpty {
 		return AccessFilter{}, nil, true
 	}
@@ -2415,7 +2415,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 }
 
 func catalogBrowseFilters(req CatalogRequest, access AccessFilter) (BrowseFilters, bool, error) {
-	allowedLibraryIDs, earlyEmpty := effectiveCatalogLibraryIDs(req.Query.LibraryIDs, access)
+	allowedLibraryIDs, earlyEmpty := access.LibraryScope(req.Query.LibraryIDs)
 	if earlyEmpty {
 		return BrowseFilters{}, true, nil
 	}
@@ -2510,48 +2510,6 @@ func applyCatalogBrowseOverlayRules(filters *BrowseFilters, def QueryDefinition)
 	if len(filters.ContentRating) > 1 {
 		filters.ContentRating = slices.Compact(filters.ContentRating)
 	}
-}
-
-func effectiveCatalogLibraryIDs(requestIDs []int, access AccessFilter) ([]int, bool) {
-	if len(requestIDs) == 0 {
-		if access.AllowedLibraryIDs != nil {
-			ids := append([]int(nil), access.AllowedLibraryIDs...)
-			ids = removeCatalogLibraryIDs(ids, access.DisabledLibraryIDs)
-			if len(ids) == 0 {
-				return nil, true
-			}
-			return ids, false
-		}
-		return nil, false
-	}
-
-	ids := append([]int(nil), requestIDs...)
-	if access.AllowedLibraryIDs != nil {
-		ids = intersectInts(ids, access.AllowedLibraryIDs)
-	}
-	ids = removeCatalogLibraryIDs(ids, access.DisabledLibraryIDs)
-	if len(ids) == 0 {
-		return nil, true
-	}
-	return ids, false
-}
-
-func removeCatalogLibraryIDs(ids, remove []int) []int {
-	if len(ids) == 0 || len(remove) == 0 {
-		return ids
-	}
-	blocked := make(map[int]struct{}, len(remove))
-	for _, id := range remove {
-		blocked[id] = struct{}{}
-	}
-	filtered := ids[:0]
-	for _, id := range ids {
-		if _, ok := blocked[id]; ok {
-			continue
-		}
-		filtered = append(filtered, id)
-	}
-	return filtered
 }
 
 func filterCatalogItems(items []*models.MediaItem, def QueryDefinition) []*models.MediaItem {
