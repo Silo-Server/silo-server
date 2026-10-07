@@ -57,10 +57,11 @@ func householdRequest(profileID string, admin bool, profileToken string) *http.R
 }
 
 // TestCanManageHousehold pins the household-parent boundary before it is shared
-// with the settings routes. The rule is deliberately narrow: a server admin, or
-// the one profile flagged is_primary — and when that profile carries a PIN, a
-// verified profile token, so sending only X-Profile-Id cannot walk past a
-// profile lock.
+// with the settings routes. The rule is deliberately narrow: the one profile
+// flagged is_primary, whatever the account's role — and when that profile
+// carries a PIN, a verified profile token, so sending only X-Profile-Id cannot
+// walk past a profile lock. Only an admin request naming no profile on a
+// household with no limited profile manages without one.
 func TestCanManageHousehold(t *testing.T) {
 	ctx := context.Background()
 
@@ -87,12 +88,88 @@ func TestCanManageHousehold(t *testing.T) {
 		return store, access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	}
 
-	t.Run("admin always may", func(t *testing.T) {
+	t.Run("profile-less admin on an unrestricted household may", func(t *testing.T) {
 		store, tokens := setup(t, "")
-		// An admin with no active profile at all still manages.
+		// No profile is limited, so first-run and admin tooling that sends
+		// no X-Profile-Id still manages.
 		ok, err := canManageHousehold(householdRequest("", true, ""), store, nil, tokens)
 		if err != nil || !ok {
 			t.Fatalf("admin = (%v, %v), want (true, nil)", ok, err)
+		}
+	})
+
+	t.Run("profile-less admin on a restricted household may not", func(t *testing.T) {
+		store, tokens := setup(t, "")
+		rating := "PG"
+		if err := store.UpdateProfile(ctx, "child", userstore.UpdateProfileInput{MaxContentRating: &rating}); err != nil {
+			t.Fatalf("limit child: %v", err)
+		}
+		ok, err := canManageHousehold(householdRequest("", true, ""), store, nil, tokens)
+		if err != nil || ok {
+			t.Fatalf("profile-less admin = (%v, %v), want (false, nil)", ok, err)
+		}
+	})
+
+	// An admin API key keeps its profile-less household management on a
+	// restricted household, as it keeps profile-less admin powers; a regular
+	// account's key does not gain any.
+	t.Run("profile-less admin API key on a restricted household may", func(t *testing.T) {
+		store, tokens := setup(t, "1234")
+		for _, admin := range []bool{true, false} {
+			req := householdRequest("", admin, "")
+			claims := *apimw.GetClaims(req.Context())
+			claims.TokenType = auth.TokenTypeAPIKey
+			claims.SessionID = ""
+			req = req.WithContext(apimw.SetClaims(req.Context(), &claims))
+			ok, err := canManageHousehold(req, store, nil, tokens)
+			if err != nil || ok != admin {
+				t.Fatalf("API key admin=%v = (%v, %v), want (%v, nil)", admin, ok, err, admin)
+			}
+		}
+	})
+
+	t.Run("profile-less admin with a PIN-locked primary may not", func(t *testing.T) {
+		store, tokens := setup(t, "1234")
+		ok, err := canManageHousehold(householdRequest("", true, ""), store, nil, tokens)
+		if err != nil || ok {
+			t.Fatalf("profile-less admin = (%v, %v), want (false, nil)", ok, err)
+		}
+	})
+
+	// The admin role does not widen the rule: a non-primary profile on an
+	// admin account is a household member like any other.
+	t.Run("non-primary on an admin account may not", func(t *testing.T) {
+		store, tokens := setup(t, "")
+		ok, err := canManageHousehold(householdRequest("child", true, ""), store, nil, tokens)
+		if err != nil || ok {
+			t.Fatalf("admin non-primary = (%v, %v), want (false, nil)", ok, err)
+		}
+	})
+
+	t.Run("primary on an admin account may", func(t *testing.T) {
+		store, tokens := setup(t, "")
+		ok, err := canManageHousehold(householdRequest("primary", true, ""), store, nil, tokens)
+		if err != nil || !ok {
+			t.Fatalf("admin primary = (%v, %v), want (true, nil)", ok, err)
+		}
+	})
+
+	t.Run("PIN-locked primary on an admin account needs a token", func(t *testing.T) {
+		store, tokens := setup(t, "1234")
+		repo := stubUserRepo{user: &models.User{ID: 1}}
+		_, err := canManageHousehold(householdRequest("primary", true, ""), store, repo, tokens)
+		if !errors.Is(err, access.ErrProfileUnverified) {
+			t.Fatalf("admin pin without token err = %v, want ErrProfileUnverified", err)
+		}
+		token, _, err := tokens.Mint(access.ProfileTokenClaims{
+			UserID: 1, SessionID: "session-1", ProfileID: "primary",
+		})
+		if err != nil {
+			t.Fatalf("issuing token: %v", err)
+		}
+		ok, err := canManageHousehold(householdRequest("primary", true, token), store, repo, tokens)
+		if err != nil || !ok {
+			t.Fatalf("admin pin with token = (%v, %v), want (true, nil)", ok, err)
 		}
 	})
 

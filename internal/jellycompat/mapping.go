@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -105,7 +106,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		// Jellyfin 12 reports the item's own original language, uninherited.
 		OriginalLanguage: item.OriginalLanguage,
 		ImageTags:        map[string]string{},
-		UserData:         userDataDTO(m.codec.EncodeStringID(EncodedIDItem, item.ContentID), item.UserData, isFavorite, progress),
+		UserData:         userDataDTO(m.codec.EncodeStringID(EncodedIDItem, item.ContentID), jellyfinIsFolder(item.Type), item.UserData, isFavorite, progress),
 	}
 
 	if mt := jellyfinMediaType(item.Type); mt != "" {
@@ -195,7 +196,7 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 		dto.Tags = []string{}
 	}
 	if allFields || fields["productionlocations"] {
-		dto.ProductionLocations = append([]string{}, item.Countries...)
+		dto.ProductionLocations = append([]string{}, lang.UniqueCountries(item.Countries)...)
 	}
 	if allFields || fields["mediasourcecount"] {
 		// The list path has no version data, so assume matched playable items
@@ -331,7 +332,7 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 	dto.SortName = firstNonEmpty(item.SortTitle, item.OriginalTitle, item.Title)
 	dto.ForcedSortName = dto.SortName
 	dto.Studios = m.namePairs(item.Studios, EncodedIDStudio)
-	dto.ProductionLocations = append([]string{}, item.Countries...)
+	dto.ProductionLocations = append([]string{}, lang.UniqueCountries(item.Countries)...)
 	if item.Tagline != "" {
 		dto.Taglines = []string{item.Tagline}
 	}
@@ -412,7 +413,7 @@ func (m *mapper) seasonFromUpstream(season upstreamSeason, seriesID string, isFa
 		ImageTags:          map[string]string{},
 		SeriesID:           m.codec.EncodeStringID(EncodedIDItem, seriesID),
 		ParentID:           m.codec.EncodeStringID(EncodedIDItem, seriesID),
-		UserData:           userDataDTO(m.codec.EncodeStringID(EncodedIDSeason, season.ContentID), season.UserData, isFavorite, nil),
+		UserData:           userDataDTO(m.codec.EncodeStringID(EncodedIDSeason, season.ContentID), true, season.UserData, isFavorite, nil),
 		ChildCount:         season.EpisodeCount,
 		RecursiveItemCount: season.EpisodeCount,
 	}
@@ -437,7 +438,7 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 		RunTimeTicks: runtimeTicks(ep.DurationSeconds, ep.Runtime),
 		ImageTags:    map[string]string{},
 		SeriesName:   ep.SeriesTitle,
-		UserData:     userDataDTO(m.codec.EncodeStringID(EncodedIDItem, ep.ContentID), ep.UserData, isFavorite, progress),
+		UserData:     userDataDTO(m.codec.EncodeStringID(EncodedIDItem, ep.ContentID), false, ep.UserData, isFavorite, progress),
 	}
 	applyPlayableLocation(&dto, ep.HasMediaFiles == nil || *ep.HasMediaFiles)
 	dto.ProviderIDs = providerIDMap(ep.ImdbID, ep.TmdbID, ep.TvdbID)
@@ -513,13 +514,13 @@ func (m *mapper) applySeasonPrimaryImage(dto *baseItemDTO, season seriesImageSet
 	)
 }
 
-func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, progress *upstreamProgress) *itemUserDataDTO {
+func userDataDTO(itemID string, isFolder bool, data *catalog.SeasonUserData, isFavorite bool, progress *upstreamProgress) *itemUserDataDTO {
 	dto := &itemUserDataDTO{IsFavorite: isFavorite, ItemID: itemID, Key: itemID}
 
 	if data != nil {
 		pos := clampResumeSeconds(data.PositionSeconds, data.DurationSeconds)
 		dto.PlaybackPositionTicks = secondsToTicks(pos)
-		dto.PlayedPercentage = playedPercentage(pos, data.DurationSeconds, data.Played)
+		dto.PlayedPercentage = playedPercentage(pos, data.DurationSeconds)
 		dto.Played = data.Played
 		dto.UnplayedItemCount = data.UnplayedCount
 		if data.Played {
@@ -531,7 +532,7 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 		pos := clampResumeSeconds(progress.PositionSeconds, progress.DurationSeconds)
 		played := dto.Played || progress.Completed
 		dto.PlaybackPositionTicks = secondsToTicks(pos)
-		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds, played)
+		dto.PlayedPercentage = playedPercentage(pos, progress.DurationSeconds)
 		dto.Played = played
 		if played {
 			dto.PlayCount = 1
@@ -539,18 +540,22 @@ func userDataDTO(itemID string, data *catalog.SeasonUserData, isFavorite bool, p
 		dto.LastPlayedDate = progress.UpdatedAt
 	}
 
+	// Jellyfin folders report the share of children played, so a played
+	// series or season reports 100.
+	if isFolder && dto.Played {
+		dto.PlayedPercentage = 100
+	}
+
 	return dto
 }
 
 // playedPercentage derives PlayedPercentage from the same clamped position
-// used for PlaybackPositionTicks so the two fields can never disagree. A
-// played item at rest (position 0, no resume point) reports 100 so clients
-// rendering progress from the DTO show it fully watched; a rewatch in flight
+// used for PlaybackPositionTicks so the two fields can never disagree. Like
+// Jellyfin, a video with no resume point reports 0, which omits the field,
+// even when it is played: clients that draw a bar for any positive value
+// would otherwise show a full bar on every watched item. A rewatch in flight
 // reports its live fraction.
-func playedPercentage(clampedPos, duration float64, played bool) float64 {
-	if played && clampedPos == 0 {
-		return 100
-	}
+func playedPercentage(clampedPos, duration float64) float64 {
 	if duration <= 0 {
 		return 0
 	}

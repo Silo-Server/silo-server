@@ -28,7 +28,7 @@ type fakeCatalog struct {
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
-	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID}, nil
+	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
 }
 
 func fakeListingCard(id string) handlers.CollectionItemView {
@@ -100,6 +100,21 @@ func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, 
 	return view, nil
 }
 
+// fakeDeviceAudioOverride is the device whose device-scoped audio preference
+// is French; every other caller resolves the profile's English.
+const fakeDeviceAudioOverride = "phone-1"
+
+// fakeHeatVersion answers Heat's one version with the effective audio the
+// viewer's device resolves, as the detail service does.
+func fakeHeatVersion(v handlers.ItemViewer) catalogpkg.FileVersion {
+	version := catalogpkg.FileVersion{FileID: 120, FilePath: "/media/movies/Heat.mkv", Resolution: "2160p", AddedAt: fixedTime(),
+		EffectiveAudioTrackIndex: new(1), EffectiveAudioLanguage: "en"}
+	if v.Access.DeviceID == fakeDeviceAudioOverride {
+		version.EffectiveAudioTrackIndex, version.EffectiveAudioLanguage = new(2), "fr"
+	}
+	return version
+}
+
 func notFoundItem() error {
 	return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 }
@@ -122,19 +137,22 @@ func (f *fakeCatalog) ItemDetail(_ context.Context, v handlers.ItemViewer, id st
 		Cast:           []catalogpkg.CastCredit{{Name: "Al Pacino", Character: "Vincent Hanna", PersonID: "7"}},
 		SeasonUserData: &catalogpkg.SeasonUserData{Played: true, WatchedCount: 1, LastFileID: &fileID},
 		UserState:      &catalogpkg.ItemUserState{Played: true, IsFavorite: true},
-		Versions:       []catalogpkg.FileVersion{{FileID: 120, FilePath: "/media/movies/Heat.mkv", Resolution: "2160p", AddedAt: fixedTime()}},
+		Versions:       []catalogpkg.FileVersion{fakeHeatVersion(v)},
 		Subtitles:      []catalogpkg.SubtitleInfo{}, OverlaySummary: &models.OverlaySummary{Resolution: "4K"},
 		WorkFormats: []catalogpkg.WorkFormatSummary{{Type: "ebook", ContentID: "ebook:heat", LibraryID: 2}}}, nil
 }
 
-func (f *fakeCatalog) ItemVersions(_ context.Context, _ handlers.ItemViewer, id string) ([]catalogpkg.FileVersion, error) {
+func (f *fakeCatalog) ItemVersions(_ context.Context, v handlers.ItemViewer, id string) ([]catalogpkg.FileVersion, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
+	f.lastViewer = v
 	if id != "movie:heat-1995" {
 		return nil, notFoundItem()
 	}
-	return []catalogpkg.FileVersion{{FileID: 120, Resolution: "2160p", AddedAt: fixedTime()}}, nil
+	version := fakeHeatVersion(v)
+	version.FilePath = ""
+	return []catalogpkg.FileVersion{version}, nil
 }
 
 func (f *fakeCatalog) MangaFiles(_ context.Context, _ handlers.ItemViewer, id string) (*catalogpkg.MangaSeriesFiles, error) {
@@ -516,6 +534,68 @@ func TestGetCatalogItem(t *testing.T) {
 		t.Fatalf("episode file readability = %+v", episodePage)
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/series:nope/episodes", "", viewerHeaders()), TypeNotFound)
+}
+
+// TestGetCatalogItemResolvesDeviceAudio covers the device-scoped audio
+// override on item detail and its versions: the declared X-Silo-Device-Id
+// reaches the detail service, so the device's French override wins, and a
+// request without the header answers the profile's English.
+func TestGetCatalogItemResolvesDeviceAudio(t *testing.T) {
+	deps, fake := catalogDeps(t)
+	h := newTestHandler(t, deps)
+	type version struct {
+		EffectiveAudioTrackIndex *int   `json:"effective_audio_track_index"`
+		EffectiveAudioLanguage   string `json:"effective_audio_language"`
+	}
+	for _, tc := range []struct {
+		name, header, wantDevice, wantLang string
+		wantIndex                          int
+	}{
+		{"device override", fakeDeviceAudioOverride, fakeDeviceAudioOverride, "fr", 2},
+		{"device id trimmed", " " + fakeDeviceAudioOverride + " ", fakeDeviceAudioOverride, "fr", 2},
+		{"other device", "tv-1", "tv-1", "en", 1},
+		{"no header", "", "", "en", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			headers := viewerHeaders()
+			if tc.header != "" {
+				headers = with(headers, deviceIDHeader, tc.header)
+			}
+			check := func(path string, versions func([]byte) []version) {
+				t.Helper()
+				rec := do(t, h, http.MethodGet, path, "", headers)
+				if rec.Code != http.StatusOK {
+					t.Fatal(rec.Code, rec.Body.String())
+				}
+				if fake.lastViewer.Access.DeviceID != tc.wantDevice {
+					t.Fatalf("%s device = %q, want %q", path, fake.lastViewer.Access.DeviceID, tc.wantDevice)
+				}
+				got := versions(rec.Body.Bytes())
+				if len(got) != 1 || got[0].EffectiveAudioTrackIndex == nil || *got[0].EffectiveAudioTrackIndex != tc.wantIndex || got[0].EffectiveAudioLanguage != tc.wantLang {
+					t.Fatalf("%s effective audio = %+v, want %s #%d", path, got, tc.wantLang, tc.wantIndex)
+				}
+			}
+			check("/api/v2/catalog/items/movie:heat-1995", func(b []byte) []version {
+				var body struct {
+					Versions []version `json:"versions"`
+				}
+				if err := json.Unmarshal(b, &body); err != nil {
+					t.Fatal(err)
+				}
+				return body.Versions
+			})
+			check("/api/v2/catalog/items/movie:heat-1995/versions", func(b []byte) []version {
+				var body struct {
+					Items []version `json:"items"`
+				}
+				if err := json.Unmarshal(b, &body); err != nil {
+					t.Fatal(err)
+				}
+				return body.Items
+			})
+		})
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995", "", with(viewerHeaders(), deviceIDHeader, "phone-1,phone-1")), TypeValidationFailed)
 }
 
 func TestSeriesSeasons(t *testing.T) {

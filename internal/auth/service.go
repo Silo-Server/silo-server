@@ -262,6 +262,32 @@ func (s *Service) routePasswordLogin(ctx context.Context, username string) (stri
 	return directory, nil
 }
 
+// HasLoginName reports whether a password sign-in with name would find an
+// existing account (see LookupLogin).
+func (s *Service) HasLoginName(ctx context.Context, name string) (bool, error) {
+	if s.users == nil {
+		return false, nil
+	}
+	if _, err := LookupLogin(ctx, s.users, name); err != nil {
+		if IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("looking up user: %w", err)
+	}
+	return true, nil
+}
+
+// PasswordLoginUsesDirectory reports whether a password sign-in with
+// username would go to the directory (LDAP) instead of a local account (see
+// routePasswordLogin).
+func (s *Service) PasswordLoginUsesDirectory(ctx context.Context, username string) (bool, error) {
+	providerID, err := s.routePasswordLogin(ctx, username)
+	if err != nil {
+		return false, err
+	}
+	return providerID != LocalProviderID, nil
+}
+
 func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider) {
 	if provider == nil || info.ID == "" {
 		return
@@ -914,38 +940,64 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 }
 
 // StartImpersonation creates a new target-user session with admin provenance.
+// Account locks serialize creation with revocation and authority changes; the
+// originating login session must still be live when the new session is inserted.
 func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUserID int, deviceName, ip string) (*TokenPair, *models.User, *models.User, error) {
-	if claims := ClaimsFromContext(ctx); claims != nil {
+	claims := ClaimsFromContext(ctx)
+	if claims != nil {
 		if claims.TokenType == TokenTypeAPIKey || claims.SessionID == "" {
 			return nil, nil, nil, ErrImpersonationNotAllowed
 		}
-		currentSession, err := s.sessions.GetByID(ctx, claims.SessionID)
-		if err != nil {
-			if !IsSessionNotFound(err) {
-				return nil, nil, nil, fmt.Errorf("getting current session: %w", err)
-			}
-		} else if currentSession.ImpersonatorUserID != nil {
-			return nil, nil, nil, ErrAlreadyImpersonating
-		}
-	}
-
-	admin, err := s.users.GetByID(ctx, adminUserID)
-	if err != nil {
-		if IsNotFound(err) {
-			return nil, nil, nil, ErrImpersonationNotAllowed
-		}
-		return nil, nil, nil, fmt.Errorf("getting admin user: %w", err)
-	}
-	if admin.Role != "admin" || !admin.Enabled {
-		return nil, nil, nil, ErrImpersonationNotAllowed
 	}
 	if adminUserID == targetUserID {
 		return nil, nil, nil, ErrImpersonationNotAllowed
 	}
-
-	target, err := s.users.GetByID(ctx, targetUserID)
+	tx, err := s.sessions.pool.Begin(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("getting target user: %w", err)
+		return nil, nil, nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// Match revocation and ownership transfers: lock both accounts in ID
+	// order before taking session locks or inserting rows with user FKs.
+	ids := []int{adminUserID, targetUserID}
+	sort.Ints(ids)
+	var admin, target *models.User
+	for _, id := range ids {
+		user, err := lockUser(ctx, tx, id)
+		if err != nil {
+			if id == adminUserID && IsNotFound(err) {
+				return nil, nil, nil, ErrImpersonationNotAllowed
+			}
+			return nil, nil, nil, fmt.Errorf("getting impersonation account: %w", err)
+		}
+		if id == adminUserID {
+			admin = user
+		} else {
+			target = user
+		}
+	}
+	// An already active View as user answers 409 before the account checks,
+	// whose outcome would depend on the account being viewed.
+	if claims != nil {
+		currentSession, err := scanSession(tx.QueryRow(ctx, `SELECT `+sessionColumns+` FROM auth_sessions WHERE id=$1 FOR UPDATE`, claims.SessionID))
+		if IsSessionNotFound(err) {
+			return nil, nil, nil, ErrSessionRevoked
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("getting current session: %w", err)
+		}
+		if currentSession.RevokedAt != nil || !currentSession.ExpiresAt.After(time.Now()) {
+			return nil, nil, nil, ErrSessionRevoked
+		}
+		if currentSession.ImpersonatorUserID != nil {
+			return nil, nil, nil, ErrAlreadyImpersonating
+		}
+		if currentSession.UserID != admin.ID {
+			return nil, nil, nil, ErrSessionRevoked
+		}
+	}
+	if admin.Role != "admin" || !admin.Enabled {
+		return nil, nil, nil, ErrImpersonationNotAllowed
 	}
 	// Admins may not act as another admin; only the server Owner may, and
 	// nobody may act as the Owner.
@@ -966,8 +1018,11 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 		ImpersonationStartedAt: &startedAt,
 	}
 
-	if err := s.sessions.Create(ctx, session); err != nil {
+	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, nil, nil, fmt.Errorf("creating session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, nil, err
 	}
 
 	pair, err := s.generateTokenPair(Claims{
@@ -1207,6 +1262,19 @@ func (s *Service) GetSessions(ctx context.Context, userID int) ([]*models.AuthSe
 // SessionRepository.ListByUserPage.
 func (s *Service) GetSessionsPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {
 	return s.sessions.ListByUserPage(ctx, userID, after, limit)
+}
+
+// CurrentLoginSession returns the caller's live session independently of the
+// page position, so an older current session need not be paged into view.
+func (s *Service) CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error) {
+	session, err := s.sessions.GetByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session.UserID != userID || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
+		return nil, ErrSessionNotFound
+	}
+	return session, nil
 }
 
 // RevokeSession revokes a specific session. It verifies the session belongs

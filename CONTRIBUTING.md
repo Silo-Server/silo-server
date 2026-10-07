@@ -26,6 +26,11 @@ Problems that only affect a native client belong in
 [`silo-android`](https://github.com/Silo-Server/silo-android). Search first; if
 an issue already covers the problem, add what's new there.
 
+Using Claude Code or Codex? The
+[Silo troubleshooting skill](https://github.com/Silo-Server/silo-troubleshooting-skill)
+helps you collect these details and drafts the issue, then has independent
+reviewers check it against your evidence before you post it.
+
 - One problem or proposal per issue.
 - Describe what you observed before any theory about the cause.
 - Give exact steps to reproduce, expected and actual behavior, the Silo version

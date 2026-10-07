@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -430,6 +431,23 @@ func TestClassifyAuthReportsUnknownMiddleware(t *testing.T) {
 		if !contains(traits, want) {
 			t.Errorf("traits = %v, want %q", traits, want)
 		}
+	}
+}
+
+// The v1 household gate narrows a profile-optional viewer read; it must not
+// be mistaken for RequireProfile, which would mark the route profile_required.
+func TestClassifyAuthHouseholdProfileGate(t *testing.T) {
+	class, traits := classifyAuth([]string{
+		"authMiddleware.RequireAuth",
+		"viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
+		"householdProfileGate",
+	})
+	if class != "profile_scoped" {
+		t.Errorf("class = %q, want profile_scoped", class)
+	}
+	want := []string{"authenticated", "household_profile_gate", "viewer_access"}
+	if !reflect.DeepEqual(traits, want) {
+		t.Errorf("traits = %v, want %v", traits, want)
 	}
 }
 

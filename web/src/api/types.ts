@@ -1132,6 +1132,8 @@ export interface ItemDetail {
   };
   content_id: string;
   play_content_id?: string;
+  /** The season of `play_content_id` when it is an episode. */
+  play_season_number?: number;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   status?: "pending" | "matched" | "unmatched" | "ambiguous";
 
@@ -2383,6 +2385,44 @@ export interface AutoscanStatus {
 
 export type AutoscanEventStatus = "running" | "success" | "error" | "unresolved";
 
+/** Outcome counters of a completed autoscan scan run. */
+export interface AutoscanScanResult {
+  new: number;
+  updated: number;
+  unchanged: number;
+  missing: number;
+  missing_skipped_protected: number;
+  files_deleted: number;
+  items_deleted: number;
+  memberships_removed: number;
+  errors: number;
+  /** Non-zero when the run did not scan because an overlapping scan was in progress. */
+  skipped: number;
+}
+
+export type AutoscanChangeOutcome =
+  | "queued"
+  | "joined"
+  | "suppressed"
+  | "unresolved"
+  | "ignored"
+  | "error";
+
+/** One change an autoscan event received and what the host did with it. */
+export interface AutoscanEventChange {
+  source_path: string;
+  rewritten_path: string;
+  scope?: string;
+  /** A known outcome, or the raw value a newer server sent. */
+  outcome: AutoscanChangeOutcome | (string & {});
+  reason?: string;
+  detail?: string;
+  library_id?: number;
+  target_mode?: string;
+  target_path?: string;
+  scan_run_id?: string;
+}
+
 export interface AutoscanEventScanRun {
   id: string;
   library_id: number;
@@ -2394,6 +2434,7 @@ export interface AutoscanEventScanRun {
   started_at?: string;
   completed_at?: string;
   error_message?: string;
+  result?: AutoscanScanResult;
 }
 
 export interface AutoscanEvent {
@@ -2415,6 +2456,8 @@ export interface AutoscanEvent {
   scans_suppressed: number;
   error_message?: string;
   scan_runs: AutoscanEventScanRun[];
+  changes: AutoscanEventChange[];
+  changes_truncated: boolean;
 }
 
 export interface AutoscanEventsResponse {
@@ -2443,6 +2486,7 @@ export interface AutoscanScan {
   capability_id?: string;
   event_status?: AutoscanEventStatus;
   event_completed_at?: string;
+  result?: AutoscanScanResult;
 }
 
 export interface AutoscanScansResponse {

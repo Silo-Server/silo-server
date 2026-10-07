@@ -66,3 +66,34 @@ func TestAdminAutoscanScans(t *testing.T) {
 	deps.AdminAutoscanScans = nil
 	requireProblem(t, do(t, NewHandler(deps), "GET", path, "", bearer(adminToken)), TypeDependencyUnavailable)
 }
+
+type fixedAdminAutoscanScans struct{ rows []autoscan.ScanWithEvent }
+
+func (f fixedAdminAutoscanScans) ReadAdminAutoscanScans(context.Context, autoscan.ScanListFilter) ([]autoscan.ScanWithEvent, int, error) {
+	return f.rows, len(f.rows), nil
+}
+
+func TestAdminAutoscanScansExposeResult(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanScans = fixedAdminAutoscanScans{rows: []autoscan.ScanWithEvent{
+		{ScanRunSummary: autoscan.ScanRunSummary{ID: "scan-skipped", MediaFolderID: 7, Mode: "subtree", Status: "completed", Result: &autoscan.ScanResult{Skipped: 1}}},
+		{ScanRunSummary: autoscan.ScanRunSummary{ID: "scan-running", MediaFolderID: 7, Mode: "subtree", Status: "running"}},
+	}}
+	rec := do(t, NewHandler(deps), "GET", Prefix+"/admin/autoscan/scans", "", bearer(adminToken))
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Items) != 2 {
+		t.Fatal(err, rec.Body.String())
+	}
+	var result AdminAutoscanScanResult
+	if err := json.Unmarshal(body.Items[0]["result"], &result); err != nil || result.Skipped != 1 || result.New != 0 {
+		t.Fatal(err, string(body.Items[0]["result"]))
+	}
+	if _, ok := body.Items[1]["result"]; ok {
+		t.Fatalf("running scan carries a result: %s", body.Items[1]["result"])
+	}
+}

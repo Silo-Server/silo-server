@@ -51,7 +51,8 @@ type Resolver interface {
 // Queuer enqueues resolved scan targets.
 type Queuer interface {
 	EnqueueScans(ctx context.Context, targets []scantrigger.Target) error
-	EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (created, reused int, err error)
+	// EnqueueAutoscanScans returns one outcome per target, in order.
+	EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error)
 }
 
 type resolveStats struct {
@@ -348,10 +349,17 @@ type consumeResult struct {
 // propagates it so the delivery can be retried by the sender.
 func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes []Change, opts consumeOptions) (consumeResult, error) {
 	rewritten := rewriteChanges(changes, src.PathRewrites)
-	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, opts.TTL)
+	records := newChangeRecords(changes, rewritten)
+	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, records, opts.TTL)
 	result := consumeResult{Stats: stats, ResolvedAny: resolvedAny}
+	// finish stamps the bounded change log onto every terminal event update.
+	finish := func(f EventFinish) {
+		f.Changes, f.ChangesTruncated = boundChangeRecords(records)
+		s.finishEvent(ctx, opts.EventID, f)
+	}
 	if len(targets) > maxAutoscanTargetsPerPoll {
 		collapsed := collapseTargetsToLibraryScans(targets)
+		collapsePendingToLibraries(records)
 		slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans", "component", "autoscan",
 			"source_id", src.ID,
 			"targets", len(targets),
@@ -361,13 +369,14 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		targets = collapsed
 	}
 	if len(targets) > 0 {
-		enqueue, eerr := s.enqueueScanTargets(ctx, targets, opts.EventID)
+		enqueue, outcomes, eerr := s.enqueueScanTargets(ctx, targets, opts.EventID)
 		result.Enqueue = enqueue
 		if eerr != nil {
 			s.releaseClaims(ctx, claimed)
+			failPending(records)
 			slog.WarnContext(ctx, "autoscan: enqueue failed", "component", "autoscan", "source_id", src.ID, "err", eerr)
 			result.Status = EventStatusError
-			s.finishEvent(ctx, opts.EventID, EventFinish{
+			finish(EventFinish{
 				Status:          EventStatusError,
 				ChangesReturned: len(changes),
 				ChangesResolved: stats.ChangesResolved,
@@ -378,6 +387,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 			})
 			return result, eerr // do NOT advance marker
 		}
+		applyEnqueueOutcomes(records, targets, outcomes)
 	}
 
 	// Advancing the marker is what tells the provider "I've consumed up to
@@ -419,7 +429,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 			slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
 		}
 		result.Status = EventStatusError
-		s.finishEvent(ctx, opts.EventID, EventFinish{
+		finish(EventFinish{
 			Status:          EventStatusError,
 			ChangesReturned: len(changes),
 			ChangesResolved: stats.ChangesResolved,
@@ -457,7 +467,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		if aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "component", "autoscan", "source_id", src.ID, "err", aerr)
 			result.Status = EventStatusError
-			s.finishEvent(ctx, opts.EventID, EventFinish{
+			finish(EventFinish{
 				Status:          EventStatusError,
 				ChangesReturned: len(changes),
 				ChangesResolved: stats.ChangesResolved,
@@ -486,7 +496,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		}
 	}
 	result.Status = status
-	s.finishEvent(ctx, opts.EventID, EventFinish{
+	finish(EventFinish{
 		Status:          status,
 		ChangesReturned: len(changes),
 		ChangesResolved: stats.ChangesResolved,
@@ -667,11 +677,15 @@ func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (Ingest
 	}, cerr
 }
 
-func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, error) {
+// enqueueScanTargets enqueues targets in bounded chunks. With an event it also
+// returns one outcome per target, aligned with targets; event-less enqueues
+// report no per-target outcomes.
+func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, []scantrigger.EnqueueOutcome, error) {
 	var result EnqueueResult
 	if len(targets) == 0 {
-		return result, nil
+		return result, nil, nil
 	}
+	var outcomes []scantrigger.EnqueueOutcome
 	for start := 0; start < len(targets); start += maxAutoscanTargetsPerPoll {
 		end := start + maxAutoscanTargetsPerPoll
 		if end > len(targets) {
@@ -679,20 +693,26 @@ func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.
 		}
 		chunk := targets[start:end]
 		if eventID != 0 {
-			created, reused, err := s.queue.EnqueueAutoscanScans(ctx, chunk, eventID)
+			chunkOutcomes, err := s.queue.EnqueueAutoscanScans(ctx, chunk, eventID)
 			if err != nil {
-				return result, err
+				return result, nil, err
 			}
-			result.Created += created
-			result.Reused += reused
+			for _, outcome := range chunkOutcomes {
+				if outcome.Created {
+					result.Created++
+				} else {
+					result.Reused++
+				}
+			}
+			outcomes = append(outcomes, chunkOutcomes...)
 			continue
 		}
 		if err := s.queue.EnqueueScans(ctx, chunk); err != nil {
-			return result, err
+			return result, nil, err
 		}
 		result.Created += len(chunk)
 	}
-	return result, nil
+	return result, outcomes, nil
 }
 
 func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) (int64, bool) {
@@ -774,7 +794,9 @@ func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 // resolveAndClaim resolves changes to scan targets and atomically claims them
 // via the suppressor. Legacy/auto changes retain the historical parent-dir
 // collapse. Structured file changes resolve exact files, and subtree changes
-// resolve exact subtree paths even when the path no longer exists.
+// resolve exact subtree paths even when the path no longer exists. records is
+// aligned with changes and receives each change's target and outcome; claimed
+// changes are left pending until the enqueue reports which run covers them.
 //
 // Every claim is keyed on the path the source reported, not the scan target,
 // together with that path's observed state (see Suppressor). A video file
@@ -784,59 +806,99 @@ func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 // which a suppression keyed on the directory would have swallowed. Likewise a
 // file deleted or replaced shortly after it was imported is a new change, not
 // a duplicate of the import.
-func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl time.Duration) (targets []scantrigger.Target, claimed []suppressClaim, resolvedAny bool, stats resolveStats) {
+func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, records []ChangeRecord, ttl time.Duration) (targets []scantrigger.Target, claimed []suppressClaim, resolvedAny bool, stats resolveStats) {
 	seenTargets := make(map[string]struct{})
 
 	var legacyPaths []string
-	for _, change := range changes {
+	legacyByDir := make(map[string][]int)
+	for i, change := range changes {
+		rec := &records[i]
 		switch change.Scope {
 		case ChangeScopeFile, ChangeScopeSubtree:
-			target, ok := s.resolveChange(ctx, change, &stats)
+			target, ok := s.resolveChange(ctx, change, &stats, rec)
 			if !ok {
 				continue
 			}
 			resolvedAny = true
 			stats.ChangesResolved++
+			rec.setTarget(*target)
 			if !s.claimTarget(ctx, *target, filepath.Clean(change.SourcePath), ttl, seenTargets, &targets, &claimed) {
 				stats.Suppressed++
+				rec.setOutcome(ChangeOutcomeSuppressed, "", "")
+				continue
 			}
+			rec.pendingTarget = scanTargetKey(*target)
 		default:
+			if change.SourcePath == "" {
+				rec.setOutcome(ChangeOutcomeIgnored, string(scantrigger.ReasonPathRequired), "")
+				continue
+			}
 			legacyPaths = append(legacyPaths, change.SourcePath)
+			dir := filepath.Dir(change.SourcePath)
+			legacyByDir[dir] = append(legacyByDir[dir], i)
 		}
 	}
 
 	for _, group := range groupByParentDir(legacyPaths) {
 		dir := group.Dir
+		indexes := legacyByDir[dir]
+		apply := func(fn func(*ChangeRecord)) {
+			for _, i := range indexes {
+				fn(&records[i])
+			}
+		}
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
+		primaryErr := rerr
+		var fallbackErr error
 		if isRequestError(rerr) {
 			// The directory may have been removed (e.g. a deleted movie
 			// folder). Fall back to a reconciling scan of the vanished path so
 			// its files are marked missing promptly. Paths outside Silo's
 			// media folders still resolve to nothing and are skipped below.
 			target, rerr = s.resolver.ResolveVanishedPath(ctx, dir, scanTrigger)
+			fallbackErr = rerr
 		}
 		if rerr != nil {
 			var reqErr *scantrigger.RequestError
 			if errors.As(rerr, &reqErr) {
 				// Path outside Silo's media folders (or otherwise unresolvable)
 				// — an expected skip, not an error worth logging every cycle.
+				apply(func(rec *ChangeRecord) { rec.setUnresolved(primaryErr, fallbackErr) })
 				continue
 			}
 			stats.TransientErrors++
 			slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", dir, "err", rerr)
+			apply(func(rec *ChangeRecord) {
+				rec.setOutcome(ChangeOutcomeError, ChangeReasonResolveFailed, rerr.Error())
+			})
 			continue
 		}
 		if target == nil || target.Folder == nil {
+			apply(func(rec *ChangeRecord) {
+				rec.setOutcome(ChangeOutcomeUnresolved, string(scantrigger.ReasonNoLibraryMatch), "")
+			})
 			continue
 		}
 		resolvedAny = true
 		// The directory scan serves every reported path in it; each path is
 		// claimed on its own so a new change to one file is not debounced by
 		// an earlier report of a sibling.
+		key := scanTargetKey(*target)
+		claimedPaths := make(map[string]bool, len(group.Paths))
 		for _, path := range group.Paths {
 			stats.ChangesResolved++
-			if !s.claimTarget(ctx, *target, filepath.Clean(path), ttl, seenTargets, &targets, &claimed) {
+			claimedPaths[path] = s.claimTarget(ctx, *target, filepath.Clean(path), ttl, seenTargets, &targets, &claimed)
+			if !claimedPaths[path] {
 				stats.Suppressed++
+			}
+		}
+		for _, i := range indexes {
+			rec := &records[i]
+			rec.setTarget(*target)
+			if claimedPaths[changes[i].SourcePath] {
+				rec.pendingTarget = key
+			} else {
+				rec.setOutcome(ChangeOutcomeSuppressed, "", "")
 			}
 		}
 	}
@@ -875,13 +937,16 @@ func isRequestError(err error) bool {
 	return errors.As(err, &reqErr)
 }
 
-func (s *Service) resolveChange(ctx context.Context, change Change, stats *resolveStats) (*scantrigger.Target, bool) {
+func (s *Service) resolveChange(ctx context.Context, change Change, stats *resolveStats, rec *ChangeRecord) (*scantrigger.Target, bool) {
 	if change.SourcePath == "" {
+		rec.setOutcome(ChangeOutcomeIgnored, string(scantrigger.ReasonPathRequired), "")
 		return nil, false
 	}
 	var (
-		target *scantrigger.Target
-		err    error
+		target      *scantrigger.Target
+		err         error
+		primaryErr  error
+		fallbackErr error
 	)
 	switch change.Scope {
 	case ChangeScopeSubtree:
@@ -892,13 +957,17 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 		// directory. A change that resolves to a whole library was not a file
 		// path and is dropped rather than turned into a full scan.
 		if err == nil && target != nil && target.Mode == scantrigger.ModeLibrary {
+			rec.setTarget(*target)
+			rec.setOutcome(ChangeOutcomeIgnored, ChangeReasonResolvesToLibrary, "")
 			return nil, false
 		}
 		if isRequestError(err) {
 			// The file may have been deleted (upgrade/replacement). Fall back
 			// to a reconciling scan so the stale row is marked missing
 			// promptly instead of lingering until the next full library scan.
+			primaryErr = err
 			target, err = s.resolver.ResolveVanishedPath(ctx, change.SourcePath, scanTrigger)
+			fallbackErr = err
 		}
 	default:
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
@@ -906,13 +975,19 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 	if err != nil {
 		var reqErr *scantrigger.RequestError
 		if errors.As(err, &reqErr) {
+			if primaryErr == nil {
+				primaryErr = err
+			}
+			rec.setUnresolved(primaryErr, fallbackErr)
 			return nil, false
 		}
 		stats.TransientErrors++
 		slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", change.SourcePath, "scope", change.Scope, "err", err)
+		rec.setOutcome(ChangeOutcomeError, ChangeReasonResolveFailed, err.Error())
 		return nil, false
 	}
 	if target == nil || target.Folder == nil {
+		rec.setOutcome(ChangeOutcomeUnresolved, string(scantrigger.ReasonNoLibraryMatch), "")
 		return nil, false
 	}
 	return target, true
@@ -952,7 +1027,7 @@ func (s *Service) claimTarget(
 		}
 	}
 
-	targetKey := fmt.Sprintf("%d|%s|%s", target.Folder.ID, target.Mode, target.Path)
+	targetKey := scanTargetKey(target)
 	if _, seen := seenTargets[targetKey]; seen {
 		// Claimed, but already enqueued this cycle under another change that
 		// resolved to the same target. Not a suppression: the enqueue covers

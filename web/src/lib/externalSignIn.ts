@@ -103,6 +103,28 @@ export function leaveForProvider(url: string): void {
 // them straight back to a provider that still has its own session open;
 // that would sign them in again at once. Cleared by the next sign-in.
 const SIGNED_OUT_KEY = "silo.auth.signedOut";
+const SESSION_END_KEY = "silo.auth.sessionEnd";
+
+// Why the last session ended, for the sign-in page's notice. Only a
+// deliberate sign-out also blocks the provider redirect: a session that
+// expired or was revoked elsewhere goes back through single sign-on as before.
+export function markSessionEnded(reason: "ended" | "signed-out"): void {
+  if (reason === "signed-out") markSignedOut();
+  try {
+    window.sessionStorage.setItem(SESSION_END_KEY, reason);
+  } catch {
+    // The sign-in form remains usable without storage.
+  }
+}
+
+export function sessionEndReason(): "ended" | "signed-out" | null {
+  try {
+    const reason = window.sessionStorage.getItem(SESSION_END_KEY);
+    return reason === "ended" || reason === "signed-out" ? reason : null;
+  } catch {
+    return null;
+  }
+}
 
 export function markSignedOut(): void {
   try {
@@ -115,6 +137,7 @@ export function markSignedOut(): void {
 export function clearSignedOut(): void {
   try {
     window.sessionStorage.removeItem(SIGNED_OUT_KEY);
+    window.sessionStorage.removeItem(SESSION_END_KEY);
   } catch {
     // Nothing to clear.
   }

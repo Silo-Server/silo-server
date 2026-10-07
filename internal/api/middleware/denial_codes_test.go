@@ -180,7 +180,7 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/x", nil)
 		r = r.WithContext(SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s"}))
 		rec := newReasonWriter()
-		RequireActingAdmin(nil)(ok).ServeHTTP(rec, r)
+		RequireActingAdmin(nil, nil)(ok).ServeHTTP(rec, r)
 		got := decodeDenial(t, rec)
 		if rec.Code != http.StatusForbidden || got.Error != "forbidden" {
 			t.Fatalf("%d %q", rec.Code, got.Error)

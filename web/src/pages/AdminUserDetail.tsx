@@ -13,6 +13,7 @@ import { AdminUserDeleteDialog } from "@/components/AdminUserDeleteDialog";
 import { AdminUserImpersonationDialog } from "@/components/AdminUserImpersonationDialog";
 import { AdminUserPasswordResetDialog } from "@/components/AdminUserPasswordResetDialog";
 import { AdminUserSignIn } from "@/components/admin/AdminUserSignIn";
+import { LoginSessionsPanel } from "@/components/sessions/LoginSessionsPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -231,7 +232,7 @@ function AdminUserDetailPage() {
               available={available}
             />
           </TabsContent>
-          <TabsContent value="sign-in" className="min-w-0">
+          <TabsContent value="sign-in" className="min-w-0 space-y-6">
             <AdminUserSignIn
               user={account}
               manageable={manageable}
@@ -239,6 +240,9 @@ function AdminUserDetailPage() {
               passwordOpen={passwordOpen}
               onPasswordOpenChange={setPasswordOpen}
             />
+            {capabilities.data?.login_sessions && (
+              <LoginSessionsPanel adminUser={account} manageable={manageable} />
+            )}
           </TabsContent>
           <TabsContent value="activity" className="min-w-0">
             <ActivityTab user={account} />

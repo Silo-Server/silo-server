@@ -1174,6 +1174,7 @@ type fakeSessionService struct {
 	// sessions overrides the default live-session set; pageCalls records
 	// every ListSessionsPage query.
 	sessions  []*models.AuthSession
+	current   *models.AuthSession
 	pageCalls []sessionPageQuery
 	// loggedOut, ended and revoked record the session ids the calls received.
 	loggedOut []string
@@ -1185,8 +1186,10 @@ type fakeSessionService struct {
 	// localLoginOff leaves the local provider out of discovery, as the
 	// server does while auth.local_password_login is off.
 	localLoginOff bool
-	// lastLogin is the input the most recent Login received.
-	lastLogin handlers.LoginInput
+	// lastLogin is the input the most recent Login received, and
+	// lastLoginDevice the device its context carried for the session.
+	lastLogin       handlers.LoginInput
+	lastLoginDevice auth.ClientDevice
 	// networkPeer makes discovery list the network provider (installation
 	// 5), as for a request that came through that provider's overlay.
 	// NetworkSignIn signs laura in at installation 5 and answers installation
@@ -1195,8 +1198,13 @@ type fakeSessionService struct {
 	lastNetwork handlers.NetworkSignInInput
 }
 
-func (f *fakeSessionService) Login(_ context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
+func (f *fakeSessionService) CurrentLoginSession(context.Context, int, string) (*models.AuthSession, error) {
+	return f.current, nil
+}
+
+func (f *fakeSessionService) Login(ctx context.Context, in handlers.LoginInput) (handlers.TokenPairView, error) {
 	f.lastLogin = in
+	f.lastLoginDevice = auth.ClientDeviceFromContext(ctx)
 	if f.err != nil {
 		return handlers.TokenPairView{}, f.err
 	}
@@ -1304,7 +1312,7 @@ func (f *fakeSessionService) liveSessions(userID int) []*models.AuthSession {
 	}
 	expires := fixedTime().Add(30 * 24 * time.Hour)
 	return []*models.AuthSession{
-		{ID: "s3", UserID: userID, DeviceName: "Silo/1.0 (tvOS)", IPAddress: "127.0.0.1", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
+		{ID: "s3", UserID: userID, DeviceName: "Living Room Apple TV", DeviceID: "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50", DevicePlatform: "tvOS", IPAddress: "127.0.0.1", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
 		{ID: "s2", UserID: userID, DeviceName: "Silo/1.0 (iOS)", IPAddress: "127.0.0.2", CreatedAt: fixedTime().Add(time.Hour), ExpiresAt: expires},
 		{ID: "s1", UserID: userID, DeviceName: "", IPAddress: "", CreatedAt: fixedTime(), ExpiresAt: expires},
 	}

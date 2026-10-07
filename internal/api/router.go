@@ -188,7 +188,11 @@ type Dependencies struct {
 	PersonRefreshQueue    handlers.PersonRefreshQueue
 	PersonRefresher       handlers.PersonRefresher
 	RateLimitMW           *ratelimit.Middleware
-	ClientIPResolver      *clientip.Resolver
+	// ProfilePINAttempts bounds wrong profile PIN guesses per profile,
+	// shared with the Jellyfin login so both count against one budget.
+	// Nil gets a process-local limiter.
+	ProfilePINAttempts *ratelimit.AttemptLimiter
+	ClientIPResolver   *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
 	// runs on every native request and connected overlay origins are accepted
@@ -412,6 +416,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// acting-admin profile policy, degrading admin routes to the plain
 	// role check.
 	var checkPrimaryProfile apimw.PrimaryProfileChecker
+	// Reports whether a household has a PIN-protected or access-limited
+	// profile, which withholds admin powers from a profile-less admin
+	// request. Wired with checkPrimaryProfile; nil disables that check.
+	var householdRequiresProfile apimw.HouseholdProfileRequirement
 	// lookupProfile resolves a profile for the given user, returning nil when it
 	// does not exist. Shared by the acting-admin primary check and the
 	// diagnostics profile-attribution validator so both read profile state
@@ -436,6 +444,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 			return profile.IsPrimary, true, nil
 		}
+		householdRequiresProfile = func(ctx context.Context, userID int) (bool, error) {
+			store, err := userStores.ForUser(ctx, userID)
+			if err != nil {
+				return false, err
+			}
+			profiles, err := store.ListProfiles(ctx)
+			if err != nil {
+				return false, err
+			}
+			return access.HouseholdRequiresProfile(profiles), nil
+		}
 	}
 
 	var permissionPDP apimw.PermissionDecider
@@ -447,10 +466,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// account's primary household profile.
 	var requireActingAdmin func(http.Handler) http.Handler
 	if deps.PolicySystem != nil {
-		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile)
+		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile, householdRequiresProfile)
 	} else {
 		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile)
+		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile, householdRequiresProfile)
 	}
 
 	// Health handler advertises the server's identity so multi-server
@@ -619,6 +638,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					userRepo,
 					metadataLibraries,
 					checkPrimaryProfile,
+					householdRequiresProfile,
 					permissionPDP,
 					accessGroupStore,
 				).RequireMetadataCurationForItem
@@ -628,6 +648,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					userRepo,
 					metadataLibraries,
 					checkPrimaryProfile,
+					householdRequiresProfile,
 					accessGroupStore,
 				).RequireMetadataCurationForItem
 			}
@@ -637,6 +658,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				userRepo,
 				nil, // marker gate does not resolve target libraries
 				checkPrimaryProfile,
+				householdRequiresProfile,
 				permissionPDP,
 				accessGroupStore,
 			).RequireMarkerEdit
@@ -646,6 +668,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				userRepo,
 				nil,
 				checkPrimaryProfile,
+				householdRequiresProfile,
 			).RequireMarkerEdit
 		}
 	}
@@ -1060,6 +1083,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer
 		}
 		profileHandler.ProfileTokens = profileTokenService
+		profileHandler.PINAttempts = deps.ProfilePINAttempts
+		if profileHandler.PINAttempts == nil {
+			profileHandler.PINAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
 		// Private S3 preserves existing avatar keys and presigned delivery. Local
 		// avatars use the signed artwork endpoint. Never use public S3 here.
 		profileHandler.AvatarStore = handlers.NewProfileAvatarStore(deps.Blobs)
@@ -2136,6 +2163,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			downloadSvc.SetProgressStores(deps.UserStoreProvider)
 		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if jwtService != nil {
+			downloadHandler.SetDirectDownloadLinks(jwtService)
+		}
 		if deps.NodePlanner != nil {
 			downloadHandler.SetProxyDelivery(deps.NodePlanner, func() string {
 				cfg := deps.CurrentConfig()
@@ -2397,7 +2427,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = handlers.NewAPIKeyHandler(apiKeyRepo)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -2492,6 +2522,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminUsers = adminHandler
 		v2deps.AdminPlaybackHistory = adminHandler
 		v2deps.AdminAccounts = adminHandler
+		v2deps.AdminLoginSessions = adminHandler
 		v2deps.AdminDevices = adminHandler
 		if adminHandler.AdminDevicesAvailable() {
 			v2deps.AdminAccountDevices = adminHandler
@@ -2823,6 +2854,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if sectionHandler != nil {
 		v2deps.ProfileSections = sectionHandler
+		v2deps.AdminProfileSections = sectionHandler
 	}
 	if sectionSettingsHandler != nil {
 		v2deps.SectionFlags = sectionSettingsHandler
@@ -2869,6 +2901,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.DirectDownloads = &apiv2.DirectDownloadHandlers{
 			Original: direct("/api/v2/direct-download", downloadHandler.HandleDirectDownload),
 			Proxy:    direct("/api/v2/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy),
+		}
+		if downloadSvc != nil && jwtService != nil {
+			v2deps.DirectDownloadLinks = downloadHandler
 		}
 	}
 
@@ -3113,7 +3148,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Use(demoGuard.Guard)
 				}
 
-				apiKeyHandler := handlers.NewAPIKeyHandler(apiKeyRepo)
+				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
 				r.Route("/api-keys", func(r chi.Router) {
 					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
 					r.Get("/", apiKeyHandler.HandleListAPIKeys)
@@ -3223,6 +3258,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 				if viewerAccessMiddleware != nil {
 					r.Use(viewerAccessMiddleware.RequireViewerAccess)
 				}
+				// v1 bridge fix: the profile-optional viewer reads below
+				// refuse a request without X-Profile-Id when the account
+				// has a PIN-protected or access-restricted profile, which
+				// account scope would otherwise bypass. Capability probes,
+				// profile selection, and account routes stay
+				// profile-optional; see apimw.HouseholdProfileGate. It is
+				// wired with viewer access: without a user store neither runs.
+				householdProfileGate := func(next http.Handler) http.Handler { return next }
+				if viewerAccessMiddleware != nil {
+					householdProfileGate = apimw.NewHouseholdProfileGate(deps.UserStoreProvider).Require
+				}
 
 				// User-facing library route (all authenticated users).
 				if libraryHandler != nil {
@@ -3314,6 +3360,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				// config stay admin-only (see the /admin group below).
 				if markersHandler != nil && markerEditAccess != nil {
 					r.Route("/markers", func(r chi.Router) {
+						r.Use(householdProfileGate)
 						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
 						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
 						r.Group(func(r chi.Router) {
@@ -3364,24 +3411,27 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 				// Browse, search, and item detail routes.
 				if itemsHandler != nil {
-					r.Get("/catalog", catalogHandler.HandleGetCatalog)
-					r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
-					r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
-					r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
-					r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
-					if literaryWorkHandler != nil {
-						r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
-					}
-					if catalogResourceHandler != nil {
-						r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
-						r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
-						r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
-						r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
-						r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
-						r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
-						r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)
-					}
-					r.Get("/watch/{id}", itemsHandler.HandleGetWatchDetail)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/catalog", catalogHandler.HandleGetCatalog)
+						r.Get("/catalog/filters", catalogHandler.HandleGetCatalogFilters)
+						r.Get("/catalog/filters/search", catalogHandler.HandleGetCatalogFacetSearch)
+						r.Get("/catalog/audiobook-groups", catalogHandler.HandleGetAudiobookGroups)
+						r.Post("/catalog/query", catalogHandler.HandlePostCatalogQuery)
+						if literaryWorkHandler != nil {
+							r.Get("/works/{work_id}", literaryWorkHandler.HandleGetWork)
+						}
+						if catalogResourceHandler != nil {
+							r.Get("/catalog/items/{id}", catalogResourceHandler.HandleGetItemDetail)
+							r.Get("/catalog/items/{id}/episodes", catalogResourceHandler.HandleGetItemEpisodes)
+							r.Get("/catalog/items/{id}/versions", catalogResourceHandler.HandleGetItemVersions)
+							r.Get("/catalog/items/{id}/manga-files", catalogResourceHandler.HandleGetMangaFiles)
+							r.Get("/catalog/series/{id}/seasons", catalogResourceHandler.HandleGetSeasons)
+							r.Get("/catalog/series/{id}/seasons/{num}", catalogResourceHandler.HandleGetSeason)
+							r.Get("/catalog/series/{id}/seasons/{num}/episodes", catalogResourceHandler.HandleGetEpisodes)
+						}
+						r.Get("/watch/{id}", itemsHandler.HandleGetWatchDetail)
+					})
 				}
 
 				if calendarRepo != nil {
@@ -3389,15 +3439,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 
 				if peopleHandler != nil {
-					r.Get("/people", peopleHandler.HandleSearch)
-					r.Get("/people/{id}", peopleHandler.HandleGetPerson)
-					r.Post("/people/{id}/refresh", peopleHandler.HandleRefreshPerson)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/people", peopleHandler.HandleSearch)
+						r.Get("/people/{id}", peopleHandler.HandleGetPerson)
+						r.Post("/people/{id}/refresh", peopleHandler.HandleRefreshPerson)
+					})
 				}
 
 				if libraryCollectionHandler != nil {
-					r.Get("/library/{id}/collections", libraryCollectionHandler.HandleListLibraryCollections)
-					r.Get("/library/{id}/collections/{collection_id}/items", libraryCollectionHandler.HandleGetLibraryCollectionItems)
-					r.Get("/library/{id}/user-collections", libraryCollectionHandler.HandleListLibraryUserCollections)
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Get("/library/{id}/collections", libraryCollectionHandler.HandleListLibraryCollections)
+						r.Get("/library/{id}/collections/{collection_id}/items", libraryCollectionHandler.HandleGetLibraryCollectionItems)
+						r.Get("/library/{id}/user-collections", libraryCollectionHandler.HandleListLibraryUserCollections)
+					})
 				}
 
 				// Profile routes.
@@ -3715,7 +3771,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
-						r.Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
+						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {
 					r.Get("/metadata/ai/status", handlers.WriteMetadataAIDisabledStatus)
@@ -3743,7 +3799,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 						// in-memory fallback.
 						itemsHandler.SetTrailerRefreshLimiter(deps.RateLimitMW.SharedLimiter())
 						itemsHandler.SetTrailerRefreshRequester(requester)
-						r.Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
+						r.With(householdProfileGate).Post("/items/{id}/trailers/refresh", itemsHandler.HandleRequestTrailersRefresh)
 					}
 					r.Get("/items/trailers/capability", itemsHandler.HandleTrailerRefreshCapability)
 				}
@@ -3768,25 +3824,34 @@ func newChiRouter(deps Dependencies) chi.Router {
 						// the /{media_file_id} route below, while
 						// /providers/status never competes with it in chi.
 						r.Get("/providers/status", subtitleSearchHandler.HandleProviderStatus)
-						r.Post("/search", subtitleSearchHandler.HandleSearch)
-						r.Post("/download", subtitleSearchHandler.HandleDownload)
-						r.Post("/upload", subtitleSearchHandler.HandleUpload)
+						// The probes and the file-less language detection
+						// do not authorize against the viewer scope.
 						r.Post("/detect-language", subtitleSearchHandler.HandleDetectLanguage)
 						if subtitleAIHandler != nil {
 							r.Get("/ai/status", subtitleAIHandler.HandleStatus)
 							r.Get("/ai/quota", subtitleAIHandler.HandleQuota)
-							r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
-							r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
-							r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
-							r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
 						} else {
 							// Answer the capability probe with 200 {"enabled": false}
 							// when AI translation isn't wired, so the client gets a
 							// clean negative instead of a 404.
 							r.Get("/ai/status", handlers.WriteSubtitleAIDisabledStatus)
 						}
-						r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
-						r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+						// Media-file actions authorize against the viewer
+						// scope, so they take the household gate.
+						r.Group(func(r chi.Router) {
+							r.Use(householdProfileGate)
+							r.Post("/search", subtitleSearchHandler.HandleSearch)
+							r.Post("/download", subtitleSearchHandler.HandleDownload)
+							r.Post("/upload", subtitleSearchHandler.HandleUpload)
+							if subtitleAIHandler != nil {
+								r.Post("/ai/translate", subtitleAIHandler.HandleTranslate)
+								r.Get("/ai/jobs", subtitleAIHandler.HandleListJobs)
+								r.Get("/ai/jobs/{job_id}", subtitleAIHandler.HandleGetJob)
+								r.Post("/ai/jobs/{job_id}/cancel", subtitleAIHandler.HandleCancelJob)
+							}
+							r.Get("/{media_file_id}", subtitleSearchHandler.HandleList)
+							r.Delete("/{id}", subtitleSearchHandler.HandleDelete)
+						})
 					})
 				} else {
 					// The whole group above is conditional (it needs the DB,
@@ -3868,8 +3933,23 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 				r.Route("/downloads", func(r chi.Router) {
 					r.Get("/capability", downloadHandler.HandleCapability)
-					r.Post("/", downloadHandler.HandleCreateDownload)
-					r.Get("/", downloadHandler.HandleListDownloads)
+					// Create, list, delete and the file routes serve an
+					// ephemeral (device-less) download under the request's
+					// scope, so they take the household gate. The managed
+					// routes below already refuse a request without a profile.
+					r.Group(func(r chi.Router) {
+						r.Use(householdProfileGate)
+						r.Post("/", downloadHandler.HandleCreateDownload)
+						r.Get("/", downloadHandler.HandleListDownloads)
+						r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
+						// GET+HEAD: background download stacks probe with HEAD
+						// before issuing ranged GETs; http.ServeContent handles
+						// HEAD natively.
+						r.Get("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
+						r.Head("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
+						r.Get("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
+						r.Head("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
+					})
 					// Series monitoring (auto-download) subscriptions.
 					r.Post("/subscriptions", downloadHandler.HandleCreateSubscription)
 					r.Post("/subscriptions/sync", downloadHandler.HandleSyncSubscriptions)
@@ -3879,22 +3959,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
 					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
 					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
-					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
-					// GET+HEAD: background download stacks probe with HEAD
-					// before issuing ranged GETs; http.ServeContent handles
-					// HEAD natively.
-					r.Get("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-					r.Head("/{id}/file", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file", downloadHandler.HandleDownloadFile))
-					r.Get("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
-					r.Head("/{id}/file-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/downloads/{id}/file-proxy", downloadHandler.HandleDownloadFileViaProxy))
 					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
 					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
 					r.Get("/{id}/subtitles/{ref}", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/downloads/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle))
 				})
-				r.Get("/direct-download", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-				r.Head("/direct-download", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
-				r.Get("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
-				r.Head("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+				r.Group(func(r chi.Router) {
+					r.Use(householdProfileGate)
+					r.Get("/direct-download", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
+					r.Head("/direct-download", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download", downloadHandler.HandleDirectDownload))
+					r.Get("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodGet, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+					r.Head("/direct-download-proxy", observeNative(deps.StreamTelemetry, http.MethodHead, "/api/v1/direct-download-proxy", downloadHandler.HandleDirectDownloadViaProxy))
+				})
 
 				// Recipe gallery catalog (no profile required — purely static metadata).
 				recipeHandler := &handlers.RecipeHandler{}
@@ -5098,6 +5173,11 @@ func v2Dependencies(
 		ArtworkSigner:   deps.ArtworkSigner,
 		ArtworkRepair:   deps.ArtworkRepair,
 	}
+	if viewer != nil && deps.UserStoreProvider != nil {
+		// The same household rule v1 mounts on its profile-optional viewer
+		// reads; v2 operations opt in with Operation.HouseholdProfileGate.
+		out.HouseholdProfile = apimw.NewHouseholdProfileGate(deps.UserStoreProvider).Require
+	}
 	if metadataCuration != nil {
 		out.PermissionGates[policy.PermissionMetadataCuration] = metadataCuration
 	}
@@ -5148,4 +5228,22 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 		}
 		return names, nil
 	}
+}
+
+// newPersonalAPIKeyHandler builds the account-scoped API key handler with the
+// household check its creation path runs. A nil user repository stays a nil
+// interface so the PIN check fails closed instead of calling through it.
+func newPersonalAPIKeyHandler(
+	repo *auth.APIKeyRepository,
+	stores userstore.UserStoreProvider,
+	users *auth.UserRepository,
+	tokens *access.ProfileTokenService,
+) *handlers.APIKeyHandler {
+	h := handlers.NewAPIKeyHandler(repo)
+	h.Stores = stores
+	if users != nil {
+		h.Users = users
+	}
+	h.ProfileTokens = tokens
+	return h
 }

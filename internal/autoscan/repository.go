@@ -722,11 +722,13 @@ func (r *Repository) RecordError(ctx context.Context, sourceID, msg string) erro
 
 const eventColumns = `id, source_id, plugin_id, capability_id, started_at, completed_at,
 	duration_ms, status, delivery_mode, provider_event_type, changes_returned, changes_resolved,
-	targets_claimed, scans_created, scans_reused, scans_suppressed, error_message, marker_before, marker_after`
+	targets_claimed, scans_created, scans_reused, scans_suppressed, error_message, marker_before, marker_after,
+	change_log, change_log_truncated`
 
 func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 	var e Event
 	var status string
+	var changeLog []byte
 	if err := row.Scan(
 		&e.ID,
 		&e.SourceID,
@@ -747,11 +749,54 @@ func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 		&e.ErrorMessage,
 		&e.MarkerBefore,
 		&e.MarkerAfter,
+		&changeLog,
+		&e.ChangesTruncated,
 	); err != nil {
 		return Event{}, err
 	}
 	e.Status = EventStatus(status)
+	e.Changes = decodeChangeLog(changeLog)
 	return e, nil
+}
+
+// decodeChangeLog reads a stored change log. The log is diagnostic, so an
+// unreadable value degrades to an empty log rather than failing the listing.
+func decodeChangeLog(raw []byte) []ChangeRecord {
+	records := []ChangeRecord{}
+	if len(raw) == 0 {
+		return records
+	}
+	if err := json.Unmarshal(raw, &records); err != nil || records == nil {
+		return []ChangeRecord{}
+	}
+	return records
+}
+
+func encodeChangeLog(records []ChangeRecord) ([]byte, error) {
+	if records == nil {
+		records = []ChangeRecord{}
+	}
+	return json.Marshal(records)
+}
+
+// scanRunStatusCompleted mirrors scanqueue.StatusCompleted for scan_runs rows
+// this package reads directly.
+const scanRunStatusCompleted = "completed"
+
+// decodeScanResult reads a completed run's result_payload. Running runs carry
+// progress in the same column, so only completed runs report a result.
+func decodeScanResult(status string, raw []byte) *ScanResult {
+	if status != scanRunStatusCompleted {
+		return nil
+	}
+	if trimmed := strings.TrimSpace(string(raw)); trimmed == "" || trimmed == "{}" || trimmed == "null" {
+		return nil
+	}
+	var result ScanResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil
+	}
+	return &result
 }
 
 const insertEventSQL = `
@@ -846,6 +891,10 @@ func (r *Repository) FinishEvent(ctx context.Context, in EventFinish) error {
 		completed = time.Now()
 	}
 	msg := truncateUTF8(in.ErrorMessage, maxLastErrorLen)
+	changeLog, err := encodeChangeLog(in.Changes)
+	if err != nil {
+		return fmt.Errorf("encode autoscan change log: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE autoscan_events
 		SET completed_at = $2,
@@ -858,7 +907,9 @@ func (r *Repository) FinishEvent(ctx context.Context, in EventFinish) error {
 			scans_reused = $8,
 			scans_suppressed = $9,
 			error_message = $10,
-			marker_after = $11
+			marker_after = $11,
+			change_log = $12::jsonb,
+			change_log_truncated = $13
 		WHERE id = $1`,
 		in.ID,
 		completed,
@@ -871,6 +922,8 @@ func (r *Repository) FinishEvent(ctx context.Context, in EventFinish) error {
 		in.ScansSuppressed,
 		msg,
 		nullable(in.MarkerAfter),
+		string(changeLog),
+		in.ChangesTruncated,
 	)
 	if err != nil {
 		return fmt.Errorf("finish autoscan event: %w", err)
@@ -934,6 +987,12 @@ func eventFilterClauses(filter EventListFilter) ([]string, []any) {
 			OR lower(status) LIKE `+param+`
 			OR lower(error_message) LIKE `+param+`
 			OR lower(COALESCE(source_id::text, '')) LIKE `+param+`
+			OR EXISTS (
+				SELECT 1
+				FROM jsonb_array_elements(change_log) AS cl(change)
+				WHERE lower(COALESCE(cl.change->>'source_path', '')) LIKE `+param+`
+				   OR lower(COALESCE(cl.change->>'rewritten_path', '')) LIKE `+param+`
+			)
 			OR EXISTS (
 				SELECT 1
 				FROM scan_runs sr
@@ -1058,7 +1117,7 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 
 	runRows, err := r.pool.Query(ctx, `
 		SELECT autoscan_event_id, id, media_folder_id, mode, path, trigger, status,
-			COALESCE(error_message, ''), requested_at, started_at, completed_at
+			COALESCE(error_message, ''), requested_at, started_at, completed_at, result_payload
 		FROM scan_runs
 		WHERE autoscan_event_id = ANY($1)
 		ORDER BY requested_at ASC`,
@@ -1071,6 +1130,7 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 	for runRows.Next() {
 		var eventID int64
 		var run ScanRunSummary
+		var resultPayload []byte
 		if err := runRows.Scan(
 			&eventID,
 			&run.ID,
@@ -1083,9 +1143,11 @@ func (r *Repository) ListEvents(ctx context.Context, filter EventListFilter) ([]
 			&run.RequestedAt,
 			&run.StartedAt,
 			&run.CompletedAt,
+			&resultPayload,
 		); err != nil {
 			return nil, err
 		}
+		run.Result = decodeScanResult(run.Status, resultPayload)
 		if idx, ok := indexByID[eventID]; ok {
 			events[idx].Runs = append(events[idx].Runs, run)
 		}
@@ -1147,7 +1209,8 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 				COALESCE(e.plugin_id, ''),
 				COALESCE(e.capability_id, ''),
 				COALESCE(e.status, ''),
-				e.completed_at
+				e.completed_at,
+				sr.result_payload
 		FROM scan_runs sr
 		LEFT JOIN autoscan_events e ON e.id = sr.autoscan_event_id
 		WHERE `+strings.Join(clauses, " AND ")+`
@@ -1164,6 +1227,7 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 	for rows.Next() {
 		var scan ScanWithEvent
 		var eventStatus string
+		var resultPayload []byte
 		if err := rows.Scan(
 			&scan.ID,
 			&scan.MediaFolderID,
@@ -1181,10 +1245,12 @@ func (r *Repository) ListAutoscanScans(ctx context.Context, filter ScanListFilte
 			&scan.CapabilityID,
 			&eventStatus,
 			&scan.EventCompletedAt,
+			&resultPayload,
 		); err != nil {
 			return nil, err
 		}
 		scan.EventStatus = EventStatus(eventStatus)
+		scan.Result = decodeScanResult(scan.Status, resultPayload)
 		scans = append(scans, scan)
 	}
 	return scans, rows.Err()

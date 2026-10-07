@@ -117,8 +117,13 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 			{"verified primary reaches admission", "primary", "guest", auth.TokenTypeAccess, "user", profileToken, 503},
 			{"foreign acting profile rejected", "foreign", "guest", auth.TokenTypeAccess, "user", "", 404},
 			{"API key PIN exemption is not household authority", "primary", "guest", auth.TokenTypeAPIKey, "user", "", 403},
-			{"admin without profile reaches admission", "", "guest", auth.TokenTypeAccess, "admin", "", 503},
-			{"admin cannot target another account", "", "foreign", auth.TokenTypeAccess, "admin", "", 404},
+			// The admin role manages the household only through the verified
+			// primary profile; this household has a PIN-locked primary, so a
+			// profile-less admin request no longer stands in for it.
+			{"admin without profile on a locked household", "", "guest", auth.TokenTypeAccess, "admin", "", 403},
+			{"admin account guest cannot target primary", "guest", "primary", auth.TokenTypeAccess, "admin", "", 403},
+			{"admin as verified primary reaches admission", "primary", "guest", auth.TokenTypeAccess, "admin", profileToken, 503},
+			{"admin cannot target another account", "primary", "foreign", auth.TokenTypeAccess, "admin", profileToken, 404},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rec := request(http.MethodPost, "", fmt.Sprintf(`{"profile_id":%q,"source":"plex"}`, tc.target), tc.profile, tc.tokenType, tc.role, tc.proof)
@@ -145,7 +150,8 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 			{"no acting profile sees no runs", "", auth.TokenTypeAccess, "user", "", "", 0, ""},
 			{"verified primary sees household", "primary", auth.TokenTypeAccess, "user", profileToken, "?limit=200", 50, ""},
 			{"API key sees only locked primary runs", "primary", auth.TokenTypeAPIKey, "user", "", "?limit=200", 50, "primary"},
-			{"admin retains v1 limit", "", auth.TokenTypeAccess, "admin", "", "?limit=200", 50, ""},
+			{"admin without profile on a locked household sees no runs", "", auth.TokenTypeAccess, "admin", "", "", 0, ""},
+			{"admin as verified primary retains v1 limit", "primary", auth.TokenTypeAccess, "admin", profileToken, "?limit=200", 50, ""},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rec := request(http.MethodGet, tc.query, "", tc.profile, tc.tokenType, tc.role, tc.proof)
@@ -178,8 +184,9 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 			{"no profile cannot read a run", "", "guest-new", auth.TokenTypeAccess, "user", "", 404},
 			{"verified primary reads guest run", "primary", "guest-new", auth.TokenTypeAccess, "user", profileToken, 200},
 			{"API key cannot read guest run as locked primary", "primary", "guest-new", auth.TokenTypeAPIKey, "user", "", 404},
-			{"admin reads guest run", "", "guest-new", auth.TokenTypeAccess, "admin", "", 200},
-			{"admin cannot read another account run", "", "foreign-run", auth.TokenTypeAccess, "admin", "", 404},
+			{"admin without profile on a locked household cannot read guest run", "", "guest-new", auth.TokenTypeAccess, "admin", "", 404},
+			{"admin as verified primary reads guest run", "primary", "guest-new", auth.TokenTypeAccess, "admin", profileToken, 200},
+			{"admin cannot read another account run", "primary", "foreign-run", auth.TokenTypeAccess, "admin", profileToken, 404},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				rec := request(http.MethodGet, "/"+tc.run, "", tc.profile, tc.tokenType, tc.role, tc.proof)

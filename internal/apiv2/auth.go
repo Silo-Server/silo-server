@@ -138,7 +138,7 @@ func (reg *Registry) login(ctx context.Context, in *LoginInput) (*LoginOutput, e
 	if r := requestFrom(ctx); r != nil {
 		input.DeviceName = r.UserAgent()
 	}
-	view, err := reg.deps.Sessions.Login(ctx, input)
+	view, err := reg.deps.Sessions.Login(withClientDevice(ctx), input)
 	if err != nil {
 		return nil, loginProblem(err)
 	}
@@ -160,7 +160,7 @@ func (reg *Registry) signInWithNetworkIdentity(ctx context.Context, in *NetworkS
 	if r := requestFrom(ctx); r != nil {
 		input.DeviceName = r.UserAgent()
 	}
-	view, err := reg.deps.Sessions.NetworkSignIn(ctx, input)
+	view, err := reg.deps.Sessions.NetworkSignIn(withClientDevice(ctx), input)
 	if err != nil {
 		return nil, loginProblem(err)
 	}
@@ -209,7 +209,7 @@ func (reg *Registry) completeOAuthLogin(ctx context.Context, in *CompleteOAuthLo
 	if reg.deps.OAuth == nil || reg.deps.Accounts == nil {
 		return nil, unavailable("oauth login")
 	}
-	c, err := reg.deps.OAuth.Complete(ctx, in.Body.Code, in.Body.CodeVerifier, in.Browser)
+	c, err := reg.deps.OAuth.Complete(withClientDevice(ctx), in.Body.Code, in.Body.CodeVerifier, in.Browser)
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrOAuthCompletionUnavailable):

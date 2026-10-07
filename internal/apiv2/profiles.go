@@ -194,8 +194,8 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: create,
 		// As v1 POST /profiles: the first profile on an account is
-		// bootstrapped by anyone signed in; after that an administrator or
-		// the verified primary profile manages the household.
+		// bootstrapped by anyone signed in; after that the verified primary
+		// profile manages the household, on an admin account too.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
@@ -214,8 +214,8 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: update,
 		// Profile scoped without a required header, as v1 PUT /profiles/{id}:
-		// an administrator or the verified primary profile manages the
-		// household, and any other caller may change only its own active
+		// the verified primary profile manages the household (on an admin
+		// account too), and any other caller may change only its own active
 		// profile's playback preferences. Non-retryable until the profiles
 		// section guards it: the profile row converges, but v1 bumps the
 		// account-wide access_policy_revision on field presence rather than
@@ -238,8 +238,8 @@ func registerProfiles(reg *Registry) {
 	del.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{
 		Operation: del,
-		// As v1 DELETE /profiles/{id}: an administrator or the verified
-		// primary profile manages the household. Repeating the delete
+		// As v1 DELETE /profiles/{id}: the verified primary profile manages
+		// the household, on an admin account too. Repeating the delete
 		// answers 404 (already gone).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
@@ -253,8 +253,8 @@ func registerProfiles(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/profiles/household/sessions", "listHouseholdSessions", "profiles",
 			"List the live playback sessions on the signed-in account, for a household manager."),
-		// As v1 GET /profiles/household/sessions: an administrator or the
-		// verified primary profile; a bounded, unpaginated collection.
+		// As v1 GET /profiles/household/sessions: the verified primary
+		// profile, on an admin account too; a bounded, unpaginated collection.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		ServiceBacked:   true,
@@ -262,6 +262,7 @@ func registerProfiles(reg *Registry) {
 
 	verify := humaOp(http.MethodPost, Prefix+"/profiles/{id}/verify-pin", "verifyProfilePIN", "profiles",
 		"Check a profile's PIN; a match issues the X-Profile-Token that unlocks the profile for this login session.")
+	verify.Description = "Wrong PINs are counted per profile, Jellyfin password#PIN sign-ins included. Redis shares the count across server nodes; without Redis, each process counts its own attempts. Up to five attempts are allowed; the fifth wrong one locks the profile for five minutes, during which every check, even with the right PIN, is refused with 429 rate_limited and a Retry-After header giving the seconds left. A correct PIN while not locked clears the count, and an unlocked count expires five minutes after its first attempt. Each check affects the count and must not be automatically retried."
 	Register(reg, Operation{
 		Operation: verify,
 		// As v1 POST /profiles/{id}/verify-pin: any signed-in caller on the
@@ -271,7 +272,7 @@ func registerProfiles(reg *Registry) {
 		// credential.
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
-		RetrySafety:     RetrySafetyNaturalIdempotent,
+		RetrySafety:     RetrySafetyNonRetryable,
 		ServiceBacked:   true,
 	}, reg.verifyProfilePIN)
 

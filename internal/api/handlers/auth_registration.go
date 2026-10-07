@@ -137,6 +137,20 @@ func (h *AuthHandler) ListSessionsPage(ctx context.Context, userID int, after *a
 	return sessions, false, nil
 }
 
+// CurrentLoginSession returns the caller's live login session, or nil when it
+// was revoked or expired after the request authenticated: the session list
+// then reports no current session instead of failing.
+func (h *AuthHandler) CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error) {
+	session, err := h.service.CurrentLoginSession(ctx, userID, sessionID)
+	if auth.IsSessionNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return session, nil
+}
+
 // RevokeSession revokes one of the caller's sessions. v1 DELETE
 // /auth/sessions/{id} and v2 deleteSession both call it.
 func (h *AuthHandler) RevokeSession(ctx context.Context, sessionID string, userID int) error {

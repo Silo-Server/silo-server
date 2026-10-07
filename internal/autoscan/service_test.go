@@ -352,7 +352,6 @@ type recordingQueuer struct {
 	batches        [][]scantrigger.Target
 	autoscanEvents []int64
 	createdCount   *int
-	reusedCount    int
 }
 
 func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
@@ -360,14 +359,24 @@ func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.
 	q.enqueued = append(q.enqueued, targets...)
 	return nil
 }
-func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+
+// EnqueueAutoscanScans reports the first createdCount targets (all, when
+// unset) as created runs and the rest as reused, naming each run after the
+// target's position across every call ("run-0", "run-1", ...).
+func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error) {
+	offset := len(q.enqueued)
 	q.batches = append(q.batches, append([]scantrigger.Target(nil), targets...))
 	q.enqueued = append(q.enqueued, targets...)
 	q.autoscanEvents = append(q.autoscanEvents, eventID)
+	created := len(targets)
 	if q.createdCount != nil {
-		return *q.createdCount, q.reusedCount, nil
+		created = *q.createdCount
 	}
-	return len(targets), q.reusedCount, nil
+	outcomes := make([]scantrigger.EnqueueOutcome, len(targets))
+	for i := range targets {
+		outcomes[i] = scantrigger.EnqueueOutcome{RunID: "run-" + strconv.Itoa(offset+i), Created: i < created}
+	}
+	return outcomes, nil
 }
 
 type allowSuppressor struct{}
@@ -396,8 +405,8 @@ type failingQueuer struct{}
 func (failingQueuer) EnqueueScans(context.Context, []scantrigger.Target) error {
 	return context.DeadlineExceeded
 }
-func (failingQueuer) EnqueueAutoscanScans(context.Context, []scantrigger.Target, int64) (int, int, error) {
-	return 0, 0, context.DeadlineExceeded
+func (failingQueuer) EnqueueAutoscanScans(context.Context, []scantrigger.Target, int64) ([]scantrigger.EnqueueOutcome, error) {
+	return nil, context.DeadlineExceeded
 }
 
 func newService(store Store, provider ScanSourceProvider, queue Queuer, suppress Suppressor) *Service {
@@ -662,7 +671,7 @@ func TestPollOnceRecordsReusedScanCounts(t *testing.T) {
 		},
 	}, nextMarker: "m1"}
 	created := 1
-	q := &recordingQueuer{createdCount: &created, reusedCount: 1}
+	q := &recordingQueuer{createdCount: &created}
 	svc := newService(store, prov, q, allowSuppressor{})
 	if err := svc.PollOnce(context.Background()); err != nil {
 		t.Fatalf("PollOnce: %v", err)

@@ -177,7 +177,9 @@ sign-in with a new session after its credentials were retired.
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one
 attempt with the password as typed, so a PIN is never sent to the directory
-and a failed Jellyfin sign-in counts once toward its lockout. A Jellyfin
+and a failed Jellyfin sign-in counts once toward its lockout. The PIN part
+counts toward the profile's PIN lockout shared with `verifyProfilePIN` (see
+[Profile PINs](../auth-api.md#profile-pins)). A Jellyfin
 sign-in refused by the sign-in policy (`local_login_disabled`,
 `not_permitted`, `email_in_use`, `identity_linked_elsewhere`, an expired
 directory password) answers 401 `InvalidUsernameOrPassword` with the reason

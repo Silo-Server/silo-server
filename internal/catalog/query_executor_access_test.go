@@ -107,6 +107,7 @@ func TestSingleEpisodeCatalogLibraryIDFailsClosedOutsideAccess(t *testing.T) {
 		name      string
 		requested []int
 		allowed   []int
+		disabled  []int
 		wantID    int
 		wantEmpty bool
 		wantOK    bool
@@ -118,41 +119,17 @@ func TestSingleEpisodeCatalogLibraryIDFailsClosedOutsideAccess(t *testing.T) {
 		{name: "single allowed library", allowed: []int{3}, wantID: 3, wantOK: true},
 		{name: "unrestricted, no library", wantOK: false},
 		{name: "several libraries", requested: []int{3, 4}, allowed: []int{3, 4}, wantOK: false},
+		{name: "disabled library", requested: []int{3}, disabled: []int{3}, wantEmpty: true, wantOK: true},
+		{name: "one library left after disabled", requested: []int{3, 4}, disabled: []int{4}, wantID: 3, wantOK: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			id, empty, ok := singleEpisodeCatalogLibraryID(
 				QueryDefinition{LibraryIDs: tc.requested},
-				AccessFilter{AllowedLibraryIDs: tc.allowed},
+				AccessFilter{AllowedLibraryIDs: tc.allowed, DisabledLibraryIDs: tc.disabled},
 			)
 			if id != tc.wantID || empty != tc.wantEmpty || ok != tc.wantOK {
 				t.Fatalf("got (%d, empty=%v, ok=%v), want (%d, empty=%v, ok=%v)", id, empty, ok, tc.wantID, tc.wantEmpty, tc.wantOK)
-			}
-		})
-	}
-}
-
-func TestEffectiveLibraryScope(t *testing.T) {
-	cases := []struct {
-		name      string
-		requested []int
-		allowed   []int
-		wantIDs   []int
-		wantEmpty bool
-	}{
-		{name: "unrestricted, no request"},
-		{name: "unrestricted, requested", requested: []int{1, 2}, wantIDs: []int{1, 2}},
-		{name: "restricted, no request", allowed: []int{3}, wantIDs: []int{3}},
-		{name: "restricted, overlapping request", requested: []int{1, 3}, allowed: []int{3, 4}, wantIDs: []int{3}},
-		{name: "restricted, disjoint request", requested: []int{1}, allowed: []int{3}, wantEmpty: true},
-		{name: "empty allowlist", allowed: []int{}, wantEmpty: true},
-		{name: "empty allowlist, requested", requested: []int{1}, allowed: []int{}, wantEmpty: true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ids, empty := effectiveLibraryScope(tc.requested, tc.allowed)
-			if !reflect.DeepEqual(ids, tc.wantIDs) || empty != tc.wantEmpty {
-				t.Fatalf("got (%v, empty=%v), want (%v, empty=%v)", ids, empty, tc.wantIDs, tc.wantEmpty)
 			}
 		})
 	}

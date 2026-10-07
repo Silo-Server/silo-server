@@ -11,6 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -217,7 +218,13 @@ func overridesQuery(ctx context.Context, in SectionOverridesScopeInput) (handler
 	if claims == nil {
 		return handlers.SectionOverridesQuery{}, nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	q := handlers.SectionOverridesQuery{UserID: claims.UserID, ProfileID: profileFrom(ctx), Scope: in.Scope}
+	return pageOverridesQuery(claims.UserID, profileFrom(ctx), in)
+}
+
+// pageOverridesQuery addresses one page of the given profile; see
+// overridesQuery.
+func pageOverridesQuery(userID int, profileID string, in SectionOverridesScopeInput) (handlers.SectionOverridesQuery, *int, *Problem) {
+	q := handlers.SectionOverridesQuery{UserID: userID, ProfileID: profileID, Scope: in.Scope}
 	var libraryID *int
 	switch {
 	case in.Scope == scopeLibrary && in.LibraryID == "":
@@ -252,6 +259,10 @@ func (reg *Registry) listProfileSectionOverrides(ctx context.Context, in *Sectio
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	return sectionOverrideCollectionOf(rows)
+}
+
+func sectionOverrideCollectionOf(rows []userstore.SectionOverride) (*SectionOverrideCollectionOutput, error) {
 	items := make([]SectionOverride, 0, len(rows))
 	for _, row := range rows {
 		item, p := sectionOverrideOf(row)
@@ -273,6 +284,19 @@ func (reg *Registry) replaceProfileSectionOverrides(ctx context.Context, in *Sec
 	if p != nil {
 		return nil, p
 	}
+	writes, p := sectionOverrideWritesOf(in)
+	if p != nil {
+		return nil, p
+	}
+	if err := reg.deps.ProfileSections.SaveProfileOverrides(ctx, q, writes); err != nil {
+		return nil, sectionProblem(err)
+	}
+	return nil, nil
+}
+
+// sectionOverrideWritesOf lowers a replacement override set onto the v1
+// member shape after the omitted-versus-null checks.
+func sectionOverrideWritesOf(in *SectionOverridesReplaceInput) ([]handlers.SectionOverrideWrite, *Problem) {
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
 	}
@@ -287,10 +311,7 @@ func (reg *Registry) replaceProfileSectionOverrides(ctx context.Context, in *Sec
 		}
 		writes = append(writes, w)
 	}
-	if err := reg.deps.ProfileSections.SaveProfileOverrides(ctx, q, writes); err != nil {
-		return nil, sectionProblem(err)
-	}
-	return nil, nil
+	return writes, nil
 }
 
 // resetProfileSectionOverrides runs the same delete v1 DELETE
@@ -325,6 +346,10 @@ func (reg *Registry) getProfileSectionSettings(ctx context.Context, in *SectionO
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
+	return profileSectionSettingsOf(resolved)
+}
+
+func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSectionSettingCollectionOutput, error) {
 	items := make([]ProfileSectionSetting, 0, len(resolved))
 	for _, s := range resolved {
 		config, p := sectionConfigOf(string(s.Config))

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 )
 
@@ -108,12 +109,38 @@ func (s *Service) failClaim(ctx context.Context, claim RunClaim, summary Executi
 	}
 	if err := s.repo.failRun(finishCtx, claim, summary, message); err != nil {
 		if !errors.Is(err, ErrRunNotFound) {
-			slog.WarnContext(finishCtx, "history import: terminal write failed", "run_id", claim.RunID, "error", err)
+			slog.WarnContext(finishCtx, "history import: terminal write failed", "run_id", claim.RunID, "error", err, "cause", runFailureCause(cause))
 		}
 		return
 	}
+	logRunFailure(finishCtx, slog.Default(), claim, cause)
 	workmetrics.FinishContext(ctx, "error")
 	s.notifyRunByID(finishCtx, claim.RunID)
+}
+
+// logRunFailure records why this worker marked a run failed. The run stores
+// only fixed text for its monitor, so this log line is the only place an
+// operator can see the underlying error, such as an upstream timeout or HTTP
+// status.
+func logRunFailure(ctx context.Context, logger *slog.Logger, claim RunClaim, cause error) {
+	if cause == nil {
+		return
+	}
+	logger.WarnContext(ctx, "history import: run failed",
+		"component", "historyimport",
+		"run_id", claim.RunID,
+		"dispatch_kind", claim.DispatchKind,
+		"error", runFailureCause(cause),
+	)
+}
+
+// runFailureCause returns the error text with request URL queries removed and
+// credential assignments masked.
+func runFailureCause(cause error) string {
+	if cause == nil {
+		return ""
+	}
+	return logredact.SanitizeText(logredact.SanitizeURLError(cause).Error())
 }
 
 func (s *Service) ListAdminRunsPage(ctx context.Context, sourceID *int, after *RunKey, limit int) ([]Run, bool, error) {

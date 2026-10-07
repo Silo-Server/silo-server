@@ -82,6 +82,7 @@ const AdminDownloadPreparationsRefresh = lazy(
   () => import("@/components/AdminDownloadPreparationsRefresh"),
 );
 const SettingsLayout = lazy(() => import("@/pages/SettingsLayout"));
+const SignedInSessions = lazy(() => import("@/pages/settings/SignedInSessions"));
 const OAuthComplete = lazy(() => import("@/pages/OAuthComplete"));
 const ActivateDevice = lazy(() => import("@/pages/ActivateDevice"));
 const SetupWizard = lazy(() => import("@/pages/SetupWizard"));
@@ -279,9 +280,15 @@ function RequireProfile({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function RequireAdmin({ children }: { children: ReactNode }) {
+export function RequireAdmin({ children }: { children: ReactNode }) {
   const actingAdmin = useIsActingAdmin();
+  const { profile } = useAuth();
+  const location = useLocation();
   if (!actingAdmin) return <Navigate to="/" replace />;
+  // The server keeps admin powers for a session with no profile only while no
+  // profile on the account has a PIN or an access limit, so choose the
+  // profile first rather than open the admin area onto refusals.
+  if (!profile) return <Navigate to={guardRedirectTarget("/profiles", location)} replace />;
   return <>{children}</>;
 }
 
@@ -498,7 +505,7 @@ function AppRoutes() {
                     </RequireProfile>
                   }
                 />
-                {/* Admin area — own layout, no profile required */}
+                {/* Admin area — own layout; RequireAdmin needs a selected profile */}
                 <Route
                   path="/admin/*"
                   element={
@@ -554,6 +561,18 @@ function AppRoutes() {
                   }
                 >
                   <Route index element={<AccountSettings />} />
+                </Route>
+                <Route
+                  path="/settings/sessions"
+                  element={
+                    <RequirePrimaryOrAdmin>
+                      <UICustomizedLayout>
+                        <SettingsLayout />
+                      </UICustomizedLayout>
+                    </RequirePrimaryOrAdmin>
+                  }
+                >
+                  <Route index element={<SignedInSessions />} />
                 </Route>
                 {/* Remaining settings use profile-scoped values and require a profile. */}
                 <Route

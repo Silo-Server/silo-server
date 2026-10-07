@@ -1519,11 +1519,14 @@ issued token so the administrator can assign it to a source.
 
 Personal history imports on both `/api/v1` and `/api/v2` use the acting
 `X-Profile-Id`. A non-primary profile can import only into itself and see only runs
-targeting itself. The primary profile (with its PIN verified when it has one) and
-server admins can act for any profile on their own account. An API key's exemption
+targeting itself. The primary profile (with its PIN verified when it has one) can act
+for any profile on its own account, whether or not the account is an admin. Another
+profile on an admin account acts only for itself; an admin login session without an
+acting profile acts for the household only while no profile on the account has a PIN, a
+maturity limit, or library restrictions, and an admin API key without one always does. An API key's exemption
 from PIN entry does not grant household authority to a locked primary profile.
 Creating a run for another profile without this authority returns 403; reading its
-run returns 404. A non-admin request without an acting profile cannot create a run
+run returns 404. Any other request without an acting profile cannot create a run
 and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
 are bound to the account and acting profile.
 
@@ -2435,6 +2438,15 @@ inserts can move rows between pages; neither count nor continuation provides a
 snapshot. A full final page may require one additional empty read. Missing service
 returns503; source errors are masked. No scan/worker execution changes.
 
+Completed runs carry `result`: `new`, `updated`, `unchanged`, `missing`,
+`missing_skipped_protected`, `files_deleted`, `items_deleted`,
+`memberships_removed`, `errors` and `skipped`, read from the run's stored result. `missing` counts the files the run
+newly marked missing; files an earlier scan already marked are not counted again.
+`skipped` is non-zero when the run did no work because an overlapping scan of the
+same scope was already in progress.
+Queued, running, failed and cancelled runs omit `result`, because a running run's
+stored value is progress, not an outcome.
+
 The Activity panel retains polling and numbered pages through at most100 cursor
 reads per request. It rejects unsupported/unsafe row values and invalid continuation
 without partial success. Cache identity includes captured profile/PIN generation;
@@ -2453,6 +2465,29 @@ positions do not provide snapshot consistency; full final pages may require an
 additional empty read. Running events retain the existing start-time placeholder
 in completed_at and their running status. Missing service returns503, private
 source failures500. No execution or worker behavior changes.
+
+Each item also carries `changes`, the changes the event received in reported
+order, capped at 50 entries, and `changes_truncated`, which is true when the event
+received more (`changes_returned` keeps the full count). Events recorded before
+change logging have an empty list. Each change has `source_path` (as reported),
+`rewritten_path` (after the source's path rewrites), optional `scope`, and
+`outcome`: `queued` (created a scan run), `joined` (coalesced into a run for the
+same scope that was already queued or running), `suppressed` (debounced),
+`unresolved` (did not map to a scannable library location), `ignored` (empty path,
+or a file change that resolved to a whole library) or `error` (resolve or enqueue
+failure). `reason` is a machine code for unresolved, ignored and error outcomes:
+resolver reasons such as `no_library_match`, `library_root_offline` or
+`unsupported_extension`, plus `resolves_to_library`, `resolve_failed` and
+`enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
+may show `detail`. Resolved changes include `library_id`, `target_mode` and
+`target_path`; queued and joined changes include the covering `scan_run_id`, which
+is how a joined change names a run another event created. A change that joins a
+run that is already running carries reason `follow_up_scan` and no `scan_run_id`:
+that run may have passed the path already, so a follow-up scan of the same scope,
+queued when it finishes, covers the change. Paths are capped at 1024 bytes, and NUL
+characters in them are stored as U+FFFD. `q` also matches the reported and
+rewritten paths in the change log. Nested `scan_runs` carry the same optional
+`result` as the scan history.
 
 The Activity panel keeps polling and numbered pages through at most100 cursor
 reads per requested page. Captured authority/PIN cache identity, stale-response

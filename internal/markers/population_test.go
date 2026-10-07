@@ -1,8 +1,11 @@
 package markers
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,9 +133,28 @@ func TestPopulationRequiresCompletedSetup(t *testing.T) {
 	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { t.Fatal("request before setup completion"); return Result{}, nil }}
 	service, store := populationFixture(t, OnlineStorageStored, provider)
 	service.opts.Settings.(populationSettings)["setup.completed"] = "false"
-	_, changed, err := service.Populate(t.Context(), &models.MediaFile{ID: 1})
-	if err != nil || changed || store.claimed != 0 {
-		t.Fatalf("before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+	var logs bytes.Buffer
+	service.opts.Registry.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	// With online lookups switched off, finishing the wizard would not start
+	// them, so the notice must not suggest it.
+	service.opts.Settings.(populationSettings)[SettingMode] = "local"
+	if _, _, err := service.Refresh(t.Context(), &models.MediaFile{ID: 1}); err != nil || logs.Len() != 0 {
+		t.Fatalf("local mode before setup: err=%v logs=%q", err, logs.String())
+	}
+	service.opts.Settings.(populationSettings)[SettingMode] = "online"
+	for range 2 {
+		_, changed, err := service.Populate(t.Context(), &models.MediaFile{ID: 1})
+		if err != nil || changed || store.claimed != 0 {
+			t.Fatalf("before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+		}
+		if _, changed, err := service.Refresh(t.Context(), &models.MediaFile{ID: 1}); err != nil || changed || store.claimed != 0 {
+			t.Fatalf("refresh before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+		}
+	}
+	// The skip is otherwise silent: playback and admin refresh report a
+	// queued lookup that never reaches a provider.
+	if got := strings.Count(logs.String(), "paused until the setup wizard is finished"); got != 1 {
+		t.Fatalf("setup wait logged %d times, want once:\n%s", got, logs.String())
 	}
 }
 

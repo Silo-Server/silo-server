@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/Silo-Server/silo-server/internal/policy"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/policy"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
@@ -1742,7 +1743,38 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, adminTrickplayFixtureCases()...)
 	cases = append(cases, deviceSignInFixtureCases()...)
 	cases = append(cases, externalSignInFixtureCases()...)
-	return append(cases, adminDownloadPreparationControlFixtureCases()...)
+	cases = append(cases, adminDownloadPreparationControlFixtureCases()...)
+	return append(cases, loginSessionFixtureCases()...)
+}
+
+func loginSessionFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "login_session_capabilities", operationID: "getLoginSessionCapabilities",
+			scenario: "An authenticated account discovers login-session management and recorded activity.",
+			method:   http.MethodGet, path: "/api/v2/auth/sessions/capabilities", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/LoginSessionCapabilities"},
+		{name: "login_session_list", operationID: "listSessions",
+			scenario: "An account lists live login sessions, with explicit null activity where none is recorded.",
+			method:   http.MethodGet, path: "/api/v2/auth/sessions", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/LoginSessionCollection"},
+		{name: "admin_login_session_list", operationID: "listAdminUserLoginSessions",
+			scenario: "An acting admin inspects a selected account's login sessions.",
+			method:   http.MethodGet, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/LoginSessionCollection"},
+		{name: "admin_login_session_delete", operationID: "deleteAdminUserLoginSession",
+			scenario: "An acting admin revokes one session of the selected account.",
+			method:   http.MethodDelete, path: "/api/v2/admin/users/7/login-sessions/00000000-0000-0000-0000-000000000001", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusNoContent, assertHeaders: []string{"Cache-Control"}},
+		{name: "admin_login_sessions_delete_all", operationID: "deleteAdminUserLoginSessions",
+			scenario: "An acting admin signs the selected account out everywhere and receives the live-session count.",
+			method:   http.MethodDelete, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(adminToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminLoginSessionsRevoked"},
+		{name: "admin_login_session_forbidden", operationID: "listAdminUserLoginSessions",
+			scenario: "A non-admin cannot inspect another account's sessions.",
+			method:   http.MethodGet, path: "/api/v2/admin/users/7/login-sessions", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+	}
 }
 
 // deviceSignInFixtureCases covers the TV sign-in additions: the opened
@@ -1896,7 +1928,9 @@ func fixtureDeps() Dependencies {
 	deps.AdminAccounts = accounts
 	deps.AdminAccessGroups = fixtureAdminAccessGroups()
 	deps.AdminAccountSettings = &fakeAdminAccountSettings{}
+	deps.AdminProfileSections = fixtureAdminProfileSections()
 	deps.AdminAccountActivity = &fakeAdminAccountActivity{}
+	deps.AdminLoginSessions = &fakeAdminLoginSessions{}
 	deps = withAdminAccountInsights(deps)
 	deps.HistoryImports = fixtureHistoryImports()
 	deps.WebhookSync = &fakeWebhookManagement{}

@@ -800,6 +800,88 @@ bridge; v2 does not mint a parallel credential universe. `Authorization`, `X-Pro
 `X-Profile-Token` retain their security meanings, as do account/profile, primary-profile,
 acting-admin, server-admin, and hidden-resource checks.
 
+A critical bridge fix narrows the v1 viewer routes that do not require a profile. Without
+`X-Profile-Id` they resolved to the account's own limits, so any device signed into the
+household could read past a restricted profile's limits, or a locked profile's PIN, by omitting
+the header. When any profile on the account has a PIN, a rating ceiling, an advisory-age limit,
+or a library restriction, those routes now answer `400 bad_request` with the message
+`X-Profile-Id header is required`, the response v1 playback start already gives. The marker
+writes are gated too, and the gate runs before their `marker_edit` check, so a caller without
+that permission that omits the header gets this 400 rather than 403. Accounts without such a
+profile keep account scope. API keys, capability probes, profile selection,
+account and admin routes, and the session-bound stream and transcode routes are not gated.
+Download links that pass the access token as `?token=` cannot send the header, so on such an
+account they get the 400 too; v1 gains no profile query parameter. The gate reads only the
+profiles' stored limits. A custom scope policy (`silo_custom.scope`) that narrows one profile
+through `input.profile_id` applies only to requests that name that profile; for the household
+to require a profile, that profile also needs one of the stored limits above. The gated routes
+carry the `household_profile_gate` trait in the route inventory, and
+`TestHouseholdProfileGateCoversV1ViewerRoutes` fails when a v1 route runs viewer access without
+a profile and neither carries the trait nor is listed as exempt. The change is recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+
+V2 applies the same rule to its profile-optional watch, marker and subtitle operations.
+An operation declares `HouseholdProfileGate`, and the gate chain runs the household gate right
+after viewer access. On an account with a limited profile, a request without `X-Profile-Id` (an
+empty header counts as absent) gets the `422 validation_failed` problem with an error at
+`header.x-profile-id`, the same problem profile-required operations answer. As on v1, the rule
+reads only the profiles' stored limits, so a custom scope override keyed on one profile does not
+trigger it. The gated
+operations are `getWatchState`, `getWatchTrickplay`, the marker reads and writes, and the
+subtitle operations that act on one media file or stored subtitle; their `X-Profile-Id`
+description states the rule. API keys are exempt. Capability probes, profile selection, account
+operations, `listUserLibraries`, the section recipe gallery and the session-bound playback
+delivery routes keep account scope. A new profile-optional operation that reads or acts on catalog content declares the gate;
+`TestHouseholdProfileGateCoversProfileOptionalOperations` fails until every profile-optional or
+permission-gated operation either declares it or is listed as exempt with a reason.
+
+Direct downloads (`getDirectDownload`, `getDirectDownloadProxy` and their HEAD forms) are gated
+too. A browser starts them as a navigation that cannot send headers, so the profile travels in a
+direct-download link instead: `createDirectDownloadLink`, a profile-scoped operation that needs
+the profile's PIN proof like any other, checks the file against that profile's access and returns
+URLs carrying a `dl` token. The token is a JWT signed with the session signing key, of
+`token_type` `direct_download_link`, naming the account, login session, profile and one media
+file, and valid for five minutes. Only the direct-download routes accept it, and only as `dl`;
+`RequireAuth` refuses it as a bearer credential because it is not an access token. On those
+routes it replaces the account credential: the login session must still be active, the
+`file_id` must match, and `X-Profile-Id` is rewritten to the token's profile. Viewer access then
+resolves that profile's current limits and skips only the PIN proof the link stands for, as it
+does for the Apple display token. The link authorizes the start of a request; a transfer that
+began in time may run longer.
+
+Household management (creating, editing, and deleting profiles, listing household sessions,
+managing another profile's devices or settings, importing history for another profile, and
+creating a personal API key) belongs to the account's primary profile, verified with
+`X-Profile-Token` when it has a PIN; v2 also refuses a scope whose PIN check an API key
+skipped. The account's admin role does not widen this, the same way acting-admin routes refuse
+admin powers to a non-primary profile: on an admin account, every other profile is a household
+member like any other. A request without `X-Profile-Id` manages the household only when the
+account is an admin and no profile on it has a PIN, a rating ceiling, an advisory-age limit, or
+a library restriction (the same test as the gate above), so first-run and admin tooling keep
+working on an unrestricted household. An admin API key that names no profile keeps household
+management on any household, as it keeps profile-less admin powers below: it is an account
+credential bounded by its scopes, and only the acting primary profile can create one. A key
+that names a profile is held to the primary-profile rule like a session. Refusals reuse the existing responses: v1 `403
+forbidden`, v2 `403 permission_denied` or `profile_verification_required`. The v1 change is a
+critical bridge fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
+`createPersonalAPIKey` became `profile_scoped` with an optional profile so the viewer gate can
+verify that profile.
+
+Admin powers follow the same household test. The acting-admin gate (v1 `RequireActingAdmin`
+and its policy-backed form; the v2 `acting_admin` class) and the metadata-curation admin
+bypass already refuse a non-primary declared profile; a login session that declares no profile
+now keeps admin powers only while no profile on the account has a PIN, a rating ceiling, an
+advisory-age limit, or a library restriction. The policy input carries this as
+`household_requires_profile`, precomputed in Go like `acting_as_primary`. A refused request gets
+the existing refusal (v1 `403 forbidden`, "Admin access requires the account's primary
+profile"; v2 `403 permission_denied`), and a failed profile lookup fails closed with the
+existing `500`. API keys keep their profile-less admin access. A PIN-locked primary profile
+needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
+admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
+acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
+admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
+This is the same critical bridge fix.
+
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
@@ -1314,7 +1396,8 @@ deliberate v1 differences, recorded per row in the ledger: `createProfile` answe
 from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
 ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
 keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
-reports `expires_at` as a nullable instant; `uploadProfileAvatar` is the first Huma multipart
+reports `expires_at` as a nullable instant. PIN verification is `non_retryable`: a replayed wrong
+PIN counts as another lockout attempt. `uploadProfileAvatar` is the first Huma multipart
 operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
 types or an undecodable image is `422` at `body.avatar`, an oversized avatar is `413`, and a
 server without an upload store answers `503`; section overrides drop the `/reset` suffix
@@ -1463,7 +1546,8 @@ The operation answers
 closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
 integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
 per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
-optional as v1 does, takes `file_id` (string ID) and a strict `image_size`, renders file ids as
+optional as v1 does (narrowed by the household rule under
+[Credential continuity](#credential-continuity)), takes `file_id` (string ID) and a strict `image_size`, renders file ids as
 string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
 `{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;
 `markWatched`/`unmarkWatched` answer `204` instead of v1's `{content_id, type, affected_count,
@@ -1900,9 +1984,11 @@ has no view of these entries. There is no new realtime event. See
 Seven v2 operations list sources, list/create/read import runs, create/check a Plex
 PIN and perform Emby Connect login. Source discovery and external sign-in are account
 operations. Run creation, listing, and reads enforce the acting profile: a secondary
-profile acts only for itself, while an admin or the primary profile with any required
-PIN verification may act for its household. Non-admin creation requires an acting
-profile. Target account ownership is checked before source authentication. Run lists
+profile acts only for itself, while the primary profile with any required PIN
+verification may act for its household (see household management under
+[Credential continuity](#credential-continuity)).
+Creation requires an acting profile, except for an admin account on a household with
+no limited profile. Target account ownership is checked before source authentication. Run lists
 use signed `(created_at, id)` cursors scoped to the account and acting profile.
 The retained v1 run handlers enforce the same rule as a critical bridge fix, preserving
 their existing envelopes, success statuses, and 50-run list cap. See
@@ -2167,7 +2253,7 @@ lost updates but do not make external validation or whole moderation flows atomi
 `GET /api/v2/devices` lists the acting profile's registered settings devices.
 `scope=household` explicitly requests all profiles on that account and requires
 household management authority: the primary profile (with PIN verification when
-configured) or a server admin. The collection uses bounded keyset pages ordered by
+configured), on an admin account too (see [Credential continuity](#credential-continuity)). The collection uses bounded keyset pages ordered by
 `last_seen_at DESC, profile_id, device_id`; continuation retains the store timestamp's
 full precision. A device observed again can move ahead of the continuation point;
 this is a live registry, not a historical snapshot. Cursors bind the account,
