@@ -13,7 +13,8 @@ const (
 	maxKeywords      = 5
 )
 
-func truncateRunes(s string, limit int) string {
+// TruncateRunes returns s cut to at most limit runes.
+func TruncateRunes(s string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
@@ -39,12 +40,12 @@ func BuildEmbeddingText(item *models.MediaItem) string {
 	typeName := mediaTypeLabel(item.Type)
 
 	if len(item.Genres) > 0 && item.Overview != "" {
-		overview := truncateRunes(item.Overview, maxOverviewRunes)
+		overview := TruncateRunes(item.Overview, maxOverviewRunes)
 		parts = append(parts, fmt.Sprintf("%s %s about %s", strings.Join(item.Genres, ", "), typeName, overview))
 	} else if len(item.Genres) > 0 {
 		parts = append(parts, fmt.Sprintf("%s %s", strings.Join(item.Genres, ", "), typeName))
 	} else if item.Overview != "" {
-		overview := truncateRunes(item.Overview, maxOverviewRunes)
+		overview := TruncateRunes(item.Overview, maxOverviewRunes)
 		parts = append(parts, fmt.Sprintf("%s. %s", typeName, overview))
 	}
 

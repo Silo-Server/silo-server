@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // ClientConfig holds embedding client configuration.
@@ -49,7 +53,9 @@ type embeddingRequest struct {
 type embeddingResponse struct {
 	Data []struct {
 		Embedding []float32 `json:"embedding"`
-		Index     int       `json:"index"`
+		// Index is nil when the server omits it; the entry's position is
+		// used instead.
+		Index *int `json:"index"`
 	} `json:"data"`
 }
 
@@ -78,28 +84,104 @@ type geminiEmbedResponse struct {
 	} `json:"embeddings"`
 }
 
-const maxGeminiRetryDelay = 60 * time.Second
+// maxRetryDelay caps how long one retry waits after a 429. A provider that
+// asks for longer ends the run instead.
+const maxRetryDelay = 60 * time.Second
 
-// RateLimitError reports a Gemini limit that should stop the current backfill
-// rather than fan out into requests for individual items.
+// RateLimitError reports a provider limit that should stop the current
+// backfill rather than fan out into requests for individual items.
 type RateLimitError struct {
-	DailyQuota    bool
+	// DailyQuota marks a spent daily quota (Gemini).
+	DailyQuota bool
+	// QuotaExhausted marks an account with no quota left (OpenAI's
+	// insufficient_quota).
+	QuotaExhausted bool
+	// RetryDeferred marks a provider that asked to wait longer than
+	// maxRetryDelay before the next request.
 	RetryDeferred bool
 }
 
 func (e *RateLimitError) Error() string {
 	if e.DailyQuota {
-		return "gemini embedding API daily quota exhausted; retry after the quota resets or review limits in Google AI Studio"
+		return "embedding API daily quota exhausted; retry after the quota resets or review the provider's limits"
+	}
+	if e.QuotaExhausted {
+		return "embedding API quota exhausted (insufficient_quota); review the provider account's plan and limits"
 	}
 	if e.RetryDeferred {
-		return "gemini embedding API rate limited; requested retry delay is too long for this run; try again later"
+		return "embedding API rate limited; requested retry delay is too long for this run; try again later"
 	}
-	return "gemini embedding API rate limit persisted after retries; try again later"
+	return "embedding API rate limit persisted after retries; try again later"
+}
+
+// StatusError is an HTTP error response from the embedding API.
+type StatusError struct {
+	// API names the endpoint family in the message: "embedding" or
+	// "gemini embedding".
+	API        string
+	StatusCode int
+	Body       string
+}
+
+// Error quotes the provider's response body with credential assignments
+// masked: it reaches logs, job results and search diagnostics.
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s API returned %d: %s", e.API, e.StatusCode, logredact.SanitizeText(e.Body))
+}
+
+// Unavailable reports whether err shows that the provider cannot serve any
+// request until its configuration changes or its host comes back: it
+// rejected the credentials or does not know the endpoint or model (401, 403,
+// 404), or its host could not be resolved or dialed. Retrying the request or
+// sending smaller ones will not help.
+func Unavailable(err error) bool {
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) {
+		switch statusErr.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+			return true
+		}
+		return false
+	}
+	return isConnectError(err)
+}
+
+// InputRefused reports whether the provider refused this input rather than
+// failing for every request: a rejected request (InputRejected), or the 5xx a
+// local model such as Ollama answers an input longer than its context with.
+// The input may succeed shortened; other inputs are not affected.
+func InputRefused(err error) bool {
+	return InputRejected(err) || (err != nil && strings.Contains(strings.ToLower(err.Error()), "context length"))
+}
+
+// InputRejected reports whether the provider refused the request's input,
+// for example as too long or malformed: a 4xx response other than the
+// Unavailable ones, 408 and 429.
+func InputRejected(err error) bool {
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) || Unavailable(err) {
+		return false
+	}
+	code := statusErr.StatusCode
+	return code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
+}
+
+// isConnectError reports a failure to resolve or dial the provider's host.
+func isConnectError(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var opErr *net.OpError
+	return errors.As(err, &opErr) && opErr.Op == "dial"
 }
 
 // Embed generates embeddings for the given texts.
-// Returns one []float32 per input text, in the same order.
-// Retries on transient errors (5xx) and temporary rate limits with backoff.
+// Returns one non-empty []float32 per input text, in the same order, or an
+// error when the response does not hold exactly that.
+// Retries transport errors, 5xx responses and short rate limits with backoff;
+// an unreachable host, a rejected request and a long or persistent rate limit
+// fail without retrying.
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if c.isGemini() {
 		return c.embedGemini(ctx, texts)
@@ -134,8 +216,12 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 
 		resp, err = c.httpClient.Do(httpReq)
 		if err != nil {
-			if attempt < maxAttempts-1 {
-				time.Sleep(time.Duration(attempt+1) * time.Second)
+			// A host that cannot be resolved or dialed will not answer a
+			// retry a few seconds later either.
+			if attempt < maxAttempts-1 && !isConnectError(err) {
+				if err := waitForRetry(ctx, time.Duration(attempt+1)*time.Second); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, fmt.Errorf("embedding request failed: %w", err)
@@ -149,29 +235,39 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 		respBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 
-		// Rate limited — wait using Retry-After header or exponential backoff.
 		if resp.StatusCode == http.StatusTooManyRequests {
+			if isInsufficientQuota(respBody) {
+				// No wait restores a spent account quota.
+				return nil, &RateLimitError{QuotaExhausted: true}
+			}
 			if attempt >= maxAttempts-1 {
-				return nil, fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(respBody))
+				return nil, &RateLimitError{}
 			}
 			wait := rateLimitBackoff(resp, attempt)
+			if wait > maxRetryDelay {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				// End this run rather than retry before the provider's minimum delay.
+				return nil, &RateLimitError{RetryDeferred: true}
+			}
 			slog.WarnContext(ctx, "rate limited by embedding API, waiting", "component", "recommendations", "attempt", attempt+1, "wait", wait)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(wait):
+			if err := waitForRetry(ctx, wait); err != nil {
+				return nil, err
 			}
 			continue
 		}
 
 		// Server error — retry with backoff.
 		if resp.StatusCode >= 500 && attempt < maxAttempts-1 {
-			time.Sleep(time.Duration(attempt+1) * time.Second)
+			if err := waitForRetry(ctx, time.Duration(attempt+1)*time.Second); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
 		// Non-retryable error (4xx except 429).
-		return nil, fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, &StatusError{API: "embedding", StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 	defer resp.Body.Close()
 
@@ -180,11 +276,24 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("decode embedding response: %w", err)
 	}
 
+	if len(embResp.Data) != len(texts) {
+		return nil, fmt.Errorf("embedding API returned %d vectors for %d inputs", len(embResp.Data), len(texts))
+	}
 	results := make([][]float32, len(texts))
-	for _, d := range embResp.Data {
-		if d.Index < len(results) {
-			results[d.Index] = d.Embedding
+	filled := make([]bool, len(texts))
+	for i, d := range embResp.Data {
+		index := i
+		if d.Index != nil {
+			index = *d.Index
 		}
+		if index < 0 || index >= len(results) || filled[index] {
+			return nil, fmt.Errorf("embedding API returned an invalid or repeated index %d for %d inputs", index, len(texts))
+		}
+		results[index] = d.Embedding
+		filled[index] = true
+	}
+	if err := checkVectors(results); err != nil {
+		return nil, err
 	}
 	return results, nil
 }
@@ -206,7 +315,9 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("marshal gemini embedding request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1beta/%s:batchEmbedContents?key=%s", c.cfg.BaseURL, modelRef, c.cfg.APIKey)
+	// The key travels in a header: a URL query parameter would surface in
+	// transport errors, which quote the request URL.
+	url := fmt.Sprintf("%s/v1beta/%s:batchEmbedContents", c.cfg.BaseURL, modelRef)
 
 	maxAttempts := 6
 	var resp *http.Response
@@ -216,10 +327,11 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			return nil, fmt.Errorf("create request: %w", reqErr)
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-goog-api-key", c.cfg.APIKey)
 
 		resp, err = c.httpClient.Do(httpReq)
 		if err != nil {
-			if attempt < maxAttempts-1 {
+			if attempt < maxAttempts-1 && !isConnectError(err) {
 				if err := waitForRetry(ctx, time.Duration(attempt+1)*time.Second); err != nil {
 					return nil, err
 				}
@@ -244,7 +356,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			if wait <= 0 {
 				wait = rateLimitBackoff(resp, attempt)
 			}
-			if wait > maxGeminiRetryDelay {
+			if wait > maxRetryDelay {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -266,7 +378,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 			continue
 		}
 
-		return nil, fmt.Errorf("gemini embedding API returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, &StatusError{API: "gemini embedding", StatusCode: resp.StatusCode, Body: string(respBody)}
 	}
 	defer resp.Body.Close()
 
@@ -275,13 +387,43 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("decode gemini embedding response: %w", err)
 	}
 
+	if len(gresp.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("gemini embedding API returned %d vectors for %d inputs", len(gresp.Embeddings), len(texts))
+	}
 	results := make([][]float32, len(texts))
 	for i, emb := range gresp.Embeddings {
-		if i < len(results) {
-			results[i] = emb.Values
-		}
+		results[i] = emb.Values
+	}
+	if err := checkVectors(results); err != nil {
+		return nil, err
 	}
 	return results, nil
+}
+
+// checkVectors rejects a response with an empty vector, which would
+// otherwise be stored as all zeros.
+func checkVectors(vectors [][]float32) error {
+	for i, vector := range vectors {
+		if len(vector) == 0 {
+			return fmt.Errorf("embedding API returned an empty vector for input %d", i)
+		}
+	}
+	return nil
+}
+
+// isInsufficientQuota reports an OpenAI-style 429 body whose error code or
+// type is insufficient_quota.
+func isInsufficientQuota(body []byte) bool {
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+			Type string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &payload) != nil {
+		return false
+	}
+	return payload.Error.Code == "insufficient_quota" || payload.Error.Type == "insufficient_quota"
 }
 
 // rateLimitBackoff returns how long to wait after a 429 response.

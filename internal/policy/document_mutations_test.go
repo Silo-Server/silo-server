@@ -312,10 +312,21 @@ func TestDocumentServiceCommittedApplyFailure(t *testing.T) {
 			if failure == "local reload" {
 				runtimeStore.pool.Close()
 			}
+			applied := 0
+			system.OnChangeApplied(func(context.Context) { applied++ })
 			service := NewDocumentService(store, system)
 			result, err := service.Activate(ctx, document.ID, version.ID, document.Revision)
 			if err != nil || !result.Persisted || result.Generation != 2 || result.Document.ActiveVersionID == nil {
 				t.Fatalf("committed result lost: %+v %v", result, err)
+			}
+			// The hook runs once this node has loaded the change; a failed
+			// reload has not, and a later event or poll reload runs it.
+			want := 1
+			if failure == "local reload" {
+				want = 0
+			}
+			if applied != want {
+				t.Fatalf("change hook ran %d times, want %d", applied, want)
 			}
 			if result.Application.PublishErr == nil {
 				t.Fatal("publication failure omitted")

@@ -25,8 +25,15 @@ export default function TasteSeed() {
   // automatically pre-selected without needing setState-in-effect.
   const [userToggles, setUserToggles] = useState<Map<string, boolean>>(new Map());
 
-  const { data, fetchNextPage, hasNextPage, isFetching, isFetchingNextPage, isPending } =
-    useTasteSeedItems(true);
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetching,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    isPending,
+  } = useTasteSeedItems(true);
   const submit = useSubmitTasteSeed();
 
   // Flatten paginated pages into a single item list.
@@ -48,6 +55,15 @@ export default function TasteSeed() {
     }
     return set;
   }, [items, userToggles]);
+
+  // A page can hydrate to no cards the profile may see. Keep paging until a
+  // card shows up or the catalog runs out, instead of settling on the empty
+  // state; the sentinel below only exists once cards render.
+  const waitingForCards = items.length === 0 && hasNextPage && !isFetchNextPageError;
+  useEffect(() => {
+    if (isPending || !waitingForCards || isFetchingNextPage) return;
+    void fetchNextPage();
+  }, [fetchNextPage, isFetchingNextPage, isPending, waitingForCards]);
 
   // Infinite-scroll trigger: load the next page when sentinel becomes visible.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -160,7 +176,7 @@ export default function TasteSeed() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        {isPending ? (
+        {isPending || waitingForCards ? (
           <TasteSeedGridSkeleton />
         ) : items.length === 0 ? (
           <div className="text-muted-foreground flex flex-col items-center gap-3 py-24 text-center">

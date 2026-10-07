@@ -2798,6 +2798,25 @@
       "body_file": "admin_recommendations_embeddings.json"
     },
     {
+      "name": "admin_recommendations_embeddings_reset",
+      "operation_id": "resetAdminRecommendationEmbeddings",
+      "scenario": "A reset reports what it deleted; global rows are kept.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/recommendations/embeddings/reset",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminRecommendationEmbeddingsReset",
+      "body_file": "admin_recommendations_embeddings_reset.json"
+    },
+    {
       "name": "admin_recommendations_recommendations",
       "operation_id": "triggerAdminRecommendationRefresh",
       "scenario": "Started acknowledges process-local background execution, not a persisted job.",
@@ -2819,7 +2838,7 @@
     {
       "name": "admin_recommendations_status",
       "operation_id": "getAdminRecommendationsStatus",
-      "scenario": "Persisted counts and process-local running flags have distinct meanings.",
+      "scenario": "Persisted counts, last runs from any server and process-local running flags have distinct meanings.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/recommendations/status",

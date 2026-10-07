@@ -20,9 +20,15 @@ import (
 )
 
 type recommendationsEngine interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error)
-	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]recommendations.ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*recommendations.TasteProfileSummary, error)
+}
+
+// accessibleItemIDFilter keeps the item IDs an access filter admits.
+// *recommendations.Repo implements it.
+type accessibleItemIDFilter interface {
+	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 }
 
 type recommendationsReader interface {
@@ -41,6 +47,8 @@ type RecommendationsHandler struct {
 	storeProvider       userstore.UserStoreProvider
 	ratingsRepo         *catalog.RatingsRepo
 	recsRepo            *recommendations.Repo
+	signals             *recommendations.SignalReader // watched set as the reader computes it; nil without recsRepo
+	accessibleIDs       accessibleItemIDFilter
 	enabled             bool
 	Fetcher             discoverFetcher
 	DetailSvc           discoverPresigner
@@ -49,9 +57,9 @@ type RecommendationsHandler struct {
 	WatchTonightFetcher watchTonightSectionFetcher
 	CastFetcher         cardsCastFetcher
 	EbookProgress       EbookReaderProgressLister
-	// RecWorker enqueues asynchronous taste-profile refreshes after writes
-	// (taste seeding). Optional — when nil, refresh is simply skipped.
-	RecWorker ProfileRefreshRequester
+	// RecWorker is told when taste seeding adds favorites. Optional: when
+	// nil, nothing is rebuilt until the next scheduled job.
+	RecWorker SignalsChangedNotifier
 	nowFn     func() time.Time
 }
 
@@ -67,7 +75,7 @@ type discoverPresigner interface {
 
 // NewRecommendationsHandler creates a new RecommendationsHandler.
 func NewRecommendationsHandler(engine recommendationsEngine, reader recommendationsReader, storeProvider userstore.UserStoreProvider, ratingsRepo *catalog.RatingsRepo, recsRepo *recommendations.Repo, enabled bool) *RecommendationsHandler {
-	return &RecommendationsHandler{
+	h := &RecommendationsHandler{
 		engine:        engine,
 		reader:        reader,
 		storeProvider: storeProvider,
@@ -76,6 +84,11 @@ func NewRecommendationsHandler(engine recommendationsEngine, reader recommendati
 		enabled:       enabled,
 		nowFn:         time.Now,
 	}
+	if recsRepo != nil {
+		h.signals = recommendations.NewSignalReader(recsRepo, storeProvider)
+		h.accessibleIDs = recsRepo
+	}
+	return h
 }
 
 // --- Response types ---
@@ -118,7 +131,11 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 		limit = 50
 	}
 
-	items, err := h.SimilarItems(r.Context(), itemID, limit)
+	filter := requestAccessFilter(r)
+	items, err := h.SimilarItems(r.Context(), itemID, limit, filter)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, filter)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -127,9 +144,16 @@ func (h *RecommendationsHandler) HandleSimilar(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, scoredItemsResponse{Items: items})
 }
 
+// v1RecommendationRowLimit keeps a frozen v1 row read at the 20 items a row
+// has always answered there; the reader serves up to 50 for v2.
+func v1RecommendationRowLimit(r *http.Request) int {
+	limit, _ := parsePagination(r)
+	return min(limit, recommendationsDefaultLimit)
+}
+
 // HandleForYouMain handles GET /recommendations/for-you/main.
 func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	row, err := h.ForYouMain(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -140,7 +164,7 @@ func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http
 
 // HandleForYouRows handles GET /recommendations/for-you/rows.
 func (h *RecommendationsHandler) HandleForYouRows(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	rows, err := h.ForYouRows(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -163,7 +187,11 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 	}
 
 	limit, _ := parsePagination(r)
-	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit)
+	filter := requestAccessFilter(r)
+	items, err := h.BecauseWatched(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), itemID, limit, filter)
+	if err == nil {
+		items, err = h.keepAccessible(r.Context(), items, filter)
+	}
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -173,7 +201,7 @@ func (h *RecommendationsHandler) HandleBecauseWatched(w http.ResponseWriter, r *
 
 // HandleSimilarUsers handles GET /recommendations/similar-users.
 func (h *RecommendationsHandler) HandleSimilarUsers(w http.ResponseWriter, r *http.Request) {
-	limit, _ := parsePagination(r)
+	limit := v1RecommendationRowLimit(r)
 	items, err := h.SimilarUsersLiked(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -204,7 +232,7 @@ func (h *RecommendationsHandler) HandlePopular(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	items, err := h.PopularItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -228,7 +256,7 @@ func (h *RecommendationsHandler) HandleRecentlyAdded(w http.ResponseWriter, r *h
 		}
 	}
 
-	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit)
+	items, err := h.RecentlyAddedItems(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), days, limit, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -247,7 +275,11 @@ func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Conte
 		return items
 	}
 	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
-	if err != nil || len(watchedSet) == 0 {
+	if err != nil {
+		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return items
+	}
+	if len(watchedSet) == 0 {
 		return items
 	}
 
@@ -261,22 +293,13 @@ func (h *RecommendationsHandler) excludeWatchedRecommendations(ctx context.Conte
 	return filtered
 }
 
+// watchedItemIDSet is SignalReader.WatchedItemIDSet, or an empty set when the
+// handler has no recommendations repo.
 func (h *RecommendationsHandler) watchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {
-	if h.recsRepo == nil {
+	if h.signals == nil {
 		return map[string]struct{}{}, nil
 	}
-
-	if h.storeProvider != nil {
-		store, err := h.storeProvider.ForUser(ctx, userID)
-		if err == nil && store != nil {
-			set, err := h.recsRepo.GetWatchedItemIDSetFromStore(ctx, store, profileID)
-			if err == nil {
-				return set, nil
-			}
-		}
-	}
-
-	return h.recsRepo.GetWatchedItemIDSet(ctx, userID, profileID)
+	return h.signals.WatchedItemIDSet(ctx, userID, profileID)
 }
 
 func (h *RecommendationsHandler) excludeLowRatedRecommendations(ctx context.Context, userID int, profileID string, items []recommendations.ScoredItem) []recommendations.ScoredItem {

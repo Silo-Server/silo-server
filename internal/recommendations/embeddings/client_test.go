@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -230,4 +233,298 @@ func TestGeminiRetryRespectsContext(t *testing.T) {
 			t.Fatalf("retry deadline: calls=%d error=%v", calls, err)
 		}
 	})
+}
+
+func TestGeminiSendsAPIKeyOutsideTheURL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var requests []*http.Request
+		c := geminiTestClient(func(r *http.Request) (*http.Response, error) {
+			requests = append(requests, r)
+			return nil, errors.New("connection refused")
+		})
+		_, err := c.Embed(context.Background(), []string{"synthetic item"})
+		if err == nil {
+			t.Fatal("Embed succeeded through a failing transport")
+		}
+		// Transport errors quote the request URL, so the key must not be in it.
+		if strings.Contains(err.Error(), "test-key") {
+			t.Fatalf("error exposes the API key: %v", err)
+		}
+		if len(requests) == 0 {
+			t.Fatal("no request reached the transport")
+		}
+		for _, r := range requests {
+			if r.URL.Query().Has("key") {
+				t.Fatalf("request URL carries the key: %s", r.URL)
+			}
+			if got := r.Header.Get("x-goog-api-key"); got != "test-key" {
+				t.Fatalf("x-goog-api-key = %q, want the configured key", got)
+			}
+		}
+	})
+}
+
+func openAITestClient(transport embeddingTransport) *Client {
+	c := NewClient(ClientConfig{BaseURL: "http://embed.test", Model: "test-model"})
+	c.httpClient.Transport = transport
+	return c
+}
+
+func TestEmbedRejectsMalformedResponses(t *testing.T) {
+	for _, tc := range []struct {
+		name, base, body string
+		inputs           int
+	}{
+		{"openai no data", "http://embed.test", `{"data":[]}`, 1},
+		{"openai null vector", "http://embed.test", `{"data":[{"embedding":null,"index":0}]}`, 1},
+		{"openai empty vector", "http://embed.test", `{"data":[{"embedding":[],"index":0}]}`, 1},
+		{"openai fewer vectors", "http://embed.test", `{"data":[{"embedding":[1,2],"index":0}]}`, 2},
+		{"openai repeated index", "http://embed.test", `{"data":[{"embedding":[1],"index":0},{"embedding":[2],"index":0}]}`, 2},
+		{"openai index out of range", "http://embed.test", `{"data":[{"embedding":[1],"index":3}]}`, 1},
+		{"gemini no embeddings", "https://generativelanguage.googleapis.com", `{"embeddings":[]}`, 1},
+		{"gemini empty values", "https://generativelanguage.googleapis.com", `{"embeddings":[{"values":[]}]}`, 1},
+		{"gemini fewer vectors", "https://generativelanguage.googleapis.com", `{"embeddings":[{"values":[1]}]}`, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewClient(ClientConfig{BaseURL: tc.base, Model: "test-model", APIKey: "test-key"})
+			c.httpClient.Transport = embeddingTransport(func(*http.Request) (*http.Response, error) {
+				return embeddingHTTPResponse(200, tc.body, ""), nil
+			})
+			vectors, err := c.Embed(context.Background(), make([]string, tc.inputs))
+			if err == nil || vectors != nil {
+				t.Fatalf("malformed response accepted: vectors=%v error=%v", vectors, err)
+			}
+		})
+	}
+}
+
+func TestEmbedOrdersOpenAIVectorsByIndex(t *testing.T) {
+	for name, body := range map[string]string{
+		"by index":      `{"data":[{"embedding":[2],"index":1},{"embedding":[1],"index":0}]}`,
+		"index omitted": `{"data":[{"embedding":[1]},{"embedding":[2]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := openAITestClient(func(*http.Request) (*http.Response, error) {
+				return embeddingHTTPResponse(200, body, ""), nil
+			})
+			vectors, err := c.Embed(context.Background(), []string{"a", "b"})
+			if err != nil || len(vectors) != 2 || vectors[0][0] != 1 || vectors[1][0] != 2 {
+				t.Fatalf("vectors=%v error=%v", vectors, err)
+			}
+		})
+	}
+}
+
+func TestEmbedFailsFastWhenTheProviderIsUnavailable(t *testing.T) {
+	dial := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	dns := &net.DNSError{Err: "no such host", Name: "ollama", IsNotFound: true}
+	for _, base := range []string{"http://embed.test", "https://generativelanguage.googleapis.com"} {
+		for _, tc := range []struct {
+			name   string
+			status int
+			err    error
+		}{
+			{name: "unauthorized", status: 401},
+			{name: "forbidden", status: 403},
+			{name: "unknown model", status: 404},
+			{name: "connection refused", err: dial},
+			{name: "unknown host", err: dns},
+		} {
+			t.Run(base+" "+tc.name, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					c := NewClient(ClientConfig{BaseURL: base, Model: "test-model", APIKey: "test-key"})
+					calls := 0
+					c.httpClient.Transport = embeddingTransport(func(*http.Request) (*http.Response, error) {
+						calls++
+						if tc.err != nil {
+							return nil, tc.err
+						}
+						return embeddingHTTPResponse(tc.status, `{"error":"synthetic"}`, ""), nil
+					})
+					start := time.Now()
+					_, err := c.Embed(context.Background(), []string{"synthetic item"})
+					if calls != 1 || time.Since(start) != 0 {
+						t.Fatalf("requests=%d elapsed=%s, want one request and no wait", calls, time.Since(start))
+					}
+					if !Unavailable(err) || InputRejected(err) {
+						t.Fatalf("error = %v, want an unavailable provider", err)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestEmbedClassifiesAClosedPortAsUnavailable(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClient(ClientConfig{BaseURL: "http://" + addr, Model: "test-model"})
+	_, err = c.Embed(context.Background(), []string{"synthetic item"})
+	if !Unavailable(err) {
+		t.Fatalf("error = %v, want an unavailable provider", err)
+	}
+}
+
+func TestInputRejected(t *testing.T) {
+	for status, want := range map[int]bool{400: true, 413: true, 422: true, 401: false, 404: false, 408: false, 429: false, 500: false} {
+		err := fmt.Errorf("wrapped: %w", &StatusError{API: "embedding", StatusCode: status})
+		if got := InputRejected(err); got != want {
+			t.Errorf("InputRejected(%d) = %v, want %v", status, got, want)
+		}
+	}
+	if InputRejected(errors.New("embedding API returned 400: plain text")) {
+		t.Error("an untyped error counts as a rejected input")
+	}
+}
+
+// A refused input is a rejected request or a local model's context-length
+// 5xx; other server errors are not.
+func TestInputRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"rejected request": {&StatusError{API: "test provider", StatusCode: 400}, true},
+		"context length":   {fmt.Errorf("wrapped: %w", &StatusError{API: "test provider", StatusCode: 500, Body: "input length exceeds the Context Length"}), true},
+		"server error":     {&StatusError{API: "test provider", StatusCode: 503, Body: "overloaded"}, false},
+		"unauthorized":     {&StatusError{API: "test provider", StatusCode: 401}, false},
+		"nil":              {nil, false},
+	} {
+		if got := InputRefused(tc.err); got != tc.want {
+			t.Errorf("%s: InputRefused = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+func TestOpenAIServerErrorsRetryWithBackoff(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		c := openAITestClient(func(*http.Request) (*http.Response, error) {
+			calls++
+			return embeddingHTTPResponse(503, "overloaded", ""), nil
+		})
+		start := time.Now()
+		_, err := c.Embed(context.Background(), []string{"synthetic item"})
+		var statusErr *StatusError
+		if calls != 6 || time.Since(start) != 15*time.Second || !errors.As(err, &statusErr) || statusErr.StatusCode != 503 {
+			t.Fatalf("server errors: calls=%d elapsed=%s error=%v", calls, time.Since(start), err)
+		}
+		if err.Error() != "embedding API returned 503: overloaded" {
+			t.Fatalf("error text = %q", err)
+		}
+	})
+}
+
+func TestOpenAIRateLimitPolicy(t *testing.T) {
+	quotaBody := `{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}`
+	for _, tc := range []struct {
+		name       string
+		body       string
+		retryAfter string
+		calls      int
+		wait       time.Duration
+		check      func(*RateLimitError) bool
+		message    string
+	}{
+		{
+			name: "insufficient quota stops at once", body: quotaBody, calls: 1,
+			check:   func(e *RateLimitError) bool { return e.QuotaExhausted },
+			message: "quota exhausted",
+		},
+		{
+			name: "retry after above the cap", body: `{}`, retryAfter: "3600", calls: 1,
+			check:   func(e *RateLimitError) bool { return e.RetryDeferred },
+			message: "retry delay is too long",
+		},
+		{
+			name: "persistent rate limit", body: `{}`, calls: 6, wait: 190 * time.Second,
+			check:   func(e *RateLimitError) bool { return !e.RetryDeferred && !e.QuotaExhausted && !e.DailyQuota },
+			message: "rate limit persisted",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				c := openAITestClient(func(*http.Request) (*http.Response, error) {
+					calls++
+					return embeddingHTTPResponse(429, tc.body, tc.retryAfter), nil
+				})
+				start := time.Now()
+				_, err := c.Embed(context.Background(), []string{"synthetic item"})
+				if calls != tc.calls || time.Since(start) != tc.wait {
+					t.Fatalf("requests=%d elapsed=%s, want %d and %s", calls, time.Since(start), tc.calls, tc.wait)
+				}
+				var limitErr *RateLimitError
+				if !errors.As(err, &limitErr) || !tc.check(limitErr) || !strings.Contains(err.Error(), tc.message) {
+					t.Fatalf("error = %#v (%v)", limitErr, err)
+				}
+				if strings.Contains(err.Error(), "gemini") {
+					t.Fatalf("error names another provider: %v", err)
+				}
+			})
+		})
+	}
+
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		c := openAITestClient(func(*http.Request) (*http.Response, error) {
+			calls++
+			if calls == 1 {
+				return embeddingHTTPResponse(429, `{}`, "3"), nil
+			}
+			return embeddingHTTPResponse(200, `{"data":[{"embedding":[1,2,3],"index":0}]}`, ""), nil
+		})
+		start := time.Now()
+		vectors, err := c.Embed(context.Background(), []string{"synthetic item"})
+		if err != nil || calls != 2 || len(vectors) != 1 || time.Since(start) != 3*time.Second {
+			t.Fatalf("temporary limit: calls=%d elapsed=%s vectors=%v error=%v", calls, time.Since(start), vectors, err)
+		}
+	})
+}
+
+func TestOpenAIRetryRespectsContext(t *testing.T) {
+	for _, status := range []int{0, 429, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				calls := 0
+				c := openAITestClient(func(*http.Request) (*http.Response, error) {
+					calls++
+					cancel()
+					if status == 0 {
+						return nil, errors.New("synthetic transport failure")
+					}
+					return embeddingHTTPResponse(status, `{}`, "30"), nil
+				})
+				start := time.Now()
+				_, err := c.Embed(ctx, []string{"synthetic item"})
+				if !errors.Is(err, context.Canceled) || calls != 1 || time.Since(start) != 0 {
+					t.Fatalf("context cancellation: calls=%d elapsed=%s error=%v", calls, time.Since(start), err)
+				}
+			})
+		})
+	}
+}
+
+// A provider's error body reaches logs, job results and search diagnostics,
+// so a credential it echoes is masked; the rest of the body stays.
+func TestStatusErrorMasksCredentialsInTheBody(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"message":"bad request","details":"api_key=sk-live-123"}}`,
+		// A secret assignment nested inside another diagnostic value.
+		`{"error":{"message":"bad request","details":"rpc error: code = Unauthenticated desc = api_key=sk-live-123 rejected"}}`,
+	} {
+		got := (&StatusError{API: "test provider", StatusCode: 400, Body: body}).Error()
+		if strings.Contains(got, "sk-live-123") || !strings.Contains(got, "bad request") || !strings.Contains(got, "400") {
+			t.Fatalf("Error() = %q, want the key masked and the rest kept", got)
+		}
+	}
 }

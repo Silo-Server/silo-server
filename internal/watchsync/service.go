@@ -24,7 +24,7 @@ type Service struct {
 	watchState     watchStateImporter
 	storeProvider  userstore.UserStoreProvider
 	ratings        ratingStore
-	ratingStaler   ratingProfileStaler
+	signals        SignalsChangedNotifier
 	dropped        droppedStore
 	locks          sync.Map
 	scrobbleQueues sync.Map
@@ -53,7 +53,18 @@ type watchStateImporter interface {
 	RecordImportedWatchIfNewerWithSource(ctx context.Context, userID int, profileID, targetID string, duration, position float64, completed bool, updatedAt time.Time, watchedAt *time.Time, source userstore.WatchHistorySource) (bool, error)
 }
 
+// SignalsChangedNotifier records that a profile's recommendation signals
+// changed, so its taste profile and cached recommendations get rebuilt.
+// *recommendations.Worker implements it.
+type SignalsChangedNotifier interface {
+	NotifySignalsChanged(ctx context.Context, userID int, profileID string)
+}
+
 const (
+	// signalsNotifyTimeout bounds reporting a sync run's signal changes,
+	// which happens after the run's own context may have ended.
+	signalsNotifyTimeout = 10 * time.Second
+
 	manualSyncCooldown = time.Hour
 	manualSyncTimeout  = 10 * time.Minute
 	// A completed stop may require a cold metadata lookup in a provider plugin.
@@ -98,6 +109,15 @@ func (s *Service) WithUserStoreProvider(provider userstore.UserStoreProvider) *S
 
 func (s *Service) WithDefaultWatchState(provider userstore.UserStoreProvider) *Service {
 	return s.WithUserStoreProvider(provider).WithWatchState(watchstate.NewService(provider))
+}
+
+// WithSignalsChangedNotifier installs where a sync run reports that its
+// imports changed the profile's recommendation signals.
+func (s *Service) WithSignalsChangedNotifier(notifier SignalsChangedNotifier) *Service {
+	if s != nil {
+		s.signals = notifier
+	}
+	return s
 }
 
 func (s *Service) ListProviders() []ProviderSummary {
@@ -766,6 +786,14 @@ func (s *Service) tryLock(connectionID string) (func(), bool) {
 }
 
 func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncRun) (SyncRun, error) {
+	// Imports commit as they go, so a run that fails partway still reports
+	// the signal changes it made, once, when it ends.
+	signalsChanged := false
+	defer func(userID int, profileID string) {
+		if signalsChanged {
+			s.notifySignalsChanged(ctx, userID, profileID)
+		}
+	}(conn.UserID, conn.ProfileID)
 	provider, ok := s.registry.Get(conn.Provider)
 	if !ok {
 		run.Status = string(SyncRunStatusFailed)
@@ -847,6 +875,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ImportWatched(ctx, conn, cfg, importer)
 			run.InboundWatchedFound = result.Found
 			run.InboundWatchedImported = result.Imported
+			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
 				recordFlowError("watched import", err)
@@ -865,6 +894,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ImportProgress(ctx, conn, cfg, importer)
 			run.InboundProgressFound = result.Found
 			run.InboundProgressImported = result.Imported
+			signalsChanged = signalsChanged || result.Imported > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
 				recordFlowError("progress import", err)
@@ -901,6 +931,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		if b.importEnabled(conn) && b.capImport(caps) {
 			result, err := s.importList(ctx, conn, cfg, provider, b)
 			b.setImportCounts(&run, result.Found, result.Imported)
+			signalsChanged = signalsChanged || result.changedLocalList()
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
 				recordFlowError(string(b.kind)+" import", err)
@@ -935,6 +966,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		result, err := s.syncRatings(ctx, conn, cfg, provider)
 		run.InboundRatingsFound = result.RemoteFound
 		run.InboundRatingsImported = result.Imported
+		signalsChanged = signalsChanged || result.Imported > 0
 		run.OutboundRatingsFound = result.LocalFound
 		run.OutboundRatingsSent = result.Sent
 		run.Warning = appendWarning(run.Warning, result.Warnings)
@@ -963,6 +995,17 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	}
 	run.Status = string(SyncRunStatusSuccess)
 	return s.completeSyncRun(ctx, run)
+}
+
+// notifySignalsChanged reports that a sync run changed the profile's
+// recommendation signals.
+func (s *Service) notifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	if s.signals == nil {
+		return
+	}
+	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signalsNotifyTimeout)
+	defer cancel()
+	s.signals.NotifySignalsChanged(notifyCtx, userID, profileID)
 }
 
 // deferRateLimitedConnection records when the provider's rate limit is

@@ -3505,6 +3505,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/recommendations/embeddings/reset": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Delete the embedding lock, every item embedding, taste profiles and per-profile cached rows in one transaction.
+     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.
+     */
+    post: operations["resetAdminRecommendationEmbeddings"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/recommendations/status": {
     parameters: {
       query?: never;
@@ -3512,7 +3532,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read persisted counts and this process's running flags. */
+    /** Read persisted counts, each job's last run, the embedding lock conflict and this process's running flags. */
     get: operations["getAdminRecommendationsStatus"];
     put?: never;
     post?: never;
@@ -16045,16 +16065,70 @@ export interface components {
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
     };
+    AdminRecommendationEmbeddingsReset: {
+      /**
+       * Format: int64
+       * @description Per-profile cached recommendation rows deleted. Global rows are kept.
+       */
+      cached_rows: number;
+      /**
+       * Format: int64
+       * @description Item embeddings deleted.
+       */
+      embeddings: number;
+      /**
+       * Format: int64
+       * @description Taste clusters deleted.
+       */
+      taste_clusters: number;
+      /**
+       * Format: int64
+       * @description Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.
+       */
+      taste_profiles: number;
+    };
+    AdminRecommendationJobRun: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      completed_at: string;
+      /** @description Why the run failed, with credentials masked. Present only when status is failed. */
+      error?: string;
+      /** @description Counts the run reported. Keys differ by job and may grow. */
+      result?: {
+        [key: string]: unknown;
+      };
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      started_at: string;
+      /**
+       * @description completed also covers runs that finished with partial failures; result counts them.
+       * @enum {string}
+       */
+      status: "completed" | "failed";
+    };
     AdminRecommendationJobStatus: {
       /** Format: int64 */
       count: number;
+      /** @description The newest finished run of this job on any server. Absent until one finishes. */
+      last_run?: components["schemas"]["AdminRecommendationJobRun"];
       running: boolean;
       /** Format: int64 */
       total?: number;
     };
     AdminRecommendationsStatus: {
+      /**
+       * Format: date-time
+       * @description When the newest cached recommendation row was written. Absent when nothing is cached.
+       */
+      cache_refreshed_at?: string;
       cowatch: components["schemas"]["AdminRecommendationJobStatus"];
       embeddings: components["schemas"]["AdminRecommendationJobStatus"];
+      /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
+      lock_conflict: string;
       recommendations: components["schemas"]["AdminRecommendationJobStatus"];
       taste_profiles: components["schemas"]["AdminRecommendationJobStatus"];
     };
@@ -22323,6 +22397,8 @@ export interface components {
       credits_replaced: number;
       /** Format: int64 */
       embeddings_imported: number;
+      /** Format: int64 */
+      embeddings_skipped: number;
       /** Format: int64 */
       episodes_created: number;
       /** Format: int64 */
@@ -62572,6 +62648,121 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  resetAdminRecommendationEmbeddings: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRecommendationEmbeddingsReset"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
           [name: string]: unknown;
         };
         content: {

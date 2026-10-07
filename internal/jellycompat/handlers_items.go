@@ -615,18 +615,40 @@ func (h *ItemsHandler) HandleSimilar(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Tier 1: embedding-based recommendations.
-	if h.recommender != nil {
-		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit)
-		if recErr == nil && len(scored) > 0 {
-			if h.writeSimilarFromScored(w, r, session, scored, limit) {
-				return
-			}
+	// Tier 1: embedding-based recommendations, anchored only on an item the
+	// viewer can see. A hidden anchor goes to the genre path, which answers
+	// it as an unknown item, so the list cannot show what a hidden title
+	// resembles.
+	if h.recommender != nil && h.similarAnchorVisible(r.Context(), session, contentID) {
+		scored, recErr := h.recommender.SimilarItems(r.Context(), contentID, limit, h.resolveAccessFilter(r.Context(), session))
+		if recErr != nil {
+			slog.WarnContext(r.Context(), "jellycompat: similar items failed; falling back to genre", "component", "jellycompat",
+				"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", recErr)
+		} else if len(scored) > 0 && h.writeSimilarFromScored(w, r, session, scored, limit) {
+			return
 		}
 	}
 
 	// Tier 2: genre-based fallback.
 	h.writeSimilarFromGenre(w, r, session, contentID, limit)
+}
+
+// similarAnchorVisible reports whether the session's viewer can see the
+// catalog item a Similar list is anchored on. A failed check counts as not
+// visible.
+func (h *ItemsHandler) similarAnchorVisible(ctx context.Context, session *Session, contentID string) bool {
+	items, err := h.loadCompatItemsByContentIDs(ctx, session, []string{contentID}, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat: similar anchor access check failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "content_id", contentID, "error", err)
+		return false
+	}
+	for _, item := range items {
+		if item.ContentID == contentID {
+			return true
+		}
+	}
+	return false
 }
 
 // writeSimilarFromScored converts recommender ScoredItem results into a Jellyfin query result.
@@ -640,6 +662,8 @@ func (h *ItemsHandler) writeSimilarFromScored(w http.ResponseWriter, r *http.Req
 
 	itemsByID, err := h.fetchCompatItemsByContentIDs(r.Context(), session, contentIDs, nil)
 	if err != nil {
+		slog.WarnContext(r.Context(), "jellycompat: similar items lookup failed", "component", "jellycompat",
+			"user_id", session.StreamAppUserID, "profile_id", session.ProfileID, "error", err)
 		writeJSON(w, http.StatusOK, queryResultDTO{Items: []baseItemDTO{}, TotalRecordCount: 0})
 		return true
 	}

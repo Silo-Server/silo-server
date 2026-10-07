@@ -62,3 +62,71 @@ func TestAdminSplitDryRunRollbackAndCommit(t *testing.T) {
 		t.Fatalf("commit target %s %v", content, err)
 	}
 }
+
+// recordingRecommendationStaler records the item sets it is asked to mark.
+type recordingRecommendationStaler struct{ calls [][]string }
+
+func (s *recordingRecommendationStaler) MarkProfilesStaleForItems(_ context.Context, itemIDs []string) (int64, error) {
+	s.calls = append(s.calls, itemIDs)
+	return 0, nil
+}
+
+// A committed split that moves user state onto its target marks the
+// recommendations of the profiles with state there stale; a dry run, or a
+// split that moves no user state, marks nothing.
+func TestAdminSplitMarksRecommendationsStaleWhenStateMoves(t *testing.T) {
+	pool := catalogTransferPool(t)
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	source, target := "split-recs-source-"+suffix, "split-recs-target-"+suffix
+	for _, id := range []string{source, target} {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO media_items(content_id,type,title)VALUES($1,'movie',$1)`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var folder, userID int
+	if err := pool.QueryRow(t.Context(), `INSERT INTO media_folders(type,name)VALUES('movies',$1)RETURNING id`, suffix).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `INSERT INTO users(username,role)VALUES($1,'user')RETURNING id`, "split-recs-"+suffix).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	ids := []int{}
+	for i := range 3 {
+		var id int
+		if err := pool.QueryRow(t.Context(), `INSERT INTO media_files(media_folder_id,file_path,content_id)VALUES($1,$2,$3)RETURNING id`, folder, fmt.Sprintf("/split-recs-fixture/%s/%d.mkv", suffix, i), source).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id=ANY($1)`, ids)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id=ANY($1)`, []string{source, target})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id=$1`, folder)
+	})
+	if _, err := pool.Exec(t.Context(), `INSERT INTO user_favorites(user_id,profile_id,media_item_id)VALUES($1,'p1',$2)`, userID, source); err != nil {
+		t.Fatal(err)
+	}
+	staler := &recordingRecommendationStaler{}
+	h := NewAdminSplitHandler(pool, &fakeItemLookup{items: map[string]*models.MediaItem{source: {ContentID: source, Type: "movie", Title: "Source"}, target: {ContentID: target, Type: "movie", Title: "Target"}}}, nil, nil, nil, nil, nil)
+	h.SetRecommendationStaler(staler)
+	split := func(fileID int, mode string, dryRun bool) {
+		t.Helper()
+		req := AdminSplitRequest{FileIDs: []int{fileID}, Target: AdminSplitTarget{ContentID: target}, HistoryMode: mode, PersistOverride: new(false), DryRun: dryRun}
+		if _, err := h.SplitAdminItem(t.Context(), source, req); err != nil {
+			t.Fatalf("split file %d (%s, dry run %v): %v", fileID, mode, dryRun, err)
+		}
+	}
+
+	split(ids[0], "move_all", true)
+	// Evidence mode leaves the favorite, an item-level intent, on the source.
+	split(ids[0], "evidence", false)
+	if len(staler.calls) != 0 {
+		t.Fatalf("marks after a dry run and a split that moved no user state = %v, want none", staler.calls)
+	}
+	split(ids[1], "move_all", false)
+	if len(staler.calls) != 1 || len(staler.calls[0]) != 1 || staler.calls[0][0] != target {
+		t.Fatalf("marks after moving the favorite = %v, want one for the target", staler.calls)
+	}
+}

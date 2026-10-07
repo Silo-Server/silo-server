@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -24,21 +26,37 @@ const (
 	SectionKindGenre         = "genre"
 )
 
-// ProfileRefreshRequester queues a profile-scoped refresh without blocking the caller.
-type ProfileRefreshRequester interface {
-	RequestProfileRefresh(ctx context.Context, userID int, profileID string)
+// ReadRefreshRequester queues a refresh for a profile whose cached rows a read
+// found missing, without blocking the caller. *Worker limits these to one per
+// profile per interval, because a row that came out empty looks the same to a
+// read as a row that was never built.
+type ReadRefreshRequester interface {
+	RequestReadRefresh(ctx context.Context, userID int, profileID string)
+	// ReadRefreshDue reports whether RequestReadRefresh would queue a
+	// refresh for the profile now.
+	ReadRefreshDue(userID int, profileID string) bool
+}
+
+// readerRepo is the part of *Repo the Reader reads.
+type readerRepo interface {
+	GetTasteProfileMeta(ctx context.Context, userID int, profileID string) (*TasteProfileMeta, error)
+	GetTasteClusterMeta(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
+	GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error)
+	ListCachedGenreSamplers(ctx context.Context) (map[string][]ScoredItem, error)
+	GetTopGenres(ctx context.Context, limit int) ([]string, error)
+	FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error)
 }
 
 // Reader assembles recommendation rows from cache-backed data sources.
 type Reader struct {
-	repo        *Repo
+	repo        readerRepo
 	ratingsRepo *catalog.RatingsRepo
-	refresh     ProfileRefreshRequester
+	refresh     ReadRefreshRequester
 	signals     *SignalReader
 }
 
 // NewReader creates a cache-backed recommendations reader.
-func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ProfileRefreshRequester, storeProvider userstore.UserStoreProvider) *Reader {
+func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ReadRefreshRequester, storeProvider userstore.UserStoreProvider) *Reader {
 	return &Reader{
 		repo:        repo,
 		ratingsRepo: ratingsRepo,
@@ -47,17 +65,57 @@ func NewReader(repo *Repo, ratingsRepo *catalog.RatingsRepo, refresh ProfileRefr
 	}
 }
 
+// WithUserStoreOutsidePostgres records whether the user store keeps watch
+// progress, favorites and watchlist outside Postgres (the SQLite backend), and
+// returns the reader. Signal checks then read the store.
+func (r *Reader) WithUserStoreOutsidePostgres(outside bool) *Reader {
+	if r != nil && r.signals != nil {
+		r.signals.storeOutsidePostgres = outside
+	}
+	return r
+}
+
+// requestRefresh asks for the profile's cached rows to be rebuilt.
+func (r *Reader) requestRefresh(ctx context.Context, userID int, profileID string) {
+	if r.refresh != nil {
+		r.refresh.RequestReadRefresh(ctx, userID, profileID)
+	}
+}
+
+// requestRefreshIfSignals asks for a refresh of a profile that has no taste
+// profile yet, when it has signals to build one from. Its first refresh
+// request lives in one server's memory and can be lost; this lets a later
+// read recover it. A profile with nothing to build from asks for nothing,
+// and the signals are checked only when a refresh would be let through.
+func (r *Reader) requestRefreshIfSignals(ctx context.Context, userID int, profileID string) {
+	if r.refresh == nil || !r.refresh.ReadRefreshDue(userID, profileID) {
+		return
+	}
+	has, err := r.signalReader().HasSignals(ctx, userID, profileID)
+	if err != nil {
+		slog.WarnContext(ctx, "checking a profile's recommendation signals failed", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", err)
+		return
+	}
+	if has {
+		r.refresh.RequestReadRefresh(ctx, userID, profileID)
+	}
+}
+
 func (r *Reader) signalReader() *SignalReader {
 	if r.signals != nil {
 		return r.signals
 	}
-	return NewSignalReader(r.repo, nil)
+	repo, _ := r.repo.(signalRepo)
+	return NewSignalReader(repo, nil)
 }
 
 // GetForYouMain returns the first row the recommendations page should display.
 func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	limit = normalizeRecommendationLimit(limit)
-	rows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	return r.forYouMain(ctx, userID, profileID, normalizeRecommendationLimit(limit), filter)
+}
+
+func (r *Reader) forYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +129,7 @@ func (r *Reader) GetForYouMain(ctx context.Context, userID int, profileID string
 // GetForYouRows returns the remaining recommendations-page rows after the main row.
 func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
-	rows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -82,18 +140,34 @@ func (r *Reader) GetForYouRows(ctx context.Context, userID int, profileID string
 	return rows[1:], nil
 }
 
+// GetForYouPage returns every recommendations-page row, the main row first.
+// It is GetForYouMain and GetForYouRows in one read.
+func (r *Reader) GetForYouPage(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	limit = normalizeRecommendationLimit(limit)
+	rows, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	if err != nil {
+		return nil, err
+	}
+	return trimRows(rows, limit), nil
+}
+
 // GetSimilarUsersLiked returns the cached collaborative row for the profile.
 func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
-	limit = normalizeRecommendationLimit(limit)
+	return r.similarUsersLiked(ctx, userID, profileID, normalizeRecommendationLimit(limit), filter)
+}
 
+func (r *Reader) similarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeSimilarUsersLiked, "")
 	if err != nil {
 		return nil, err
 	}
+	if items == nil {
+		// No row is cached. A built row may be empty (too few peer accounts),
+		// and rebuilding it would not change that.
+		r.requestRefresh(ctx, userID, profileID)
+		return []ScoredItem{}, nil
+	}
 	if len(items) == 0 {
-		if r.refresh != nil {
-			r.refresh.RequestProfileRefresh(ctx, userID, profileID)
-		}
 		return []ScoredItem{}, nil
 	}
 
@@ -112,18 +186,31 @@ func (r *Reader) GetSimilarUsersLiked(ctx context.Context, userID int, profileID
 	return rows[0].Items, nil
 }
 
-// GetBecauseYouWatched returns a cached because-you-watched row, using the
-// requested source item when provided or the most recent completed items when not.
-func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
-	items, _, err := r.GetBecauseYouWatchedWithSource(ctx, userID, profileID, sourceItemID, limit, filter)
-	return items, err
+// Section reads serve home and library sections. Each returns a row's whole
+// candidate pool, every cached candidate left after filtering (at most
+// CacheCandidateLimit), rather than a page of the public limit: the section
+// scopes the row to its libraries and trims it to its own item limit
+// afterwards, and trimming first would leave a library's row short or empty.
+
+// SectionForYouMain is GetForYouMain's row for a home or library section.
+func (r *Reader) SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*ForYouRow, error) {
+	return r.forYouMain(ctx, userID, profileID, CacheCandidateLimit, filter)
 }
 
-// GetBecauseYouWatchedWithSource preserves the exact anchor used for the returned
-// recommendations. A caller must access-check the anchor before displaying it.
-func (r *Reader) GetBecauseYouWatchedWithSource(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
-	limit = normalizeRecommendationLimit(limit)
+// SectionSimilarUsersLiked is GetSimilarUsersLiked's row for a home or
+// library section.
+func (r *Reader) SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	return r.similarUsersLiked(ctx, userID, profileID, CacheCandidateLimit, filter)
+}
 
+// SectionBecauseYouWatched returns a cached Because You Watched row for a
+// home or library section and the anchor it was built from. It uses
+// sourceItemID as the anchor when given, else the profile's most recent
+// completed titles in turn: the first whose row keeps an item after
+// filtering wins. When libraryIDs is not nil an item must also be in one of
+// those libraries, so a section picks an anchor with recommendations in its
+// own scope. A caller must access-check the anchor before displaying it.
+func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
 	sourceIDs := []string{}
 	if sourceItemID != "" {
 		sourceIDs = append(sourceIDs, sourceItemID)
@@ -135,6 +222,8 @@ func (r *Reader) GetBecauseYouWatchedWithSource(ctx context.Context, userID int,
 		sourceIDs = append(sourceIDs, recentCompleted...)
 	}
 
+	read := r.newRowRead(userID, profileID, scopeToLibraries(filter, libraryIDs))
+	cached := false
 	for _, sourceID := range sourceIDs {
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeBecauseWatched, sourceID)
 		if err != nil {
@@ -143,35 +232,60 @@ func (r *Reader) GetBecauseYouWatchedWithSource(ctx context.Context, userID int,
 		if len(items) == 0 {
 			continue
 		}
-		rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{{
+		cached = true
+		rows, err := read.filter(ctx, []ForYouRow{{
 			Type:  RecTypeBecauseWatched,
 			Label: "Because You Watched",
 			Items: items,
-		}}, filter)
+		}})
 		if err != nil {
 			return nil, "", err
 		}
-		rows = trimRows(rows, limit)
 		if len(rows) == 0 {
-			return []ScoredItem{}, "", nil
+			// Everything this anchor recommends is filtered out or out of
+			// scope; the next anchor may still fill the row.
+			continue
 		}
+		rows = trimRows(rows, CacheCandidateLimit)
 		return rows[0].Items, sourceID, nil
 	}
 
-	if r.refresh != nil {
-		r.refresh.RequestProfileRefresh(ctx, userID, profileID)
+	// Rows are built only for completed titles, so a profile with none has
+	// nothing a refresh could add, and a refresh does not bring back what
+	// filtering removed from a cached row.
+	if len(sourceIDs) > 0 && !cached {
+		r.requestRefresh(ctx, userID, profileID)
 	}
 	return []ScoredItem{}, "", nil
 }
 
-// GetTasteMatchRow returns the strongest matching personalized cluster row for a genre,
-// falling back to the global genre sampler when no personalized cluster matches.
-// An empty genre auto-picks: every taste cluster qualifies (strongest first),
-// and the global fallback uses the server-wide top genre.
-func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
-	limit = normalizeRecommendationLimit(limit)
+// scopeToLibraries narrows filter so an item must also be in one of
+// libraryIDs, unless libraryIDs is nil. An empty libraryIDs allows nothing.
+func scopeToLibraries(filter catalog.AccessFilter, libraryIDs []int) catalog.AccessFilter {
+	if libraryIDs == nil {
+		return filter
+	}
+	scoped := filter
+	if filter.AllowedLibraryIDs == nil {
+		scoped.AllowedLibraryIDs = slices.Clone(libraryIDs)
+		return scoped
+	}
+	scoped.AllowedLibraryIDs = make([]int, 0, len(libraryIDs))
+	for _, id := range libraryIDs {
+		if slices.Contains(filter.AllowedLibraryIDs, id) {
+			scoped.AllowedLibraryIDs = append(scoped.AllowedLibraryIDs, id)
+		}
+	}
+	return scoped
+}
 
-	clusters, err := r.repo.GetTasteClusters(ctx, userID, profileID)
+// SectionTasteMatchRow returns the strongest matching personalized cluster
+// row for a genre for a home or library section, falling back to the global
+// genre sampler when no personalized cluster matches. An empty genre
+// auto-picks: every taste cluster qualifies (strongest first), and the global
+// fallback uses the server-wide top genre.
+func (r *Reader) SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*ForYouRow, error) {
+	clusters, err := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,23 +307,22 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 		return matching[i].TotalWeight > matching[j].TotalWeight
 	})
 
+	read := r.newRowRead(userID, profileID, filter)
 	for _, cluster := range matching {
 		items, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouClusterPrefix+itoa(cluster.ClusterIdx), "")
 		if err != nil {
 			return nil, err
 		}
 		if len(items) == 0 {
-			if r.refresh != nil {
-				r.refresh.RequestProfileRefresh(ctx, userID, profileID)
-			}
+			r.requestRefresh(ctx, userID, profileID)
 			continue
 		}
 
-		rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{clusterRow(cluster, items)}, filter)
+		rows, err := read.filter(ctx, []ForYouRow{clusterRow(cluster, items)})
 		if err != nil {
 			return nil, err
 		}
-		rows = trimRows(rows, limit)
+		rows = trimRows(rows, CacheCandidateLimit)
 		if len(rows) == 0 {
 			// This cluster's cached items were entirely filtered out (e.g.
 			// access restrictions) — try the next-strongest cluster instead of
@@ -234,78 +347,76 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 	if len(items) == 0 {
 		return nil, nil
 	}
-	rows, err := r.filterRows(ctx, userID, profileID, []ForYouRow{{
+	rows, err := read.filter(ctx, []ForYouRow{{
 		Type:  "genre_sampler",
 		Label: "Top " + genre,
 		Items: items,
-	}}, filter)
+	}})
 	if err != nil {
 		return nil, err
 	}
-	rows = trimRows(rows, limit)
+	rows = trimRows(rows, CacheCandidateLimit)
 	if len(rows) == 0 {
 		return nil, nil
 	}
 	return &rows[0], nil
 }
 
-func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, bool, error) {
-	level := 0
+// getForYouPageRows merges the profile's cached personal rows with the global
+// rows by its cold-start level. A profile with no positive signal, or no taste
+// profile, is level 0 and gets only the global rows, even when personal rows
+// from an earlier taste profile are still cached.
+func (r *Reader) getForYouPageRows(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	return r.newRowRead(userID, profileID, filter).forYouPageRows(ctx)
+}
+
+func (rr *rowRead) forYouPageRows(ctx context.Context) ([]ForYouRow, error) {
+	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 	meta, err := r.repo.GetTasteProfileMeta(ctx, userID, profileID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	if meta != nil {
-		positiveSignals := 0
-		for key, count := range meta.SignalCounts {
-			switch key {
-			case "rated_low", "watch_low":
-			default:
-				positiveSignals += count
-			}
-		}
-		level = coldStartLevel(positiveSignals)
-	}
+	level := coldStartLevelOf(meta)
 
 	globalRows, err := r.getGlobalRows(ctx)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	clusterRows, missingClusters, err := r.getClusterRows(ctx, userID, profileID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	personalRows := make([]ForYouRow, 0, 1+len(clusterRows))
 	mainItems, err := r.repo.GetRecommendationCache(ctx, userID, profileID, RecTypeForYouMain, "")
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	missingPersonalized := level > 0 && (len(mainItems) == 0 || missingClusters)
 	if len(mainItems) > 0 {
 		personalRows = append(personalRows, ForYouRow{
-			Type:  "cluster",
+			Type:  clusterRowType,
 			Label: "For You",
 			Items: mainItems,
 		})
 	}
 	personalRows = append(personalRows, clusterRows...)
-	if level == 0 && len(personalRows) > 0 {
-		level = 3
-	}
 
 	rows := mergePersonalizedAndColdStart(personalRows, globalRows, level)
-	rows, err = r.filterRows(ctx, userID, profileID, rows, filter)
+	rows, err = rr.filter(ctx, rows)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
-	if missingPersonalized && r.refresh != nil {
-		r.refresh.RequestProfileRefresh(ctx, userID, profileID)
+	switch {
+	case missingPersonalized:
+		r.requestRefresh(ctx, userID, profileID)
+	case meta == nil:
+		r.requestRefreshIfSignals(ctx, userID, profileID)
 	}
 
-	return rows, missingPersonalized, nil
+	return rows, nil
 }
 
 func (r *Reader) getGlobalRows(ctx context.Context) ([]ForYouRow, error) {
@@ -325,7 +436,7 @@ func (r *Reader) getGlobalRows(ctx context.Context) ([]ForYouRow, error) {
 }
 
 func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID string) ([]ForYouRow, bool, error) {
-	clusters, err := r.repo.GetTasteClusters(ctx, userID, profileID)
+	clusters, err := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -349,25 +460,73 @@ func (r *Reader) getClusterRows(ctx context.Context, userID int, profileID strin
 	return rows, missing, nil
 }
 
+// clusterRow titles a cached cluster row from its items, which carry the title
+// of the build that cached them; the cluster table may have been rebuilt since.
+// Items cached without a cluster title fall back to the cluster's label.
 func clusterRow(cluster TasteCluster, items []ScoredItem) ForYouRow {
-	label := cluster.Label
-	if label == "" {
-		label = "For You"
+	title := clusterTitle(cluster.Label)
+	if len(items) > 0 {
+		if label, ok := strings.CutPrefix(items[0].Reason, clusterTitlePrefix); ok && label != "" {
+			title = items[0].Reason
+		}
 	}
 	return ForYouRow{
-		Type:         "cluster",
-		Label:        "Because you enjoy " + label,
+		Type:         clusterRowType,
+		Label:        title,
 		ClusterIndex: cluster.ClusterIdx,
 		Items:        items,
 	}
 }
 
+// filterRows drops from rows the items the profile cannot access, those in its
+// recommendation exclusion set (watched and favorited titles), and those it
+// rated 2 or lower, then drops the rows left empty. Rows cached before a title
+// was watched or favorited are cleaned here.
 func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, rows []ForYouRow, filter catalog.AccessFilter) ([]ForYouRow, error) {
+	return r.newRowRead(userID, profileID, filter).filter(ctx, rows)
+}
+
+// rowRead filters the rows one request reads for a profile. The profile's
+// exclusion set is loaded once, on first use, however many rows, anchors or
+// clusters the request goes through.
+type rowRead struct {
+	reader    *Reader
+	userID    int
+	profileID string
+	access    catalog.AccessFilter
+	excluded  map[string]struct{}
+}
+
+func (r *Reader) newRowRead(userID int, profileID string, access catalog.AccessFilter) *rowRead {
+	return &rowRead{reader: r, userID: userID, profileID: profileID, access: access}
+}
+
+// exclusions returns the profile's recommendation exclusion set, loading it on
+// the first call.
+func (rr *rowRead) exclusions(ctx context.Context) (map[string]struct{}, error) {
+	if rr.excluded != nil {
+		return rr.excluded, nil
+	}
+	excluded, err := rr.reader.signalReader().RecommendationExclusionSet(ctx, rr.userID, rr.profileID)
+	if err != nil {
+		return nil, err
+	}
+	if excluded == nil {
+		// A non-nil set records that it was loaded.
+		excluded = map[string]struct{}{}
+	}
+	rr.excluded = excluded
+	return excluded, nil
+}
+
+// filter is filterRows for this read.
+func (rr *rowRead) filter(ctx context.Context, rows []ForYouRow) ([]ForYouRow, error) {
 	if len(rows) == 0 {
 		return rows, nil
 	}
+	r, userID, profileID := rr.reader, rr.userID, rr.profileID
 
-	watchedSet, err := r.signalReader().WatchedItemIDSet(ctx, userID, profileID)
+	excluded, err := rr.exclusions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -389,8 +548,7 @@ func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, r
 
 	accessible := map[string]struct{}{}
 	if len(itemIDs) > 0 {
-		var err error
-		accessible, err = r.repo.FilterAccessibleItemIDs(ctx, itemIDs, filter)
+		accessible, err = r.repo.FilterAccessibleItemIDs(ctx, itemIDs, rr.access)
 		if err != nil {
 			return nil, err
 		}
@@ -403,7 +561,7 @@ func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, r
 			if _, ok := accessible[item.MediaItemID]; !ok {
 				continue
 			}
-			if _, watched := watchedSet[item.MediaItemID]; watched {
+			if _, skip := excluded[item.MediaItemID]; skip {
 				continue
 			}
 			if rating, rated := lowRatings[item.MediaItemID]; rated && rating <= 2 {
@@ -426,9 +584,10 @@ func (r *Reader) filterRows(ctx context.Context, userID int, profileID string, r
 // popular rows. All data is read from cache — no live aggregation queries.
 func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
+	read := r.newRowRead(userID, profileID, filter)
 
 	// 1. For-you rows (personalized + cold-start blended, already filtered).
-	forYouRows, _, err := r.getForYouPageRows(ctx, userID, profileID, filter)
+	forYouRows, err := read.forYouPageRows(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +623,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 	if len(genreSamplers) > 0 {
 		// Exclude genres that overlap with the user's taste clusters.
 		excludeGenres := make(map[string]struct{})
-		clusters, clusterErr := r.repo.GetTasteClusters(ctx, userID, profileID)
+		clusters, clusterErr := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
 		if clusterErr != nil {
 			slog.WarnContext(ctx, "GetDiscoverRows: failed to load taste clusters for genre exclusion", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", clusterErr)
 		}
@@ -493,8 +652,8 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		}
 	}
 
-	// Filter extra rows (watched + low-rated) and deduplicate across all rows.
-	extraRows, err = r.filterRows(ctx, userID, profileID, extraRows, filter)
+	// Filter extra rows (excluded + low-rated) and deduplicate across all rows.
+	extraRows, err = read.filter(ctx, extraRows)
 	if err != nil {
 		return nil, err
 	}
@@ -579,14 +738,14 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 		if err != nil || len(items) == 0 {
 			return nil, err
 		}
-		return &ForYouRow{Type: "cluster", Label: "For You", Items: items}, nil
+		return &ForYouRow{Type: clusterRowType, Label: "For You", Items: items}, nil
 
 	case SectionKindCluster:
 		idx, err := strconv.Atoi(key)
 		if err != nil {
 			return nil, fmt.Errorf("invalid cluster index %q: %w", key, err)
 		}
-		clusters, err := r.repo.GetTasteClusters(ctx, userID, profileID)
+		clusters, err := r.repo.GetTasteClusterMeta(ctx, userID, profileID)
 		if err != nil {
 			return nil, err
 		}
@@ -652,6 +811,10 @@ func (r *Reader) loadSectionRow(ctx context.Context, userID int, profileID, kind
 
 	return nil, nil
 }
+
+// clusterRowType is the type the API reports for the main row and every
+// taste-cluster row.
+const clusterRowType = "cluster"
 
 // selectDailyGenres picks up to n genres from the available list using a
 // deterministic daily seed so the selection is stable within a day for a given profile.
@@ -725,14 +888,23 @@ func trimRows(rows []ForYouRow, limit int) []ForYouRow {
 	return rows
 }
 
+// Public row reads answer defaultRecommendationLimit items per row unless
+// asked for a positive limit, and at most maxRecommendationLimit, the v2
+// limit parameter's maximum.
+const (
+	defaultRecommendationLimit = 20
+	maxRecommendationLimit     = 50
+)
+
+// MaxRowReadLimit is the most items a row read returns per row, whatever
+// limit it was asked for.
+const MaxRowReadLimit = maxRecommendationLimit
+
 func normalizeRecommendationLimit(limit int) int {
 	if limit <= 0 {
-		return 20
+		return defaultRecommendationLimit
 	}
-	if limit > 20 {
-		return 20
-	}
-	return limit
+	return min(limit, maxRecommendationLimit)
 }
 
 func itoa(v int) string {

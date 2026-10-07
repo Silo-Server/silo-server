@@ -4126,7 +4126,7 @@ func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Removed != 1 {
+	if result.Removed != 1 || !result.changedLocalList() {
 		t.Fatalf("result = %#v", result)
 	}
 	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
@@ -4139,6 +4139,41 @@ func TestServiceAppliesIncrementalFavoriteTombstone(t *testing.T) {
 	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
 	if updated.SyncCursors[pluginFavoritesCursorKey] != "cursor-2" {
 		t.Fatalf("connection cursors = %#v", updated.SyncCursors)
+	}
+}
+
+// A list import changes the profile's signals only when it adds to the local
+// list: Imported also counts rows the list already held.
+func TestImportListChangesSignalsOnlyWhenItAddsLocally(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	store := userdb.NewSQLiteUserStore(db)
+	ctx := context.Background()
+	conn := Connection{ID: "conn-1", Provider: "plugin:4:list", UserID: 7, ProfileID: "profile-1", ImportFavoritesEnabled: true}
+	service := NewService(newServiceFakeRepo(), NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	provider := favoriteBatchProviderStub{batch: FavoriteImportBatch{Rows: []RemoteFavorite{{ProviderItemKey: testMovieProviderItemKey}}}}
+
+	result, err := service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || !result.changedLocalList() {
+		t.Fatalf("first import = %#v, want a local change", result)
+	}
+	result, err = service.importList(ctx, conn, ServerConfig{}, provider, service.favoritesBinding())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.changedLocalList() {
+		t.Fatalf("repeat import = %#v, want no local change", result)
 	}
 }
 

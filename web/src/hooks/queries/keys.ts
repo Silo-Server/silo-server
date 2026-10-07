@@ -320,14 +320,9 @@ export const recKeys = {
   forYouMain: () => [...recKeys.all, "for-you", "main"] as const,
   forYouRows: () => [...recKeys.all, "for-you", "rows"] as const,
   similar: (itemId: string) => [...recKeys.all, "similar", itemId] as const,
-  becauseWatched: (itemId: string) => [...recKeys.all, "because-watched", itemId] as const,
-  similarUsers: () => [...recKeys.all, "similar-users"] as const,
   tasteProfile: () => [...recKeys.all, "taste-profile"] as const,
   discover: () => [...recKeys.all, "discover"] as const,
   section: (kind: string, key?: string) => [...recKeys.all, "section", kind, key ?? ""] as const,
-  watchTonight: () => [...recKeys.all, "watch-tonight"] as const,
-  watchTonightCards: (mode: string, genres: string[]) =>
-    [...recKeys.all, "watch-tonight-cards", mode, ...genres.sort()] as const,
   tasteSeedItems: () => [...recKeys.all, "taste-seed", "items"] as const,
 };
 

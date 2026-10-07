@@ -8,16 +8,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-type countingProfileRefresher struct{ calls int }
-
-func (c *countingProfileRefresher) RequestProfileRefresh(context.Context, int, string) { c.calls++ }
-
 // A taste-seed submission counts only the favorites it newly recorded: a
 // duplicate pick, an already-favorited item, and a retried submission all
 // report 0 added and queue no refresh.
 func TestSubmitTasteSeedCountsOnlyNewFavorites(t *testing.T) {
 	store := newHouseholdTestStore(t)
-	refresher := &countingProfileRefresher{}
+	refresher := &countingSignalsNotifier{}
 	h := &RecommendationsHandler{storeProvider: testUserStoreProvider{store: store}, RecWorker: refresher, Fetcher: stubDiscoverFetcher{items: []*models.MediaItem{{ContentID: "movie:heat-1995"}, {ContentID: "movie:already"}, {ContentID: "movie:collateral-2004"}}}}
 	ctx := context.Background()
 
@@ -64,7 +60,7 @@ func TestSubmitTasteSeedRejectsInvisiblePicksBeforeWriting(t *testing.T) {
 	for _, inaccessible := range []string{"movie:hidden-library", "movie:unknown", " "} {
 		t.Run(inaccessible, func(t *testing.T) {
 			store := newHouseholdTestStore(t)
-			refresher := &countingProfileRefresher{}
+			refresher := &countingSignalsNotifier{}
 			fetcher := &tasteSeedAccessFetcher{}
 			h := &RecommendationsHandler{storeProvider: testUserStoreProvider{store: store}, RecWorker: refresher, Fetcher: fetcher}
 			filter := catalog.AccessFilter{AllowedLibraryIDs: []int{7}}

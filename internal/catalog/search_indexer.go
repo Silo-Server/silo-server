@@ -77,6 +77,10 @@ type CatalogSearchIndexer struct {
 	settingsStore SettingsStore
 	runtime       *CatalogSearchSettings
 	events        *SearchIndexEventRepository
+	// models names the locked embedding model. Documents carry only vectors
+	// of that model, the ones the coverage gate counts and query vectors are
+	// compared with. Nil indexes every stored vector.
+	models CatalogSemanticModelProvider
 }
 
 func NewCatalogSearchIndexer(pool *pgxpool.Pool, settingsStore SettingsStore) *CatalogSearchIndexer {
@@ -100,6 +104,16 @@ func NewCatalogSearchIndexerFromSettings(pool *pgxpool.Pool, settingsStore Setti
 		runtime:       new(settings),
 		events:        NewSearchIndexEventRepository(pool),
 	}
+}
+
+// WithSemanticModelProvider indexes only vectors of the embedding model
+// models reports, the same provider the semantic coverage gate uses, and
+// returns the indexer.
+func (i *CatalogSearchIndexer) WithSemanticModelProvider(models CatalogSemanticModelProvider) *CatalogSearchIndexer {
+	if i != nil {
+		i.models = models
+	}
+	return i
 }
 
 func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) {
@@ -229,7 +243,7 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	}
 	if len(events) == 0 {
 		stats.DocumentCount = state.DocumentCount
-		if vectorCount, err := countCatalogSearchVectorDocuments(ctx, i.pool, settings.IndexTypes, ""); err == nil {
+		if vectorCount, err := i.countIndexedVectors(ctx, settings.IndexTypes); err == nil {
 			stats.VectorDocCount = vectorCount
 		}
 		setSearchIndexTaskResult(progress, stats)
@@ -299,7 +313,7 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 		return stats, err
 	}
 	stats.DocumentCount = docCount
-	if vectorCount, err := countCatalogSearchVectorDocuments(ctx, i.pool, settings.IndexTypes, ""); err == nil {
+	if vectorCount, err := i.countIndexedVectors(ctx, settings.IndexTypes); err == nil {
 		stats.VectorDocCount = vectorCount
 	}
 	stats.LastProcessedID = maxID
@@ -503,7 +517,7 @@ func (i *CatalogSearchIndexer) rebuildLocked(
 		return stats, err
 	}
 	stats.DocumentCount = docCount
-	if vectorCount, err := countCatalogSearchVectorDocuments(ctx, i.pool, settings.IndexTypes, ""); err == nil {
+	if vectorCount, err := i.countIndexedVectors(ctx, settings.IndexTypes); err == nil {
 		stats.VectorDocCount = vectorCount
 	}
 	// Swap the state pointer BEFORE marking events processed. If the process
@@ -1041,7 +1055,11 @@ func (i *CatalogSearchIndexer) attachDocumentVectors(ctx context.Context, docs [
 	}
 	var vectors map[string][]float32
 	if len(ids) > 0 {
-		if vectors, err = loadCatalogSearchVectors(ctx, i.pool, ids); err != nil {
+		model, err := i.activeModel(ctx)
+		if err != nil {
+			return err
+		}
+		if vectors, err = loadCatalogSearchVectors(ctx, i.pool, ids, model); err != nil {
 			return err
 		}
 	}
@@ -1051,7 +1069,33 @@ func (i *CatalogSearchIndexer) attachDocumentVectors(ctx context.Context, docs [
 	return nil
 }
 
-func loadCatalogSearchVectors(ctx context.Context, pool *pgxpool.Pool, contentIDs []string) (map[string][]float32, error) {
+// activeModel returns the embedding model whose vectors documents carry, or
+// "" for every model.
+func (i *CatalogSearchIndexer) activeModel(ctx context.Context) (string, error) {
+	if i.models == nil {
+		return "", nil
+	}
+	model, err := i.models.ActiveEmbeddingModel(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve active embedding model: %w", err)
+	}
+	return model, nil
+}
+
+// countIndexedVectors counts the documents of itemTypes that carry a vector,
+// the way attachDocumentVectors chooses them.
+func (i *CatalogSearchIndexer) countIndexedVectors(ctx context.Context, itemTypes []string) (int, error) {
+	model, err := i.activeModel(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return countCatalogSearchVectorDocuments(ctx, i.pool, itemTypes, model)
+}
+
+// loadCatalogSearchVectors returns the stored vectors of contentIDs made by
+// model ("" => any model). An item whose vector came from another model is
+// absent, so its document opts out of semantic search until it is re-embedded.
+func loadCatalogSearchVectors(ctx context.Context, pool *pgxpool.Pool, contentIDs []string, model string) (map[string][]float32, error) {
 	contentIDs = compactNonEmptyStrings(contentIDs)
 	if pool == nil || len(contentIDs) == 0 {
 		return nil, nil
@@ -1060,7 +1104,8 @@ func loadCatalogSearchVectors(ctx context.Context, pool *pgxpool.Pool, contentID
 		SELECT media_item_id, embedding
 		FROM media_item_embeddings
 		WHERE media_item_id = ANY($1)
-	`, contentIDs)
+		  AND ($2 = '' OR model = $2)
+	`, contentIDs, model)
 	if err != nil {
 		return nil, fmt.Errorf("load catalog search vectors: %w", err)
 	}

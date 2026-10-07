@@ -18,7 +18,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -125,7 +127,7 @@ func runAdminSettingsConnectionCheck(ctx context.Context, kind string, cfg *conf
 	case "redis":
 		response = checkRedisConnection(ctx, cfg)
 	case "recommendations_embedding":
-		response = checkRecommendationsEmbeddingConnection(ctx, cfg)
+		response = checkRecommendationsEmbeddingConnection(ctx, cfg, effectiveSettings[recommendations.EmbeddingLockSettingKey])
 	case "ai_chat":
 		response = checkAIChatConnection(ctx, cfg)
 	case "ai_transcription":
@@ -315,7 +317,20 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 			return nil, err
 		}
 	}
+	// A stored configuration that does not load has no base URL its
+	// embedding token may go to.
+	storedEmbeddingBaseURL := ""
+	if kind == "recommendations_embedding" {
+		if stored, loadErr := config.LoadFromDB(merged); loadErr == nil {
+			storedEmbeddingBaseURL = stored.Recommendations.EmbeddingBaseURL
+		}
+	}
 	for _, key := range req.DirtyKeys {
+		if key == recommendations.EmbeddingLockSettingKey {
+			// The lock is server state the embedding check compares a draft
+			// against, not a value a draft can replace.
+			continue
+		}
 		merged[key] = req.Values[key]
 	}
 	if storedAIConfig != nil {
@@ -325,8 +340,32 @@ func (h *AdminHandler) effectiveSettingsForConnectionCheck(
 		}
 		protectAIConnectionCheckSecrets(kind, req, storedAIConfig, draftAIConfig, merged)
 	}
+	if kind == "recommendations_embedding" {
+		protectEmbeddingConnectionCheckSecret(req, storedEmbeddingBaseURL, merged)
+	}
 
 	return merged, nil
+}
+
+// embeddingTokenSettingKeys hold the embedding provider's token: the token,
+// then the legacy OpenAI key it falls back to.
+var embeddingTokenSettingKeys = []string{"recommendations.embedding_auth_token", "recommendations.openai_api_key"}
+
+// protectEmbeddingConnectionCheckSecret sends the stored embedding token only
+// to the base URL it was saved for (same scheme, host and port). A draft that
+// points the check elsewhere, by its base URL or a legacy provider setting,
+// is checked with the token it carries itself, or none, so a check cannot
+// hand the saved token to another server.
+func protectEmbeddingConnectionCheckSecret(req adminSettingsConnectionCheckRequest, storedBaseURL string, settings map[string]string) {
+	draft, err := config.LoadFromDB(settings)
+	if err == nil && storedBaseURL != "" && endpointAuthority(draft.Recommendations.EmbeddingBaseURL) == endpointAuthority(storedBaseURL) {
+		return
+	}
+	for _, key := range embeddingTokenSettingKeys {
+		if !hasExplicitDraftSecret(req, key) {
+			settings[key] = ""
+		}
+	}
 }
 
 func protectAIConnectionCheckSecrets(
@@ -558,9 +597,15 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 	}
 }
 
+// checkRecommendationsEmbeddingConnection embeds a test string and checks
+// that Silo can store what the model returns and that the stored embedding
+// lock (rawLock, empty when none) accepts the configuration. Its failure
+// messages are authored here and never quote the base URL, so the v2 boundary
+// returns them as they are.
 func checkRecommendationsEmbeddingConnection(
 	ctx context.Context,
 	cfg *config.Config,
+	rawLock string,
 ) connectionCheckResponse {
 	if strings.TrimSpace(cfg.Recommendations.EmbeddingBaseURL) == "" {
 		return connectionCheckResponse{
@@ -583,15 +628,35 @@ func checkRecommendationsEmbeddingConnection(
 
 	checkCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	if _, err := client.Embed(checkCtx, []string{"silo connection test"}); err != nil {
+	vectors, err := client.Embed(checkCtx, []string{"silo connection test"})
+	if err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Embedding connection check failed: %v", err),
 		}
 	}
+	failed := func(message string) connectionCheckResponse {
+		return connectionCheckResponse{Success: false, Message: message, safeMessage: message}
+	}
+	if len(vectors) == 0 || len(vectors[0]) == 0 {
+		return failed("The embedding provider returned no vector for the test text.")
+	}
+	dimensions := len(vectors[0])
+	if dimensions > embeddingvectors.CanonicalDimensions {
+		return failed(fmt.Sprintf("The model returns %d dimensions; Silo stores at most %d.", dimensions, embeddingvectors.CanonicalDimensions))
+	}
+	lock, err := recommendations.ParseEmbeddingLock(rawLock)
+	if err != nil {
+		return failed("The stored embedding lock cannot be read. Reset embeddings to clear it.")
+	}
+	if lock != nil {
+		if conflict := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions); conflict != "" {
+			return failed(conflict)
+		}
+	}
 
 	return connectionCheckResponse{
 		Success: true,
-		Message: "Embedding connection successful.",
+		Message: fmt.Sprintf("Embedding connection successful. The model returns %d dimensions.", dimensions),
 	}
 }

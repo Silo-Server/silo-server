@@ -183,21 +183,20 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
-	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver            // optional; enables stream_url in responses
-	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
-	WatchScrobbler          PlaybackWatchScrobbler
-	StableIdentityResolver  *watchstate.StableIdentityResolver
-	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	AdminStore              PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
-	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
-	EventsHub               *evt.Hub
-	MissingMarker           MissingFileMarker
-	NodePlanner             nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret               string                    // needed for signing stream tokens
-	StreamTelemetry         *streamtelemetry.Registry // local observation-only telemetry
+	sessionMgr             SessionManagerInterface
+	fileResolver           FilePathResolver            // optional; enables stream_url in responses
+	StoreProvider          userstore.UserStoreProvider // optional; enables progress/history persistence
+	WatchScrobbler         PlaybackWatchScrobbler
+	StableIdentityResolver *watchstate.StableIdentityResolver
+	CompletionObserver     watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
+	signalsNotifier        SignalsChangedNotifier
+	AdminStore             PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
+	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	EventsHub              *evt.Hub
+	MissingMarker          MissingFileMarker
+	NodePlanner            nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
+	JWTSecret              string                    // needed for signing stream tokens
+	StreamTelemetry        *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
 	// a stopped session keeps serving from a valid token until the token expires.
@@ -405,14 +404,10 @@ func (h *PlaybackHandler) TranscodeManager() *playback.TranscodeManager {
 	return h.tm
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *PlaybackHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *PlaybackHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *PlaybackHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 // playbackConfig returns the current playback config, falling back to the
@@ -1006,7 +1001,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 		// A heartbeat that only moves the position leaves the taste profile
 		// alone; the stop (persistStopAndHistory) refreshes it for the play,
 		// and marking the item watched refreshes it here.
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
 	}
 
 	if err := store.UpdateProgressHints(ctx, session.ProfileID, targetID, userstore.VersionHints{
@@ -1062,7 +1057,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// A history row this stop wrote still counts when a later write failed:
 	// no later stop of a once-recorded play refreshes the profile for it.
 	if (err == nil && !result.AlreadyRecorded) || result.HistoryID != "" {
-		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
+		notifySignalsChanged(ctx, h.signalsNotifier, session.UserID, session.ProfileID)
 	}
 	return result
 }

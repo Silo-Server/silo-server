@@ -539,6 +539,7 @@ func (s *MetadataService) repairAnchoredIdentityMismatchGroup(
 	if err := tx.Commit(ctx); err != nil {
 		return false, fmt.Errorf("committing anchored identity repair: %w", err)
 	}
+	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(moveResult.Reattribution, anchor.TargetContent, moveResult.EpisodePairs)...)
 
 	slog.InfoContext(ctx, "metadata: repaired provider-anchored root ownership",
 		"component", "metadata",

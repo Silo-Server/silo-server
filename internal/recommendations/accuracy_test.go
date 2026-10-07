@@ -1,6 +1,7 @@
 package recommendations
 
 import (
+	"math"
 	"slices"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestApplyGenreCapCountsAllGenres(t *testing.T) {
 	}
 }
 
-func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
+func TestHNSWEfSearchUsesCandidateLimitWithinBounds(t *testing.T) {
 	tests := []struct {
 		name           string
 		candidateLimit int
@@ -42,6 +43,8 @@ func TestHNSWEfSearchUsesCandidateLimitFloor(t *testing.T) {
 		{name: "raises small scans", candidateLimit: 40, want: minHNSWEfSearch},
 		{name: "keeps exact floor", candidateLimit: minHNSWEfSearch, want: minHNSWEfSearch},
 		{name: "keeps larger scans", candidateLimit: 900, want: 900},
+		{name: "keeps exact cap", candidateLimit: maxHNSWEfSearch, want: maxHNSWEfSearch},
+		{name: "caps at the pgvector maximum", candidateLimit: 1200, want: 1000},
 	}
 
 	for _, tt := range tests {
@@ -197,17 +200,20 @@ func TestApplyGenreCapDoesNotCollapseConcentratedRows(t *testing.T) {
 }
 
 func TestCollaborativeSupportAggregatesAcrossPeers(t *testing.T) {
-	candidates := map[string]collaborativeCandidate{}
+	candidates := collaborativeCandidates([]peerLikes{
+		{userID: 1, similarity: 1, weights: map[string]float64{"shared": 0.4, "single": 0.6}},
+		{userID: 2, similarity: 1, weights: map[string]float64{"shared": 0.3, "single-other": 0.6}},
+	})
 
-	addCollaborativeSupport(candidates, "shared", 0.4)
-	addCollaborativeSupport(candidates, "shared", 0.3)
-	addCollaborativeSupport(candidates, "single", 0.6)
-
-	if candidates["shared"].score <= candidates["single"].score {
-		t.Fatalf("shared score = %f, single score = %f; expected aggregated shared support to win", candidates["shared"].score, candidates["single"].score)
+	shared, ok := candidates["shared"]
+	if !ok {
+		t.Fatalf("candidates = %#v, want the title two accounts liked", candidates)
 	}
-	if candidates["shared"].support != 2 {
-		t.Fatalf("shared support = %d, want 2", candidates["shared"].support)
+	if math.Abs(shared.score-0.7) > 1e-9 {
+		t.Fatalf("shared score = %f, want the peers' scores summed", shared.score)
+	}
+	if len(shared.accounts) != 2 {
+		t.Fatalf("shared accounts = %d, want 2", len(shared.accounts))
 	}
 }
 
@@ -217,7 +223,10 @@ func TestCowatchMatrixTreatsProfilesAsDistinctWatchers(t *testing.T) {
 		"b": {"1:p1", "1:p2"},
 	}
 
-	pairs := computeCowatchMatrix(watchers, 2, 2, 10)
+	pairs, err := computeCowatchMatrix(t.Context(), watchers, 2, 2, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(pairs) != 2 {
 		t.Fatalf("got %d co-watch pairs, want 2: %#v", len(pairs), pairs)
 	}
@@ -263,12 +272,12 @@ func TestCompatiblePeerContentRatingsComparesAgeCeilings(t *testing.T) {
 
 func TestMMRLambdaUsesConfiguredGlobalOverride(t *testing.T) {
 	engine := &Engine{cfg: config.RecommendationsConfig{DiversityLambda: 0.25}}
-	if got := engine.mmrLambda(0.8); got != 0.25 {
+	if got := engine.mmrLambda(); got != 0.25 {
 		t.Fatalf("mmrLambda = %f, want configured override", got)
 	}
 
 	engine.cfg.DiversityLambda = 1.2
-	if got := engine.mmrLambda(0.8); got != 0.8 {
+	if got := engine.mmrLambda(); got != defaultMMRLambda {
 		t.Fatalf("mmrLambda = %f, want fallback default for invalid override", got)
 	}
 }

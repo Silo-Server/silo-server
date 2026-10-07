@@ -1,27 +1,17 @@
 package handlers
 
-import (
-	"context"
-	"log/slog"
-)
+import "context"
 
-// ProfileStaler marks a user's taste profile as stale so it gets refreshed.
-type ProfileStaler interface {
-	MarkProfileStale(ctx context.Context, userID int, profileID string) error
+// SignalsChangedNotifier records that a profile's recommendation signals
+// (ratings, favorites, watchlist, watch progress or history) changed, so its
+// taste profile and cached recommendations get rebuilt.
+// *recommendations.Worker implements it.
+type SignalsChangedNotifier interface {
+	NotifySignalsChanged(ctx context.Context, userID int, profileID string)
 }
 
-// ProfileRefreshRequester enqueues an asynchronous profile-scoped recommendation refresh.
-type ProfileRefreshRequester interface {
-	RequestProfileRefresh(ctx context.Context, userID int, profileID string)
-}
-
-func triggerProfileRefresh(ctx context.Context, staler ProfileStaler, requester ProfileRefreshRequester, userID int, profileID string) {
-	if staler != nil {
-		if err := staler.MarkProfileStale(ctx, userID, profileID); err != nil {
-			slog.WarnContext(ctx, "failed to mark profile stale", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
-		}
-	}
-	if requester != nil {
-		requester.RequestProfileRefresh(ctx, userID, profileID)
+func notifySignalsChanged(ctx context.Context, notifier SignalsChangedNotifier, userID int, profileID string) {
+	if notifier != nil {
+		notifier.NotifySignalsChanged(ctx, userID, profileID)
 	}
 }

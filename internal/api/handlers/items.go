@@ -100,8 +100,7 @@ type ItemsHandler struct {
 	detailSvc                *catalog.DetailService
 	storeProvider            userstore.UserStoreProvider
 	watchState               *watchstate.Service
-	profileStaler            ProfileStaler
-	profileRefreshRequester  ProfileRefreshRequester
+	signalsNotifier          SignalsChangedNotifier
 	metadataRefreshRequester MetadataRefreshRequester
 	trailerRefreshRequester  TrailerRefreshRequester
 	trailerItemAccess        trailerItemAccess
@@ -158,14 +157,10 @@ func (h *ItemsHandler) SetCompletionObserver(obs watchstate.CompletionObserver) 
 	h.watchState.WithCompletionObserver(obs)
 }
 
-// SetProfileStaler configures an optional staleness trigger for taste profiles.
-func (h *ItemsHandler) SetProfileStaler(ps ProfileStaler) {
-	h.profileStaler = ps
-}
-
-// SetProfileRefreshRequester configures an optional background refresh queue for taste profiles.
-func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshRequester) {
-	h.profileRefreshRequester = requester
+// SetSignalsChangedNotifier configures where changes to a profile's
+// recommendation signals are reported. Without it they are not reported.
+func (h *ItemsHandler) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	h.signalsNotifier = notifier
 }
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {

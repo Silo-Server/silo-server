@@ -30,7 +30,10 @@ compatibility does not expose these administrator settings contracts.
 check against the submitted `values` and `dirty_keys`, merged with stored settings.
 Supported kinds are `s3_public`, `s3_operational`, `s3_private`, `redis`,
 `recommendations_embedding`, `ai_chat`, `ai_transcription`, `meilisearch`, and
-`mdblist`. Existing endpoint-change protection for stored AI credentials applies.
+`mdblist`. Stored AI and embedding credentials are sent only to the base URL
+they were saved for (same scheme, host and port): a draft that points
+`ai_chat`, `ai_transcription` or `recommendations_embedding` elsewhere is
+checked with the credential it submits in `values` and `dirty_keys`, or none.
 Provider failures return `success: false` with a generic message that excludes
 provider error bodies and credentials. Invalid kinds/configuration return `422`.
 

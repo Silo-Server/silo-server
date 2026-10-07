@@ -38,18 +38,26 @@ func recommendationsUnavailable(message string) *APIError {
 	return apiError(http.StatusInternalServerError, "internal_error", message)
 }
 
-// BecauseWatched answers "because you watched {item}" candidates, minus the
-// profile's watched and low-rated items. An unavailable engine answers an
-// empty list.
-func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int, profileID, itemID string, limit int) ([]recommendations.ScoredItem, error) {
+// BecauseWatched answers "because you watched {item}" candidates the viewer
+// can see, minus the profile's watched and low-rated items. An unavailable
+// engine, and an anchor the viewer cannot see, answer an empty list.
+func (h *RecommendationsHandler) BecauseWatched(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
 	}
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
-	items, err := h.engine.BecauseYouWatched(ctx, userID, profileID, itemID, limit)
+	visible, err := h.anchorVisible(ctx, itemID, filter)
 	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return []recommendations.ScoredItem{}, nil
+	}
+	items, err := h.engine.BecauseYouWatched(ctx, userID, profileID, itemID, limit, filter)
+	if err != nil {
+		slog.WarnContext(ctx, "BecauseWatched failed", "component", "api", "user_id", userID, "profile_id", profileID, "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch recommendations")
 	}
 	items = h.filterRecommendations(ctx, userID, profileID, items)
@@ -95,30 +103,65 @@ func (h *RecommendationsHandler) ForYouRows(ctx context.Context, userID int, pro
 	return rows, nil
 }
 
-// PopularItems answers the server-wide popular items of the last days,
-// minus what the profile has watched.
-func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetPopularItems(ctx, days, limit)
+// PopularItems answers up to limit of the server-wide popular items of the
+// last days that the viewer can see and the profile has not watched.
+func (h *RecommendationsHandler) PopularItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
+		return h.recsRepo.GetPopularItems(ctx, days, n)
+	})
 	if err != nil {
+		slog.WarnContext(ctx, "PopularItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch popular items")
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+	return items, nil
 }
 
-// RecentlyAddedItems answers the items added in the last days, minus what
-// the profile has watched.
-func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int) ([]recommendations.ScoredItem, error) {
-	items, err := h.recsRepo.GetRecentlyAddedItems(ctx, days, limit)
+// liveListMaxRead bounds how deep a live list reads to fill its limit with
+// titles the viewer can see.
+const liveListMaxRead = 1000
+
+// visibleListItems reads a server-wide list with read(n), n rows at a time,
+// and keeps the titles the viewer can see and the profile has not watched.
+// The list is filtered after its LIMIT, so it reads deeper until limit
+// titles are kept, the list runs out, or liveListMaxRead rows were read.
+func (h *RecommendationsHandler) visibleListItems(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter, read func(n int) ([]recommendations.ScoredItem, error)) ([]recommendations.ScoredItem, error) {
+	watchedSet, err := h.watchedItemIDSet(ctx, userID, profileID)
 	if err != nil {
+		slog.WarnContext(ctx, "loading the watched set failed; recommendations are not filtered for it", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		watchedSet = nil
+	}
+	for n := min(limit*3, liveListMaxRead); ; n = min(n*4, liveListMaxRead) {
+		items, err := read(n)
+		if err != nil {
+			return nil, err
+		}
+		unwatched := make([]recommendations.ScoredItem, 0, len(items))
+		for _, item := range items {
+			if _, watched := watchedSet[item.MediaItemID]; !watched {
+				unwatched = append(unwatched, item)
+			}
+		}
+		kept, err := h.keepAccessible(ctx, unwatched, filter)
+		if err != nil {
+			return nil, err
+		}
+		if len(kept) >= limit || len(items) < n || n >= liveListMaxRead {
+			return kept[:min(len(kept), limit)], nil
+		}
+	}
+}
+
+// RecentlyAddedItems answers up to limit of the items added in the last
+// days that the viewer can see and the profile has not watched.
+func (h *RecommendationsHandler) RecentlyAddedItems(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	items, err := h.visibleListItems(ctx, userID, profileID, limit, filter, func(n int) ([]recommendations.ScoredItem, error) {
+		return h.recsRepo.GetRecentlyAddedItems(ctx, days, n)
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "RecentlyAddedItems failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch recently added items")
 	}
-	if items == nil {
-		items = []recommendations.ScoredItem{}
-	}
-	return h.excludeWatchedRecommendations(ctx, userID, profileID, items), nil
+	return items, nil
 }
 
 // Discover answers the discover page: the cached rows blended with upcoming
@@ -204,6 +247,7 @@ func (h *RecommendationsHandler) renderDiscoverRows(ctx context.Context, userID 
 	}
 	enrichment, err := h.loadItemEnrichment(ctx, userID, profileID, filter, allIDs)
 	if err != nil {
+		slog.WarnContext(ctx, "recommendation cards: item details failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch item details")
 	}
 	out := make([]discoverRowResponse, 0, len(discoverRows))
@@ -238,7 +282,7 @@ func (h *RecommendationsHandler) cardsOf(ctx context.Context, userID int, profil
 
 // BecauseWatchedCards is BecauseWatched rendered as cards.
 func (h *RecommendationsHandler) BecauseWatchedCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.BecauseWatched(ctx, userID, profileID, itemID, limit)
+	items, err := h.BecauseWatched(ctx, userID, profileID, itemID, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +291,7 @@ func (h *RecommendationsHandler) BecauseWatchedCards(ctx context.Context, userID
 
 // PopularCards is PopularItems rendered as cards.
 func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.PopularItems(ctx, userID, profileID, days, limit)
+	items, err := h.PopularItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +300,7 @@ func (h *RecommendationsHandler) PopularCards(ctx context.Context, userID int, p
 
 // RecentlyAddedCards is RecentlyAddedItems rendered as cards.
 func (h *RecommendationsHandler) RecentlyAddedCards(ctx context.Context, userID int, profileID string, days, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit)
+	items, err := h.RecentlyAddedItems(ctx, userID, profileID, days, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -294,17 +338,27 @@ func (h *RecommendationsHandler) ForYouRowCards(ctx context.Context, userID int,
 	return h.renderDiscoverRows(ctx, userID, profileID, filter, discoverRowModelsFromRecommendations(rows))
 }
 
-// SimilarItems answers items similar to itemID; an unavailable engine
-// answers an empty list. The list is not viewer-filtered, as in v1.
-func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int) ([]recommendations.ScoredItem, error) {
+// SimilarItems answers items similar to itemID; an unavailable engine, and
+// an anchor the viewer cannot see, answer an empty list. The similar items
+// themselves are not viewer-filtered: v1 filters them with keepAccessible and
+// v2 as it renders the cards.
+func (h *RecommendationsHandler) SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	if h.engineUnavailable() {
 		return []recommendations.ScoredItem{}, nil
 	}
 	if limit <= 0 {
 		limit = recommendationsDefaultLimit
 	}
-	items, err := h.engine.SimilarItems(ctx, itemID, limit)
+	visible, err := h.anchorVisible(ctx, itemID, filter)
 	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return []recommendations.ScoredItem{}, nil
+	}
+	items, err := h.engine.SimilarItems(ctx, itemID, limit, filter)
+	if err != nil {
+		slog.WarnContext(ctx, "SimilarItems failed", "component", "api", "item_id", itemID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch similar items")
 	}
 	if items == nil {
@@ -324,6 +378,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 	}
 	items, err := h.reader.GetSimilarUsersLiked(ctx, userID, profileID, limit, filter)
 	if err != nil {
+		slog.WarnContext(ctx, "SimilarUsersLiked failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, recommendationsUnavailable("Failed to fetch recommendations")
 	}
 	if items == nil {
@@ -334,7 +389,7 @@ func (h *RecommendationsHandler) SimilarUsersLiked(ctx context.Context, userID i
 
 // SimilarCards is SimilarItems rendered as cards for the acting profile.
 func (h *RecommendationsHandler) SimilarCards(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]SectionItemView, error) {
-	items, err := h.SimilarItems(ctx, itemID, limit)
+	items, err := h.SimilarItems(ctx, itemID, limit, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -358,21 +413,77 @@ func (h *RecommendationsHandler) TasteProfile(ctx context.Context, userID int, p
 		return emptyTasteProfileSummary()
 	}
 	summary, err := h.engine.GetTasteProfileSummary(ctx, userID, profileID)
-	if err != nil || summary == nil {
+	if err != nil {
+		slog.WarnContext(ctx, "TasteProfile failed; answering an empty summary", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		return emptyTasteProfileSummary()
+	}
+	if summary == nil {
 		return emptyTasteProfileSummary()
 	}
 	return *summary
 }
 
-// TasteSeedItems answers one offset page of taste-seeding picker cards.
+// keepAccessible drops the items filter does not admit, keeping their order.
+// The v1 lists answer bare identifiers, so they filter here; the v2 card
+// renderings filter as they hydrate. Without an access check nothing is shown.
+func (h *RecommendationsHandler) keepAccessible(ctx context.Context, items []recommendations.ScoredItem, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.MediaItemID
+	}
+	accessible, err := h.accessibleItemIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, err
+	}
+	kept := make([]recommendations.ScoredItem, 0, len(items))
+	for _, item := range items {
+		if _, ok := accessible[item.MediaItemID]; ok {
+			kept = append(kept, item)
+		}
+	}
+	return kept, nil
+}
+
+// anchorVisible reports whether the viewer can see the item a list is
+// anchored on. A list anchored on a hidden item answers as one anchored on an
+// unknown item does, so it cannot confirm that the item exists or show what
+// it resembles.
+func (h *RecommendationsHandler) anchorVisible(ctx context.Context, itemID string, filter catalog.AccessFilter) (bool, error) {
+	accessible, err := h.accessibleItemIDs(ctx, []string{itemID}, filter)
+	if err != nil {
+		return false, err
+	}
+	_, ok := accessible[itemID]
+	return ok, nil
+}
+
+// accessibleItemIDs is the subset of ids filter admits; with no access check
+// wired it is empty.
+func (h *RecommendationsHandler) accessibleItemIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
+	if h.accessibleIDs == nil {
+		return map[string]struct{}{}, nil
+	}
+	accessible, err := h.accessibleIDs.FilterAccessibleItemIDs(ctx, ids, filter)
+	if err != nil {
+		slog.WarnContext(ctx, "recommendations: access check failed", "component", "api", "user_id", filter.UserID, "profile_id", filter.ProfileID, "error", err)
+		return nil, recommendationsUnavailable("Failed to fetch recommendations")
+	}
+	return accessible, nil
+}
+
+// TasteSeedItems answers one offset page of taste-seeding picker cards. The
+// candidate window holds only titles filter admits; hydration filters again.
 // candidates is how many candidate identifiers the page window held before
-// hydration dropped inaccessible ones; a window as large as limit means a
-// next page may exist. An unwired repository or fetcher answers no cards.
+// hydration; a window as large as limit means a next page may exist. An
+// unwired repository or fetcher answers no cards.
 func (h *RecommendationsHandler) TasteSeedItems(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, limit, offset int) (items []SectionItemView, candidates int, err error) {
 	if h.recsRepo == nil || h.Fetcher == nil {
 		return []SectionItemView{}, 0, nil
 	}
-	candidateIDs, err := h.recsRepo.GetTasteSeedCandidates(ctx, limit, offset)
+	candidateIDs, err := h.recsRepo.GetTasteSeedCandidates(ctx, filter, limit, offset)
 	if err != nil {
 		slog.ErrorContext(ctx, "TasteSeedItems: candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return nil, 0, recommendationsUnavailable("Failed to fetch taste seed candidates")
@@ -418,6 +529,7 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 	}
 	items, err := h.Fetcher.FetchItemsByContentIDs(ctx, itemIDs, filter)
 	if err != nil {
+		slog.WarnContext(ctx, "TasteSeed: validating picks failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return 0, recommendationsUnavailable("Failed to validate taste-seed items")
 	}
 	visible := make(map[string]bool, len(items))
@@ -452,11 +564,7 @@ func (h *RecommendationsHandler) SubmitTasteSeed(ctx context.Context, userID int
 		}
 	}
 	if added > 0 {
-		var staler ProfileStaler
-		if h.recsRepo != nil {
-			staler = h.recsRepo
-		}
-		triggerProfileRefresh(ctx, staler, h.RecWorker, userID, profileID)
+		notifySignalsChanged(ctx, h.RecWorker, userID, profileID)
 	}
 	return added, nil
 }

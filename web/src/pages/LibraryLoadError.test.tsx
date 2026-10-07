@@ -31,6 +31,12 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
   useSidebarPins: () => ({ pins: {} }),
 }));
 
+// The Recommended tab reads the recipe gallery for its cross-row duplicate
+// rule; keep that read off the sequenced request mock above.
+vi.mock("@/lib/recipes", () => ({
+  fetchRecipeCatalog: () => Promise.resolve({ categories: {} }),
+}));
+
 // Stands in for the grid with its empty message, which a failed browse must
 // never reach.
 vi.mock("@/components/ItemGrid", async () => {

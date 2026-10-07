@@ -344,6 +344,13 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		// Leaves titles no profile watchlists any more; the profile
 		// handler's watchlist-title purge sweeps those under the title lock.
 		"user_watchlist_titles",
+		// Recommendation state. A deleted profile's ratings would otherwise
+		// keep shaping other accounts' Similar Users rows, and its taste
+		// would be rebuilt every night.
+		"user_ratings",
+		"user_taste_profiles",
+		"user_taste_clusters",
+		"recommendation_cache",
 	}
 	for _, table := range cascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {

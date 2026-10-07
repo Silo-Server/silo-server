@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
@@ -22,7 +22,15 @@ func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
 }
 
 const embeddingLockSettingKey = "recommendations.embedding_lock"
-const minHNSWEfSearch = 200
+
+// hnsw.ef_search bounds: scans below the floor lose recall, and pgvector
+// rejects values above its maximum, 1000. The relaxed_order iterative scan
+// keeps reading past ef_search until the query's LIMIT fills, so the cap does
+// not shorten a deeper candidate pull.
+const (
+	minHNSWEfSearch = 200
+	maxHNSWEfSearch = 1000
+)
 
 // watchedActivityCTE unifies video watch progress and ebook reader progress
 // into one activity stream. Episodes roll up to their parent series via
@@ -68,17 +76,32 @@ watched_activity AS (
 	  )
 )`, catalog.EbookFinishedProgressThresholdSQL)
 
+// recentCompletedItemIDsQuery lists a profile's most recently completed
+// titles that are still in the catalog. Progress outlives a deleted item, and
+// an episode of a deleted series no longer rolls up to it, so a dead ID would
+// otherwise take an anchor's place.
 var recentCompletedItemIDsQuery = fmt.Sprintf(`
 	WITH %s
 	SELECT item_id
 	FROM   watched_activity
 	WHERE  user_id = $1 AND profile_id = $2 AND completed = true
+	  AND  EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = watched_activity.item_id)
 	GROUP  BY item_id
 	ORDER  BY MAX(updated_at) DESC, item_id ASC
 	LIMIT  $3
 `, watchedActivityCTE)
 
-var tasteSeedCandidateQuery = fmt.Sprintf(`
+// tasteSeedCandidateQuery builds the taste-seed picker query. accessConditions
+// are the viewer's access predicates; limit and offset bind at limitArg and
+// limitArg+1.
+func tasteSeedCandidateQuery(accessConditions []string, limitArg int) string {
+	conditions := append([]string{
+		recommendationItemEligibilityWhereClause("mi"),
+		"mi.type IN ('movie', 'series', 'audiobook', 'ebook')",
+		"mi.poster_path IS NOT NULL",
+		"mi.poster_path <> ''",
+	}, accessConditions...)
+	return fmt.Sprintf(`
 			WITH %s,
 			watched_counts AS (
 				SELECT item_id, COUNT(DISTINCT watcher_id) AS watch_count
@@ -90,9 +113,6 @@ var tasteSeedCandidateQuery = fmt.Sprintf(`
 			FROM   media_items mi
 			LEFT JOIN watched_counts wc ON wc.item_id = mi.content_id
 			WHERE  %s
-			  AND  mi.type IN ('movie', 'series', 'audiobook', 'ebook')
-			  AND  mi.poster_path IS NOT NULL
-			  AND  mi.poster_path <> ''
 			ORDER  BY COALESCE(wc.watch_count, 0) DESC,
 			          CASE
 			            WHEN mi.rating_imdb IS NOT NULL THEN 2
@@ -103,7 +123,8 @@ var tasteSeedCandidateQuery = fmt.Sprintf(`
 			          CASE WHEN mi.rating_tmdb < 9.5 THEN mi.rating_tmdb END DESC NULLS LAST,
 			          mi.year DESC NULLS LAST,
 			          mi.content_id ASC
-			LIMIT  $1 OFFSET $2`, watchedActivityCTE, recommendationItemEligibilityWhereClause("mi"))
+			LIMIT  $%d OFFSET $%d`, watchedActivityCTE, strings.Join(conditions, " AND "), limitArg, limitArg+1)
+}
 
 // Repo provides database operations for the recommendation system.
 type Repo struct {
@@ -116,7 +137,7 @@ func NewRepo(pool *pgxpool.Pool) *Repo {
 }
 
 func hnswEfSearch(candidateLimit int) int {
-	return max(candidateLimit, minHNSWEfSearch)
+	return min(max(candidateLimit, minHNSWEfSearch), maxHNSWEfSearch)
 }
 
 func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn func(pgx.Tx) error) error {
@@ -202,19 +223,27 @@ func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []f
 
 // GetEmbeddingLock retrieves the embedding lock metadata from server_settings.
 func (r *Repo) GetEmbeddingLock(ctx context.Context) (*EmbeddingLock, error) {
+	return ReadEmbeddingLock(ctx, r.pool)
+}
+
+// RowQuerier runs a query that returns at most one row. *pgxpool.Pool and
+// pgx.Tx satisfy it.
+type RowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// ReadEmbeddingLock reads the embedding lock through q, which may be a
+// transaction. It returns nil when no lock is set.
+func ReadEmbeddingLock(ctx context.Context, q RowQuerier) (*EmbeddingLock, error) {
 	var raw string
-	err := r.pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
+	err := q.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, embeddingLockSettingKey).Scan(&raw)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get embedding lock: %w", err)
 	}
-	lock, err := ParseEmbeddingLock(raw)
-	if err != nil {
-		return nil, err
-	}
-	return lock, nil
+	return ParseEmbeddingLock(raw)
 }
 
 // SetEmbeddingLock stores the embedding lock metadata in server_settings.
@@ -257,20 +286,36 @@ func (r *Repo) GetEmbedding(ctx context.Context, itemID string) ([]float32, erro
 // excluding the specified item IDs. When mediaType is non-empty, results are
 // restricted to that media_items.type so cross-media-type results never appear
 // (e.g. an audiobook in a "Similar to this movie" rail) once audiobook
-// embeddings exist alongside movie/series ones.
-func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int) ([]ScoredItem, error) {
-	var items []ScoredItem
-	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+// embeddings exist alongside movie/series ones. filter's library and maturity
+// limits apply in the query, as in findTasteProfileCandidates, so a restricted
+// viewer gets limit items it can see; a zero filter applies none.
+func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs []string, mediaType string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return []ScoredItem{}, nil
+	}
+	if excludeIDs == nil {
+		excludeIDs = []string{}
+	}
+	conditions := []string{
+		"e.media_item_id != ALL($2)",
+		"($4 = '' OR mi.type = $4)",
+	}
+	args := []any{pgvector.NewVector(embedding), excludeIDs, limit, mediaType}
+	argIdx := len(args) + 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	query := fmt.Sprintf(`
 			SELECT e.media_item_id,
 			       1 - (e.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS similarity
 			FROM   media_item_embeddings e
 			JOIN   media_items mi ON mi.content_id = e.media_item_id
-			WHERE  e.media_item_id != ALL($2)
-			  AND  ($4 = '' OR mi.type = $4)
+			WHERE  %s
 			ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
-			LIMIT  $3
-		`, pgvector.NewVector(embedding), excludeIDs, limit, mediaType)
+			LIMIT  $3`, strings.Join(conditions, " AND "))
+
+	var items []ScoredItem
+	err := r.withHNSWCandidateScan(ctx, limit, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -488,13 +533,19 @@ func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel, afterID 
 	return ids, nil
 }
 
+// ListEmbeddingTextCandidates returns items embedded with currentModel whose
+// stored canonical text differs from the text rebuilt here in SQL, ordered by
+// content_id and paged via afterID (pass "" for the first page). The SQL text
+// approximates embeddings.BuildEmbeddingText, so callers re-check each row in
+// Go before re-embedding it.
 func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error) {
 	query := fmt.Sprintf(`
-		-- Keep current_text in sync with embeddings.BuildEmbeddingText. This lets
-		-- the embedding job page over only missing, model-stale, or text-stale rows.
+		-- Keep current_text in sync with embeddings.BuildEmbeddingText.
 		-- Book lines map to embeddings.mediaTypeLabel + the author/narrator
 		-- branch in BuildEmbeddingText; any divergence here forces book items
-		-- to re-embed every job run.
+		-- to re-embed every job run. People sort like sortItemPeople in Go:
+		-- sort_order, then name and character compared byte by byte
+		-- (COLLATE "C"), then person_id.
 		WITH text_candidates AS (
 			SELECT mi.content_id,
 			       COALESCE(e.model, '') AS model,
@@ -534,7 +585,7 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 			LEFT JOIN LATERAL (
 				SELECT COALESCE(string_agg(
 					CASE WHEN ranked.character <> '' THEN ranked.name || ' as ' || ranked.character ELSE ranked.name END,
-					', ' ORDER BY ranked.sort_order
+					', ' ORDER BY ranked.sort_order, ranked.name COLLATE "C", ranked.character COLLATE "C", ranked.person_id
 				), '') AS names
 				FROM (
 					SELECT COALESCE(p.name, '') AS name,
@@ -545,33 +596,33 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 					JOIN people p ON p.id = ip.person_id
 					WHERE ip.content_id = mi.content_id
 					  AND ip.kind = 1
-					ORDER BY ip.sort_order, p.name, COALESCE(ip.character, ''), ip.person_id
+					ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id
 					LIMIT 5
 				) ranked
 			) actors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 2
 			) directors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 3
 			) writers ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
 				  AND ip.kind = 7
 			) authors ON TRUE
 			LEFT JOIN LATERAL (
-				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name, ip.person_id), '') AS names
+				SELECT COALESCE(string_agg(COALESCE(p.name, ''), ', ' ORDER BY ip.sort_order, p.name COLLATE "C", COALESCE(ip.character, '') COLLATE "C", ip.person_id), '') AS names
 				FROM item_people ip
 				JOIN people p ON p.id = ip.person_id
 				WHERE ip.content_id = mi.content_id
@@ -584,9 +635,8 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 		       mi.model,
 		       mi.canonical_text
 		FROM   text_candidates mi
-		WHERE  mi.model = ''
-		   OR  mi.model != $2
-		   OR  mi.canonical_text IS DISTINCT FROM mi.current_text
+		WHERE  mi.model = $2
+		  AND  mi.canonical_text IS DISTINCT FROM mi.current_text
 		ORDER  BY mi.content_id
 		LIMIT  $3
 	`, embeddingEligibilityWhereClause())
@@ -608,6 +658,16 @@ func (r *Repo) ListEmbeddingTextCandidates(ctx context.Context, afterID, current
 		return nil, fmt.Errorf("iterating embedding text candidates: %w", err)
 	}
 	return candidates, nil
+}
+
+// HasEmbeddingsFromModel reports whether any item has an embedding from model,
+// such as one a catalog import stored.
+func (r *Repo) HasEmbeddingsFromModel(ctx context.Context, model string) (bool, error) {
+	var has bool
+	if err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_item_embeddings WHERE model = $1)`, model).Scan(&has); err != nil {
+		return false, fmt.Errorf("check embeddings from model: %w", err)
+	}
+	return has, nil
 }
 
 // EmbeddingCount returns the total number of stored embeddings.
@@ -633,10 +693,11 @@ func (r *Repo) TotalMediaItemCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// TasteProfileCount returns the total number of stored taste profiles.
+// TasteProfileCount returns the number of profiles with a taste vector. Rows
+// cleared for having no positive signal (see ClearTasteProfile) do not count.
 func (r *Repo) TasteProfileCount(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_taste_profiles`).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM user_taste_profiles WHERE embedding IS NOT NULL`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("taste profile count: %w", err)
 	}
@@ -653,8 +714,20 @@ func (r *Repo) CacheEntryCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// Now returns the database's current time. Refresh start times come from
+// here, so they compare correctly with stale marks the database stamps.
+func (r *Repo) Now(ctx context.Context) (time.Time, error) {
+	var now time.Time
+	if err := r.pool.QueryRow(ctx, `SELECT NOW()`).Scan(&now); err != nil {
+		return time.Time{}, fmt.Errorf("read database time: %w", err)
+	}
+	return now, nil
+}
+
 // UpsertTasteProfile stores or updates a user's precomputed taste profile.
-func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID string, embedding []float32, signalCounts map[string]int, maxContentRating string) error {
+// updatedAt is when the refresh that built it started reading signals, so a
+// stale mark written after that stays newer than the profile.
+func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID string, embedding []float32, signalCounts map[string]int, maxContentRating string, updatedAt time.Time) error {
 	countsJSON, err := json.Marshal(signalCounts)
 	if err != nil {
 		return fmt.Errorf("marshaling signal counts: %w", err)
@@ -663,15 +736,84 @@ func (r *Repo) UpsertTasteProfile(ctx context.Context, userID int, profileID str
 	_, err = r.pool.Exec(ctx, `
 		INSERT INTO user_taste_profiles
 			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NOW())
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (user_id, profile_id) DO UPDATE
 			SET embedding          = EXCLUDED.embedding,
 			    signal_counts      = EXCLUDED.signal_counts,
 			    max_content_rating = EXCLUDED.max_content_rating,
-			    updated_at         = NOW()
-	`, userID, profileID, pgvector.NewVector(embedding), countsJSON, maxContentRating)
+			    updated_at         = EXCLUDED.updated_at
+	`, userID, profileID, pgvector.NewVector(embedding), countsJSON, maxContentRating, updatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert taste profile for user %d profile %s: %w", userID, profileID, err)
+	}
+	return nil
+}
+
+// clearTasteVectorQuery clears an existing taste row. A row a concurrent
+// profile purge deleted stays deleted: UPDATE skips it, where an upsert would
+// insert it again.
+const clearTasteVectorQuery = `
+		UPDATE user_taste_profiles
+		SET    embedding          = NULL,
+		       signal_counts      = $3,
+		       max_content_rating = $4,
+		       updated_at         = $5
+		WHERE  user_id = $1 AND profile_id = $2`
+
+// createClearedTasteProfileQuery is clearTasteVectorQuery that also creates a
+// missing row.
+const createClearedTasteProfileQuery = `
+		INSERT INTO user_taste_profiles
+			(user_id, profile_id, embedding, signal_counts, max_content_rating, updated_at)
+		VALUES ($1, $2, NULL, $3, $4, $5)
+		ON CONFLICT (user_id, profile_id) DO UPDATE
+			SET embedding          = NULL,
+			    signal_counts      = EXCLUDED.signal_counts,
+			    max_content_rating = EXCLUDED.max_content_rating,
+			    updated_at         = EXCLUDED.updated_at`
+
+// ClearTasteProfile stores a profile that has no positive taste signal. In one
+// transaction it sets the profile's row to signalCounts and no taste vector,
+// and deletes the profile's taste clusters and every cached row of the
+// profile; global rows are not the profile's. Keeping the row lets
+// MarkProfileStale mark it and lets readers compute its cold-start level. A
+// missing row is created only with create, which a refresh passes only for a
+// profile its user store still lists, so the row a profile deletion purged
+// does not come back. updatedAt is as for UpsertTasteProfile.
+func (r *Repo) ClearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, updatedAt time.Time, create bool) error {
+	countsJSON, err := json.Marshal(signalCounts)
+	if err != nil {
+		return fmt.Errorf("marshaling signal counts: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx to clear taste profile: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := lockTasteClusters(ctx, tx, userID, profileID); err != nil {
+		return err
+	}
+	query := clearTasteVectorQuery
+	if create {
+		query = createClearedTasteProfileQuery
+	}
+	if _, err := tx.Exec(ctx, query, userID, profileID, countsJSON, maxContentRating, updatedAt); err != nil {
+		return fmt.Errorf("clear taste vector for user %d profile %s: %w", userID, profileID, err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete taste clusters for user %d profile %s: %w", userID, profileID, err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("delete cached rows for user %d profile %s: %w", userID, profileID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit cleared taste profile for user %d profile %s: %w", userID, profileID, err)
 	}
 	return nil
 }
@@ -712,11 +854,12 @@ func (r *Repo) GetTasteProfileMeta(ctx context.Context, userID int, profileID st
 }
 
 // GetTasteProfile retrieves the embedding for a user's taste profile.
-// Returns nil, nil when no profile exists.
+// Returns nil, nil when no profile exists or the profile has no taste vector
+// (see ClearTasteProfile).
 func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error) {
 	var v pgvector.Vector
 	err := r.pool.QueryRow(ctx,
-		`SELECT embedding FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`,
+		`SELECT embedding FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2 AND embedding IS NOT NULL`,
 		userID, profileID,
 	).Scan(&v)
 	if err != nil {
@@ -748,6 +891,7 @@ func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID strin
 			       1 - (p.embedding::halfvec(3072) <=> $1::halfvec(3072)) AS score
 			FROM   user_taste_profiles p
 			WHERE  p.user_id     != $2
+			  AND  p.embedding IS NOT NULL
 			  AND  ($3 OR COALESCE(p.max_content_rating, '') = '' OR p.max_content_rating = ANY($4::text[]))
 			ORDER  BY p.embedding::halfvec(3072) <=> $1::halfvec(3072)
 			LIMIT  $5
@@ -838,6 +982,65 @@ func (r *Repo) UpsertRecommendationCache(ctx context.Context, userID int, profil
 	return nil
 }
 
+// extendGlobalRecommendationCacheQuery addresses global rows the way
+// UpsertRecommendationCache writes them: user_id NULL, the global profile ID,
+// and no source item.
+const extendGlobalRecommendationCacheQuery = `
+		UPDATE recommendation_cache
+		SET    expires_at = GREATEST(expires_at, $4::timestamptz)
+		WHERE  user_id IS NULL
+		  AND  profile_id     = $1
+		  AND  source_item_id = ''
+		  AND  (rec_type = $2 OR ($3 AND starts_with(rec_type, $2)))
+		  AND  expires_at     > NOW()`
+
+// ExtendGlobalRecommendationCache keeps the unexpired global row recType, or
+// every global row whose type starts with recType when prefix is set, until at
+// least expiresAt. It returns the number of rows it extended.
+func (r *Repo) ExtendGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, expiresAt string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, extendGlobalRecommendationCacheQuery, GlobalCacheProfileID, recType, prefix, expiresAt)
+	if err != nil {
+		return 0, fmt.Errorf("extend global recommendation cache %s: %w", recType, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+const deleteGlobalRecommendationCacheQuery = `
+		DELETE FROM recommendation_cache
+		WHERE  user_id IS NULL
+		  AND  profile_id     = $1
+		  AND  source_item_id = ''
+		  AND  (rec_type = $2 OR ($3 AND starts_with(rec_type, $2)))
+		  AND  rec_type <> ALL($4::text[])`
+
+// DeleteGlobalRecommendationCache deletes the global row recType, or every
+// global row whose type starts with recType when prefix is set, except the
+// types in keep. It returns the number of rows it deleted.
+func (r *Repo) DeleteGlobalRecommendationCache(ctx context.Context, recType string, prefix bool, keep []string) (int64, error) {
+	if keep == nil {
+		// A NULL array would make the ALL comparison NULL and delete nothing.
+		keep = []string{}
+	}
+	tag, err := r.pool.Exec(ctx, deleteGlobalRecommendationCacheQuery, GlobalCacheProfileID, recType, prefix, keep)
+	if err != nil {
+		return 0, fmt.Errorf("delete global recommendation cache %s: %w", recType, err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteProfileRecommendationCache deletes a profile's cached row recType for
+// sourceItemID, which is empty for rows without a source item. Global rows are
+// not a profile's; see DeleteGlobalRecommendationCache.
+func (r *Repo) DeleteProfileRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) error {
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM recommendation_cache
+		WHERE  user_id = $1 AND profile_id = $2 AND rec_type = $3 AND source_item_id = $4`,
+		userID, profileID, recType, sourceItemID); err != nil {
+		return fmt.Errorf("delete recommendation cache %s for user %d profile %s: %w", recType, userID, profileID, err)
+	}
+	return nil
+}
+
 // GetRecommendationCache retrieves cached recommendation results that have not
 // yet expired. Returns nil, nil on cache miss or expiry.
 func (r *Repo) GetRecommendationCache(ctx context.Context, userID int, profileID, recType, sourceItemID string) ([]ScoredItem, error) {
@@ -914,14 +1117,8 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 	}
 	defer tx.Rollback(ctx)
 
-	// Lock the replacement, including an empty cluster set, across server
-	// processes. DELETE alone cannot protect rows another refresh has not yet
-	// committed, so concurrent replacements can otherwise collide on INSERT.
-	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
-		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
-		userID, profileID)
-	if err != nil {
-		return fmt.Errorf("lock taste clusters: %w", err)
+	if err := lockTasteClusters(ctx, tx, userID, profileID); err != nil {
+		return err
 	}
 
 	_, err = tx.Exec(ctx,
@@ -951,10 +1148,37 @@ func (r *Repo) UpsertTasteClusters(ctx context.Context, userID int, profileID st
 	return tx.Commit(ctx)
 }
 
+// lockTasteClusters locks a profile's cluster replacement, including an empty
+// cluster set, across server processes until tx ends. DELETE alone cannot
+// protect rows another refresh has not yet committed, so concurrent
+// replacements can otherwise collide on INSERT.
+func lockTasteClusters(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(
+		'recommendations:taste-clusters:' || $1::bigint::text || ':' || $2::text, 0))`,
+		userID, profileID); err != nil {
+		return fmt.Errorf("lock taste clusters: %w", err)
+	}
+	return nil
+}
+
 // GetTasteClusters retrieves all clusters for a user/profile.
 func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error) {
+	return r.queryTasteClusters(ctx, userID, profileID, true)
+}
+
+// GetTasteClusterMeta returns the profile's taste clusters without their
+// embeddings, for reads that only label, match and order cluster rows.
+func (r *Repo) GetTasteClusterMeta(ctx context.Context, userID int, profileID string) ([]TasteCluster, error) {
+	return r.queryTasteClusters(ctx, userID, profileID, false)
+}
+
+func (r *Repo) queryTasteClusters(ctx context.Context, userID int, profileID string, withEmbedding bool) ([]TasteCluster, error) {
+	columns := "cluster_idx, dominant_genres, label, member_count, total_weight, updated_at"
+	if withEmbedding {
+		columns += ", embedding"
+	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT cluster_idx, embedding, dominant_genres, label, member_count, total_weight, updated_at
+		SELECT `+columns+`
 		FROM   user_taste_clusters
 		WHERE  user_id = $1 AND profile_id = $2
 		ORDER  BY cluster_idx`,
@@ -969,12 +1193,18 @@ func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID strin
 		var c TasteCluster
 		var v pgvector.Vector
 		var genresJSON []byte
-		if err := rows.Scan(&c.ClusterIdx, &v, &genresJSON, &c.Label, &c.MemberCount, &c.TotalWeight, &c.UpdatedAt); err != nil {
+		dest := []any{&c.ClusterIdx, &genresJSON, &c.Label, &c.MemberCount, &c.TotalWeight, &c.UpdatedAt}
+		if withEmbedding {
+			dest = append(dest, &v)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan cluster: %w", err)
 		}
 		c.UserID = userID
 		c.ProfileID = profileID
-		c.Embedding = v.Slice()
+		if withEmbedding {
+			c.Embedding = v.Slice()
+		}
 		if err := json.Unmarshal(genresJSON, &c.DominantGenres); err != nil {
 			return nil, fmt.Errorf("unmarshal cluster genres: %w", err)
 		}
@@ -985,31 +1215,48 @@ func (r *Repo) GetTasteClusters(ctx context.Context, userID int, profileID strin
 
 // --- Co-Watch Operations ---
 
-// UpsertCowatchPairs bulk-upserts co-watch pairs. Operates in a single transaction.
+// UpsertCowatchPairs bulk-upserts co-watch pairs in one statement, stamping
+// each with the transaction time. A batch must not repeat an (item, similar
+// item) pair.
 func (r *Repo) UpsertCowatchPairs(ctx context.Context, pairs []CowatchPair) error {
 	if len(pairs) == 0 {
 		return nil
 	}
-	tx, err := r.pool.Begin(ctx)
+	itemIDs := make([]string, len(pairs))
+	similarIDs := make([]string, len(pairs))
+	scores := make([]float64, len(pairs))
+	counts := make([]int32, len(pairs))
+	for i, p := range pairs {
+		itemIDs[i] = p.ItemID
+		similarIDs[i] = p.SimilarItemID
+		scores[i] = p.JaccardScore
+		counts[i] = int32(p.CowatchCount)
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO item_cowatch (item_id, similar_item_id, jaccard_score, cowatch_count, updated_at)
+		SELECT item_id, similar_item_id, jaccard_score, cowatch_count, NOW()
+		FROM   unnest($1::text[], $2::text[], $3::float8[], $4::int4[])
+		       AS p(item_id, similar_item_id, jaccard_score, cowatch_count)
+		ON CONFLICT (item_id, similar_item_id) DO UPDATE
+			SET jaccard_score = EXCLUDED.jaccard_score,
+			    cowatch_count = EXCLUDED.cowatch_count,
+			    updated_at    = EXCLUDED.updated_at`,
+		itemIDs, similarIDs, scores, counts)
 	if err != nil {
-		return fmt.Errorf("begin tx for cowatch: %w", err)
+		return fmt.Errorf("upsert cowatch pairs: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	return nil
+}
 
-	for _, p := range pairs {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO item_cowatch (item_id, similar_item_id, jaccard_score, cowatch_count, updated_at)
-			VALUES ($1, $2, $3, $4, NOW())
-			ON CONFLICT (item_id, similar_item_id) DO UPDATE
-				SET jaccard_score = EXCLUDED.jaccard_score,
-				    cowatch_count = EXCLUDED.cowatch_count,
-				    updated_at    = NOW()`,
-			p.ItemID, p.SimilarItemID, p.JaccardScore, p.CowatchCount)
-		if err != nil {
-			return fmt.Errorf("upsert cowatch pair: %w", err)
-		}
+// DeleteCowatchPairsBefore deletes the co-watch pairs last written before
+// cutoff and returns how many it deleted.
+func (r *Repo) DeleteCowatchPairsBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM item_cowatch WHERE updated_at IS NULL OR updated_at < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale cowatch pairs: %w", err)
 	}
-	return tx.Commit(ctx)
+	return tag.RowsAffected(), nil
 }
 
 // GetCowatchNeighbors returns the top co-watch neighbors for an item.
@@ -1047,21 +1294,124 @@ func (r *Repo) CowatchPairCount(ctx context.Context) (int, error) {
 	return count, nil
 }
 
+// purgeProfileStatements delete a profile's ratings and recommendation state.
+// None of these tables has a foreign key to the profile, which may live
+// outside Postgres.
+var purgeProfileStatements = []string{
+	`DELETE FROM user_ratings WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM user_taste_profiles WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM user_taste_clusters WHERE user_id = $1 AND profile_id = $2`,
+	`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2`,
+}
+
+// PurgeProfile deletes a deleted profile's ratings, taste profile, taste
+// clusters and cached rows in one transaction. The Postgres user store does
+// this as it deletes the profile; with a user store outside Postgres the
+// profile handler calls this after the delete.
+func (r *Repo) PurgeProfile(ctx context.Context, userID int, profileID string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin recommendation purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for _, stmt := range purgeProfileStatements {
+		if _, err := tx.Exec(ctx, stmt, userID, profileID); err != nil {
+			return fmt.Errorf("purge recommendation data for user %d profile %s: %w", userID, profileID, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit recommendation purge: %w", err)
+	}
+	return nil
+}
+
 // --- Staleness Operations ---
 
-// MarkProfileStale sets stale_at = NOW() on a user's taste profile. A profile
-// already waiting for a refresh (stale_at > updated_at) keeps its pending
-// mark, so a repeat mark writes nothing.
+// MarkProfileStale sets stale_at = NOW() on a user's taste profile. It always
+// advances the mark, even over a pending one: a refresh that started reading
+// before this change must not clear it (see ClearStaleAt). A profile with no
+// taste row yet gets one with no vector, updated at the epoch, so the mark
+// survives a first build that read the signals before this change; readers
+// treat the row as no taste profile until a refresh stores one.
 func (r *Repo) MarkProfileStale(ctx context.Context, userID int, profileID string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE user_taste_profiles SET stale_at = NOW()
-		WHERE  user_id = $1 AND profile_id = $2
-		  AND  (stale_at IS NULL OR stale_at <= updated_at)`,
+		INSERT INTO user_taste_profiles (user_id, profile_id, embedding, updated_at, stale_at)
+		VALUES ($1, $2, NULL, to_timestamp(0), NOW())
+		ON CONFLICT (user_id, profile_id) DO UPDATE SET stale_at = NOW()`,
 		userID, profileID)
 	if err != nil {
 		return fmt.Errorf("mark profile stale: %w", err)
 	}
 	return nil
+}
+
+// MarkAccountsStale marks stale the taste profile of every profile on the
+// accounts, in one statement, and returns how many it marked. Access changes
+// that reach whole accounts call it.
+func (r *Repo) MarkAccountsStale(ctx context.Context, userIDs []int) (int64, error) {
+	if len(userIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE user_taste_profiles SET stale_at = NOW() WHERE user_id = ANY($1)`, userIDs)
+	if err != nil {
+		return 0, fmt.Errorf("mark accounts stale: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MarkAllProfilesStale marks every taste profile stale and returns how many
+// it marked. A policy change that can reach every account's scope calls it.
+func (r *Repo) MarkAllProfilesStale(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `UPDATE user_taste_profiles SET stale_at = NOW()`)
+	if err != nil {
+		return 0, fmt.Errorf("mark all profiles stale: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MarkProfilesStaleForItems marks stale every taste profile whose progress,
+// history, ebook reading progress, rating, favorite or watchlist entry points
+// at one of itemIDs or at an episode of a series among them. Catalog merges
+// and splits call it after they move user state onto itemIDs, and the
+// embedding backfill after it stores their vectors. A live Postgres profile
+// with no taste row yet gets a vectorless one, as MarkProfileStale gives it,
+// so a first build that read the items before this mark does not consume it.
+// It returns how many profiles it marked.
+func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error) {
+	if len(itemIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		WITH ids AS (
+			SELECT unnest($1::text[]) AS id
+			UNION
+			SELECT content_id FROM episodes WHERE series_id = ANY($1::text[])
+		), profiles AS (
+			SELECT user_id, profile_id FROM user_taste_profiles
+			UNION
+			SELECT user_id, id FROM user_profiles
+		)
+		INSERT INTO user_taste_profiles (user_id, profile_id, embedding, updated_at, stale_at)
+		SELECT tp.user_id, tp.profile_id, NULL, to_timestamp(0), NOW()
+		FROM   profiles tp
+		WHERE EXISTS (SELECT 1 FROM user_watch_progress s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_watch_history s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM ebook_reader_progress s JOIN ids ON ids.id = s.content_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_ratings s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_favorites s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		   OR EXISTS (SELECT 1 FROM user_watchlist s JOIN ids ON ids.id = s.media_item_id
+		              WHERE s.user_id = tp.user_id AND s.profile_id = tp.profile_id)
+		ON CONFLICT (user_id, profile_id) DO UPDATE SET stale_at = NOW()`,
+		itemIDs)
+	if err != nil {
+		return 0, fmt.Errorf("mark profiles stale for items: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // StaleProfile represents a taste profile that needs refreshing.
@@ -1070,12 +1420,15 @@ type StaleProfile struct {
 	ProfileID string
 }
 
-// GetStaleProfiles returns profiles where stale_at > updated_at.
+// GetStaleProfiles returns profiles where stale_at > updated_at, oldest mark
+// first. A refresh that fails marks its profile again, so a profile that keeps
+// failing moves behind the others instead of taking the whole batch.
 func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT user_id, profile_id
 		FROM   user_taste_profiles
 		WHERE  stale_at IS NOT NULL AND stale_at > updated_at
+		ORDER  BY stale_at, user_id, profile_id
 		LIMIT  $1`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get stale profiles: %w", err)
@@ -1093,11 +1446,14 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	return profiles, rows.Err()
 }
 
-// ClearStaleAt resets stale_at to NULL after refreshing a profile.
-func (r *Repo) ClearStaleAt(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE user_taste_profiles SET stale_at = NULL WHERE user_id = $1 AND profile_id = $2`,
-		userID, profileID)
+// ClearStaleAt resets stale_at to NULL after a refresh that started reading
+// signals at started. A mark newer than that records a change the refresh may
+// have missed, so it stays for the stale sweep.
+func (r *Repo) ClearStaleAt(ctx context.Context, userID int, profileID string, started time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE user_taste_profiles SET stale_at = NULL
+		WHERE  user_id = $1 AND profile_id = $2 AND stale_at <= $3`,
+		userID, profileID, started)
 	if err != nil {
 		return fmt.Errorf("clear stale_at: %w", err)
 	}
@@ -1306,6 +1662,9 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 // (watcher, item) before ranking and aggregation so a lone binge-watcher
 // cannot satisfy the minimum-watchers threshold ($2) by itself and the
 // per-user recency cap ($1) counts distinct items rather than raw rows.
+// Progress outlives deleted items, and an episode of a deleted series no
+// longer rolls up to it, so only items still in media_items are ranked: a
+// dead ID neither enters the matrix nor uses up a watcher's recency cap.
 //
 // Watcher identity is (user_id, profile_id) for the Jaccard math — profiles of
 // one account legitimately have distinct tastes — but the minimum-watchers
@@ -1320,6 +1679,7 @@ var itemWatchersQuery = fmt.Sprintf(`
 		       item_id AS media_item_id,
 		       ROW_NUMBER() OVER (PARTITION BY user_id, profile_id ORDER BY MAX(updated_at) DESC) AS rn
 		FROM   watched_activity
+		WHERE  EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = watched_activity.item_id)
 		GROUP  BY user_id, profile_id, watcher_id, item_id
 	)
 	SELECT media_item_id, ARRAY_AGG(watcher_id) AS watchers
@@ -1446,14 +1806,26 @@ func (r *Repo) GetTopRatedItems(ctx context.Context, minRatings, limit int) ([]S
 	return items, rows.Err()
 }
 
-// GetTasteSeedCandidates returns movie/series/audiobook content IDs ordered for the
-// taste-seeding picker: server engagement first (most-watched in the last
-// 180 days), then rating reliability and rating score, then recency. This keeps
-// fresh servers from front-loading single-vote TMDB 10.0 obscurities while
-// established servers prioritize what users actually watch. Episodes are resolved
-// to their parent series. Items without a poster are excluded.
-func (r *Repo) GetTasteSeedCandidates(ctx context.Context, limit, offset int) ([]string, error) {
-	rows, err := r.pool.Query(ctx, tasteSeedCandidateQuery, limit, offset)
+// GetTasteSeedCandidates returns movie, series, audiobook and ebook content IDs
+// ordered for the taste-seeding picker: server engagement first (most-watched
+// in the last 180 days), then rating reliability and rating score, then
+// recency. This keeps fresh servers from front-loading single-vote TMDB 10.0
+// obscurities while established servers prioritize what users actually watch.
+// Episodes are resolved to their parent series. Items without a poster are
+// excluded, and so are those filter does not admit, so a restricted profile
+// gets full pages of titles it can pick.
+func (r *Repo) GetTasteSeedCandidates(ctx context.Context, filter catalog.AccessFilter, limit, offset int) ([]string, error) {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return []string{}, nil
+	}
+	var conditions []string
+	var args []any
+	argIdx := 1
+	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
+	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+	args = append(args, limit, offset)
+
+	rows, err := r.pool.Query(ctx, tasteSeedCandidateQuery(conditions, argIdx), args...)
 	if err != nil {
 		return nil, fmt.Errorf("get taste seed candidates: %w", err)
 	}
@@ -1566,36 +1938,10 @@ func (r *Repo) GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[st
 	return result, rows.Err()
 }
 
-// GetItemGenres returns the full genre array for each item ID.
-func (r *Repo) GetItemGenres(ctx context.Context, itemIDs []string) (map[string][]string, error) {
-	if len(itemIDs) == 0 {
-		return nil, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, genres
-		FROM   media_items
-		WHERE  content_id = ANY($1)
-		  AND  array_length(genres, 1) > 0`,
-		itemIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get item genres: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]string)
-	for rows.Next() {
-		var id string
-		var genres []string
-		if err := rows.Scan(&id, &genres); err != nil {
-			return nil, fmt.Errorf("scan item genre: %w", err)
-		}
-		result[id] = genres
-	}
-	return result, rows.Err()
-}
-
 // FilterAccessibleItemIDs returns the subset of item IDs allowed by the given
-// access filter. The returned map is keyed by media_items.content_id.
+// access filter, including its excluded media types (the Jellyfin surface
+// excludes audiobooks and podcasts). The returned map is keyed by
+// media_items.content_id.
 func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, filter catalog.AccessFilter) (map[string]struct{}, error) {
 	if len(itemIDs) == 0 {
 		return map[string]struct{}{}, nil
@@ -1620,6 +1966,11 @@ func (r *Repo) FilterAccessibleItemIDs(ctx context.Context, itemIDs []string, fi
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
+
+	if len(filter.ExcludedMediaTypes) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mi.type = ANY($%d))", argIdx))
+		args = append(args, filter.ExcludedMediaTypes)
+	}
 
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
 		SELECT mi.content_id
@@ -1668,23 +2019,84 @@ func (r *Repo) GetItemAddedDates(ctx context.Context, itemIDs []string) (map[str
 	return result, rows.Err()
 }
 
-// GetAllUsersWithTasteProfiles returns all user/profile pairs that have taste profiles.
-func (r *Repo) GetAllUsersWithTasteProfiles(ctx context.Context) ([]StaleProfile, error) {
-	rows, err := r.pool.Query(ctx, `SELECT user_id, profile_id FROM user_taste_profiles`)
-	if err != nil {
-		return nil, fmt.Errorf("get all users with taste profiles: %w", err)
-	}
-	defer rows.Close()
+// listCacheRefreshCandidatesQuery orders profiles by the age of their main
+// row, those without one first. A run that exhausts its time budget leaves the
+// newest rows for last, so the next run starts with the profiles it missed.
+const listCacheRefreshCandidatesQuery = `
+		SELECT tp.user_id, tp.profile_id
+		FROM   user_taste_profiles tp
+		LEFT   JOIN recommendation_cache rc
+		       ON  rc.user_id        = tp.user_id
+		       AND rc.profile_id     = tp.profile_id
+		       AND rc.rec_type       = $1
+		       AND rc.source_item_id = ''
+		ORDER  BY rc.created_at ASC NULLS FIRST, tp.user_id, tp.profile_id`
 
-	var profiles []StaleProfile
-	for rows.Next() {
-		var p StaleProfile
-		if err := rows.Scan(&p.UserID, &p.ProfileID); err != nil {
-			return nil, fmt.Errorf("scan user with taste profile: %w", err)
-		}
-		profiles = append(profiles, p)
+// ListCacheRefreshCandidates returns every profile that has a taste profile,
+// least recently cached first.
+func (r *Repo) ListCacheRefreshCandidates(ctx context.Context) ([]StaleProfile, error) {
+	rows, err := r.pool.Query(ctx, listCacheRefreshCandidatesQuery, RecTypeForYouMain)
+	if err != nil {
+		return nil, fmt.Errorf("list cache refresh candidates: %w", err)
 	}
-	return profiles, rows.Err()
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (StaleProfile, error) {
+		var p StaleProfile
+		err := row.Scan(&p.UserID, &p.ProfileID)
+		return p, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list cache refresh candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+// HasSignalRows reports whether the profile has a rating or ebook reading
+// progress, the signals that always live in Postgres. With includeStoreTables
+// it also checks the Postgres user store's watch progress, favorites and
+// watchlist tables, which hold those signals unless the user store lives
+// elsewhere.
+func (r *Repo) HasSignalRows(ctx context.Context, userID int, profileID string, includeStoreTables bool) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM user_ratings WHERE user_id = $1 AND profile_id = $2)
+		    OR EXISTS (SELECT 1 FROM ebook_reader_progress WHERE user_id = $1 AND profile_id = $2)
+		    OR ($3 AND (
+		           EXISTS (SELECT 1 FROM user_watch_progress WHERE user_id = $1 AND profile_id = $2)
+		        OR EXISTS (SELECT 1 FROM user_favorites WHERE user_id = $1 AND profile_id = $2)
+		        OR EXISTS (SELECT 1 FROM user_watchlist WHERE user_id = $1 AND profile_id = $2)))`,
+		userID, profileID, includeStoreTables).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check signals for user %d profile %s: %w", userID, profileID, err)
+	}
+	return exists, nil
+}
+
+// ListUserIDs returns every account's ID in ascending order.
+func (r *Repo) ListUserIDs(ctx context.Context) ([]int, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id FROM users ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list user ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("list user ids: %w", err)
+	}
+	return ids, nil
+}
+
+// HasGlobalRecommendationCache reports whether any unexpired global row is
+// cached.
+func (r *Repo) HasGlobalRecommendationCache(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM recommendation_cache
+			WHERE  user_id IS NULL AND profile_id = $1 AND expires_at > NOW()
+		)`, GlobalCacheProfileID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check global recommendation cache: %w", err)
+	}
+	return exists, nil
 }
 
 // GetWatchedItemIDs returns content IDs of media items the user has watched
@@ -1721,36 +2133,20 @@ func (r *Repo) GetWatchedItemIDSet(ctx context.Context, userID int, profileID st
 	return scoredItemIDSet(ids), nil
 }
 
-// GetWatchedItemIDSetFromStore derives watched item IDs from a user store,
-// then canonicalizes episode progress rows to their parent series IDs.
-func (r *Repo) GetWatchedItemIDSetFromStore(ctx context.Context, store userstore.UserStore, profileID string) (map[string]struct{}, error) {
-	if store == nil {
-		return map[string]struct{}{}, nil
+// GetFavoriteItemIDs returns the content IDs a profile has favorited, as
+// stored: episodes are not resolved to their series.
+func (r *Repo) GetFavoriteItemIDs(ctx context.Context, userID int, profileID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT media_item_id FROM user_favorites WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("get favorite item IDs: %w", err)
 	}
-
-	const pageSize = 1000
-	rawIDs := make([]string, 0, pageSize)
-	offset := 0
-
-	for {
-		progress, err := store.ListProgress(ctx, profileID, "all", pageSize, offset)
-		if err != nil {
-			return nil, fmt.Errorf("list progress from store: %w", err)
-		}
-
-		for _, wp := range progress {
-			if wp.Completed || (wp.DurationSeconds > 0 && wp.PositionSeconds/wp.DurationSeconds >= 0.5) {
-				rawIDs = append(rawIDs, wp.MediaItemID)
-			}
-		}
-
-		if len(progress) < pageSize {
-			break
-		}
-		offset += len(progress)
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("get favorite item IDs: %w", err)
 	}
-
-	return r.ResolveCanonicalItemIDSet(ctx, rawIDs)
+	return ids, nil
 }
 
 // GetRecentCompletedItemIDs returns the most recently completed canonical item IDs for a profile.
@@ -1777,19 +2173,6 @@ func (r *Repo) GetRecentCompletedItemIDs(ctx context.Context, userID int, profil
 		return nil, fmt.Errorf("iterate recent completed item IDs: %w", err)
 	}
 	return ids, nil
-}
-
-// ExcludeWatchedItems removes watched items from a scored recommendation list.
-func (r *Repo) ExcludeWatchedItems(ctx context.Context, userID int, profileID string, items []ScoredItem) ([]ScoredItem, error) {
-	if len(items) == 0 {
-		return items, nil
-	}
-
-	watchedSet, err := r.GetWatchedItemIDSet(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get watched item IDs: %w", err)
-	}
-	return excludeScoredItems(items, watchedSet), nil
 }
 
 func scoredItemIDSet(ids []string) map[string]struct{} {
@@ -1850,6 +2233,27 @@ func (r *Repo) ResolveCanonicalItemIDs(ctx context.Context, itemIDs []string) (m
 	return resolved, nil
 }
 
+// ExistingItemIDs returns the IDs in itemIDs that still have a media_items
+// row.
+func (r *Repo) ExistingItemIDs(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
+	existing := make(map[string]struct{}, len(itemIDs))
+	if len(itemIDs) == 0 {
+		return existing, nil
+	}
+	rows, err := r.pool.Query(ctx, `SELECT content_id FROM media_items WHERE content_id = ANY($1)`, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("find existing item IDs: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("find existing item IDs: %w", err)
+	}
+	for _, id := range ids {
+		existing[id] = struct{}{}
+	}
+	return existing, nil
+}
+
 // ResolveCanonicalItemIDSet maps episode IDs to their parent series IDs and
 // leaves movie/series IDs unchanged.
 func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) (map[string]struct{}, error) {
@@ -1862,17 +2266,6 @@ func (r *Repo) ResolveCanonicalItemIDSet(ctx context.Context, itemIDs []string) 
 		set[itemID] = struct{}{}
 	}
 	return set, nil
-}
-
-// CleanOldCacheTypes removes V1 cache entries that are no longer used.
-func (r *Repo) CleanOldCacheTypes(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM recommendation_cache WHERE user_id = $1 AND profile_id = $2 AND rec_type IN ('for_you', 'taste_match')`,
-		userID, profileID)
-	if err != nil {
-		return fmt.Errorf("clean old cache types: %w", err)
-	}
-	return nil
 }
 
 // GetItemAllGenres returns the full genre array for each item ID.

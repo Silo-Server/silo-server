@@ -625,6 +625,7 @@ export const v2Operations = {
   "POST /api/v2/admin/policy/documents/{id}/versions": "createAdminPolicyVersion",
   "POST /api/v2/admin/policy/simulate": "simulateAdminPolicy",
   "POST /api/v2/admin/policy/validate": "validateAdminPolicy",
+  "POST /api/v2/admin/recommendations/embeddings/reset": "resetAdminRecommendationEmbeddings",
   "POST /api/v2/admin/recommendations/trigger/cowatch": "triggerAdminRecommendationCowatch",
   "POST /api/v2/admin/recommendations/trigger/embeddings": "triggerAdminRecommendationEmbeddings",
   "POST /api/v2/admin/recommendations/trigger/recommendations": "triggerAdminRecommendationRefresh",

@@ -310,6 +310,7 @@ type ImportResult struct {
 	LinksCreated       int      `json:"links_created"`
 	CreditsReplaced    int      `json:"credits_replaced"`
 	EmbeddingsImported int      `json:"embeddings_imported"`
+	EmbeddingsSkipped  int      `json:"embeddings_skipped"` // made by another embedding model
 	Skipped            int      `json:"skipped"`
 	UnmatchedRoots     []string `json:"unmatched_roots,omitempty"`
 }

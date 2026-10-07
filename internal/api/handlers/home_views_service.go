@@ -62,8 +62,16 @@ func (h *SectionHandler) HomeSections(ctx context.Context, viewer SectionViewer)
 	return response, nil
 }
 
-// HomeSectionItems answers one section of the home page with its items.
+// HomeSectionItems answers one section of the home page with its items, or an
+// error when its items cannot be fetched.
 func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer) (SectionView, error) {
+	return h.homeSectionItems(ctx, sectionID, viewer, false)
+}
+
+// homeSectionItems is HomeSectionItems. With emptyOnFetchError, a section
+// whose items cannot be fetched answers with no items, as the frozen v1
+// endpoint always has.
+func (h *SectionHandler) homeSectionItems(ctx context.Context, sectionID string, viewer SectionViewer, emptyOnFetchError bool) (SectionView, error) {
 	resolved, libraryIDs, accessFilter, profileID, err := h.loadResolvedHomeSections(ctx)
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -77,11 +85,14 @@ func (h *SectionHandler) HomeSectionItems(ctx context.Context, sectionID string,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, homeSectionsForFetch([]sections.ResolvedSection{s}, hideWatched)[0], nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
+			// Unlike the aggregate read, which keeps the page up with an
+			// empty row, a failed single section answers an error, so a
+			// client can tell it from a section with nothing to show.
 			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
-			withItems = sections.SectionWithItems{
-				ResolvedSection: s,
-				Items:           []*models.MediaItem{},
+			if !emptyOnFetchError {
+				return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load section")
 			}
+			withItems = sections.SectionWithItems{ResolvedSection: s, Items: []*models.MediaItem{}}
 		}
 		withItems.ItemLimit = s.ItemLimit
 		items := []sections.SectionWithItems{withItems}

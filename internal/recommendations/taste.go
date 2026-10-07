@@ -143,34 +143,82 @@ func maxContentRatingFromSets(ratedSet, completedSet, favSet map[string]struct{}
 // watch progress, and rewatches. Applies time decay and builds clustered
 // sub-profiles.
 func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID string) error {
+	_, err := e.refreshTasteProfile(ctx, userID, profileID)
+	return err
+}
+
+// refreshTasteProfile is RefreshTasteProfile, also reporting whether it stored
+// a taste vector. A profile with no positive signal, or none whose title has
+// an embedding yet, gets none: its vector, clusters and cached personal rows
+// are cleared instead (see clearTasteProfile). A profile deleted since the
+// refresh was queued gets no vector and no taste row.
+func (e *Engine) refreshTasteProfile(ctx context.Context, userID int, profileID string) (bool, error) {
+	started, err := e.repo.Now(ctx)
+	if err != nil {
+		return false, err
+	}
+	stored, err := e.rebuildTasteProfile(ctx, userID, profileID, started)
+	if err != nil {
+		return stored, err
+	}
+	return stored, e.purgeIfProfileDeleted(ctx, userID, profileID)
+}
+
+// purgeIfProfileDeleted deletes the recommendation state of a profile deleted
+// while a rebuild wrote it. The rebuild checks that its profile exists before
+// writing, but a deletion can land between that check and the writes, after
+// the deletion's own purge ran. Profiles may live outside Postgres, so the
+// check cannot share the writes' transaction; run after the rebuild's last
+// write, either this check sees the deletion or the deletion's purge comes
+// after every write.
+func (e *Engine) purgeIfProfileDeleted(ctx context.Context, userID int, profileID string) error {
 	store, err := e.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("get user store for user %d: %w", userID, err)
 	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("get profile %s: %w", profileID, err)
+	}
+	if profile != nil {
+		return nil
+	}
+	return e.repo.PurgeProfile(ctx, userID, profileID)
+}
+
+// rebuildTasteProfile is refreshTasteProfile for a refresh that started at
+// started, database time, before any of its signal reads. The profile is
+// stored as updated at started, so a stale mark set while it reads stays newer
+// than the profile and the stale sweep refreshes it again.
+func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID string, started time.Time) (bool, error) {
+	store, err := e.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
+	}
 
 	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list ratings: %w", err)
+		return false, fmt.Errorf("list ratings: %w", err)
 	}
 
 	favorites, err := store.ListFavorites(ctx, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list favorites: %w", err)
+		return false, fmt.Errorf("list favorites: %w", err)
 	}
 
 	watchlist, err := store.ListWatchlist(ctx, profileID, 1000, 0)
 	if err != nil {
-		return fmt.Errorf("list watchlist: %w", err)
+		return false, fmt.Errorf("list watchlist: %w", err)
 	}
 
 	watchProgress, err := e.signalReader().WatchProgressForUser(ctx, userID, profileID)
 	if err != nil {
-		return fmt.Errorf("get watch progress: %w", err)
+		return false, fmt.Errorf("get watch progress: %w", err)
 	}
 
 	rewatchCounts, err := e.signalReader().RewatchCounts(ctx, userID, profileID)
 	if err != nil {
-		return fmt.Errorf("get rewatch counts: %w", err)
+		return false, fmt.Errorf("get rewatch counts: %w", err)
 	}
 
 	now := time.Now()
@@ -203,7 +251,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	refs, err := e.repo.ResolveCanonicalContentRefs(ctx, rawIDs)
 	if err != nil {
-		return fmt.Errorf("resolve canonical content refs: %w", err)
+		return false, fmt.Errorf("resolve canonical content refs: %w", err)
 	}
 
 	signalCounts := make(map[string]int)
@@ -242,36 +290,11 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 			signalCounts["rated_3"]++
 		default:
 			s.ExplicitWeight += WeightRatedLow * decay
-			signalCounts["rated_low"]++
+			signalCounts[signalKindRatedLow]++
 		}
 	}
 
-	for _, wp := range watchProgress {
-		ref, ok := refs[wp.MediaItemID]
-		if !ok || ref.CanonicalID == "" {
-			continue
-		}
-		weight, ok := implicitWatchWeight(wp)
-		if !ok {
-			continue
-		}
-		switch weight {
-		case WeightWatchHigh:
-			signalCounts["watch_high"]++
-		case WeightWatchMed:
-			signalCounts["watch_med"]++
-		case WeightWatchLow:
-			signalCounts["watch_low"]++
-		}
-	}
-
-	for _, rc := range rewatchCounts {
-		ref, ok := refs[rc.MediaItemID]
-		if !ok || ref.CanonicalID == "" || rc.Count < 2 {
-			continue
-		}
-		signalCounts["rewatch"]++
-	}
+	countWatchSignals(signalCounts, watchProgress, rewatchCounts, refs, now)
 
 	implicitSignals, completedSet := buildCanonicalImplicitSignals(watchProgress, rewatchCounts, refs, now, halfLife)
 	for canonicalID, weight := range implicitSignals {
@@ -300,8 +323,20 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 		signalCounts["watchlist"]++
 	}
 
+	// A refresh queued before its profile was deleted must not bring back the
+	// taste row the deletion purged, even from signals that outlive a profile
+	// such as watch history; it only clears a row left behind. Profiles may
+	// live outside Postgres, so the user store says whether it still exists.
+	userProfile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("get profile %s: %w", profileID, err)
+	}
+	if userProfile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, false)
+	}
+
 	if len(signals) == 0 {
-		return nil
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, "", started, true)
 	}
 
 	allIDs := make([]string, 0, len(signals))
@@ -328,7 +363,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
 	if err != nil {
-		return fmt.Errorf("get batch embeddings: %w", err)
+		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
 
 	vecs := make([][]float32, 0, len(signals))
@@ -365,11 +400,6 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 		}
 	}
 
-	profile := weightedAverage(vecs, embWeights)
-	if profile == nil {
-		return nil
-	}
-
 	maxContentRating := ""
 	if len(allIDs) > 0 && items != nil {
 		crMap := make(map[string]string, len(items))
@@ -379,22 +409,81 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
 	}
 
-	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating); err != nil {
-		return fmt.Errorf("upsert taste profile: %w", err)
+	// Without a positive weight the average points away from the titles the
+	// profile disliked or abandoned, and would recommend their opposites.
+	profile := weightedAverage(vecs, embWeights)
+	if len(positiveItems) == 0 || profile == nil {
+		return false, e.clearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, true)
 	}
 
-	if len(positiveItems) > 0 {
-		clusters := buildTasteClusters(positiveItems)
-		for i := range clusters {
-			clusters[i].UserID = userID
-			clusters[i].ProfileID = profileID
-		}
-		if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
-			return fmt.Errorf("upsert taste clusters: %w", err)
-		}
+	if err := e.repo.UpsertTasteProfile(ctx, userID, profileID, profile, signalCounts, maxContentRating, started); err != nil {
+		return false, fmt.Errorf("upsert taste profile: %w", err)
 	}
 
+	clusters := buildTasteClusters(positiveItems)
+	for i := range clusters {
+		clusters[i].UserID = userID
+		clusters[i].ProfileID = profileID
+	}
+	if err := e.repo.UpsertTasteClusters(ctx, userID, profileID, clusters); err != nil {
+		return false, fmt.Errorf("upsert taste clusters: %w", err)
+	}
+
+	return true, nil
+}
+
+// clearTasteProfile stores a profile that has no positive signal, or none
+// whose title has an embedding: its signal counts without a taste vector, and
+// none of the clusters or cached personal rows an earlier vector produced.
+// Readers then treat it as having no taste profile. Without create a missing
+// row stays missing (see Repo.ClearTasteProfile).
+func (e *Engine) clearTasteProfile(ctx context.Context, userID int, profileID string, signalCounts map[string]int, maxContentRating string, started time.Time, create bool) error {
+	if err := e.repo.ClearTasteProfile(ctx, userID, profileID, signalCounts, maxContentRating, started, create); err != nil {
+		return fmt.Errorf("clear taste profile: %w", err)
+	}
 	return nil
+}
+
+// countWatchSignals adds the watch and rewatch signal counts to counts, once
+// per canonical title: a series counts as one title however many of its
+// episodes were watched, in the bucket of its strongest watch.
+func countWatchSignals(counts map[string]int, progress []WatchProgressRow, rewatches []RewatchCount, refs map[string]canonicalContentRef, now time.Time) {
+	strongest := make(map[string]float64)
+	for _, wp := range progress {
+		ref, ok := refs[wp.MediaItemID]
+		if !ok || ref.CanonicalID == "" {
+			continue
+		}
+		weight, ok := implicitWatchWeight(wp, now)
+		if !ok {
+			continue
+		}
+		if best, seen := strongest[ref.CanonicalID]; !seen || weight > best {
+			strongest[ref.CanonicalID] = weight
+		}
+	}
+	for _, weight := range strongest {
+		switch weight {
+		case WeightWatchHigh:
+			counts["watch_high"]++
+		case WeightWatchMed:
+			counts["watch_med"]++
+		case WeightWatchLow:
+			counts[signalKindWatchLow]++
+		}
+	}
+
+	rewatched := make(map[string]struct{})
+	for _, rc := range rewatches {
+		ref, ok := refs[rc.MediaItemID]
+		if !ok || ref.CanonicalID == "" || rc.Count < 2 {
+			continue
+		}
+		rewatched[ref.CanonicalID] = struct{}{}
+	}
+	if len(rewatched) > 0 {
+		counts["rewatch"] += len(rewatched)
+	}
 }
 
 // GetTasteProfileSummary returns a human-readable summary of the user's taste

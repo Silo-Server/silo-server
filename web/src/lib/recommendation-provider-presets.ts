@@ -22,9 +22,11 @@ export const RECOMMENDATION_PROVIDER_PRESETS: RecommendationProviderPreset[] = [
     id: "ollama",
     label: "Ollama",
     tag: "Local",
-    description: "Free, self-hosted. Needs Ollama running.",
+    description: "Free, self-hosted. Needs Ollama running. About 640 MB; 1024-dimension vectors.",
     baseUrl: "http://ollama:11434",
-    model: "qwen3-embedding:latest",
+    // The :latest tag is the 8B model, whose 4096-dimension vectors Silo
+    // cannot store.
+    model: "qwen3-embedding:0.6b",
     needsToken: false,
   },
   {

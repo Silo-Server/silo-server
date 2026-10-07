@@ -25,6 +25,30 @@ func coldStartLevel(positiveSignalCount int) int {
 	}
 }
 
+// The signal_counts kinds that record a dislike: a 1-2 star rating, and a
+// title abandoned below lowProgressThreshold.
+const (
+	signalKindRatedLow = "rated_low"
+	signalKindWatchLow = "watch_low"
+)
+
+// coldStartLevelOf returns the cold-start level of a profile from its taste
+// profile metadata, counting only positive signals. A profile with no taste
+// profile is level 0.
+func coldStartLevelOf(meta *TasteProfileMeta) int {
+	if meta == nil {
+		return 0
+	}
+	positive := 0
+	for kind, count := range meta.SignalCounts {
+		if kind == signalKindRatedLow || kind == signalKindWatchLow {
+			continue
+		}
+		positive += count
+	}
+	return coldStartLevel(positive)
+}
+
 // buildColdStartRows builds the set of non-personalized recommendation rows
 // used during cold-start (and appended to warm profiles for discovery).
 // Rows with empty item slices are omitted.

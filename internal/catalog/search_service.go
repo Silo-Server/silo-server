@@ -240,7 +240,14 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 			}
 		}
 		if s.itemRepo != nil && s.itemRepo.pool != nil {
-			if vectorCount, err := countCatalogSearchVectorDocuments(ctx, s.itemRepo.pool, settings.IndexTypes, ""); err == nil {
+			// The indexer sends only the locked model's vectors; count those.
+			model := ""
+			if s.coverage != nil {
+				if snap := s.coverage.Snapshot(); snap != nil {
+					model = snap.Model
+				}
+			}
+			if vectorCount, err := countCatalogSearchVectorDocuments(ctx, s.itemRepo.pool, settings.IndexTypes, model); err == nil {
 				status.Index.VectorDocumentCount = vectorCount
 			}
 		}

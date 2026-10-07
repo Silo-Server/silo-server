@@ -60,11 +60,14 @@ const fetchAllMaxConcurrency = 6
 const slowSectionFetchThreshold = 500 * time.Millisecond
 const slowAggregateFetchThreshold = time.Second
 
+// recommendationReader reads the recommendation rows sections show. Each
+// read returns the row's whole cached pool; the fetcher scopes it to the
+// section's libraries and trims it to the section's item limit.
 type recommendationReader interface {
-	GetForYouMain(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
-	GetBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetSimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
-	GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionForYouMain(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
+	SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, string, error)
+	SectionSimilarUsersLiked(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error)
+	SectionTasteMatchRow(ctx context.Context, userID int, profileID, genre string, filter catalog.AccessFilter) (*recommendations.ForYouRow, error)
 }
 
 // trendingSnapshotGetter is the read side of the trending snapshot table.
@@ -274,11 +277,9 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		f.logSlowSectionFetch(resolved, libraryID, libraryIDs, result, time.Since(start), err)
 	}()
 
-	if resolved.SectionType == SectionBecauseYouWatched {
-		if reader, ok := f.RecommendationReader.(becauseWatchedSourceReader); ok {
-			result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, reader)
-			return result, err
-		}
+	if resolved.SectionType == SectionBecauseYouWatched && f.RecommendationReader != nil {
+		result, err = f.fetchBecauseWatchedWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
+		return result, err
 	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
@@ -1650,6 +1651,11 @@ func limitUserCollectionSectionItems(items []*models.MediaItem, limit int) ([]*m
 	return items, total
 }
 
+// fetchRecommendationSection reads the row's whole cached pool, scopes it to
+// the section's libraries, then trims it to the section's item limit, so a
+// library's row fills from every cached candidate in that library rather than
+// only those in the row's first page. Because You Watched takes the
+// FetchOne branch whenever a reader is wired.
 func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	if f.RecommendationReader == nil {
 		return []*models.MediaItem{}, 0, nil // graceful degradation
@@ -1659,19 +1665,13 @@ func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSect
 	var scoredItems []recommendations.ScoredItem
 	switch s.SectionType {
 	case SectionRecommendedForYou:
-		row, err := f.RecommendationReader.GetForYouMain(ctx, userID, profileID, s.ItemLimit, filter)
+		row, err := f.RecommendationReader.SectionForYouMain(ctx, userID, profileID, filter)
 		if err != nil || row == nil {
 			return []*models.MediaItem{}, 0, err
 		}
 		scoredItems = row.Items
-	case SectionBecauseYouWatched:
-		items, err := f.RecommendationReader.GetBecauseYouWatched(ctx, userID, profileID, cfg.anchor(), s.ItemLimit, filter)
-		if err != nil {
-			return []*models.MediaItem{}, 0, err
-		}
-		scoredItems = items
 	case SectionSimilarUsersLiked:
-		items, err := f.RecommendationReader.GetSimilarUsersLiked(ctx, userID, profileID, s.ItemLimit, filter)
+		items, err := f.RecommendationReader.SectionSimilarUsersLiked(ctx, userID, profileID, filter)
 		if err != nil {
 			return []*models.MediaItem{}, 0, err
 		}
@@ -1679,7 +1679,7 @@ func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSect
 	case SectionTasteMatch:
 		// An empty genre is valid: the reader auto-picks the profile's
 		// strongest taste cluster (falling back to the server top genre).
-		row, err := f.RecommendationReader.GetTasteMatchRow(ctx, userID, profileID, strings.TrimSpace(cfg.Genre), s.ItemLimit, filter)
+		row, err := f.RecommendationReader.SectionTasteMatchRow(ctx, userID, profileID, strings.TrimSpace(cfg.Genre), filter)
 		if err != nil || row == nil {
 			return []*models.MediaItem{}, 0, err
 		}
@@ -1688,23 +1688,46 @@ func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSect
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	if len(scoredItems) == 0 {
-		return []*models.MediaItem{}, 0, nil
-	}
-
-	// Resolve item IDs to full MediaItem objects
-	itemIDs := make([]string, len(scoredItems))
-	for i, item := range scoredItems {
-		itemIDs[i] = item.MediaItemID
-	}
-
-	mediaItems, err := f.fetchItemsByContentIDs(ctx, itemIDs, libraryID, libraryIDs, filter)
+	orderedItems, err := f.scopeRecommendationItems(ctx, scoredItems, libraryID, libraryIDs, filter)
 	if err != nil {
 		return nil, 0, err
 	}
-	orderedItems := orderMediaItems(mediaItems, itemIDs)
+	orderedItems = limitRecommendationItems(orderedItems, s.ItemLimit)
 	return orderedItems, len(orderedItems), nil
 }
+
+// scopeRecommendationItems loads the scored items that are in the section's
+// library scope, keeping their order.
+func (f *Fetcher) scopeRecommendationItems(ctx context.Context, scored []recommendations.ScoredItem, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, error) {
+	if len(scored) == 0 {
+		return []*models.MediaItem{}, nil
+	}
+	ids := make([]string, len(scored))
+	for i, item := range scored {
+		ids[i] = item.MediaItemID
+	}
+	items, err := f.fetchItemsByContentIDs(ctx, ids, libraryID, libraryIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	return orderMediaItems(items, ids), nil
+}
+
+// limitRecommendationItems cuts a recommendation row to the section's item
+// limit, defaultRecommendationSectionLimit when it sets none.
+func limitRecommendationItems(items []*models.MediaItem, itemLimit int) []*models.MediaItem {
+	if itemLimit <= 0 {
+		itemLimit = defaultRecommendationSectionLimit
+	}
+	if len(items) > itemLimit {
+		return items[:itemLimit]
+	}
+	return items
+}
+
+// defaultRecommendationSectionLimit is the row size of a recommendation
+// section that sets no item limit, the size the reader's public reads use.
+const defaultRecommendationSectionLimit = 20
 
 func (f *Fetcher) fetchHiddenGems(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
 	var p recipes.HiddenGemsParams

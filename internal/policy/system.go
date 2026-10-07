@@ -30,6 +30,14 @@ type System struct {
 	cancel   context.CancelFunc
 	reloadCh chan struct{}
 	wg       sync.WaitGroup
+	// reloadMu serializes reloads, so each loads the store's snapshot after
+	// the previous one applied and the loaded generation never goes back.
+	reloadMu sync.Mutex
+
+	// changeApplied runs after this node loads a newer policy generation;
+	// announcedGeneration is the newest one it ran for, or the boot load's.
+	changeApplied       func(context.Context)
+	announcedGeneration int64
 
 	// bootDegradedReason is set when the initial engine could not load the
 	// full stored policy (store unreachable or custom bundle failed) and is
@@ -125,6 +133,7 @@ func (s *System) Start(ctx context.Context) error {
 	}
 	s.engine = engine
 	s.bootDegradedReason = bootDegradedReason
+	s.announcedGeneration = engine.Revision()
 	s.pdp = NewPDP(engine, WithDecisionLogger(s.decisionLogger))
 	s.cancel = cancel
 	s.mu.Unlock()
@@ -323,6 +332,21 @@ func (s *System) NotifyChanged(ctx context.Context) error {
 	return s.ApplyChanged(ctx).Err()
 }
 
+// OnChangeApplied registers fn to run each time this node loads a newer policy
+// generation than it had, whichever reload loaded it: the synchronous one
+// after a local change, or a later event or poll reload, which also covers a
+// local reload that failed. Every node runs fn after it applies the change,
+// so state fn invalidates is invalidated again after the last node applies
+// it. The boot load does not run fn.
+func (s *System) OnChangeApplied(fn func(context.Context)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.changeApplied = fn
+	s.mu.Unlock()
+}
+
 // ApplyChanged reloads this node synchronously, publishes a cross-node
 // invalidation event, and reports per-step outcomes so callers can distinguish
 // "persisted" from "live". The last known-good engine remains active on reload
@@ -381,25 +405,50 @@ func (s *System) engineOptions(extra ...EngineOption) []EngineOption {
 }
 
 func (s *System) reloadFromStore(ctx context.Context) error {
-	sources, generation, err := s.loadSnapshot(ctx)
+	announce, err := s.reloadSerialized(ctx)
 	if err != nil {
 		return err
+	}
+	s.mu.RLock()
+	changeApplied := s.changeApplied
+	s.mu.RUnlock()
+	if announce && changeApplied != nil {
+		changeApplied(ctx)
+	}
+	return nil
+}
+
+// reloadSerialized loads the store's current policy into the engine, one
+// reload at a time: overlapping reloads could otherwise apply an older
+// snapshot after a newer one. It reports whether the loaded generation is
+// newer than any announced before.
+func (s *System) reloadSerialized(ctx context.Context) (announce bool, err error) {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+	sources, generation, err := s.loadSnapshot(ctx)
+	if err != nil {
+		return false, err
 	}
 
 	s.mu.RLock()
 	engine := s.engine
 	s.mu.RUnlock()
 	if engine == nil {
-		return errors.New("policy system is not started")
+		return false, errors.New("policy system is not started")
 	}
 	if err := engine.Reload(ctx, sources, generation); err != nil {
-		return err
+		return false, err
 	}
 	s.mu.Lock()
 	s.bootDegradedReason = ""
+	// Two reloads of one generation announce it once.
+	announce = generation > s.announcedGeneration
+	if announce {
+		s.announcedGeneration = generation
+	}
 	s.mu.Unlock()
 	s.logger.InfoContext(ctx, "policy engine reloaded", "generation", generation)
-	return nil
+	return announce, nil
 }
 
 func (s *System) loadSnapshot(ctx context.Context) (map[string]ActiveSource, int64, error) {

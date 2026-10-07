@@ -106,3 +106,19 @@ func TestItemToRecordOmitsAnAbsentAdvisory(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddingsForModelKeepsOnlyThatModel(t *testing.T) {
+	records := []EmbeddingRecord{
+		{MediaItemID: "movie-1", Model: "nomic-embed-text"},
+		{MediaItemID: "movie-2", Model: "gemini-embedding-001"},
+		{MediaItemID: "movie-3", Model: "nomic-embed-text"},
+		{MediaItemID: "movie-4", Model: ""},
+	}
+	got := embeddingsForModel(records, "nomic-embed-text")
+	if len(got) != 2 || got[0].MediaItemID != "movie-1" || got[1].MediaItemID != "movie-3" {
+		t.Fatalf("embeddingsForModel = %#v", got)
+	}
+	if got := embeddingsForModel(records, ""); len(got) != 0 {
+		t.Fatalf("an unknown model kept %#v", got)
+	}
+}

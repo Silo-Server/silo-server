@@ -3,6 +3,8 @@ package recommendations
 import (
 	"context"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ScoredItem represents a recommended item with a relevance score and explanation.
@@ -21,7 +23,7 @@ type ForYouRow struct {
 	Items        []ScoredItem `json:"items"`
 }
 
-// ForYouResponse is the grouped response for the ForYou endpoint.
+// ForYouResponse is the grouped response of the For You rows endpoint.
 type ForYouResponse struct {
 	Rows []ForYouRow `json:"rows"`
 }
@@ -56,16 +58,16 @@ type WatchSignal struct {
 	LastWatchedAt time.Time
 }
 
-// Recommender provides recommendation operations.
+// Recommender provides recommendation operations. The profile-scoped reads
+// take the viewer's access filter and leave out what it cannot see before
+// ranking, so a restricted viewer still gets a full list.
 type Recommender interface {
-	SimilarItems(ctx context.Context, itemID string, limit int) ([]ScoredItem, error)
-	ForYou(ctx context.Context, userID int, profileID string, limit int) (*ForYouResponse, error)
-	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int) ([]ScoredItem, error)
-	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int) ([]ScoredItem, error)
+	SimilarItems(ctx context.Context, itemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
+	BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
+	SimilarUsersLiked(ctx context.Context, userID int, profileID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error)
 	RefreshTasteProfile(ctx context.Context, userID int, profileID string) error
 	GetTasteProfileSummary(ctx context.Context, userID int, profileID string) (*TasteProfileSummary, error)
-	EmbedItem(ctx context.Context, itemID string) error
-	EmbedAll(ctx context.Context) (embedded int, err error)
+	EmbedAll(ctx context.Context) (EmbedCounts, error)
 }
 
 // TasteProfileSummary is the user-facing taste profile response.
@@ -113,15 +115,6 @@ const (
 	ColdStartFullPersonalized = 15
 	ColdStartMixed            = 5
 	ColdStartMinimal          = 1
-)
-
-// MMR lambda values by recommendation type.
-const (
-	LambdaForYou         = 0.7
-	LambdaGenreRow       = 0.8
-	LambdaBecauseWatched = 0.7
-	LambdaSimilarUsers   = 0.6
-	LambdaSimilarItems   = 0.8
 )
 
 // GenreCapPercent is the maximum fraction of a recommendation row any single genre can occupy.

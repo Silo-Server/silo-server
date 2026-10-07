@@ -448,6 +448,7 @@ type MetadataService struct {
 	groupOverrideRepo       metadataGroupOverrideRepo
 	observedLocationRepo    metadataObservedLocationRepo
 	dbPool                  *pgxpool.Pool
+	recsStaler              RecommendationStaler
 
 	dedupLocks      keyedDedupLocks
 	onDemandRefresh keyedRefreshSet
@@ -7127,7 +7128,7 @@ func (s *MetadataService) recoverProviderIDConflict(
 			return "", fmt.Errorf("loading source status for provider conflict recovery: %w", statusErr)
 		}
 		if isProvisionalOwnershipStatus(sourceStatus) && isConfirmedOwnershipStatus(existing.Status) {
-			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, sourceContentID, existing.ContentID, false)
+			canonicalID, err := canonicalizeProviderIDDuplicateInto(ctx, s.dbPool, s.recsStaler, sourceContentID, existing.ContentID, false)
 			if err != nil {
 				return "", err
 			}
@@ -7241,6 +7242,21 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 			`,
 			args: []any{fromContentID, toContentID},
 		},
+		// A target with no embedding keeps the source's until the backfill
+		// re-embeds it from the target's own text, as the provider-ID merge
+		// does. The source's row goes with the source item (ON DELETE
+		// CASCADE), and stays when the source item survives.
+		{
+			name: "merge embeddings",
+			sql: `
+				INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text, created_at, updated_at)
+				SELECT $2, embedding, model, canonical_text, created_at, updated_at
+				FROM media_item_embeddings
+				WHERE media_item_id = $1
+				ON CONFLICT (media_item_id) DO NOTHING
+			`,
+			args: []any{fromContentID, toContentID},
+		},
 		{
 			name: "delete orphaned skeleton",
 			sql: `
@@ -7261,12 +7277,13 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 	if err != nil {
 		return err
 	}
-	if _, err := reattribute.Run(ctx, tx, reattribute.Options{
+	report, err := reattribute.Run(ctx, tx, reattribute.Options{
 		FromContentID: fromContentID,
 		ToContentID:   toContentID,
 		WholeItem:     true,
 		EpisodePairs:  episodePairs,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("reattributing user state %s -> %s: %w", fromContentID, toContentID, err)
 	}
 
@@ -7286,6 +7303,7 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
+	MarkRecommendationsStale(ctx, s.recsStaler, MovedStateTargets(report, toContentID, episodePairs)...)
 	return nil
 }
 

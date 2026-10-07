@@ -45,7 +45,8 @@ type listBinding struct {
 	removeItems func(ctx context.Context, cfg ServerConfig, conn Connection, provider Provider, items []LocalFavorite) (result ExportResult, ok bool, err error)
 
 	// Local list operations against the per-user store.
-	localAdd    func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error
+	// localAdd reports whether the item was new to the local list.
+	localAdd    func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) (bool, error)
 	localRemove func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error
 	localList   func(ctx context.Context, store userstore.UserStore, profileID string, limit, offset int) ([]listRow, error)
 
@@ -101,9 +102,8 @@ func (s *Service) favoritesBinding() listBinding {
 			res, err := remover.RemoveFavorites(ctx, cfg, conn, items)
 			return res, true, err
 		},
-		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error {
-			_, err := store.AddFavoriteAt(ctx, profileID, mediaItemID, at)
-			return err
+		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) (bool, error) {
+			return store.AddFavoriteAt(ctx, profileID, mediaItemID, at)
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
 			return store.RemoveFavorite(ctx, profileID, mediaItemID)
@@ -170,9 +170,8 @@ func (s *Service) watchlistBinding() listBinding {
 			res, err := remover.RemoveWatchlist(ctx, cfg, conn, items)
 			return res, true, err
 		},
-		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error {
-			_, err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
-			return err
+		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) (bool, error) {
+			return store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
 			return store.RemoveFromWatchlist(ctx, profileID, mediaItemID)
@@ -225,6 +224,15 @@ type ImportListResult struct {
 	Unmatched int
 	Removed   int
 	Warnings  []string
+	// added counts the imported items that were new to the local list;
+	// Imported also counts the ones it already held.
+	added int
+}
+
+// changedLocalList reports whether the import added to or removed from the
+// local list.
+func (r ImportListResult) changedLocalList() bool {
+	return r.added > 0 || r.Removed > 0
 }
 
 // importList pulls the provider's list (favorites or watchlist) and mirrors it
@@ -277,8 +285,12 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
-		if err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt); err != nil {
+		added, err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt)
+		if err != nil {
 			return result, err
+		}
+		if added {
+			result.added++
 		}
 		orderedIDs = append(orderedIDs, match.MediaItemID)
 		result.Imported++

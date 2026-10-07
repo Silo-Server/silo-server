@@ -20,6 +20,11 @@ const mockFetchLibrarySectionItems = vi.fn();
 const mockUseSidebarPins = vi.fn();
 const mockUseLibraryCollectionItems = vi.fn();
 const mockUseLibraryHasItems = vi.fn();
+const mockFetchRecipeCatalog = vi.fn();
+
+vi.mock("@/lib/recipes", () => ({
+  fetchRecipeCatalog: () => mockFetchRecipeCatalog(),
+}));
 
 vi.mock("@/hooks/queries/catalog", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/queries/catalog")>()),
@@ -79,13 +84,14 @@ vi.mock("@/components/SectionRow", () => ({
     section: {
       title: string;
       section_type: string;
-      items: Array<{ user_state?: { is_favorite: boolean } }>;
+      items: Array<{ content_id: string; user_state?: { is_favorite: boolean } }>;
     };
   }) => (
     <div
       data-kind="section-row"
       data-section-type={section.section_type}
       data-favorite={section.items[0]?.user_state?.is_favorite ? "true" : "false"}
+      data-item-ids={section.items.map((item) => item.content_id).join(",")}
     >
       {section.title}
     </div>
@@ -202,6 +208,8 @@ describe("LibraryRecommended", () => {
     mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
     mockUseLibraryHasItems.mockReset();
     mockUseLibraryHasItems.mockReturnValue({ data: undefined });
+    mockFetchRecipeCatalog.mockReset();
+    mockFetchRecipeCatalog.mockResolvedValue({ categories: {} });
   });
 
   afterEach(async () => {
@@ -220,6 +228,58 @@ describe("LibraryRecommended", () => {
     });
     return queryClient;
   }
+
+  it("drops what an earlier row shows from avoid-duplicates rows", async () => {
+    mockFetchRecipeCatalog.mockResolvedValue({
+      categories: {
+        personalized: [
+          {
+            type: "recommended_for_you",
+            category: "personalized",
+            presets: [],
+            avoid_duplicates: true,
+            supports_rotation: false,
+            admin_only: false,
+          },
+        ],
+      },
+    });
+    mockUseLibraryLayout.mockReturnValue({
+      data: {
+        sections: [
+          makeLayout({ id: "recent", title: "Recently Added" }),
+          makeLayout({ id: "for-you", section_type: "recommended_for_you", title: "For You" }),
+        ],
+      },
+      isLoading: false,
+    });
+    mockFetchLibrarySectionItems.mockImplementation((_libraryId: number, sectionId: string) => {
+      const section =
+        sectionId === "recent"
+          ? makeSection({ id: "recent", title: "Recently Added" })
+          : makeSection({ id: "for-you", section_type: "recommended_for_you", title: "For You" });
+      const items =
+        sectionId === "recent"
+          ? section.items
+          : [...section.items, { ...section.items[0]!, content_id: "item-2", title: "Item Two" }];
+      return Promise.resolve({ section: { ...section, items, total_count: items.length } });
+    });
+
+    await render(<LibraryRecommended libraryId={42} />);
+
+    await waitFor(() => {
+      expect(
+        container
+          .querySelector('[data-section-type="recommended_for_you"]')
+          ?.getAttribute("data-item-ids"),
+      ).toBe("item-2");
+    });
+    expect(
+      container
+        .querySelector('[data-section-type="recently_added"]')
+        ?.getAttribute("data-item-ids"),
+    ).toBe("item-1");
+  });
 
   it("does not invalidate cached library sections on mount", async () => {
     const invalidateQueries = vi.spyOn(QueryClient.prototype, "invalidateQueries");

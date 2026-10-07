@@ -19,6 +19,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
+// signalsNotifyTimeout bounds reporting a run's signal changes, which happens
+// after the run's own context may have ended.
+const signalsNotifyTimeout = 10 * time.Second
+
+// SignalsChangedNotifier records that a profile's recommendation signals
+// changed, so its taste profile and cached recommendations get rebuilt.
+// *recommendations.Worker implements it.
+type SignalsChangedNotifier interface {
+	NotifySignalsChanged(ctx context.Context, userID int, profileID string)
+}
+
 // maxConcurrentRuns limits how many import runs execute simultaneously.
 // Additional runs stay queued until a slot opens. This prevents overwhelming
 // the external server and database when bulk-importing many users at once.
@@ -47,6 +58,10 @@ type Service struct {
 	runCancels   map[string]context.CancelFunc
 	runCancelsMu sync.Mutex
 	observers    []Observer
+
+	// signals hears once per run that the profile's signals changed. Nil
+	// reports nothing.
+	signals SignalsChangedNotifier
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -81,6 +96,33 @@ func (s *Service) SetLocalNetworkAccess(access *LocalNetworkAccess) {
 	if s != nil {
 		s.localNetwork = access
 	}
+}
+
+// SetSignalsChangedNotifier installs where a run reports that it changed the
+// importing profile's recommendation signals.
+func (s *Service) SetSignalsChangedNotifier(notifier SignalsChangedNotifier) {
+	if s != nil {
+		s.signals = notifier
+	}
+}
+
+// notifySignalsChanged reports a run's signal changes once it ends.
+func (s *Service) notifySignalsChanged(ctx context.Context, userID int, profileID string) {
+	if s.signals == nil {
+		return
+	}
+	notifyCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signalsNotifyTimeout)
+	defer cancel()
+	s.signals.NotifySignalsChanged(notifyCtx, userID, profileID)
+}
+
+// runChangedSignals reports whether a run should report that it changed the
+// profile's recommendation signals: every completed run, and a failed run
+// that had already written progress, history, favorites or watchlist entries,
+// since records are written one by one.
+func runChangedSignals(completed bool, summary ExecutionSummary) bool {
+	return completed || summary.ProgressUpdated > 0 || summary.HistoryCreated > 0 ||
+		summary.FavoritesImported > 0 || summary.WatchlistAdded > 0
 }
 
 func (s *Service) SetStableIdentityResolver(identity *watchstate.StableIdentityResolver) {
@@ -329,6 +371,12 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		Warnings:         []string{},
 		UnmatchedSamples: []UnmatchedSample{},
 	}
+	completed := false
+	defer func() {
+		if runChangedSignals(completed, summary) {
+			s.notifySignalsChanged(ctx, run.UserID, run.ProfileID)
+		}
+	}()
 	if claim.Generation == 0 {
 		if err := s.repo.MarkRunStarted(ctx, run.ID); err != nil {
 			slog.Error("history import: failed to mark run started", "run_id", run.ID, "error", err)
@@ -447,16 +495,19 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 			return
 		}
 		outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
+		// A write that landed counts even when a later step for the record
+		// failed, so a run that then fails still reports the signal change.
+		if outcome.ProgressWritten {
+			summary.ProgressUpdated++
+		}
+		if outcome.HistoryCreated {
+			summary.HistoryCreated++
+		}
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
-			if outcome.ProgressWritten {
-				summary.ProgressUpdated++
-			} else {
+			if !outcome.ProgressWritten {
 				summary.Skipped++
-			}
-			if outcome.HistoryCreated {
-				summary.HistoryCreated++
 			}
 			if outcome.HiddenSuppressed {
 				hiddenSuppressed++
@@ -477,6 +528,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		slog.Error("history import: failed to complete run", "run_id", run.ID, "error", err)
 		return
 	}
+	completed = true
 	observation.Finish("success")
 	s.notifyRunByID(ctx, run.ID)
 	slog.Info(
