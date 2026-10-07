@@ -277,6 +277,17 @@ func (s *Service) HasLoginName(ctx context.Context, name string) (bool, error) {
 	return true, nil
 }
 
+// PasswordLoginUsesDirectory reports whether a password sign-in with
+// username would go to the directory (LDAP) instead of a local account (see
+// routePasswordLogin).
+func (s *Service) PasswordLoginUsesDirectory(ctx context.Context, username string) (bool, error) {
+	providerID, err := s.routePasswordLogin(ctx, username)
+	if err != nil {
+		return false, err
+	}
+	return providerID != LocalProviderID, nil
+}
+
 func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider) {
 	if provider == nil || info.ID == "" {
 		return

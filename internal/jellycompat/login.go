@@ -149,9 +149,11 @@ func splitPasswordPIN(password string) (basePw, pin string) {
 }
 
 // parseLogin reads username#profile. When no account has the name before
-// the last '#' but the whole name is an account, such as one named after an
-// old Discord name like "name#1234", the whole name is the account and no
-// profile is named.
+// the last '#' and that name would not go to the directory, but the whole
+// name is an account, such as one named after an old Discord name like
+// "name#1234", the whole name is the account and no profile is named. A name
+// the directory may still provision keeps the split, so a local account can
+// never block a directory user's first sign-in.
 func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
 	accountUsername, profileName, hasExplicitProfile, err = parseProfileLogin(combinedUsername)
 	if err != nil || !hasExplicitProfile {
@@ -162,6 +164,13 @@ func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string)
 		return "", "", false, err
 	}
 	if splitExists {
+		return accountUsername, profileName, true, nil
+	}
+	usesDirectory, err := r.authService.PasswordLoginUsesDirectory(ctx, accountUsername)
+	if err != nil {
+		return "", "", false, err
+	}
+	if usesDirectory {
 		return accountUsername, profileName, true, nil
 	}
 	whole := strings.TrimSpace(combinedUsername)

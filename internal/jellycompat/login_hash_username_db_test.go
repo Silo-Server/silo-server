@@ -21,7 +21,9 @@ import (
 // whole name, and name#1234#Profile selects one of its profiles. When an
 // account has the name before the last '#', the name is read as
 // username#profile as before, so registering a name with '#' in it cannot
-// take over another account's profile sign-in.
+// take over another account's profile sign-in. With a directory (LDAP), a
+// name before the last '#' that has no account yet goes to the directory, so
+// a local account named with the whole name cannot block its first sign-in.
 func TestLoginAccountNameWithHashDB(t *testing.T) {
 	pool, suffix := jellyfin12CompatPool(t)
 	ctx := context.Background()
@@ -105,5 +107,22 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 		if _, err := resolver.Resolve(ctx, name, password, "test", ""); !errors.Is(err, ErrProfileRequired) {
 			t.Fatalf("%q: error = %v, want ErrProfileRequired", name, err)
 		}
+	}
+
+	directory := &countingDirectory{}
+	directorySvc := auth.NewService(auth.NewLocalProvider(users, sessions), auth.NewJWTService("jellycompat-login-test-secret-0123456789", time.Minute, time.Hour),
+		sessions, users, nil, nil, nil)
+	directorySvc.SetPluginProviderSource(directorySource{{
+		Info:     auth.LoginProviderInfo{ID: "plugin:1:ldap", DisplayName: "Directory", Mode: auth.ProviderModeCredentials, InstallationID: 1},
+		Provider: directory,
+	}})
+	directoryResolver := NewLoginResolver(directorySvc, stores, NewSessionStore(time.Hour, nil), nil, nil)
+	unprovisioned := fmt.Sprintf("jfdirhash-%d", suffix)
+	account(unprovisioned+"#Kids", "Main")
+	if _, err := directoryResolver.Resolve(ctx, unprovisioned+"#Kids", "directory-secret", "test", ""); err == nil {
+		t.Fatalf("%s#Kids: a password the directory refused signed in", unprovisioned)
+	}
+	if len(directory.passwords) != 1 || directory.passwords[0] != "directory-secret" {
+		t.Fatalf("%s#Kids: directory asked %q, want one attempt for the unprovisioned name", unprovisioned, directory.passwords)
 	}
 }
