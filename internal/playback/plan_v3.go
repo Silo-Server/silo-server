@@ -807,7 +807,7 @@ func lowerVersionServesQualitiesV3(input PlannerInputV3) bool {
 func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
 	lower := input.LowerVersion.Lower
 	qualities := []AvailableQualityV3{originalQualityEntryV3(input.LowerVersion.Requested)}
-	if label, ok := lowerVersionLabelV3(lower); ok {
+	if label, ok := lowerVersionLabelV3(input.LowerVersion.Requested, lower); ok {
 		qualities = append(qualities, AvailableQualityV3{
 			Label:       label,
 			DisplayName: label,
@@ -822,10 +822,12 @@ func lowerVersionQualitiesV3(input PlannerInputV3) []AvailableQualityV3 {
 // lower version unchanged: the planner preserves a source no taller than the
 // preference's height. Only the 1080p and 720p classes qualify. "480p" is also
 // a fixed transcode rung, and a source taller than its class, such as
-// 2560x1440 in the 1080p class, would be scaled down.
-func lowerVersionLabelV3(lower SourceDescriptorV3) (string, bool) {
+// 2560x1440 in the 1080p class, would be scaled down. The requested version
+// must be taller than the class, or the preference would preserve it (a
+// 3840x1080 source) instead of moving playback to the lower version.
+func lowerVersionLabelV3(requested, lower SourceDescriptorV3) (string, bool) {
 	class := sourceLadderHeightV3(lower)
-	if (class != 1080 && class != 720) || lower.Height <= 0 || lower.Height > class {
+	if (class != 1080 && class != 720) || lower.Height <= 0 || lower.Height > class || requested.Height <= class {
 		return "", false
 	}
 	return strconv.Itoa(class) + "p", true

@@ -1328,7 +1328,10 @@ lower-resolution version instead, when the item has one and the request allows
 version fallback. The menu is then `original` (the requested 4K version), the
 first non-4K version in fallback order at its plain resolution class (`1080p`
 or `720p`, with that version's height and bitrate; omitted when the version is
-taller than its class), and the rungs a transcode of that version can serve.
+taller than its class or the requested version is not taller than it), and the
+rungs a transcode of that version can serve. When that version cannot play and
+the fallback adopts a later non-4K version, the plan it returns describes the
+version it adopted.
 Choosing any of them refuses the 4K source, so the fallback plays the lower
 version: unchanged for its plain label or a rung it fits, transcoded for a lower
 rung. `original` returns to the 4K version. The menu stays the same while the
