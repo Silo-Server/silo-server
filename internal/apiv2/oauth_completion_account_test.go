@@ -36,7 +36,7 @@ func (f *completionAccountViews) CurrentUser(context.Context, *auth.Claims) (han
 
 func (f *completionAccountViews) OAuthUserView(_ context.Context, user *models.User) handlers.UserView {
 	f.projected = user
-	return handlers.UserView{ID: user.ID, Username: user.Username, Email: user.Email, Role: user.Role, Permissions: auth.EffectivePermissions(user), PasswordChangeRequired: user.PasswordChangeRequired}
+	return handlers.UserView{ID: user.ID, Username: user.Username, Email: user.Email, Role: user.Role, Permissions: append([]string{}, user.Permissions...), PasswordChangeRequired: user.PasswordChangeRequired}
 }
 
 func TestOAuthCompletionUsesAccountReadAtRedemption(t *testing.T) {

@@ -646,6 +646,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				userRepo,
 				nil,
 				checkPrimaryProfile,
+				accessGroupStore,
 			).RequireMarkerEdit
 		}
 	}
