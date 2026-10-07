@@ -766,12 +766,10 @@ func availableQualitiesV3(input PlannerInputV3, source SourceDescriptorV3) []Ava
 	return append([]AvailableQualityV3{originalQualityEntryV3(source)}, transcodeRungsV3(input, input.EffectiveFile, source)...)
 }
 
-// originalQualityEntryV3 is the menu entry that plays source unchanged. Its
-// display name spares clients deriving one from the wire label "original".
+// originalQualityEntryV3 is the menu entry that plays source unchanged.
 func originalQualityEntryV3(source SourceDescriptorV3) AvailableQualityV3 {
 	return AvailableQualityV3{
 		Label:           QualityOriginalV3,
-		DisplayName:     "Original",
 		Height:          source.Height,
 		BitrateKbps:     source.BitrateKbps,
 		PreservesSource: true,
