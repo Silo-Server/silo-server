@@ -80,6 +80,7 @@ type Dependencies struct {
 	ObserveRoutes func([]streamtelemetry.WalkedRoute)
 
 	DirectDownloads                  *DirectDownloadHandlers
+	DirectDownloadLinks              DirectDownloadLinkService
 	ViewerSubtitleDelete             ViewerSubtitleDeleteService
 	OrderedApplePush                 OrderedApplePushService
 	NotificationEmailVerification    NotificationEmailVerificationService
@@ -256,6 +257,12 @@ type Dependencies struct {
 	Auth *apimw.AuthMiddleware
 	// ViewerAccess resolves the declared profile into a viewer scope.
 	ViewerAccess *apimw.ViewerAccessMiddleware
+	// HouseholdProfile refuses a request without X-Profile-Id when the
+	// account has a PIN-protected or access-restricted profile
+	// (apimw.HouseholdProfileGate). Operations declaring
+	// HouseholdProfileGate run it after viewer access and fail closed when
+	// it is not wired.
+	HouseholdProfile func(http.Handler) http.Handler
 	// ActingAdmin is the admin-through-primary-profile gate.
 	ActingAdmin func(http.Handler) http.Handler
 	// PermissionGates maps a permission name (policy.Permission* constants)
@@ -308,6 +315,7 @@ type Dependencies struct {
 	// AdminUsers lists accounts for administrators (*handlers.AdminHandler).
 	AdminUsers           AdminUserService
 	AdminAccounts        AdminAccountService
+	AdminLoginSessions   AdminLoginSessionService
 	AdminAccountActivity AdminAccountActivityService
 	AdminAccountSettings AdminAccountSettingsService
 	AdminAccessGroups    AdminAccessGroupService
@@ -384,6 +392,9 @@ type Dependencies struct {
 	// ProfileSections reads and writes a profile's home-row overrides
 	// (*handlers.SectionHandler).
 	ProfileSections ProfileSectionService
+	// AdminProfileSections reads and writes any account's profile page
+	// layouts for an administrator (*handlers.SectionHandler).
+	AdminProfileSections AdminProfileSectionService
 	// SectionFlags reads the profile-facing sections settings
 	// (*handlers.SectionSettingsHandler).
 	SectionFlags SectionFlagService
@@ -1202,6 +1213,9 @@ type SessionService interface {
 	DiscoverProviders(ctx context.Context) (auth.ProviderDiscovery, error)
 	Refresh(ctx context.Context, refreshToken string) (handlers.RefreshedTokensView, error)
 	ListSessionsPage(ctx context.Context, userID int, after *auth.SessionKey, limit int) ([]*models.AuthSession, bool, error)
+	// CurrentLoginSession returns nil, not an error, when the session is no
+	// longer live.
+	CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error)
 	RevokeSession(ctx context.Context, sessionID string, userID int) error
 	SetupInitialUser(ctx context.Context, in handlers.RegistrationInput) (handlers.TokenPairView, error)
 	SignupEnabled(ctx context.Context) (bool, error)

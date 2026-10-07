@@ -63,7 +63,10 @@ and S3 with a separate public or token-authenticated delivery endpoint return
 signed `/api/v2/artwork/...` URLs; the server reads the storage API to avoid
 external delivery lag. Standard S3 delivery returns direct presigned URLs.
 See [trickplay](architecture/trickplay.md#serving) for access rules, sheet
-geometry, and revision retention.
+geometry, and revision retention. Like `getWatchState`, the manifest read
+accepts a request without `X-Profile-Id` only while no profile on the account
+is PIN-protected or access-restricted; otherwise it answers `422
+validation_failed` at `header.x-profile-id`.
 
 ## Start
 

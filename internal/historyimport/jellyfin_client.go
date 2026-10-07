@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,7 @@ const (
 	// favorite in Silo, so only movies, shows, and episodes are requested.
 	jellyfinPlayableItemTypes = "Movie,Episode"
 	jellyfinFavoriteItemTypes = "Movie,Series,Episode"
+	jellyfinVideoMediaType    = "Video"
 )
 
 type JellyfinClient struct {
@@ -158,18 +160,27 @@ func (c *JellyfinClient) FetchItemsByIDs(ctx context.Context, auth jellyfinLocal
 	return allItems, nil
 }
 
+// FetchResumableItems pages through the user's in-progress movies and
+// episodes. It filters by MediaTypes=Video, as Jellyfin's own Continue
+// Watching row does, and keeps movies and episodes here: on a large Jellyfin
+// 12.1 library the same request with IncludeItemTypes took over a minute,
+// longer than the client timeout, while MediaTypes answered in under a second.
 func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinLocalAuth) ([]jellyfinItem, error) {
 	query := url.Values{}
 	query.Set("UserId", auth.UserID)
 	query.Set("EnableUserData", "true")
-	query.Set("IncludeItemTypes", jellyfinPlayableItemTypes)
+	query.Set("MediaTypes", jellyfinVideoMediaType)
 	query.Set("Fields", jellyfinItemFields)
 
 	items, err := c.fetchPagedItems(ctx, auth, auth.endpoint("/UserItems/Resume"), query)
 	if err != nil {
 		return nil, fmt.Errorf("fetching Jellyfin resumable items: %w", err)
 	}
-	return items, nil
+	// Filter after paging: paging stops on a short page, so it must see the
+	// unfiltered page sizes.
+	return slices.DeleteFunc(items, func(item jellyfinItem) bool {
+		return !strings.EqualFold(item.Type, "Movie") && !strings.EqualFold(item.Type, "Episode")
+	}), nil
 }
 
 func (c *JellyfinClient) fetchPagedItems(ctx context.Context, auth jellyfinLocalAuth, endpoint string, query url.Values) ([]jellyfinItem, error) {

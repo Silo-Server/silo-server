@@ -97,6 +97,12 @@ func requireViewableLibrary(ctx context.Context, folders *catalog.FolderReposito
 	if !viewerCanAccessLibrary(ctx, libraryID) {
 		return apiError(http.StatusNotFound, "not_found", "Library not found")
 	}
+	return requireEnabledLibrary(ctx, folders, libraryID)
+}
+
+// requireEnabledLibrary is requireViewableLibrary without the viewer's
+// library access: the library must exist and be enabled.
+func requireEnabledLibrary(ctx context.Context, folders *catalog.FolderRepository, libraryID int) error {
 	if folders == nil {
 		return nil
 	}

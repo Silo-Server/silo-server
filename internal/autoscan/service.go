@@ -29,7 +29,7 @@ type Store interface {
 	ListEnabledSources(ctx context.Context) ([]Source, error)
 	GetSource(ctx context.Context, id string) (Source, error)
 	GetConnection(ctx context.Context, id string) (Connection, error)
-	AdvanceMarker(ctx context.Context, sourceID, marker string) error
+	AdvanceMarker(ctx context.Context, adv MarkerAdvance) (bool, error)
 	RecordError(ctx context.Context, sourceID, msg string) error
 	CreateEvent(ctx context.Context, event EventCreate) (int64, error)
 	FinishEvent(ctx context.Context, event EventFinish) error
@@ -51,7 +51,8 @@ type Resolver interface {
 // Queuer enqueues resolved scan targets.
 type Queuer interface {
 	EnqueueScans(ctx context.Context, targets []scantrigger.Target) error
-	EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) (created, reused int, err error)
+	// EnqueueAutoscanScans returns one outcome per target, in order.
+	EnqueueAutoscanScans(ctx context.Context, targets []scantrigger.Target, eventID int64) ([]scantrigger.EnqueueOutcome, error)
 }
 
 type resolveStats struct {
@@ -175,6 +176,10 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 	}
 	ttl := time.Duration(settings.DebounceSeconds) * time.Second
 	now := time.Now()
+	// Descriptors are only needed for sources with no bound connection, so the
+	// installed-plugin listing is read at most once per cycle and only then.
+	var requirements map[sourceIdentity]ConnectionRequirement
+	requirementsLoaded := false
 
 	for _, src := range sources {
 		// Webhook sources are fed by IngestChanges when the provider POSTs to
@@ -195,6 +200,16 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 				continue
 			}
 		}
+		// The list was read at the start of the cycle, and the sources ahead
+		// of this one may have taken a while. An admin edit since then may have
+		// reset the marker (a new connection or config, or a repointed
+		// connection), so poll from the current row: sending the listed marker
+		// to a new upstream would replay or skip its history.
+		current, ok := s.currentPollSource(ctx, src)
+		if !ok {
+			continue
+		}
+		src = current
 		marker := ""
 		if src.Marker != nil {
 			marker = *src.Marker
@@ -203,41 +218,40 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 		if !started {
 			continue
 		}
-		// A connection is OPTIONAL. Server-based providers (Sonarr/Radarr) bind a
-		// connection and the resolved {base_url, api_key} is handed to the plugin.
-		// Other providers (e.g. a filesystem/CephFS watcher) need none and get an
-		// empty connection they ignore. If a plugin requires a connection it didn't
-		// get, it returns an error that is RecordError'd below — so the operator
-		// still sees "needs attention" without the host assuming every source is
-		// credential-based.
+		// Whether a connection is needed comes from the source's descriptor.
+		// Server-based providers (Sonarr/Radarr) bind a connection and the
+		// resolved {base_url, api_key} is handed to the plugin. Other providers
+		// (e.g. a filesystem/CephFS watcher) need none and get an empty
+		// connection they ignore. A source whose descriptor requires a
+		// connection but has none bound is not sent to the plugin: the call can
+		// only fail, and the host can say what to fix more plainly than the
+		// plugin's error would.
+		if src.ConnectionID == nil {
+			if !requirementsLoaded {
+				requirements = s.connectionRequirements(ctx)
+				requirementsLoaded = true
+			}
+			if requirements[sourceIdentity{src.PluginID, src.CapabilityID}] == ConnectionRequired {
+				s.failPoll(ctx, src, eventID, marker, missingConnectionMessage)
+				continue
+			}
+		}
 		var conn ResolvedConnection
+		var connRow *Connection
 		if src.ConnectionID != nil {
-			resolved, cerr := s.resolveConnection(ctx, *src.ConnectionID)
+			row, resolved, cerr := s.resolveConnection(ctx, *src.ConnectionID)
 			if cerr != nil {
 				slog.WarnContext(ctx, "autoscan: resolve connection failed", "component", "autoscan", "source_id", src.ID, "err", cerr)
-				if rerr := s.store.RecordError(ctx, src.ID, cerr.Error()); rerr != nil {
-					slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
-				}
-				s.finishEvent(ctx, eventID, EventFinish{
-					Status:       EventStatusError,
-					ErrorMessage: cerr.Error(),
-					MarkerAfter:  marker,
-				})
+				s.failPoll(ctx, src, eventID, marker, cerr.Error())
 				continue
 			}
 			conn = resolved
+			connRow = &row
 		}
 		changes, next, perr := s.provider.PollChanges(ctx, src.PluginID, src.CapabilityID, marker, conn, src.SourceConfig)
 		if perr != nil {
 			slog.WarnContext(ctx, "autoscan: poll changes failed", "component", "autoscan", "source_id", src.ID, "err", perr)
-			if rerr := s.store.RecordError(ctx, src.ID, perr.Error()); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
-			}
-			s.finishEvent(ctx, eventID, EventFinish{
-				Status:       EventStatusError,
-				ErrorMessage: perr.Error(),
-				MarkerAfter:  marker,
-			})
+			s.failPoll(ctx, src, eventID, marker, pollErrorMessage(perr))
 			continue // do NOT advance marker
 		}
 
@@ -249,9 +263,58 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 			Marker:        marker,
 			NextMarker:    next,
 			AdvanceMarker: true,
+			Connection:    connRow,
 		})
 	}
 	return nil
+}
+
+// missingConnectionMessage is recorded for a poll source whose descriptor
+// requires a connection when none is bound. It is written for the operator,
+// who sees it on the source row and in poll activity.
+const missingConnectionMessage = "No server selected. Edit the source and choose a server."
+
+// failPoll records a poll that ended before the provider returned changes: the
+// source's last_error and the event both carry msg, and the marker is held so
+// the next poll re-reads the same window.
+func (s *Service) failPoll(ctx context.Context, src Source, eventID int64, marker, msg string) {
+	if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
+		slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
+	}
+	s.finishEvent(ctx, eventID, EventFinish{
+		Status:       EventStatusError,
+		ErrorMessage: msg,
+		MarkerAfter:  marker,
+	})
+}
+
+// sourceIdentity is the (plugin, capability) pair a source is created against.
+type sourceIdentity struct {
+	pluginID     string
+	capabilityID string
+}
+
+// connectionRequirements maps each discoverable scan-source identity to its
+// resolved descriptor's connection requirement. It reads the same normalized
+// descriptors as the source write check (ListAvailableScanSources), so a
+// source the write path accepted is judged the same way here. A missing lister
+// or a listing failure yields nil, which leaves every source to the plugin's
+// own judgement: a transient listing fault must not stop otherwise working
+// sources polling.
+func (s *Service) connectionRequirements(ctx context.Context) map[sourceIdentity]ConnectionRequirement {
+	if s.lister == nil {
+		return nil
+	}
+	discovered, err := s.ListAvailableScanSources(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: list scan sources for connection requirements failed", "component", "autoscan", "err", err)
+		return nil
+	}
+	out := make(map[sourceIdentity]ConnectionRequirement, len(discovered))
+	for _, d := range discovered {
+		out[sourceIdentity{d.PluginID, d.CapabilityID}] = d.Descriptor.Connection
+	}
+	return out
 }
 
 // consumeOptions parameterizes the shared consume path for its two callers.
@@ -264,6 +327,9 @@ type consumeOptions struct {
 	Marker        string // poll: the window's opening marker, held on failure
 	NextMarker    string // poll: the provider's next marker
 	AdvanceMarker bool   // poll: true; webhook: false
+	// Connection is the connection row the poll read from (nil when the
+	// source has none); the marker advance is conditional on it.
+	Connection *Connection
 }
 
 // consumeResult reports what one consume pass did, for callers that surface
@@ -283,10 +349,17 @@ type consumeResult struct {
 // propagates it so the delivery can be retried by the sender.
 func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes []Change, opts consumeOptions) (consumeResult, error) {
 	rewritten := rewriteChanges(changes, src.PathRewrites)
-	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, opts.TTL)
+	records := newChangeRecords(changes, rewritten)
+	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, records, opts.TTL)
 	result := consumeResult{Stats: stats, ResolvedAny: resolvedAny}
+	// finish stamps the bounded change log onto every terminal event update.
+	finish := func(f EventFinish) {
+		f.Changes, f.ChangesTruncated = boundChangeRecords(records)
+		s.finishEvent(ctx, opts.EventID, f)
+	}
 	if len(targets) > maxAutoscanTargetsPerPoll {
 		collapsed := collapseTargetsToLibraryScans(targets)
+		collapsePendingToLibraries(records)
 		slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans", "component", "autoscan",
 			"source_id", src.ID,
 			"targets", len(targets),
@@ -296,13 +369,14 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		targets = collapsed
 	}
 	if len(targets) > 0 {
-		enqueue, eerr := s.enqueueScanTargets(ctx, targets, opts.EventID)
+		enqueue, outcomes, eerr := s.enqueueScanTargets(ctx, targets, opts.EventID)
 		result.Enqueue = enqueue
 		if eerr != nil {
 			s.releaseClaims(ctx, claimed)
+			failPending(records)
 			slog.WarnContext(ctx, "autoscan: enqueue failed", "component", "autoscan", "source_id", src.ID, "err", eerr)
 			result.Status = EventStatusError
-			s.finishEvent(ctx, opts.EventID, EventFinish{
+			finish(EventFinish{
 				Status:          EventStatusError,
 				ChangesReturned: len(changes),
 				ChangesResolved: stats.ChangesResolved,
@@ -313,6 +387,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 			})
 			return result, eerr // do NOT advance marker
 		}
+		applyEnqueueOutcomes(records, targets, outcomes)
 	}
 
 	// Advancing the marker is what tells the provider "I've consumed up to
@@ -354,7 +429,7 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 			slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
 		}
 		result.Status = EventStatusError
-		s.finishEvent(ctx, opts.EventID, EventFinish{
+		finish(EventFinish{
 			Status:          EventStatusError,
 			ChangesReturned: len(changes),
 			ChangesResolved: stats.ChangesResolved,
@@ -368,10 +443,12 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		return result, errors.New(msg) // do NOT advance marker
 	}
 	status := EventStatusSuccess
-	var statusMsg string
+	var statusMsg, unresolvedMsg string
+	markerAfter := opts.NextMarker
 	if len(changes) > 0 && !resolvedAny {
 		status = EventStatusUnresolved
-		statusMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder", len(changes))
+		unresolvedMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder", len(changes))
+		statusMsg = unresolvedMsg
 		if opts.AdvanceMarker {
 			statusMsg += " — advanced past them"
 			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
@@ -382,10 +459,15 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		}
 	}
 	if opts.AdvanceMarker {
-		if aerr := s.store.AdvanceMarker(ctx, src.ID, opts.NextMarker); aerr != nil {
+		advanced, aerr := s.store.AdvanceMarker(ctx, MarkerAdvance{
+			Source:     src,
+			Connection: opts.Connection,
+			NextMarker: opts.NextMarker,
+		})
+		if aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "component", "autoscan", "source_id", src.ID, "err", aerr)
 			result.Status = EventStatusError
-			s.finishEvent(ctx, opts.EventID, EventFinish{
+			finish(EventFinish{
 				Status:          EventStatusError,
 				ChangesReturned: len(changes),
 				ChangesResolved: stats.ChangesResolved,
@@ -398,9 +480,23 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 			})
 			return result, aerr
 		}
+		if !advanced {
+			// The source changed while this poll ran: an admin reset its
+			// marker by changing its connection, config or upstream. The
+			// window belongs to the old upstream, so the next poll starts
+			// from the reset marker instead, and the event must not claim
+			// an advance the source never stored.
+			slog.DebugContext(ctx, "autoscan: source changed during poll; not storing its marker", "component", "autoscan", "source_id", src.ID)
+			markerAfter = opts.Marker
+			statusMsg = unresolvedMsg
+			if statusMsg != "" {
+				statusMsg += "; "
+			}
+			statusMsg += markerNotStoredMessage
+		}
 	}
 	result.Status = status
-	s.finishEvent(ctx, opts.EventID, EventFinish{
+	finish(EventFinish{
 		Status:          status,
 		ChangesReturned: len(changes),
 		ChangesResolved: stats.ChangesResolved,
@@ -409,10 +505,14 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		ScansReused:     result.Enqueue.Reused,
 		ScansSuppressed: stats.Suppressed,
 		ErrorMessage:    statusMsg,
-		MarkerAfter:     opts.NextMarker,
+		MarkerAfter:     markerAfter,
 	})
 	return result, nil
 }
+
+// markerNotStoredMessage notes on a poll event that the source changed while
+// it ran, so the window's marker was dropped rather than stored.
+const markerNotStoredMessage = "source changed during the poll; its marker was not stored"
 
 // ChangeIngest is one webhook delivery's worth of changes for a source.
 type ChangeIngest struct {
@@ -577,11 +677,15 @@ func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (Ingest
 	}, cerr
 }
 
-func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, error) {
+// enqueueScanTargets enqueues targets in bounded chunks. With an event it also
+// returns one outcome per target, aligned with targets; event-less enqueues
+// report no per-target outcomes.
+func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, []scantrigger.EnqueueOutcome, error) {
 	var result EnqueueResult
 	if len(targets) == 0 {
-		return result, nil
+		return result, nil, nil
 	}
+	var outcomes []scantrigger.EnqueueOutcome
 	for start := 0; start < len(targets); start += maxAutoscanTargetsPerPoll {
 		end := start + maxAutoscanTargetsPerPoll
 		if end > len(targets) {
@@ -589,20 +693,26 @@ func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.
 		}
 		chunk := targets[start:end]
 		if eventID != 0 {
-			created, reused, err := s.queue.EnqueueAutoscanScans(ctx, chunk, eventID)
+			chunkOutcomes, err := s.queue.EnqueueAutoscanScans(ctx, chunk, eventID)
 			if err != nil {
-				return result, err
+				return result, nil, err
 			}
-			result.Created += created
-			result.Reused += reused
+			for _, outcome := range chunkOutcomes {
+				if outcome.Created {
+					result.Created++
+				} else {
+					result.Reused++
+				}
+			}
+			outcomes = append(outcomes, chunkOutcomes...)
 			continue
 		}
 		if err := s.queue.EnqueueScans(ctx, chunk); err != nil {
-			return result, err
+			return result, nil, err
 		}
 		result.Created += len(chunk)
 	}
-	return result, nil
+	return result, outcomes, nil
 }
 
 func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) (int64, bool) {
@@ -641,13 +751,35 @@ func (s *Service) finishEvent(ctx context.Context, eventID int64, finish EventFi
 	}
 }
 
-// resolveConnection loads and resolves a source's connection to credentials.
-func (s *Service) resolveConnection(ctx context.Context, connectionID string) (ResolvedConnection, error) {
+// currentPollSource re-reads src just before it is polled. It reports false
+// when the source is gone, is no longer an enabled poll source, or cannot be
+// read. A failed read skips the source for this cycle rather than polling the
+// listed row, whose marker may belong to an upstream an admin has since
+// replaced; its last_run_at is untouched, so the next cycle retries it.
+func (s *Service) currentPollSource(ctx context.Context, src Source) (Source, bool) {
+	current, err := s.store.GetSource(ctx, src.ID)
+	if errors.Is(err, ErrNotFound) {
+		return Source{}, false
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: re-read source before poll failed; skipping it this cycle", "component", "autoscan", "source_id", src.ID, "err", err)
+		return Source{}, false
+	}
+	if !current.Enabled || current.DeliveryMode == DeliveryModeWebhook {
+		return Source{}, false
+	}
+	return current, true
+}
+
+// resolveConnection loads a source's connection and resolves it to
+// credentials, returning both the row and the credentials.
+func (s *Service) resolveConnection(ctx context.Context, connectionID string) (Connection, ResolvedConnection, error) {
 	conn, err := s.store.GetConnection(ctx, connectionID)
 	if err != nil {
-		return ResolvedConnection{}, err
+		return Connection{}, ResolvedConnection{}, err
 	}
-	return s.connres.Resolve(ctx, conn)
+	resolved, err := s.connres.Resolve(ctx, conn)
+	return conn, resolved, err
 }
 
 func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
@@ -662,7 +794,9 @@ func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 // resolveAndClaim resolves changes to scan targets and atomically claims them
 // via the suppressor. Legacy/auto changes retain the historical parent-dir
 // collapse. Structured file changes resolve exact files, and subtree changes
-// resolve exact subtree paths even when the path no longer exists.
+// resolve exact subtree paths even when the path no longer exists. records is
+// aligned with changes and receives each change's target and outcome; claimed
+// changes are left pending until the enqueue reports which run covers them.
 //
 // Every claim is keyed on the path the source reported, not the scan target,
 // together with that path's observed state (see Suppressor). A video file
@@ -672,59 +806,99 @@ func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 // which a suppression keyed on the directory would have swallowed. Likewise a
 // file deleted or replaced shortly after it was imported is a new change, not
 // a duplicate of the import.
-func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl time.Duration) (targets []scantrigger.Target, claimed []suppressClaim, resolvedAny bool, stats resolveStats) {
+func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, records []ChangeRecord, ttl time.Duration) (targets []scantrigger.Target, claimed []suppressClaim, resolvedAny bool, stats resolveStats) {
 	seenTargets := make(map[string]struct{})
 
 	var legacyPaths []string
-	for _, change := range changes {
+	legacyByDir := make(map[string][]int)
+	for i, change := range changes {
+		rec := &records[i]
 		switch change.Scope {
 		case ChangeScopeFile, ChangeScopeSubtree:
-			target, ok := s.resolveChange(ctx, change, &stats)
+			target, ok := s.resolveChange(ctx, change, &stats, rec)
 			if !ok {
 				continue
 			}
 			resolvedAny = true
 			stats.ChangesResolved++
+			rec.setTarget(*target)
 			if !s.claimTarget(ctx, *target, filepath.Clean(change.SourcePath), ttl, seenTargets, &targets, &claimed) {
 				stats.Suppressed++
+				rec.setOutcome(ChangeOutcomeSuppressed, "", "")
+				continue
 			}
+			rec.pendingTarget = scanTargetKey(*target)
 		default:
+			if change.SourcePath == "" {
+				rec.setOutcome(ChangeOutcomeIgnored, string(scantrigger.ReasonPathRequired), "")
+				continue
+			}
 			legacyPaths = append(legacyPaths, change.SourcePath)
+			dir := filepath.Dir(change.SourcePath)
+			legacyByDir[dir] = append(legacyByDir[dir], i)
 		}
 	}
 
 	for _, group := range groupByParentDir(legacyPaths) {
 		dir := group.Dir
+		indexes := legacyByDir[dir]
+		apply := func(fn func(*ChangeRecord)) {
+			for _, i := range indexes {
+				fn(&records[i])
+			}
+		}
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
+		primaryErr := rerr
+		var fallbackErr error
 		if isRequestError(rerr) {
 			// The directory may have been removed (e.g. a deleted movie
 			// folder). Fall back to a reconciling scan of the vanished path so
 			// its files are marked missing promptly. Paths outside Silo's
 			// media folders still resolve to nothing and are skipped below.
 			target, rerr = s.resolver.ResolveVanishedPath(ctx, dir, scanTrigger)
+			fallbackErr = rerr
 		}
 		if rerr != nil {
 			var reqErr *scantrigger.RequestError
 			if errors.As(rerr, &reqErr) {
 				// Path outside Silo's media folders (or otherwise unresolvable)
 				// — an expected skip, not an error worth logging every cycle.
+				apply(func(rec *ChangeRecord) { rec.setUnresolved(primaryErr, fallbackErr) })
 				continue
 			}
 			stats.TransientErrors++
 			slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", dir, "err", rerr)
+			apply(func(rec *ChangeRecord) {
+				rec.setOutcome(ChangeOutcomeError, ChangeReasonResolveFailed, rerr.Error())
+			})
 			continue
 		}
 		if target == nil || target.Folder == nil {
+			apply(func(rec *ChangeRecord) {
+				rec.setOutcome(ChangeOutcomeUnresolved, string(scantrigger.ReasonNoLibraryMatch), "")
+			})
 			continue
 		}
 		resolvedAny = true
 		// The directory scan serves every reported path in it; each path is
 		// claimed on its own so a new change to one file is not debounced by
 		// an earlier report of a sibling.
+		key := scanTargetKey(*target)
+		claimedPaths := make(map[string]bool, len(group.Paths))
 		for _, path := range group.Paths {
 			stats.ChangesResolved++
-			if !s.claimTarget(ctx, *target, filepath.Clean(path), ttl, seenTargets, &targets, &claimed) {
+			claimedPaths[path] = s.claimTarget(ctx, *target, filepath.Clean(path), ttl, seenTargets, &targets, &claimed)
+			if !claimedPaths[path] {
 				stats.Suppressed++
+			}
+		}
+		for _, i := range indexes {
+			rec := &records[i]
+			rec.setTarget(*target)
+			if claimedPaths[changes[i].SourcePath] {
+				rec.pendingTarget = key
+			} else {
+				rec.setOutcome(ChangeOutcomeSuppressed, "", "")
 			}
 		}
 	}
@@ -763,13 +937,16 @@ func isRequestError(err error) bool {
 	return errors.As(err, &reqErr)
 }
 
-func (s *Service) resolveChange(ctx context.Context, change Change, stats *resolveStats) (*scantrigger.Target, bool) {
+func (s *Service) resolveChange(ctx context.Context, change Change, stats *resolveStats, rec *ChangeRecord) (*scantrigger.Target, bool) {
 	if change.SourcePath == "" {
+		rec.setOutcome(ChangeOutcomeIgnored, string(scantrigger.ReasonPathRequired), "")
 		return nil, false
 	}
 	var (
-		target *scantrigger.Target
-		err    error
+		target      *scantrigger.Target
+		err         error
+		primaryErr  error
+		fallbackErr error
 	)
 	switch change.Scope {
 	case ChangeScopeSubtree:
@@ -780,13 +957,17 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 		// directory. A change that resolves to a whole library was not a file
 		// path and is dropped rather than turned into a full scan.
 		if err == nil && target != nil && target.Mode == scantrigger.ModeLibrary {
+			rec.setTarget(*target)
+			rec.setOutcome(ChangeOutcomeIgnored, ChangeReasonResolvesToLibrary, "")
 			return nil, false
 		}
 		if isRequestError(err) {
 			// The file may have been deleted (upgrade/replacement). Fall back
 			// to a reconciling scan so the stale row is marked missing
 			// promptly instead of lingering until the next full library scan.
+			primaryErr = err
 			target, err = s.resolver.ResolveVanishedPath(ctx, change.SourcePath, scanTrigger)
+			fallbackErr = err
 		}
 	default:
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
@@ -794,13 +975,19 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 	if err != nil {
 		var reqErr *scantrigger.RequestError
 		if errors.As(err, &reqErr) {
+			if primaryErr == nil {
+				primaryErr = err
+			}
+			rec.setUnresolved(primaryErr, fallbackErr)
 			return nil, false
 		}
 		stats.TransientErrors++
 		slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", change.SourcePath, "scope", change.Scope, "err", err)
+		rec.setOutcome(ChangeOutcomeError, ChangeReasonResolveFailed, err.Error())
 		return nil, false
 	}
 	if target == nil || target.Folder == nil {
+		rec.setOutcome(ChangeOutcomeUnresolved, string(scantrigger.ReasonNoLibraryMatch), "")
 		return nil, false
 	}
 	return target, true
@@ -840,7 +1027,7 @@ func (s *Service) claimTarget(
 		}
 	}
 
-	targetKey := fmt.Sprintf("%d|%s|%s", target.Folder.ID, target.Mode, target.Path)
+	targetKey := scanTargetKey(target)
 	if _, seen := seenTargets[targetKey]; seen {
 		// Claimed, but already enqueued this cycle under another change that
 		// resolved to the same target. Not a suppression: the enqueue covers

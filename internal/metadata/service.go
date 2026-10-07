@@ -297,6 +297,12 @@ func (s providerIDValueSet) add(provider, providerID string) {
 	s[provider][providerID] = struct{}{}
 }
 
+func (s providerIDValueSet) has(provider, providerID string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	_, ok := s[provider][normalizeProviderIDComparisonValue(provider, providerID)]
+	return ok
+}
+
 func (s providerIDValueSet) remove(provider, providerID string) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	providerID = normalizeProviderIDComparisonValue(provider, providerID)
@@ -1289,12 +1295,53 @@ func applyProvider404sToAccumulator(accumulator *MetadataResult, provider404s *p
 	suppressProviderIDValues(accumulator.ProviderIDs, provider404s.dropped)
 }
 
+// shouldReanchorProviderContentID reports whether a provider-anchored item may
+// move to the anchor its current identity derives. A manual refresh may. So may
+// an Identify whose correction rejected the item's live anchor
+// (anchorRejected): that anchor names a different title, and leaving the item
+// on it would let that title merge into this item when it is scanned in.
+// Scheduled jobs, and an Identify that confirms or extends the match or only
+// replaces a dead anchor, keep the client-visible content_id.
 func shouldReanchorProviderContentID(
 	contentID string,
 	isNew bool,
 	mode RefreshMode,
+	anchorRejected bool,
 ) bool {
-	return !isNew && mode == ModeManualRefresh && contentid.IsProviderAnchored(contentID)
+	if isNew || !contentid.IsProviderAnchored(contentID) {
+		return false
+	}
+	return mode == ModeManualRefresh || (mode == ModeIdentify && anchorRejected)
+}
+
+// identityCorrectionRejectsLiveAnchor reports whether a correction rejected
+// the provider ID contentID is anchored on while that ID is not known to be
+// dead. A dead anchor (recorded stale, or 404 in this run) can't be claimed by
+// another title, so it is safe to keep. resolved holds the provider IDs this
+// run's providers returned for the chosen identity: when they restate the
+// anchor, the choice only added a provider ID to the same title (an admin
+// picking a show's TVDB candidate for an item anchored on its TMDB ID), so the
+// anchor stands.
+func identityCorrectionRejectsLiveAnchor(
+	contentID string,
+	resolved map[string]string,
+	rejected providerIDValueSet,
+	dead ...providerIDValueSet,
+) bool {
+	provider, providerID, ok := contentid.ProviderAnchor(contentID)
+	if !ok || !rejected.has(provider, providerID) {
+		return false
+	}
+	if value := strings.TrimSpace(resolved[provider]); value != "" &&
+		normalizeProviderIDComparisonValue(provider, value) == normalizeProviderIDComparisonValue(provider, providerID) {
+		return false
+	}
+	for _, set := range dead {
+		if set.has(provider, providerID) {
+			return false
+		}
+	}
+	return true
 }
 
 // ProcessWithProviders runs the pipeline with explicit providers (for testing).
@@ -2358,6 +2405,12 @@ func (s *MetadataService) mergeAndPersist(
 	if req.enrichmentOnly && existingItem == nil {
 		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
 	}
+	// Nor may an Identify: a concurrent Identify can move the item to its
+	// corrected id after this one loaded it, and writing on without the stored
+	// item would drop its field locks.
+	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
+		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
+	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2406,12 +2459,14 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	// Re-anchor an already provider-anchored item whose corrected identity now
-	// derives a different anchor — the recovery path when an admin fixes a wrong
-	// <uniqueid> in an NFO. Manual refresh only: scheduled jobs and ModeIdentify
-	// must preserve the client-visible content_id even when an external ID is
-	// stale. Reuses the local-promotion machinery under the provider-dedup lock;
-	// a no-op when the derived anchor is unchanged.
-	if shouldReanchorProviderContentID(contentID, isNew, req.Mode) {
+	// derives a different anchor — the recovery path when an admin replaces a
+	// wrong match with Identify or fixes a wrong <uniqueid> in an NFO. See
+	// shouldReanchorProviderContentID for which modes may move the id. Reuses
+	// the local-promotion machinery under the provider-dedup lock; a no-op when
+	// the derived anchor is unchanged.
+	anchorRejected := identityCorrectionRejectsLiveAnchor(contentID, accumulator.ProviderIDs,
+		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
+	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
 		reanchored, err := s.reanchorContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
 		if err != nil {
@@ -7291,34 +7346,83 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 
 // mergeEpisodeIDPairs maps the source series' episode content ids onto the
 // target series' episodes by (season, episode) number, so episode-level user
-// state survives a series merge. Episodes with no counterpart on the target
-// are skipped: their state stays on ids that die with the source series, which
-// is today's behavior, and the next scan recreates the episodes on the target.
+// state survives a series merge. A source episode with no counterpart on the
+// target is paired with the id the target composes for it, when both series are
+// provider-anchored and the source episode is on its series' composition: the
+// source's composed id does not die with it, because the show the source
+// anchor names mints it again when it is scanned in, so its state moves to the
+// id the target's episode takes when a scan creates it. Other unpaired
+// episodes keep their state on ids that die with the source series.
 func mergeEpisodeIDPairs(ctx context.Context, tx pgx.Tx, fromContentID, toContentID string) ([]reattribute.IDPair, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT src.content_id, dest.content_id
+		SELECT src.content_id, src.season_number, src.episode_number, dest.content_id
 		FROM episodes src
-		JOIN episodes dest
+		LEFT JOIN episodes dest
 		  ON dest.series_id = $2
 		 AND dest.season_number = src.season_number
 		 AND dest.episode_number = src.episode_number
 		WHERE src.series_id = $1
-		  AND src.content_id <> dest.content_id
 	`, fromContentID, toContentID)
 	if err != nil {
 		return nil, fmt.Errorf("mapping episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
 	}
-	defer rows.Close()
-
-	var pairs []reattribute.IDPair
+	var pairs, composed []reattribute.IDPair
 	for rows.Next() {
-		var pair reattribute.IDPair
-		if err := rows.Scan(&pair.From, &pair.To); err != nil {
+		var sourceID string
+		var seasonNumber, episodeNumber int
+		var destID *string
+		if err := rows.Scan(&sourceID, &seasonNumber, &episodeNumber, &destID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scanning episode id pair: %w", err)
 		}
-		pairs = append(pairs, pair)
+		if destID != nil {
+			if *destID != sourceID {
+				pairs = append(pairs, reattribute.IDPair{From: sourceID, To: *destID})
+			}
+			continue
+		}
+		oldID, okOld := contentid.ForEpisode(fromContentID, seasonNumber, episodeNumber)
+		newID, okNew := contentid.ForEpisode(toContentID, seasonNumber, episodeNumber)
+		if okOld && okNew && sourceID == oldID && newID != sourceID {
+			composed = append(composed, reattribute.IDPair{From: sourceID, To: newID})
+		}
 	}
-	return pairs, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("mapping episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	if len(composed) == 0 {
+		return pairs, nil
+	}
+
+	// An id held by another series' episode is not this target's to give.
+	targets := make([]string, len(composed))
+	for i, pair := range composed {
+		targets[i] = pair.To
+	}
+	takenRows, err := tx.Query(ctx, `SELECT content_id FROM episodes WHERE content_id = ANY($1)`, targets)
+	if err != nil {
+		return nil, fmt.Errorf("checking composed episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	taken := make(map[string]struct{})
+	for takenRows.Next() {
+		var id string
+		if err := takenRows.Scan(&id); err != nil {
+			takenRows.Close()
+			return nil, fmt.Errorf("scanning composed episode id: %w", err)
+		}
+		taken[id] = struct{}{}
+	}
+	takenRows.Close()
+	if err := takenRows.Err(); err != nil {
+		return nil, fmt.Errorf("checking composed episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	for _, pair := range composed {
+		if _, ok := taken[pair.To]; !ok {
+			pairs = append(pairs, pair)
+		}
+	}
+	return pairs, nil
 }
 
 func rebindDeletableStatuses(allowMatchedSource bool) []string {

@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -58,6 +59,10 @@ type ProfileHandler struct {
 	// canonical setting row a profile mutation syncs (see
 	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
+	// PINAttempts bounds wrong PIN guesses per profile (see
+	// ratelimit.ProfilePINPolicy). The router always sets it; nil, as in
+	// tests that do not exercise the limit, allows every attempt.
+	PINAttempts *ratelimit.AttemptLimiter
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -375,8 +380,8 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	// The very first profile on a user can be bootstrapped without
 	// primary/admin privileges (it becomes the primary); everything after
-	// requires either the server admin role or the caller's active profile
-	// being primary.
+	// requires the household manager (canManageHouseholdAs): the caller's
+	// active profile being the verified primary, whatever the account role.
 	isBootstrap := len(existingProfiles) == 0
 	if !isBootstrap {
 		allowed, err := canManageHouseholdAs(ctx, store, cmd.ActiveProfileID, cmd.VerifyProfile)
@@ -650,6 +655,15 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 	}
+	// A new or removed PIN starts with a clean attempt count, so a manager
+	// who resets a locked profile's PIN can use the new one straight away.
+	// The PIN is already committed, so the reset must not depend on the
+	// client staying connected.
+	if req.PIN != nil {
+		resetCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		h.PINAttempts.Reset(resetCtx, ratelimit.ProfilePINKey(userID, profileID))
+		cancel()
+	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
 		if cleanupErr := deleteUploadedAvatarObjects(ctx, h.AvatarStore, userID, profileID); cleanupErr != nil {
 			slog.WarnContext(ctx, "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
@@ -873,9 +887,29 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
+	// Only a profile that exists and has a PIN gets an attempt budget, so
+	// requests naming arbitrary IDs add no limiter entries.
+	profile, err := store.GetProfile(ctx, cmd.ProfileID)
+	if err != nil {
+		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load profile")
+	}
+	if profile == nil || profile.PINHash == "" {
+		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
+	}
+
+	// The attempt is counted before the PIN is checked, so concurrent
+	// guesses cannot overrun the limit, and while the profile is locked even
+	// the right PIN is refused.
+	attemptKey := ratelimit.ProfilePINKey(cmd.UserID, cmd.ProfileID)
+	if retryAfter, ok := h.PINAttempts.Reserve(ctx, attemptKey); !ok {
+		return none, PINLockedError(retryAfter)
+	}
 	valid, err := store.VerifyPIN(ctx, cmd.ProfileID, cmd.PIN)
 	if err != nil {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
+	}
+	if valid {
+		h.PINAttempts.Reset(ctx, attemptKey)
 	}
 	if !valid || h.UserRepo == nil || h.ProfileTokens == nil {
 		return ProfileVerification{Valid: valid}, nil
@@ -896,6 +930,15 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to issue profile token")
 	}
 	return ProfileVerification{Valid: true, ProfileToken: token, ExpiresAt: expiresAt}, nil
+}
+
+// PINLockedError is the 429 a PIN check answers while the profile is locked
+// after too many wrong PINs. Both listeners render RetryAfter as the
+// Retry-After header.
+func PINLockedError(retryAfter time.Duration) *APIError {
+	e := apiError(http.StatusTooManyRequests, "rate_limited", "Too many incorrect PINs. Try again later.")
+	e.RetryAfter = ratelimit.RetryAfterSeconds(retryAfter)
+	return e
 }
 
 // --- Helpers ---

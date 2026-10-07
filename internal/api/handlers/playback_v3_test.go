@@ -4402,6 +4402,180 @@ func TestHandleReplanPlaybackV3PreservesOmittedSubtitleAndReportsUnavailableInFa
 	}
 }
 
+// With 4K transcoding disabled, a 4K version still offers lower qualities when
+// the item has a lower-resolution version: choosing one moves playback to that
+// version, and Original moves it back. The menu stays the same throughout.
+func TestHandleReplanPlaybackV3LowerQualityMovesToLowerVersionWithout4KTranscode(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution = "2160p"
+	source.Bitrate = 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Level = 51
+	source.VideoTracks[0].Width = 3840
+	source.VideoTracks[0].Height = 2160
+	source.VideoTracks[0].Bitrate = 32_000
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID = 84
+	alternate.Resolution = "1080p"
+	alternate.Bitrate = 8_000
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Level = 41
+	alternate.VideoTracks[0].Width = 1920
+	alternate.VideoTracks[0].Height = 1080
+	alternate.VideoTracks[0].Bitrate = 8_000
+
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	handler.v3Registry = playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationVideoToH264V3, RecipeVersion: "2", Available: true},
+	})
+	startRequest := v3HandlerStartRequest()
+	startRequest.Capabilities.MaxResolution = "2160p"
+	startRequest.Capabilities.VideoDecode[0].Levels = []int{51}
+	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
+	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
+	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	if started.PlaybackPlan.EffectiveMediaFileID != source.ID || started.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("start plan = file %d via %s, want the 4K original direct", started.PlaybackPlan.EffectiveMediaFileID, started.PlaybackPlan.Delivery)
+	}
+	menu := started.PlaybackPlan.AvailableQualities
+	labels := make([]string, 0, len(menu))
+	for _, quality := range menu {
+		labels = append(labels, quality.Label)
+	}
+	wantLabels := []string{
+		playback.QualityOriginalV3, "1080p",
+		playback.QualityRung1080pMediumV3, playback.QualityRung1080pLowV3,
+		playback.QualityRung720pHighV3, playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3,
+		"480p",
+	}
+	if !reflect.DeepEqual(labels, wantLabels) {
+		t.Fatalf("menu = %v, want %v", labels, wantLabels)
+	}
+	if menu[0].Height != 2160 || !menu[0].PreservesSource || menu[1].Height != 1080 || menu[1].BitrateKbps != 8_000 || menu[1].PreservesSource {
+		t.Fatalf("original and lower-version entries = %#v, %#v", menu[0], menu[1])
+	}
+
+	replan := func(id, quality string, current playback.DecisionResponseV3) playback.DecisionResponseV3 {
+		t.Helper()
+		key := playback.PlanAttemptKeyV3(*current.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
+		response := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+			ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationQualityChangeV3,
+			PlaybackAttemptID: startRequest.PlaybackAttemptID,
+			ReplanRequestID:   "lower-version-" + id, FailedPlanID: current.PlaybackPlan.PlanID,
+			PlanAttemptID: "lower-version-attempt-" + id, PlanAttemptKey: key,
+			AttemptedPlanKeys: []string{key}, AttemptCount: 1, QualityPreference: quality,
+			SelectedTracks:        playback.SelectedTracksV3{Audio: current.PlaybackPlan.SelectedTracks.Audio},
+			Capabilities:          startRequest.Capabilities,
+			ClientPlaybackContext: startRequest.ClientPlaybackContext,
+		})
+		if response.PlaybackPlan == nil {
+			t.Fatalf("%s replan terminal = %#v", quality, response.Terminal)
+		}
+		if !reflect.DeepEqual(response.PlaybackPlan.AvailableQualities, menu) {
+			t.Fatalf("%s replan menu = %#v, want the start menu %#v", quality, response.PlaybackPlan.AvailableQualities, menu)
+		}
+		return response
+	}
+
+	lower := replan("0001", "1080p", started)
+	if lower.PlaybackPlan.EffectiveMediaFileID != alternate.ID || lower.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("1080p plan = file %d via %s, want the 1080p version direct", lower.PlaybackPlan.EffectiveMediaFileID, lower.PlaybackPlan.Delivery)
+	}
+	reduced := replan("0002", playback.QualityRung720pMediumV3, lower)
+	if reduced.PlaybackPlan.EffectiveMediaFileID != alternate.ID || reduced.PlaybackPlan.Delivery != playback.DeliveryTranscodeHLSV3 {
+		t.Fatalf("720p plan = file %d via %s, want a transcode of the 1080p version", reduced.PlaybackPlan.EffectiveMediaFileID, reduced.PlaybackPlan.Delivery)
+	}
+	back := replan("0003", playback.QualityOriginalV3, reduced)
+	if back.PlaybackPlan.EffectiveMediaFileID != source.ID || back.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("original plan = file %d via %s, want the 4K original direct", back.PlaybackPlan.EffectiveMediaFileID, back.PlaybackPlan.Delivery)
+	}
+}
+
+// When the first lower version cannot play, the fallback adopts a later one,
+// and the menu of the plan it returns describes the version that plays.
+func TestHandleStartPlaybackV3LowerVersionMenuFollowsAdoptedVersion(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution = "2160p"
+	source.Bitrate = 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Level = 51
+	source.VideoTracks[0].Width = 3840
+	source.VideoTracks[0].Height = 2160
+	source.VideoTracks[0].Bitrate = 32_000
+	version := func(id int, resolution string, width, height, kbps int) *models.MediaFile {
+		value := *source
+		value.ID = id
+		value.Resolution = resolution
+		value.Bitrate = kbps
+		value.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+		value.VideoTracks[0].Level = 41
+		value.VideoTracks[0].Width = width
+		value.VideoTracks[0].Height = height
+		value.VideoTracks[0].Bitrate = kbps
+		return &value
+	}
+	// The 1080p version comes first in fallback order but is gone from disk.
+	missing := version(84, "1080p", 1920, 1080, 8_000)
+	missing.FilePath = filepath.Join(t.TempDir(), "gone.mp4")
+	playable := version(85, "720p", 1280, 720, 4_000)
+
+	files := map[int]*models.MediaFile{source.ID: source, missing.ID: missing, playable.ID: playable}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, missing, playable}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "1080p"
+	startRequest.Capabilities.MaxResolution = "2160p"
+	startRequest.Capabilities.VideoDecode[0].Levels = []int{51}
+	startRequest.Capabilities.VideoDecode[0].MaxWidth = 3840
+	startRequest.Capabilities.VideoDecode[0].MaxHeight = 2160
+	startRequest.Capabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+	plan := started.PlaybackPlan
+	if plan.EffectiveMediaFileID != playable.ID {
+		t.Fatalf("effective file = %d, want the playable 720p version %d", plan.EffectiveMediaFileID, playable.ID)
+	}
+	labels := make([]string, 0, len(plan.AvailableQualities))
+	for _, quality := range plan.AvailableQualities {
+		labels = append(labels, quality.Label)
+	}
+	want := []string{playback.QualityOriginalV3, "720p", playback.QualityRung720pMediumV3, playback.QualityRung720pLowV3, "480p"}
+	if !reflect.DeepEqual(labels, want) {
+		t.Fatalf("menu = %v, want %v describing the adopted 720p version", labels, want)
+	}
+	if plan.AvailableQualities[0].Height != 2160 || plan.AvailableQualities[1].Height != 720 {
+		t.Fatalf("original and lower-version entries = %#v, %#v", plan.AvailableQualities[0], plan.AvailableQualities[1])
+	}
+}
+
 // TestHandleReplanPlaybackV3RemapsSubtitleAcrossFormatsInFallbackVersion
 // covers #1034 end to end: the 1080p fallback carries the selected English
 // subtitle as SRT where the 2160p source has ASS, and the quality change keeps

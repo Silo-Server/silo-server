@@ -15,6 +15,12 @@ import (
 
 const jellycompatSessionColumns = `token, username, account_username, profile_id, profile_name, pseudo_user_id, streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, created_at, expires_at`
 
+// errSessionUnreadable marks a compat session row that was read but whose
+// bridged tokens could not be decrypted (a changed encryption key, damaged
+// ciphertext). Retrying cannot fix it, so lookups treat the session as gone
+// and the client signs in again.
+var errSessionUnreadable = errors.New("compat session cannot be decrypted")
+
 // SessionRepository persists compat sessions in PostgreSQL.
 type SessionRepository struct {
 	pool   *pgxpool.Pool
@@ -58,10 +64,10 @@ func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 	}
 	// Decrypt the bridged Silo access/refresh tokens (read-path contract).
 	if session.StreamAppAccessToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token)); err != nil {
-		return nil, fmt.Errorf("decrypt streamapp access token: %w", err)
+		return nil, fmt.Errorf("%w: decrypt streamapp access token: %w", errSessionUnreadable, err)
 	}
 	if session.StreamAppRefreshToken, err = r.cipher.DecryptIfEncrypted(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token)); err != nil {
-		return nil, fmt.Errorf("decrypt streamapp refresh token: %w", err)
+		return nil, fmt.Errorf("%w: decrypt streamapp refresh token: %w", errSessionUnreadable, err)
 	}
 	return &session, nil
 }

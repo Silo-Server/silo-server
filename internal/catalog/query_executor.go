@@ -310,7 +310,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		return previewPagePlan{}, err
 	}
 
-	libraryIDs, libraryScopeEmpty := effectiveLibraryScope(def.LibraryIDs, access.AllowedLibraryIDs)
+	libraryIDs, libraryScopeEmpty := access.LibraryScope(def.LibraryIDs)
 
 	// Scope can be set externally (e.g. catalog resolver pre-fills it from
 	// the request) or implied by the query definition's MediaScope (e.g.
@@ -655,17 +655,6 @@ func buildLibraryScopeJoin(
 	}
 
 	return strings.Join(clauses, " AND "), args, true
-}
-
-// effectiveLibraryScope narrows the requested libraries to the viewer's
-// allowed set; with no request, the allowed set is the scope. A nil allowed
-// set means the viewer is unrestricted. empty reports that a scope was
-// requested or imposed but no library survived, so the caller must match
-// nothing: an empty ID list must never be read as "no library filter". It is
-// effectiveCatalogLibraryIDs without disabled libraries, which these callers
-// exclude in their own clause, so the rule lives in one place.
-func effectiveLibraryScope(requested, allowed []int) (ids []int, empty bool) {
-	return effectiveCatalogLibraryIDs(requested, AccessFilter{AllowedLibraryIDs: allowed})
 }
 
 func intersectInts(a, b []int) []int {

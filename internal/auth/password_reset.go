@@ -57,16 +57,17 @@ func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs 
 		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking login sessions: %w", err)
 	}
+	if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
+	return withdrawDeviceSignInApprovalsInTransaction(ctx, tx, userIDs)
+}
+
+func revokeAudiobookshelfSessionsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE abs_sessions SET revoked_at = NOW()
 		WHERE user_id = ANY($1::int[]) AND revoked_at IS NULL`, userIDs); err != nil {
 		return fmt.Errorf("revoking Audiobookshelf sessions: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE device_login_requests SET status = $2, updated_at = NOW()
-		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
-		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
-		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
 	}
 	return nil
 }

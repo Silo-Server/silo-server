@@ -10,7 +10,7 @@ import {
   useResetProfileOverrides,
 } from "@/hooks/queries/sections";
 import { useUserLibraries } from "@/hooks/queries/libraries";
-import type { SettingsSectionEntry, SectionOverride } from "@/api/types";
+import type { SettingsSectionEntry } from "@/api/types";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,26 +29,19 @@ import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
-import { canAddAdminOnlyRecipes, isTraktConfig } from "@/lib/sectionTypes";
+import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 import { randomUUID } from "@/lib/uuid";
+import {
+  applySectionDeletion,
+  buildSectionOverrides,
+  canMutateSectionSettings,
+  createOverrideIdSource,
+  hydrateRemovedSystemSections,
+  shouldRestoreLatestSaveFailure,
+  type RemovedSystemOverride,
+} from "@/lib/sectionOverrides";
 import { Plus } from "lucide-react";
-import {
-  SectionDragOverlay,
-  SortableSectionCardRow,
-  type EditableSectionViewModel,
-} from "@/components/sections/EditableSectionRows";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  KeyboardSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
-import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { SectionOrderList } from "@/components/sections/SectionOrderList";
 import { toast } from "sonner";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { useOptionalAuth } from "@/hooks/useAuth";
@@ -61,180 +54,6 @@ import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
-
-interface RemovedSystemOverride {
-  id: string;
-}
-
-interface SectionOverrideIds {
-  /** The profile's saved overrides for the page. */
-  savedOverrides?: SectionOverride[];
-  /** An ID for an admin section the profile has no saved override for. */
-  newId?: (sectionId: string) => string;
-  /** The section the change being saved is to, if it is to one section. */
-  changedSectionId?: string;
-}
-
-/**
- * The override set to save for one page. A change to an admin section keeps
- * the ID of the profile's saved override for that section, or gets one from
- * `newId`: the server's section source policy refuses a legacy Trakt admin
- * section's override without an ID. It also refuses a new override that
- * leaves such a section showing, so a shown one without a saved override is
- * left out and keeps its admin position, unless the change is to that
- * section; the refusal then reaches the user instead of the change silently
- * not saving. Positions are only as close to the list order as that held
- * position allows.
- */
-export function buildSectionOverrides(
-  sections: SettingsSectionEntry[],
-  removedSystemSections: RemovedSystemOverride[] = [],
-  { savedOverrides = [], newId = () => randomUUID(), changedSectionId }: SectionOverrideIds = {},
-): SectionOverride[] {
-  // The server resolves the last saved override for a section.
-  const savedIds = new Map<string, string>();
-  for (const override of savedOverrides) {
-    if (override.section_id && override.id) savedIds.set(override.section_id, override.id);
-  }
-  const leftOut = (s: SettingsSectionEntry) =>
-    !s.is_custom &&
-    !s.hidden &&
-    !savedIds.has(s.id) &&
-    s.id !== changedSectionId &&
-    isTraktConfig(s.config);
-  // A section left out keeps its admin position, so the others are numbered
-  // in list order around it and never on it: the server orders sections with
-  // equal positions arbitrarily.
-  const heldPositions = new Set(sections.filter(leftOut).map((s) => s.position));
-  const overrides: SectionOverride[] = [];
-  let position = 0;
-  for (const s of sections) {
-    if (leftOut(s)) {
-      position = Math.max(position, s.position + 1);
-      continue;
-    }
-    while (heldPositions.has(position)) position += 1;
-    overrides.push({
-      section_id: s.is_custom ? undefined : s.id,
-      id: s.is_custom ? s.id : (savedIds.get(s.id) ?? newId(s.id)),
-      position: position++,
-      hidden: s.hidden,
-      title: s.title,
-      featured: s.featured,
-      item_limit: s.item_limit,
-      section_type: s.is_custom ? s.section_type : undefined,
-      config: s.config,
-    });
-  }
-  for (const section of removedSystemSections) {
-    overrides.push({
-      section_id: section.id,
-      id: savedIds.get(section.id) ?? newId(section.id),
-      removed: true,
-    });
-  }
-  return overrides;
-}
-
-/**
- * Gives each admin section one new override ID and returns the same one on
- * later calls, so a quick second save on a page reuses the IDs of the first
- * before the saved overrides refetch.
- */
-export function createOverrideIdSource(): (sectionId: string) => string {
-  const ids = new Map<string, string>();
-  return (sectionId) => {
-    const id = ids.get(sectionId) ?? randomUUID();
-    ids.set(sectionId, id);
-    return id;
-  };
-}
-
-export function applySectionDeletion(
-  sections: SettingsSectionEntry[],
-  removedSystemSections: RemovedSystemOverride[],
-  id: string,
-): { sections: SettingsSectionEntry[]; removedSystemSections: RemovedSystemOverride[] } {
-  const target = sections.find((section) => section.id === id);
-  if (!target) {
-    return { sections, removedSystemSections };
-  }
-
-  const nextSections = sections.filter((section) => section.id !== id);
-  if (target.is_custom) {
-    return { sections: nextSections, removedSystemSections };
-  }
-
-  if (removedSystemSections.some((section) => section.id === id)) {
-    return { sections: nextSections, removedSystemSections };
-  }
-
-  return {
-    sections: nextSections,
-    removedSystemSections: [...removedSystemSections, { id }],
-  };
-}
-
-export function hydrateRemovedSystemSections(
-  overrides: SectionOverride[] = [],
-): RemovedSystemOverride[] {
-  return Array.from(
-    new Set(
-      overrides
-        .filter((override) => override.removed && Boolean(override.section_id))
-        .map((override) => override.section_id as string),
-    ),
-  ).map((id) => ({ id }));
-}
-
-interface ReadyQueryState {
-  isSuccess: boolean;
-  isError: boolean;
-}
-
-export function canMutateSectionSettings(
-  settingsQuery?: ReadyQueryState,
-  rawOverridesQuery?: ReadyQueryState,
-): boolean {
-  return Boolean(
-    settingsQuery?.isSuccess &&
-    !settingsQuery.isError &&
-    rawOverridesQuery?.isSuccess &&
-    !rawOverridesQuery.isError,
-  );
-}
-
-function shouldRestoreSelectionState(
-  currentSelectionValue: string,
-  selectionValueAtSave: string,
-): boolean {
-  return currentSelectionValue === selectionValueAtSave;
-}
-
-export function shouldRestoreLatestSaveFailure(
-  currentSelectionValue: string,
-  selectionValueAtSave: string,
-  latestAttemptId: number,
-  failedAttemptId: number,
-): boolean {
-  return (
-    shouldRestoreSelectionState(currentSelectionValue, selectionValueAtSave) &&
-    latestAttemptId === failedAttemptId
-  );
-}
-
-function toEditableSection(section: SettingsSectionEntry): EditableSectionViewModel {
-  return {
-    id: section.id,
-    title: section.title,
-    sectionType: section.section_type,
-    itemLimit: section.item_limit,
-    featured: section.featured,
-    hidden: section.hidden,
-    isCustom: section.is_custom,
-    config: section.config,
-  };
-}
 
 export function buildProfileGallerySection(
   payload: AddPayload,
@@ -307,8 +126,6 @@ export default function HomeScreenSettings() {
   // New override IDs for admin sections on this page.
   const newOverrideIdRef = useRef(createOverrideIdSource());
 
-  // DnD state
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [orderedSections, setOrderedSections] = useState<SettingsSectionEntry[]>([]);
   const [removedSystemSections, setRemovedSystemSections] = useState<RemovedSystemOverride[]>([]);
 
@@ -326,11 +143,6 @@ export default function HomeScreenSettings() {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [pendingDeleteSection, setPendingDeleteSection] = useState<SettingsSectionEntry | null>(
     null,
-  );
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   // Sync from server
@@ -395,35 +207,13 @@ export default function HomeScreenSettings() {
     );
   }
 
-  // DnD handlers
-  function handleDragStart(event: DragStartEvent) {
+  function handleMove(next: SettingsSectionEntry[], movedId: string) {
     if (!canEditSections) {
       return;
     }
-    setActiveId(event.active.id as string);
-  }
-
-  function handleDragEnd(event: DragEndEvent) {
-    if (!canEditSections) {
-      setActiveId(null);
-      return;
-    }
-    setActiveId(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = orderedSections.findIndex((s) => s.id === active.id);
-    const newIndex = orderedSections.findIndex((s) => s.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    const next = arrayMove(orderedSections, oldIndex, newIndex);
     setOrderedSections(next);
-    saveOverrides(next, removedSystemSections, String(active.id));
+    saveOverrides(next, removedSystemSections, movedId);
   }
-
-  function handleDragCancel() {
-    setActiveId(null);
-  }
-
-  const activeSection = activeId ? (orderedSections.find((s) => s.id === activeId) ?? null) : null;
 
   // Toggle visibility
   function handleToggleHidden(id: string) {
@@ -455,9 +245,6 @@ export default function HomeScreenSettings() {
     );
     setOrderedSections(nextState.sections);
     setRemovedSystemSections(nextState.removedSystemSections);
-    if (activeId === pendingDeleteSection.id) {
-      setActiveId(null);
-    }
     setConfirmDeleteOpen(false);
     setPendingDeleteSection(null);
     saveOverrides(nextState.sections, nextState.removedSystemSections);
@@ -513,7 +300,6 @@ export default function HomeScreenSettings() {
     newOverrideIdRef.current = createOverrideIdSource();
     setOrderedSections([]);
     setRemovedSystemSections([]);
-    setActiveId(null);
     setConfirmResetOpen(false);
     setConfirmDeleteOpen(false);
     setPendingDeleteSection(null);
@@ -670,45 +456,16 @@ export default function HomeScreenSettings() {
           </p>
         ) : null}
 
-        <DndContext
-          sensors={canEditSections ? sensors : []}
-          collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDragCancel={handleDragCancel}
-        >
-          <SortableContext
-            items={orderedSections.map((s) => s.id)}
-            strategy={verticalListSortingStrategy}
-          >
-            <div className="space-y-2">
-              {orderedSections.map((section) => (
-                <SortableSectionCardRow
-                  key={section.id}
-                  section={toEditableSection(section)}
-                  catalog={recipeCatalog}
-                  onToggleHidden={() => handleToggleHidden(section.id)}
-                  onEdit={() => handleOpenEdit(section)}
-                  onDelete={() => handleRequestDelete(section)}
-                  disabled={!canEditSections}
-                />
-              ))}
-              {orderedSections.length === 0 && (
-                <div className="surface-panel-subtle text-muted-foreground rounded-[1.2rem] py-8 text-center text-sm">
-                  No sections configured.
-                </div>
-              )}
-            </div>
-          </SortableContext>
-          <DragOverlay>
-            {activeSection ? (
-              <SectionDragOverlay
-                section={toEditableSection(activeSection)}
-                catalog={recipeCatalog}
-              />
-            ) : null}
-          </DragOverlay>
-        </DndContext>
+        <SectionOrderList
+          key={scopeValue}
+          sections={orderedSections}
+          catalog={recipeCatalog}
+          disabled={!canEditSections}
+          onMove={handleMove}
+          onToggleHidden={(section) => handleToggleHidden(section.id)}
+          onEdit={handleOpenEdit}
+          onDelete={handleRequestDelete}
+        />
       </SettingsGroup>
 
       <SettingsGroup

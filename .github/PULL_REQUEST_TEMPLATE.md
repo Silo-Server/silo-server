@@ -45,11 +45,15 @@ Surface and build:
 item details a screen shows, such as search results, home sections, recommendations,
 metadata, artwork, sorting, or filtering. See "Show visible changes" in
 CONTRIBUTING.md. Use before-and-after screenshots of the same screen and data for each
-affected surface, and a short recording when motion, timing, or focus matters. Crop or
-blur private details. A maintainer may link
-`Evidence: https://evidence.siloserver.org/r/<repo>/<topic>/` instead; that page
-requires Silo-Server organization sign-in. When nothing visible changes, replace this
-section's content with "Evidence: none, no user-visible change". -->
+affected surface, and a short recording when motion, timing, or focus matters. For web
+app and web admin changes also visible at phone width, include desktop and mobile web
+captures (or show that mobile is unaffected). Crop or blur private details in
+anything attached here. To keep captures private instead, publish them to
+evidence.siloserver.org, where only you and Silo maintainers can open them, and
+replace the table with
+`Evidence: https://evidence.siloserver.org/r/silo-server/pr-<number>/`. When nothing
+visible changes, replace this section's content with "Evidence: none, no user-visible
+change". -->
 
 ## Risks
 

@@ -89,21 +89,26 @@ type ScopeDecision struct {
 // gates.
 //
 // acting_as_primary is precomputed in Go from the declared profile because
-// Rego never performs database lookups. user_libraries_restricted distinguishes
+// Rego never performs database lookups. household_requires_profile is
+// precomputed the same way for an admin login session that declares no
+// profile: true when a profile on the account has a PIN or an access limit,
+// which withholds the profile-less acting-admin grant; API keys and declared
+// profiles always report false. user_libraries_restricted distinguishes
 // nil user library assignment (unrestricted) from an empty allowlist.
 type PermissionInput struct {
 	SchemaVersion int `json:"schema_version"`
 
-	UserID                  int      `json:"user_id"`
-	Role                    string   `json:"role"`
-	UserEnabled             bool     `json:"user_enabled"`
-	AssignedPermissions     []string `json:"assigned_permissions"`
-	Permission              string   `json:"permission"`
-	DeclaredProfileID       string   `json:"declared_profile_id"`
-	ActingAsPrimary         bool     `json:"acting_as_primary"`
-	TargetLibraryIDs        []int    `json:"target_library_ids"`
-	UserLibraryIDs          []int    `json:"user_library_ids"`
-	UserLibrariesRestricted bool     `json:"user_libraries_restricted"`
+	UserID                   int      `json:"user_id"`
+	Role                     string   `json:"role"`
+	UserEnabled              bool     `json:"user_enabled"`
+	AssignedPermissions      []string `json:"assigned_permissions"`
+	Permission               string   `json:"permission"`
+	DeclaredProfileID        string   `json:"declared_profile_id"`
+	ActingAsPrimary          bool     `json:"acting_as_primary"`
+	HouseholdRequiresProfile bool     `json:"household_requires_profile"`
+	TargetLibraryIDs         []int    `json:"target_library_ids"`
+	UserLibraryIDs           []int    `json:"user_library_ids"`
+	UserLibrariesRestricted  bool     `json:"user_libraries_restricted"`
 
 	RequestTime string `json:"request_time"`
 	DeviceID    string `json:"device_id"`

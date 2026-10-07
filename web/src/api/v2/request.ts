@@ -51,7 +51,10 @@ const authExchangeOperations = new Set<V2OperationKey>([
 
 // Reads sent as POST because their input is a JSON document. They wait for
 // the server only as long as a GET does.
-const readOnlyPostOperations = new Set<V2OperationKey>(["POST /api/v2/catalog/query"]);
+const readOnlyPostOperations = new Set<V2OperationKey>([
+  "POST /api/v2/catalog/query",
+  "POST /api/v2/direct-download/links",
+]);
 
 /**
  * The deadline a request gets when its caller sets none: reads fail with

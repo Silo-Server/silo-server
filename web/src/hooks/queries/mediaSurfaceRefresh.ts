@@ -24,6 +24,11 @@ interface InvalidateMediaSurfaceOptions {
   libraryId?: number;
   watchedKeys?: Array<readonly unknown[]>;
   skipItemDetail?: boolean;
+  /**
+   * Skip every query whose key names itemId, for an item that moved to a new
+   * content ID: refetching its old ID would only return 404.
+   */
+  skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
 }
 
@@ -152,6 +157,9 @@ function shouldInvalidateMediaSurfaceQuery(
   if (options.skipItemDetail && options.itemId && isItemDetailQueryKey(queryKey, options.itemId)) {
     return false;
   }
+  if (options.skipItemQueries && options.itemId && queryKey.includes(options.itemId)) {
+    return false;
+  }
 
   if (queryKeyStartsWith(queryKey, catalogKeys.all)) {
     return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
@@ -208,6 +216,9 @@ export function scheduleMediaSurfaceInvalidation(
     skipItemDetail: existing
       ? Boolean(existing.options.skipItemDetail && options.skipItemDetail)
       : options.skipItemDetail,
+    skipItemQueries: existing
+      ? Boolean(existing.options.skipItemQueries && options.skipItemQueries)
+      : options.skipItemQueries,
     skipSimilarItems: existing
       ? Boolean(existing.options.skipSimilarItems && options.skipSimilarItems)
       : options.skipSimilarItems,

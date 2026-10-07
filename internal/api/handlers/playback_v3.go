@@ -1708,8 +1708,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
+	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
 	result, toneMapCapabilityErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{
-		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
+		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile),
 		ServerBitrateCapKbps: serverBitrateCapV3(r.Context()),
 		AudioTrackIndex:      audioIndex, Settings: settings,
 		Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
@@ -1748,7 +1749,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 					if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
 						continue
 					}
-					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateReq, RequestedFile: requestedFile, EffectiveFile: candidateFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
+					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateReq, RequestedFile: requestedFile, EffectiveFile: candidateFile, LowerVersion: lowerVersionForFileV3(lowerVersion, candidateFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
 				}
 				if candidateResult.Terminal == nil {
 					req = candidateReq
@@ -1804,7 +1805,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	// a session is opened, so the logged route is the one that will actually run.
 	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures),
 		func() playback.PlannerInputV3 {
-			return h.plannerInputV3(r.Context(), req, requestedFile, effectiveFile, audioIndex, nil)
+			input := h.plannerInputV3(r.Context(), req, requestedFile, effectiveFile, audioIndex, nil)
+			input.LowerVersion = lowerVersionForFileV3(lowerVersion, effectiveFile)
+			return input
 		}, result)
 	if escalateErr != nil {
 		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, escalateErr)
@@ -2636,6 +2639,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	routeSession.TargetAudioChannels = result.TargetAudioChannels
 	routeSession.TargetAudioBitrateKbps = result.TargetAudioBitrateKbps
 	routeSession.RemuxDVMode = remuxDVModeForPlanV3(result.Plan)
+	routeSession.RemuxResumeLeadingPictureDrop = result.RemuxResumeLeadingPictureDrop
 	// A replan starts without an egress identity. Do not let the previous
 	// proxy's row or internal URL leak into an API-served replacement route.
 	routeSession.RoutingEgressNodeID = 0
@@ -4254,39 +4258,40 @@ func sourceVideoTranscodeFactsV3(file *models.MediaFile, result playback.Planner
 // v3SessionStreamState builds the durable stream state for a prepared transport.
 func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3, mode mediaAuthModeV3) playback.SessionStreamState {
 	state := playback.SessionStreamState{
-		PlayMethod:                result.PlayMethod,
-		BasePlayMethod:            result.PlayMethod,
-		AudioTrackIndex:           plannedAudioTrackIndexV3(result, session.AudioTrackIndex),
-		TranscodeAudio:            result.TranscodeAudio,
-		RemuxDVMode:               remuxDVModeForPlanV3(result.Plan),
-		TranscodeHWAccel:          transport.hwAccel,
-		ToneMapMode:               transport.toneMapMode,
-		TranscodeNodeURL:          transport.nodeURL,
-		TranscodeTransportID:      transport.transportID,
-		TranscodeRouteSet:         true,
-		RoutingNetworkProvider:    new(netaccess.PathFromContext(ctx).Provider),
-		RoutingWorkload:           string(transport.routingWorkload),
-		RoutingExecution:          string(transport.routingExecution),
-		RoutingExecutionNodeID:    transport.routingExecutorID,
-		RoutingExecutionNodeURL:   transport.routingExecutorURL,
-		RoutingEgress:             string(transport.routingEgress),
-		RoutingEgressNodeID:       transport.routingEgressID,
-		RoutingEgressNodeURL:      transport.routingEgressURL,
-		RequireMediaAuthorization: mode.headerAuth,
-		MediaAuthorizationSet:     true,
-		ClientIP:                  clientip.FromContext(ctx),
-		ClientName:                session.ClientName,
-		ClientVersion:             session.ClientVersion,
-		ClientUserAgent:           session.ClientUserAgent,
-		StreamBitrateKbps:         result.TargetBitrateKbps,
-		TargetVideoCodec:          result.TargetVideoCodec,
-		TargetAudioCodec:          result.TargetAudioCodec,
-		SourceAudioChannels:       result.SourceAudioChannels,
-		TargetAudioChannels:       result.TargetAudioChannels,
-		TargetAudioBitrateKbps:    result.TargetAudioBitrateKbps,
-		TargetResolution:          result.TargetResolution,
-		SubtitleTrackIndex:        result.SubtitleTransportTrackIndex,
-		SubtitleBurnIn:            result.SubtitleBurnIn,
+		PlayMethod:                    result.PlayMethod,
+		BasePlayMethod:                result.PlayMethod,
+		AudioTrackIndex:               plannedAudioTrackIndexV3(result, session.AudioTrackIndex),
+		TranscodeAudio:                result.TranscodeAudio,
+		RemuxDVMode:                   remuxDVModeForPlanV3(result.Plan),
+		RemuxResumeLeadingPictureDrop: result.RemuxResumeLeadingPictureDrop,
+		TranscodeHWAccel:              transport.hwAccel,
+		ToneMapMode:                   transport.toneMapMode,
+		TranscodeNodeURL:              transport.nodeURL,
+		TranscodeTransportID:          transport.transportID,
+		TranscodeRouteSet:             true,
+		RoutingNetworkProvider:        new(netaccess.PathFromContext(ctx).Provider),
+		RoutingWorkload:               string(transport.routingWorkload),
+		RoutingExecution:              string(transport.routingExecution),
+		RoutingExecutionNodeID:        transport.routingExecutorID,
+		RoutingExecutionNodeURL:       transport.routingExecutorURL,
+		RoutingEgress:                 string(transport.routingEgress),
+		RoutingEgressNodeID:           transport.routingEgressID,
+		RoutingEgressNodeURL:          transport.routingEgressURL,
+		RequireMediaAuthorization:     mode.headerAuth,
+		MediaAuthorizationSet:         true,
+		ClientIP:                      clientip.FromContext(ctx),
+		ClientName:                    session.ClientName,
+		ClientVersion:                 session.ClientVersion,
+		ClientUserAgent:               session.ClientUserAgent,
+		StreamBitrateKbps:             result.TargetBitrateKbps,
+		TargetVideoCodec:              result.TargetVideoCodec,
+		TargetAudioCodec:              result.TargetAudioCodec,
+		SourceAudioChannels:           result.SourceAudioChannels,
+		TargetAudioChannels:           result.TargetAudioChannels,
+		TargetAudioBitrateKbps:        result.TargetAudioBitrateKbps,
+		TargetResolution:              result.TargetResolution,
+		SubtitleTrackIndex:            result.SubtitleTransportTrackIndex,
+		SubtitleBurnIn:                result.SubtitleBurnIn,
 	}
 	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
 		state.SegmentDuration = playback.DefaultSegmentDuration
@@ -5002,8 +5007,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	var toneMapCapabilityErr error
 	var plannerSettings playback.PlannerSettingsV3
 	var plannerSettingsErr error
+	var lowerVersion *playback.LowerVersionV3
 	if !seekReanchor {
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
+		if requestedEditionResolved {
+			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
+		}
 	}
 	if seekReanchor {
 		if err := h.validateFrozenSubtitleIdentityV3(r.Context(), effectiveFile, record.FrozenRecipe); err != nil {
@@ -5019,7 +5028,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	} else {
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
 	if outputChange && result.Terminal != nil && effectiveFile.ID != currentEffectiveFile.ID {
 		// Returning to the requested edition is speculative during an output
@@ -5033,7 +5042,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if err != nil {
 			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 		}
-		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+		result, toneMapCapabilityErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: audioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	}
 	if start.AllowsAlternateVersions() && terminalAllowsAlternateFileV3(result.Terminal) && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		accessFilter := requestAccessFilter(r)
@@ -5071,7 +5080,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 					if err := preflightPlaybackFile(r.Context(), candidateFile, h.MissingMarker, h.EventsHub); err != nil {
 						continue
 					}
-					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: plannerRequestedFile, EffectiveFile: candidateFile, ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
+					candidateResult, candidateToneMapErr = h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: candidateStart, RequestedFile: plannerRequestedFile, EffectiveFile: candidateFile, LowerVersion: lowerVersionForFileV3(lowerVersion, candidateFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: candidateAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), candidateFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), candidateFile)})
 				}
 				if candidateResult.Terminal == nil {
 					start = candidateStart
@@ -5112,7 +5121,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// so it is excluded — its route was escalated when the attempt started.
 		escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), mode,
 			func() playback.PlannerInputV3 {
-				return h.plannerInputV3(r.Context(), start, plannerRequestedFile, effectiveFile, audioIndex, attemptedKeys)
+				input := h.plannerInputV3(r.Context(), start, plannerRequestedFile, effectiveFile, audioIndex, attemptedKeys)
+				input.LowerVersion = lowerVersionForFileV3(lowerVersion, effectiveFile)
+				return input
 			}, result)
 		if escalateErr != nil {
 			return playback.DecisionResponseV3{}, *record, nil, escalateErr
@@ -5805,6 +5816,49 @@ func copyOptionalIntV3(value *int) *int {
 	}
 	copy := *value
 	return &copy
+}
+
+// lowerVersionV3 finds the version that serves lower qualities of a 4K
+// version when 4K transcoding is disabled: the first non-4K candidate in the
+// alternate-version fallback order, the one that fallback adopts when a lower
+// quality refuses the 4K source. It reads stored metadata only; the menu is
+// built on every start and must not pay for probes. Nil when the policy lets
+// the 4K source be transcoded, the request pins its version, or the item has
+// no lower version.
+func (h *PlaybackHandler) lowerVersionV3(ctx context.Context, req playback.StartRequestV3, base *models.MediaFile, settings playback.PlannerSettingsV3, filter catalog.AccessFilter) *playback.LowerVersionV3 {
+	if base == nil || settings.Allow4KTranscode || !settings.TranscodeEnabled || !req.AllowsAlternateVersions() || !playback.Is4KMediaFileV3(base) {
+		return nil
+	}
+	alternates, err := h.findAlternateFiles(ctx, base, filter)
+	if err != nil {
+		return nil
+	}
+	for _, alternate := range alternates {
+		// A part of a multi-part version falls back only to the same part.
+		if base.PresentationPartTotal > 1 && alternate.PresentationPartIndex != base.PresentationPartIndex {
+			continue
+		}
+		if playback.Is4KMediaFileV3(alternate) {
+			// Candidates are ordered non-4K first; the rest are 4K too.
+			return nil
+		}
+		return &playback.LowerVersionV3{
+			Requested: playback.SourceDescriptorFromFileV3(base, 0),
+			Lower:     playback.SourceDescriptorFromFileV3(alternate, 0),
+		}
+	}
+	return nil
+}
+
+// lowerVersionForFileV3 is the lower version for a plan of file. When the
+// alternate-version fallback plays a lower version other than the first one,
+// that plan's menu describes the version it plays, with the probed metadata
+// the fallback just read.
+func lowerVersionForFileV3(lower *playback.LowerVersionV3, file *models.MediaFile) *playback.LowerVersionV3 {
+	if lower == nil || file == nil || playback.Is4KMediaFileV3(file) {
+		return lower
+	}
+	return &playback.LowerVersionV3{Requested: lower.Requested, Lower: playback.SourceDescriptorFromFileV3(file, 0)}
 }
 
 func shouldTryAlternateFileV3(qualityPreference string) bool {

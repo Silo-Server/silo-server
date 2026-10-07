@@ -36,7 +36,7 @@ func BuiltinArrWebhookSource() DiscoveredSource {
 		Descriptor: ScanSourceDescriptor{
 			DeliveryModes:   []string{DeliveryModeWebhook},
 			Connection:      ConnectionNone,
-			ConnectionKinds: []string{"sonarr", "radarr"},
+			ConnectionKinds: []string{ConnectionKindSonarr, ConnectionKindRadarr},
 			Summary:         "No API key needed — paste one URL into Sonarr/Radarr → Settings → Connect → Webhook.",
 			ConfigForm: &AdminForm{
 				Fields: []AdminFormField{

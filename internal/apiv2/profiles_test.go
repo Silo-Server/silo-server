@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -484,6 +485,13 @@ func TestVerifyProfilePIN(t *testing.T) {
 	// A declared locked profile is judged even though the header is optional.
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, with(bearer(memberToken), "X-Profile-Id", "p-locked")), TypeProfileVerificationRequired)
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: errors.New("boom")})), http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken)), TypeInternalError)
+	// A profile locked after too many wrong PINs is rate_limited with the
+	// lockout remainder as Retry-After.
+	locked := do(t, newTestHandler(t, pilotDeps(nil, &fakeProfiles{err: handlers.PINLockedError(5 * time.Minute)})), http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken))
+	requireProblem(t, locked, TypeRateLimited)
+	if got := locked.Header().Get("Retry-After"); got != "300" {
+		t.Fatalf("Retry-After = %q, want 300", got)
+	}
 	unwired := pilotDeps(nil, nil)
 	unwired.Profiles = nil
 	requireProblem(t, do(t, newTestHandler(t, unwired), http.MethodPost, "/api/v2/profiles/p-owner/verify-pin", `{"pin":"1234"}`, bearer(memberToken)), TypeDependencyUnavailable)
