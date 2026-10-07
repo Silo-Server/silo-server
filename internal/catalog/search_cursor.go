@@ -630,14 +630,10 @@ func (r *ItemRepository) searchCandidatesExecutor(def QueryDefinition, access Ac
 	executor.SourceWhere = cursorTruePredicate
 	executor.SourceArgs = args
 	if def.Sort.Field == defaultSortField {
-		libraryIDs := append([]int(nil), def.LibraryIDs...)
-		if access.AllowedLibraryIDs != nil {
-			if len(libraryIDs) == 0 {
-				libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-			} else {
-				libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-			}
-		}
+		// Sort expression only. Callers pass access already narrowed to the
+		// requested libraries (catalogSearchAccess returns early when that is
+		// empty), so the relation above enforces the library scope.
+		libraryIDs, _ := access.LibraryScope(def.LibraryIDs)
 		if len(libraryIDs) > 0 {
 			executor.SourceArgs = append(executor.SourceArgs, libraryIDs)
 			parameter := fmt.Sprintf("$%d", len(executor.SourceArgs))

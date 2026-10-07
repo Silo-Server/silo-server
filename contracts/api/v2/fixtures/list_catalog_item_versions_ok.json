@@ -10,7 +10,9 @@
       "file_size": 0,
       "duration": 0,
       "bitrate": 0,
-      "added_at": "2026-01-02T03:04:05.678Z"
+      "added_at": "2026-01-02T03:04:05.678Z",
+      "effective_audio_track_index": 1,
+      "effective_audio_language": "en"
     }
   ]
 }

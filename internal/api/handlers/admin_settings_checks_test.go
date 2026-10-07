@@ -658,7 +658,7 @@ func TestAdminSettingsRejectClearingOnlyRedisTransport(t *testing.T) {
 		}
 	})
 
-	t.Run("bootstrap Sentinel", func(t *testing.T) {
+	t.Run("bootstrap Redis URL", func(t *testing.T) {
 		settings := newStore()
 		handler := &AdminHandler{
 			SettingsRepo:            settings,

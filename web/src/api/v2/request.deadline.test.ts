@@ -1,3 +1,7 @@
+// TODO: this file uses ReadableStream, which VM contexts do not provide, so it
+// runs on the threads pool (THREADS_TESTS in vite.config.ts). Make it VM-safe
+// and drop it from that list.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import authenticationRequired from "../../../../contracts/api/v2/fixtures/authentication_required.json";

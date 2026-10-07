@@ -98,3 +98,40 @@ func TestApplyEpisodeTargetLibraryAccessComposesAllowedAndDisabledMembership(t *
 		t.Fatalf("args = %v, argIdx = %d; want allowed and disabled lists with next index 3", args, argIdx)
 	}
 }
+
+func TestApplySectionLibraryScopeToQuery(t *testing.T) {
+	seven := 7
+	cases := []struct {
+		name       string
+		def        []int
+		libraryID  *int
+		libraryIDs []int
+		wantIDs    []int
+		wantOK     bool
+	}{
+		{name: "unrestricted keeps the query's libraries", def: []int{1, 2}, wantIDs: []int{1, 2}, wantOK: true},
+		{name: "pinned library wins", def: []int{1}, libraryID: &seven, wantIDs: []int{7}, wantOK: true},
+		{name: "no query libraries take the viewer's", libraryIDs: []int{3, 4}, wantIDs: []int{3, 4}, wantOK: true},
+		{name: "overlap keeps the shared libraries", def: []int{1, 3}, libraryIDs: []int{3, 4}, wantIDs: []int{3}, wantOK: true},
+		// The query asked for library 1 and the viewer cannot reach it: the
+		// section must match nothing rather than fall back to every library
+		// the viewer can see.
+		{name: "disjoint libraries match nothing", def: []int{1}, libraryIDs: []int{3}, wantOK: false},
+		{name: "nonexistent query library matches nothing", def: []int{999}, libraryIDs: []int{3}, wantOK: false},
+		// An empty, non-nil scope means the viewer can reach no library; it
+		// must not read as "every library".
+		{name: "empty scope matches nothing", libraryIDs: []int{}, wantOK: false},
+		{name: "empty scope with query libraries matches nothing", def: []int{1}, libraryIDs: []int{}, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := applySectionLibraryScopeToQuery(catalog.QueryDefinition{LibraryIDs: tc.def}, tc.libraryID, tc.libraryIDs)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (libraries %v)", ok, tc.wantOK, got.LibraryIDs)
+			}
+			if ok && !slices.Equal(got.LibraryIDs, tc.wantIDs) {
+				t.Fatalf("libraries = %v, want %v", got.LibraryIDs, tc.wantIDs)
+			}
+		})
+	}
+}

@@ -74,3 +74,26 @@ func TestAdminAutoscanSourceWriteTransport(t *testing.T) {
 		})
 	}
 }
+
+// A missing required server is a validation problem that names the field, so
+// a client can point the operator at the connection picker.
+func TestAdminAutoscanSourceWriteConnectionRequiredProblem(t *testing.T) {
+	f := &fakeSourceWrites{err: handlers.ErrAdminAutoscanSourceConnectionRequired}
+	deps := pilotDeps(nil, nil)
+	deps.AdminAutoscanSourceWrites = f
+	h := NewHandler(deps)
+	for method, path := range map[string]string{
+		"POST": Prefix + "/admin/autoscan/sources",
+		"PUT":  Prefix + "/admin/autoscan/sources/source",
+	} {
+		body := `{"plugin_id":"silo.autoscan.arr","capability_id":"arr","enabled":true,"path_rewrites":[]}`
+		if method == "PUT" {
+			body = `{"enabled":true,"connection_id":null,"path_rewrites":[]}`
+		}
+		rec := do(t, h, method, path, body, bearer(adminToken))
+		requireProblem(t, rec, TypeValidationFailed)
+		if !strings.Contains(rec.Body.String(), `"location":"body.connection_id"`) || !strings.Contains(rec.Body.String(), `"code":"required"`) {
+			t.Fatalf("%s problem = %s, want a required body.connection_id error", method, rec.Body.String())
+		}
+	}
+}

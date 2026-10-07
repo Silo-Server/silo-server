@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,7 +38,14 @@ type stubLoginSessions struct {
 	valid map[string]bool
 }
 
+// loginStoreDown is a login session whose check fails in the store, as when
+// Postgres is unreachable.
+const loginStoreDown = "login-store-down"
+
 func (s stubLoginSessions) IsValid(_ context.Context, sessionID string) (bool, error) {
+	if sessionID == loginStoreDown {
+		return false, errors.New("dial tcp: connection refused")
+	}
 	return s.valid[sessionID], nil
 }
 
@@ -101,6 +109,9 @@ func TestProxyGrantRoutesRefuseUnauthenticatedAndUnauthorizedCallers(t *testing.
 		{name: "no bearer", path: "/stream/v3/session-1", wantStatus: http.StatusUnauthorized, wantError: "unauthorized"},
 		{name: "token signed by another secret", path: "/stream/v3/session-1", bearer: foreignAccessToken(t), wantStatus: http.StatusUnauthorized, wantError: "unauthorized"},
 		{name: "revoked login session", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 7, "login-revoked"), wantStatus: http.StatusUnauthorized, wantError: "unauthorized"},
+		// A session that could not be checked is not a revoked one: the
+		// client must retry, not sign out.
+		{name: "login session store down", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 7, loginStoreDown), wantStatus: http.StatusServiceUnavailable, wantError: "service_unavailable"},
 		{name: "another user's session", path: "/stream/v3/session-1", bearer: grantAccessToken(t, 8, "login-1"), wantStatus: http.StatusForbidden, wantError: "forbidden"},
 		{name: "no grant", path: "/stream/v3/session-missing", bearer: grantAccessToken(t, 7, "login-1"), wantStatus: http.StatusNotFound, wantError: "playback_session_not_found"},
 	} {
@@ -115,6 +126,9 @@ func TestProxyGrantRoutesRefuseUnauthenticatedAndUnauthorizedCallers(t *testing.
 			}
 			if body.Error != test.wantError {
 				t.Fatalf("error code = %q, want %q", body.Error, test.wantError)
+			}
+			if wantRetry := test.wantStatus == http.StatusServiceUnavailable; (rr.Header().Get("Retry-After") != "") != wantRetry {
+				t.Fatalf("Retry-After = %q, want present=%v", rr.Header().Get("Retry-After"), wantRetry)
 			}
 			if rr.Body.Len() > 0 && rr.Body.String()[0] == '0' {
 				t.Fatal("refused request received media bytes")

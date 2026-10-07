@@ -687,14 +687,24 @@ type SectionOverridesQuery struct {
 // The addressed library must be visible before reading or changing its
 // profile override set, even when individual section configs name no libraries.
 func (h *SectionHandler) requireOverrideLibrary(ctx context.Context, scope, libraryID string) error {
+	id, err := overrideLibraryID(scope, libraryID)
+	if err != nil || id == 0 {
+		return err
+	}
+	return h.requireViewableLibrary(ctx, id)
+}
+
+// overrideLibraryID is the library a library page's override set names, or
+// 0 for any other page.
+func overrideLibraryID(scope, libraryID string) (int, error) {
 	if scope != "library" {
-		return nil
+		return 0, nil
 	}
 	id, err := strconv.Atoi(libraryID)
 	if err != nil || id <= 0 {
-		return apiError(http.StatusBadRequest, "bad_request", "Library ID is required")
+		return 0, apiError(http.StatusBadRequest, "bad_request", "Library ID is required")
 	}
-	return h.requireViewableLibrary(ctx, id)
+	return id, nil
 }
 
 // ListProfileOverrides lists the profile's saved overrides for one page; the
@@ -705,6 +715,11 @@ func (h *SectionHandler) ListProfileOverrides(ctx context.Context, q SectionOver
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return nil, err
 	}
+	return h.listProfileOverrides(ctx, q)
+}
+
+// listProfileOverrides is ListProfileOverrides after the library check.
+func (h *SectionHandler) listProfileOverrides(ctx context.Context, q SectionOverridesQuery) ([]userstore.SectionOverride, error) {
 	if h.StoreProvider == nil {
 		return []userstore.SectionOverride{}, nil
 	}
@@ -755,13 +770,19 @@ func (h *SectionHandler) SaveProfileOverrides(ctx context.Context, q SectionOver
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
+	return h.saveProfileOverrides(ctx, q, writes, apimw.IsAdmin(ctx))
+}
+
+// saveProfileOverrides is SaveProfileOverrides after the library check, with
+// the role the recipe gate checks passed in: the caller's for the profile's
+// own routes, the owning account's for an administrator's write.
+func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOverridesQuery, writes []SectionOverrideWrite, isAdmin bool) error {
 	// Gate: validate user-added overrides before touching the store.
 	allowCustom := false
 	if h.Settings != nil {
 		v, _ := h.Settings.Get(ctx, SectionsAllowProfileCustomSettingKey)
 		allowCustom = v == "true"
 	}
-	isAdmin := apimw.IsAdmin(ctx)
 
 	type trendingCandidate struct {
 		id     string
@@ -1059,6 +1080,11 @@ func (h *SectionHandler) ResetProfileOverrides(ctx context.Context, q SectionOve
 	if err := h.requireOverrideLibrary(ctx, q.Scope, q.LibraryID); err != nil {
 		return err
 	}
+	return h.resetProfileOverrides(ctx, q)
+}
+
+// resetProfileOverrides is ResetProfileOverrides after the library check.
+func (h *SectionHandler) resetProfileOverrides(ctx context.Context, q SectionOverridesQuery) error {
 	if h.StoreProvider == nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "User store not available")
 	}
@@ -1151,6 +1177,12 @@ func (h *SectionHandler) ResolveProfileSectionSettings(ctx context.Context, user
 			return nil, err
 		}
 	}
+	return h.resolveProfileSectionSettings(ctx, userID, profileID, scope, libraryID, filter)
+}
+
+// resolveProfileSectionSettings is ResolveProfileSectionSettings after the
+// library check.
+func (h *SectionHandler) resolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter catalog.AccessFilter) ([]sections.ResolvedSection, error) {
 	adminSections, err := h.repo.ListByScope(ctx, scope, libraryID)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
@@ -1193,42 +1225,8 @@ func sectionAllowedByAccess(section sections.ResolvedSection, filter catalog.Acc
 		return true
 	}
 
-	if filter.AllowedLibraryIDs != nil {
-		return intSlicesIntersect(configLibraryIDs, filter.AllowedLibraryIDs)
-	}
-
-	for _, libraryID := range configLibraryIDs {
-		if !intSliceContains(filter.DisabledLibraryIDs, libraryID) {
-			return true
-		}
-	}
-	return false
-}
-
-func intSlicesIntersect(left, right []int) bool {
-	if len(left) == 0 || len(right) == 0 {
-		return false
-	}
-
-	set := make(map[int]struct{}, len(right))
-	for _, value := range right {
-		set[value] = struct{}{}
-	}
-	for _, value := range left {
-		if _, ok := set[value]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func intSliceContains(values []int, target int) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	_, none := filter.LibraryScope(configLibraryIDs)
+	return !none
 }
 
 // applyDiversityFilter removes items from sections whose recipe has

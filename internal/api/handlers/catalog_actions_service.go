@@ -8,10 +8,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Seams of the catalog-items section's actions and lookups: trailer refresh,
@@ -195,12 +198,13 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 	return job, nil
 }
 
-// SearchPeople answers up to limit people matching query; limit <= 0 is 20.
-func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit int) ([]PersonView, error) {
+// SearchPeople answers up to limit people matching query that the viewer can
+// see through at least one credit, as person detail requires; limit <= 0 is 20.
+func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit int, filter catalog.AccessFilter) ([]PersonView, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	people, err := h.personRepo.Search(ctx, query, limit)
+	people, err := h.personRepo.SearchAlphabetical(ctx, query, limit, filter)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "search_failed", err.Error())
 	}
@@ -224,13 +228,14 @@ func (h *PeopleHandler) SearchPeopleScoped(ctx context.Context, query string, li
 	return resp, nil
 }
 
-// Person answers one person. A view (queueRefresh) also queues a provider
-// refresh when one is due; a speculative prefetch leaves that to the sweep.
-func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool) (PersonView, error) {
-	person, err := h.personRepo.Get(ctx, id)
+// Person answers one person the viewer can see through at least one credit
+// (the people search predicate); any other person is not found, like an
+// unknown ID. A view (queueRefresh) also queues a provider refresh when one is
+// due; a speculative prefetch leaves that to the sweep.
+func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool, filter catalog.AccessFilter) (PersonView, error) {
+	person, err := h.visiblePerson(ctx, id, filter)
 	if err != nil {
-		slog.WarnContext(ctx, "people: get person failed", "component", "api", "id", id, "id_str", strconv.FormatInt(id, 10), "error", err)
-		return PersonView{}, apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+		return PersonView{}, err
 	}
 	if queueRefresh {
 		h.enqueuePersonRefreshIfDue(*person)
@@ -239,8 +244,9 @@ func (h *PeopleHandler) Person(ctx context.Context, id int64, queueRefresh bool)
 }
 
 // RefreshPerson queues a provider refresh of the person for the viewer
-// userID, at most personRefreshRate per user.
-func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64) error {
+// userID, at most personRefreshRate per user. A person the viewer cannot see
+// is not found, as in Person.
+func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64, filter catalog.AccessFilter) error {
 	if h == nil || h.refreshQueue == nil {
 		return apiError(http.StatusServiceUnavailable, policyErrorUnavailable, "Person refresh is not configured")
 	}
@@ -255,12 +261,26 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64)
 		}
 		return limited
 	}
-	person, err := h.personRepo.Get(ctx, id)
-	if err != nil || person == nil {
-		return apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+	if _, err := h.visiblePerson(ctx, id, filter); err != nil {
+		return err
 	}
 	h.refreshQueue.Enqueue(id)
 	return nil
+}
+
+// visiblePerson loads a person the viewer can see through at least one credit.
+// A hidden or unknown person is a 404; a failed lookup is a 500, because the
+// person may well be visible.
+func (h *PeopleHandler) visiblePerson(ctx context.Context, id int64, filter catalog.AccessFilter) (*models.Person, error) {
+	person, err := h.personRepo.GetVisible(ctx, id, filter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apiError(http.StatusNotFound, policyErrorNotFound, "person not found")
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "people: get person failed", "component", "api", "id", id, "id_str", strconv.FormatInt(id, 10), "error", err)
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load person")
+	}
+	return person, nil
 }
 
 // Work answers a literary work with the formats the viewer can see.

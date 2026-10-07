@@ -42,6 +42,12 @@ func TestRefreshSession(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"revoked"}`, nil), TypeSessionExpired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"nope"}`, nil), TypeInvalidToken)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"provider-down"}`, nil), TypeProviderUnavailable)
+	// A store outage judged nothing: retry later, keep the refresh token.
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"store-down"}`, nil)
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("store outage problem has no Retry-After")
+	}
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{}`, nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.refresh_token" {
 		t.Fatalf("errors = %+v", p.Errors)
@@ -74,7 +80,7 @@ func TestListAndDeleteSessions(t *testing.T) {
 	deps.Sessions = sessions
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/auth/sessions", "", bearer(memberToken))
-	want := `{"items":[{"id":"s3","device_name":"Silo/1.0 (tvOS)","ip_address":"127.0.0.1","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"},{"id":"s2","device_name":"Silo/1.0 (iOS)","ip_address":"127.0.0.2","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"},{"id":"s1","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z"}],"page":{"has_more":false}}` + "\n"
+	want := `{"items":[{"id":"s3","device_name":"Living Room Apple TV","ip_address":"127.0.0.1","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","device_id":"8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50","device_platform":"tvOS","last_seen_at":null,"current":false},{"id":"s2","device_name":"Silo/1.0 (iOS)","ip_address":"127.0.0.2","created_at":"2026-01-02T04:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","last_seen_at":null,"current":false},{"id":"s1","device_name":"","ip_address":"","created_at":"2026-01-02T03:04:05.678Z","expires_at":"2026-02-01T03:04:05.678Z","last_seen_at":null,"current":true}],"page":{"has_more":false},"current_session":null}` + "\n"
 	if rec.Code != 200 || rec.Body.String() != want {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}

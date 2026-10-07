@@ -5,11 +5,14 @@ import (
 	"testing"
 )
 
-// fakeLister returns a fixed set of discovered scan sources.
-type fakeLister struct{ sources []DiscoveredSource }
+// fakeLister returns a fixed set of discovered scan sources, or err.
+type fakeLister struct {
+	sources []DiscoveredSource
+	err     error
+}
 
 func (f fakeLister) ListScanSources(context.Context) ([]DiscoveredSource, error) {
-	return f.sources, nil
+	return f.sources, f.err
 }
 
 func TestListAvailableScanSourcesEnumeratesInstalled(t *testing.T) {

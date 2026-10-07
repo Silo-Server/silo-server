@@ -474,7 +474,6 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	}
 	if err := s.repo.completeRun(ctx, claim, summary); err != nil {
 		s.failClaim(ctx, claim, summary, err)
-		slog.Error("history import: failed to complete run", "run_id", run.ID, "error", err)
 		return
 	}
 	observation.Finish("success")

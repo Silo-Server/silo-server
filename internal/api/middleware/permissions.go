@@ -25,8 +25,9 @@ type MetadataTargetLibraryResolver interface {
 type PermissionMiddleware struct {
 	users        PermissionUserLoader
 	libraries    MetadataTargetLibraryResolver
-	checkPrimary PrimaryProfileChecker      // nil disables the acting-admin profile policy
-	groups       access.GroupPolicyProvider // nil means "no access groups"
+	checkPrimary PrimaryProfileChecker       // nil disables the acting-admin profile policy
+	household    HouseholdProfileRequirement // nil disables the profile-less acting-admin check
+	groups       access.GroupPolicyProvider  // nil means "no access groups"
 }
 
 // NewPermissionMiddleware creates the legacy permission middleware. The
@@ -37,13 +38,14 @@ func NewPermissionMiddleware(
 	users PermissionUserLoader,
 	libraries MetadataTargetLibraryResolver,
 	checkPrimary PrimaryProfileChecker,
+	household HouseholdProfileRequirement,
 	groups ...access.GroupPolicyProvider,
 ) *PermissionMiddleware {
 	var groupProvider access.GroupPolicyProvider
 	if len(groups) > 0 {
 		groupProvider = groups[0]
 	}
-	return &PermissionMiddleware{users: users, libraries: libraries, checkPrimary: checkPrimary, groups: groupProvider}
+	return &PermissionMiddleware{users: users, libraries: libraries, checkPrimary: checkPrimary, household: household, groups: groupProvider}
 }
 
 // RequireMetadataCurationForItem allows acting admins or users with
@@ -61,10 +63,11 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 		}
 		if claims.Role == "admin" {
 			var checkPrimary PrimaryProfileChecker
+			var household HouseholdProfileRequirement
 			if m != nil {
-				checkPrimary = m.checkPrimary
+				checkPrimary, household = m.checkPrimary, m.household
 			}
-			actingAdmin, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
+			actingAdmin, err := actingAdminAllowed(r, claims, checkPrimary, household)
 			if err != nil {
 				writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
 				return
@@ -93,8 +96,9 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 		hasPermission := auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)
 		if claims.Role == "admin" {
 			// Reached only when the admin bypass was refused (non-primary
-			// profile declared): the role-derived grant does not apply, only
-			// an explicitly assigned permission does.
+			// profile declared, or no profile on a household that requires
+			// one): the role-derived grant does not apply, only an explicitly
+			// assigned permission does.
 			hasPermission = auth.HasAssignedPermission(user, auth.PermissionMetadataCuration)
 		}
 		if !hasPermission {

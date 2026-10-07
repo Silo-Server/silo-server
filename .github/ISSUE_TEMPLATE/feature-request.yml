@@ -1,0 +1,92 @@
+name: Feature request
+description: Suggest an improvement or something Silo doesn't do yet
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Silo is pre-1.0 and focused on correctness and polish. A request is most useful when it explains the problem you hit, with a concrete example, rather than prescribing a solution. One request per issue.
+
+        Silo will not accept Live TV, OTA/DVB tuners, IPTV, EPG/XMLTV guides, DVR, or `.strm` remote-stream files; [Project non-goals](https://github.com/Silo-Server/silo-server/blob/main/docs/non-goals.md) explains why. Requests that only concern the Apple or Android apps belong in [silo-apple](https://github.com/Silo-Server/silo-apple/issues/new/choose) or [silo-android](https://github.com/Silo-Server/silo-android/issues/new/choose).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do, and what stops you today. Give a concrete example.
+    validations:
+      required: true
+  - type: textarea
+    id: who-it-affects
+    attributes:
+      label: Who it affects
+      description: The kind of user or setup, such as household size, library type, client, or deployment.
+    validations:
+      required: true
+  - type: textarea
+    id: current-workaround
+    attributes:
+      label: Current workaround
+      description: What you do instead today, or "none".
+    validations:
+      required: true
+  - type: textarea
+    id: proposed-behavior
+    attributes:
+      label: Proposed behavior
+      description: What you would like Silo to do. Describe the outcome, not an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, including plugins or companion apps, and why they fall short.
+  - type: input
+    id: ai-harness
+    attributes:
+      label: AI harness
+      description: Enter the exact agent harness or application, or "none".
+    validations:
+      required: true
+  - type: input
+    id: ai-tools
+    attributes:
+      label: AI tool(s)
+      description: Enter the exact tool name(s), or "none".
+    validations:
+      required: true
+  - type: input
+    id: ai-models
+    attributes:
+      label: AI model(s)
+      description: Enter the exact model identifier(s) reported by each tool, or "n/a".
+    validations:
+      required: true
+  - type: dropdown
+    id: ai-involvement
+    attributes:
+      label: AI involvement
+      options:
+        - No AI used
+        - Human-written, AI-reviewed
+        - AI-assisted
+        - Fully AI-generated, human verified
+    validations:
+      required: true
+  - type: textarea
+    id: ai-review
+    attributes:
+      label: Independent or adversarial review
+      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this issue does not require independent or adversarial review.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched open and closed issues, including ones closed as not planned, and this is not already requested
+          required: true
+        - label: This is not one of Silo's non-goals
+          required: true
