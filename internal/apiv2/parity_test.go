@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,21 +32,29 @@ func (f fakeTokens) ValidateToken(tok string) (*auth.Claims, error) {
 }
 
 // fakeSessions maps each active login session to its account's current role;
-// a session it does not list is revoked or expired.
+// a session it does not list is revoked or expired. storeDownSession is one
+// the store cannot look up.
 type fakeSessions struct{ roles map[string]string }
 
+const storeDownSession = "s-store-down"
+
 func (f fakeSessions) ActiveSessionRole(_ context.Context, id string) (string, bool, error) {
+	if id == storeDownSession {
+		return "", false, errors.New("checking session validity: dial tcp: connection refused")
+	}
 	role, ok := f.roles[id]
 	return role, ok, nil
 }
 
 type fakeUsers struct{ users map[int]*models.User }
 
+// GetByID reports a missing account the way the repository does, as
+// auth.ErrNotFound: the auth gate tells it from a store failure.
 func (f fakeUsers) GetByID(_ context.Context, id int) (*models.User, error) {
 	if u, ok := f.users[id]; ok {
 		return u, nil
 	}
-	return nil, errors.New("no user")
+	return nil, auth.ErrNotFound
 }
 
 type fakeResolver struct{}
@@ -104,6 +113,9 @@ const (
 	// demotedToken is member 1's session token minted while the account was
 	// an admin: the session is valid but the role changed since.
 	demotedToken = "tok-demoted"
+	// storeDownToken is member 1's token for a session the store cannot
+	// look up (the database is unreachable).
+	storeDownToken = "tok-store-down"
 )
 
 type fakeAPIKeys struct{ keys map[string]*models.APIKey }
@@ -126,6 +138,7 @@ func fakeAuth(users map[int]*models.User) *apimw.AuthMiddleware {
 		impersonatedToken:      {UserID: 1, Role: "user", SessionID: "s4", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: ptr(2)},
 		temporaryPasswordToken: {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, PasswordChangeRequired: true},
 		demotedToken:           {UserID: 1, Role: "admin", SessionID: "s1", TokenType: auth.TokenTypeAccess},
+		storeDownToken:         {UserID: 1, Role: "user", SessionID: storeDownSession, TokenType: auth.TokenTypeAccess},
 	}
 	keys := fakeAPIKeys{map[string]*models.APIKey{apiKeyToken: {ID: 7, UserID: 1}}}
 	return apimw.NewAuthMiddleware(fakeTokens{claims}, fakeSessions{map[string]string{"s1": "user", "s2": "admin", "s3": "admin", "s4": "user"}}, keys, fakeUsers{users})
@@ -185,6 +198,9 @@ func TestMiddlewareParity(t *testing.T) {
 		{"authenticated: no credential", ClassAuthenticated, nil, TypeAuthenticationRequired, false},
 		{"authenticated: bad token", ClassAuthenticated, bearer("nope"), TypeInvalidToken, false},
 		{"authenticated: expired session", ClassAuthenticated, bearer(expiredToken), TypeSessionExpired, false},
+		// The store could not look the session up: retry, do not sign out.
+		{"authenticated: session store down", ClassAuthenticated, bearer(storeDownToken), TypeDependencyUnavailable, false},
+		{"profile: session store down", ClassProfileScoped, with(bearer(storeDownToken), "X-Profile-Id", "p-owner"), TypeDependencyUnavailable, false},
 		// The session is valid but the account's role changed after the
 		// token was minted; the client refreshes instead of signing out.
 		{"authenticated: role changed", ClassAuthenticated, bearer(demotedToken), TypeTokenRefreshRequired, false},
@@ -268,6 +284,21 @@ func TestAPIKeyDenialProblems(t *testing.T) {
 				t.Fatalf("v2 denial contains legacy fields: %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestSessionStoreOutageIsRetryable: a login session the store could not look
+// up is a 503 dependency_unavailable with the gate's Retry-After, never the
+// 401 session_expired that makes a client sign out.
+func TestSessionStoreOutageIsRetryable(t *testing.T) {
+	h := newTestHandler(t, parityDeps(false))
+	rec := do(t, h, http.MethodGet, Prefix+"/account/me", "", bearer(storeDownToken))
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if got := rec.Header().Get("Retry-After"); got != strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds) {
+		t.Fatalf("Retry-After = %q", got)
+	}
+	if strings.Contains(rec.Body.String(), "connection refused") {
+		t.Fatalf("problem leaks the store error: %s", rec.Body.String())
 	}
 }
 

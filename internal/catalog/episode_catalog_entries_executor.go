@@ -758,19 +758,9 @@ func (e *QueryExecutor) hydrateEpisodeCatalogEntryPage(
 }
 
 func singleEpisodeCatalogLibraryID(def QueryDefinition, access AccessFilter) (int, bool, bool) {
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
-	if len(libraryIDs) == 0 {
-		if access.AllowedLibraryIDs != nil {
-			return 0, true, true
-		}
-		return 0, false, false
+	libraryIDs, empty := effectiveLibraryScope(def.LibraryIDs, access.AllowedLibraryIDs)
+	if empty {
+		return 0, true, true
 	}
 	if len(libraryIDs) != 1 {
 		return 0, false, false

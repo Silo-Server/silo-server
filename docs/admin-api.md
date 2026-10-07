@@ -1769,7 +1769,10 @@ failures preserve webhook status while omitting the URL. Successful reveals emit
 the v2 delivery path using the existing token and configured public base.
 
 Source timestamps use UTC milliseconds. Path rewrites remain an array; connection
-identity and stored source configuration retain their existing meanings. The web
+identity and stored source configuration retain their existing meanings.
+`webhook_last_received_at` counts provider Test events and deliveries the source
+accepted; a delivery dropped because the source or Autoscan was disabled does not
+update it (see [Autoscan delivery API](autoscan-delivery-api.md)). The web
 collects at most 100 pages of 100 sources, rejects missing/repeated continuations
 or overflow, and discards source URLs decoded after an authority change. Reads do
 not create sources, rotate tokens, dispatch events or update external providers.

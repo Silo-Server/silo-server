@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 )
@@ -172,7 +173,9 @@ func registerAuthSessions(reg *Registry) {
 	// invalid_token. A session opened through an external sign-in provider
 	// whose due re-check could not reach the provider, under the fail_closed
 	// outage policy, is 503 provider_unavailable: the session stays valid
-	// and the client retries later.
+	// and the client retries later. A refresh that could not read the
+	// session or account from the store is 503 dependency_unavailable with
+	// Retry-After; the token was not judged and the client keeps it.
 	refresh.Errors = []int{http.StatusUnauthorized, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: refresh, RetrySafety: RetrySafetyDomainIdentity, Class: ClassPublic, ServiceBacked: true}, reg.refreshSession)
 	Register(reg, Operation{
@@ -245,6 +248,10 @@ func (reg *Registry) refreshSession(ctx context.Context, in *RefreshSessionInput
 	if err != nil {
 		if errors.Is(err, auth.ErrProviderUnavailable) {
 			return nil, NewProblem(TypeProviderUnavailable, "The sign-in provider could not confirm the account. Try again later; the session stays valid.")
+		}
+		if errors.Is(err, auth.ErrSessionCheckUnavailable) {
+			return nil, NewProblem(TypeDependencyUnavailable, "The session could not be checked right now. Retry after the Retry-After delay; the session stays valid.").
+				WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
 		var apiErr *handlers.APIError
 		if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {

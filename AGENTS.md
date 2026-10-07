@@ -307,7 +307,9 @@ never attach or embed its media.
   covers UI and UX changes and changes to which items appear or what they show,
   such as search results, home sections, recommendations, sorting, filtering,
   metadata, or artwork. Use before-and-after captures of the same screen with the
-  same data, and a short recording when motion, timing, or focus matters. Write
+  same data, and a short recording when motion, timing, or focus matters. For web
+  app and web admin changes also visible at phone width, include desktop and
+  mobile web captures (or show that mobile is unaffected). Write
   `Evidence: none, no user-visible change` only when that is true.
 - Check evidence media for private information before posting, and upload it to
   GitHub. Never commit PR-only assets such as `.github/pr-assets/`.

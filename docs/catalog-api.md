@@ -38,6 +38,17 @@ its existing alphabetical, unscoped search.
 as a view: when the person's metadata is incomplete or stale and no provider lookup
 ran recently, the server queues a background refresh.
 
+Person detail and `POST /api/v2/catalog/people/{id}/refresh` (`refreshPerson`)
+apply the same visibility rule as a v2 people search without `media_scope`: the
+viewer must be able to see at least one of the person's credits. Otherwise both
+answer `404`, exactly as for an unknown ID, so these routes do not return the
+name, biography, or photo of someone who appears only in titles the viewer cannot
+see. The v1 bridge routes `GET /api/v1/people/{id}` and
+`POST /api/v1/people/{id}/refresh`, and the Jellyfin-compatible `GET /Items/{id}`
+for a person, follow the same rule. The v1 bridge search `GET /api/v1/people?q=`
+lists only people the viewer can see this way and keeps its alphabetical order
+without exact-name ranking. The admin person routes are not filtered.
+
 Clients that warm a cache speculatively, such as web prefetching the cast of an
 open item, pass `prefetch=true`. A prefetch returns the same person but does not
 queue a refresh; missing metadata is left to the server's background sweep. Read

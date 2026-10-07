@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestPersonSearchScopeAndRankingPostgres(t *testing.T) {
@@ -79,9 +82,13 @@ func TestPersonSearchScopeAndRankingPostgres(t *testing.T) {
 			}
 		})
 	}
-	legacy, err := repo.Search(ctx, name, 1)
+	legacy, err := repo.SearchAlphabetical(ctx, name, 1, AccessFilter{})
 	if err != nil || len(legacy) != 1 || legacy[0].ID != ids[1] {
 		t.Fatalf("legacy alphabetical search changed: %+v, %v", legacy, err)
+	}
+	legacy, err = repo.SearchAlphabetical(ctx, name, 20, AccessFilter{})
+	if err != nil || len(legacy) != 4 || slices.ContainsFunc(legacy, func(p models.Person) bool { return p.ID == ids[4] }) {
+		t.Fatalf("legacy search listed a person with no visible credit: %+v, %v", legacy, err)
 	}
 }
 
@@ -172,7 +179,43 @@ func TestPersonSearchViewerAccessPostgres(t *testing.T) {
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
+			requireGetVisibleMatchesSearch(t, repo, prefix, ids, tc.filter)
 		})
+	}
+}
+
+// requireGetVisibleMatchesSearch checks that person detail admits exactly the
+// people an unscoped people search returns under the same viewer access, and
+// that a hidden person reads like an unknown ID.
+func requireGetVisibleMatchesSearch(t *testing.T, repo *PersonRepository, query string, ids []int64, filter AccessFilter) {
+	t.Helper()
+	searched, err := repo.SearchScoped(t.Context(), query, 100, "", filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := make(map[int64]bool, len(searched))
+	for _, p := range searched {
+		listed[p.ID] = true
+	}
+	// The v1 bridge search lists the same people, in its own order.
+	legacy, err := repo.SearchAlphabetical(t.Context(), query, 100, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy) != len(searched) || slices.ContainsFunc(legacy, func(p models.Person) bool { return !listed[p.ID] }) {
+		t.Fatalf("v1 search listed %+v, v2 search %+v", legacy, searched)
+	}
+	for _, id := range ids {
+		person, err := repo.GetVisible(t.Context(), id, filter)
+		switch {
+		case listed[id] && (err != nil || person == nil || person.ID != id):
+			t.Fatalf("person %d is searchable but detail answered %+v, %v", id, person, err)
+		case !listed[id] && !errors.Is(err, pgx.ErrNoRows):
+			t.Fatalf("person %d is not searchable but detail answered %+v, %v", id, person, err)
+		}
+	}
+	if _, err := repo.GetVisible(t.Context(), -1, filter); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("unknown person: %v", err)
 	}
 }
 
@@ -262,6 +305,9 @@ func TestPersonSearchEpisodeParentAccessPostgres(t *testing.T) {
 				}
 				if !slices.Equal(got, tc.want) {
 					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+				if scope == "" {
+					requireGetVisibleMatchesSearch(t, repo, prefix, ids, tc.filter)
 				}
 			})
 		}

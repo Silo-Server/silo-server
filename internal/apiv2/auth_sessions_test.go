@@ -42,6 +42,12 @@ func TestRefreshSession(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"revoked"}`, nil), TypeSessionExpired)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"nope"}`, nil), TypeInvalidToken)
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"provider-down"}`, nil), TypeProviderUnavailable)
+	// A store outage judged nothing: retry later, keep the refresh token.
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{"refresh_token":"store-down"}`, nil)
+	requireProblem(t, rec, TypeDependencyUnavailable)
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("store outage problem has no Retry-After")
+	}
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/refresh", `{}`, nil), TypeValidationFailed)
 	if len(p.Errors) != 1 || p.Errors[0].Location != "body.refresh_token" {
 		t.Fatalf("errors = %+v", p.Errors)

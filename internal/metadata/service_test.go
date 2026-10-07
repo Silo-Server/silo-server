@@ -47,6 +47,9 @@ type fakeItemRepo struct {
 	// referenced reports whether something links to an item, for
 	// DeleteIfUnreferenced. Nil treats every item as unreferenced.
 	referenced func(contentID string) bool
+
+	// unmatchedIDs is what ListUnmatchedByFolderAndPathPrefix returns.
+	unmatchedIDs []string
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -180,7 +183,9 @@ func (r *fakeItemRepo) ReplacePeople(_ context.Context, _ string, _ []models.Ite
 }
 
 func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ int, _ string, _ int) ([]string, error) {
-	return nil, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.unmatchedIDs...), nil
 }
 
 // TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the

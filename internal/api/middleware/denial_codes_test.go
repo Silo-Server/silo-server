@@ -89,6 +89,9 @@ func TestDenialCodesAreStable(t *testing.T) {
 		{"forbidden", func(w http.ResponseWriter) {
 			writeForbidden(w, "Admin access required")
 		}, http.StatusForbidden, "forbidden", ""},
+		{"credential check unavailable", func(w http.ResponseWriter) {
+			writeCredentialCheckUnavailable(w, httptest.NewRequest(http.MethodGet, "/x", nil), errors.New("store down"))
+		}, http.StatusServiceUnavailable, CodeServiceUnavailable, ""},
 		{"internal", func(w http.ResponseWriter) {
 			writeInternalError(w, activeProfileVerificationFailedMsg)
 		}, http.StatusInternalServerError, "internal_error", ""},
