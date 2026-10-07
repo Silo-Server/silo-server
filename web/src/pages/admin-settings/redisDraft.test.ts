@@ -48,15 +48,32 @@ describe("stageRedisUrl", () => {
     });
   });
 
-  it("clears the number when Redis is switched off", () => {
+  it("stages the number on screen when Redis is switched off", () => {
+    // The server stores no number without a URL, so the save still removes it.
     for (const edited of [undefined, "5"]) {
       const draft = draftOver({ "redis.db": "3" });
       if (edited !== undefined) draft.setValue("redis.db", edited);
 
       stageRedisUrl(draft, "");
 
-      expect(Object.fromEntries(draft.staged)).toEqual({ "redis.url": "", "redis.db": "" });
+      expect(Object.fromEntries(draft.staged)).toEqual({
+        "redis.url": "",
+        "redis.db": edited ?? "3",
+      });
     }
+  });
+
+  it("keeps the number through a URL that is emptied and typed again", () => {
+    const draft = draftOver({ "redis.db": "3" });
+
+    stageRedisUrl(draft, "r");
+    stageRedisUrl(draft, "");
+    stageRedisUrl(draft, "redis://cache.example.invalid:6379/7");
+
+    expect(Object.fromEntries(draft.staged)).toEqual({
+      "redis.url": "redis://cache.example.invalid:6379/7",
+      "redis.db": "3",
+    });
   });
 
   it("keeps a typed number through an emptied URL when none is saved", () => {

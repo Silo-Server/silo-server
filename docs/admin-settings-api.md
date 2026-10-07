@@ -117,8 +117,8 @@ single-server URL and for a Sentinel URL. A change needs a restart.
   report one. Under `REDIS_URL` it answers the effective value.
 - The web forms stage the number the Database number field shows with an edit
   of `redis.url`, so a new URL alone does not move the install to another
-  database. When the URL is cleared they stage an empty `redis.db` to remove a
-  stored number.
+  database. That includes a cleared URL, so a URL emptied and typed again keeps
+  the number; a save that leaves no URL stores no number.
 
 ### HEVC encoding
 

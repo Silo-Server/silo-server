@@ -515,14 +515,15 @@ describe("InfrastructureSettings", () => {
       expect(redisGroup.getByLabelText("Connection URL")).toHaveValue("");
     });
 
-    it("clears the number when Redis is switched off", async () => {
+    it("sends the number with the empty URL when Redis is switched off", async () => {
+      // The server stores no number without a URL, so this removes a saved one.
       render(<InfrastructureSettings />);
 
       await userEvent.click(screen.getByRole("switch", { name: "Use Redis" }));
       await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() =>
-        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": "", "redis.db": "" }),
+        expect(updateSettingsMock).toHaveBeenCalledWith({ "redis.url": "", "redis.db": "3" }),
       );
     });
 

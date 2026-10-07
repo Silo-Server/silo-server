@@ -265,16 +265,18 @@ describe("StorageStep", () => {
     expect(setValue).toHaveBeenCalledWith("redis.db", "3");
   });
 
-  it("clears the Redis database number when the URL is emptied", async () => {
+  it("keeps the Redis database number through a URL that is emptied and typed again", async () => {
     const { setValue } = setup({ saved: { "redis.db": "3" } });
     const { rerender } = render(<StorageStep />);
     await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[0]!);
-    fireEvent.change(screen.getByLabelText("Connection URL"), { target: { value: "r" } });
-    rerender(<StorageStep />);
+    for (const value of ["r", "", "redis://new.example.invalid:6379/7"]) {
+      fireEvent.change(screen.getByLabelText("Connection URL"), { target: { value } });
+      rerender(<StorageStep />);
+    }
 
-    fireEvent.change(screen.getByLabelText("Connection URL"), { target: { value: "" } });
-
-    expect(setValue).toHaveBeenLastCalledWith("redis.db", "");
+    expect(setValue).not.toHaveBeenCalledWith("redis.db", "");
+    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3");
+    expect(screen.getByLabelText("Database number")).toHaveValue(3);
   });
 
   it("reveals S3 fields and stages the backend selection", async () => {
