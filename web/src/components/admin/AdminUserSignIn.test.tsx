@@ -302,11 +302,22 @@ describe("AdminUserSignIn linking by subject", () => {
     const user = userEvent.setup();
     identities = [];
     state.installations = [TAILSCALE];
-    mount();
+    mount({ ...USER, password_login: true });
     await user.click(await screen.findByRole("button", { name: "Connect identity" }));
     const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
     expect(dialog).toHaveTextContent("It keeps its Silo password too.");
     expect(dialog).not.toHaveTextContent("Connecting turns off password sign-in");
+  });
+
+  it("promises no password to an account without one when linking a network sign-in", async () => {
+    const user = userEvent.setup();
+    identities = [];
+    state.installations = [TAILSCALE];
+    mount({ ...USER, password_login: false });
+    await user.click(await screen.findByRole("button", { name: "Connect identity" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect a sign-in identity" });
+    expect(dialog).not.toHaveTextContent("Silo password");
+    expect(dialog).not.toHaveTextContent("turns off password sign-in");
   });
 
   it("links an identity to the enabled provider by its exact subject", async () => {

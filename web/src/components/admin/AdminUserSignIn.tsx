@@ -2,7 +2,7 @@ import { useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { KeyRound, Link2, Loader2, Unlink } from "lucide-react";
 
-import type { AdminUser } from "@/api/types";
+import type { AdminUser, PluginInstallation } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { AdminUserSetPasswordDialog } from "@/components/AdminUserSetPasswordDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -145,6 +145,23 @@ function IdentityRow({
   );
 }
 
+/**
+ * What linking does to the account's Silo password, as the dialog says it:
+ * break-glass accounts and network sign-ins (such as Tailscale) keep it, and
+ * other providers turn it off. Nothing is said about a password the account
+ * doesn't have.
+ */
+function connectPasswordNote(
+  user: AdminUser,
+  installation: PluginInstallation | undefined,
+): string {
+  if (user.break_glass) return " As a break-glass account it keeps its Silo password.";
+  if (installation && isNetworkSignIn(installation)) {
+    return user.password_login ? " It keeps its Silo password too." : "";
+  }
+  return " Connecting turns off password sign-in for this account.";
+}
+
 /** Connects an account to a provider identity by the provider's exact subject. */
 function LinkIdentityDialog({
   user,
@@ -238,11 +255,7 @@ function LinkIdentityDialog({
             <DialogTitle>Connect a sign-in identity</DialogTitle>
             <DialogDescription>
               {user.username} will sign in with this provider account.
-              {user.break_glass
-                ? " As a break-glass account it keeps its Silo password."
-                : selectedInstallation && isNetworkSignIn(selectedInstallation)
-                  ? " It keeps its Silo password too."
-                  : " Connecting turns off password sign-in for this account."}
+              {connectPasswordNote(user, selectedInstallation)}
             </DialogDescription>
           </DialogHeader>
           {error ? (
