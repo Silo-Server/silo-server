@@ -14,20 +14,21 @@ const LEAD_MAX = 2;
 
 /**
  * Headline crew for a title's "Cast & Crew" row: the director (or series
- * creator) first, then writers. A series leads with its Creator credits and
- * falls back to its Director credits, captioned "Director", when it has none.
+ * creator) first, then writers. A series leads with every one of its Creator
+ * credits and falls back to its Director credits, captioned "Director", when it
+ * has none. Directors are capped at two cards.
  */
 export function buildCrewGroups(crew: CrewMember[], leadRole: "Director" | "Creator"): CrewGroup[] {
   const lead = leadCredits(crew, leadRole);
   // A writer-director already has a card in the lead group. Only the lead
   // cards the row shows count, so a director past the cap still shows as a writer.
-  const shownLeadKeys = new Set(uniqueByPerson(lead.members).slice(0, LEAD_MAX).map(creditKey));
+  const shownLeadKeys = new Set(uniqueByPerson(lead.members).slice(0, lead.max).map(creditKey));
   return [
     {
       label: lead.role,
       role: lead.role,
       members: lead.members,
-      max: LEAD_MAX,
+      max: lead.max,
     },
     {
       label: "Writers",
@@ -43,12 +44,13 @@ export function buildCrewGroups(crew: CrewMember[], leadRole: "Director" | "Crea
 function leadCredits(
   crew: CrewMember[],
   leadRole: "Director" | "Creator",
-): { role: "Director" | "Creator"; members: CrewMember[] } {
+): { role: "Director" | "Creator"; members: CrewMember[]; max: number } {
   if (leadRole === "Creator") {
     const creators = crew.filter((c) => c.job === "Creator");
-    if (creators.length > 0) return { role: "Creator", members: creators };
+    // Every creator gets a card; a series rarely has more than a handful.
+    if (creators.length > 0) return { role: "Creator", members: creators, max: Infinity };
   }
-  return { role: "Director", members: crew.filter((c) => c.job === "Director") };
+  return { role: "Director", members: crew.filter((c) => c.job === "Director"), max: LEAD_MAX };
 }
 
 function creditKey(credit: CrewMember): string {

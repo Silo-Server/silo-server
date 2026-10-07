@@ -136,6 +136,71 @@ describe("CastCarousel", () => {
     expect(writers?.members.map((c) => c.name)).toEqual(["Third Director"]);
   });
 
+  it("shows every creator of a series, once each", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/series-1"]}>
+        <CastCarousel
+          cast={[]}
+          crewGroups={buildCrewGroups(
+            [
+              { name: "J.J. Abrams", job: "Creator", person_id: "person-400" },
+              { name: "Damon Lindelof", job: "Creator", person_id: "person-401" },
+              { name: "Jeffrey Lieber", job: "Creator", person_id: "person-402" },
+              { name: "J.J. Abrams", job: "Creator", person_id: "person-400" },
+            ],
+            "Creator",
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup.match(/>Creator</g)).toHaveLength(3);
+    for (const name of ["J.J. Abrams", "Damon Lindelof", "Jeffrey Lieber"]) {
+      expect(markup.match(new RegExp(`>${name}<`, "g"))).toHaveLength(1);
+    }
+  });
+
+  it("leaves every series creator out of the Writers group", () => {
+    const [, writers] = buildCrewGroups(
+      [
+        { name: "J.J. Abrams", job: "Creator", person_id: "person-400" },
+        { name: "Damon Lindelof", job: "Creator", person_id: "person-401" },
+        { name: "Jeffrey Lieber", job: "Creator", person_id: "person-402" },
+        { name: "Jeffrey Lieber", job: "Writer", person_id: "person-402" },
+        { name: "Staff Writer", job: "Writer", person_id: "person-403" },
+      ],
+      "Creator",
+    );
+
+    expect(writers?.members.map((c) => c.name)).toEqual(["Staff Writer"]);
+  });
+
+  it.each([
+    ["a movie", "Director"],
+    ["a series without Creator credits", "Creator"],
+  ] as const)("still shows at most two directors for %s", (_, leadRole) => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter>
+        <CastCarousel
+          cast={[]}
+          crewGroups={buildCrewGroups(
+            [
+              { name: "First Director", job: "Director", person_id: "person-500" },
+              { name: "Second Director", job: "Director", person_id: "person-501" },
+              { name: "Third Director", job: "Director", person_id: "person-502" },
+            ],
+            leadRole,
+          )}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(markup.match(/>Director</g)).toHaveLength(2);
+    expect(markup).toContain(">First Director<");
+    expect(markup).toContain(">Second Director<");
+    expect(markup).not.toContain("Third Director");
+  });
+
   it("renders the plain cast row without dividers when no crew groups are passed", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter>
