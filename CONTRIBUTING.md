@@ -1,9 +1,58 @@
 # Contributing to Silo
 
-Contributions are welcome from any workflow, including AI-assisted ones. Most of
-Silo was written with AI assistance. Whoever submits the work is responsible for
-understanding it, testing it, and explaining it; that applies to maintainers and
-external contributors alike.
+> [!IMPORTANT]
+> The most helpful way to contribute to Silo right now is a clear, accurate
+> issue. Pull requests are welcome from contributors who've had one merged in a
+> Silo repository, or when a maintainer asks for one. We close other pull
+> requests without review.
+
+## Why we're asking for issues
+
+Pull requests now arrive faster than we can review them carefully. Reviewing a
+change properly means reading every line, checking it against work already in
+flight, re-running validation, and owning the result after it merges. Writing
+the change ourselves from a precise issue takes less time, and it keeps every
+change on one workflow with the same tests and the same review.
+
+This is about review capacity, not the quality of anyone's work, and it applies
+whether or not you used AI. We'll revisit it as Silo approaches 1.0. Thank you
+for taking the time to write things up well.
+
+## Write a useful issue
+
+Use the [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose).
+Problems that only affect a native client belong in
+[`silo-apple`](https://github.com/Silo-Server/silo-apple) or
+[`silo-android`](https://github.com/Silo-Server/silo-android). Search first; if
+an issue already covers the problem, add what's new there.
+
+- One problem or proposal per issue.
+- Describe what you observed before any theory about the cause.
+- Give exact steps to reproduce, expected and actual behavior, the Silo version
+  or commit, your deployment, and the clients involved.
+- Paste raw logs rather than a summary. Redact credentials, tokens, personal
+  data, and private media details, mark each redaction, and leave the rest
+  untouched.
+- For a feature, describe the problem it solves and who it affects, and read
+  [Project non-goals](docs/non-goals.md) first.
+- If you found the cause or have a fix in mind, put it under Technical notes,
+  apart from what you observed. Point to the files involved; a short code
+  excerpt is fine. We may implement it differently.
+- Disclose AI use, as described in
+  [AI-assisted contributions](#ai-assisted-contributions).
+
+Report security vulnerabilities privately with **Report a vulnerability** on
+the repository's Security tab, not in a public issue.
+
+## Pull requests
+
+Pull requests are welcome from contributors who've had a pull request merged in
+a Silo repository, and from anyone a maintainer has asked for one, usually in
+an issue comment. The rest of this guide applies to those pull requests.
+
+We close other pull requests without review. That isn't a judgment of the
+work. If the problem still matters, open an issue for it and link the closed
+pull request; we may use the code as a reference.
 
 ## Before you start
 
@@ -41,14 +90,6 @@ and plugin host. Client-only work belongs in `silo-apple` or `silo-android`;
 plugin contracts belong in `silo-plugin-sdk`; provider behavior belongs in the
 individual plugin repository. Cross-repository changes should identify all
 affected repositories in the issue and pull request.
-
-## Reporting a problem
-
-Use the [GitHub issue forms](https://github.com/Silo-Server/silo-server/issues/new/choose);
-they ask for everything a maintainer needs. Two rules: describe what you observed
-before any root-cause theory, and paste raw logs rather than a summary. Redact
-credentials, tokens, personal data, and private media details, mark each
-redaction, and leave the rest untouched.
 
 ## Prepare a focused change
 
@@ -221,6 +262,10 @@ the issue when review changes the behavior, and close it if the pull request
 closes without merging.
 
 ## AI-assisted contributions
+
+AI-assisted work is welcome; most of Silo was written with AI assistance.
+Whoever submits the work is responsible for understanding it, testing it, and
+explaining it; that applies to maintainers and external contributors alike.
 
 Disclose AI use in every issue and pull request, or state "No AI used" when true.
 The [AI-assisted contribution policy](docs/ai-contributions.md) covers contributor

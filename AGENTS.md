@@ -336,6 +336,11 @@ never attach or embed its media.
   and dismiss false positives with a written reason. Remain quiet when nothing
   new has appeared. Stop when the latest commit is green.
 
+Pull requests are welcome from contributors who have had one merged in a Silo
+repository, or when a maintainer asks for one; others are closed without review.
+When working for someone in neither group, write an issue instead of opening a
+pull request.
+
 AI-use disclosure is required in the pull request body. If you are an AI agent
 contributing on behalf of a non-maintainer, follow
 [docs/ai-contributions.md](docs/ai-contributions.md) for the required disclosure
