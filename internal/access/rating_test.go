@@ -277,6 +277,20 @@ func TestNormalizeUnrecognized(t *testing.T) {
 	}
 }
 
+func TestIsAdult(t *testing.T) {
+	cases := map[string]bool{
+		"NC-17": true, "FSK 18": true, "R18+": true, "X18+": true, "18": true, "DE:18": true,
+		"R": false, "TV-MA": false, "PG-13": false, "15": false, "FSK 16": false,
+		// Unrated and unrecognized ratings are not adult.
+		"": false, "NR": false, "Unrated": false, "not a rating": false,
+	}
+	for raw, want := range cases {
+		if got := IsAdult(raw); got != want {
+			t.Errorf("IsAdult(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
 func TestNormalizeReturnsIndependentAgePointers(t *testing.T) {
 	// The age must be a copy: a caller mutating it cannot be allowed to
 	// rewrite the shared ladder.

@@ -58,9 +58,13 @@ import {
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
-const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
+const HOME_PREFERENCE_KEYS = [
+  SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+  SETTING_KEYS.HOME_SHOW_ADULT_IN_FEATURED,
+] as const;
 
 interface RemovedSystemOverride {
   id: string;
@@ -301,6 +305,13 @@ export default function HomeScreenSettings() {
   const saveHomePreference = useSetSettingValue();
   const hideWatchedItems =
     homePreferences.data?.[SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS]?.value === true;
+  // A child profile or one with a rating limit never receives adult titles, so
+  // the switch reads off and cannot be changed. The server enforces the limit.
+  const { profile: currentProfile } = useCurrentProfile();
+  const ratingLimited = Boolean(currentProfile?.is_child || currentProfile?.max_content_rating);
+  const showAdultInFeatured =
+    !ratingLimited &&
+    homePreferences.data?.[SETTING_KEYS.HOME_SHOW_ADULT_IN_FEATURED]?.value === true;
   const activeSelectionValue = scopeValue;
   const activeSelectionRef = useRef(activeSelectionValue);
   const latestSaveAttemptRef = useRef(0);
@@ -534,10 +545,10 @@ export default function HomeScreenSettings() {
     saveOverrides(next);
   }
 
-  function handleHideWatchedItemsChange(enabled: boolean) {
+  function saveHomePreferenceValue(key: (typeof HOME_PREFERENCE_KEYS)[number], enabled: boolean) {
     saveHomePreference.mutate(
       {
-        key: SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS,
+        key,
         value: enabled,
         identity: PROFILE_SCOPE,
       },
@@ -591,7 +602,7 @@ export default function HomeScreenSettings() {
 
       <SettingsGroup
         title="Home preferences"
-        description="Choose how this profile's Home screen handles completed media."
+        description="Choose what this profile's Home screen leaves out."
       >
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5">
@@ -607,7 +618,29 @@ export default function HomeScreenSettings() {
             id="hide-watched-home"
             checked={hideWatchedItems}
             disabled={homePreferences.isLoading || saveHomePreference.isPending}
-            onCheckedChange={handleHideWatchedItemsChange}
+            onCheckedChange={(enabled) =>
+              saveHomePreferenceValue(SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS, enabled)
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="show-adult-featured" className="text-sm font-medium">
+              Show adult titles in Featured
+            </Label>
+            <p className="text-muted-foreground text-[13px] leading-relaxed">
+              {ratingLimited
+                ? "This profile's rating limit is set by the household manager."
+                : "Let titles rated 18 or over appear in Featured sections on Home. Browse and search are not affected."}
+            </p>
+          </div>
+          <Switch
+            id="show-adult-featured"
+            checked={showAdultInFeatured}
+            disabled={ratingLimited || homePreferences.isLoading || saveHomePreference.isPending}
+            onCheckedChange={(enabled) =>
+              saveHomePreferenceValue(SETTING_KEYS.HOME_SHOW_ADULT_IN_FEATURED, enabled)
+            }
           />
         </div>
       </SettingsGroup>

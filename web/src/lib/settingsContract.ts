@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 16;
+export const SETTINGS_REVISION = 17;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -194,6 +194,8 @@ export const SETTING_KEYS = {
   DOWNLOADS_WIFI_ONLY: "downloads.wifi_only",
   /** Hide watched items from Home */
   HOME_HIDE_WATCHED_ITEMS: "home.hide_watched_items",
+  /** Show adult titles in Featured */
+  HOME_SHOW_ADULT_IN_FEATURED: "home.show_adult_in_featured",
   /** Primary menu */
   NAV_PRIMARY_MENU: "nav.primary_menu",
   /** Navigation shortcuts */
@@ -486,6 +488,23 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     label: "Hide watched items from Home",
     description:
       "Remove watched items from ordinary Home sections while keeping Featured and watch-history sections unchanged.",
+    category: "navigation",
+    control: "switch",
+    platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "home.show_adult_in_featured": {
+    key: "home.show_adult_in_featured",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 17,
+    scopes: ["profile"],
+    scopeIntroducedIn: [17],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: false,
+    label: "Show adult titles in Featured",
+    description:
+      "Let titles certified 18 or over appear in Home featured sections. When off, they are left out; the profile's rating limit always applies first.",
     category: "navigation",
     control: "switch",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
