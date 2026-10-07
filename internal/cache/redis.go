@@ -173,7 +173,7 @@ type RedisEventBus struct {
 func newRedisEventBus(cfg config.RedisConfig) *RedisEventBus {
 	client, sentinel, err := newRedisClient(cfg)
 	if err != nil {
-		client = redis.NewClient(unparsedRedisOptions(cfg.URL, err))
+		client = redis.NewClient(unparsedRedisOptions(cfg, err))
 	}
 	return newRedisEventBusFromClient(client, sentinel)
 }
@@ -192,12 +192,22 @@ func newRedisEventBusFromClient(client *redis.Client, sentinel bool) *RedisEvent
 	return bus
 }
 
-// unparsedRedisOptions treats a value that is not a URL as a bare address.
+// unparsedRedisOptions treats a value that is not a URL as a bare address,
+// applying the validated database override before the client is built.
 // Anything else can carry passwords, and go-redis quotes the address in dial
 // errors, so every command fails with the parse error instead.
-func unparsedRedisOptions(redisURL string, parseErr error) *redis.Options {
-	if isBareRedisAddress(redisURL) {
-		return &redis.Options{Addr: redisURL}
+func unparsedRedisOptions(cfg config.RedisConfig, parseErr error) *redis.Options {
+	if isBareRedisAddress(cfg.URL) {
+		db, err := config.NormalizeRedisDB(cfg.DB)
+		if err == nil {
+			options := &redis.Options{Addr: cfg.URL}
+			if db != "" {
+				// NormalizeRedisDB has already validated the integer.
+				options.DB, _ = strconv.Atoi(db)
+			}
+			return options
+		}
+		parseErr = err
 	}
 	return &redis.Options{
 		Addr: "invalid-redis-url",

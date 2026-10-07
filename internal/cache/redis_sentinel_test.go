@@ -357,9 +357,9 @@ func TestUnparsedRedisValueIsDialedOnlyWhenItIsABareAddress(t *testing.T) {
 		"redis.example:6379", "redis_1.example-a:6379", "127.0.0.1:6379", "[::1]:6379", "[fe80::1%eth0]:6379", ":6379",
 		"/run/redis/redis.sock",
 	} {
-		options := unparsedRedisOptions(address, parseErr)
-		if options.Addr != address || options.Dialer != nil {
-			t.Errorf("unparsedRedisOptions(%q) dials %q, want the address itself", address, options.Addr)
+		options := unparsedRedisOptions(config.RedisConfig{URL: address, DB: "5"}, parseErr)
+		if options.Addr != address || options.Dialer != nil || options.DB != 5 {
+			t.Errorf("unparsedRedisOptions(%q) dials %q on database %d, want the address itself on database 5", address, options.Addr, options.DB)
 		}
 	}
 	refused := []string{
@@ -387,7 +387,7 @@ func TestUnparsedRedisValueIsDialedOnlyWhenItIsABareAddress(t *testing.T) {
 	// A zone belongs to an IP address.
 	refused = append(refused, "secret%redis.example:6379")
 	for _, value := range refused {
-		options := unparsedRedisOptions(value, parseErr)
+		options := unparsedRedisOptions(config.RedisConfig{URL: value}, parseErr)
 		if strings.Contains(options.Addr, "secret") || options.Dialer == nil {
 			t.Errorf("unparsedRedisOptions(%q) dials %q, want no dial at all", value, options.Addr)
 			continue

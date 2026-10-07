@@ -83,18 +83,27 @@ func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
 		path string
 		db   string
 		want []string
+		bare bool
 	}{
-		{"database 3", "/3", "", []string{"SUBSCRIBE silo:admin@db3 on database 3", "PUBLISH silo:admin@db3 on database 3"}},
-		{"database 0", "/0", "", bare},
-		{"no database number", "", "", bare},
-		{"negative database number", "/-1", "", bare},
-		{"redis.db replaces the number in the URL", "/3", "5", db5},
-		{"redis.db on a URL without a number", "", "5", db5},
-		{"redis.db 0 replaces the number in the URL", "/3", "0", bare},
+		{"database 3", "/3", "", []string{"SUBSCRIBE silo:admin@db3 on database 3", "PUBLISH silo:admin@db3 on database 3"}, false},
+		{"database 0", "/0", "", bare, false},
+		{"no database number", "", "", bare, false},
+		{"negative database number", "/-1", "", bare, false},
+		{"redis.db replaces the number in the URL", "/3", "5", db5, false},
+		{"redis.db on a URL without a number", "", "5", db5, false},
+		{"redis.db 0 replaces the number in the URL", "/3", "0", bare, false},
+		{"redis.db on a bare address", "", "5", db5, true},
+		{"normalized redis.db on a bare address", "", " 05 ", db5, true},
+		{"redis.db 0 on a bare address", "", "0", bare, true},
+		{"no redis.db on a bare address", "", "", bare, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := startRESPTestServer(t, nil, respTestRedis)
-			bus := newRedisEventBus(config.RedisConfig{URL: "redis://" + server.addr + tc.path, DB: tc.db})
+			redisURL := "redis://" + server.addr + tc.path
+			if tc.bare {
+				redisURL = server.addr
+			}
+			bus := newRedisEventBus(config.RedisConfig{URL: redisURL, DB: tc.db})
 			t.Cleanup(func() { _ = bus.Close() })
 
 			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
@@ -105,6 +114,26 @@ func TestRedisEventBusSendsScopedChannelToRedis(t *testing.T) {
 			}
 			if got := server.pubsub(); !slices.Equal(got, tc.want) {
 				t.Errorf("Redis received %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRedisEventBusRejectsInvalidDatabaseOnBareAddress(t *testing.T) {
+	for _, db := range []string{"five", "-1", "999999999999999999999999999999"} {
+		t.Run(db, func(t *testing.T) {
+			server := startRESPTestServer(t, nil, respTestRedis)
+			bus := newRedisEventBus(config.RedisConfig{URL: server.addr, DB: db})
+			t.Cleanup(func() { _ = bus.Close() })
+
+			if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("subscribe with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if err := bus.Publish(t.Context(), ChannelAdmin, Event{Type: EventSettingsChanged}); err == nil || !strings.Contains(err.Error(), config.RedisDBSettingKey) {
+				t.Errorf("publish with invalid redis.db: %v, want a redis.db error", err)
+			}
+			if got := server.received(); len(got) != 0 {
+				t.Errorf("Redis received %q for an invalid redis.db, want no commands", got)
 			}
 		})
 	}
