@@ -2982,7 +2982,7 @@ func TestPlanPlaybackV3PublishesAvailableQualities(t *testing.T) {
 	if !reflect.DeepEqual(labels, want) {
 		t.Fatalf("labels = %v, want %v", labels, want)
 	}
-	if !result.Plan.AvailableQualities[0].PreservesSource || result.Plan.AvailableQualities[0].Height != 2160 {
+	if got := result.Plan.AvailableQualities[0]; !got.PreservesSource || got.Height != 2160 || got.DisplayName != "Original" {
 		t.Fatalf("original entry = %#v", result.Plan.AvailableQualities[0])
 	}
 	if got := result.Plan.AvailableQualities[2]; got.BitrateKbps != 20_000 || got.DisplayName != "4K Medium" {
