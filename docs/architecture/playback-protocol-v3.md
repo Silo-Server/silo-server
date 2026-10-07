@@ -1302,7 +1302,8 @@ selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
 The source rung is always present, labelled `original`, with
-`preserves_source: true`. Transcode rungs are added below the source resolution
+`preserves_source: true`. On `/api/v2` it also carries `display_name`
+`Original`; the frozen `/api/v1` response leaves it unnamed. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
 available to the client, transcoding is enabled, the viewer's account may
 transcode video (`transcode_allowed`; admission still enforces it), and 4K
