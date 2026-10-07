@@ -4,6 +4,8 @@ import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
 
 interface CrewListProps {
   crew: CrewMember[];
+  /** Jobs to list, in order. Others are ignored. Defaults to Director, Writer and Producer. */
+  jobs?: readonly string[];
 }
 
 interface CrewEntry {
@@ -11,10 +13,10 @@ interface CrewEntry {
   personId: string;
 }
 
-/** Jobs to display, in order. Others are ignored. */
+/** Jobs to display, in order, when the page doesn't choose its own. */
 const DISPLAY_JOBS = ["Director", "Writer", "Producer"] as const;
 
-export default function CrewList({ crew }: CrewListProps) {
+export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
   if (crew.length === 0) return null;
 
   const grouped = new Map<string, CrewEntry[]>();
@@ -30,10 +32,12 @@ export default function CrewList({ crew }: CrewListProps) {
     }
   }
 
-  const entries = DISPLAY_JOBS.filter((job) => grouped.has(job)).map((job) => ({
-    job: `${job}s`,
-    people: grouped.get(job)!,
-  }));
+  const entries = jobs
+    .filter((job) => grouped.has(job))
+    .map((job) => ({
+      job: `${job}s`,
+      people: grouped.get(job)!,
+    }));
 
   if (entries.length === 0) return null;
 

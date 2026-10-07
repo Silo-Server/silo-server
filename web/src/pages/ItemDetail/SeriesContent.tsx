@@ -39,6 +39,12 @@ import { cn } from "@/lib/utils";
 /** Series lead with their creators; one without Creator credits keeps showing its directors. */
 const SERIES_LEAD_JOBS = ["Creator", "Director"] as const;
 
+/**
+ * The series Crew section lists every creator ahead of the usual crew. Season
+ * and episode pages keep CrewList's default jobs, so creators stay on the series.
+ */
+const SERIES_CREW_JOBS = ["Creator", "Director", "Writer", "Producer"] as const;
+
 export default function SeriesContent({
   item,
   showAdvisoryAge,
@@ -271,7 +277,7 @@ export default function SeriesContent({
           <CastCarousel cast={item.cast} prefetchPeople />
         </DetailSection>
       )}
-      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} />}
+      {item.crew && item.crew.length > 0 && <CrewList crew={item.crew} jobs={SERIES_CREW_JOBS} />}
 
       {similarLoading ? (
         <RecommendationGridSkeleton />
