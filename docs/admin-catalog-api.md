@@ -486,8 +486,8 @@ Silo's own sidecar discovery whether or not the library's metadata chain uses
 the NFO provider. A `file://` URL from any other provider is not offered. These
 choices have `provider_id` `local`, a `file://` `original_url`, and a small
 WebP preview as a `data:` URI in `url`. A file that cannot be read under the
-library-root, symlink and size checks is left out. Frozen v1 lists provider
-choices only. See
+library-root, symlink and size checks is left out, and `provider_errors`
+reports the failure under `local`. Frozen v1 lists provider choices only. See
 [Local NFO metadata](architecture/local-nfo-metadata.md#admin-image-picker).
 
 `POST /api/v2/admin/items/{id}/images/apply` accepts `original_url`, `type`, and

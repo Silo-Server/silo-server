@@ -26,10 +26,15 @@ type localImageServiceFake struct {
 	providerCalls  int
 	applyLocal     []metadata.ApplyLocalItemImageRequest
 	applyLocalErr  error
+	plainImages    []metadata.RemoteImage
+	previewCalls   int
 }
 
 func (f *localImageServiceFake) FetchItemImages(context.Context, map[string]string, string, string, int) ([]metadata.RemoteImage, map[string]string, error) {
 	f.plainCalls++
+	if f.plainImages != nil {
+		return f.plainImages, nil, nil
+	}
 	return []metadata.RemoteImage{{ProviderID: "tmdb", URL: "https://image.example/poster.jpg", Type: metadata.ImagePoster}}, nil, nil
 }
 
@@ -50,6 +55,7 @@ func (f *localImageServiceFake) FetchSeasonImages(context.Context, map[string]st
 // LocalImagePreview previews the poster and fails for the backdrop, the way an
 // oversized or unreadable file would.
 func (f *localImageServiceFake) LocalImagePreview(_ context.Context, _ string, sourceURL string) (string, error) {
+	f.previewCalls++
 	if sourceURL == localPosterURL {
 		return localPreviewURI, nil
 	}
@@ -101,6 +107,30 @@ func TestAdminItemImagesOffersPreviewableLocalImages(t *testing.T) {
 	}
 	if len(out.Images) != 2 {
 		t.Fatalf("choices = %+v, want the provider poster and the local poster", out.Images)
+	}
+	// The admin is told why the backdrop is missing.
+	if out.ProviderErrors["local"] == "" {
+		t.Fatalf("provider errors = %v, want the local preview failure", out.ProviderErrors)
+	}
+}
+
+// Only the movie and series listing runs sidecar discovery. A file:// URL a
+// provider returns anywhere else is not read, previewed, or labeled local.
+func TestAdminItemImagesDoesNotPreviewProviderFileURLs(t *testing.T) {
+	svc := &localImageServiceFake{plainImages: []metadata.RemoteImage{
+		{ProviderID: "plugin", URL: localPosterURL, Type: metadata.ImagePoster},
+	}}
+	h := newLocalImageHandlerForTest(svc)
+
+	out, err := h.GetAdminItemImages(context.Background(), "book")
+	if err != nil {
+		t.Fatalf("GetAdminItemImages: %v", err)
+	}
+	if svc.previewCalls != 0 {
+		t.Fatalf("previewed %d provider file URLs, want none", svc.previewCalls)
+	}
+	if len(out.Images) != 1 || out.Images[0].ProviderID != "plugin" || out.Images[0].URL != localPosterURL {
+		t.Fatalf("choices = %+v, want the provider row unchanged", out.Images)
 	}
 }
 

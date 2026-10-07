@@ -8265,15 +8265,7 @@ func primaryProviderID(ids map[string]string) string {
 // providerIDs should come from the parent MediaItem (for seasons/episodes,
 // the caller resolves up to the series item). contentType is "movie" or "series".
 func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[string]string, contentType string, language string, folderID int) ([]RemoteImage, map[string]string, error) {
-	return s.fetchItemImages(ctx, ImageRequest{
-		ProviderIDs: providerIDs,
-		ContentType: contentType,
-		Language:    language,
-	}, folderID)
-}
-
-func (s *MetadataService) fetchItemImages(ctx context.Context, req ImageRequest, folderID int) ([]RemoteImage, map[string]string, error) {
-	chain, err := s.resolveChainCached(ctx, folderID, req.ContentType)
+	chain, err := s.resolveChainCached(ctx, folderID, contentType)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolving provider chain: %w", err)
 	}
@@ -8286,7 +8278,11 @@ func (s *MetadataService) fetchItemImages(ctx context.Context, req ImageRequest,
 		if !ok {
 			continue
 		}
-		images, err := ip.GetImages(ctx, req)
+		images, err := ip.GetImages(ctx, ImageRequest{
+			ProviderIDs: providerIDs,
+			ContentType: contentType,
+			Language:    language,
+		})
 		if err != nil {
 			slog.WarnContext(ctx, "fetch item images: provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)

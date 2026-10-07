@@ -255,11 +255,14 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 
 	var images []metadata.RemoteImage
 	var providerErrors map[string]string
+	// Only the movie and series list runs sidecar discovery. Every other list
+	// treats a file:// URL as an ordinary provider choice, as before.
+	withLocal := includeLocal && resolved.season == nil && resolved.episode == nil && offersLocalImages(resolved.parentItem.Type)
 	if resolved.season != nil {
 		images, providerErrors, err = h.imageSvc.FetchSeasonImages(
 			ctx, providerIDs, language, folderID, resolved.season.SeasonNumber,
 		)
-	} else if includeLocal && resolved.episode == nil && offersLocalImages(resolved.parentItem.Type) {
+	} else if withLocal {
 		images, providerErrors, err = h.imageSvc.FetchItemImagesWithLocal(
 			ctx, providerIDs, resolved.parentItem.Type, language, folderID, resolved.parentItem.ContentID,
 		)
@@ -280,7 +283,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 	// inline preview below instead.
 	rawPaths := make([]string, 0, len(images))
 	for _, img := range images {
-		if !metadata.IsLocalImageSource(img.URL) {
+		if !withLocal || !metadata.IsLocalImageSource(img.URL) {
 			rawPaths = append(rawPaths, img.URL)
 		}
 	}
@@ -294,12 +297,17 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 	for _, img := range images {
 		displayURL := img.URL
 		providerID := img.ProviderID
-		if includeLocal && metadata.IsLocalImageSource(img.URL) {
+		if withLocal && metadata.IsLocalImageSource(img.URL) {
 			// A file the picker cannot preview could not be applied either:
-			// both read it under the same confinement and size checks.
+			// both read it under the same confinement and size checks. Report
+			// the failure so the admin can tell why the choice is missing.
 			preview, err := h.imageSvc.LocalImagePreview(ctx, resolved.parentItem.ContentID, img.URL)
 			if err != nil {
 				slog.WarnContext(ctx, "admin images: local image preview failed", "component", "api", "content_id", contentID, "error", err)
+				if providerErrors == nil {
+					providerErrors = map[string]string{}
+				}
+				providerErrors[localImageProviderID] = err.Error()
 				continue
 			}
 			displayURL = preview

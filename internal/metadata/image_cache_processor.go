@@ -1009,7 +1009,7 @@ func readConfinedLocalImage(ctx context.Context, resolver LibraryRootResolver, r
 	// Open every library root before resolving anything. All reads go through
 	// one of these handles, so a root or an intermediate directory replaced
 	// after this point cannot redirect the read outside the library.
-	pinned := openLibraryRoots(roots)
+	pinned, openFailures := openLibraryRoots(roots)
 	defer closeLibraryRoots(pinned)
 	// The lexical check above cannot see through symlinks. Resolve the path and
 	// roots and re-confine so an intermediate directory symlink planted inside a
@@ -1027,6 +1027,17 @@ func readConfinedLocalImage(ctx context.Context, resolver LibraryRootResolver, r
 	// The resolved root must be one of the directories opened above; a root
 	// replaced in between resolves somewhere else and is refused.
 	root := pinnedLibraryRoot(pinned, resolvedRoot)
+	if root == nil {
+		// A root that could not be opened is a read failure, not a path
+		// outside the library: keep it off the stable-failure texts so a
+		// transient error (EMFILE, a mount hiccup) is retried normally.
+		if openErr := libraryRootOpenError(openFailures, resolvedRoot); openErr != nil {
+			if errors.Is(openErr, fs.ErrPermission) {
+				return nil, fmt.Errorf("local image forbidden: %s", localPath)
+			}
+			return nil, fmt.Errorf("local image read failed: opening library root: %w", openErr)
+		}
+	}
 	rel, relErr := filepath.Rel(resolvedRoot, resolvedPath)
 	if root == nil || relErr != nil || !filepath.IsLocal(rel) {
 		return nil, localImageOutsideRootsError(localPath)
@@ -1034,9 +1045,18 @@ func readConfinedLocalImage(ctx context.Context, resolver LibraryRootResolver, r
 	return readLocalImageFile(localPath, root, rel)
 }
 
-// openLibraryRoots opens each library root that exists as an os.Root.
-func openLibraryRoots(roots []string) []*os.Root {
+// libraryRootOpenFailure records a library root that exists but could not be
+// opened.
+type libraryRootOpenFailure struct {
+	root string
+	err  error
+}
+
+// openLibraryRoots opens each library root that exists as an os.Root and
+// returns the roots that exist but failed to open.
+func openLibraryRoots(roots []string) ([]*os.Root, []libraryRootOpenFailure) {
 	pinned := make([]*os.Root, 0, len(roots))
+	var failures []libraryRootOpenFailure
 	for _, root := range roots {
 		root = filepath.Clean(strings.TrimSpace(root))
 		if root == "" || root == "." || !filepath.IsAbs(root) {
@@ -1044,11 +1064,30 @@ func openLibraryRoots(roots []string) []*os.Root {
 		}
 		handle, err := os.OpenRoot(root)
 		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				failures = append(failures, libraryRootOpenFailure{root: root, err: err})
+			}
 			continue
 		}
 		pinned = append(pinned, handle)
 	}
-	return pinned
+	return pinned, failures
+}
+
+// libraryRootOpenError returns the open error of the failed root that is the
+// same directory as resolvedRoot, or nil when none is.
+func libraryRootOpenError(failures []libraryRootOpenFailure, resolvedRoot string) error {
+	if len(failures) == 0 {
+		return nil
+	}
+	if current, statErr := os.Stat(resolvedRoot); statErr == nil {
+		for _, failure := range failures {
+			if info, err := os.Stat(failure.root); err == nil && os.SameFile(info, current) {
+				return failure.err
+			}
+		}
+	}
+	return nil
 }
 
 func closeLibraryRoots(pinned []*os.Root) {
@@ -1155,12 +1194,12 @@ func localImagePathWithinRoots(path string, roots []string) bool {
 	return false
 }
 
-// readLocalImageFile reads a sidecar image with the same guards as discovery:
-// Lstat rejects symlinked leaves and non-regular files, the opened handle is
-// fstat-re-checked, and reads cap at maxLocalImageSourceBytes. ENOENT/EPERM
-// map to the stable-failure texts matched by isStableProviderImageFailure.
-// readLocalImageFile reads rel inside root. path is the logical path, used for
-// the leaf check and in error texts.
+// readLocalImageFile reads rel inside root with the same guards as discovery.
+// path is the logical path, used for the leaf check and in error texts: Lstat
+// on it rejects symlinked leaves and non-regular files, the handle opened
+// through root is fstat-re-checked against it, and reads cap at
+// maxLocalImageSourceBytes. ENOENT/EPERM map to the stable-failure texts
+// matched by isStableProviderImageFailure.
 func readLocalImageFile(path string, root *os.Root, rel string) ([]byte, error) {
 	classify := func(err error) error {
 		switch {

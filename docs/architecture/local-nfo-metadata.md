@@ -114,7 +114,10 @@ choice has the provider ID `local`, keeps its `file://` path as `original_url`,
 and shows a 300-pixel-wide WebP preview as an inline `data:` URI (the web client
 authenticates with a bearer token, so an `<img>` cannot fetch an authenticated
 preview route). The preview is read under the same root confinement, symlink and
-size checks as the processor; a file that fails them is left out of the list.
+size checks as the processor; a file that fails them is left out of the list,
+and the list's `provider_errors` reports it under `local`. Only the movie and
+series list does this: any other list treats a provider's `file://` URL as an
+ordinary provider choice and never reads it.
 
 `POST .../images/apply` with a `file://` `original_url` caches the file only
 when the item's sidecar discovery offers it for that image type, reads it under

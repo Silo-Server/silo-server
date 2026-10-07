@@ -51,7 +51,7 @@ func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, provider
 		if providerErrors == nil {
 			providerErrors = map[string]string{}
 		}
-		providerErrors[localArtworkCapabilityID] = err.Error()
+		providerErrors[imageCacheLocalProviderID] = err.Error()
 	}
 	return append(images, local...), providerErrors, nil
 }
