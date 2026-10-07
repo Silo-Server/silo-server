@@ -195,27 +195,16 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 			WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
 			WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, maxRank))
 	}
-	effectiveLibraries := uniquePositiveInts(q.LibraryIDs)
-	if len(effectiveLibraries) > 0 {
-		if q.Access.AllowedLibraryIDs != nil {
-			effectiveLibraries = intersectOptionalInts(effectiveLibraries, q.Access.AllowedLibraryIDs)
-		}
-		effectiveLibraries = subtractInts(effectiveLibraries, q.Access.DisabledLibraryIDs)
-		if len(effectiveLibraries) == 0 {
-			return result, nil
-		}
+	effectiveLibraries, none := q.Access.LibraryScope(uniquePositiveInts(q.LibraryIDs))
+	switch {
+	case none:
+		return result, nil
+	case effectiveLibraries != nil:
 		fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
 		args = append(args, effectiveLibraries)
-	} else {
-		if q.Access.AllowedLibraryIDs != nil {
-			fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
-			args = append(args, q.Access.AllowedLibraryIDs)
-			argIdx++
-		}
-		if len(q.Access.DisabledLibraryIDs) > 0 {
-			fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
-			args = append(args, q.Access.DisabledLibraryIDs)
-		}
+	case len(q.Access.DisabledLibraryIDs) > 0:
+		fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
+		args = append(args, q.Access.DisabledLibraryIDs)
 	}
 
 	// PostgreSQL progress lives beside the catalog, so the database can choose

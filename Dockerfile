@@ -33,25 +33,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && 
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-COPY web/embed.go web/embed.go
-COPY --from=frontend_dist / web/dist
-COPY cmd/ cmd/
+RUN go mod download
 COPY internal/ internal/
 COPY migrations/ migrations/
 # The settings contract is a Go package (contracts/settings/v1) that embeds the
 # manifest, so the binary carries the exact bytes it was built from. It lives
 # outside internal/ because clients vendor these files.
 COPY contracts/ contracts/
+RUN --network=none go build ./internal/... ./migrations/... ./contracts/...
+COPY cmd/ cmd/
+COPY web/embed.go web/embed.go
+COPY --from=frontend_dist / web/dist
+RUN --network=none go build -o /silo ./cmd/silo/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 ARG BUILD_NUMBER
 ARG BUILD_DATE
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go build \
+RUN --network=none go build \
     -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 

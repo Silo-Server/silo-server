@@ -130,6 +130,11 @@
 # Corrected matches preserve destination IDs and remove rejected source IDs.
 ./internal/metadata TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs
 
+# A corrected Identify moves a series and its anchored children in one rename.
+./internal/metadata TestIdentify_CorrectedSeriesMovesWithItsChildren
+./internal/metadata TestIdentify_CorrectionOntoExistingSeriesMovesUnpairedEpisodeState
+./internal/metadata TestRenameContentIDsMergesLeftoverAvailability
+
 # Home sections: one overlay summary row read per card.
 ./internal/sections TestOverlaySummariesOnlyDecodeWinner
 ./internal/sections TestOverlaySummariesRankingMatchesGo
@@ -184,3 +189,6 @@
 ./internal/trickplay TestNormalizedVideoLibraryTypesRemainEligibleDB
 ./internal/trickplay TestCurrentFileEligibilitySuppressesTrickplayDB
 ./internal/scanner TestChapterLockDiscardsUndecodableAcquisitionDB
+
+# Jellyfin password#PIN sign-ins share the per-profile PIN lockout.
+./internal/jellycompat TestLoginPINAttemptsShareProfileLimitDB

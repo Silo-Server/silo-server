@@ -321,19 +321,10 @@ func appendDiscoveryLibraryScope(
 		scope = libraryIDs
 	}
 
-	// Intersect the section scope with the viewer's allowed set so a scoped
-	// section can never widen access beyond what the viewer may see.
-	allowed := filter.AllowedLibraryIDs
-	if len(scope) > 0 {
-		if allowed != nil {
-			allowed = intersectInts(scope, allowed)
-			if len(allowed) == 0 {
-				return false
-			}
-		} else {
-			allowed = scope
-		}
-	} else if allowed != nil && len(allowed) == 0 {
+	// Limit the section scope to the viewer's access so a scoped section can
+	// never widen it beyond what the viewer may see.
+	allowed, none := filter.LibraryScope(scope)
+	if none {
 		return false
 	}
 

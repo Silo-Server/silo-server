@@ -445,6 +445,110 @@
       "body_file": "admin_account_ips.json"
     },
     {
+      "name": "admin_account_profile_section_settings",
+      "operation_id": "getAdminUserProfileSectionSettings",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner/sections/settings",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSectionSettingCollection",
+      "body_file": "admin_account_profile_section_settings.json"
+    },
+    {
+      "name": "admin_account_profile_sections",
+      "operation_id": "listAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionOverrideCollection",
+      "body_file": "admin_account_profile_sections.json"
+    },
+    {
+      "name": "admin_account_profile_sections_not_found",
+      "operation_id": "listAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-elsewhere/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_account_profile_sections_not_found.json"
+    },
+    {
+      "name": "admin_account_profile_sections_replace",
+      "operation_id": "replaceAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"overrides\":[{\"id\":\"o-kid\",\"section_id\":\"s-continue\",\"position\":0,\"hidden\":true}]}"
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "admin_account_profile_sections_reset",
+      "operation_id": "resetAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "admin_account_profiles",
       "operation_id": "listAdminUserProfiles",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -1758,6 +1862,89 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "admin_login_session_delete",
+      "operation_id": "deleteAdminUserLoginSession",
+      "scenario": "An acting admin revokes one session of the selected account.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/login-sessions/00000000-0000-0000-0000-000000000001",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "admin_login_session_forbidden",
+      "operation_id": "listAdminUserLoginSessions",
+      "scenario": "A non-admin cannot inspect another account's sessions.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_login_session_forbidden.json"
+    },
+    {
+      "name": "admin_login_session_list",
+      "operation_id": "listAdminUserLoginSessions",
+      "scenario": "An acting admin inspects a selected account's login sessions.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCollection",
+      "body_file": "admin_login_session_list.json"
+    },
+    {
+      "name": "admin_login_sessions_delete_all",
+      "operation_id": "deleteAdminUserLoginSessions",
+      "scenario": "An acting admin signs the selected account out everywhere and receives the live-session count.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminLoginSessionsRevoked",
+      "body_file": "admin_login_sessions_delete_all.json"
     },
     {
       "name": "admin_marker_capabilities",
@@ -10651,6 +10838,47 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "login_provider_null.json"
+    },
+    {
+      "name": "login_session_capabilities",
+      "operation_id": "getLoginSessionCapabilities",
+      "scenario": "An authenticated account discovers login-session management and recorded activity.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"199ed1b146458dcd278850dd6857e5640e7dbc8742e67275bdbaf314cac391bd\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCapabilities",
+      "body_file": "login_session_capabilities.json"
+    },
+    {
+      "name": "login_session_list",
+      "operation_id": "listSessions",
+      "scenario": "An account lists live login sessions, with explicit null activity where none is recorded.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCollection",
+      "body_file": "login_session_list.json"
     },
     {
       "name": "logout_authentication_required",

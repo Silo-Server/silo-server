@@ -154,8 +154,9 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 }
 
 // HandleApplyItemMatch handles POST /admin/items/{id}/match/apply.
-// It applies the user-selected provider IDs to the item via ModeIdentify,
-// preserving the original content_id.
+// It applies the user-selected provider IDs to the item via ModeIdentify. A
+// local item, or one whose match the choice corrects, moves to the content_id
+// its new identity derives; the response carries the resulting content_id.
 func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.Request) {
 	contentID := chi.URLParam(r, "id")
 	if contentID == "" {

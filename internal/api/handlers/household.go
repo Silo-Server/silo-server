@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -21,14 +22,24 @@ type userLookup interface {
 // canManageHousehold reports whether the caller may act for the whole household
 // — every profile on their own account — rather than only for themselves.
 //
-// Server admins always may. Otherwise the caller's active profile must be the
-// one flagged is_primary, which is the household parent and is deliberately
-// *not* the server-wide admin role: a household parent manages their family,
-// an admin manages the server.
+// The caller's active profile must be the one flagged is_primary, which is the
+// household parent and is deliberately *not* the server-wide admin role: a
+// household parent manages their family, an admin manages the server. The
+// admin role does not widen this. A non-primary profile on an admin account is
+// a household member like any other, exactly as RequireActingAdmin refuses it
+// admin powers; otherwise a child profile on the admin's account could lift
+// its own limits or clear the parent's PIN.
 //
 // When that primary profile has a PIN, management additionally requires a valid
 // X-Profile-Token from /profiles/{id}/verify-pin. Without that, a client could
 // walk past a profile lock by sending only X-Profile-Id.
+//
+// A request that names no profile manages the household only when it is an
+// admin API key, or comes from an admin account whose household has no limited
+// profile (see
+// access.HouseholdRequiresProfile): first-run and admin tooling keep working,
+// but a device signed into the account cannot drop X-Profile-Id to get past a
+// child's limits or the parent's PIN.
 //
 // This is a policy boundary for well-behaved clients rather than a defense
 // against the account holder: every profile on an account shares one login
@@ -66,11 +77,8 @@ func canManageHouseholdAs(
 	activeProfileID string,
 	verify func(profileID string) error,
 ) (bool, error) {
-	if apimw.IsAdmin(ctx) {
-		return true, nil
-	}
 	if activeProfileID == "" {
-		return false, nil
+		return profileLessAdminMayManage(ctx, store)
 	}
 	active, err := store.GetProfile(ctx, activeProfileID)
 	if err != nil {
@@ -89,6 +97,28 @@ func canManageHouseholdAs(
 		return false, err
 	}
 	return true, nil
+}
+
+// profileLessAdminMayManage is the household rule for a request that names no
+// profile: only an admin account may manage, and a login session only while
+// no profile on the household is limited. Once one is, the session must name
+// the primary profile and verify it like any other household parent. An admin
+// API key keeps its profile-less household management, as it keeps
+// profile-less admin powers on acting-admin routes: it is an account
+// credential bounded by its own scopes, and only the acting primary profile
+// can create one.
+func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (bool, error) {
+	if !apimw.IsAdmin(ctx) {
+		return false, nil
+	}
+	if claims := apimw.GetClaims(ctx); claims != nil && claims.TokenType == auth.TokenTypeAPIKey {
+		return true, nil
+	}
+	profiles, err := store.ListProfiles(ctx)
+	if err != nil {
+		return false, fmt.Errorf("listing household profiles: %w", err)
+	}
+	return !access.HouseholdRequiresProfile(profiles), nil
 }
 
 // verifyProfileToken checks the X-Profile-Token a PIN-locked profile must

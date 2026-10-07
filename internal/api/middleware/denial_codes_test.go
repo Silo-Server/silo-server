@@ -89,6 +89,9 @@ func TestDenialCodesAreStable(t *testing.T) {
 		{"forbidden", func(w http.ResponseWriter) {
 			writeForbidden(w, "Admin access required")
 		}, http.StatusForbidden, "forbidden", ""},
+		{"credential check unavailable", func(w http.ResponseWriter) {
+			writeCredentialCheckUnavailable(w, httptest.NewRequest(http.MethodGet, "/x", nil), errors.New("store down"))
+		}, http.StatusServiceUnavailable, CodeServiceUnavailable, ""},
 		{"internal", func(w http.ResponseWriter) {
 			writeInternalError(w, activeProfileVerificationFailedMsg)
 		}, http.StatusInternalServerError, "internal_error", ""},
@@ -177,7 +180,7 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/x", nil)
 		r = r.WithContext(SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s"}))
 		rec := newReasonWriter()
-		RequireActingAdmin(nil)(ok).ServeHTTP(rec, r)
+		RequireActingAdmin(nil, nil)(ok).ServeHTTP(rec, r)
 		got := decodeDenial(t, rec)
 		if rec.Code != http.StatusForbidden || got.Error != "forbidden" {
 			t.Fatalf("%d %q", rec.Code, got.Error)

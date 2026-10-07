@@ -417,6 +417,23 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Account",
     items: [
       {
+        path: "sessions",
+        label: "Signed-in sessions",
+        icon: MonitorSmartphone,
+        description: "See active sign-ins and sign out a browser or app.",
+        primaryOrAdmin: true,
+        keywords: [
+          "sessions",
+          "active",
+          "client",
+          "device",
+          "last seen",
+          "sign out",
+          "revoke",
+          "security",
+        ],
+      },
+      {
         path: "account",
         label: "Account",
         icon: KeyRound,

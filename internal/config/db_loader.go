@@ -387,9 +387,6 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Redis
 	cfg.Redis.URL = stringOr(m, "redis.url", "")
-	cfg.Redis.SentinelMaster = stringOr(m, "redis.sentinel_master", "")
-	cfg.Redis.SentinelPassword = stringOr(m, "redis.sentinel_password", "")
-	// SentinelAddresses loaded from YAML only (slice not suitable for key-value settings)
 
 	// Rate Limiting
 	rateLimitEnabled, err := boolOr(m, "ratelimit.enabled", true)

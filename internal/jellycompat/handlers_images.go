@@ -135,7 +135,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 	if personID, err := h.codec.DecodeIntID(EncodedIDPerson, routeID); err == nil {
 		if session == nil {
 			if token, ok := ExtractToken(r); ok {
-				session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
+				session, _, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 			}
 		}
 		h.handlePersonImage(w, r, session, routeID, imageType, tag, personID)
@@ -163,7 +163,7 @@ func (h *ImagesHandler) HandleItemImage(w http.ResponseWriter, r *http.Request) 
 
 	if session == nil {
 		if token, ok := ExtractToken(r); ok {
-			session, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
+			session, _, _ = resolveCompatToken(r.Context(), h.sessions, h.keyAuth, token)
 		}
 	}
 

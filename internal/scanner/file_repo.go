@@ -3035,6 +3035,11 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // reappears within the window restores without re-probing or re-matching.
 // A zero grace deletes all missing-marked rows immediately.
 //
+// Rows of an item that still exists without any library membership are kept
+// whatever their age: membership reconciliation runs first and deletes every
+// orphan it may, so such an item is held (catalog WithRemovalGrace) or
+// protected, and its orphan check on a later pass needs these rows to find it.
+//
 // Rows whose file_path lies at or under one of protectedRoots are never
 // deleted, no matter how long they have been missing: an unreachable library
 // root (dead drive, lost mount) is temporarily offline, not removed, so its
@@ -3043,7 +3048,15 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
+	query := `DELETE FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NOT NULL
+		  AND mf.missing_since < $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_items mi
+			WHERE mi.content_id = mf.content_id
+			  AND NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)
+		  )`
 	args := []any{folderID, cutoff}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"

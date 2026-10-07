@@ -150,6 +150,8 @@ type Scanner struct {
 	// emptying trash hard-deletes its row. Missing files are hidden from
 	// clients immediately; the grace only delays losing per-file state so a
 	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
+	// Membership reconciliation also holds an orphaned item for as long, so a
+	// replacement file relinks to it (see catalog WithRemovalGrace).
 	fileRemovalGrace     time.Duration
 	markerFetcher        func(context.Context, string) *IntroCreditsMarkers
 	markerPrefix         markerPrefixCache
@@ -240,7 +242,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore blobs
 		locationRepo:         NewObservedLocationRepository(fileRepo.Pool()),
 		groupLocationRepo:    NewGroupLocationRepository(fileRepo.Pool()),
 		folderRepo:           catalog.NewFolderRepository(fileRepo.Pool()),
-		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()),
+		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()).WithRemovalGrace(fileRemovalGrace),
 		episodeLibraryRepo:   catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
 		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
 		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),

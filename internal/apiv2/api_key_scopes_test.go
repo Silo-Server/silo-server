@@ -54,6 +54,9 @@ func (s *scopeCatalogStore) DeleteByAdminConditional(context.Context, int64, aut
 func realAPIKeyHandler() (http.Handler, *scopeCatalogStore) {
 	store := &scopeCatalogStore{}
 	svc := handlers.NewAPIKeyHandler(store)
+	// An admin household with no limited profile: a profile-less admin
+	// request may still create keys.
+	svc.Stores = householdStores{}
 	deps := pilotDeps(nil, nil)
 	deps.PersonalAPIKeys = svc
 	deps.AdminAPIKeys = svc

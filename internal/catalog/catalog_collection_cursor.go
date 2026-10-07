@@ -96,10 +96,9 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 			if err != nil {
 				return nil, err
 			}
-			if len(collection.LibraryIDs) > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
-			} else if collection.LibraryID > 0 {
-				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
+			def, ok := scopeLibraryCollectionDefinition(def, collection)
+			if !ok {
+				return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
 			}
 			return r.resolveSmartCollectionCursor(ctx, effective, access, def)
 		}

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/autoscan"
@@ -10,6 +12,12 @@ import (
 
 var ErrAdminAutoscanSourceWriteUnavailable = errors.New("autoscan source writing unavailable")
 var ErrAdminAutoscanSourceWriteInvalid = errors.New("invalid autoscan source")
+
+// ErrAdminAutoscanSourceConnectionRequired rejects an enabled poll source with
+// no connection when its descriptor requires one. It wraps
+// ErrAdminAutoscanSourceWriteInvalid so callers that only know the general
+// validation error still classify it correctly.
+var ErrAdminAutoscanSourceConnectionRequired = fmt.Errorf("%w: connection required", ErrAdminAutoscanSourceWriteInvalid)
 
 type AdminAutoscanSourceWrite struct {
 	PluginID            string
@@ -67,6 +75,9 @@ func (h *AutoscanHandler) CreateAdminAutoscanSource(ctx context.Context, in Admi
 	if !scanSourceInstalled(available, in.PluginID, in.CapabilityID) {
 		return AdminAutoscanSourceView{}, ErrAdminAutoscanSourceWriteInvalid
 	}
+	if missingRequiredConnection(available, source) {
+		return AdminAutoscanSourceView{}, ErrAdminAutoscanSourceConnectionRequired
+	}
 	created, err := h.repo.CreateSource(ctx, source)
 	if err != nil {
 		return AdminAutoscanSourceView{}, err
@@ -91,9 +102,46 @@ func (h *AutoscanHandler) UpdateAdminAutoscanSource(ctx context.Context, id stri
 		return AdminAutoscanSourceView{}, err
 	}
 	source.ID = strings.TrimSpace(id)
+	if h.updateMissesRequiredConnection(ctx, source) {
+		return AdminAutoscanSourceView{}, ErrAdminAutoscanSourceConnectionRequired
+	}
 	updated, err := h.repo.UpdateSource(ctx, source)
 	if err != nil {
 		return AdminAutoscanSourceView{}, err
 	}
 	return h.sourceResponseWithWebhook(ctx, updated), nil
+}
+
+// missingRequiredConnection reports whether source would poll without the
+// connection its resolved descriptor requires. Only an enabled poll source is
+// held to it: webhook delivery never uses a connection, and a disabled source
+// never polls, so an operator can still switch off a source that was saved
+// without a server before this rule existed. A capability that is not in the
+// discovered list has no resolvable descriptor and is not blocked.
+func missingRequiredConnection(available []autoscan.AvailableScanSource, source autoscan.Source) bool {
+	if source.ConnectionID != nil || !source.Enabled || source.DeliveryMode != autoscan.DeliveryModePoll {
+		return false
+	}
+	for _, a := range available {
+		if a.PluginID == source.PluginID && a.CapabilityID == source.CapabilityID {
+			return a.Descriptor.Connection == autoscan.ConnectionRequired
+		}
+	}
+	return false
+}
+
+// updateMissesRequiredConnection applies missingRequiredConnection to an
+// update. Updates may target an orphaned source whose plugin is gone, so a
+// missing service or a failed listing leaves the descriptor unresolved and the
+// write proceeds rather than being blocked on discovery.
+func (h *AutoscanHandler) updateMissesRequiredConnection(ctx context.Context, source autoscan.Source) bool {
+	if h.svc == nil || source.ConnectionID != nil || !source.Enabled || source.DeliveryMode != autoscan.DeliveryModePoll {
+		return false
+	}
+	available, err := h.svc.ListAvailableScanSources(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: list scan sources for connection requirement failed", "component", "api", "source_id", source.ID, "err", err)
+		return false
+	}
+	return missingRequiredConnection(available, source)
 }

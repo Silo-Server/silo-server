@@ -39,6 +39,7 @@ import {
   type SourceType,
 } from "./HistoryImportSettings.utils";
 import { cn } from "@/lib/utils";
+import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
 
@@ -90,9 +91,10 @@ export default function HistoryImportSettings() {
   const { profile } = useCurrentProfile();
   const { user } = useAuth();
   const { data: profiles = [] } = useProfiles();
-  // The server lets an admin or the primary profile import into any profile
-  // on the account; every other profile imports only into itself.
-  const canImportForOthers = user?.role === "admin" || profile?.is_primary === true;
+  // The server lets the primary profile import into any profile on the
+  // account, on an admin account too; every other profile, including a
+  // non-primary profile on an admin account, imports only into itself.
+  const canImportForOthers = isActingAdmin(user, profile) || profile?.is_primary === true;
   const profileNames = useMemo(
     () => new Map(profiles.map((item) => [item.id, item.name])),
     [profiles],

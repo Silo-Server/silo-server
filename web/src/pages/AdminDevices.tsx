@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   DeviceProfileTabs,
+  deviceSettingKeysForPlatform,
   PlatformTile,
   UNKNOWN_PROFILE_ID,
   classifyPlatform,
@@ -37,7 +38,6 @@ import {
   type DeviceProfileTabEntry,
   type PlatformKind,
 } from "@/components/admin/deviceOverrides";
-import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
@@ -1650,7 +1650,12 @@ function DeviceDetailPanel({
         <div className="flex items-center gap-2">
           <SettingsScopeControl
             showAllSettings={effectiveShowAllSettings}
-            totalSettings={ALL_DEVICE_SETTING_KEYS.length}
+            totalSettings={
+              deviceSettingKeysForPlatform(
+                data.device_platform,
+                overrides.map((setting) => setting.key),
+              ).length
+            }
             overrideCount={totalOverrides}
             disabled={profileTabs.length === 0}
             lockToAllSettings={forceAllSettings}

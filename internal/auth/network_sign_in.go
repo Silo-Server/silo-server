@@ -158,8 +158,9 @@ func (s *Service) NetworkSignIn(ctx context.Context, in NetworkSignInInput) (*To
 // LinkNetworkIdentity links the network identity of the request's peer to
 // the signed-in account, after the account re-entered its local password,
 // with the rules of LinkCredentialsIdentity: the identity is linked through
-// account resolution, the provider's managed role applies, and local password
-// sign-in turns off unless the account is break-glass. Errors are
+// account resolution and the provider's managed role applies. Unlike other
+// linking, the account keeps its local password (linkIdentityTx), which works
+// only while the provider vouches for the person (networkRefused). Errors are
 // LinkCredentialsIdentity's, plus ErrNetworkIdentityRequired.
 func (s *Service) LinkNetworkIdentity(ctx context.Context, in NetworkLinkInput) (*LinkedIdentity, error) {
 	provider, peer, err := s.networkRequest(ctx, in.InstallationID)
@@ -196,6 +197,10 @@ type primaryAuthority struct {
 	refused bool
 }
 
+// refusalStatuses are the answers isRefusal treats as refusals, as a query
+// parameter.
+var refusalStatuses = []string{CheckStatusNotFound, CheckStatusDisabled, CheckStatusNotPermitted}
+
 // primaryAuthorityOf answers primaryAuthority for a network identity of
 // userID at installationID; the zero value for any other installation.
 func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installationID int) (primaryAuthority, error) {
@@ -209,12 +214,49 @@ func primaryAuthorityOf(ctx context.Context, db rowQuerier, userID, installation
 		SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $2 AND `+isNetwork+`),
 			EXISTS (SELECT 1 FROM primary_identities),
 			EXISTS (SELECT 1 FROM primary_identities WHERE last_check_status = ANY($3) OR pending_refusal = ANY($3))`,
-		userID, installationID, []string{CheckStatusNotFound, CheckStatusDisabled, CheckStatusNotPermitted}).Scan(&network, &primary, &refused)
+		userID, installationID, refusalStatuses).Scan(&network, &primary, &refused)
 	if err != nil {
 		return primaryAuthority{}, fmt.Errorf("checking for a primary sign-in identity: %w", err)
 	}
 	defers := network && primary
 	return primaryAuthority{defers: defers, refused: defers && refused}, nil
+}
+
+// networkRefused reports whether the latest answer of an enabled network
+// identity provider about one of userID's identities refused the person, a
+// refusal whose revocation rolled back (pending_refusal) included. Local
+// password sign-in is then refused too, except for a break-glass account: a
+// network identity keeps the account's password (linkIdentityTx), and the
+// overlay still decides who may use the account. The block lifts when the
+// provider vouches for the person again, at a sign-in through it or a
+// re-check, which the scheduled pass runs for such accounts
+// (idleIdentityCondition).
+func networkRefused(ctx context.Context, db rowQuerier, userID int) (bool, error) {
+	var refused bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_identities i
+		JOIN plugin_installations p ON p.id = i.plugin_installation_id AND p.enabled
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND b.enabled
+		WHERE i.user_id = $1 AND `+plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+`
+			AND (i.last_check_status = ANY($2) OR i.pending_refusal = ANY($2)))`,
+		userID, refusalStatuses).Scan(&refused); err != nil {
+		return false, fmt.Errorf("checking for a network provider's refusal: %w", err)
+	}
+	return refused, nil
+}
+
+// installationIsNetwork reports whether installationID signs people in only
+// as a network provider: it has a network binding and no other kind. An
+// installation that also has an OIDC or LDAP binding, enabled or not, is
+// treated as that provider, so linking there turns the password off.
+func installationIsNetwork(ctx context.Context, db rowQuerier, installationID int) (bool, error) {
+	isNetwork := plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")
+	var network bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $1 AND `+isNetwork+`)
+		AND NOT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $1 AND NOT `+isNetwork+`)`,
+		installationID).Scan(&network); err != nil {
+		return false, fmt.Errorf("checking for a network sign-in binding: %w", err)
+	}
+	return network, nil
 }
 
 // networkPreviewTTL bounds how long discovery reuses a plugin's answer about
