@@ -124,7 +124,11 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	disabled := preferences.DisabledLibraryIDs
 	if len(disabled) > 0 {
 		if scope.AllowedLibraryIDs != nil {
-			// Restricted user: subtract disabled IDs from the allowed set.
+			// Restricted user: subtract disabled IDs from the allowed set,
+			// remembering which allowed ones the profile hid.
+			if hidden := intersectInts(scope.AllowedLibraryIDs, disabled); len(hidden) > 0 {
+				scope.HiddenLibraryIDs = hidden
+			}
 			scope.AllowedLibraryIDs = subtractInts(scope.AllowedLibraryIDs, disabled)
 		} else {
 			// Unrestricted user: pass disabled IDs through so query layer

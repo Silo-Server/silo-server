@@ -45161,10 +45161,18 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "supports_include_hidden": {
+            "description": "Whether listUserLibraries accepts include_hidden",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "available",
+          "supports_include_hidden",
           "revision",
           "state",
           "allowed"
@@ -192756,6 +192764,19 @@
                 "pvt_5f3a9c1e7b2d4e8fa0c6"
               ],
               "type": "string"
+            }
+          },
+          {
+            "description": "Also list libraries the profile hid itself (ui.disabled_library_ids), for a screen that shows them again. Without an account, profile, or policy library limit they are listed either way. Navigation should omit it and filter by the setting",
+            "explode": false,
+            "in": "query",
+            "name": "include_hidden",
+            "schema": {
+              "description": "Also list libraries the profile hid itself (ui.disabled_library_ids), for a screen that shows them again. Without an account, profile, or policy library limit they are listed either way. Navigation should omit it and filter by the setting",
+              "examples": [
+                false
+              ],
+              "type": "boolean"
             }
           }
         ],

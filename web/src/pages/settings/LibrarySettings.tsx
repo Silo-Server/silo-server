@@ -493,7 +493,10 @@ function LibraryCard({
 }
 
 export default function LibrarySettings() {
-  const { data: libraries, isLoading: librariesLoading } = useAvailableUserLibraries();
+  // Hidden libraries stay listed so each keeps a switch to show it again.
+  const { data: libraries, isLoading: librariesLoading } = useAvailableUserLibraries({
+    includeHidden: true,
+  });
   const {
     disabledLibraryIDs: savedDisabledLibraryIDs,
     libraryOrder: savedLibraryOrder,

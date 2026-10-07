@@ -7,6 +7,14 @@ type Scope struct {
 	AllowedLibraryIDs   []int
 	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
 	LibrariesRestricted bool
+	// HiddenLibraryIDs are the libraries a restricted scope left out of
+	// AllowedLibraryIDs only because the profile hid them
+	// (ui.disabled_library_ids). They grant nothing; the library list that
+	// lets the profile show them again reads them. Nil when unrestricted,
+	// where the hidden libraries travel in DisabledLibraryIDs instead. Kept
+	// out of the access fingerprint: a hide or show already changes
+	// AllowedLibraryIDs.
+	HiddenLibraryIDs []int `json:"-"`
 	// MaturityLimits are the profile's maturity restrictions, embedded so a
 	// Scope copies them into a catalog filter as one value. JSON flattens the
 	// embedded fields, so the access fingerprints that hash a Scope (socket

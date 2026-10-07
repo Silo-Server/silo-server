@@ -29172,6 +29172,11 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description Whether listUserLibraries accepts include_hidden
+       * @example true
+       */
+      supports_include_hidden: boolean;
     };
     ValidationClaimsV3: {
       audio: components["schemas"]["AudioClaimsV3"];
@@ -126356,7 +126361,10 @@ export interface operations {
   };
   listUserLibraries: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Also list libraries the profile hid itself (ui.disabled_library_ids), for a screen that shows them again. Without an account, profile, or policy library limit they are listed either way. Navigation should omit it and filter by the setting */
+        include_hidden?: boolean;
+      };
       header?: {
         /** @description Optional. When present, it must name a profile of the authenticated account. */
         "X-Profile-Id"?: string;
