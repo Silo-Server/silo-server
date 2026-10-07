@@ -58,6 +58,11 @@ Find the `## Evidence` section of the PR body. For a visible change, it passes w
 - a recording when the change is about motion, timing, focus movement, or a multi-step flow;
 - the surface and build or commit the captures came from.
 
+Evidence on `evidence.siloserver.org` is private, and you cannot open it. For a section that links
+a page there, count the link as evidence, do not ask for the surface or build in the body, and
+list what the page should show so the reviewer can check it, such as desktop and mobile web
+captures for a web change.
+
 An explanation of why evidence could not be captured is acceptable; report it so the reviewer can
 decide, and do not count it as a pass.
 
