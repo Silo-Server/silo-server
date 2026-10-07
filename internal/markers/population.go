@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -80,6 +81,9 @@ type PopulationService struct {
 	slots  chan struct{}
 	mu     sync.Mutex
 	memory map[string]cachedMarkerResult
+	// setupWaitLogged keeps the "waiting for setup" notice to one line per
+	// process instead of one per playback, read, or sync.
+	setupWaitLogged atomic.Bool
 }
 
 func NewPopulationService(opts PopulationOptions) *PopulationService {
@@ -111,19 +115,30 @@ func (s *PopulationService) enabled(ctx context.Context) (bool, error) {
 	if s == nil || s.opts.Registry == nil || s.opts.Resolver == nil || s.opts.Store == nil || s.opts.Settings == nil {
 		return false, nil
 	}
+	raw, err := s.opts.Settings.Get(ctx, SettingMode)
+	if err != nil {
+		return false, err
+	}
+	if mode := NormalizeMode(raw); mode != ModeOnline && mode != ModeBoth {
+		return false, nil
+	}
 	complete, err := s.opts.Settings.Get(ctx, "setup.completed")
 	if err != nil {
 		return false, err
 	}
 	if strings.TrimSpace(complete) != settingEnabled {
+		// Online lookups wait for the setup wizard, which lets the admin turn
+		// them off first. A server set up without finishing the wizard would
+		// otherwise accept playback and refresh requests and fetch nothing,
+		// with no trace of why.
+		if s.setupWaitLogged.CompareAndSwap(false, true) {
+			s.opts.Registry.log().WarnContext(ctx,
+				"online markers: lookups are paused until the setup wizard is finished",
+				"setting", "setup.completed", "value", complete)
+		}
 		return false, nil
 	}
-	raw, err := s.opts.Settings.Get(ctx, SettingMode)
-	if err != nil {
-		return false, err
-	}
-	mode := NormalizeMode(raw)
-	return mode == ModeOnline || mode == ModeBoth, nil
+	return true, nil
 }
 
 // Populate returns an effective file even when one provider fails. Stored mode

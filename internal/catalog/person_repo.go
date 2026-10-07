@@ -508,12 +508,34 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 
 // Get retrieves a person by ID.
 func (r *PersonRepository) Get(ctx context.Context, id int64) (*models.Person, error) {
+	return r.getByID(ctx, id, "")
+}
+
+// GetVisible retrieves a person by ID only when the viewer can see at least
+// one of the person's credits, using the predicate SearchScoped applies with
+// no media scope. A person the viewer cannot see answers pgx.ErrNoRows, the
+// same as an unknown ID, so the answer does not reveal that the person exists.
+func (r *PersonRepository) GetVisible(ctx context.Context, id int64, filter AccessFilter) (*models.Person, error) {
+	var args []any
+	argIdx := getByIDFirstExtraArg
+	visible := personCreditVisibleSQL("people.id", nil, personCreditScope{}, filter, &args, &argIdx)
+	return r.getByID(ctx, id, " AND "+visible, args...)
+}
+
+// getByIDFirstExtraArg is the first placeholder number an extraWhere passed to
+// getByID may use; $1 is the person ID.
+const getByIDFirstExtraArg = 2
+
+// getByID reads the person with the given ID, narrowed by extraWhere, whose
+// placeholders start at getByIDFirstExtraArg and bind extraArgs in order.
+func (r *PersonRepository) getByID(ctx context.Context, id int64, extraWhere string, extraArgs ...any) (*models.Person, error) {
+	args := append([]any{id}, extraArgs...)
 	var p models.Person
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
 			metadata_refresh_attempted_at
-		FROM people WHERE id = $1`, id,
+		FROM people WHERE id = $1`+extraWhere, args...,
 	).Scan(&p.ID, &p.Name, &p.SortName, &p.Bio, &p.BirthDate, &p.DeathDate, &p.Birthplace, &p.Homepage,
 		&p.PhotoPath, &p.PhotoSourcePath, &p.PhotoThumbhash, &p.TmdbID, &p.ImdbID, &p.TvdbID, &p.PlexGUID, &p.CreatedAt, &p.UpdatedAt,
 		&p.MetadataRefreshAttemptedAt,
@@ -542,7 +564,11 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 	return &p, nil
 }
 
-// Search finds persons by name substring (case-insensitive), ordered by name.
+// SearchAlphabetical finds persons by name substring (case-insensitive), ordered by
+// name, among the people the viewer can see through at least one credit (the
+// predicate SearchScoped and GetVisible apply with no media scope). It keeps
+// the v1 bridge search's untrimmed query and alphabetical order; only the
+// visibility filter is added.
 //
 // The predicate is `name ILIKE '%term%'` rather than `LOWER(name) LIKE ...` so
 // the pg_trgm GIN index idx_people_name_trgm can serve it: for a rare 3+ char
@@ -550,50 +576,29 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 // scan. ILIKE is itself case-insensitive, so this stays equivalent to the prior
 // LOWER(name) comparison (including its existing treatment of % and _ in the
 // term as LIKE wildcards).
-func (r *PersonRepository) Search(ctx context.Context, query string, limit int) ([]models.Person, error) {
-	return r.search(ctx, query, limit, "", nil)
+func (r *PersonRepository) SearchAlphabetical(ctx context.Context, query string, limit int, filter AccessFilter) ([]models.Person, error) {
+	return r.search(ctx, query, limit, "", filter, false)
 }
 
 // SearchScoped ranks exact names first and restricts people to credits in the
 // selected media scope and viewer access before applying the limit. Empty scope
 // includes accessible credits across all media types.
 func (r *PersonRepository) SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter) ([]models.Person, error) {
-	return r.search(ctx, strings.TrimSpace(query), limit, mediaScope, &filter)
+	return r.search(ctx, strings.TrimSpace(query), limit, mediaScope, filter, true)
 }
 
-func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter *AccessFilter) ([]models.Person, error) {
+// search runs a name search over the people the viewer can see. rankExact
+// puts exact name matches first, as v2 search does.
+func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter, rankExact bool) ([]models.Person, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	args := []any{query, limit}
-	where := "name ILIKE '%' || $1 || '%'"
-	if filter != nil {
-		conditions := []string{"ip.person_id = people.id"}
-		argIdx := 3
-		if types := MediaScopeItemTypes(mediaScope); len(types) > 0 {
-			conditions = append(conditions, "mi.type = ANY($3::text[])")
-			args = append(args, types)
-			argIdx++
-		}
-		// Episode access follows the parent series, while scope and excluded
-		// media types describe the credited item itself.
-		appendLibraryAccessConditions("access_item.content_id", *filter, &conditions, &args, &argIdx)
-		applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, &args, &argIdx)
-		applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-		where += ` AND EXISTS (
-			SELECT 1 FROM item_people ip
-			JOIN media_items mi ON mi.content_id = ip.content_id
-			JOIN media_items access_item ON access_item.content_id = CASE
-				WHEN mi.type = 'episode' THEN ` + episodeParentSeriesIDExpr("mi.content_id") + `
-				ELSE mi.content_id END
-			WHERE ` + strings.Join(conditions, " AND ") + ")"
-	}
-	order := "name ASC"
-	if filter != nil {
-		order = "name ASC, id ASC"
-		if query != "" {
-			order = "(LOWER(name) = LOWER($1)) DESC, " + order
-		}
+	argIdx := 3
+	where := "name ILIKE '%' || $1 || '%' AND " + personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{}, filter, &args, &argIdx)
+	order := "name ASC, id ASC"
+	if rankExact && query != "" {
+		order = "(LOWER(name) = LOWER($1)) DESC, " + order
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
@@ -618,6 +623,57 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		people = append(people, p)
 	}
 	return people, rows.Err()
+}
+
+// personCreditVisibleSQL renders an EXISTS predicate that holds when the person
+// at personIDExpr has at least one credit the viewer can see, limited to
+// credits on items of the given types when types is non-empty and to credits
+// inside scope. People search, person detail and the Jellyfin person reads
+// share it so a person found by one opens in the others.
+func personCreditVisibleSQL(personIDExpr string, types []string, scope personCreditScope, filter AccessFilter, args *[]any, argIdx *int) string {
+	conditions := []string{"ip.person_id = " + personIDExpr}
+	if len(types) > 0 {
+		conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d::text[])", *argIdx))
+		*args = append(*args, types)
+		*argIdx = *argIdx + 1
+	}
+	// Episode access follows the parent series, while scope and excluded
+	// media types describe the credited item itself.
+	appendLibraryAccessConditions("access_item.content_id", filter, &conditions, args, argIdx)
+	applyAccessFilter("access_item", AccessFilter{MaturityLimits: filter.MaturityLimits}, &conditions, args, argIdx)
+	applyAccessFilter("mi", AccessFilter{ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, args, argIdx)
+	if scope.LibraryID > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries scope_mil WHERE scope_mil.content_id = access_item.content_id AND scope_mil.media_folder_id = $%d)", *argIdx))
+		*args = append(*args, scope.LibraryID)
+		*argIdx = *argIdx + 1
+	}
+	if scope.ContentID != "" {
+		// The credits on the item and, for a series, on its episodes: the
+		// same rows as matching the credited or the access item. Resolving
+		// them up front lets the lookup start from item_people's content_id
+		// index instead of joining every credit to its access item first.
+		conditions = append(conditions, fmt.Sprintf("ip.content_id = ANY(ARRAY(SELECT $%d::text UNION ALL SELECT scope_e.content_id FROM episodes scope_e WHERE scope_e.series_id = $%d))", *argIdx, *argIdx))
+		*args = append(*args, scope.ContentID)
+		*argIdx = *argIdx + 1
+	}
+	return `EXISTS (
+			SELECT 1 FROM item_people ip
+			JOIN media_items mi ON mi.content_id = ip.content_id
+			JOIN media_items access_item ON access_item.content_id = CASE
+				WHEN mi.type = 'episode' THEN ` + episodeParentSeriesIDExpr("mi.content_id") + `
+				ELSE mi.content_id END
+			WHERE ` + strings.Join(conditions, " AND ") + ")"
+}
+
+// personCreditScope narrows the credits personCreditVisibleSQL counts to one
+// library or one item; the zero value counts every credit. Both match the item
+// that carries access, which for an episode credit is the parent series, so a
+// guest star belongs to the series' libraries. ContentID also matches the
+// credited item itself: a series scope covers its episodes' guest stars, and
+// an episode scope covers that episode's own credits.
+type personCreditScope struct {
+	LibraryID int
+	ContentID string
 }
 
 // maxPersonConflictResolutions bounds how many external-id collisions a single
@@ -1285,16 +1341,22 @@ func scanItemPeople(rows pgx.Rows) ([]models.ItemPerson, error) {
 	return people, rows.Err()
 }
 
-// SearchVisible restricts both the page and total to people credited on visible
-// video items. A hidden library's credits never enter the result set.
+// SearchVisible restricts both the page and total to people the viewer can see
+// through a credit on a video item. A hidden library's credits never enter the
+// result set.
 func (r *PersonRepository) SearchVisible(ctx context.Context, term string, exact bool, limit, offset int, filter AccessFilter, includeTotal bool) ([]models.Person, int, error) {
 	return r.SearchVisibleWithOptions(ctx, PersonSearchOptions{Term: term, Exact: exact, Limit: limit, Offset: offset, Filter: filter, IncludeTotal: includeTotal})
 }
 
+// videoCreditTypes are the credited item types the Jellyfin person reads
+// (SearchVisibleWithOptions, EnsureAccessible) count. The Jellyfin surface
+// lists only these types, so a credit on any other item opens nothing there.
+var videoCreditTypes = []string{playableTypeMovie, playableTypeSeries, browseTypeEpisode}
+
 // PersonSearchOptions narrows SearchVisibleWithOptions. Name bounds compare
 // lowercased names, as Jellyfin's people query does; LibraryID and
 // ContentID keep only people credited on items in that library or on that
-// item.
+// item, where an episode credit belongs to its series (see personCreditScope).
 type PersonSearchOptions struct {
 	Term                    string
 	Exact                   bool
@@ -1309,25 +1371,15 @@ type PersonSearchOptions struct {
 	IncludeTotal            bool
 }
 
-// SearchVisibleWithOptions lists people credited on at least one movie or
-// series the filter allows, ordered by name.
+// SearchVisibleWithOptions lists the people the viewer can see through a
+// credit on a video item, ordered by name. Visibility is the person-detail
+// rule (GetVisible), narrowed to videoCreditTypes, so an episode credit counts
+// when the viewer can see the parent series.
 func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts PersonSearchOptions) ([]models.Person, int, error) {
-	filter := opts.Filter
-	conditions := []string{"ip.person_id = p.id", "mi.type IN ('movie', 'series')"}
 	args := []any{}
 	argIdx := 1
-	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
-	applyAccessFilter("mi", filter, &conditions, &args, &argIdx)
-	if opts.LibraryID > 0 {
-		conditions = append(conditions, fmt.Sprintf("EXISTS (SELECT 1 FROM media_item_libraries scope_mil WHERE scope_mil.content_id = mi.content_id AND scope_mil.media_folder_id = $%d)", argIdx))
-		args = append(args, opts.LibraryID)
-		argIdx++
-	}
-	if opts.ContentID != "" {
-		conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
-		args = append(args, opts.ContentID)
-		argIdx++
-	}
+	scope := personCreditScope{LibraryID: opts.LibraryID, ContentID: opts.ContentID}
+	visible := personCreditVisibleSQL("p.id", videoCreditTypes, scope, opts.Filter, &args, &argIdx)
 	personConditions := []string{}
 	addName := func(clause, value string) {
 		personConditions = append(personConditions, fmt.Sprintf(clause, argIdx))
@@ -1349,7 +1401,7 @@ func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts Pe
 	if opts.NameStartsWithOrGreater != "" {
 		addName("LOWER(p.name) >= LOWER($%d)", opts.NameStartsWithOrGreater)
 	}
-	personConditions = append(personConditions, "EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id = ip.content_id WHERE "+strings.Join(conditions, " AND ")+")")
+	personConditions = append(personConditions, visible)
 	where := strings.Join(personConditions, " AND ")
 	limit, offset, includeTotal := opts.Limit, opts.Offset, opts.IncludeTotal
 	var total int
@@ -1379,16 +1431,15 @@ func (r *PersonRepository) SearchVisibleWithOptions(ctx context.Context, opts Pe
 }
 
 // EnsureAccessible requires a credit on a visible video item before serving
-// person metadata or image bytes, including already cached derivatives.
+// person metadata or image bytes, including already cached derivatives. It
+// applies the SearchVisibleWithOptions rule, so a person the Jellyfin people
+// list shows also serves their photo.
 func (r *PersonRepository) EnsureAccessible(ctx context.Context, id int64, filter AccessFilter) error {
-	conditions := []string{"ip.person_id = $1", "mi.type IN ('movie','series')"}
 	args := []any{id}
 	index := 2
-	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &index)
-	applyAccessFilter("mi", filter, &conditions, &args, &index)
+	visible := personCreditVisibleSQL("$1", videoCreditTypes, personCreditScope{}, filter, &args, &index)
 	var exists bool
-	err := r.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM item_people ip JOIN media_items mi ON mi.content_id=ip.content_id WHERE "+strings.Join(conditions, " AND ")+")", args...).Scan(&exists)
-	if err != nil {
+	if err := r.pool.QueryRow(ctx, "SELECT "+visible, args...).Scan(&exists); err != nil {
 		return err
 	}
 	if !exists {

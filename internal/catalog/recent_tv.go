@@ -159,9 +159,11 @@ func ResolveRecentTVLibraryIDs(
 			ids = append(ids, id)
 		}
 	}
-	ids = intersectOptionalInts(ids, access.AllowedLibraryIDs)
-	ids = subtractInts(ids, access.DisabledLibraryIDs)
 	if len(ids) == 0 {
+		return []int{}, true, nil
+	}
+	ids, none := access.LibraryScope(ids)
+	if none {
 		return []int{}, true, nil
 	}
 	return sortedUniqueInts(ids), true, nil
@@ -967,32 +969,6 @@ func sortedUniqueInts(values []int) []int {
 	values = uniquePositiveInts(values)
 	slices.Sort(values)
 	return values
-}
-
-// intersectOptionalInts is intersectInts with the access-layer convention that
-// a nil allow-list means unrestricted rather than "allow nothing".
-func intersectOptionalInts(values, allowed []int) []int {
-	if allowed == nil {
-		return values
-	}
-	return intersectInts(values, allowed)
-}
-
-func subtractInts(values, denied []int) []int {
-	if len(denied) == 0 {
-		return values
-	}
-	deniedSet := make(map[int]struct{}, len(denied))
-	for _, value := range denied {
-		deniedSet[value] = struct{}{}
-	}
-	result := make([]int, 0, len(values))
-	for _, value := range values {
-		if _, denied := deniedSet[value]; !denied {
-			result = append(result, value)
-		}
-	}
-	return result
 }
 
 // The tuple belongs to the final event relation, after grouping and optional

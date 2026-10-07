@@ -487,7 +487,7 @@ func TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics(t *testing.T) {
 	got, err := resolver.resolveDirectSearchSource(
 		context.Background(),
 		CatalogRequest{Source: CatalogSourceQuery, SearchQuery: "dune", Limit: 20},
-		// AllowedLibraryIDs empty (non-nil) => effectiveCatalogLibraryIDs early-empties.
+		// AllowedLibraryIDs empty (non-nil) => AccessFilter.LibraryScope early-empties.
 		AccessFilter{AllowedLibraryIDs: []int{}},
 	)
 	if err != nil {

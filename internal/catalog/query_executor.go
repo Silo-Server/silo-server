@@ -310,14 +310,7 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		return previewPagePlan{}, err
 	}
 
-	libraryIDs := append([]int(nil), def.LibraryIDs...)
-	if access.AllowedLibraryIDs != nil {
-		if len(libraryIDs) == 0 {
-			libraryIDs = append([]int(nil), access.AllowedLibraryIDs...)
-		} else {
-			libraryIDs = intersectInts(libraryIDs, access.AllowedLibraryIDs)
-		}
-	}
+	libraryIDs, libraryScopeEmpty := access.LibraryScope(def.LibraryIDs)
 
 	// Scope can be set externally (e.g. catalog resolver pre-fills it from
 	// the request) or implied by the query definition's MediaScope (e.g.
@@ -408,7 +401,8 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		conditions = append(conditions, libScopeWhere)
 		args = append(args, libScopeArgs...)
 		argIdx += len(libScopeArgs)
-	} else if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
+	}
+	if libraryScopeEmpty {
 		conditions = append(conditions, "1 = 0")
 	}
 	if access.AllowedContentIDs != nil {

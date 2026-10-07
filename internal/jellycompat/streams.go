@@ -1557,6 +1557,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	// a missing subtitle then record an outcome on a real session, which is
 	// correct: they are failures by an already-authorized principal.
 	attachCompatStream(r.Context(), session, playSession, source.FileID)
+	segmentPTSOffset := compatSubtitleSegmentPTSOffset90k(playSession.UpstreamPlayMethod, *source, file)
 
 	routeIndex := chiURLParam(r, "routeIndex")
 	trackIndex, parseErr := strconv.Atoi(routeIndex)
@@ -1581,7 +1582,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					return
 				}
 				h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, ExternalPath: sub.Path})
-				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat)
+				h.deliverTextSubtitle(w, r, sub.Format, data, requestedFormat, segmentPTSOffset)
 				return
 			}
 			// Serve ASS/SSA as raw data when requested.
@@ -1591,7 +1592,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
 				}
-				h.deliverSubtitle(w, r, "ass", data)
+				h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
 				return
 			}
 			if requestedFormat == "srt" && subtitleCanServeSRT(sub.Format) {
@@ -1600,7 +1601,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 					return
 				}
-				h.deliverSubtitle(w, r, requestedFormat, data)
+				h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 				return
 			}
 			data, subErr := playback.LoadExternalSubtitleAsVTT(r.Context(), sub.Path, sub.Format, h.FFmpegPath)
@@ -1608,7 +1609,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusInternalServerError, "ServerError", "Failed to load subtitle")
 				return
 			}
-			h.deliverSubtitle(w, r, "vtt", data)
+			h.deliverSubtitle(w, r, "vtt", data, segmentPTSOffset)
 			return
 		}
 	}
@@ -1636,7 +1637,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			// The correction can change behind the same URL.
 			w.Header().Set("Cache-Control", "private, no-cache")
 			h.subtitlePlayed(r, subtitles.SyncTarget{MediaFileID: file.ID, StoredID: dl.ID})
-			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat)
+			h.deliverTextSubtitle(w, r, string(dl.Format), data, requestedFormat, segmentPTSOffset)
 			return
 		}
 	}
@@ -1658,7 +1659,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 			return
 		}
-		h.deliverSubtitle(w, r, "ass", data)
+		h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
 		return
 	}
 
@@ -1669,7 +1670,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	}
 	format := "srt"
 	if requestedFormat == "srt" && subtitleCanServeSRT(format) {
-		h.deliverSubtitle(w, r, requestedFormat, data)
+		h.deliverSubtitle(w, r, requestedFormat, data, segmentPTSOffset)
 		return
 	}
 	vttData, convErr := playback.ConvertToVTT(data, format)
@@ -1677,7 +1678,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to convert subtitle")
 		return
 	}
-	h.deliverSubtitle(w, r, "vtt", vttData)
+	h.deliverSubtitle(w, r, "vtt", vttData, segmentPTSOffset)
 }
 
 func findEmbeddedSubtitle(file *models.MediaFile, routeIndex int) (int, models.SubtitleTrack) {

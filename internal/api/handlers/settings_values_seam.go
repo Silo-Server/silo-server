@@ -212,7 +212,7 @@ func (h *SettingValuesHandler) sessionIdentity(
 // mayActFor authorizes acting for a profile other than the caller's own.
 //
 // Two checks, in this order and for different reasons. First the household
-// guard: only the primary profile (or a server admin) manages the household, so
+// guard: only the primary profile manages the household (see canManageHouseholdAs), so
 // an ordinary member naming a sibling is 403 — the profile plainly exists, and
 // pretending otherwise would be a lie the caller can already disprove through
 // GET /profiles. Then existence, resolved through the caller's *own* user
@@ -629,7 +629,7 @@ func (h *SettingValuesHandler) clearSettingValue(
 		return apiError(http.StatusNotFound, policyErrorNotFound, "No value is set at this scope")
 	}
 	auditSettingsForOther(ctx, settingsAuditRecord{
-		Action:          "clear",
+		Action:          settingsAuditActionClear,
 		ActorProfileID:  actingProfileID(ctx),
 		TargetProfileID: identity.ProfileID,
 		TargetUserID:    eventUserID,

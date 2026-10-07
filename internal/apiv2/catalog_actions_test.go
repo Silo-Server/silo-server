@@ -97,23 +97,31 @@ func (f *fakeCatalogActions) SearchPeopleScoped(_ context.Context, query string,
 	return nil, nil
 }
 
-func (f *fakeCatalogActions) Person(_ context.Context, id int64, queueRefresh bool) (handlers.PersonView, error) {
+// fakePersonVisible stands in for the people search predicate: person 7 is
+// credited inside the viewer's libraries, person 9 only outside them, and
+// every other ID is unknown.
+func fakePersonVisible(id int64, filter catalogpkg.AccessFilter) bool {
+	return id == 7 || (id == 9 && filter.AllowedLibraryIDs == nil)
+}
+
+func (f *fakeCatalogActions) Person(_ context.Context, id int64, queueRefresh bool, filter catalogpkg.AccessFilter) (handlers.PersonView, error) {
 	f.personReads = append(f.personReads, queueRefresh)
 	if f.err != nil {
 		return handlers.PersonView{}, f.err
 	}
-	if id != 7 {
+	f.lastFilter = filter
+	if !fakePersonVisible(id, filter) {
 		return handlers.PersonView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "person not found"}
 	}
 	return fakePerson(id), nil
 }
 
-func (f *fakeCatalogActions) RefreshPerson(_ context.Context, userID int, id int64) error {
+func (f *fakeCatalogActions) RefreshPerson(_ context.Context, userID int, id int64, filter catalogpkg.AccessFilter) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.lastUser = userID
-	if id != 7 {
+	f.lastUser, f.lastFilter = userID, filter
+	if !fakePersonVisible(id, filter) {
 		return &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "person not found"}
 	}
 	f.refreshed = append(f.refreshed, id)
@@ -271,11 +279,23 @@ func TestPeople(t *testing.T) {
 	if rec.Code != 200 || !slices.Equal(fake.personReads, []bool{true, false}) {
 		t.Fatalf("prefetch read: %d %s, queueRefresh per read %v", rec.Code, rec.Body.String(), fake.personReads)
 	}
+	if !slices.Equal(fake.lastFilter.AllowedLibraryIDs, []int{1, 2}) {
+		t.Fatalf("detail did not forward viewer access: %+v", fake.lastFilter)
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people/8", "", viewerHeaders()), TypeNotFound)
+	// A person credited only outside the viewer's access reads like an unknown one.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people/9", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people/abc", "", viewerHeaders()), TypeValidationFailed)
 	rec = do(t, h, http.MethodPost, "/api/v2/catalog/people/7/refresh", "", viewerHeaders())
 	if rec.Code != 202 || rec.Body.String() != `{"status":"queued","person_id":"7"}`+"\n" || len(fake.refreshed) != 1 || fake.lastUser != 1 {
 		t.Fatalf("%d %q %v", rec.Code, rec.Body.String(), fake.refreshed)
+	}
+	if !slices.Equal(fake.lastFilter.AllowedLibraryIDs, []int{1, 2}) {
+		t.Fatalf("refresh did not forward viewer access: %+v", fake.lastFilter)
+	}
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/people/9/refresh", "", viewerHeaders()), TypeNotFound)
+	if len(fake.refreshed) != 1 {
+		t.Fatalf("hidden person was queued: %v", fake.refreshed)
 	}
 	fake.err = &handlers.APIError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Person refresh is not configured"}
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/people/7/refresh", "", viewerHeaders()), TypeDependencyUnavailable)

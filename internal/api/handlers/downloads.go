@@ -57,6 +57,7 @@ type DownloadHandler struct {
 	nodePlanner     nodepool.DownloadPlanner
 	jwtSecret       func() string
 	proxyHTTPClient *http.Client
+	linkIssuer      DirectDownloadLinkIssuer
 	preflightMu     sync.Mutex
 	preflightCache  map[string]proxyPreflightResult
 }
@@ -86,6 +87,49 @@ func NewDownloadHandler(svc DownloadService) *DownloadHandler {
 func (h *DownloadHandler) SetProxyDelivery(planner nodepool.DownloadPlanner, jwtSecret func() string) {
 	h.nodePlanner = planner
 	h.jwtSecret = jwtSecret
+}
+
+// DirectDownloadLinkIssuer signs direct-download link tokens;
+// auth.JWTService implements it.
+type DirectDownloadLinkIssuer interface {
+	GenerateDirectDownloadLinkToken(userID int, role, sessionID, profileID string, impersonatorUserID *int, fileID int) (string, time.Time, error)
+}
+
+// ErrDirectDownloadLinksUnavailable reports that link minting is not wired:
+// no issuer, or a download service that cannot authorize without serving.
+var ErrDirectDownloadLinksUnavailable = errors.New("direct download links are not configured")
+
+// ErrDirectDownloadLinkSession reports a caller without a login session (an
+// API key). A link is bound to a session so revoking it revokes the link.
+var ErrDirectDownloadLinkSession = errors.New("direct download links require a login session")
+
+// SetDirectDownloadLinks enables CreateDirectDownloadLink.
+func (h *DownloadHandler) SetDirectDownloadLinks(issuer DirectDownloadLinkIssuer) {
+	h.linkIssuer = issuer
+}
+
+// CreateDirectDownloadLink authorizes fileID for the request's verified
+// profile exactly as a direct download would (download policy, catalog and
+// file access under the profile's scope), then mints a short-lived link token
+// carrying the session, profile and file. Nothing is served or recorded. The
+// direct-download routes authorize the request again when the link is used.
+func (h *DownloadHandler) CreateDirectDownloadLink(ctx context.Context, fileID int) (string, time.Time, error) {
+	resolver, ok := h.svc.(downloadFileResolver)
+	if !ok || h.linkIssuer == nil {
+		return "", time.Time{}, ErrDirectDownloadLinksUnavailable
+	}
+	claims := apimw.GetClaims(ctx)
+	profileID := apimw.GetProfileID(ctx)
+	if claims == nil || profileID == "" {
+		return "", time.Time{}, downloads.ErrProfileRequired
+	}
+	if claims.SessionID == "" {
+		return "", time.Time{}, ErrDirectDownloadLinkSession
+	}
+	if _, err := resolver.ResolveDirectFile(ctx, claims.UserID, fileID, "", AccessFilterFromContext(ctx, "")); err != nil {
+		return "", time.Time{}, err
+	}
+	return h.linkIssuer.GenerateDirectDownloadLinkToken(claims.UserID, claims.Role, claims.SessionID, profileID, claims.ImpersonatorUserID, fileID)
 }
 
 type downloadFileResolver interface {

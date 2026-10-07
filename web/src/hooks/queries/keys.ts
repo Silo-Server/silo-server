@@ -113,6 +113,11 @@ export const historyKeys = {
   list: () => ["history", "list"] as const,
 };
 
+export const shuffleKeys = {
+  all: ["shuffles"] as const,
+  detail: (shuffleId: string) => ["shuffles", shuffleId] as const,
+};
+
 export const collectionKeys = {
   all: ["collections"] as const,
   list: () => ["collections", "list"] as const,

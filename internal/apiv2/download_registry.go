@@ -95,6 +95,9 @@ type DownloadCapability struct {
 	MonitorQuality bool `json:"monitor_quality"`
 	// PreparationProgress: listed preparing entries carry `preparation`.
 	PreparationProgress bool `json:"preparation_progress"`
+	// DirectDownloadLinks: POST /direct-download/links mints the
+	// profile-bound links the direct-download routes accept as `dl`.
+	DirectDownloadLinks bool `json:"direct_download_links"`
 }
 
 // DownloadQualityOption describes one quality preset. bitrate_kbps and
@@ -239,6 +242,7 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.DownloadAllowed = view.DownloadAllowed
 		out.OrderedStatus = true
 		out.FileDelivery = reg.deps.DownloadDelivery != nil
+		out.DirectDownloadLinks = reg.deps.DirectDownloadLinks != nil
 		out.BoundedManifests = reg.deps.DownloadManifests != nil
 		out.SubscriptionReads = reg.deps.DownloadSubscriptions != nil
 		out.SubscriptionMutations = reg.deps.DownloadSubscriptionMutations != nil

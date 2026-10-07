@@ -303,6 +303,125 @@ at 32 entries, and the server keeps only the keys on its allowlist (§7.5),
 truncating each value to 256 characters. Unknown keys are dropped silently; a
 client sending them is not an error, it just achieves nothing.
 
+### 2.5 Session liveness
+
+A playback session lasts until the client stops it, the server stops it (for
+example an administrator's stop, or a withdrawn plan the client does not replan
+off, §6.1), or the server decides it was abandoned. The four endpoints above
+are not a heartbeat: a client that calls only those, while its player fetches
+no media from this server, loses its session 45 to 60 seconds after its `start`
+or its last `replan` that returned a playable plan (about five minutes when a
+proxy node serves the media). After that its `replan`, progress, and stop calls
+answer `404 playback_session_not_found`.
+
+Every 15 seconds the server ends each session that has shown no activity for
+**45 seconds**, or for **30 minutes** when the client's latest progress report
+said the player was paused. A session that has never sent a progress report is
+on the 45-second window. Both windows are fixed. These count as activity:
+
+| Activity | Note |
+| --- | --- |
+| The `POST /playback/start` that created the session | Starts the clock |
+| A `POST /playback/{session_id}/replan` that returns a playable plan | Counts once; it is not a heartbeat |
+| `POST /playback/{session_id}/progress` | The heartbeat. Progress reports are the only way to report a pause |
+| A request for an HLS playlist or segment (`server_remux_hls`, `server_transcode_hls`) | Each request counts |
+| A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count |
+| A valid `hello`, `ack`, or `result` frame on the control socket (below), and the socket closing after a `hello` | Opening the socket, its pings, and frames that fail validation do not count |
+
+`capability`, `route-events`, `/sync/progress`, subtitle sidecar requests, and a
+`replan` that is refused, ends in a terminal, or replays an earlier answer do
+not count. When a proxy node serves the media, this server never sees the media
+requests, so it waits at least five minutes before ending such a session; the
+pause state still comes only from progress reports. Whether progress reports
+alone should keep alive a session whose media requests have stopped is raised
+in [#666](https://github.com/Silo-Server/silo-server/issues/666).
+
+A client therefore:
+
+1. Posts progress every 10 seconds while the session is open, playing or
+   paused. That leaves room for several lost reports inside the 45-second
+   window. The web player does the same through the sequenced `/api/v2`
+   progress call ([Playback API](../playback-api.md#progress-and-stop)), where
+   a sample counts only when it is answered `applied` or `replayed`.
+2. Stops the session with `DELETE /playback/{session_id}` when playback ends,
+   so the server releases its transcode and records the stop at once.
+   Otherwise both wait until the session expires: 45 to 60 seconds after its
+   last activity, about five minutes for proxy-served media, or about 30
+   minutes if the last progress report said paused.
+3. Treats `404 playback_session_not_found` from `replan` or progress as the end
+   of the session and, if the viewer is still watching, starts a new attempt
+   (§6.2). A `404 playback_session_not_found` from `DELETE` means the session
+   had already ended; a `404 not_found` means `X-Profile-Id` is wrong and the
+   stop should be retried with the right one.
+4. If it opens the control socket, answers every command it receives with a
+   `result` before the command's `deadline_ms` (below).
+
+**`POST /playback/{session_id}/progress`.** Auth + `X-Profile-Id` required.
+Body: `{"position": <seconds>, "is_paused": <bool>}`, where `position` is the
+source position: the player position plus `timeline_offset_seconds` (§5). The
+position also feeds resume and history unless the session was started with
+`progress_persistence: "client"` (§2.2) or plays one part of a multipart item.
+Answers `204` with no body.
+
+**`DELETE /playback/{session_id}`.** Auth + `X-Profile-Id` required. No body.
+Answers `204` with no body. A repeated `DELETE` answers `404`.
+
+Both can answer these errors:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `400` | `bad_request` | Malformed progress body, or no `X-Profile-Id` |
+| `401` | `unauthorized` | No authenticated user |
+| `403` | `forbidden` | The session belongs to another user |
+| `403` | `profile_unverified` | The profile is PIN-protected and `X-Profile-Token` is missing or invalid |
+| `404` | `playback_session_not_found` | No such session, or it has ended |
+| `404` | `not_found` | `X-Profile-Id` names no profile on this account; the session has not ended |
+| `500` | `internal_error` | The server could not load the account or profile, or (stop only) could not stop a remux running on a transcode node |
+
+The session and ownership checks come before the progress body is read, so a
+malformed body for an ended session answers `404`. `replan`, this progress
+call, stop, and the control socket see only the sessions held in memory by the
+API process that answers, for every attempt, so a deployment with several API
+replicas needs session affinity for them; the reconstruction in §4.1 covers
+media requests only. The sequenced `/api/v2` progress call records an
+`applied` or `replayed` sample on any replica, but only the replica that holds
+the session counts it as activity, and that replica still ends the session when
+its own window runs out, so v2 progress needs the same affinity. These bodies,
+and the control socket frames below, have no JSON Schema under
+`docs/design/schemas/playback-v3/`; this section is their contract.
+
+**Control socket.** `GET /playback/sessions/{session_id}/control/ws` (auth, no
+profile) is optional. It adds to progress reports and does not replace them: it
+carries no position or pause state. It answers `404 playback_session_not_found`
+for an unknown session, and its other errors, such as a `403` for another
+user's session, in plain text. The server treats the socket as connected only
+after the player sends a valid `hello`:
+
+```json
+{"type": "hello", "session_id": "…", "client": {"name": "…", "version": "…"}, "capabilities": {"commands": ["plan_invalidated"]}}
+```
+
+`session_id` must be the session in the socket's path, `client.name` and
+`client.version` must not be empty, and every name in `capabilities.commands`
+(which may be empty) must be one the server knows: `pause`, `unpause`,
+`play_pause`, `seek`, `set_volume`, `stop`, `terminate`, `display_message`,
+`server_restarting`, `server_shutting_down`, `play_media`, `set_audio_track`,
+`set_subtitle_track`, or `plan_invalidated`. Otherwise the server ignores that
+`hello`, and the socket counts as connected only once a valid one arrives. The
+list does not limit what the server sends.
+
+As soon as the socket is open, the player can receive an administrator's
+`stop`, `terminate`, or `display_message`, and the `server_restarting` notice;
+once it is connected, also `plan_invalidated` (§6.1) and an administrator's
+`pause` or `unpause`. It may acknowledge a command with `{"type": "ack",
+"command_id": "…", "session_id": "…", "status": "accepted"}`, and answers it
+with `{"type": "result", "command_id": "…", "session_id": "…", "status":
+"completed"}`, or `"rejected"`. An `ack` or `result` answers a command only if
+it carries that command's `command_id` and this socket's `session_id`. A
+command with a `deadline_ms` that gets no valid `result` in time stops the
+session, and so does a `completed` result to `stop` or `terminate`. A
+`rejected` result stops it only for `plan_invalidated` (§6.1).
+
 ---
 
 ## 3. Capability evidence tiers
@@ -620,6 +739,18 @@ or force reload deletes it. This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 
+**Resume leading-picture drop.** A seeked progressive copy starts at the
+keyframe before the requested position. For HEVC that keyframe can be an
+open-GOP CRA whose leading (RASL) pictures reference frames the copy never
+sent, and macOS Firefox rejects the stream there instead of skipping them. For
+that client and an HEVC source the planner freezes a best-effort request into
+the session, the remux recipe card and the stream token (`rlpd`). The executor
+applies `noise=drop=lt(pts\,startpts)*not(key)` only when the response starts
+past zero and its FFmpeg's `noise` filter takes the `drop` expression (probed
+once per binary). It is not a plan transformation or a required capability: an
+executor without the filter, or one that predates the claim, serves the plain
+copy, so it never narrows where the route may run.
+
 **Theme audio.** Detail-page theme songs use the same routing policy without
 becoming playback sessions (`internal/themedelivery`). Original theme audio
 resolves as `direct_play`/`direct`; an AAC conversion resolves as
@@ -872,8 +1003,9 @@ Changing any of these modes means stopping and starting a new attempt.
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 
 Every other control message in this protocol travels client → server. This one
-does not: `plan_invalidated` is the only **server-initiated control push**, and
-it exists because the server can learn a route is wrong *after* the plan is
+does not: `plan_invalidated` is the protocol's **server-initiated control
+push** (administrator commands share the same socket, §2.5), and it exists
+because the server can learn a route is wrong *after* the plan is
 already playing.
 
 The concrete case is H.264 stream-copy safety. Some encoders redefine the same
@@ -907,12 +1039,14 @@ without checking it would evict a route the server never complained about.
 
 A client that advertises `plan_invalidated_v1` in `client_features` promises to:
 
-1. send `{"type":"ack","status":"accepted"}` immediately,
+1. send `{"type":"ack","command_id":"…","session_id":"…","status":"accepted"}`
+   immediately,
 2. run its ordinary recovery replan — `operation: "failure_recovery"`, with the
    invalidated plan's `plan_attempt_key` in `attempted_plan_keys` so the copy
    route is excluded deterministically (the now-persisted verdict excludes it
    too), and
-3. send `{"type":"result","status":"completed"}` when the replan is done.
+3. send `{"type":"result","command_id":"…","session_id":"…","status":"completed"}`
+   when the replan is done.
 
 **Everything else is a session stop.** The server pushes the command only to a
 session that negotiated the feature *and* holds a live realtime connection. No
@@ -1302,7 +1436,8 @@ selection, sends a `quality_change` replan with the entry's `label`. It does not
 compute rungs.
 
 The source rung is always present, labelled `original`, with
-`preserves_source: true`. Transcode rungs are added below the source resolution
+`preserves_source: true`. On `/api/v2` it also carries `display_name`
+`Original`; the frozen `/api/v1` response leaves it unnamed. Transcode rungs are added below the source resolution
 class, plus at the same class when they reduce bitrate, and only when HLS is
 available to the client, transcoding is enabled, the viewer's account may
 transcode video (`transcode_allowed`; admission still enforces it), and 4K
@@ -1322,6 +1457,21 @@ same-edition candidates with non-4K versions first, then continue through the
 remaining candidates until one produces a plan. A refused lower-resolution
 candidate therefore does not hide a later 4K version that can direct-play or
 remux without video encoding.
+
+A 4K version whose 4K transcoding is disabled takes its lower qualities from a
+lower-resolution version instead, when the item has one and the request allows
+version fallback. The menu is then `original` (the requested 4K version), the
+first non-4K version in fallback order at its plain resolution class (`1080p`
+or `720p`, with that version's height and bitrate; omitted when the version is
+taller than its class or the requested version is not taller than it), and the
+rungs a transcode of that version can serve. When that version cannot play and
+the fallback adopts a later non-4K version, the plan it returns describes the
+version it adopted.
+Choosing any of them refuses the 4K source, so the fallback plays the lower
+version: unchanged for its plain label or a rung it fits, transcoded for a lower
+rung. `original` returns to the 4K version. The menu stays the same while the
+lower version plays. It needs HLS and transcoding enabled, because the 4K
+refusal under any other policy is not one the fallback acts on.
 
 | label | display_name | height | kbps |
 | --- | --- | --- | --- |

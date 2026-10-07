@@ -68,6 +68,21 @@ const (
 // without the server that issued it.
 var deviceCodeAlphabet = []byte("0123456789")
 
+// withdrawDeviceSignInApprovalsInTransaction prevents an approved device from
+// minting a fresh native session after account-wide revocation. Callers lock
+// the approving accounts first, as approval and collection do, and commit this
+// update together with session revocation. Already-issued playback grants and
+// requests approved by other accounts are unchanged.
+func withdrawDeviceSignInApprovalsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE device_login_requests SET status = $2, updated_at = NOW()
+		WHERE approved_by_user_id = ANY($1::int[]) AND status = $3`,
+		userIDs, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
+		return fmt.Errorf("withdrawing device sign-in approvals: %w", err)
+	}
+	return nil
+}
+
 type DeviceLoginStartInput struct {
 	DeviceName     string
 	DevicePlatform string
@@ -709,11 +724,15 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		}
 	}
 	session := models.AuthSession{
-		ID:         sessionID,
-		UserID:     user.ID,
-		DeviceName: record.DeviceName,
-		IPAddress:  record.IPAddress,
-		ExpiresAt:  sessionExpiresAt,
+		ID:     sessionID,
+		UserID: user.ID,
+		// The name and platform the device started with. Device headers on
+		// the poll that collects the session replace them and add the
+		// device's id (applyClientDevice).
+		DeviceName:     record.DeviceName,
+		DevicePlatform: clampClientDeviceValue(record.DevicePlatform, maxClientDevicePlatformLen),
+		IPAddress:      record.IPAddress,
+		ExpiresAt:      sessionExpiresAt,
 		// The device continues the approving session's provider chain, so a
 		// provider that cannot re-check it ends the device's session when it
 		// would have ended the approver's.

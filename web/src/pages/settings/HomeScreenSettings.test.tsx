@@ -9,11 +9,11 @@ import {
   canMutateSectionSettings,
   buildSectionOverrides,
   createOverrideIdSource,
-  buildProfileGallerySection,
   hydrateRemovedSystemSections,
-  sectionSaveErrorMessage,
   shouldRestoreLatestSaveFailure,
-} from "./HomeScreenSettings";
+} from "@/lib/sectionOverrides";
+
+import { buildProfileGallerySection, sectionSaveErrorMessage } from "./HomeScreenSettings";
 
 function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSectionEntry {
   return {

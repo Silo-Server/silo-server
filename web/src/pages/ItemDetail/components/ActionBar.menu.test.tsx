@@ -204,3 +204,33 @@ describe("ActionBar request and party actions", () => {
     expect(onPlay).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ActionBar shuffle", () => {
+  it("offers Shuffle first in the menu and starts it", async () => {
+    const onShuffle = vi.fn();
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="series-1" playHref="/watch/episode-1" onShuffle={onShuffle} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    const items = screen.getAllByRole("menuitem");
+    expect(items[0]).toHaveAccessibleName("Shuffle");
+    await userEvent.click(items[0]!);
+
+    expect(onShuffle).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("leaves Shuffle out when the page cannot shuffle", async () => {
+    render(
+      <MemoryRouter>
+        <ActionBar contentId="season-1" playHref="/watch/episode-1" />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    expect(screen.queryByRole("menuitem", { name: "Shuffle" })).toBeNull();
+  });
+});

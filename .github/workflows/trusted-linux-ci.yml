@@ -25,6 +25,38 @@ env:
 
 
 jobs:
+  prune-go-caches:
+    name: Prune old Go caches
+    if: ${{ !inputs.self_hosted && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Keep the newest cache for each Go job and the shared modules
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Paginate so pruning covers every cache on this ref, even above the CLI's default list limit.
+          gh api --paginate -X GET "repos/$GH_REPO/actions/caches" \
+            -f ref="$GITHUB_REF" -f per_page=100 \
+            --jq '.actions_caches[] | {id, key, ref, createdAt: .created_at}' > "$RUNNER_TEMP/go-caches.json"
+          cache_ids="$(jq -sr --arg ref "$GITHUB_REF" '
+            map(select(.ref == $ref) | . + {
+              prefix: (.key | capture("^(?<prefix>go-(lint|test|integration|db-pins|db-auth|mod)-)").prefix)
+            })
+            | group_by(.prefix)[]
+            | sort_by(.createdAt, .id) | reverse
+            | .[1:][] | .id
+          ' "$RUNNER_TEMP/go-caches.json")"
+          while IFS= read -r cache_id; do
+            [ -n "$cache_id" ] || continue
+            echo "Deleting Go cache: $cache_id"
+            gh cache delete "$cache_id"
+          done <<< "$cache_ids"
+
   # Selection runs on a hosted runner and uses trusted tools from main, even
   # when a PR checks out an older or modified copy of those tools. Every
   # private-runner job waits for it, so it does nothing else.
@@ -34,7 +66,7 @@ jobs:
   # a tarball of the whole repository (about 290 MB) and took 15-20 s per job.
   # Pinning to job.workflow_sha gives every run, including a re-run, tools
   # from the same commit as its job list. The checkout holds no Go files,
-  # which gofmt in go-lint would otherwise see.
+  # which gofmt in the lint lane would otherwise see.
   select:
     name: Select CI jobs
     runs-on: ubuntu-latest
@@ -49,6 +81,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          filter: blob:none
           sparse-checkout: .github/actions
           persist-credentials: false
       - name: Check out the CI tools from main
@@ -77,7 +110,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
+        # Every job except Go skips web/assets-source (230 MB of PNG files that
+        # only the internal/collections/templates tests read).
+        with: &no-assets
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Test CI helper changes
         run: |
@@ -112,7 +152,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '>=1.26 <1.27'
           cache: false
       # Equivalent to make verify-case-collisions with main's checker. It
       # lists the files tracked in the PR checkout; .ci-tools is untracked.
@@ -124,17 +164,91 @@ jobs:
   # Contract assertions run once in the full suite; artifact generation and
   # semantic comparison retain their separate gate. PG17 race tests and
   # pgvector query-budget pins use independent disposable databases.
+  # Go lint and Go test each compile the whole tree when their build cache
+  # is cold. On one runner, lint, contracts, and tests compiling at once
+  # exhausted it, so each job runs on its own runner and runs its own steps
+  # one after the other.
   go-lint:
     name: Go lint
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-lint"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     steps:
+      # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
+      # nothing under ./... compiles without the headers. The Dockerfile
+      # installs the same package in its build stage. The install needs
+      # nothing from the repository, so it starts before checkout and runs in
+      # the background; the setup-go action waits for it. The other Go jobs
+      # reuse these steps through their anchors.
+      - &libvips-cache-key
+        name: Read the libvips cache key
+        if: runner.environment == 'github-hosted'
+        id: libvips-cache-key
+        shell: bash
+        run: echo "key=libvips-dev-${ImageOS:?}-${ImageVersion:?}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+
+      - &libvips-restore
+        name: Restore the libvips packages
+        if: runner.environment == 'github-hosted'
+        id: libvips-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/libvips-debs/*.deb
+          key: ${{ steps.libvips-cache-key.outputs.key }}
+
+      - &libvips-install
+        name: Install libvips
+        shell: bash
+        run: |
+          : > "$RUNNER_TEMP/libvips.log"
+          # The disposable private runner image already includes these headers.
+          if pkg-config --exists vips; then
+            echo 0 > "$RUNNER_TEMP/libvips.status"
+            exit 0
+          fi
+          # Each log line carries its epoch time, so the log shows which part of
+          # the install takes the time. The status is written only after the
+          # last line is in the log. Nothing reaches the step's own output: the
+          # runner holds a step open for 5 s while a background process can
+          # still write to it.
+          (
+            set +e
+            (
+              set -e
+              # libvips and its dependencies use the runner's official Ubuntu sources.
+              test -f /etc/apt/sources.list.d/ubuntu.sources
+              apt_options=(
+                -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                -o Dir::Etc::sourceparts=-
+              )
+              if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+                mkdir -p "$RUNNER_TEMP/libvips-debs"
+                apt_options+=(-o "Dir::Cache::archives=$RUNNER_TEMP/libvips-debs")
+                # The restore has no fallback keys, so packages are present only
+                # when they were saved on this runner image. apt then installs
+                # them as local files without updating its package lists; if it
+                # cannot, the update and install below run as usual.
+                debs=("$RUNNER_TEMP"/libvips-debs/*.deb)
+                if [ -e "${debs[0]}" ]; then
+                  echo "apt-get install cached"
+                  if sudo apt-get "${apt_options[@]}" install -y --no-install-recommends --no-download "${debs[@]}"; then
+                    exit 0
+                  fi
+                fi
+              fi
+              echo "apt-get update"
+              sudo apt-get "${apt_options[@]}" update
+              echo "apt-get install"
+              sudo apt-get "${apt_options[@]}" install -y --no-install-recommends libvips-dev
+            ) 2>&1 | while IFS= read -r line; do printf '%s %s\n' "$EPOCHREALTIME" "$line"; done > "$RUNNER_TEMP/libvips.log"
+            echo "${PIPESTATUS[0]}" > "$RUNNER_TEMP/libvips.status"
+          ) > /dev/null 2>&1 &
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # golangci-lint needs the merge base to tell this branch's lines from
-          # the ones it inherited.
+          # golangci-lint and the contract diff need the merge base to tell
+          # this branch's lines from the ones it inherited.
           fetch-depth: 0
           persist-credentials: false
 
@@ -155,20 +269,17 @@ jobs:
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
+        id: setup-go
         with:
           cache-name: lint
 
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt is required on:"
-            echo "$unformatted"
-            exit 1
-          fi
-
-      - name: Vet
-        run: go vet ./...
+      - &libvips-save
+        name: Save the libvips packages
+        if: runner.environment == 'github-hosted' && github.event_name != 'pull_request' && steps.libvips-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/libvips-debs/*.deb
+          key: ${{ steps.libvips-cache.outputs.cache-primary-key }}
 
       # Built from source (see GOLANGCI_LINT_VERSION) but only once per
       # version: the binary is cached, and so is the analysis cache that lets
@@ -201,7 +312,16 @@ jobs:
           fi
 
       - name: Restore the golangci-lint analysis cache
-        if: runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ github.sha }}
+          restore-keys: |
+            golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
+
+      - name: Restore and save the golangci-lint analysis cache
+        if: runner.environment == 'github-hosted' && github.event_name != 'pull_request'
         uses: actions/cache@v4
         with:
           path: ~/.cache/golangci-lint
@@ -209,101 +329,23 @@ jobs:
           restore-keys: |
             golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
 
-      # Scoped to the lines this branch touched. The repo does not pass a full
-      # golangci-lint run today — there are a few hundred pre-existing findings,
-      # which is why the Go half of `make lint` has never been enforced — and
-      # blocking every PR on a cleanup nobody has done would just get the gate
-      # removed again. New and changed lines have to be clean, so the count only
-      # falls from here.
-      - name: Lint changed lines
+      - name: Normalize tracked source mtimes
+        run: python3 scripts/ci/content_mtimes.py
+
+      - name: Run Go lint and contract checks
+        shell: bash
         env:
-          # Immutable PR base or exact pre-push revision. Missing push history
-          # triggers conservative full analysis rather than an empty diff.
-          BASE_REF: ${{ github.event_name == 'push' && github.event.before || github.event_name == 'pull_request' && github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
-          LINT_CHANGED_CI: '1'
-          LINT_CHANGED_BASE_MODE: ${{ github.event_name == 'push' && 'revision' || 'merge-base' }}
-        uses: ./.ci-tools/.github/actions/ci-tools
+          LINT_BASE_REF: ${{ github.event_name == 'push' && github.event.before || github.event_name == 'pull_request' && github.event.pull_request.base.sha || format('origin/{0}', github.event.repository.default_branch) }}
+          LINT_BASE_MODE: ${{ github.event_name == 'push' && 'revision' || 'merge-base' }}
+          CONTRACT_BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint contracts
+
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: ./.github/actions/save-go-cache
         with:
-          operation: lint
-
-      # The inventory's lint rule (recovering a router from a handler) has to
-      # hold over the whole tree, not only the lines a branch touched: an old
-      # line folded in by a rebase is as much of a hole as a new one.
-      - name: Lint router recovery full-tree
-        run: make lint-router-recovery
-
-  go-verify:
-    name: Go contract checks
-    needs: select
-    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
-    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-verify"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          # The contract diff compares against the PR's merge base.
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Set up Go
-        uses: ./.github/actions/setup-go
-        with:
-          cache-name: verify
-
-      # A manifest change that does not regenerate leaves every client reading
-      # stale keys, which the contract exists to prevent.
-      - name: Verify settings bindings are current
-        run: make verify-settings-bindings
-
-      # The server defines the playback protocol and the clients prove
-      # conformance against these fixtures. A contract change that does not
-      # regenerate leaves every client testing against a stale body, so the
-      # drift surfaces as a playback bug on three platforms rather than as a
-      # failure here.
-      - name: Verify playback protocol fixtures are current
-        run: make verify-playback-fixtures
-
-      # The API v2 migration needs every legacy native route accounted for
-      # before anything is ported. The generator reads registration source, so
-      # a route hidden behind optional dependency wiring still has to appear,
-      # and a registration it cannot follow fails here rather than shrinking
-      # the inventory in silence.
-      - name: Verify the legacy native route inventory is current
-        run: make verify-route-inventory
-
-      # Every inventoried route needs a migration decision before v2 work
-      # ports it. The ledger is schema-checked and reconciled against the
-      # inventory one-to-one, so a new route without a ledger entry, or a
-      # stale entry for a removed route, fails here.
-      - name: Verify the v2 migration ledger covers the route inventory
-        run: make verify-migration-ledger CONTRACT_GO_TESTS=0
-
-      # Ledger/schema, scenario coverage, offline routes, fixture freshness
-      # and fixture-schema assertions remain in make test-go. It is always
-      # selected with this job. Never share SILO_SCENARIO_DATABASE_URL with
-      # the integration or query-budget databases: the executor truncates.
-
-      # The v2 OpenAPI artifact is rendered from the Go registries and the
-      # binary serves the committed bytes, so a registration change that does
-      # not regenerate leaves clients reading a contract the server no longer
-      # matches. This byte-compares a fresh generation.
-      - name: Verify the v2 OpenAPI artifact is current
-        run: make verify-apiv2-openapi
-
-      # Semantic diff against the PR's base. Spec lint belongs to go-test. A breaking
-      # change fails unless contracts/api/v2/breaking-approvals.json names
-      # that exact operation, rule and fingerprint; after the LOCKED marker
-      # nothing is approvable. On a push to main the base is main itself, so
-      # both documents are identical and the diff tool compares nothing (an
-      # approval a just-merged PR carried is not stale there). The base is read
-      # through the environment, as the lint step
-      # does, never interpolated into the script.
-      - name: Verify the v2 contract diff
-        env:
-          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
-        run: |
-          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          make verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/${BASE_REF}"
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
 
   go-test:
     name: Go test
@@ -311,50 +353,97 @@ jobs:
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-test"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
     steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
       - name: Checkout
         uses: actions/checkout@v5
         with:
           persist-credentials: false
 
+      # After the PR checkout, which would otherwise clean it away, and
+      # before any PR code runs.
+      - name: Check out the CI tools from main
+        uses: actions/checkout@v5
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Set up Go
         uses: ./.github/actions/setup-go
+        id: setup-go
         with:
           cache-name: test
 
-      # Owns all package assertions, including ledger/scenario/offline/spec
-      # and fixture generation/schema checks previously repeated in verify.
-      # Compiles every package on the way; no separate build step is needed.
-      - name: Test
-        run: make test-go
+      - *libvips-save
+
+      - name: Normalize tracked source mtimes
+        run: python3 scripts/ci/content_mtimes.py
+
+      - name: Run Go tests
+        shell: bash
+        env:
+          TEST_GOFLAGS: ${{ github.event_name == 'schedule' && '-count=1' || '' }}
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk tests
+
+      - name: Save the Go cache
+        if: ${{ !cancelled() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' }}
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+          module-cache-key: ${{ steps.setup-go.outputs.module-cache-key }}
+          module-cache-hit: ${{ steps.setup-go.outputs.module-cache-hit }}
 
   go-integration:
     name: Go integration
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-integration"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
-    services:
-      watch-party-postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: watch_party
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d watch_party"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
+    env:
+      SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/silo_test?sslmode=disable
     steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
+      # Each start writes to a log, not to the step's output, so the runner
+      # does not hold the step open for 5 s while docker pulls. The wait step
+      # prints the log if the database never becomes ready.
+      - name: Start Postgres
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql/data -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=watch_party postgres:17-alpine > "$RUNNER_TEMP/pg.log" 2>&1 &
+
+      - name: Start pgvector Postgres
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/pgvector" -p 5433:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pgvector.log" 2>&1 &
+
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+        with: *no-assets
       - name: Set up Go
         uses: ./.github/actions/setup-go
+        id: setup-go
         with:
           cache-name: integration
+
+      - *libvips-save
+
+      - name: Wait for Postgres
+        run: |
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d watch_party; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pgvector")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pgvector.log"; exit 1; }
+
+      - name: Migrate the test database
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
 
       - name: Test Watch Party coordination against Postgres
         env:
@@ -381,47 +470,66 @@ jobs:
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
           go test -race -count=1 -run '^TestMarkerContributionClaimsByTargetMigrationPostgres$' ./migrations/
 
+      - name: Test image cache cleanup resumption against Postgres
+        run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
+
+      - name: Test device sign-in against Postgres
+        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+
+      - name: Test taste cluster replacement against Postgres
+        run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
+
+      - name: Test Jellyfin detail preferences against Postgres
+        run: go test -race -count=1 -run '^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' ./cmd/silo/
+
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+
 
   # make test-go has no database, so every DB-backed test in it skips, and go
   # test counts a skip as a pass. This job migrates a fresh database and runs
   # the query-budget pins listed in scripts/ci/db-pins.txt, failing when one
   # is missing, skipped or failing, so a PR that turns a pinned budget into an
-  # N+1 fails here. It is a job of its own so it adds no time to go-test, and
-  # because the full schema needs pgvector, which go-test's image lacks.
-  # The long external sign-in suite has its own database job below so it can
-  # run beside these pins instead of extending this job's critical path.
+  # N+1 fails here. The pins run without -race, so the -race tests that need
+  # the full pgvector schema (taste cluster replacement, Jellyfin detail
+  # preferences, image cache cleanup, device sign-in) run in go-integration,
+  # which builds with -race anyway; external sign-in runs in go-db-auth.
   go-db-pins:
     name: Go DB pins
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-pins"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
-    services:
-      # The image docker-compose.yml runs: the schema needs pgvector.
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: silo_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d silo_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
     steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
+      # The image docker-compose.yml runs: the schema needs pgvector.
+      - name: Start Postgres
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
+
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+        with: *no-assets
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
+        id: setup-go
         with:
           cache-name: db-pins
+
+      - *libvips-save
+
+      - name: Wait for Postgres
+        run: |
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
 
       # A throwaway key: it only has to pass the bootstrap length check, and
       # nothing encrypted with it outlives the job.
@@ -431,58 +539,57 @@ jobs:
       - name: Run the query-budget pins
         run: make test-db-pins
 
-      - name: Test taste cluster replacement against Postgres
-        run: go test -race -count=1 -run '^TestUpsertTasteClusters.*Postgres$' ./internal/recommendations/
-
-      - name: Test Jellyfin detail preferences against Postgres
-        run: go test -race -count=1 -run '^TestCompatDetailServiceResolvesViewerSubtitleDefaultsPostgres$' ./cmd/silo/
-
-      - name: Test image cache cleanup resumption against Postgres
-        run: go test -race -count=1 -run '^(TestImageCacheCleanup|TestRequeuedImageCacheCleanup|TestJobOutcomeIsRecorded)' ./internal/adminjob/
-
-      - name: Test device sign-in against Postgres
-        run: go test -race -count=1 -run '^TestDeviceLogin.*DB$' ./internal/auth/
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
 
   # External sign-in tests are isolated from the query pins because several of
   # them intentionally create and mutate the same account state. Keeping them
   # in one fresh database preserves their ordering while allowing the long
   # suite to run in parallel with the query-budget job above.
+  # Postgres starts in the background during Checkout and Go setup; migration
+  # waits for it to accept connections.
   go-db-auth:
     name: Go DB external auth
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-db-auth"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: silo_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d silo_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
       SILO_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/silo_test?sslmode=disable
     steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
+      - name: Start Postgres
+        run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
+
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+        with: *no-assets
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
+        id: setup-go
         with:
           cache-name: db-auth
 
+      - *libvips-save
+
+      - name: Wait for Postgres
+        run: |
+          # shellcheck disable=SC2016
+          timeout 60 sh -c 'until docker exec "$(cat "$RUNNER_TEMP/pg")" pg_isready -h 127.0.0.1 -U postgres -d silo_test; do sleep 1; done' || { cat "$RUNNER_TEMP/pg.log"; exit 1; }
+
       # A throwaway key: it only has to pass the bootstrap length check, and
       # nothing encrypted with it outlives the job.
+      # Every test in this job runs with -race, so migrating with -race reuses
+      # the race build instead of caching a second, non-race copy of the tree.
       - name: Migrate the test database
-        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run ./cmd/silo/ --migrate-only
+        run: DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" go run -race ./cmd/silo/ --migrate-only
 
       # Account resolution and linking, the local-password policy, the OAuth
       # flow store across nodes, provider re-checks, network identity sign-in
@@ -496,19 +603,29 @@ jobs:
           go test -race -count=1 -run '^TestLoginPINConventionStaysLocalDB$' ./internal/jellycompat/
           go test -race -count=1 -run '^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' ./internal/plugins/
 
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+
   web:
-    name: Web
+    name: Web (${{ matrix.part }})
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [build, checks]
     defaults:
       run:
         working-directory: web
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+        with: *no-assets
 
       # The pnpm version comes from web/package.json's packageManager field —
       # there is no package.json at the repo root, and `defaults.run` does not
@@ -533,40 +650,81 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        env:
-          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
-        run: |
-          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
-            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
-            mkdir -p "$cache_dir"
-            pnpm run lint --cache --cache-strategy content --cache-location "$cache_dir/eslint-${CACHE_ID}"
-          else
-            pnpm run lint
-          fi
+      - name: Read the web check cache directory
+        if: matrix.part == 'checks' && runner.environment == 'github-hosted'
+        id: web-cache
+        run: echo "path=${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web" >> "$GITHUB_OUTPUT"
 
-      - name: Format check
+      - name: Restore the web check cache
+        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.web-cache.outputs.path }}
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+
+      - name: Restore and save the web check cache
+        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.web-cache.outputs.path }}
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+
+      - name: Lint and format check
+        if: matrix.part == 'checks'
         env:
-          CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
+          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*') }}
+          PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
         run: |
-          if [ "$RUNNER_ENVIRONMENT" = self-hosted ]; then
-            cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
-            mkdir -p "$cache_dir"
-            pnpm run format:check --cache --cache-strategy content --cache-location "$cache_dir/prettier-${CACHE_ID}"
-          else
-            pnpm run format:check
-          fi
+          cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"
+          mkdir -p "$cache_dir"
+          pnpm run format:check --cache --cache-strategy content --cache-location "$cache_dir/prettier-${PRETTIER_CACHE_ID}" &
+          failed=0
+          pnpm run lint --concurrency auto --cache --cache-strategy content --cache-location "$cache_dir/eslint-${ESLINT_CACHE_ID}" || { echo "::error::ESLint failed"; failed=1; }
+          wait $! || { echo "::error::Prettier failed"; failed=1; }
+          exit "$failed"
+
+      - name: Restore the TypeScript cache
+        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/silo-tsc
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: tsc-${{ runner.os }}-
+
+      - name: Restore and save the TypeScript cache
+        if: matrix.part == 'build' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/silo-tsc
+          key: tsc-${{ runner.os }}-${{ github.sha }}
+          restore-keys: tsc-${{ runner.os }}-
 
       - name: Typecheck and build
-        run: pnpm run build
+        if: matrix.part == 'build'
+        run: |
+          cache_dir="$RUNNER_TEMP/silo-tsc"
+          mkdir -p "$cache_dir"
+          # -p --incremental reuses content checks after checkout resets mtimes; tsc -b rechecks.
+          pnpm exec tsc -p tsconfig.app.json --incremental --tsBuildInfoFile "$cache_dir/app.tsbuildinfo" &
+          app_pid=$!
+          pnpm exec tsc -p tsconfig.node.json --incremental --tsBuildInfoFile "$cache_dir/node.tsbuildinfo" &
+          node_pid=$!
+          failed=0
+          pnpm exec vite build || { echo "::error::Vite build failed"; failed=1; }
+          wait "$app_pid" || { echo "::error::App typecheck failed"; failed=1; }
+          wait "$node_pid" || { echo "::error::Node typecheck failed"; failed=1; }
+          exit "$failed"
 
       # Fails when the launch bundle grows past web/perf-budget.json, and when it
       # shrinks without the budget following it down.
       - name: Check the launch bundle budget
+        if: matrix.part == 'build'
         run: pnpm run budget:check
 
       - name: Upload frontend bundle for image builds
-        if: github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
+        if: matrix.part == 'build' && github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist-${{ github.sha }}
@@ -575,15 +733,17 @@ jobs:
           retention-days: 1
 
       # The generated web binding is compared after prettier, so this half of
-      # the bindings check lives here rather than in the Go job, which has no
+      # the bindings check lives here rather than in a Go job, which has no
       # pnpm. It needs Go to run the generator.
       - name: Set up Go
+        if: matrix.part == 'checks'
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '>=1.26 <1.27'
           cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
+        if: matrix.part == 'checks'
         working-directory: .
         run: make verify-settings-bindings-web
 
@@ -592,24 +752,24 @@ jobs:
       # fresh generation so the typed request boundary never drifts from the
       # spec the server serves.
       - name: Verify the generated web v2 contract types are current
+        if: matrix.part == 'checks'
         working-directory: .
         run: make verify-apiv2-web-types
 
 
   web-test:
-    name: Web test (${{ matrix.shard }}/2)
+    name: Web test (${{ matrix.shard }}/4)
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          persist-credentials: false
+        with: *no-assets
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -635,15 +795,15 @@ jobs:
 
       # Includes the appearance-cache ownership tests, which are the regression
       # guard for cross-account leaks in the localStorage warm start. The
-      # suite is split across two runners; vitest assigns files to a shard
+      # suite is split across four runners; vitest assigns files to a shard
       # deterministically, so every file runs exactly once.
       - name: Test
-        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/2"
+        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/4 --maxWorkers=4"
 
   result:
     name: CI result
     if: always()
-    needs: [select, repo-checks, go-lint, go-verify, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
+    needs: [select, repo-checks, go-lint, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
     runs-on: ubuntu-latest
     steps:
       - name: Check out the CI tools from main

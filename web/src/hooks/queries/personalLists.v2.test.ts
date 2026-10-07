@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import listFavoritesOk from "../../../../contracts/api/v2/fixtures/list_favorites_ok.json";
@@ -12,6 +13,7 @@ import { setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
 import { useFavorites, useToggleFavorite } from "./favorites";
+import { PERSONAL_STATE_WRITE_TIMEOUT_MS } from "./personalStateWrites";
 import { catalogKeys, itemKeys } from "./keys";
 import { useDeleteRating, useSetRating } from "./ratings";
 import { useToggleWatchlist } from "./watchlist";
@@ -61,6 +63,7 @@ describe("personal lists on the v2 contract", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.mocked(toast.error).mockClear();
   });
 
   it("lists favorites as browse cards from the items envelope", async () => {
@@ -183,5 +186,92 @@ describe("personal lists on the v2 contract", () => {
       remove.unmount();
       client.clear();
     }
+  });
+
+  describe("when the server cannot be reached", () => {
+    afterEach(() => {
+      onlineManager.setOnline(true);
+      vi.useRealTimers();
+    });
+
+    const unreachable = () =>
+      stubFetch(() => {
+        throw new TypeError("Failed to fetch");
+      });
+
+    it.each([
+      ["favorite", () => useToggleFavorite("movie:c"), "Failed to update favorites"],
+      ["watchlist entry", () => useToggleWatchlist("movie:c"), "Failed to update watchlist"],
+    ])("sends a %s toggle while offline and reports the failure", async (_kind, hook, message) => {
+      onlineManager.setOnline(false);
+      const fetchMock = unreachable();
+
+      const { result } = renderHook(hook, { wrapper: createWrapper() });
+      await act(async () => {
+        await expect(result.current.mutateAsync(false)).rejects.toThrow();
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.current.isPaused).toBe(false);
+      expect(toast.error).toHaveBeenCalledWith(message);
+    });
+
+    it("rolls back a rating set or cleared while offline and reports the failure", async () => {
+      onlineManager.setOnline(false);
+      unreachable();
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      });
+      client.setQueryData(catalogKeys.itemDetail("movie:c"), {
+        content_id: "movie:c",
+        user_rating: 3,
+      });
+      const wrapper = createWrapper(client);
+      const set = renderHook(() => useSetRating("movie:c"), { wrapper });
+      const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper });
+
+      for (const mutation of [
+        () => set.result.current.mutateAsync(5),
+        () => remove.result.current.mutateAsync(),
+      ]) {
+        await act(async () => {
+          await expect(mutation()).rejects.toThrow();
+        });
+        expect(client.getQueryData(catalogKeys.itemDetail("movie:c"))).toMatchObject({
+          user_rating: 3,
+        });
+      }
+      expect(toast.error).toHaveBeenCalledTimes(2);
+      expect(toast.error).toHaveBeenCalledWith("Failed to update rating");
+      client.clear();
+    });
+
+    it("gives up on a toggle the server never answers", async () => {
+      vi.useFakeTimers();
+      // A server that accepts the connection and then stops answering.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(
+          (_input, init) =>
+            new Promise((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+            }),
+        ),
+      );
+
+      const { result } = renderHook(() => useToggleFavorite("movie:c"), {
+        wrapper: createWrapper(),
+      });
+      let outcome: Promise<unknown> = Promise.resolve();
+      act(() => {
+        outcome = result.current.mutateAsync(false);
+      });
+      const rejected = expect(outcome).rejects.toThrow("did not respond");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(PERSONAL_STATE_WRITE_TIMEOUT_MS);
+      });
+      await rejected;
+      expect(toast.error).toHaveBeenCalledWith("Failed to update favorites");
+    });
   });
 });
