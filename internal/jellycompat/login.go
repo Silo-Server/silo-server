@@ -61,7 +61,7 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 // directory (LDAP) gets exactly one attempt with the password as typed, so
 // a PIN never reaches the directory and a failed bind is never doubled.
 func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password, userAgent, remoteIP string) (*Session, error) {
-	accountUsername, requestedProfile, hasExplicitProfile, err := parseProfileLogin(combinedUsername)
+	accountUsername, requestedProfile, hasExplicitProfile, err := r.parseLogin(ctx, combinedUsername)
 	if err != nil {
 		return nil, err
 	}
@@ -146,6 +146,33 @@ func splitPasswordPIN(password string) (basePw, pin string) {
 		return "", ""
 	}
 	return password[:idx], password[idx+1:]
+}
+
+// parseLogin reads username#profile. When no account has the name before
+// the last '#' but the whole name is an account, such as one named after an
+// old Discord name like "name#1234", the whole name is the account and no
+// profile is named.
+func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
+	accountUsername, profileName, hasExplicitProfile, err = parseProfileLogin(combinedUsername)
+	if err != nil || !hasExplicitProfile {
+		return accountUsername, profileName, hasExplicitProfile, err
+	}
+	splitExists, err := r.authService.HasLoginName(ctx, accountUsername)
+	if err != nil {
+		return "", "", false, err
+	}
+	if splitExists {
+		return accountUsername, profileName, true, nil
+	}
+	whole := strings.TrimSpace(combinedUsername)
+	wholeExists, err := r.authService.HasLoginName(ctx, whole)
+	if err != nil {
+		return "", "", false, err
+	}
+	if wholeExists {
+		return whole, "", false, nil
+	}
+	return accountUsername, profileName, true, nil
 }
 
 func parseProfileLogin(username string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {

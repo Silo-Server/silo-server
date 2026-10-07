@@ -262,6 +262,21 @@ func (s *Service) routePasswordLogin(ctx context.Context, username string) (stri
 	return directory, nil
 }
 
+// HasLoginName reports whether a password sign-in with name would find an
+// existing account (see LookupLogin).
+func (s *Service) HasLoginName(ctx context.Context, name string) (bool, error) {
+	if s.users == nil {
+		return false, nil
+	}
+	if _, err := LookupLogin(ctx, s.users, name); err != nil {
+		if IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("looking up user: %w", err)
+	}
+	return true, nil
+}
+
 func (s *Service) RegisterProvider(info LoginProviderInfo, provider AuthProvider) {
 	if provider == nil || info.ID == "" {
 		return

@@ -18,6 +18,7 @@
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
 ./internal/auth TestLoginIdentitySpaceDB
+./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
