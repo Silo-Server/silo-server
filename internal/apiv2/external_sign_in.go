@@ -53,7 +53,9 @@ type ExternalSignInCapabilities struct {
 	NetworkSignIn bool `json:"network_sign_in" doc:"Whether signInWithNetworkIdentity and linkAccountIdentityWithNetwork are served. Whether a given request may use them is answered by listAuthProviders, which lists a network provider only to a request that arrived through that provider's network"`
 	// NetworkLinkKeepsPassword tells clients which consequence of linking a
 	// network identity to describe: servers before it turned the password off.
-	NetworkLinkKeepsPassword bool `json:"network_link_keeps_password" doc:"Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in, refused with not_permitted only while the provider refuses the person. False when network sign-in is not served; servers without the field turn local password sign-in off on such a link, as for other providers"`
+	// It describes the linking rule, not whether the link operations are
+	// served (NetworkSignIn).
+	NetworkLinkKeepsPassword bool `json:"network_link_keeps_password" doc:"Whether linking a network identity (linkAccountIdentityWithNetwork, or createAdminUserIdentity at a network provider) keeps the account's local password sign-in. While the provider's latest answer refuses the person, that password is refused with not_permitted (break-glass accounts excepted); an unavailable or unsupported answer keeps the refusal, and it ends when the provider vouches again or the network provider is turned off. Servers without the field turn local password sign-in off on such a link. network_sign_in says whether the link operations are served"`
 }
 
 // ExternalSignInCapabilitiesOutput is the getExternalSignInCapabilities
@@ -337,7 +339,7 @@ func registerExternalSignIn(reg *Registry) {
 				out.Body.ConnectionTest = svc.ConnectionTestAvailable()
 				out.Body.CredentialsLinking = svc.CredentialsLinkingAvailable()
 				out.Body.NetworkSignIn = svc.NetworkLinkingAvailable() && reg.deps.Sessions != nil
-				out.Body.NetworkLinkKeepsPassword = out.Body.NetworkSignIn
+				out.Body.NetworkLinkKeepsPassword = true
 			}
 			return out, nil
 		})
@@ -436,7 +438,7 @@ func registerExternalSignIn(reg *Registry) {
 
 	network := humaOp(http.MethodPost, Prefix+"/account/identities/link-network", "linkAccountIdentityWithNetwork", "account",
 		"Link the network identity of this device (such as its Tailscale login) to the caller's account.")
-	network.Description = "Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking except one: the account keeps its local password sign-in (audited). While the provider refuses the person at a re-check, that password is refused with not_permitted too, except for a break-glass account, until the provider vouches for the person again. listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in."
+	network.Description = "Only a request that arrived through the network identity provider's own network address can link: the provider's plugin says who owns the device that sent it, and that identity is linked to this account after the account re-enters its local password, with the same rules as other linking except one: the account keeps its local password sign-in (audited). While the provider refuses the person at a re-check, that password is refused with not_permitted too, except for a break-glass account; an unavailable or unsupported answer keeps the refusal, which ends when the provider vouches for the person again or the network provider is turned off. listAuthProviders lists the provider, with the device owner's name, only to such a request. Answers 201 with the linked identity as listAccountIdentities shows it. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 422 validation_failed at body.password (wrong local password); 409 local_password_required; 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out); 403 permission_denied (the Silo account is disabled, or the caller is an API key or impersonation session); 409 identity_linked_elsewhere; 409 already_linked; 404 not_found (not an enabled network identity provider); 503 provider_unavailable. Spends the login rate-limit budget. getExternalSignInCapabilities reports network_sign_in."
 	network.DefaultStatus = http.StatusCreated
 	network.Errors = []int{http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
 	Register(reg, Operation{Operation: network, Class: ClassAuthenticated, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable, RateLimitBucket: loginDomain},

@@ -244,12 +244,15 @@ func networkRefused(ctx context.Context, db rowQuerier, userID int) (bool, error
 	return refused, nil
 }
 
-// installationIsNetwork reports whether installationID's sign-in binding is a
-// network provider's.
+// installationIsNetwork reports whether installationID signs people in only
+// as a network provider: it has a network binding and no other kind. An
+// installation that also has an OIDC or LDAP binding, enabled or not, is
+// treated as that provider, so linking there turns the password off.
 func installationIsNetwork(ctx context.Context, db rowQuerier, installationID int) (bool, error) {
+	isNetwork := plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")
 	var network bool
-	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b
-		WHERE b.plugin_installation_id = $1 AND `+plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id")+`)`,
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $1 AND `+isNetwork+`)
+		AND NOT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = $1 AND NOT `+isNetwork+`)`,
 		installationID).Scan(&network); err != nil {
 		return false, fmt.Errorf("checking for a network sign-in binding: %w", err)
 	}

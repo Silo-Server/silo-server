@@ -294,6 +294,29 @@ func TestNetworkRefusalBlocksLocalPasswordDB(t *testing.T) {
 	}
 }
 
+// TestNetworkLinkAtMixedInstallationTurnsPasswordOffDB: an installation that
+// also has an OIDC or LDAP binding is that provider for linking, even while
+// that binding is off, so linking there turns the password off.
+func TestNetworkLinkAtMixedInstallationTurnsPasswordOffDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'tailscale', '{"auth_modes":["network"]}')`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'tailscale', true)`,
+		env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	owner := env.localAccount(t, "owner", models.RoleUser)
+	if _, err := env.resolve(t, env.identity("owner"), false, owner.ID); err != nil {
+		t.Fatal(err)
+	}
+	if user, err := NewUserRepository(env.pool).GetByID(ctx, owner.ID); err != nil || user.LocalPasswordLoginEnabled {
+		t.Fatalf("after linking at a mixed installation = %+v, %v; want local password sign-in off", user, err)
+	}
+}
+
 // enableNetworkProvider enables the env's primary binding and adds an
 // enabled network identity provider installation beside it.
 func (e *recheckEnv) enableNetworkProvider(t *testing.T, label string) int {
