@@ -257,3 +257,18 @@ func TestResolveBackwardCompatLegacyUserAdded(t *testing.T) {
 		t.Fatalf("legacy user-added not resolved correctly: %+v", resolved)
 	}
 }
+
+func TestResolve_ReplacesRawSectionTypeTitle(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "Hot Right Now", Config: json.RawMessage(`{"window":"7d"}`)},
+	}
+
+	result := Resolve(admin, nil)
+	if result[0].Title != "Trending This Week" {
+		t.Errorf("raw-key title = %q, want %q", result[0].Title, "Trending This Week")
+	}
+	if result[1].Title != "Hot Right Now" {
+		t.Errorf("custom title = %q, want unchanged", result[1].Title)
+	}
+}

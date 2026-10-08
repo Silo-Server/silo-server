@@ -2,7 +2,11 @@ package sections
 
 import (
 	"encoding/json"
+	"reflect"
 	"sort"
+	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
 const jsonNullLiteral = "null"
@@ -61,6 +65,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			}
 		}
 
+		rs.Title = readableTitle(rs.SectionType, rs.Title, rs.Config)
 		result = append(result, rs)
 	}
 
@@ -130,6 +135,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			}
 		}
 
+		rs.Title = readableTitle(rs.SectionType, rs.Title, rs.Config)
 		result = append(result, rs)
 	}
 
@@ -185,7 +191,7 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 	return ResolvedSection{
 		ID:          o.ID,
 		SectionType: sectionType,
-		Title:       title,
+		Title:       readableTitle(sectionType, title, cfg),
 		Featured:    featured,
 		ItemLimit:   limit,
 		Config:      cfg,
@@ -193,4 +199,41 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 		IsCustom:    true,
 		Hidden:      o.Hidden,
 	}
+}
+
+// readableTitle replaces a blank title, or one that is just the raw
+// section_type key (older editors saved that when no title was typed), with
+// the recipe's display name: the preset whose default params all match the
+// section config, else the recipe's first preset. Other titles pass through.
+func readableTitle(sectionType SectionType, title string, config json.RawMessage) string {
+	if t := strings.TrimSpace(title); t != "" && t != string(sectionType) {
+		return title
+	}
+	rec, ok := recipes.Get(string(sectionType))
+	if !ok {
+		return title
+	}
+	presets := rec.Definition().Presets
+	if len(presets) == 0 {
+		return title
+	}
+	var cfg map[string]any
+	_ = json.Unmarshal(config, &cfg)
+	for _, p := range presets {
+		var params map[string]any
+		if json.Unmarshal(p.DefaultParams, &params) != nil {
+			continue
+		}
+		matched := true
+		for k, v := range params {
+			if !reflect.DeepEqual(cfg[k], v) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return p.DisplayName
+		}
+	}
+	return presets[0].DisplayName
 }

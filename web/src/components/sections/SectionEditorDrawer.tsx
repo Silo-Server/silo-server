@@ -326,6 +326,10 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
     ? lookupRecipe(props.recipeCatalog, sectionType)
     : undefined;
   const isKnownRecipe = Boolean(recipeDef);
+  // A blank title saves the recipe's preset name, never the raw section_type key.
+  const defaultTitle =
+    matchRecipePresetFor(props.recipeCatalog, sectionType, recipeParams)?.display_name ??
+    sectionTypeLabel(sectionType);
   const showCollectionPicker = sectionType === "collection";
   const showLegacyFilter = isLegacyFilterType(sectionType);
   const showRecipeParams = !showCollectionPicker && !showLegacyFilter && isKnownRecipe;
@@ -381,7 +385,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           buildProfileSectionSaveEntry({
             section: props.section,
             sectionType,
-            title,
+            title: title.trim() || defaultTitle,
             itemLimit,
             featured,
             queryDefinition,
@@ -403,7 +407,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
           scope: props.scope,
           currentLibraryId: props.currentLibraryId,
           sectionType,
-          title,
+          title: title.trim() || defaultTitle,
           itemLimit,
           featured,
           enabled,
@@ -506,7 +510,7 @@ export default function SectionEditorDrawer(props: SectionEditorDrawerProps) {
             <Input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder={sectionTypeLabel(sectionType)}
+              placeholder={defaultTitle}
             />
           </div>
 
