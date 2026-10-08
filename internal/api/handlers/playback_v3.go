@@ -1780,6 +1780,17 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 					firstFailureAudioIndex = candidateAudioIndex
 				}
 			}
+			if result.Terminal != nil && droppedSubtitle != nil && subtitleOnlyRefusalV3(result.Terminal) {
+				// Only the subtitle kept the requested file from playing, so
+				// it plays without one. Every sibling that plays drops the
+				// subtitle too, and would lose the requested picture as well.
+				withoutSubtitle := baseReq
+				withoutSubtitle.SubtitleTrackID, withoutSubtitle.SubtitleTrackIndex = "", nil
+				candidateResult, candidateToneMapErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: withoutSubtitle, RequestedFile: requestedFile, EffectiveFile: effectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, effectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+				if candidateResult.Terminal == nil {
+					droppedSubtitle = &alternateCandidateV3{file: effectiveFile, request: withoutSubtitle, audioIndex: baseAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
+				}
+			}
 			if result.Terminal != nil && droppedSubtitle != nil {
 				req = droppedSubtitle.request
 				effectiveFile = droppedSubtitle.file
@@ -5147,6 +5158,17 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 					firstFailureAudioIndex = candidateAudioIndex
 				}
 			}
+			if result.Terminal != nil && droppedSubtitle != nil && subtitleOnlyRefusalV3(result.Terminal) {
+				// Only the subtitle kept the effective file from playing, so
+				// it plays without one rather than on a sibling that drops
+				// the subtitle too.
+				withoutSubtitle := baseStart
+				withoutSubtitle.SubtitleTrackID, withoutSubtitle.SubtitleTrackIndex = "", nil
+				candidateResult, candidateToneMapErr := h.planPlaybackWithCapabilitiesV3(r.Context(), playback.PlannerInputV3{Request: withoutSubtitle, RequestedFile: plannerRequestedFile, EffectiveFile: baseEffectiveFile, LowerVersion: lowerVersionForFileV3(lowerVersion, baseEffectiveFile), ServerBitrateCapKbps: serverBitrateCapV3(r.Context()), AudioTrackIndex: baseAudioIndex, Settings: plannerSettings, Registry: h.transformationRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), baseEffectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), baseEffectiveFile)})
+				if candidateResult.Terminal == nil {
+					droppedSubtitle = &alternateCandidateV3{file: baseEffectiveFile, request: withoutSubtitle, audioIndex: baseAudioIndex, result: candidateResult, toneMapErr: candidateToneMapErr}
+				}
+			}
 			if result.Terminal != nil && droppedSubtitle != nil {
 				start = droppedSubtitle.request
 				effectiveFile = droppedSubtitle.file
@@ -5967,6 +5989,14 @@ func terminalAllowsAlternateFileV3(terminal *playback.TerminalV3) bool {
 	default:
 		return false
 	}
+}
+
+// subtitleOnlyRefusalV3 reports a refusal caused by the selected subtitle
+// alone. The planner names the subtitle only when its burn-in requirement was
+// the sole reason for an adaptation the file cannot take, so the same file
+// plays once the subtitle is cleared.
+func subtitleOnlyRefusalV3(terminal *playback.TerminalV3) bool {
+	return terminal != nil && terminal.Reason == terminalSubtitleConversionUnsupportedV3
 }
 
 // alternateCandidateV3 is a planned alternate version held back while the
