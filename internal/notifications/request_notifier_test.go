@@ -108,6 +108,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 			 'org.siloserver.silo', 'ciphertext', 'hash-2', 'server-2', 'private_push', true)`); err != nil {
 		t.Fatalf("create push tables: %v", err)
 	}
+	catalogItem := seedAccessCatalog(t, p).series
 	system := &System{
 		pool:           p,
 		Settings:       NewSettings(mapSettingReader{SettingApplePushDeliveryEnabled: "true"}),
@@ -115,6 +116,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 		Preferences:    NewPreferencesRepository(p),
 		pushDeviceRepo: NewPushDeviceRepository(p),
 		dispatcher:     NewMultiDispatcher(),
+		scopes:         scopeByProfile{"default": {}},
 		logger:         slog.New(slog.DiscardHandler),
 	}
 	notifier := NewRequestFulfillmentNotifier(system)
@@ -122,7 +124,7 @@ func TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID(t *testing.T) {
 	req.RequestedByProfileID = "default"
 
 	for range 2 {
-		if err := notifier.NotifyFulfilled(ctx, req, "movie-tmdb-949"); err != nil {
+		if err := notifier.NotifyFulfilled(ctx, req, catalogItem); err != nil {
 			t.Fatalf("NotifyFulfilled: %v", err)
 		}
 	}

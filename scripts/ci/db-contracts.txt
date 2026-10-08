@@ -84,6 +84,8 @@
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 

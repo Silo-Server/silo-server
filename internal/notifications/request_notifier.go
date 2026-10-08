@@ -118,8 +118,8 @@ func NewRequestFulfillmentNotifier(system *System) *RequestFulfillmentNotifier {
 // first dispatch error so the caller retries the whole request later; a
 // recipient already told is deduped by the (account, profile, request) unique
 // index.
-// Skipping a recipient (master toggle off, missing attribution) still counts
-// as handled.
+// Skipping a recipient (master toggle off, missing attribution, or no access
+// to the matched item; see DispatchOperational) still counts as handled.
 func (n *RequestFulfillmentNotifier) NotifyFulfilled(ctx context.Context, req requests.Request, contentID string) error {
 	if n == nil || n.backend == nil {
 		return nil

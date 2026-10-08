@@ -34,6 +34,7 @@ type FanoutWorker struct {
 	deliveries  *DeliveryRepository
 	preferences *PreferencesRepository
 	settings    *Settings
+	scopes      ScopeResolver
 	dispatcher  Dispatcher
 	logger      *slog.Logger
 	nudge       chan struct{}
@@ -67,7 +68,8 @@ func (w *FanoutWorker) SetPushOutbox(pushDevices *PushDeviceRepository) {
 	w.pushDevices = pushDevices
 }
 
-// NewFanoutWorker creates a FanoutWorker.
+// NewFanoutWorker creates a FanoutWorker. scopes resolves each recipient's
+// current access; without it no episode notification is delivered.
 func NewFanoutWorker(
 	pool *pgxpool.Pool,
 	releases *ReleaseRepository,
@@ -75,6 +77,7 @@ func NewFanoutWorker(
 	deliveries *DeliveryRepository,
 	preferences *PreferencesRepository,
 	settings *Settings,
+	scopes ScopeResolver,
 	dispatcher Dispatcher,
 ) *FanoutWorker {
 	return &FanoutWorker{
@@ -84,6 +87,7 @@ func NewFanoutWorker(
 		deliveries:  deliveries,
 		preferences: preferences,
 		settings:    settings,
+		scopes:      scopes,
 		dispatcher:  dispatcher,
 		logger:      slog.Default().With("component", "notifications.fanout"),
 		nudge:       make(chan struct{}, 1),
@@ -207,6 +211,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 
 	// Capture the entire batch before acquiring inbox locks. Locking one event
 	// at a time could acquire the same profiles in opposite transaction order.
+	//
+	// An interest row is computed when the profile's relationship to the
+	// series changes, so it can outlive the profile's access: a library
+	// restriction or maturity limit set later leaves the row in place. Only
+	// candidates that can open the episode now are captured, which keeps the
+	// title off every channel for the rest.
+	recipients := newRecipientAccess(w.scopes, w.logger)
 	candidatesByEvent := make(map[string]map[string]struct{}, len(fanout))
 	profiles := make(map[string]struct{})
 	for _, event := range fanout {
@@ -216,6 +227,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 		captured := make(map[string]struct{}, len(candidates))
 		for _, candidate := range candidates {
+			allowed, err := recipients.canOpen(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, event.LibraryID)
+			if err != nil {
+				return 0, err
+			}
+			if !allowed {
+				continue
+			}
 			captured[candidate.ProfileID] = struct{}{}
 			profiles[candidate.ProfileID] = struct{}{}
 		}
@@ -539,7 +557,8 @@ func eventIDs(events []ReleaseEvent) []string {
 }
 
 // capturedFanoutCandidates retains refreshed state without admitting profiles
-// whose inbox locks were not included in the transaction-wide acquisition.
+// whose inbox locks were not included in the transaction-wide acquisition,
+// which also leaves out every candidate that failed the access check.
 func capturedFanoutCandidates(candidates []SeriesInterest, captured map[string]struct{}) []SeriesInterest {
 	return slices.DeleteFunc(candidates, func(candidate SeriesInterest) bool {
 		_, ok := captured[candidate.ProfileID]
