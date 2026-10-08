@@ -488,22 +488,39 @@ function LanguageValueSelect({
   const options = [...codes]
     .map((code) => ({ code, name: formatLanguage(code) || code }))
     .sort((a, b) => a.name.localeCompare(b.name));
+  let placeholder = "Pick a language";
+  if (filters.isLoading) placeholder = "Loading languages";
+  else if (filters.isError && !filters.data) placeholder = "Couldn’t load languages";
+  let status: string | null = null;
+  if (filters.isError) {
+    status = filters.data ? "Couldn’t refresh languages" : "Couldn’t load languages";
+  } else if (options.length === 0) {
+    status = "No languages yet";
+  }
 
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select
+      value={value}
+      onValueChange={onChange}
+      onOpenChange={(open) => {
+        // Opening the picker after a failed load asks again.
+        if (open && filters.isError) void filters.refetch();
+      }}
+    >
       <SelectTrigger aria-label="Value" className={className}>
-        <SelectValue placeholder={filters.isLoading ? "Loading languages" : "Pick a language"} />
+        <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>
-        {options.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-1.5 text-sm">No languages yet</div>
-        ) : (
-          options.map((option) => (
-            <SelectItem key={option.code} value={option.code}>
-              {option.name}
-            </SelectItem>
-          ))
-        )}
+        {options.map((option) => (
+          <SelectItem key={option.code} value={option.code}>
+            {option.name}
+          </SelectItem>
+        ))}
+        {status ? (
+          <p role="status" className="text-muted-foreground px-2 py-1.5 text-sm">
+            {status}
+          </p>
+        ) : null}
       </SelectContent>
     </Select>
   );

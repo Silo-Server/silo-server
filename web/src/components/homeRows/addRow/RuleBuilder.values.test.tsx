@@ -111,6 +111,32 @@ describe("RuleBuilder value pickers", () => {
     );
   });
 
+  it("say the languages failed to load and ask again when the picker opens", async () => {
+    let failed = false;
+    v2Recorder.answer("GET /api/v2/catalog/filters", () => {
+      if (!failed) {
+        failed = true;
+        throw new Error("network down");
+      }
+      return {
+        genres: [],
+        studios: [],
+        networks: [],
+        countries: [],
+        original_languages: ["fr"],
+        content_ratings: [],
+      };
+    });
+    renderBuilder(languageRule("original_language", ""));
+
+    const value = screen.getByRole("combobox", { name: "Value" });
+    await waitFor(() => expect(value).toHaveTextContent("Couldn’t load languages"));
+    await userEvent.click(value);
+    expect(await screen.findByRole("option", { name: "French" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(v2Recorder.callsOf("GET /api/v2/catalog/filters")).toHaveLength(2);
+  });
+
   it("keep a saved language no title has any more", async () => {
     v2Recorder.answer("GET /api/v2/catalog/filters", {
       genres: [],
