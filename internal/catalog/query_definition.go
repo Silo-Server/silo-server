@@ -114,6 +114,35 @@ func (d queryFieldDef) allows(op string) bool {
 	return d.validOps[op] || (op == ruleOpNotInLast && d.validOps[ruleOpInLast])
 }
 
+// validateRuleValue rejects a value the SQL builder cannot use, so a malformed
+// span or a new field's malformed value fails validation instead of the
+// query that runs it.
+func validateRuleValue(rule QueryRule) error {
+	if rule.Op == ruleOpInLast || rule.Op == ruleOpNotInLast {
+		_, err := ruleInterval(rule)
+		return err
+	}
+	switch rule.Field {
+	case querySortTitle:
+		if _, ok := rule.Value.(string); !ok {
+			return fmt.Errorf("title requires a string value")
+		}
+	case ruleFieldDecade:
+		if _, ok := decadeStart(rule.Value); !ok {
+			return fmt.Errorf("decade requires a year such as 1990")
+		}
+	case querySortRuntime, querySortRatingTMDb, querySortRatingRTCritic, querySortRatingRTAudience:
+		if rule.Op == "between" {
+			if _, ok := catalogFloatRange(rule.Value); !ok {
+				return fmt.Errorf("%s between requires [min, max] numbers", rule.Field)
+			}
+		} else if _, ok := catalogFloat(rule.Value); !ok {
+			return fmt.Errorf("%s requires a number", rule.Field)
+		}
+	}
+	return nil
+}
+
 var querySortDefs = map[string]querySortDef{
 	"title":         {columnSQL: "LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", defaultOrder: "asc", titleSortOnly: true},
 	"added_at":      {defaultOrder: "desc"},
@@ -421,6 +450,9 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 			}
 			if !def.allows(rule.Op) {
 				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
+			}
+			if err := validateRuleValue(rule); err != nil {
+				return fmt.Errorf("groups[%d].rules[%d]: %w", i, j, err)
 			}
 		}
 	}

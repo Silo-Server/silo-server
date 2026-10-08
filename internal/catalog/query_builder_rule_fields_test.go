@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -217,20 +218,37 @@ func TestBuild_LatestEpisodeAddedMatchesNoEpisode(t *testing.T) {
 	}
 }
 
-func TestBuild_NewRuleFieldsRejectMalformedValues(t *testing.T) {
+func TestMalformedRuleValuesFailValidation(t *testing.T) {
+	// A malformed value fails validation, so a catalog request answers 400
+	// (422 on v2) and a save is refused, instead of the query failing with 500.
 	for _, rule := range []QueryRule{
 		{Field: "decade", Op: "is", Value: "NaN"},
 		{Field: "runtime", Op: "lt", Value: ""},
 		{Field: "rating_tmdb", Op: "between", Value: []any{"", ""}},
 		{Field: "rating_rt_critic", Op: "gte", Value: "high"},
+		{Field: "title", Op: "contains", Value: 3.0},
+		{Field: "release_date", Op: "not_in_last", Value: "soon"},
 	} {
-		_, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
-			Match:  "all",
-			Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}},
-		})
-		if err == nil {
-			t.Errorf("%s %s %v: expected the value to be rejected before it reaches SQL", rule.Field, rule.Op, rule.Value)
+		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
+		if _, _, err := NewQueryBuilder("mi").Build(def); err == nil {
+			t.Errorf("%s %s %v: expected the builder to reject the value before it reaches SQL", rule.Field, rule.Op, rule.Value)
 		}
+		if err := def.Validate(); err == nil {
+			t.Errorf("%s %s %v: expected validation to reject the value", rule.Field, rule.Op, rule.Value)
+		}
+		if err := validateCatalogOverlayQuery("", def, catalogQueryRuleFields, catalogQuerySortFields(), false); !errors.Is(err, ErrInvalidCatalogRequest) {
+			t.Errorf("%s %s %v: expected an invalid-request error, got %v", rule.Field, rule.Op, rule.Value, err)
+		}
+	}
+
+	valid := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{
+		{Field: "runtime", Op: "between", Value: []any{90.0, 120.5}},
+		{Field: "title", Op: "begins_with", Value: "the "},
+		{Field: "decade", Op: "is", Value: 1990.0},
+		{Field: "release_date", Op: "not_in_last", Value: "1y"},
+	}}}}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected well-formed values to validate, got %v", err)
 	}
 }
 

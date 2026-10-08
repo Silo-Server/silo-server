@@ -1806,6 +1806,9 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 			if !ok || !def.allows(rule.Op) {
 				return fmt.Errorf("%w: groups[%d].rules[%d] is invalid", ErrInvalidCatalogRequest, i, j)
 			}
+			if err := validateRuleValue(rule); err != nil {
+				return fmt.Errorf("%w: groups[%d].rules[%d]: %w", ErrInvalidCatalogRequest, i, j, err)
+			}
 		}
 	}
 

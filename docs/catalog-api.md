@@ -482,7 +482,9 @@ the group cursor. A query cap limits source editions before grouping.
 
 Catalog query rule groups, `custom_filter` sections, and Smart collections share
 one rule vocabulary (`queryFieldDefs` in `internal/catalog/query_definition.go`).
-Each rule is `{field, op, value}`; an operator a field does not list returns `422`.
+Each rule is `{field, op, value}`; an operator a field does not list returns `422`,
+and so does a value of the wrong shape: a span not like `30d`, a non-numeric bound,
+a decade that is not a year, or a `title` value that is not a string.
 
 | Operators | Fields | Value |
 | --- | --- | --- |
