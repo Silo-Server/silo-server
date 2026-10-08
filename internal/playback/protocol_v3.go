@@ -273,6 +273,10 @@ const (
 	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
+	// TransformationServerDV7HDR10RecipeVersionV3 2 also removes the Profile 7
+	// enhancement-layer NAL units (see DV7ToHDR10BitstreamFilter), so an
+	// executor still on version 1 cannot claim the corrected output.
+	TransformationServerDV7HDR10RecipeVersionV3 = "2"
 )
 
 // Transformation executors: who runs the transformation. A "server"

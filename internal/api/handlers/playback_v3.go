@@ -6783,7 +6783,7 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 		return ""
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 && transformation.RecipeVersion == "1" {
+		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 && transformation.RecipeVersion == playback.TransformationServerDV7HDR10RecipeVersionV3 {
 			return playback.DV7ToHDR10BitstreamFilter
 		}
 	}
