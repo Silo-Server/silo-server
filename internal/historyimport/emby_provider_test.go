@@ -22,7 +22,8 @@ import (
 // ProductionYear, UserData.PlayCount, and UserData.LastPlayedDate stay empty
 // unless Fields names them. The IsResumable filter returns every resumable
 // item, while the Resume list leaves out the ones hidden from Continue
-// Watching and returns nothing without a type filter.
+// Watching, shows one episode per series, and returns nothing without a type
+// filter.
 type fakeEmby struct {
 	t         *testing.T
 	played    []embyItem
@@ -51,10 +52,21 @@ func (f *fakeEmby) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if query.Get("IncludeItemTypes") == "" && query.Get("MediaTypes") == "" {
 			break
 		}
+		// The row shows one next-up episode per series, here the first one;
+		// other in-progress episodes of that series are left out.
+		types := strings.Split(query.Get("IncludeItemTypes"), ",")
+		nextUp := map[string]bool{}
 		for _, item := range f.resumable {
-			if !slices.Contains(f.hidden, item.ID) {
-				items = append(items, item)
+			if !slices.Contains(types, item.Type) || slices.Contains(f.hidden, item.ID) {
+				continue
 			}
+			if item.Type == "Episode" {
+				if nextUp[item.SeriesID] {
+					continue
+				}
+				nextUp[item.SeriesID] = true
+			}
+			items = append(items, item)
 		}
 	case query.Get("Ids") != "":
 		key = "Ids"
@@ -209,12 +221,20 @@ func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
 		item.UserData.LastPlayedDate = &stopped
 		return item
 	}
+	episode := func(id string, number int) embyItem {
+		item := resumable(id, "Episode", "", 1_000_000_000)
+		item.Type, item.SeriesID, item.SeriesName, item.ParentIndexNumber, item.IndexNumber = "Episode", "series-1", "Severance", 1, number
+		return item
+	}
 	fake := &fakeEmby{
 		resumable: []embyItem{
 			resumable("9", "Alien", "348", 2_700_000_000),
 			resumable("8", "Heat", "949", 2_400_000_000),
+			episode("ep-1", 1),
+			episode("ep-2", 2),
 		},
 		hidden: []string{"8"},
+		series: []embyItem{embySeverance},
 	}
 
 	records, warnings := fetchEmbyRecords(t, fake.provider(t))
@@ -228,6 +248,12 @@ func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
 	// it from Continue Watching instead of dropping it.
 	if hidden := records["8"]; !hidden.HiddenFromResume || hidden.PositionSeconds != 240 || !hidden.UpdatedAt.Equal(stopped) {
 		t.Fatalf("hidden resumable movie = hidden:%v pos:%v updated:%v, want true/240/%v", hidden.HiddenFromResume, hidden.PositionSeconds, hidden.UpdatedAt, stopped)
+	}
+
+	// Emby's row shows only one episode of a series, so a missing episode
+	// isn't treated as hidden.
+	if records["ep-1"].HiddenFromResume || records["ep-2"].HiddenFromResume {
+		t.Fatalf("episodes marked hidden = %v/%v, want neither", records["ep-1"].HiddenFromResume, records["ep-2"].HiddenFromResume)
 	}
 
 	// Without Emby's resume list nothing can be told apart: the import keeps

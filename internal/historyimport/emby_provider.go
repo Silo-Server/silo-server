@@ -124,15 +124,20 @@ func embyWatchedRecords(item embyItem, series embyItem) []Record {
 	return records
 }
 
-// hiddenFromResume returns the resumable items the user hid from Emby's
-// Continue Watching. Hiding leaves an item's user data unchanged and the
+// hiddenFromResume returns the resumable movies the user hid from Emby's
+// Continue Watching. Hiding leaves a movie's user data unchanged and the
 // IsResumable filter still returns it; only Emby's own resume list leaves it
-// out. On error nothing is reported hidden.
+// out. Episodes are never reported: that list shows one next-up episode per
+// series, so it can't tell a hidden episode from a skipped one. On error
+// nothing is reported hidden.
 func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyItem) (map[string]bool, error) {
-	if len(resumable) == 0 {
+	movies := slices.DeleteFunc(slices.Clone(resumable), func(item embyItem) bool {
+		return !strings.EqualFold(item.Type, "movie")
+	})
+	if len(movies) == 0 {
 		return nil, nil
 	}
-	listed, err := p.client.FetchResumeItems(ctx, p.auth)
+	listed, err := p.client.FetchResumeMovies(ctx, p.auth)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +146,7 @@ func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyIte
 		shown[item.ID] = true
 	}
 	hidden := make(map[string]bool)
-	for _, item := range resumable {
+	for _, item := range movies {
 		if !shown[item.ID] {
 			hidden[item.ID] = true
 		}
