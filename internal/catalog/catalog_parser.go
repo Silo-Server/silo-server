@@ -29,11 +29,14 @@ type catalogGroupBuilder struct {
 	rules map[int]*catalogRuleBuilder
 }
 
+// catalogRuleBuilder collects one rule's parameters in whatever order the
+// query string lists them. Values stay raw until value() runs, when the field
+// is known.
 type catalogRuleBuilder struct {
 	field         string
 	op            string
-	values        []any
-	indexedValues map[int]any
+	values        []string
+	indexedValues map[int]string
 }
 
 // ErrSearchMediaScopeSource refuses a search-only type on a source other than
@@ -314,10 +317,7 @@ func parseCatalogGroups(values url.Values) ([]QueryGroup, error) {
 					rule.op = rawValues[0]
 				}
 			case "value":
-				rule.values = make([]any, 0, len(rawValues))
-				for _, value := range rawValues {
-					rule.values = append(rule.values, parseCatalogScalar(value))
-				}
+				rule.values = rawValues
 			}
 			continue
 		}
@@ -331,9 +331,9 @@ func parseCatalogGroups(values url.Values) ([]QueryGroup, error) {
 				continue
 			}
 			if rule.indexedValues == nil {
-				rule.indexedValues = map[int]any{}
+				rule.indexedValues = map[int]string{}
 			}
-			rule.indexedValues[valueIdx] = parseCatalogScalar(rawValues[0])
+			rule.indexedValues[valueIdx] = rawValues[0]
 		}
 	}
 
@@ -402,20 +402,38 @@ func (r *catalogRuleBuilder) value() any {
 		}
 		slices.Sort(indexes)
 
-		values := make([]any, 0, len(indexes))
+		raw := make([]string, 0, len(indexes))
 		for _, idx := range indexes {
-			values = append(values, r.indexedValues[idx])
+			raw = append(raw, r.indexedValues[idx])
 		}
-		return values
+		return r.scalars(raw)
 	}
 
-	if len(r.values) == 1 {
-		return r.values[0]
+	switch len(r.values) {
+	case 0:
+		return nil
+	case 1:
+		return r.scalar(r.values[0])
+	default:
+		return r.scalars(r.values)
 	}
-	if len(r.values) > 1 {
-		return r.values
+}
+
+func (r *catalogRuleBuilder) scalars(raw []string) []any {
+	values := make([]any, 0, len(raw))
+	for _, value := range raw {
+		values = append(values, r.scalar(value))
 	}
-	return nil
+	return values
+}
+
+// scalar reads a raw value as a bool or a number when it looks like one. A
+// title is text whatever it looks like, so a film called "1917" stays a string.
+func (r *catalogRuleBuilder) scalar(raw string) any {
+	if strings.EqualFold(strings.TrimSpace(r.field), querySortTitle) {
+		return strings.TrimSpace(raw)
+	}
+	return parseCatalogScalar(raw)
 }
 
 func hasCatalogOverlayParams(values url.Values, ignoreLibraryID bool) bool {

@@ -253,6 +253,31 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 	}
 }
 
+func TestParseCatalogRequest_TitleValuesStayText(t *testing.T) {
+	// A title that reads as a number or a bool is still text; other fields'
+	// values are read as the scalars they look like.
+	for _, title := range []string{"1917", "true", "007"} {
+		req, err := ParseCatalogRequestWithOptions(url.Values{
+			"groups[0][rules][0][field]": {"title"},
+			"groups[0][rules][0][op]":    {"is"},
+			"groups[0][rules][0][value]": {title},
+			"groups[0][rules][1][field]": {"year"},
+			"groups[0][rules][1][op]":    {"is"},
+			"groups[0][rules][1][value]": {"1917"},
+		}, CatalogRequestOptions{ExtendedRules: true})
+		if err != nil {
+			t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+		}
+		rules := req.Query.Groups[0].Rules
+		if rules[0].Value != title || rules[1].Value != 1917 {
+			t.Fatalf("title %q: values = %#v, %#v", title, rules[0].Value, rules[1].Value)
+		}
+		if err := validateCatalogQueryRequest(req, false); err != nil {
+			t.Fatalf("title %q: expected the rule to validate, got %v", title, err)
+		}
+	}
+}
+
 func TestV1RequestsKeepTheFrozenRuleVocabulary(t *testing.T) {
 	// /api/v1 refuses the rules /api/v2 added, with the messages it gave
 	// before they existed; /api/v2 opts in and accepts them.
