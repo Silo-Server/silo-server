@@ -9,7 +9,14 @@ import type { EpisodeFile, EpisodeListItem, Season } from "@/api/types";
 import { useNextEpisode } from "./useNextEpisode";
 import { useSeriesEpisodes } from "./useSeriesEpisodes";
 
-const catalog = vi.hoisted(() => ({ seasons: new Map<number, EpisodeListItem[]>() }));
+const catalog = vi.hoisted(() => ({
+  seasons: new Map<number, EpisodeListItem[]>(),
+  // Episodes whose files are stored only outside the library the viewer
+  // opened, as a library listing with catalog.scope_versions_to_library on
+  // reports them.
+  otherLibrary: new Set<string>(),
+  episodeRequests: [] as (number | undefined)[],
+}));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   fetchCatalogSeriesSeasons: async () => ({
@@ -17,9 +24,19 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
       (season_number) => ({ season_number, is_specials: false }) as Season,
     ),
   }),
-  fetchCatalogSeasonEpisodes: async (_seriesId: string, seasonNumber: number) => ({
-    episodes: catalog.seasons.get(seasonNumber) ?? [],
-  }),
+  fetchCatalogSeasonEpisodes: async (
+    _seriesId: string,
+    seasonNumber: number,
+    libraryId?: number,
+  ) => {
+    catalog.episodeRequests.push(libraryId);
+    const episodes = catalog.seasons.get(seasonNumber) ?? [];
+    return {
+      episodes: episodes.map((ep) =>
+        libraryId && catalog.otherLibrary.has(ep.content_id) ? { ...ep, files: [] } : ep,
+      ),
+    };
+  },
 }));
 
 const file = { file_id: 1, resolution: "1080p" } as EpisodeFile;
@@ -43,13 +60,13 @@ function season(seasonNumber: number, playable: boolean[]): void {
 }
 
 /** Renders the player's episode list and the next pick for one episode. */
-async function playing(seasonNumber: number, episodeNumber: number) {
+async function playing(seasonNumber: number, episodeNumber: number, libraryId?: number) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client: queryClient }, children);
   const { result } = renderHook(
     () => {
-      const { episodes, isLoading } = useSeriesEpisodes("series-1", seasonNumber);
+      const { episodes, isLoading } = useSeriesEpisodes("series-1", seasonNumber, libraryId);
       const context = {
         seriesId: "series-1",
         currentSeason: seasonNumber,
@@ -69,7 +86,11 @@ async function playing(seasonNumber: number, episodeNumber: number) {
 }
 
 describe("useSeriesEpisodes", () => {
-  beforeEach(() => catalog.seasons.clear());
+  beforeEach(() => {
+    catalog.seasons.clear();
+    catalog.otherLibrary.clear();
+    catalog.episodeRequests.length = 0;
+  });
 
   it("steps over an episode the viewer cannot play in the middle of a season", async () => {
     season(1, [true, true, false, true]);
@@ -97,5 +118,31 @@ describe("useSeriesEpisodes", () => {
     const { nextEpisode } = await playing(1, 2);
 
     expect(nextEpisode).toBeNull();
+  });
+
+  it("keeps an episode the viewer can play from a library other than the one they opened", async () => {
+    season(1, [true, true, true]);
+    catalog.otherLibrary.add("s1e3");
+
+    const { nextEpisode } = await playing(1, 2, 7);
+
+    expect(nextEpisode?.contentId).toBe("s1e3");
+  });
+
+  it("steps over an episode the viewer cannot play from any library", async () => {
+    season(1, [true, true, false, true]);
+
+    const { nextEpisode } = await playing(1, 2, 7);
+
+    expect(nextEpisode?.contentId).toBe("s1e4");
+  });
+
+  it("asks for the season without the library only when an episode has no files", async () => {
+    season(1, [true, true]);
+    season(2, [true]);
+
+    await playing(1, 1, 7);
+
+    expect(catalog.episodeRequests).toEqual([7, 7]);
   });
 });
