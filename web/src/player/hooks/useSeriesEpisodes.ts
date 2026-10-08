@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import type { EpisodeListItem } from "@/api/types";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { fetchCatalogSeriesSeasons, fetchCatalogSeasonEpisodes } from "@/hooks/queries/catalogRead";
 import type { EpisodeRef } from "../types";
@@ -29,22 +28,31 @@ export function useSeriesEpisodes(
   const nextSeasonInfo = seasons.find((s) => s.season_number === currentSeason + 1);
 
   // Fetch current season episodes.
-  const { episodes: currentEpisodes, isLoading: currentLoading } = usePlayableSeasonEpisodes(
-    seriesId,
-    currentSeason,
-    libraryId,
-    !!seriesId && currentSeason >= 0 && !!currentSeasonInfo,
-  );
+  const { data: currentEpisodesData, isLoading: currentLoading } = useQuery({
+    queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason, libraryId),
+    queryFn: ({ signal }) =>
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason, libraryId, { signal }),
+    enabled: !!seriesId && currentSeason >= 0 && !!currentSeasonInfo,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Fetch next season episodes only when a next season exists.
-  const { episodes: nextEpisodes, isLoading: nextLoading } = usePlayableSeasonEpisodes(
-    seriesId,
-    currentSeason + 1,
-    libraryId,
-    !!seriesId && !!nextSeasonInfo,
-  );
+  const { data: nextEpisodesData, isLoading: nextLoading } = useQuery({
+    queryKey: catalogKeys.seasonEpisodes(seriesId!, currentSeason + 1, libraryId),
+    queryFn: ({ signal }) =>
+      fetchCatalogSeasonEpisodes(seriesId!, currentSeason + 1, libraryId, { signal }),
+    enabled: !!seriesId && !!nextSeasonInfo,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const episodes: EpisodeRef[] = [...currentEpisodes, ...nextEpisodes].map((ep) => ({
+  const currentEpisodes = currentEpisodesData?.episodes ?? [];
+  const nextEpisodes = nextEpisodesData?.episodes ?? [];
+
+  // The server lists an episode this viewer can't play (every file outside
+  // their access) with no files. Leaving it out lets Next, Previous and
+  // autoplay step over it.
+  const playable = [...currentEpisodes, ...nextEpisodes].filter((ep) => ep.files.length > 0);
+  const episodes: EpisodeRef[] = playable.map((ep) => ({
     contentId: ep.content_id,
     seasonNumber: ep.season_number,
     episodeNumber: ep.episode_number,
@@ -59,49 +67,4 @@ export function useSeriesEpisodes(
   const isLoading = seasonsLoading || currentLoading || (!!nextSeasonInfo && nextLoading);
 
   return { episodes, isLoading };
-}
-
-/**
- * Fetches one season's episodes and keeps those the viewer can play, so Next,
- * Previous and autoplay step over the rest.
- *
- * The server lists an episode this viewer can't play (every file outside their
- * access) with no files. With catalog.scope_versions_to_library on, a listing
- * for a library also leaves out files stored in the viewer's other libraries,
- * which playback still uses, so an episode listed without files there is
- * checked against the listing without the library before it is dropped.
- */
-function usePlayableSeasonEpisodes(
-  seriesId: string | undefined,
-  seasonNum: number,
-  libraryId: number | undefined,
-  enabled: boolean,
-): { episodes: EpisodeListItem[]; isLoading: boolean } {
-  const { data, isLoading } = useQuery({
-    queryKey: catalogKeys.seasonEpisodes(seriesId!, seasonNum, libraryId),
-    queryFn: ({ signal }) =>
-      fetchCatalogSeasonEpisodes(seriesId!, seasonNum, libraryId, { signal }),
-    enabled,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const listed = data?.episodes ?? [];
-  const checkAllLibraries = !!libraryId && listed.some((ep) => ep.files.length === 0);
-  const { data: allLibrariesData, isLoading: allLibrariesLoading } = useQuery({
-    queryKey: catalogKeys.seasonEpisodes(seriesId!, seasonNum),
-    queryFn: ({ signal }) =>
-      fetchCatalogSeasonEpisodes(seriesId!, seasonNum, undefined, { signal }),
-    enabled: enabled && checkAllLibraries,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const playableElsewhere = new Set(
-    (allLibrariesData?.episodes ?? [])
-      .filter((ep) => ep.files.length > 0)
-      .map((ep) => ep.content_id),
-  );
-  return {
-    episodes: listed.filter((ep) => ep.files.length > 0 || playableElsewhere.has(ep.content_id)),
-    isLoading: isLoading || allLibrariesLoading,
-  };
 }
