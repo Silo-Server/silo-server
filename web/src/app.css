@@ -2144,6 +2144,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
+  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
+     height the widget's fixed rows leave it. Below lg the rows are
+     content-sized, so there is no height to take and the plot would measure
+     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  .admin-chart-fill {
+    flex: 1 1 0%;
+    min-height: 10rem;
+  }
+
   /* ── Dashboard Widget Scrollbars ──────────────────────────── */
   /* Widget bodies scroll inside their row, so the default OS bar
      sits right on top of the theme. One rule covers every widget:
@@ -2196,6 +2205,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .admin-widget {
       grid-column: span var(--widget-span) / span var(--widget-span);
       grid-row: span var(--widget-rows) / span var(--widget-rows);
+    }
+
+    .admin-chart-fill {
+      min-height: 0;
     }
   }
 

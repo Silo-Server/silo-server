@@ -34,7 +34,7 @@ export function ChartEmptyState({
     <div
       className={cn(
         "text-muted-foreground flex flex-col items-center justify-center gap-1 text-center",
-        fill && "min-h-0 flex-1",
+        fill && "admin-chart-fill",
         className,
       )}
       style={fill ? undefined : { minHeight: height }}
@@ -49,7 +49,7 @@ export function ChartEmptyState({
 export function ChartSkeleton({ height = 160, fill = false }: { height?: number; fill?: boolean }) {
   return (
     <Skeleton
-      className={cn("w-full rounded-md", fill && "min-h-0 flex-1")}
+      className={cn("w-full rounded-md", fill && "admin-chart-fill")}
       style={fill ? undefined : { height }}
     />
   );
