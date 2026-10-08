@@ -302,7 +302,10 @@ answer 401. It answers `503` with `Retry-After`: v2 `dependency_unavailable`, v1
 `service_unavailable`. `POST /auth/refresh` (`refreshSession`) answers the same way when it
 cannot read the session or account. Whether the session is still valid is unknown, so a
 client keeps its tokens, waits `Retry-After` seconds and retries; it signs out only on a
-401. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
+401. Viewer access answers the same `503`, with `Retry-After: 1`, when the policy that
+resolves the viewer's access runs out of its evaluation time (`policy.eval_timeout_ms`):
+the request is refused, but no decision was made, so the client retries. Any other failure
+to resolve viewer access is still `500`. The proxy's header-authenticated `/stream/v3` routes answer `503 service_unavailable`
 too. The Jellyfin surface keeps its session and answers `503` when its session check or
 its stream and HLS authorization cannot read the session from the database, when a due
 token refresh cannot reach the database, and when that refresh meets an unreachable

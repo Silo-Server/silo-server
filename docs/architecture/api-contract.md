@@ -340,7 +340,9 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   password change, and an access token minted before the account's role changed gets
   `token_refresh_required` so clients refresh instead of signing out. A credential the auth
   gate could not check because its store failed (v1 `503 service_unavailable`) becomes
-  `503 dependency_unavailable` with `Retry-After`, never a 401. A gate the
+  `503 dependency_unavailable` with `Retry-After`, never a 401. Viewer access answers the
+  same way, with reason `viewer_access_unavailable`, when the viewer's scope policy runs out
+  of evaluation time; the request is refused either way. A gate the
   wiring lacks makes its operations fail closed with `503 dependency_unavailable`; it never
   removes them from the route table. Handlers read claims, profile, and viewer scope from the
   request context and never from headers. Every authenticated class guarantees non-nil
