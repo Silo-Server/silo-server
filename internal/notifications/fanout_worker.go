@@ -216,8 +216,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// series changes, so it can outlive the profile's access: a library
 	// restriction or maturity limit set later leaves the row in place. Only
 	// candidates that can open the episode now are captured, which keeps the
-	// title off every channel for the rest.
-	recipients := newRecipientAccess(w.scopes, w.logger)
+	// title off every channel for the rest. Eligibility is checked first, so
+	// scopes are resolved only for candidates who would get a delivery;
+	// fanOutEvent checks it again under the inbox locks.
+	recipients := newRecipientAccess(w.scopes)
 	candidatesByEvent := make(map[string]map[string]struct{}, len(fanout))
 	profiles := make(map[string]struct{})
 	for _, event := range fanout {
@@ -225,8 +227,15 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		if err != nil {
 			return 0, err
 		}
+		prefs, err := w.preferences.GetMany(ctx, tx, candidateProfileIDs(candidates))
+		if err != nil {
+			return 0, err
+		}
 		captured := make(map[string]struct{}, len(candidates))
 		for _, candidate := range candidates {
+			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.ProfileID], event.EpisodeKey); !eligible {
+				continue
+			}
 			allowed, err := recipients.canOpen(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, event.LibraryID)
 			if err != nil {
 				return 0, err
@@ -301,11 +310,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 		return nil, 0, nil
 	}
 
-	profileIDs := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		profileIDs = append(profileIDs, candidate.ProfileID)
-	}
-	prefs, err := w.preferences.GetMany(ctx, tx, profileIDs)
+	prefs, err := w.preferences.GetMany(ctx, tx, candidateProfileIDs(candidates))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -556,9 +561,18 @@ func eventIDs(events []ReleaseEvent) []string {
 	return ids
 }
 
+func candidateProfileIDs(candidates []SeriesInterest) []string {
+	ids := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.ProfileID)
+	}
+	return ids
+}
+
 // capturedFanoutCandidates retains refreshed state without admitting profiles
 // whose inbox locks were not included in the transaction-wide acquisition,
-// which also leaves out every candidate that failed the access check.
+// which also leaves out every candidate that was ineligible or failed the
+// access check when the batch was captured.
 func capturedFanoutCandidates(candidates []SeriesInterest, captured map[string]struct{}) []SeriesInterest {
 	return slices.DeleteFunc(candidates, func(candidate SeriesInterest) bool {
 		_, ok := captured[candidate.ProfileID]

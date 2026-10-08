@@ -34,14 +34,23 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 	if s == nil {
 		return nil, nil
 	}
+	var recipient *recipientAccess
+	if delivery.SeriesID != nil && *delivery.SeriesID != "" {
+		// The resolver reads through the pool, so resolve before the
+		// transaction holds a connection; canOpen below reuses the result.
+		recipient = newRecipientAccess(s.scopes)
+		if _, err := recipient.scope(ctx, delivery.UserID, delivery.ProfileID); err != nil {
+			return nil, err
+		}
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin operational dispatch tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if delivery.SeriesID != nil && *delivery.SeriesID != "" {
-		allowed, err := newRecipientAccess(s.scopes, s.logger).canOpen(ctx, tx, delivery.UserID, delivery.ProfileID, *delivery.SeriesID, 0)
+	if recipient != nil {
+		allowed, err := recipient.canOpen(ctx, tx, delivery.UserID, delivery.ProfileID, *delivery.SeriesID, 0)
 		if err != nil {
 			return nil, err
 		}

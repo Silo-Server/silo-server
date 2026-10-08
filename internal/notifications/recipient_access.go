@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -24,7 +23,6 @@ import (
 // queries the catalog once per distinct scope rather than once per recipient.
 type recipientAccess struct {
 	scopes   ScopeResolver
-	logger   *slog.Logger
 	resolved map[recipientKey]*access.Scope
 	verdicts map[string]bool
 }
@@ -34,10 +32,9 @@ type recipientKey struct {
 	profileID string
 }
 
-func newRecipientAccess(scopes ScopeResolver, logger *slog.Logger) *recipientAccess {
+func newRecipientAccess(scopes ScopeResolver) *recipientAccess {
 	return &recipientAccess{
 		scopes:   scopes,
-		logger:   logger,
 		resolved: make(map[recipientKey]*access.Scope),
 		verdicts: make(map[string]bool),
 	}
@@ -46,12 +43,12 @@ func newRecipientAccess(scopes ScopeResolver, logger *slog.Logger) *recipientAcc
 // canOpen reports whether the profile may open contentID. An episode is
 // judged by its series, as catalog reads judge it. A positive libraryID must
 // also be in the profile's scope: an episode event is about one library, and
-// the profile may see the series only through another. A recipient whose
-// scope cannot be resolved may open nothing.
+// the profile may see the series only through another. A recipient without a
+// scope may open nothing; a scope that could not be resolved is an error.
 func (a *recipientAccess) canOpen(ctx context.Context, tx pgx.Tx, userID int, profileID, contentID string, libraryID int) (bool, error) {
-	scope := a.scope(ctx, recipientKey{userID: userID, profileID: profileID})
-	if scope == nil {
-		return false, nil
+	scope, err := a.scope(ctx, userID, profileID)
+	if err != nil || scope == nil {
+		return false, err
 	}
 	if libraryID > 0 {
 		libraries := catalog.AccessFilter{AllowedLibraryIDs: scope.AllowedLibraryIDs, DisabledLibraryIDs: scope.DisabledLibraryIDs}
@@ -76,30 +73,36 @@ func (a *recipientAccess) canOpen(ctx context.Context, tx pgx.Tx, userID int, pr
 	return allowed, nil
 }
 
-// scope resolves the recipient's current scope, or nil when it has none. A
-// failed resolution skips the recipient rather than the whole batch: one
-// broken account must not hold back everyone else's notifications, and
-// sending without knowing the scope could reach a profile that may not see
-// the title.
-func (a *recipientAccess) scope(ctx context.Context, key recipientKey) *access.Scope {
+// scope resolves the recipient's current scope, or nil when it has none: the
+// profile is gone, or policy revoked it. Any other failure is returned rather
+// than read as "no access", so the caller's transaction rolls back and the
+// work is retried: fanout leaves the event unprocessed, and request
+// fulfillment retries the request. A scope built without the profile's viewer
+// preferences counts as a failure, because it lacks the libraries the profile
+// hid.
+func (a *recipientAccess) scope(ctx context.Context, userID int, profileID string) (*access.Scope, error) {
+	key := recipientKey{userID: userID, profileID: profileID}
 	if scope, ok := a.resolved[key]; ok {
-		return scope
+		return scope, nil
 	}
 	var resolved *access.Scope
 	if a.scopes != nil {
 		scope, err := a.scopes.Resolve(ctx, access.ResolveInput{
-			UserID:              key.userID,
-			ProfileID:           key.profileID,
+			UserID:              userID,
+			ProfileID:           profileID,
 			SkipPINVerification: true,
 		})
 		switch {
-		case err == nil:
+		case errors.Is(err, access.ErrProfileNotFound), errors.Is(err, access.ErrProfileUnverified):
+			// No scope: the recipient may open nothing.
+		case err != nil:
+			return nil, fmt.Errorf("resolve notification recipient %d/%s: %w", userID, profileID, err)
+		case scope.PreferencesDegraded:
+			return nil, fmt.Errorf("resolve notification recipient %d/%s: viewer preferences unavailable", userID, profileID)
+		default:
 			resolved = &scope
-		case !errors.Is(err, access.ErrProfileNotFound):
-			a.logger.WarnContext(ctx, "notification recipient skipped: access scope unavailable",
-				"user_id", key.userID, "profile_id", key.profileID, "error", err)
 		}
 	}
 	a.resolved[key] = resolved
-	return resolved
+	return resolved, nil
 }

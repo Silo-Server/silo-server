@@ -102,9 +102,12 @@ release event's episode key:
   recompute checks libraries only, so a row can outlive a library
   restriction for up to a day and a maturity limit indefinitely; this check
   is what keeps the title off every channel for that profile. A candidate
-  whose scope cannot be resolved is skipped, and its notification cursor
-  does not move. A delivery already in an inbox is not re-checked when
-  access changes later.
+  whose profile no longer exists is skipped, and its notification cursor
+  does not move. If a scope cannot be resolved right now (a failed read, or
+  viewer preferences that could not be loaded), the batch rolls back and the
+  event is retried on the next run. Only candidates that would otherwise get
+  a delivery are resolved. A delivery already in an inbox is not re-checked
+  when access changes later.
 
 Multiple matching reasons produce one delivery with merged reason flags.
 Deliveries are deduplicated per `(profile, release event)` and, for
@@ -149,9 +152,11 @@ recipient profile's on the recipient's account. The per-webhook
 An operational delivery that names a catalog item (`request.fulfilled`,
 through `series_id`) is created only when the recipient can open that item,
 checked as fanout checks an episode. A requester or follower without access
-is skipped, and the request still counts as notified. `request.approved` and
-`request.declined` name no catalog item; they repeat the title the requester
-submitted.
+is skipped, and the request still counts as notified. A scope that cannot be
+resolved fails the dispatch, so the request is retried. The scope is resolved
+before the dispatch transaction opens, because the resolver reads through the
+connection pool. `request.approved` and `request.declined` name no catalog
+item; they repeat the title the requester submitted.
 
 Approval is the one transition whose two destinations disagree. Server
 channels see `request.approved` for every approval; the requester only gets a
