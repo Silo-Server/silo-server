@@ -471,10 +471,13 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if msg, ok := validateSectionScope(existing.Scope, existing.LibraryID); !ok {
 			return none, apiError(400, "bad_request", msg)
 		}
-		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config, req.V1Rules); !ok {
+		definitionChanged := existing.SectionType != originalType || !jsonConfigEqual(originalConfig, existing.Config)
+		// Like the recipe check below, the v1 rule vocabulary applies only to a
+		// changed definition, so v1 can still rename, move or disable a row
+		// whose rules were saved through v2.
+		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config, req.V1Rules && definitionChanged); !ok {
 			return none, apiError(400, "bad_request", msg)
 		}
-		definitionChanged := existing.SectionType != originalType || !jsonConfigEqual(originalConfig, existing.Config)
 		// Only a changed type or config runs the recipe check, so a row saved
 		// before create ran it can still be moved, renamed or disabled, even
 		// when the client echoes its unchanged type and config.

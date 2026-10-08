@@ -203,6 +203,31 @@ func TestAdminSectionUpdateValidatesRecipeConfigDB(t *testing.T) {
 	}
 }
 
+// A v1 update can rename or disable a row whose rules use the v2 vocabulary,
+// echoing its config unchanged, but cannot save a changed config with one.
+func TestAdminSectionV1UpdateKeepsV2RulesDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	h := NewSectionHandler(sections.NewRepository(f.pool), nil)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM page_sections WHERE library_id=$1`, f.library)
+	})
+	titleRule := json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"begins_with","value":"the "}]}]}`)
+	row, err := h.CreateAdminSection(t.Context(), AdminSectionCreate{Scope: "library", LibraryID: &f.library, Title: "The films", SectionType: string(sections.SectionCustomFilter), Enabled: true, Config: titleRule})
+	if err != nil {
+		t.Fatalf("v2 create with a title rule: %v", err)
+	}
+	if _, err := h.UpdateAdminSection(t.Context(), row.ID, AdminSectionUpdate{Title: "Renamed", V1Rules: true}); err != nil {
+		t.Fatalf("v1 rename: %v", err)
+	}
+	if _, err := h.UpdateAdminSection(t.Context(), row.ID, AdminSectionUpdate{Enabled: new(false), Config: titleRule, V1Rules: true}); err != nil {
+		t.Fatalf("v1 disable echoing the unchanged config: %v", err)
+	}
+	changed := json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"ends_with","value":"s"}]}]}`)
+	if _, err := h.UpdateAdminSection(t.Context(), row.ID, AdminSectionUpdate{Config: changed, V1Rules: true}); err == nil {
+		t.Fatal("v1 saved a changed config with a title rule")
+	}
+}
+
 // The frozen /api/v1 routes don't request the recipe check, so they keep
 // storing what they stored before it existed.
 func TestAdminSectionV1WritesSkipRecipeConfigDB(t *testing.T) {
