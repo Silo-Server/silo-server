@@ -505,9 +505,9 @@ episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
 still apply when an administrator hides that rating source, so a saved collection
 keeps its members; the web editor only stops offering those fields.
 
-The personalized `last_watched` field also takes `not_in_last`. A title the
-profile never finished counts as finished long ago, and a show's last watched
-date is its most recently finished episode.
+The personalized `last_watched` field also takes `not_in_last`. It counts only
+finished plays: a title the profile never finished counts as finished long ago,
+and a show's last watched date is its most recently finished episode.
 
 `GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
 when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten

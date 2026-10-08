@@ -200,20 +200,21 @@ func UserHistoryCTESQL(argIdx int) string {
 	return fmt.Sprintf(`user_last_watched AS (
 	SELECT watched.media_item_id, MAX(GREATEST(src.uwh_at, src.uwp_at)) AS last_watched
 	FROM (
-		SELECT uwh.media_item_id, uwh.watched_at AS uwh_at, NULL::timestamptz AS uwp_at, uwh.completed AS finished
+		-- Only finished plays count, as on the episode path: a title, or a
+		-- show through its episodes, is dated by when it was last finished.
+		SELECT uwh.media_item_id, uwh.watched_at AS uwh_at, NULL::timestamptz AS uwp_at
 		FROM user_watch_history uwh
-		WHERE uwh.user_id = $%d AND uwh.profile_id = $%d
+		WHERE uwh.user_id = $%d AND uwh.profile_id = $%d AND uwh.completed = TRUE
 		UNION ALL
-		SELECT uwp.media_item_id, NULL::timestamptz, uwp.updated_at, TRUE
+		SELECT uwp.media_item_id, NULL::timestamptz, uwp.updated_at
 		FROM user_watch_progress uwp
 		WHERE uwp.user_id = $%d AND uwp.profile_id = $%d AND uwp.completed = TRUE
 		UNION ALL
-		SELECT erp.content_id AS media_item_id, NULL::timestamptz, erp.updated_at, TRUE
+		SELECT erp.content_id AS media_item_id, NULL::timestamptz, erp.updated_at
 		FROM ebook_reader_progress erp
 		WHERE erp.user_id = $%d AND erp.profile_id = $%d AND erp.progress >= %s
 	) src
-	-- Only a finished episode dates its show.
-	LEFT JOIN episodes ep ON src.finished AND ep.content_id = src.media_item_id
+	LEFT JOIN episodes ep ON ep.content_id = src.media_item_id
 	CROSS JOIN LATERAL (VALUES (src.media_item_id), (ep.series_id)) AS watched(media_item_id)
 	WHERE watched.media_item_id IS NOT NULL
 	  AND NOT EXISTS (

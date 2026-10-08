@@ -60,12 +60,14 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		batchEquivExec(t, pool, `INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, id(show))
 		batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1 || '-e1', $1, $1 || '-s1', 1, 1, 'Pilot')`, id(show))
 	}
-	// Only Fresh Show's episode was finished, three days ago. Stale Show's was
-	// started yesterday but not finished, which does not date the show.
+	// Only Fresh Show's episode was finished, three days ago. Stale Show's
+	// episode and 100% Wolf were started yesterday but not finished, which
+	// dates neither them nor the show.
 	batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES
-		($1, $3, $4, $5, NOW() - INTERVAL '3 days', TRUE),
-		($2, $3, $4, $6, NOW() - INTERVAL '1 day', FALSE)`,
-		prefix+"-history", prefix+"-unfinished", userID, profile, id("fresh")+"-e1", id("stale")+"-e1")
+		($1 || '-history', $2, $3, $4, NOW() - INTERVAL '3 days', TRUE),
+		($1 || '-unfinished', $2, $3, $5, NOW() - INTERVAL '1 day', FALSE),
+		($1 || '-unfinished-movie', $2, $3, $6, NOW() - INTERVAL '1 day', FALSE)`,
+		prefix, userID, profile, id("fresh")+"-e1", id("stale")+"-e1", id("wolf"))
 
 	executor := &QueryExecutor{Pool: pool}
 	viewer := AccessFilter{UserID: userID, ProfileID: profile}
@@ -92,6 +94,7 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		{"aired not in the last", "series", QueryRule{Field: "last_air_date", Op: "not_in_last", Value: "1m"}, []string{"stale"}},
 		{"show watched in the last", "series", QueryRule{Field: "last_watched", Op: "in_last", Value: "7d"}, []string{"fresh"}},
 		{"show not watched in the last", "series", QueryRule{Field: "last_watched", Op: "not_in_last", Value: "7d"}, []string{"stale"}},
+		{"unfinished title not watched", "movie", QueryRule{Field: "last_watched", Op: "in_last", Value: "7d"}, []string{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
