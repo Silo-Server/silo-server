@@ -22,6 +22,8 @@ type PersonalCollectionUpdateCommand struct {
 	CollectionID string
 	Request      PersonalCollectionUpdateRequest
 	PosterFile   func() ([]byte, error)
+	// V1Rules: see PersonalCollectionPreviewRequest.
+	V1Rules bool
 }
 
 func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd PersonalCollectionUpdateCommand) (PersonalCollectionView, error) {
@@ -77,7 +79,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		input.DisplayQueryDefinition = &displayQueryDefinition
 	}
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
+		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true, cmd.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
@@ -202,7 +204,7 @@ func (h *CollectionHandler) PreviewPersonalCollection(ctx context.Context, req P
 
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, true, true)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, true, true, req.V1Rules)
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}

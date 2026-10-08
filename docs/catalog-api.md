@@ -513,8 +513,9 @@ when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
 Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
 operators, and `not_in_last`. Older servers answer those rules with `422`, so the
 web rule editor offers them only while the flag is true. `/api/v1` keeps its frozen
-rule vocabulary: its catalog requests, including `POST /api/v1/catalog/query`,
-refuse those fields and `not_in_last` with the `400` they got before.
+rule vocabulary: its catalog requests (including `POST /api/v1/catalog/query`) and
+its section and collection saves and previews refuse those fields and
+`not_in_last` with the errors they gave before.
 
 ### Search continuation
 

@@ -127,13 +127,13 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	queryDefinition := defaultJSON(req.QueryDefinition)
 	if req.CollectionType == collectionTypeSmart {
 		var err error
-		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false)
+		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	} else if len(req.QueryDefinition) > 0 {
 		var err error
-		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false)
+		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
@@ -218,9 +218,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(req.QueryDefinition) > 0 {
 		var err error
 		if req.CollectionType == nil || *req.CollectionType == collectionTypeSmart {
-			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
+			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		} else {
-			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		}
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
@@ -370,7 +370,7 @@ func (h *LibraryCollectionHandler) PreviewAdminCollection(ctx context.Context, r
 	}
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}

@@ -200,6 +200,9 @@ type PersonalCollectionPreviewRequest struct {
 	// WithPosters signs each item's poster. Only the /api/v2 adapter sets it;
 	// the frozen /api/v1 body drops posters, so it skips the presign batch.
 	WithPosters bool `json:"-"`
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
+	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
+	V1Rules bool `json:"-"`
 }
 
 type PersonalCollectionPreviewView struct {
@@ -254,6 +257,7 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		ProfileID:  apimw.GetProfileID(r.Context()),
 		Request:    req,
 		PosterFile: posterFileReader(r),
+		V1Rules:    true,
 	})
 	if err == nil {
 		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &created)
@@ -273,7 +277,7 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
-	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: userID, ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r)})
+	resp, err := h.UpdatePersonalCollection(r.Context(), PersonalCollectionUpdateCommand{UserID: userID, ProfileID: apimw.GetProfileID(r.Context()), CollectionID: chi.URLParam(r, "id"), Request: req, PosterFile: posterFileReader(r), V1Rules: true})
 	if err == nil {
 		err = v1CollectionAudience(r.Context(), h.storeProvider, userID, &resp)
 	}
@@ -290,6 +294,7 @@ func (h *CollectionHandler) HandlePreviewCollection(w http.ResponseWriter, r *ht
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.PreviewPersonalCollection(r.Context(), req, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
@@ -522,7 +527,7 @@ func defaultJSON(raw []byte) json.RawMessage {
 	return json.RawMessage(raw)
 }
 
-func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
+func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
 	var def catalog.QueryDefinition
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &def); err != nil {
@@ -533,6 +538,11 @@ func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPerso
 	if err := def.ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields); err != nil {
 		return nil, err
 	}
+	if v1Rules {
+		if err := catalog.ValidateV1Rules(def); err != nil {
+			return nil, err
+		}
+	}
 	normalized, err := json.Marshal(def)
 	if err != nil {
 		return nil, err
@@ -540,8 +550,8 @@ func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPerso
 	return normalized, nil
 }
 
-func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
-	normalized, err := normalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields)
+func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
+	normalized, err := normalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
 	if err != nil {
 		return nil, err
 	}

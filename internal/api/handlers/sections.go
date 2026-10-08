@@ -108,6 +108,9 @@ type createSectionRequest struct {
 	// ValidateRecipe runs the section type's own config check. Only /api/v2
 	// sets it; the frozen /api/v1 routes keep accepting what they always did.
 	ValidateRecipe bool `json:"-"`
+	// V1Rules keeps the frozen /api/v1 rule vocabulary: a rule on a field or
+	// with not_in_last that /api/v2 added is refused. Only /api/v1 sets it.
+	V1Rules bool `json:"-"`
 }
 
 type updateSectionRequest struct {
@@ -120,6 +123,8 @@ type updateSectionRequest struct {
 	Enabled     *bool           `json:"enabled"`
 	// ValidateRecipe: see createSectionRequest.
 	ValidateRecipe bool `json:"-"`
+	// V1Rules: see createSectionRequest.
+	V1Rules bool `json:"-"`
 }
 
 type reorderSectionsRequest struct {
@@ -169,7 +174,7 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 }
 
 // validateSectionConfig checks config requirements for the given section type.
-func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage) (string, bool) {
+func validateSectionConfig(sectionType sections.SectionType, config json.RawMessage, v1Rules bool) (string, bool) {
 	if sectionType == sections.SectionCollection {
 		collectionConfig := sections.ParseCollectionConfig(config)
 		if strings.TrimSpace(collectionConfig.LibraryCollectionID) == "" {
@@ -201,8 +206,14 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 		}
 	}
 	if sectionType == sections.SectionCustomFilter || sectionType == sections.SectionGenre || sectionType == sections.SectionRandom || len(config) > 0 {
-		if _, err := sections.ParseQueryDefinition(config); err != nil {
+		def, err := sections.ParseQueryDefinition(config)
+		if err != nil {
 			return err.Error(), false
+		}
+		if v1Rules {
+			if err := catalog.ValidateV1Rules(def); err != nil {
+				return err.Error(), false
+			}
 		}
 	}
 	return "", true
@@ -273,6 +284,7 @@ func (h *SectionHandler) HandleCreateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 
 	resp, err := h.CreateAdminSection(r.Context(), req)
 	if err != nil {
@@ -290,6 +302,7 @@ func (h *SectionHandler) HandleUpdateSection(w http.ResponseWriter, r *http.Requ
 		writeError(w, 400, "bad_request", "Invalid request body")
 		return
 	}
+	req.V1Rules = true
 	resp, err := h.UpdateAdminSection(r.Context(), id, req)
 	if err != nil {
 		writeAPIError(w, adminSectionServiceError(err))

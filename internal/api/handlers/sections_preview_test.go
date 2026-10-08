@@ -66,6 +66,32 @@ func TestHandlePreviewValidConfig(t *testing.T) {
 	}
 }
 
+// The frozen /api/v1 preview refuses a rule /api/v2 added, as it did when the
+// fetcher could not parse it; the v2 preview takes the same config.
+func TestAdminSectionPreviewKeepsTheV1RuleVocabulary(t *testing.T) {
+	h := &SectionHandler{previewFetcher: &stubPreviewFetcher{
+		items: []*models.MediaItem{{ContentID: "abc"}},
+		total: 1,
+	}}
+	config := json.RawMessage(`{"match":"all","groups":[{"match":"all","rules":[{"field":"title","op":"begins_with","value":"the "}]}]}`)
+	body, _ := json.Marshal(map[string]any{
+		"section_type": string(sections.SectionCustomFilter),
+		"config":       config,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/sections/preview", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	h.HandlePreview(rec, req)
+
+	if rec.Code != http.StatusInternalServerError || !bytes.Contains(rec.Body.Bytes(), []byte("preview_failed")) {
+		t.Fatalf("v1 preview: status %d body %s", rec.Code, rec.Body.String())
+	}
+	if _, err := h.PreviewAdminSection(context.Background(), AdminSectionPreviewRequest{SectionType: string(sections.SectionCustomFilter), Config: config}); err != nil {
+		t.Fatalf("v2 preview: %v", err)
+	}
+}
+
 // The v2 admin preview presigns each item's poster exactly as a live row does,
 // so an admin peek shows the same image the row will show once saved.
 func TestAdminSectionPreviewPresignsPostersLikeLiveRows(t *testing.T) {
