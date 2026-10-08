@@ -141,6 +141,29 @@ describe("RuleBuilder value pickers", () => {
     expect(v2Recorder.callsOf("GET /api/v2/catalog/filters")).toHaveLength(2);
   });
 
+  it("ask an older server for the languages of the whole kind, since it refuses library_ids", async () => {
+    v2Recorder.answer("GET /api/v2/catalog/search/capabilities", {
+      revision: "r1",
+      state: "available",
+      allowed: true,
+    });
+    v2Recorder.answer("GET /api/v2/catalog/filters", {
+      genres: [],
+      studios: [],
+      networks: [],
+      countries: [],
+      original_languages: ["fr"],
+      content_ratings: [],
+    });
+    renderBuilder(languageRule("original_language", ""));
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Value" }));
+    expect(await screen.findByRole("option", { name: "French" })).toBeInTheDocument();
+    expect(v2Recorder.callsOf("GET /api/v2/catalog/filters").map((c) => c.query)).toEqual([
+      { source: "query", type: "movie", skip_technical: true },
+    ]);
+  });
+
   it("keep a saved language no title has any more", async () => {
     v2Recorder.answer("GET /api/v2/catalog/filters", {
       genres: [],

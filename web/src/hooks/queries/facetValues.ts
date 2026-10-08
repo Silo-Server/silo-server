@@ -88,22 +88,27 @@ export function useRuleLanguages(
   scope: FacetValueScope,
   { includeTechnical }: { includeTechnical: boolean },
 ) {
+  const queryClient = useQueryClient();
   const libraryIds = [...(scope.libraryIds ?? [])].sort((a, b) => a - b);
   const type = scope.mediaScope && scope.mediaScope !== "all" ? scope.mediaScope : undefined;
   return useQuery({
     queryKey: ["catalog", "ruleLanguages", { libraryIds, type, includeTechnical }] as const,
-    queryFn: async ({ signal }) =>
-      catalogFiltersFromV2(
-        await v2("GET /api/v2/catalog/filters", {
-          query: {
-            source: "query",
-            type,
-            library_ids: libraryIds.length > 0 ? libraryIds.map(String) : undefined,
-            skip_technical: includeTechnical ? undefined : true,
-          },
-          signal,
-        }),
-      ),
+    queryFn: async ({ signal }) => {
+      // A server without facet_value_search refuses library_ids, so it is
+      // asked for the whole kind instead, as useFacetValues does.
+      const capabilities = await fetchPeopleSearchCapabilities(queryClient).catch(() => null);
+      const byLibrary = capabilities?.facet_value_search === true && libraryIds.length > 0;
+      const filters = await v2("GET /api/v2/catalog/filters", {
+        query: {
+          source: "query",
+          type,
+          library_ids: byLibrary ? libraryIds.map(String) : undefined,
+          skip_technical: includeTechnical ? undefined : true,
+        },
+        signal,
+      });
+      return catalogFiltersFromV2(filters);
+    },
     staleTime: 5 * 60 * 1000,
   });
 }
