@@ -63,6 +63,7 @@ const episodeCatalogSelectBody = `(
 		NULL::text AS first_air_date,
 		NULL::text AS last_air_date,
 		e.air_date AS last_air_date_at,
+		NULL::timestamptz AS latest_episode_added_at,
 		si.air_time,
 		si.air_timezone,
 		COALESCE(si.show_status, '') AS show_status,
