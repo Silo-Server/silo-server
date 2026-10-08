@@ -23,7 +23,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -73,13 +75,10 @@ type Server struct {
 	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
-	// Download limits are node-local once egress is delegated. Rebuild the
-	// manager when hot-reloaded settings change so existing transfers retain
-	// their original limiter while new transfers use the new values.
+	// Download byte budgets are shared with API instances. Only DB-less test
+	// servers use the standalone manager.
 	downloadBandwidthMu sync.Mutex
 	downloadBandwidth   *downloads.BandwidthManager
-	downloadServerBPS   int64
-	downloadUserBPS     int64
 
 	// capabilityHash is the last computed capability snapshot's hash, published
 	// by /health without probing. Nil until the first snapshot or capability
@@ -902,19 +901,21 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	}
 }
 
+// SetDownloadBandwidth wires the shared cluster budget before serving requests.
+func (s *Server) SetDownloadBandwidth(pool *pgxpool.Pool, client *redis.Client) {
+	s.downloadBandwidth = downloads.NewBandwidthManager(0, 0)
+	s.downloadBandwidth.SetSharedBudget(client, downloads.BandwidthRates(pool))
+}
+
 func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
-	cfg := s.watcher.Config()
-	if cfg == nil {
-		return nil
-	}
-	serverBPS := cfg.Download.ServerBandwidthBPS
-	userBPS := cfg.Download.UserBandwidthBPS
 	s.downloadBandwidthMu.Lock()
 	defer s.downloadBandwidthMu.Unlock()
-	if s.downloadBandwidth == nil || serverBPS != s.downloadServerBPS || userBPS != s.downloadUserBPS {
-		s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
-		s.downloadServerBPS = serverBPS
-		s.downloadUserBPS = userBPS
+	if s.downloadBandwidth == nil {
+		cfg := s.watcher.Config()
+		if cfg == nil {
+			return nil
+		}
+		s.downloadBandwidth = downloads.NewBandwidthManager(cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS)
 	}
 	return s.downloadBandwidth
 }

@@ -1227,6 +1227,7 @@ func main() {
 		var standaloneHooks standaloneServerHooks
 		if mode == "proxy" {
 			srv := proxy.NewServer(watcher, tracker)
+			srv.SetDownloadBandwidth(pool, redisClient)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
 			if resolverErr != nil {
 				log.Fatalf("load trusted CIDRs: %v", resolverErr)
