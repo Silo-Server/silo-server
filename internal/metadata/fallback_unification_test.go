@@ -591,6 +591,175 @@ func TestPersistSeasonsAndEpisodes_BulkFailurePreservesPartialProgress(t *testin
 	}
 }
 
+// uniqueProviderIDEpisodeRepo adds the provider ID rules of EpisodeRepository
+// that the plain fake skips: the stale-ID clears that run before a write, the
+// unique provider ID indexes, which reject a bulk write holding one ID twice,
+// and the upsert keeping a stored ID when the write carries none.
+type uniqueProviderIDEpisodeRepo struct {
+	*fakeEpisodeRepo
+}
+
+var errDuplicateEpisodeProviderID = errors.New("duplicate key value violates unique constraint on an episode provider ID")
+
+func episodeIDColumns(ep *models.Episode) []*string {
+	return []*string{&ep.ImdbID, &ep.TmdbID, &ep.TvdbID}
+}
+
+// keepStoredEpisodeIDsLocked mirrors COALESCE(NULLIF(EXCLUDED.id, ”), stored).
+func (r *uniqueProviderIDEpisodeRepo) keepStoredEpisodeIDsLocked(ep *models.Episode) *models.Episode {
+	cp := *ep
+	if stored, ok := r.episodes[episodeKey(ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)]; ok {
+		storedIDs := episodeIDColumns(stored)
+		for column, id := range episodeIDColumns(&cp) {
+			if *id == "" {
+				*id = *storedIDs[column]
+			}
+		}
+	}
+	return &cp
+}
+
+func (r *uniqueProviderIDEpisodeRepo) BulkUpsert(ctx context.Context, seriesID string, episodes []*models.Episode) error {
+	r.mu.Lock()
+	owners := make([]map[string]string, 3)
+	for column := range owners {
+		owners[column] = make(map[string]string)
+	}
+	for _, ep := range episodes {
+		key := episodeKey(seriesID, ep.SeasonNumber, ep.EpisodeNumber)
+		for column, id := range episodeIDColumns(ep) {
+			if *id == "" {
+				continue
+			}
+			if _, taken := owners[column][*id]; taken {
+				r.bulkUpserts++
+				r.mu.Unlock()
+				return errDuplicateEpisodeProviderID
+			}
+			owners[column][*id] = key
+		}
+	}
+	for key, stored := range r.episodes {
+		if stored.SeriesID != seriesID {
+			continue
+		}
+		for column, id := range episodeIDColumns(stored) {
+			if owner, ok := owners[column][*id]; ok && *id != "" && owner != key {
+				*id = ""
+			}
+		}
+	}
+	writes := make([]*models.Episode, len(episodes))
+	for i, ep := range episodes {
+		writes[i] = r.keepStoredEpisodeIDsLocked(ep)
+	}
+	r.mu.Unlock()
+	return r.fakeEpisodeRepo.BulkUpsert(ctx, seriesID, writes)
+}
+
+func (r *uniqueProviderIDEpisodeRepo) Upsert(ctx context.Context, ep *models.Episode) error {
+	r.mu.Lock()
+	key := episodeKey(ep.SeriesID, ep.SeasonNumber, ep.EpisodeNumber)
+	incoming := episodeIDColumns(ep)
+	for storedKey, stored := range r.episodes {
+		if stored.SeriesID != ep.SeriesID || storedKey == key {
+			continue
+		}
+		for column, id := range episodeIDColumns(stored) {
+			if *id != "" && *id == *incoming[column] {
+				*id = ""
+			}
+		}
+	}
+	write := r.keepStoredEpisodeIDsLocked(ep)
+	r.mu.Unlock()
+	return r.fakeEpisodeRepo.Upsert(ctx, write)
+}
+
+// TestPersistSeasonsAndEpisodes_ProviderIDsStayUniqueWithinOneBulkWrite covers
+// a provider that moved an episode's ID to another episode number. The stored
+// row still holds the ID, and the canonical merge keeps stored IDs, so the
+// write batch put it on two episodes: the bulk write failed, and the
+// single-row fallback that followed left the ID on whichever row it wrote last.
+func TestPersistSeasonsAndEpisodes_ProviderIDsStayUniqueWithinOneBulkWrite(t *testing.T) {
+	type ids = map[string]string
+	for _, tc := range []struct {
+		name     string
+		stored   map[int]ids
+		provided map[int]ids
+		want     map[int]ids
+	}{
+		{
+			name:     "moved to an episode without one",
+			stored:   map[int]ids{2: {}, 6: {"tmdb": "tmdb-special"}},
+			provided: map[int]ids{2: {"tmdb": "tmdb-special"}, 6: {"tvdb": "tvdb-reunion"}},
+			want:     map[int]ids{2: {"tmdb": "tmdb-special"}, 6: {"tvdb": "tvdb-reunion"}},
+		},
+		{
+			name:     "moved off an episode that has a new one",
+			stored:   map[int]ids{2: {"tmdb": "tmdb-special"}, 6: {}},
+			provided: map[int]ids{2: {"tmdb": "tmdb-premiere"}, 6: {"tmdb": "tmdb-special"}},
+			want:     map[int]ids{2: {"tmdb": "tmdb-premiere"}, 6: {"tmdb": "tmdb-special"}},
+		},
+		{
+			name:     "one ID for a two-part episode",
+			stored:   map[int]ids{2: {}, 6: {}},
+			provided: map[int]ids{2: {"imdb": "tt0000002"}, 6: {"imdb": "tt0000002"}},
+			want:     map[int]ids{2: {"imdb": "tt0000002"}, 6: {}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const seriesID = "series-renumbered-special"
+
+			service, _, _, plainEpisodes := newSeasonEpisodeServiceForTest(seriesID)
+			episodeRepo := &uniqueProviderIDEpisodeRepo{fakeEpisodeRepo: plainEpisodes}
+			service.episodeRepo = episodeRepo
+			titles := map[int]string{2: "Behind the Scenes", 6: "Reunion"}
+			for number, stored := range tc.stored {
+				plainEpisodes.episodes[episodeKey(seriesID, 0, number)] = &models.Episode{
+					ContentID:      "special-" + titles[number],
+					SeriesID:       seriesID,
+					SeasonNumber:   0,
+					EpisodeNumber:  number,
+					Title:          titles[number],
+					ImdbID:         stored["imdb"],
+					TmdbID:         stored["tmdb"],
+					TvdbID:         stored["tvdb"],
+					MetadataSource: "provider",
+				}
+			}
+			results := make([]EpisodeResult, 0, len(tc.provided))
+			for _, number := range []int{2, 6} {
+				results = append(results, EpisodeResult{SeasonNumber: 0, EpisodeNumber: number, Title: titles[number], ProviderIDs: tc.provided[number]})
+			}
+
+			service.persistSeasonsAndEpisodes(
+				context.Background(),
+				&models.MediaItem{ContentID: seriesID, Type: "series"},
+				map[string]string{"tvdb": "series-123"},
+				"en",
+				"en",
+				[]SeasonResult{{SeasonNumber: 0, Title: "Specials"}},
+				results,
+				MergeFillEmpty,
+			)
+
+			if got := episodeRepo.BulkUpsertCalls(); got != 1 {
+				t.Fatalf("episode bulk upserts = %d, want 1", got)
+			}
+			if got := episodeRepo.UpsertCalls(); got != 0 {
+				t.Fatalf("episode single-row fallback upserts = %d, want 0", got)
+			}
+			for number, want := range tc.want {
+				got := plainEpisodes.episodes[episodeKey(seriesID, 0, number)]
+				if got == nil || got.ImdbID != want["imdb"] || got.TmdbID != want["tmdb"] || got.TvdbID != want["tvdb"] {
+					t.Fatalf("S00E%02d = %+v, want IDs %v", number, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestPersistSeasonsAndEpisodes_PrefetchFailureUsesPointReadFallback(t *testing.T) {
 	const seriesID = "series-prefetch-fallback"
 
