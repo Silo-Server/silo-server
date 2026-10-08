@@ -48,10 +48,10 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			($3, 'movie', 'Undated', '{}', 0, 0, NULL, NULL, NULL)`,
 		id("empire"), id("wolf"), id("undated"), recent)
 	batchEquivExec(t, pool, `
-		INSERT INTO media_items (content_id, type, title, genres, latest_episode_added_at, last_air_date_at) VALUES
-			($1, 'series', 'Fresh Show', '{}', NOW() - INTERVAL '2 days', CURRENT_DATE - 2),
-			($2, 'series', 'Stale Show', '{}', NOW() - INTERVAL '400 days', CURRENT_DATE - 400)`,
-		id("fresh"), id("stale"))
+		INSERT INTO media_items (content_id, type, title, genres, latest_episode_added_at, last_air_date_at, last_air_date) VALUES
+			($1, 'series', 'Fresh Show', '{}', NOW() - INTERVAL '2 days', CURRENT_DATE - 2, NULL),
+			($2, 'series', 'Stale Show', '{}', NOW() - INTERVAL '400 days', CURRENT_DATE - 400, $3)`,
+		id("fresh"), id("stale"), recent)
 	for _, movie := range []string{"empire", "wolf", "undated"} {
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id(movie), movies)
 	}
@@ -115,6 +115,43 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			slices.Sort(want)
 			if !slices.Equal(got, want) || total != len(want) {
 				t.Fatalf("got %v (total %d), want %v", got, total, want)
+			}
+		})
+	}
+
+	// A v1 relevance search hydrates neither column these rules compare, so
+	// they run in SQL. Stale Show's provider-reported last_air_date is recent,
+	// but none of its episodes aired in the last month.
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
+	for _, tt := range []struct {
+		rule QueryRule
+		want string
+	}{
+		{QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"}, "fresh"},
+		{QueryRule{Field: "last_air_date", Op: "in_last", Value: "1m"}, "fresh"},
+		{QueryRule{Field: "last_air_date", Op: "not_in_last", Value: "1m"}, "stale"},
+	} {
+		t.Run("relevance search "+tt.rule.Field+" "+tt.rule.Op, func(t *testing.T) {
+			result, err := resolver.Resolve(ctx, CatalogRequest{
+				Source:      CatalogSourceQuery,
+				SearchQuery: "show",
+				Limit:       20,
+				Query: QueryDefinition{
+					LibraryIDs: []int{movies, shows},
+					Match:      "all",
+					Groups:     []QueryGroup{{Match: "all", Rules: []QueryRule{tt.rule}}},
+					Sort:       QuerySort{Field: "relevance", Order: "desc"},
+				},
+			}, viewer)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			var got []string
+			for _, item := range result.Items {
+				got = append(got, item.ContentID)
+			}
+			if !slices.Equal(got, []string{id(tt.want)}) || result.Total != 1 {
+				t.Fatalf("got %v (total %d), want [%s]", got, result.Total, id(tt.want))
 			}
 		})
 	}

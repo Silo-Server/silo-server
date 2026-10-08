@@ -272,10 +272,25 @@ func TestBuildEpisodeCatalogEntryRuleWhere_NewFieldsFallBack(t *testing.T) {
 	}
 }
 
+func TestRequiresAdvancedQueryExecution_ShowDateRules(t *testing.T) {
+	rules := func(rule QueryRule) QueryDefinition {
+		return QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{rule}}}}
+	}
+	// Search candidates carry neither latest_episode_added_at nor the
+	// episode-derived last_air_date_at, so these rules must run in SQL.
+	for _, field := range []string{"latest_episode_added", "last_air_date"} {
+		if !requiresAdvancedQueryExecution(rules(QueryRule{Field: field, Op: "in_last", Value: "7d"})) {
+			t.Errorf("%s: expected the SQL executor", field)
+		}
+	}
+	if requiresAdvancedQueryExecution(rules(QueryRule{Field: "title", Op: "contains", Value: "x"})) {
+		t.Error("title: expected the in-memory matcher")
+	}
+}
+
 func TestCatalogRuleMatchesItem_NewFieldsAndOperators(t *testing.T) {
 	rating := 7.8
 	critic := 91
-	lastAir := time.Now().UTC().AddDate(0, 0, -3).Format("2006-01-02")
 	oldRelease := time.Now().UTC().AddDate(-3, 0, 0).Format("2006-01-02")
 	item := &models.MediaItem{
 		Title:          "The Empire Strikes Back",
@@ -283,7 +298,6 @@ func TestCatalogRuleMatchesItem_NewFieldsAndOperators(t *testing.T) {
 		Runtime:        124,
 		RatingTMDB:     &rating,
 		RatingRTCritic: &critic,
-		LastAirDate:    &lastAir,
 		ReleaseDate:    &oldRelease,
 		CreatedAt:      time.Now().AddDate(-2, 0, 0),
 	}
@@ -299,7 +313,6 @@ func TestCatalogRuleMatchesItem_NewFieldsAndOperators(t *testing.T) {
 		{Field: "runtime", Op: "gt", Value: 120.0},
 		{Field: "rating_tmdb", Op: "gte", Value: 7.5},
 		{Field: "rating_rt_critic", Op: "between", Value: []any{90.0, 100.0}},
-		{Field: "last_air_date", Op: "in_last", Value: "7d"},
 		{Field: "release_date", Op: "not_in_last", Value: "1y"},
 		{Field: "added_at", Op: "not_in_last", Value: "1y"},
 	}
@@ -315,7 +328,6 @@ func TestCatalogRuleMatchesItem_NewFieldsAndOperators(t *testing.T) {
 		{Field: "decade", Op: "is", Value: 1970.0},
 		{Field: "runtime", Op: "lt", Value: 90.0},
 		{Field: "rating_rt_audience", Op: "gt", Value: 0.0},
-		{Field: "last_air_date", Op: "not_in_last", Value: "7d"},
 		{Field: "release_date", Op: "in_last", Value: "1y"},
 		{Field: "added_at", Op: "in_last", Value: "1y"},
 	}
@@ -330,9 +342,6 @@ func TestCatalogRuleMatchesItem_NewFieldsAndOperators(t *testing.T) {
 	for _, op := range []string{"in_last", "not_in_last"} {
 		if catalogRuleMatchesItem(undated, QueryRule{Field: "release_date", Op: op, Value: "1y"}) {
 			t.Errorf("expected undated release_date not to match %s", op)
-		}
-		if catalogRuleMatchesItem(undated, QueryRule{Field: "last_air_date", Op: op, Value: "1y"}) {
-			t.Errorf("expected missing last_air_date not to match %s", op)
 		}
 	}
 	// An unknown runtime (0) matches no bound.

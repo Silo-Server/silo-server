@@ -317,7 +317,14 @@ func (r *CatalogResolver) resolveQuerySource(ctx context.Context, req CatalogReq
 	if NormalizeQuerySort(req.Query.Sort).Field == "relevance" {
 		items = filterCatalogSearchItems(items, req.SearchQuery)
 		items = filterCatalogNamePrefix(items, req.NamePrefix)
-		items = filterCatalogItems(items, req.Query)
+		if requiresAdvancedQueryExecution(req.Query) {
+			items, err = r.filterExactSourceItemsByQuery(ctx, items, req.Query, access)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			items = filterCatalogItems(items, req.Query)
+		}
 		total := len(items)
 		paged := paginateCatalogItems(items, req.Offset, req.Limit)
 		return &CatalogResult{
@@ -1912,6 +1919,9 @@ func catalogQuerySortFields() map[string]bool {
 	return QuerySortFieldSet(false)
 }
 
+// requiresAdvancedQueryExecution reports whether def needs the SQL executor
+// because its sort or one of its rules reads data catalogRuleMatchesItem
+// cannot see on a search candidate.
 func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 	if def.Sort.Field == "bitrate" {
 		return true
@@ -1920,6 +1930,10 @@ func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 		for _, rule := range group.Rules {
 			switch rule.Field {
 			case "actor", "director", "writer", "producer", "author", "narrator", "series", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
+				return true
+			case querySortLatestEpisodeAdded, querySortLastAirDate:
+				// Search hydrates neither latest_episode_added_at nor the
+				// episode-derived last_air_date_at these rules compare.
 				return true
 			}
 		}
@@ -2897,11 +2911,6 @@ func catalogRuleMatchesItem(item *models.MediaItem, rule QueryRule) bool {
 			return false
 		}
 		return compareCatalogStringDate(releaseDate, rule.Op, rule.Value)
-	case querySortLastAirDate:
-		if item.LastAirDate == nil || strings.TrimSpace(*item.LastAirDate) == "" {
-			return false
-		}
-		return compareCatalogStringDate(strings.TrimSpace(*item.LastAirDate), rule.Op, rule.Value)
 	default:
 		return false
 	}
