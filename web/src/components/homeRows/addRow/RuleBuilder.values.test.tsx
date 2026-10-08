@@ -164,6 +164,34 @@ describe("RuleBuilder value pickers", () => {
     ]);
   });
 
+  it("ask again with the rule's libraries when the capability check failed", async () => {
+    let failed = false;
+    v2Recorder.answer("GET /api/v2/catalog/search/capabilities", () => {
+      if (!failed) {
+        failed = true;
+        throw new Error("network down");
+      }
+      return { revision: "r1", state: "available", allowed: true, facet_value_search: true };
+    });
+    v2Recorder.answer("GET /api/v2/catalog/filters", {
+      genres: [],
+      studios: [],
+      networks: [],
+      countries: [],
+      original_languages: ["fr"],
+      content_ratings: [],
+    });
+    renderBuilder(languageRule("original_language", ""));
+
+    const value = screen.getByRole("combobox", { name: "Value" });
+    await waitFor(() => expect(value).toHaveTextContent("Couldn’t load languages"));
+    await userEvent.click(value);
+    expect(await screen.findByRole("option", { name: "French" })).toBeInTheDocument();
+    expect(v2Recorder.callsOf("GET /api/v2/catalog/filters").map((c) => c.query)).toEqual([
+      { source: "query", type: "movie", library_ids: ["1"], skip_technical: true },
+    ]);
+  });
+
   it("keep a saved language no title has any more", async () => {
     v2Recorder.answer("GET /api/v2/catalog/filters", {
       genres: [],

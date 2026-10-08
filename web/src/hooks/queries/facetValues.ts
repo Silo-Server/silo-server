@@ -95,9 +95,10 @@ export function useRuleLanguages(
     queryKey: ["catalog", "ruleLanguages", { libraryIds, type, includeTechnical }] as const,
     queryFn: async ({ signal }) => {
       // A server without facet_value_search refuses library_ids, so it is
-      // asked for the whole kind instead, as useFacetValues does.
-      const capabilities = await fetchPeopleSearchCapabilities(queryClient).catch(() => null);
-      const byLibrary = capabilities?.facet_value_search === true && libraryIds.length > 0;
+      // asked for the whole kind instead. A failed capability request fails
+      // the load, so the picker asks again rather than keeping that list.
+      const capabilities = await fetchPeopleSearchCapabilities(queryClient);
+      const byLibrary = capabilities.facet_value_search === true && libraryIds.length > 0;
       const filters = await v2("GET /api/v2/catalog/filters", {
         query: {
           source: "query",
