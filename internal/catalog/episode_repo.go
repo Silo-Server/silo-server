@@ -864,6 +864,29 @@ func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn st
 	return result, rows.Err()
 }
 
+// ListFilelessIDsBySeries returns the series' episodes that no library holds
+// a file for: the rows episodeAvailabilityPredicate leaves out. Metadata
+// creates them, and a history import or a deleted file can leave watches on
+// them that history removal still has to reach.
+func (r *EpisodeRepository) ListFilelessIDsBySeries(ctx context.Context, seriesID string) ([]string, error) {
+	return r.listFilelessIDs(ctx, "series_id", seriesID)
+}
+
+// ListFilelessIDsBySeason is the season counterpart of ListFilelessIDsBySeries.
+func (r *EpisodeRepository) ListFilelessIDsBySeason(ctx context.Context, seasonID string) ([]string, error) {
+	return r.listFilelessIDs(ctx, "season_id", seasonID)
+}
+
+func (r *EpisodeRepository) listFilelessIDs(ctx context.Context, parentColumn, parentID string) ([]string, error) {
+	// parentColumn comes only from the two fixed-column wrappers above.
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`SELECT content_id FROM episodes
+		WHERE %s = $1 AND NOT %s`, parentColumn, episodeAvailabilityPredicate), parentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing file-less episode ids by %s: %w", parentColumn, err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 // buildListBySeriesGroupedBySeasonQuery returns the SQL and bound args used by
 // ListBySeriesGroupedBySeason. Extracted so tests can assert SQL shape without
 // a live Postgres pool.
