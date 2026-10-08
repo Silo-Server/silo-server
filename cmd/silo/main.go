@@ -667,6 +667,33 @@ func normalizeLoadedConfig(cfg *config.Config) {
 	cfg.Playback.FFmpegPath = playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 }
 
+// applyBootstrapOverrides replaces the settings the process environment owns
+// in a config built from the database.
+func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
+	cfg.Server.Listen = bc.Listen
+	cfg.Server.Mode = bc.Mode
+	cfg.Database.URL = bc.DatabaseURL
+	cfg.JellyfinCompat.Listen = bc.JFListen
+	cfg.Redis = cfg.Redis.WithBootstrapURL(bc.RedisURL)
+}
+
+// addRedisBootstrapSettings records what REDIS_URL supplies to this process
+// in the maps the admin settings handlers read: the keys an admin cannot save
+// here and the values in effect. REDIS_URL names the database number too, so
+// redis.db is one of them and reports the number in use. With a value the
+// parser cannot read, a server that stays up has only the event bus connected,
+// to a bare address and on database 0.
+func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values map[string]string) {
+	if redisURL == "" {
+		return
+	}
+	configured["redis.url"] = true
+	values["redis.url"] = redisURL
+	configured[config.RedisDBSettingKey] = true
+	db, _ := (config.RedisConfig{URL: redisURL}).Database()
+	values[config.RedisDBSettingKey] = strconv.Itoa(db)
+}
+
 // main starts the Silo server or a requested maintenance command.
 func main() {
 	var storageAdmission *pglock.NodeAdmission
@@ -885,13 +912,7 @@ func main() {
 	normalizeLoadedConfig(cfg)
 
 	// Step 7: Apply bootstrap overrides
-	cfg.Server.Listen = bc.Listen
-	cfg.Server.Mode = bc.Mode
-	cfg.Database.URL = bc.DatabaseURL
-	cfg.JellyfinCompat.Listen = bc.JFListen
-	if bc.RedisURL != "" {
-		cfg.Redis.URL = bc.RedisURL
-	}
+	applyBootstrapOverrides(cfg, bc)
 
 	// Step 8: Recreate pool if max_connections differs from bootstrap default
 	if cfg.Database.MaxConnections != bootstrapDBCfg.MaxConnections {
@@ -1010,7 +1031,7 @@ func main() {
 		}()
 	}
 
-	eventBus := cache.NewEventBus(cfg.Redis.URL)
+	eventBus := cache.NewEventBus(cfg.Redis)
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		if event.Type == cache.EventScanComplete {
 			sections.InvalidateResolvedListCache()
@@ -1209,10 +1230,7 @@ func main() {
 
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
-	if bc.RedisURL != "" {
-		bootstrapSensitiveConfigured["redis.url"] = true
-		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
-	}
+	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues)
 	if rawTrustedProxies := strings.TrimSpace(os.Getenv(clientip.EnvTrustedProxies)); rawTrustedProxies != "" {
 		normalizedTrustedProxies, normalizeErr := clientip.NormalizeCIDRList(rawTrustedProxies)
 		if normalizeErr != nil {
@@ -2768,8 +2786,23 @@ func main() {
 		deps.TrendingRefresher = trendingRefresher
 
 		if deps.UserStoreProvider != nil {
-			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, nil, slog.Default())
+			// Imports fill their item limit with titles their owner profile
+			// can access. Scheduled syncs start with the task manager below,
+			// so the owner resolver is wired here, not in the router.
+			var ownerScopes scopeResolver
+			if policySystem != nil {
+				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			}
+			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
+			// Syncs refresh collages and start with the task manager below,
+			// before the router exists, so the collage service is shared from
+			// here; the router gives it its generator.
+			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			userSync.Collages = deps.PersonalCollectionCollages
 			// Trakt fetchers are wired in router.go (they need settingsRepo);
 			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
@@ -2859,6 +2892,7 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
 		taskMgr.Register(tasks.NewBackfillMediaItemAliasesTask(catalog.NewItemAliasRepository(deps.DB)))
+		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),

@@ -165,7 +165,7 @@ func (s *Service) providerForClaim(ctx context.Context, run *Run, claim RunClaim
 		case SourceTypeJellyfin:
 			provider = NewJellyfinProvider(s.jellyfin, jellyfinLocalAuth{BaseURL: credential.BaseURL, UserID: credential.ExternalUserID, AccessToken: credential.ServerToken})
 		case SourceTypePlex:
-			provider = NewPlexServerProvider(s.plex, credential.BaseURL, credential.ServerToken).WithAccountToken(credential.AccountToken)
+			provider = NewPlexServerProvider(s.plex, credential.candidates(), credential.ServerToken).WithAccountToken(credential.AccountToken)
 		default:
 			return nil, ErrPersonalCredentialsUnavailable
 		}

@@ -116,8 +116,18 @@ type QueryDefinition struct {
 // underlying media_items.type values via MediaScopeItemTypes.
 const MediaScopeVideo = "video"
 
+// MediaScopeVideoWithEpisodes is a search-only scope: a text search over
+// movies, series, and TV episodes. Episodes live in the episode catalog rather
+// than media_items, so only the text-search path can mix them with media
+// items. Stored definitions (smart collections, sections) reject it through
+// IsValidMediaScope; a request parser that accepts it records it as
+// CatalogRequest.SearchMediaScope and narrows every non-search read of the
+// request to MediaScopeVideo.
+const MediaScopeVideoWithEpisodes = "video_with_episodes"
+
 // IsValidMediaScope reports whether scope (already normalized to lowercase)
-// is an accepted media_scope value. Empty means unscoped and is valid.
+// is an accepted media_scope value. Empty means unscoped and is valid. The
+// search-only MediaScopeVideoWithEpisodes is not a definition scope.
 func IsValidMediaScope(scope string) bool {
 	switch scope {
 	case "", "movie", "series", "episode", "audiobook", "ebook", "manga", MediaScopeVideo:
@@ -137,6 +147,8 @@ func MediaScopeItemTypes(scope string) []string {
 		return nil
 	case MediaScopeVideo:
 		return []string{"movie", "series"}
+	case MediaScopeVideoWithEpisodes:
+		return []string{"movie", "series", "episode"}
 	default:
 		return []string{scope}
 	}

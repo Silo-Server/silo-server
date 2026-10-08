@@ -72,6 +72,14 @@ was already accepted. A refused address fails with a message that tells the
 user what to change (`historyimport.PrivateAddressMessage`), never as an
 unreachable server.
 
+A Plex run carries every address plex.tv advertised for the server and races
+them. Admission checks each one and drops those the account may not reach,
+refusing the run only when none remain. A session-backed run may name only
+addresses the stored session advertised; the enqueue transaction recomputes
+that list rather than trusting the queued credential. The Plex client removes
+`X-Plex-Token` from any redirect that leaves the first request's host or
+downgrades from HTTPS to HTTP, which `net/http` does not do for custom headers.
+
 Run monitors, v1 run responses, and realtime history-import events carry only
 the fixed summaries from `historyimport.PublicRun`; stored diagnostics can hold
 an upstream response body and stay on the server.

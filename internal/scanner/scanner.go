@@ -796,7 +796,7 @@ func (s *Scanner) scanPaths(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1708,7 +1708,7 @@ func (s *Scanner) scanScope(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)

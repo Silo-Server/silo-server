@@ -31,10 +31,13 @@ Audiobookshelf-compatible sessions, approved device sign-ins not yet collected,
 and its Jellyfin-compatible sessions) only when it sets a password or changes
 `enabled`. Access-group, permission and playback-quality changes keep the
 account signed in: they advance `access_policy_revision`, each request resolves
-the current policy, connected events sockets receive `access_changed` (see
-[realtime-api.md](realtime-api.md#access-changes)), and PIN-protected profiles
-must enter their PIN again. Library, stream-limit and download overrides never
-signed the account out and still do not.
+the current policy, and connected events sockets receive `access_changed` (see
+[realtime-api.md](realtime-api.md#access-changes)). Profile verification tokens
+stay valid: they are bound to each profile's own PIN, not to the account's
+policy (see
+[profile-verification-tokens.md](architecture/profile-verification-tokens.md)).
+Library, stream-limit and download overrides never signed the account out and
+still do not.
 
 A role change also keeps the account signed in, but admin checks trust the role
 in the access token, so the token must be replaced. Every request that presents

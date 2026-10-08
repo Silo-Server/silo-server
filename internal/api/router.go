@@ -272,6 +272,12 @@ type Dependencies struct {
 	// Trakt / MDBList) — the user-facing analogue of CollectionService.
 	UserCollectionSync      *usercollections.Service
 	UserCollectionScheduler *usercollections.Scheduler
+	// PersonalCollectionCollages serves and builds personal collection
+	// collages. main.go builds it beside UserCollectionSync, before scheduled
+	// syncs start, and hands it to both; the router gives it its generator
+	// once the poster signer exists. Nil builds one here when artwork
+	// storage is configured.
+	PersonalCollectionCollages *catalog.PersonalCollectionCollages
 
 	// TrendingRefresher refreshes the persisted trending_discover snapshots.
 	// Built in main.go with TMDB wired; its Trakt fetcher is propagated here in
@@ -546,6 +552,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var metadataCurationAccess func(http.Handler) http.Handler
 	var markerEditAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
+	var collectionOwners catalog.PersonalCollectionAccess
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
 	var sessionRepo *auth.SessionRepository
@@ -630,6 +637,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
+			// Shared personal collections are limited to their owner's
+			// access, resolved by the same resolver the request gates use.
+			collectionOwners = usercollections.NewOwnerAccess(viewerResolver)
 		}
 		if deps.DB != nil {
 			metadataLibraries := apimw.NewPGMetadataTargetLibraryResolver(deps.DB)
@@ -881,6 +891,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
+		itemsHandler.SetPersonalCollectionAccess(collectionOwners)
 		if deps.MarkerPopulation != nil {
 			itemsHandler.MarkerPopulation = deps.MarkerPopulation
 		}
@@ -938,7 +949,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			WithEpisodeRepository(episodeRepo).
 			WithUserStoreProvider(deps.UserStoreProvider).
 			WithSearchProvider(catalogSearchService.Provider()).
-			WithWatchlistPromoter(watchlistTitles)
+			WithWatchlistPromoter(watchlistTitles).
+			WithPersonalCollectionAccess(collectionOwners)
 		catalogHandler = handlers.NewCatalogHandler(catalogResolver, itemsHandler)
 		shuffleService = shuffle.NewService(deps.DB, catalogResolver)
 		catalogHandler.SetWorkSummaryProvider(literaryRepo)
@@ -1066,6 +1078,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var libraryPlaybackPrefHandler *handlers.LibraryPlaybackPrefHandler
 	var watchProviderHandler *handlers.WatchProviderHandler
 	var playbackSessionsLoader *handlers.PlaybackSessionsLoader
+	// Personal collections without an uploaded or imported poster show a
+	// collage of their titles; it needs artwork storage and poster signing.
+	var personalCollages *catalog.PersonalCollectionCollages
+	if deps.DB != nil && detailSvc != nil {
+		if gen := handlers.NewPersonalCollectionCollageGenerator(deps.Blobs.Assets, detailSvc, nil); gen != nil {
+			personalCollages = deps.PersonalCollectionCollages
+			if personalCollages == nil {
+				personalCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			}
+			personalCollages.SetCollageGenerator(gen)
+		}
+	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
 	}
@@ -1123,6 +1147,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		collectionHandler.ArtworkStore = deps.Blobs.Assets
 		collectionHandler.ArtworkResolver = deps.ArtworkResolver
+		if detailSvc != nil {
+			collectionHandler.ItemPosters = detailSvc
+		}
+		collectionHandler.CollectionOwners = collectionOwners
+		collectionHandler.Collages = personalCollages
 		// The import handler is built beside the collection handler so the v1
 		// route group and the v2 operations share one instance; the v1 routes
 		// keep their userImportHandler != nil condition.
@@ -1151,11 +1180,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
 			// Household management: a primary profile acting for another
-			// profile on its own account. Without both of these the widening
-			// is unavailable rather than unguarded.
-			if userRepo != nil {
-				settingValuesHandler.UserRepo = userRepo
-			}
+			// profile on its own account. Without the token service a
+			// PIN-locked primary cannot widen rather than widening unguarded.
 			settingValuesHandler.ProfileTokens = profileTokenService
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
@@ -1168,9 +1194,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
-		if userRepo != nil {
-			deviceHandler.UserRepo = userRepo
-		}
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
@@ -1855,6 +1878,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		sectionBulkHandler = &handlers.SectionBulkHandler{Repo: sectionRepo}
 		sectionFetcher := sections.NewFetcher(deps.DB)
 		sectionFetcher.StoreProvider = deps.UserStoreProvider
+		sectionFetcher.CollectionOwners = collectionOwners
 		if watchlistTitles != nil {
 			sectionFetcher.WatchlistPromoter = watchlistTitles
 		}
@@ -1889,8 +1913,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			sectionHandler.AccessGroups = accessGroupStore
 		}
 		if settingsRepo != nil {
-			sectionHandler.Settings = settingsRepo
-			sectionSettingsHandler = &handlers.SectionSettingsHandler{Settings: settingsRepo}
+			sectionSettingsHandler = &handlers.SectionSettingsHandler{}
 		}
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
@@ -2007,6 +2030,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.Executor = &catalog.QueryExecutor{Pool: deps.DB}
 		libraryCollectionHandler.SectionRepo = sectionRepo
 		libraryCollectionHandler.UserCollectionPool = deps.DB
+		libraryCollectionHandler.CollectionOwners = collectionOwners
+		libraryCollectionHandler.PersonalCollages = personalCollages
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		if deps.FolderRepo != nil {
@@ -2073,6 +2098,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
+			recsFetcher.CollectionOwners = collectionOwners
 			if watchlistTitles != nil {
 				recsFetcher.WatchlistPromoter = watchlistTitles
 			}
@@ -2427,7 +2453,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -2856,10 +2882,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.ProfileSections = sectionHandler
 		v2deps.AdminProfileSections = sectionHandler
 	}
-	if sectionSettingsHandler != nil {
-		v2deps.SectionFlags = sectionSettingsHandler
-		v2deps.AdminSectionSettingsWrite = sectionSettingsHandler
-	}
 	if webhookSyncHandler != nil {
 		v2deps.WebhookSync = webhookSyncHandler
 		v2deps.WebhookReceiver = webhookSyncHandler
@@ -3148,7 +3170,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Use(demoGuard.Guard)
 				}
 
-				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 				r.Route("/api-keys", func(r chi.Router) {
 					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
 					r.Get("/", apiKeyHandler.HandleListAPIKeys)
@@ -5231,19 +5253,14 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 }
 
 // newPersonalAPIKeyHandler builds the account-scoped API key handler with the
-// household check its creation path runs. A nil user repository stays a nil
-// interface so the PIN check fails closed instead of calling through it.
+// household check its creation path runs.
 func newPersonalAPIKeyHandler(
 	repo *auth.APIKeyRepository,
 	stores userstore.UserStoreProvider,
-	users *auth.UserRepository,
 	tokens *access.ProfileTokenService,
 ) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
-	if users != nil {
-		h.Users = users
-	}
 	h.ProfileTokens = tokens
 	return h
 }

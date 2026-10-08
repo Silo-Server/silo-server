@@ -68,6 +68,7 @@ type ScopeDecision struct {
 	Unrestricted        bool   `json:"unrestricted"`
 	AllowedLibraryIDs   []int  `json:"allowed_library_ids"`
 	DisabledLibraryIDs  []int  `json:"disabled_library_ids"`
+	HiddenLibraryIDs    []int  `json:"hidden_library_ids"`
 	LibrariesRestricted bool   `json:"libraries_restricted"`
 	MaxContentRating    string `json:"max_content_rating"`
 	// MaxContentRatingOverride is the ceiling a custom scope override asked for,

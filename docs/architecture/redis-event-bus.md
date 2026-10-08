@@ -23,6 +23,12 @@ own connection to the name it gives Redis:
 | `redis://host:6379/3` | `silo:admin@db3` |
 | `redis://sentinel-1:26379/3?master_name=mymaster` | `silo:admin@db3` |
 
+The number is the one the bus's connection selects. A `redis.db` setting with a
+value replaces the number in a saved `redis.url`, so a saved
+`redis://host:6379/3` with `redis.db` 5 gives `silo:admin@db5`. `REDIS_URL`
+supplies the whole connection, and a process started with it does not apply
+`redis.db`.
+
 Installs that share one Redis server on different database numbers then keep
 both their keys and their events apart.
 

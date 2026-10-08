@@ -804,6 +804,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
+	case RedisDBSettingKey:
+		return NormalizeRedisDB(value)
 	case "theme.catalog_url":
 		return normalizeAdminThemeURL(key, value)
 
@@ -949,6 +951,87 @@ func NormalizeRedisURL(raw string) (string, error) {
 		return "", fmt.Errorf("redis.url must be a valid redis://, rediss://, or unix:// URL: %w", err)
 	}
 	return value, nil
+}
+
+// RedisDBSettingKey is the setting that replaces the database number in
+// redis.url.
+const RedisDBSettingKey = "redis.db"
+
+// NormalizeRedisDB accepts an empty value, which leaves the database number
+// to redis.url, or a whole number of 0 or more.
+func NormalizeRedisDB(raw string) (string, error) {
+	db, set, err := parseRedisDB(raw)
+	if err != nil || !set {
+		return "", err
+	}
+	return strconv.Itoa(db), nil
+}
+
+// parseRedisDB reads a redis.db value and reports whether it names a number.
+func parseRedisDB(raw string) (db int, set bool, err error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, false, nil
+	}
+	db, err = strconv.Atoi(value)
+	if err != nil || db < 0 {
+		return 0, false, fmt.Errorf("%s must be a whole number, 0 or more", RedisDBSettingKey)
+	}
+	return db, true, nil
+}
+
+// Options returns the options every Redis client is built from: what
+// ParseRedisURL reads from URL, on database DB when DB is set. The error says
+// which of the two cannot be read.
+func (c RedisConfig) Options() (*redisv9.Options, *redisv9.FailoverOptions, error) {
+	options, failover, err := ParseRedisURL(c.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	db, set, err := parseRedisDB(c.DB)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case !set:
+	case failover != nil:
+		failover.DB = db
+	default:
+		options.DB = db
+	}
+	return options, failover, nil
+}
+
+// Database returns the database number the config's clients are on. It
+// reports false when there is no URL or the config cannot be parsed.
+func (c RedisConfig) Database() (int, bool) {
+	if strings.TrimSpace(c.URL) == "" {
+		return 0, false
+	}
+	options, failover, err := c.Options()
+	if err != nil {
+		return 0, false
+	}
+	var db int
+	if failover != nil {
+		db = failover.DB
+	} else {
+		db = options.DB
+	}
+	// go-redis accepts a negative number in a URL and leaves the connection
+	// on database 0.
+	return max(db, 0), true
+}
+
+// WithBootstrapURL returns the config of a process started with REDIS_URL.
+// The environment names the whole connection, database number included, so
+// the saved redis.db is not applied to it. An empty bootstrapURL changes
+// nothing.
+func (c RedisConfig) WithBootstrapURL(bootstrapURL string) RedisConfig {
+	if bootstrapURL == "" {
+		return c
+	}
+	return RedisConfig{URL: bootstrapURL}
 }
 
 // redisSentinelMasterParam is the query parameter that makes a redis.url name

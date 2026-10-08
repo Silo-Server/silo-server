@@ -14,7 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestScopeLibraryCollectionDefinition(t *testing.T) {
+func TestResolveLibraryCollectionMembershipNarrowsToCollectionLibraries(t *testing.T) {
 	cases := []struct {
 		name       string
 		saved      []int
@@ -31,12 +31,24 @@ func TestScopeLibraryCollectionDefinition(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := scopeLibraryCollectionDefinition(QueryDefinition{LibraryIDs: tc.saved}, &tc.collection)
-			if ok != tc.wantOK {
-				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			definition, err := json.Marshal(QueryDefinition{LibraryIDs: tc.saved})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if ok && !slices.Equal(got.LibraryIDs, tc.want) {
-				t.Fatalf("LibraryIDs = %v, want %v", got.LibraryIDs, tc.want)
+			tc.collection.CollectionType = "smart"
+			tc.collection.QueryDefinition = definition
+			got, err := ResolveLibraryCollectionMembership(&tc.collection, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !got.Live {
+				t.Fatal("smart collection resolved as stored")
+			}
+			if ok := !got.OutOfScope; ok != tc.wantOK {
+				t.Fatalf("in scope = %v, want %v", ok, tc.wantOK)
+			}
+			if tc.wantOK && !slices.Equal(got.Query.LibraryIDs, tc.want) {
+				t.Fatalf("LibraryIDs = %v, want %v", got.Query.LibraryIDs, tc.want)
 			}
 		})
 	}
@@ -82,7 +94,7 @@ func TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := NewLibraryCollectionRepository(pool)
-	c, err := repo.Create(ctx, CreateLibraryCollectionInput{LibraryID: libraries[1], Slug: prefix, Title: "Scope", QueryDefinition: definition})
+	c, err := repo.Create(ctx, CreateLibraryCollectionInput{LibraryID: libraries[1], Slug: prefix, Title: "Scope", CollectionType: "smart", QueryDefinition: definition})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -3449,6 +3450,183 @@ func TestPlanPlaybackV3AndroidMedia3AudioConstraintsFallBackToAAC(t *testing.T) 
 			}
 			if result.TargetAudioChannels <= 0 || result.TargetAudioChannels > test.wantChannels {
 				t.Fatalf("target channels = %d, want <= %d", result.TargetAudioChannels, test.wantChannels)
+			}
+		})
+	}
+}
+
+// A decodable, HLS-native surround track that only exceeds the delivery's
+// channel ceiling needs an audio downmix, not a video transcode. The AAC
+// conversion runs on the remux route, so it stays available with transcoding
+// disabled.
+func TestPlanPlaybackV3ChannelCeilingAdaptsAudioAndCopiesVideo(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		codec        string
+		channels     int
+		layout       string
+		maxChannels  int
+		wantChannels int
+	}{
+		{name: "EAC3 5.1 to stereo", codec: "eac3", channels: 6, layout: "5.1(side)", maxChannels: 2, wantChannels: 2},
+		{name: "AC3 5.1 to stereo", codec: "ac3", channels: 6, layout: "5.1", maxChannels: 2, wantChannels: 2},
+		{name: "EAC3 7.1 to 5.1", codec: "eac3", channels: 8, layout: "7.1", maxChannels: 6, wantChannels: 6},
+	} {
+		for _, transcodeEnabled := range []bool{true, false} {
+			t.Run(test.name+"/transcode="+strconv.FormatBool(transcodeEnabled), func(t *testing.T) {
+				tracks := []models.AudioTrack{{Codec: test.codec, Channels: test.channels, Layout: test.layout, Default: true}}
+				file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", test.codec}, test.maxChannels)
+				selectAndroidAudioTrackV3(&request, file.ID, 0)
+
+				result := PlanPlaybackV3(PlannerInputV3{
+					Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+					Settings: PlannerSettingsV3{TranscodeEnabled: transcodeEnabled, Allow4KTranscode: true},
+					Registry: testTransformationRegistryV3(),
+				})
+				if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.PlayMethod != PlayRemux || result.TargetVideoCodec != codecCopyV3 {
+					t.Fatalf("channel-limited result = %s", ExplainPlannerResultV3(result))
+				}
+				if !result.TranscodeAudio || result.TargetAudioCodec != audioCodecAACV3 || result.TargetAudioChannels != test.wantChannels {
+					t.Fatalf("audio = transcode %t codec %q channels %d, want AAC %d", result.TranscodeAudio, result.TargetAudioCodec, result.TargetAudioChannels, test.wantChannels)
+				}
+				if names := SortedTransformationNamesV3(result.Plan.Transformations); len(names) != 1 || names[0] != TransformationAudioToAACV3 {
+					t.Fatalf("transformations = %v, want only %s", names, TransformationAudioToAACV3)
+				}
+			})
+		}
+	}
+}
+
+// Under a server bitrate cap the audio-only adaptation stays a video copy when
+// the source plus the AAC output provably fits, and otherwise needs the
+// budgeted transcode.
+func TestPlanPlaybackV3ChannelCeilingRemuxUnderServerBitrateCap(t *testing.T) {
+	tracks := []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}}
+	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "eac3"}, 2)
+	// The file total counts the E-AC-3 track the video track's rate omits.
+	file.VideoTracks[0].Bitrate = 11_000
+	selectAndroidAudioTrackV3(&request, file.ID, 0)
+	input := PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: false}, Registry: testTransformationRegistryV3(),
+		ServerBitrateCapKbps: 12_200, // 12,000 kbps file total + 192 kbps stereo AAC
+	}
+	result := PlanPlaybackV3(input)
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != codecCopyV3 || result.TargetAudioChannels != 2 {
+		t.Fatalf("fitting cap result = %s", ExplainPlannerResultV3(result))
+	}
+
+	input.ServerBitrateCapKbps = 12_100
+	input.Settings.TranscodeEnabled = true
+	result = PlanPlaybackV3(input)
+	if result.Plan == nil || result.PlayMethod != PlayTranscode {
+		t.Fatalf("tight cap result = %s, want budgeted transcode", ExplainPlannerResultV3(result))
+	}
+}
+
+// A zero ceiling means unset everywhere: before planning, in the AAC layout
+// choice, and in the finished-plan check.
+// The server folds a lower client bandwidth cap into the effective cap, so an
+// audio-converting remux has to fit that one, not only the administrator's.
+func TestPlanPlaybackV3ChannelCeilingRemuxHonorsLowerClientCap(t *testing.T) {
+	tracks := []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}}
+	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "eac3"}, 2)
+	file.VideoTracks[0].Bitrate = 11_000
+	selectAndroidAudioTrackV3(&request, file.ID, 0)
+	for _, test := range []struct {
+		name      string
+		clientCap int
+		want      PlayMethod
+	}{
+		{name: "client cap fits", clientCap: 12_200, want: PlayRemux},
+		{name: "client cap too tight", clientCap: 12_100, want: PlayTranscode},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := request
+			request.BandwidthCapKbps = &test.clientCap
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+				ServerBitrateCapKbps: 20_000,
+			})
+			if result.Plan == nil || result.PlayMethod != test.want {
+				t.Fatalf("result = %s, want %s", ExplainPlannerResultV3(result), test.want)
+			}
+		})
+	}
+}
+
+// A conversion forced only by the channel ceiling must not end playback when
+// the remux executors lack AAC: the video transcode pool can still downmix.
+func TestPlanPlaybackV3ChannelCeilingFallsBackToTranscodeWithoutRemuxAAC(t *testing.T) {
+	tracks := []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}}
+	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "eac3"}, 2)
+	selectAndroidAudioTrackV3(&request, file.ID, 0)
+	noAAC := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "video_to_h264", Available: true}})
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: noAAC,
+		ProgressiveRemuxRegistry: staticHLSRegistryV3(noAAC), HLSRemuxRegistry: staticHLSRegistryV3(noAAC),
+		HLSVideoRegistry: staticHLSRegistryV3(testTransformationRegistryV3()),
+	})
+	if result.Plan == nil || result.PlayMethod != PlayTranscode || result.TargetAudioChannels > 2 {
+		t.Fatalf("result = %s, want a stereo video transcode", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3ZeroChannelCeilingIsUnset(t *testing.T) {
+	tracks := []models.AudioTrack{{Codec: "eac3", Channels: 6, Layout: "5.1(side)", Default: true}}
+	file, request := androidMedia3FFmpegFixtureV3("tv", tracks, []string{"aac", "eac3"}, 2)
+	for class, delivery := range request.ClientPlaybackContext.Deliveries {
+		zero := 0
+		delivery.MaxChannels = &zero
+		request.ClientPlaybackContext.Deliveries[class] = delivery
+	}
+	selectAndroidAudioTrackV3(&request, file.ID, 0)
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: false}, Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect {
+		t.Fatalf("zero ceiling result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3ProgressiveChannelCeilingAdaptsAudio(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		codec        string
+		channels     int
+		layout       string
+		decodable    bool
+		maxChannels  int
+		wantChannels int
+	}{
+		{name: "decodable EAC3 5.1 to stereo", codec: "eac3", channels: 6, layout: "5.1(side)", decodable: true, maxChannels: 2, wantChannels: 2},
+		{name: "undecodable DTS 7.1 to 5.1", codec: "dts", channels: 8, layout: "7.1", maxChannels: 6, wantChannels: 6},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decode := []string{"aac"}
+			if test.decodable {
+				decode = append(decode, test.codec)
+			}
+			tracks := []models.AudioTrack{{Codec: test.codec, Channels: test.channels, Layout: test.layout, Default: true}}
+			file, request := androidMedia3FFmpegFixtureV3("mobile", tracks, decode, test.maxChannels)
+			request.Capabilities.Containers = append(request.Capabilities.Containers, "mp4")
+			progressive := request.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3]
+			progressive.Enabled, progressive.SupportedOnDevice, progressive.FailureReason = true, true, ""
+			request.ClientPlaybackContext.Deliveries[DeliveryClassProgressiveV3] = progressive
+			selectAndroidAudioTrackV3(&request, file.ID, 0)
+
+			result := PlanPlaybackV3(PlannerInputV3{
+				Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: false}, Registry: testTransformationRegistryV3(),
+			})
+			if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.PlayMethod != PlayRemux {
+				t.Fatalf("progressive result = %s", ExplainPlannerResultV3(result))
+			}
+			if !result.TranscodeAudio || result.TargetAudioCodec != audioCodecAACV3 || result.TargetAudioChannels != test.wantChannels {
+				t.Fatalf("audio = transcode %t codec %q channels %d, want AAC %d", result.TranscodeAudio, result.TargetAudioCodec, result.TargetAudioChannels, test.wantChannels)
 			}
 		})
 	}

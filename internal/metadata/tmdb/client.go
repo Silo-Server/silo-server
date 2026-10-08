@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
@@ -123,15 +124,17 @@ func (c *Client) doGet(ctx context.Context, path string, dest any) error {
 	reqURL := c.baseURL + path + sep + "api_key=" + url.QueryEscape(c.apiKey)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// reqURL carries the API key and a *url.Error prints the whole URL, so
+		// these errors drop the query string before callers log or store them.
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
-			return fmt.Errorf("tmdb: create request: %w", err)
+			return fmt.Errorf("tmdb: create request: %w", logredact.SanitizeURLError(err))
 		}
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("tmdb: request failed: %w", err)
+			return fmt.Errorf("tmdb: request failed: %w", logredact.SanitizeURLError(err))
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {

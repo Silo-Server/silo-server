@@ -317,10 +317,10 @@ func TestHandleCreateProfile_AllowsVerifiedPrimaryPIN(t *testing.T) {
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret", time.Minute)
 
 	token, _, err := handler.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         1,
-		SessionID:      "sess-1",
-		ProfileID:      "profile-1",
-		PolicyRevision: 7,
+		UserID:      1,
+		SessionID:   "sess-1",
+		ProfileID:   "profile-1",
+		PINRevision: pinRevision(t, store, "profile-1"),
 	})
 	if err != nil {
 		t.Fatalf("mint profile token: %v", err)

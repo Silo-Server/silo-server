@@ -90,6 +90,24 @@ func TestLegacyTraktAdminCollectionLibraryScopeIsImmutable(t *testing.T) {
 	}
 }
 
+// The web editor changes a franchise list's TMDB collection ID by sending a
+// rebuilt tmdb_collection source; only Trakt sources are frozen.
+func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
+	existing := &models.LibraryCollection{
+		CollectionType: "tmdb",
+		LibraryIDs:     []int{1},
+		SourceURL:      "tmdb://collection/10",
+		SourceConfig:   json.RawMessage(`{"mode":"tmdb_collection","collection_id":10}`),
+	}
+	err := validateAdminCollectionSourceUpdate(existing, AdminCollectionUpdate{
+		SourceURL:    new("tmdb://collection/119"),
+		SourceConfig: json.RawMessage(`{"mode":"tmdb_collection","collection_id":119,"limit":20}`),
+	})
+	if err != nil {
+		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
+	}
+}
+
 func TestAdminCollectionServiceCanonicalGuardAndMembershipDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
 	repo := catalog.NewLibraryCollectionRepository(f.pool)

@@ -453,13 +453,17 @@ func (r *fakeRefreshDebtRepo) MarkTargetSuccess(_ context.Context, targetType, c
 		delete(r.debts, key)
 		return nil
 	}
-	r.debts[key] = &models.MetadataRefreshDebt{
-		TargetType:    targetType,
-		ContentID:     contentID,
-		Priority:      priority,
-		ReasonMask:    reasonMask,
-		NextRefreshAt: nextRefreshAt,
+	debt := &models.MetadataRefreshDebt{TargetType: targetType, ContentID: contentID}
+	if existing, ok := r.debts[key]; ok {
+		// Mirror the repository's upsert: a success leaves attempt_count and
+		// last_attempt_at alone, so terminal give-up survives later syncs.
+		debt.AttemptCount = existing.AttemptCount
+		debt.LastAttemptAt = existing.LastAttemptAt
 	}
+	debt.Priority = priority
+	debt.ReasonMask = reasonMask
+	debt.NextRefreshAt = nextRefreshAt
+	r.debts[key] = debt
 	return nil
 }
 

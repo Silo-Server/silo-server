@@ -553,7 +553,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   terminal state, node creation, whose cross-replica pool reload runs after the insert
   without a transaction, push device registration (Apple and FCM), whose update overwrites
   a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
-  field presence rather than on an effective change, the provider device-auth poll, whose
+  field presence rather than on an effective change and the profile's PIN revision whenever
+  the request carries a PIN, the provider device-auth poll, whose
   completion check is a plain read ahead of the plugin call, admin user update, whose
   password branch re-hashes and revokes every session on each attempt, profile creation,
   whose name and limit checks run in application code with no unique index on the
@@ -1395,7 +1396,7 @@ deliberate v1 differences, recorded per row in the ledger: `createProfile` answe
 `Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
 from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
 ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
-keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+keeps v1's token semantics (bound to the login session and the profile's PIN revision, `no-store`) and
 reports `expires_at` as a nullable instant. PIN verification is `non_retryable`: a replayed wrong
 PIN counts as another lockout attempt. `uploadProfileAvatar` is the first Huma multipart
 operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared
@@ -1403,7 +1404,18 @@ types or an undecodable image is `422` at `body.avatar`, an oversized avatar is 
 server without an upload store answers `503`; section overrides drop the `/reset` suffix
 (`DELETE` on the same resource), take `scope` and `library_id` as query parameters on every
 method, and read back in `snake_case` like the write (the Phase 1 catalogs flagged v1's GET/PUT
-casing mismatch). Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+casing mismatch). `getProfileSectionSettings` also returns `default_title`, the administrator's
+own title for each admin row next to the profile's effective `title`, so a client can show that a
+profile renamed a row and offer the original name back (saving an empty `title` override restores
+it); it is empty for a profile-built row, and v1 does not return it. `getProfileSectionFlags`
+keeps `allow_profile_custom_sections` for clients that read it, but it is deprecated and always
+`true`: profiles may always add rule rows (`custom_filter`), with no server setting. Whether a
+profile that is not an admin may add a new row of a recipe is that recipe's `admin_only` in
+`listSectionRecipes`; clients follow it instead of the flag. On both versions,
+`replaceProfileSectionOverrides` refuses only a profile that is not an admin adding a new row of
+an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kind already saved on
+the page is kept and may change. v1 answers `403 custom_disabled` with its frozen message; v2
+answers `403 permission_denied` saying only an admin can add an Editor's picks row. Every profile mutation in the section is demo-restricted on v2 (v1's demo guard lists none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
 **Settings section (Phase 4).** Operations: `getSettingsContract` (serves both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (also v1
@@ -2109,9 +2121,45 @@ multipart create/update operations. Creation and provider imports mint server ID
 non-retryable. Sync is synchronous and non-retryable: the existing scheduler guard is local to
 one process and does not provide cluster-wide coalescing or a durable request identity.
 
-Collection and group edits, deletes, and ordering require `If-Match`. Clients first load the
-canonical representation: `GET /collections/{id}`, `GET /collections/groups/{id}`,
-`GET /collections/order?group_id=...`, `GET /collections/groups/order`, or
+Ownership and visibility (#1615) are one rule, applied on every read and write path and in both
+user stores. A native personal collection has exactly one owner, `creator_profile_id`. Profile
+`P` on login `U` sees a collection when it belongs to `U` and either `P` created it or `is_shared`
+is true; the decision is made at read time (`userstore.Collection.VisibleTo`), so profiles created
+later see shared collections and no per-profile rows exist. A collection the profile cannot see
+answers `404 not_found` on every operation; a visible collection the profile does not own answers
+`403 permission_denied` on every mutation, including sync. Members and `item_count` are limited to
+what the owner can access and then to what the viewer can access; personalized smart rules and
+display filters use the viewer's state. Audiobookshelf (beta) collections and playlists share the
+PostgreSQL table; only rows with `native = TRUE` are personal collections, and the column defaults
+to false so another writer can never leak into native listings. See
+[the personal collections API](../collections-api.md).
+
+Migration `20261003235347_personal_collection_login_sharing` converts existing rows. A shared
+collection stays shared only when its allow list covered every profile on its login; any other
+shared collection becomes private. Release notes for a build containing this migration must say
+so and must carry a maintenance requirement: stop every API replica before a new replica runs
+migrations, and do not restart an old replica against the migrated database. An old replica
+creates collections without `native`, so they never appear in native listings, and it can still
+store an `is_shared` meant for a subset allow list, which the new rule reads as shared with the
+whole login. The later migration that drops `user_personal_collection_profiles` first repeats the
+`native` backfill and the sharing rule, so rows an old replica wrote are recovered without
+widening access.
+
+`listCollections` returns the profile's own collections in its order, then other profiles' shared
+collections grouped by owner, each in its owner's order. Each profile has one flat order of its own
+collections (`sort_order` numbered per creator). `reorderCollections` accepts only a permutation of
+the acting profile's own collections; any other ID is a `422 validation_failed` at
+`body.ordered_ids`. The order validator remains account-wide, so another profile's edit can make a
+profile's order tag stale; clients recover from the 412 as for any stale tag.
+
+Personal collection groups are removed in two phases. Today `groups` is always `[]`, `group_id`
+always null, the `groups` capability false, and the six group operations and a `group_id` update
+answer `501 capability_unsupported`. The members and operations leave `/api/v2` once shipped Apple
+and Android builds tolerate their absence, before the lock. `CollectionCapabilities.login_sharing`
+tells clients the server implements this model.
+
+Collection edits, deletes, and ordering require `If-Match`. Clients first load the
+canonical representation: `GET /collections/{id}`, `GET /collections/order`, or
 `GET /collections/{id}/items/order`. Paths in this section have the `/api/v2` prefix.
 Each response supplies a strong ETag bound to the representation, account, profile, and access
 scope. Canonical collection editors omit the volatile presigned poster URL; display listings
@@ -2119,7 +2167,7 @@ continue to provide artwork. Personal collection detail responses include the vi
 `item_count`, so their ETag also binds that count. A catalog or watch-state change that changes
 the count invalidates an earlier tag at precondition evaluation, even without a collection edit.
 The stored collection revision continues to guard concurrent definition edits in the write
-transaction. Ordering writes use PUT, group and collection partial edits use
+transaction. Ordering writes use PUT, collection partial edits use
 PATCH, and a successful delete returns 204 without an ETag. Storage compares the version and advances it in the transaction that applies the write. Missing preconditions return 428; stale
 preconditions return 412 with the current authorized validator. Clients must not automatically retry or implicitly
 replace the observed validator with a wildcard. Web editors retain the observed validator and preserve drafts
@@ -2140,7 +2188,7 @@ Artwork changes use `PUT /collections/{id}/poster` with either a bounded multipa
 then changes the poster; artwork failure leaves the saved collection intact and is reported
 separately. Membership and artwork operations check creator ownership, and item additions also
 require catalog visibility. Adding an existing native member preserves its position; order changes
-use the explicit ordering operation. Shared viewers can read permitted collections but cannot mutate them.
+use the explicit ordering operation. Shared viewers can read shared collections but cannot mutate them.
 Native membership operations preserve audiobook chapter entries in the same storage table.
 
 Collection capabilities describe the acting account's selected user store:
@@ -2150,12 +2198,13 @@ Collection capabilities describe the acting account's selected user store:
 | Existing manual create/read/update/delete and membership | Supported | Supported |
 | Stable bounded manual continuation | Supported | Supported |
 | Guarded definition update/delete | Supported | Supported |
-| Groups and collection/item ordering | Supported | Pre-existing unsupported behavior |
+| Collection/item ordering | Supported | Pre-existing unsupported behavior |
+| Groups | Removed (#1615) | Removed |
 | Imported collections and sync | Supported | Pre-existing unsupported behavior |
 | Collection artwork | Supported | Pre-existing unsupported behavior |
 
-The `groups`, `imports`, `artwork`, and `item_reorder` flags let the bundled web hide unsupported
-actions. Unsupported store features answer the structured 501 `capability_unsupported` problem;
+The `imports`, `artwork`, and `item_reorder` flags let the bundled web hide unsupported
+actions; `groups` is always false. Unsupported store features answer the structured 501 `capability_unsupported` problem;
 they are not silently accepted. This migration does not add those feature families to SQLite.
 
 Apple and Android still need to adopt these v2 collection operation mappings, ID/envelope and
@@ -2314,6 +2363,11 @@ alone would allow that snapshot to miss a newly committed reference. Missing out
 can still be removed or replaced. Section-managed cleanup also checks management mode under the
 parent lock and reports whether it actually deleted the collection.
 
+`listAdminCollectionSections` and the `home_row_count` and `row_count` members of
+`listAdminCollections` items read those JSON references from the administrator page layouts
+without locks; the counts come from one grouped query per list request. Profile-added rows live
+in profile overrides and are not counted. The counts stay off the canonical collection read.
+
 Section storage writers use serializable transactions with sorted collection parents, section
 targets, and scope counters. Durable section and scope revisions cover definition, enabled,
 featured, membership, and order changes, including generated sections and default replacement.
@@ -2367,7 +2421,13 @@ defaults and requires the captured scope ETag. Its response is the refreshed can
 with its ETag; clients refetch definitions after replacement. `reset_profiles` selects the separate all-profile
 reset capability described above; an unsupported reset fails before definition writes. Creation
 and bulk creation use POST, while the retained preview POST samples recipe results using the
-requesting profile's access filter without saving a definition. Capabilities report whether the
+requesting profile's access filter without saving a definition. Preview items carry the same
+presigned, short-lived `poster_url` a saved row serves at its default size, and omit it when the
+item has no poster; storage keys are never serialized. Creation, bulk creation, preview,
+and a PATCH that changes `section_type` or `config` run the recipe's own config check and answer
+`validation_failed` when it fails, for example an Editor's Picks list with no items; a PATCH that
+leaves both unchanged, including one that echoes their stored values, does not re-check the stored
+config. The frozen `/api/v1` single create and update routes do not run this check. Capabilities report whether the
 service, preview, and atomic profile reset are available. Clients do not automatically replay
 administrator section operations after a conflict or a partial multi-request flow.
 

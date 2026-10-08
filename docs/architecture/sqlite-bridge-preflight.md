@@ -39,8 +39,14 @@ an old source: its missing revision tables and version block import, and inspect
 does not create the tables or upgrade its version. The inventory does not run the account writer described below. Its manifest
 records the following mapping requirements:
 
-- Preserve account-scoped profile, collection and history IDs, visibility,
-  restrictions, timestamps, ordering, history identities and hidden cutoffs.
+- Preserve account-scoped profile, collection and history IDs, restrictions,
+  timestamps, ordering, history identities and hidden cutoffs.
+- Apply the personal collection sharing rule instead of copying allow lists. A
+  shared collection is shown to every profile on the login, so it stays shared
+  only when its `personal_collection_profiles` rows name every source profile
+  (its creator implied); otherwise it is imported private. Imported collections
+  are marked `native`, and no `user_personal_collection_profiles` rows are
+  written.
 - Preserve all six canonical settings scopes, null/false/empty distinctions,
   revisions, mutation replay records and migration rejects. Allocate destination
   integer surrogate IDs where required, without changing semantic identity.
@@ -80,7 +86,8 @@ The writer requires the exact supported version-22 table and column shape,
 including type, nullability, and primary keys. Unknown or generated columns are
 rejected. Both legacy session/download tables must be empty. It validates source
 profile/collection references and central catalog references, refuses existing
-mapped target account state, and imports all 27 mapped tables in one transaction.
+mapped target account state, and imports all 26 mapped tables in one transaction.
+`personal_collection_profiles` is read only to decide each collection's sharing.
 It does not repair, prune, or partially import unsupported data.
 
 Booleans must be 0 or 1. JSON destined for JSONB must be valid and have no duplicate
@@ -93,7 +100,8 @@ and value; successful copying does not certify that external encryption keys are
 available. Canonical settings remain separate from legacy settings.
 
 Rows are copied in bounded batches and verified by ordered semantic row counts
-and digests against PostgreSQL's target representation. Generated surrogate IDs
+and digests against PostgreSQL's target representation. The digest covers
+converted values, such as a collection's `is_shared` after the sharing rule. Generated surrogate IDs
 and deliberately rebased sequence/revision values are excluded from that
 projection. Collection revision witnesses, including deleted collection
 tombstones, advance above both source and destination values. Section overrides

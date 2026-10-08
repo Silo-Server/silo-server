@@ -264,7 +264,7 @@ func TestPeople(t *testing.T) {
 		t.Fatalf("empty: %d %s", rec.Code, rec.Body.String())
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/people?limit=0", "", viewerHeaders()), TypeValidationFailed)
-	for _, scope := range []string{"video", "movie", "series", "episode", "audiobook", "ebook", "manga"} {
+	for _, scope := range []string{"video", "video_with_episodes", "movie", "series", "episode", "audiobook", "ebook", "manga"} {
 		rec = do(t, h, http.MethodGet, "/api/v2/catalog/people?q=al&media_scope="+scope, "", viewerHeaders())
 		if rec.Code != 200 || fake.lastMediaScope != scope {
 			t.Fatalf("scope %q: %d %s, forwarded %q", scope, rec.Code, rec.Body.String(), fake.lastMediaScope)

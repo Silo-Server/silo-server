@@ -2315,6 +2315,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
+    /* How far fixed page chrome (the collection editor's save bar) rises to
+       clear whichever background playback bar shows. usePlaybackBarHeight
+       measures each bar, bottom inset included, on the root while it shows. */
+    --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
   }
   @media (min-width: 64rem) {
     :root[data-app-shell] {

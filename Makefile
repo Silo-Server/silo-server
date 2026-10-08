@@ -66,8 +66,7 @@ lint-changed:
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
-WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx
+WEBTEST_KNOWN_FAILURES :=
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make

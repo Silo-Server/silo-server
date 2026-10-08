@@ -42,7 +42,7 @@ type TranslateDescription struct {
 type PeopleSearchInput struct {
 	Q          string `query:"q" maxLength:"200" doc:"Name prefix or fragment; empty lists the first people"`
 	Limit      int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most people to answer"`
-	MediaScope string `query:"media_scope" enum:"video,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes"`
+	MediaScope string `query:"media_scope" enum:"video,video_with_episodes,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes. video covers movies and series; video_with_episodes adds episodes (check getCatalogSearchCapabilities.video_with_episodes_scope first)"`
 }
 
 // PersonInput names one person.

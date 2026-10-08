@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -107,6 +107,33 @@ describe("SettingsLayout", () => {
     expect(screen.getByText("3 matches")).toBeInTheDocument();
   });
 
+  it("finds Home Screen when searching for home rows", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings/playback"]}>
+        <SettingsLayout />
+      </MemoryRouter>,
+    );
+
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "home rows");
+
+    expect(screen.getAllByRole("link", { name: /Home Screen/ })).toHaveLength(1);
+  });
+
+  it.each(["hide watched items", "export layout", "import layout", "reset home"])(
+    "finds Home Screen when searching for %s",
+    async (query) => {
+      render(
+        <MemoryRouter initialEntries={["/settings/playback"]}>
+          <SettingsLayout />
+        </MemoryRouter>,
+      );
+
+      await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), query);
+
+      expect(screen.getAllByRole("link", { name: /Home Screen/ })).toHaveLength(1);
+    },
+  );
+
   it("focuses personal settings search with Cmd+K", () => {
     render(
       <MemoryRouter initialEntries={["/settings"]}>
@@ -153,5 +180,28 @@ describe("SettingsLayout", () => {
 
     expect(document.dispatchEvent(event)).toBe(true);
     expect(event.defaultPrevented).toBe(false);
+  });
+  // jsdom can't measure layout; the real check is a 390px browser walk. The
+  // app shell, the page shell and this pane each pad a phone by 16px, which
+  // leaves Home Screen's rows too narrow to read their titles.
+  it("lets Home Screen use the pane's full width on a phone", () => {
+    function paneAt(path: string) {
+      const view = render(
+        <MemoryRouter initialEntries={[`/settings/${path}`]}>
+          <Routes>
+            <Route path="/settings/*" element={<SettingsLayout />}>
+              <Route path="*" element={<div data-testid="settings-page" />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>,
+      );
+      const pane = screen.getByTestId("settings-page").parentElement?.parentElement;
+      const classes = pane?.className ?? "";
+      view.unmount();
+      return classes;
+    }
+
+    expect(paneAt("home-screen")).toContain("max-sm:px-0");
+    expect(paneAt("playback")).not.toContain("max-sm:px-0");
   });
 });

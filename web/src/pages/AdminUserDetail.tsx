@@ -198,6 +198,13 @@ function AdminUserDetailPage() {
       <div className="page-shell min-w-0 space-y-6 py-4 sm:py-6">
         {actionError && <p role="alert">{actionError}</p>}
         {!available && <p role="status">User administration is unavailable.</p>}
+        {available && manageable && !editor && (
+          <p role="status">
+            Changes to this account are unavailable: the server's response arrived without a strong
+            ETag, which saving requires. A reverse proxy that removes or rewrites the ETag header
+            causes this.
+          </p>
+        )}
         <UserDetailHeader
           user={account}
           groupName={groupName}

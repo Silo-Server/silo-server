@@ -3027,19 +3027,19 @@ func (s *MetadataService) refreshTarget(ctx context.Context, targetType, content
 	case RefreshTargetItem:
 		return s.refreshItemTarget(ctx, contentID, folderID, mode, incrementDebtAttempt)
 	case RefreshTargetSeason:
-		err := s.refreshSeasonTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshSeasonTarget(ctx, contentID, folderID, mode)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
 		}
-		return s.syncRefreshDebtForTarget(ctx, targetType, contentID)
+		return s.syncRefreshDebtForTargetOrDefer(ctx, targetType, contentID, seriesID)
 	case RefreshTargetEpisode:
-		err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
 		}
-		return s.syncRefreshDebtForTarget(ctx, targetType, contentID)
+		return s.syncRefreshDebtForTargetOrDefer(ctx, targetType, contentID, seriesID)
 	default:
 		return fmt.Errorf("unsupported metadata refresh target type %q", targetType)
 	}
@@ -3601,7 +3601,9 @@ func (s *MetadataService) recordRefreshTargetFailure(ctx context.Context, target
 			"content_id", contentID,
 			"refresh_error", refreshErr,
 			"error", err)
+		return
 	}
+	noteScheduledRefreshFailure(ctx, targetType, contentID)
 }
 
 func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID string) error {
@@ -3899,26 +3901,28 @@ func itemHasEpisodeMetadataDebt(item *models.MediaItem) bool {
 		item.EpisodeMetadataIncomplete
 }
 
-func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode) error {
+// refreshSeasonTarget refreshes one season and reports the series it belongs to.
+func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode) (string, error) {
 	if s == nil || s.seasonRepo == nil {
-		return ErrMetadataNotFound
+		return "", ErrMetadataNotFound
 	}
 	season, err := s.seasonRepo.GetByID(ctx, seasonID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode)
+	return season.SeriesID, s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode)
 }
 
-func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode) error {
+// refreshEpisodeTarget refreshes one episode and reports the series it belongs to.
+func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode) (string, error) {
 	if s == nil || s.episodeRepo == nil {
-		return ErrMetadataNotFound
+		return "", ErrMetadataNotFound
 	}
 	episode, err := s.episodeRepo.GetByID(ctx, episodeID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode)
+	return episode.SeriesID, s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode)
 }
 
 func (s *MetadataService) refreshSeriesChildTarget(
@@ -3953,6 +3957,18 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	}
 
 	updated := false
+	// The link and debt passes cover the whole series, so a scheduled refresh
+	// batch runs them once per series instead of once per season or episode.
+	// They also run when a later language fails after an earlier one wrote
+	// rows, on a context detached from the refresh's own cancellation, since
+	// that failure may be the refresh's deadline.
+	defer func() {
+		if updated {
+			syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), seriesEpisodeSyncTimeout)
+			defer cancel()
+			s.syncSeriesEpisodeStateOrDefer(syncCtx, seriesID)
+		}
+	}()
 	childCtx, err := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
 	if err != nil {
 		return err
@@ -3981,8 +3997,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		s.persistSeasonsAndEpisodes(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode)
-		updated = true
+		if s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
+			updated = true
+		}
 	}
 	if !updated {
 		return ErrMetadataNotFound
@@ -4755,7 +4772,9 @@ func bulkUpsertWithFallback[T any](
 	return succeeded
 }
 
-// persistSeasonsAndEpisodes creates/updates seasons and episodes in the DB.
+// persistSeasonsAndEpisodes writes provider seasons and episodes for a whole
+// series refresh, then relinks the series' files and re-syncs its episode
+// debt straight away: the caller's own debt sync reads the result.
 func (s *MetadataService) persistSeasonsAndEpisodes(
 	ctx context.Context,
 	series *models.MediaItem,
@@ -4766,8 +4785,27 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	episodes []EpisodeResult,
 	mergeMode MergeMode,
 ) {
-	if series == nil || strings.TrimSpace(series.ContentID) == "" {
+	if !s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 		return
+	}
+	s.syncSeriesEpisodeState(ctx, series.ContentID)
+}
+
+// persistSeasonAndEpisodeRows writes provider seasons and episodes and queues
+// their images without the series-wide link and debt passes. It reports false
+// when there is no series to write to.
+func (s *MetadataService) persistSeasonAndEpisodeRows(
+	ctx context.Context,
+	series *models.MediaItem,
+	providerIDs map[string]string,
+	canonicalLanguage string,
+	language string,
+	seasons []SeasonResult,
+	episodes []EpisodeResult,
+	mergeMode MergeMode,
+) bool {
+	if series == nil || strings.TrimSpace(series.ContentID) == "" {
+		return false
 	}
 	seriesID := series.ContentID
 	seasonIDs := make(map[int]string, len(seasons))
@@ -4803,6 +4841,9 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ContentType:       "series",
 			ImageType:         ImageCacheImagePoster,
 			SeasonNumber:      &seasonNumber,
+			// Seasons of a provider-anchored series keep their content ID
+			// when the series is rebuilt; see enqueueItemImages.
+			RequeueSucceeded: !isCachedImagePath(season.PosterPath),
 		})
 	}
 	addEpisodeImageJob := func(episode *models.Episode) {
@@ -4823,6 +4864,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ImageType:         ImageCacheImageStill,
 			SeasonNumber:      &seasonNumber,
 			EpisodeNumber:     &episodeNumber,
+			RequeueSucceeded:  !isCachedImagePath(episode.StillPath),
 		})
 	}
 	addSeasonLocalizationImageJob := func(season *models.Season, loc *models.SeasonLocalization) {
@@ -4842,6 +4884,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ContentType:       "series",
 			ImageType:         ImageCacheImagePoster,
 			SeasonNumber:      &seasonNumber,
+			RequeueSucceeded:  !isCachedImagePath(loc.PosterPath),
 		})
 	}
 
@@ -5521,7 +5564,12 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
+	return true
+}
 
+// syncSeriesEpisodeState relinks a series' files to its episodes and re-syncs
+// the series' episode metadata debt. Both passes walk the whole series.
+func (s *MetadataService) syncSeriesEpisodeState(ctx context.Context, seriesID string) {
 	if err := s.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to ensure series episode links", "component", "metadata",
 			"series_id", seriesID, "error", err)
@@ -5977,9 +6025,12 @@ func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, series
 	}
 }
 
-func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context, seriesID string, now time.Time) {
+// refreshSeriesEpisodeMetadataState re-syncs the series' episode refresh debt
+// and incomplete flag. It reports false when it could not read the series'
+// debt or episodes; failures on single rows are logged and do not count.
+func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context, seriesID string, now time.Time) bool {
 	if s == nil || s.episodeRepo == nil {
-		return
+		return true
 	}
 
 	// Observe debt versions before reading completeness so a concurrent refresh's
@@ -5991,7 +6042,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to snapshot episode refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)
-			return
+			return false
 		}
 	}
 
@@ -5999,12 +6050,24 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: failed to list series episodes for completeness check", "component", "metadata",
 			"series_id", seriesID, "error", err)
-		return
+		return false
 	}
 
+	// Episode targets that failed during a scheduled refresh batch keep the
+	// failure their own refresh recorded while they still have debt; a later
+	// target in the batch that completed one lets the sweep clear its row.
+	failedEpisodes := failedEpisodeDebtFromContext(ctx)
+	keptActionable := false
 	var completeEpisodeIDs []string
 	var actionableEpisodes []*models.Episode
 	for _, episode := range episodes {
+		if episode != nil {
+			if _, failed := failedEpisodes[strings.TrimSpace(episode.ContentID)]; failed &&
+				EpisodeHasActionableMetadataDebt(episode, now) {
+				keptActionable = true
+				continue
+			}
+		}
 		if !EpisodeHasActionableMetadataDebt(episode, now) {
 			if s.refreshDebtRepo != nil && episode != nil {
 				if id := strings.TrimSpace(episode.ContentID); id != "" {
@@ -6031,7 +6094,8 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 	}
 
-	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0, new(now))
+	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable, new(now))
+	return true
 }
 
 func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, episode *models.Episode, now time.Time) error {
@@ -6046,7 +6110,10 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if err != nil {
 		return err
 	}
-	logRefreshDebtTerminal(RefreshTargetEpisode, episode.ContentID, reasonMask, attemptCount)
+	// No terminal notice here: this sweep re-syncs every incomplete episode in
+	// the series, and a success leaves attempt_count unchanged, so a row at the
+	// terminal count would be reported again on every sweep. The episode's own
+	// target sync reports the claim that took it there.
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetEpisode,
@@ -8126,6 +8193,12 @@ func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.Me
 			ProviderContentID: providerContentID,
 			ContentType:       imageCacheContentType(item.Type),
 			ImageType:         ImageTypeToString(field.imageType),
+			// An item rebuilt under the same content ID (a Complete Refresh,
+			// or removing and re-adding a local-only series) has no cached
+			// copy, but its earlier job for this source still reads
+			// succeeded. Without a requeue, local artwork stays blank and
+			// remote artwork stays uncached.
+			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
 	s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
@@ -8138,8 +8211,11 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 	locItem := &models.MediaItem{
 		ContentID:          loc.ContentID,
 		Type:               item.Type,
+		PosterPath:         loc.PosterPath,
 		PosterSourcePath:   loc.PosterSourcePath,
+		BackdropPath:       loc.BackdropPath,
 		BackdropSourcePath: loc.BackdropSourcePath,
+		LogoPath:           loc.LogoPath,
 		LogoSourcePath:     loc.LogoSourcePath,
 	}
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
@@ -8159,6 +8235,9 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 			ProviderContentID: providerContentID,
 			ContentType:       imageCacheContentType(item.Type),
 			ImageType:         ImageTypeToString(field.imageType),
+			// Localization rows are deleted with their item, so a rebuild
+			// leaves them in the same state; see enqueueItemImages.
+			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
 	s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)

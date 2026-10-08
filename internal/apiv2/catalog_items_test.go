@@ -70,14 +70,21 @@ func (f *fakeCatalog) Filters(_ context.Context, _ handlers.ItemViewer, req cata
 	return view, nil
 }
 
-func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, _ catalogpkg.CatalogRequest, facet, prefix string, limit int) (handlers.CatalogFacetSearchView, error) {
+func (f *fakeCatalog) SearchFacet(_ context.Context, _ handlers.ItemViewer, req catalogpkg.CatalogRequest, facet, q string, limit int) (handlers.CatalogFacetSearchView, error) {
 	if f.err != nil {
 		return handlers.CatalogFacetSearchView{}, f.err
 	}
-	if facet == "author" && strings.HasPrefix("frank herbert", prefix) {
-		return handlers.CatalogFacetSearchView{Matches: []string{"Frank Herbert"}, HasMore: limit == 1}, nil
+	f.lastReq = req
+	if facet == "author" && strings.HasPrefix("frank herbert", q) {
+		return handlers.CatalogFacetSearchView{
+			Matches: []string{"Frank Herbert"}, HasMore: limit == 1,
+			Values: []catalogpkg.FacetValue{{Value: "Frank Herbert", Count: 6}}, ValuesHasMore: limit == 1,
+		}, nil
 	}
-	return handlers.CatalogFacetSearchView{Matches: []string{}}, nil
+	if facet == "genre" && q == "" {
+		return handlers.CatalogFacetSearchView{Values: []catalogpkg.FacetValue{{Value: "Drama", Count: 9}}, ValuesHasMore: true}, nil
+	}
+	return handlers.CatalogFacetSearchView{}, nil
 }
 
 func (f *fakeCatalog) AudiobookGroups(_ context.Context, v handlers.ItemViewer, q catalogpkg.AudiobookGroupsQuery) (handlers.AudiobookGroupsView, error) {
@@ -431,12 +438,31 @@ func TestCatalogFiltersAndFacetSearch(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters", "", bearer(memberToken)), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=author&q=fra&limit=1", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":["Frank Herbert"],"has_more":true,"values":[{"value":"Frank Herbert","count":6}],"values_has_more":true}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=narrator&q=zz", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"matches":[]`) {
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[],"values_has_more":false}`+"\n" {
 		t.Fatal(rec.Code, rec.Body.String())
+	}
+	// An empty q: no prefix matches, while values ranks the common ones.
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=genre", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"matches":[],"has_more":false,"values":[{"value":"Drama","count":9}],"values_has_more":true}`+"\n" {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&library_id=3&library_ids=1&library_ids=3&library_ids=2&type=series", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{1, 2, 3}) || fake.lastReq.Query.MediaScope != "series" {
+		t.Fatalf("library_ids: %d %s seam request %+v", rec.Code, rec.Body.String(), fake.lastReq.Query)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?library_ids=2", "", viewerHeaders())
+	if rec.Code != 200 || !reflect.DeepEqual(fake.lastReq.Query.LibraryIDs, []int{2}) {
+		t.Fatalf("filters library_ids: %d seam request %+v", rec.Code, fake.lastReq.Query)
+	}
+	for _, query := range []string{"library_ids=0", "library_ids=x", "library_ids=01", "source=section&section_id=s1&library_id=1&library_ids=2"} {
+		p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=studio&"+query, "", viewerHeaders()), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "query.library_ids" {
+			t.Fatalf("%s: errors = %+v", query, p.Errors)
+		}
 	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?q=fra", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/filters/search?facet=color", "", viewerHeaders()), TypeValidationFailed)
@@ -745,5 +771,37 @@ func TestGetCatalogItemScopesVersionsToLibraryWhenEnabled(t *testing.T) {
 	}
 	if fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
+	}
+}
+
+// TestListCatalogItemsVideoWithEpisodesScope pins the search-only scope on
+// the v2 browse grammar: the query source records it for text search, the
+// filters read narrows it to video, and a source without text search refuses
+// it at the type parameter (body.type on the structured form).
+func TestListCatalogItemsVideoWithEpisodesScope(t *testing.T) {
+	deps, fake := catalogDeps(t)
+	h := newTestHandler(t, deps)
+	rec := do(t, h, http.MethodGet, "/api/v2/catalog?q=heat&type=video_with_episodes", "", viewerHeaders())
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if fake.lastReq.SearchMediaScope != catalogpkg.MediaScopeVideoWithEpisodes || fake.lastReq.Query.MediaScope != catalogpkg.MediaScopeVideo {
+		t.Fatalf("seam scopes = search %q query %q", fake.lastReq.SearchMediaScope, fake.lastReq.Query.MediaScope)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/catalog/filters?type=video_with_episodes", "", viewerHeaders())
+	if rec.Code != 200 || fake.lastReq.Query.MediaScope != catalogpkg.MediaScopeVideo {
+		t.Fatalf("filters: %d %s scope %q", rec.Code, rec.Body.String(), fake.lastReq.Query.MediaScope)
+	}
+	p := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog?source=favorites&type=video_with_episodes", "", viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "query.type" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"watchlist","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	p = requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/query", `{"source":"section","scope":"home","section_id":"s","type":"video_with_episodes"}`, viewerHeaders()), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.type" {
+		t.Fatalf("section errors = %+v", p.Errors)
 	}
 }

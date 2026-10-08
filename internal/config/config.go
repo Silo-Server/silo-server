@@ -208,6 +208,9 @@ type PlaybackConfig struct {
 type RedisConfig struct {
 	// URL names one Redis server or a Sentinel deployment; see ParseRedisURL.
 	URL string `yaml:"url"`
+	// DB is the redis.db setting. When it is not empty it replaces the
+	// database number in URL; see Options.
+	DB string `yaml:"-"`
 }
 
 // RateLimitConfig holds rate limiting infrastructure settings.
