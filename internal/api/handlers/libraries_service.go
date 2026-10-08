@@ -74,7 +74,7 @@ func (h *LibraryHandler) ListLibraries(ctx context.Context) ([]LibraryView, erro
 	folders, err := h.folderRepo.List(ctx)
 	if err != nil {
 		if ctxerr.Abandoned(ctx, err) {
-			// The client left; return the cancellation so no 500 is written.
+			// The client left; nothing failed, so there is nothing to log.
 			return nil, err
 		}
 		slog.ErrorContext(ctx, "listing libraries", "component", "api", "error", err)

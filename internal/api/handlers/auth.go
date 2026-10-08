@@ -706,12 +706,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError writes a JSON error response with the given status code,
 // error code, and message.
 // writeAPIError renders an *APIError in the v1 {error, message} shape; any
-// other error is the generic internal error. A canceled request has no client
-// left, so nothing is written, as writeCatalogError does.
+// other error is the generic internal error.
 func writeAPIError(w http.ResponseWriter, err error) {
-	if errors.Is(err, context.Canceled) {
-		return
-	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
 		if apiErr.RetryAfter > 0 {

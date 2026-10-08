@@ -667,10 +667,10 @@ func dropDelegationPattern(next http.Handler) http.Handler {
 //   - a panic anywhere, including Huma's own marshal failure after the status
 //     would already have been sent, becomes the internal_error problem with no
 //     detail leakage;
-//   - a success body is never written once the client has gone away (net/http
-//     cancels the request context on disconnect);
-//   - a problem — including the 408 for a body-read timeout, which net/http
-//     also reports as a canceled context — is still delivered.
+//   - a success body, or a server error, is never written once the client has
+//     gone away (net/http cancels the request context on disconnect);
+//   - a problem below 500 — including the 408 for a body-read timeout, which
+//     net/http also reports as a canceled context — is still delivered.
 //
 // Structured responses are bounded JSON documents, so buffering them is
 // cheap; raw media and streams are not served through Huma.

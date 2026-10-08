@@ -9,6 +9,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -181,7 +182,7 @@ func (h *SectionHandler) LibrarySectionItems(ctx context.Context, libraryID int,
 		}
 		withItems, fetchErr := h.fetcher.FetchOne(ctx, s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
-			slog.ErrorContext(ctx, "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
+			slog.Log(ctx, ctxerr.LogLevel(ctx, fetchErr, slog.LevelError), "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
 			withItems = sections.SectionWithItems{
 				ResolvedSection: s,
 				Items:           []*models.MediaItem{},
