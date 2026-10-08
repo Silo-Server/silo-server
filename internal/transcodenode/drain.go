@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
@@ -54,12 +53,14 @@ func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		key := ""
+		begin := s.drain.Begin
 		parts := strings.Split(strings.Trim(path, "/"), "/")
 		if len(parts) >= 2 && (parts[0] == drainTranscodeSegment || parts[0] == "remux") && parts[1] != drainStartSegment {
 			key = transportDrainKey(parts[1])
 		}
 		if len(parts) == 3 && parts[0] == "downloads" && parts[1] == "artifacts" && downloadprepare.ValidArtifactID(parts[2]) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			key = artifactDrainKey(parts[2])
+			begin = s.drain.BeginDelivery
 		}
 		if path == transcodeStartPath {
 			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
@@ -75,7 +76,7 @@ func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 				key = transportDrainKey(input.SessionID)
 			}
 		}
-		end, err := s.drain.Begin(r.Context(), key, time.Now().Add(playback.MaxTokenTTL))
+		end, err := begin(r.Context(), key, s.drain.ExpiryAfter(playback.MaxTokenTTL))
 		if err != nil {
 			http.Error(w, "worker retiring or drain authority unavailable", http.StatusServiceUnavailable)
 			return

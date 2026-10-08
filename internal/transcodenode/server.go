@@ -967,7 +967,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
-	finishPreparation, err := s.drain.BeginPreparation(r.Context(), artifactDrainKey(req.ArtifactID), time.Now().Add(playback.MaxTokenTTL))
+	finishPreparation, err := s.drain.BeginPreparation(r.Context(), artifactDrainKey(req.ArtifactID), s.drain.ExpiryAfter(playback.MaxTokenTTL))
 	if err != nil {
 		http.Error(w, "worker retiring or drain authority unavailable", http.StatusServiceUnavailable)
 		return

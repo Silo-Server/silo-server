@@ -65,7 +65,25 @@ type Gate struct {
 }
 
 func New(source Source, jobs func() int, revoked func(context.Context, string) bool) *Gate {
-	return &Gate{source: source, jobs: jobs, revoked: revoked, now: time.Now, instanceID: uuid.NewString(), permits: make(map[string]time.Time), permitVersions: make(map[string]uint64)}
+	return NewWithClock(source, jobs, revoked, time.Now)
+}
+
+// NewWithClock uses an immutable accounting clock. The clock must be safe for
+// concurrent callers; nil selects the production wall/monotonic clock.
+func NewWithClock(source Source, jobs func() int, revoked func(context.Context, string) bool, clock func() time.Time) *Gate {
+	if clock == nil {
+		clock = time.Now
+	}
+	return &Gate{source: source, jobs: jobs, revoked: revoked, now: clock, instanceID: uuid.NewString(), permits: make(map[string]time.Time), permitVersions: make(map[string]uint64)}
+}
+
+// ExpiryAfter uses the same clock as admission and expiry accounting. A nil
+// gate retains legacy callers' ordinary time-based deadlines.
+func (g *Gate) ExpiryAfter(lifetime time.Duration) time.Time {
+	if g == nil {
+		return time.Now().Add(lifetime)
+	}
+	return g.now().Add(lifetime)
 }
 
 // syncLocked enters and returns with mu held, releasing it around source I/O.
@@ -191,8 +209,19 @@ func (g *Gate) pruneLocked(ctx context.Context, force bool) bool {
 // Begin reserves a request before any execution or egress can start. Existing
 // identities retain their bounded media permit while retiring; an unknown
 // identity cannot start, reconstruct, or resume after the worker sees a fence.
+// Only unfenced admission may renew an existing transport permit.
 // Empty identities are one-shot background/extraction work and never retained.
 func (g *Gate) Begin(ctx context.Context, key string, expiry time.Time) (func(), error) {
+	return g.begin(ctx, key, expiry, true)
+}
+
+// BeginDelivery admits a present artifact without renewing an existing permit.
+// Successful preparation/reuse owns renewal; delivery keeps that bounded term.
+func (g *Gate) BeginDelivery(ctx context.Context, key string, expiry time.Time) (func(), error) {
+	return g.begin(ctx, key, expiry, false)
+}
+
+func (g *Gate) begin(ctx context.Context, key string, expiry time.Time, renewExisting bool) (func(), error) {
 	if g == nil {
 		return func() {}, nil
 	}
@@ -220,7 +249,7 @@ func (g *Gate) Begin(ctx context.Context, key string, expiry time.Time) (func(),
 	if g.fenceID != "" && (g.sealed || key == "" || !known) {
 		return nil, ErrFenced
 	}
-	if authorityConfirmed && key != "" && expiry.After(g.now()) && expiry.After(g.permits[key]) {
+	if authorityConfirmed && g.fenceID == "" && key != "" && (!known || renewExisting) && expiry.After(g.now()) && expiry.After(g.permits[key]) {
 		g.retainLocked(key, expiry)
 	}
 	g.active++

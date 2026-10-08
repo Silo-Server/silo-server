@@ -82,8 +82,9 @@ drops. Request reservations cover in-flight
 execution and egress; bounded session permits cover gaps between media requests.
 Permits remain until signed expiry, a positive session-deny marker, confirmed
 transport teardown, or successful deletion of the exact prepared artifact. Header-authenticated media and internal transport permits
-use the maximum token lifetime, currently 24 hours. Absence from Redis and quiet
-bandwidth are never proof that a permit ended.
+use the maximum token lifetime, currently 24 hours. Once fenced, requests keep
+the last admitted expiry and cannot renew it, even when they carry a later TTL.
+Absence from Redis and quiet bandwidth are never proof that a permit ended.
 
 `native_server_id` is the read-only `server.identity_id` in the worker's shared
 database, matching native server discovery. The worker never initializes a
@@ -119,6 +120,9 @@ Prepared-download admission uses an artifact namespace separate from transport
 identities. A successful preparation or reuse retains the artifact permit before
 its request reservation and artifact lifecycle lock are released. An already
 admitted artifact's authenticated GET and HEAD may continue during retirement.
+Delivery never extends an existing artifact permit, including before fencing.
+Successful unfenced preparation or reuse may establish a later bounded expiry;
+a preparation admitted before fencing may finish that original reservation.
 Preparation, including a known artifact ID, refuses after fencing; a restarted
 worker cannot adopt a permit merely because the file exists. A definitive missing
 file removes its permit, and successful exact deletion revokes only that artifact.

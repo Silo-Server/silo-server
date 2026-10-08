@@ -175,3 +175,53 @@ func TestDrainGateRejectsMissingAndChangedRealm(t *testing.T) {
 		})
 	}
 }
+
+func TestDrainGateFencedPollingCannotRenewBoundedPermit(t *testing.T) {
+	var fence atomic.Value
+	fence.Store("")
+	initial := time.Now().UTC()
+	var clock atomic.Int64
+	clock.Store(initial.UnixNano())
+	gate := NewWithClock(func(context.Context) (int, string, string, error) {
+		return 7, fence.Load().(string), "synthetic-realm", nil
+	}, nil, nil, func() time.Time { return time.Unix(0, clock.Load()).UTC() })
+	end, err := gate.Begin(t.Context(), "existing", gate.ExpiryAfter(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	end()
+	clock.Store(initial.Add(20 * time.Minute).UnixNano())
+	end, err = gate.Begin(t.Context(), "existing", gate.ExpiryAfter(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	end()
+	fence.Store("durable-fence")
+	for _, elapsed := range []time.Duration{time.Hour, 79 * time.Minute} {
+		clock.Store(initial.Add(elapsed).UnixNano())
+		end, err = gate.Begin(t.Context(), "existing", gate.ExpiryAfter(time.Hour))
+		if err != nil {
+			t.Fatalf("known request before last unfenced expiry: %v", err)
+		}
+		end()
+	}
+	clock.Store(initial.Add(80 * time.Minute).UnixNano())
+	status, err := gate.Observe(t.Context())
+	if err != nil || !status.Drained || status.ActiveJobs != 0 || status.ActiveRequests != 0 || status.ActiveReservations != 0 {
+		t.Fatalf("fenced polling extended last unfenced permit: %+v %v", status, err)
+	}
+	if _, err := gate.Begin(t.Context(), "existing", gate.ExpiryAfter(time.Hour)); !errors.Is(err, ErrFenced) {
+		t.Fatalf("expired permit resumed after fence: %v", err)
+	}
+	fence.Store("")
+	end, err = gate.Begin(t.Context(), "existing", gate.ExpiryAfter(time.Hour))
+	if err != nil {
+		t.Fatalf("explicit cancellation did not restore bounded admission: %v", err)
+	}
+	end()
+	gate.Revoke("existing")
+	status, err = gate.Observe(t.Context())
+	if err != nil || status.Fenced || status.ActiveReservations != 0 || status.ActiveRequests != 0 {
+		t.Fatalf("cancellation cleanup: %+v %v", status, err)
+	}
+}

@@ -165,8 +165,10 @@ Worker retirement separately refuses new preparation and known-ID reuse after
 a durable fence. Preparation admitted before the fence may finish; successful
 publication or reuse retains an artifact permit while its lifecycle lock remains
 held. Authenticated GET and HEAD of that admitted artifact may continue until
-successful exact deletion or bounded permit expiry. Unknown artifacts and files
-left by a preceding worker process cannot acquire a permit after fencing.
+successful exact deletion or bounded permit expiry. Delivery does not renew an
+existing artifact permit; successful preparation/reuse before fencing owns that
+renewal. Fenced media requests cannot extend their last admitted permit expiry.
+Unknown artifacts and files left by a preceding worker process cannot acquire a permit after fencing.
 Preparation follows request cancellation, but a lost response or cancellation
 does not establish that no bytes or receipt were published. This command is
 classified non-retryable; it supplies no durable cross-node admission or replay
