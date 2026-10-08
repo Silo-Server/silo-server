@@ -230,6 +230,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "title", Op: "contains", Value: 3.0},
 		{Field: "release_date", Op: "not_in_last", Value: "soon"},
 		{Field: "last_air_date", Op: "gt", Value: "not-a-date"},
+		{Field: "last_air_date", Op: "lt", Value: "0000-01-01"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}

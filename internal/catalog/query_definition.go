@@ -190,13 +190,14 @@ func validateRuleValue(rule QueryRule) error {
 
 // isRuleDate reports whether a date rule's bound is a calendar date
 // (2024-01-31) or an RFC 3339 time, the forms the editor and clients send.
+// PostgreSQL has no year 0, so the year must be 1 or later.
 func isRuleDate(value string) bool {
 	value = strings.TrimSpace(value)
-	if _, err := time.Parse(time.DateOnly, value); err == nil {
-		return true
+	parsed, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, value)
 	}
-	_, err := time.Parse(time.RFC3339, value)
-	return err == nil
+	return err == nil && parsed.Year() >= 1
 }
 
 var querySortDefs = map[string]querySortDef{
