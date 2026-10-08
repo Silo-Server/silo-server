@@ -16,6 +16,11 @@ interface CrewEntry {
 /** Jobs to display, in order, when the page doesn't choose its own. */
 const DISPLAY_JOBS = ["Director", "Writer", "Producer"] as const;
 
+/**
+ * Lists a title's crew by job, one row per job in `jobs` order, each person
+ * once and linked to their person page. Renders nothing when no listed job has
+ * credits.
+ */
 export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
   if (crew.length === 0) return null;
 
