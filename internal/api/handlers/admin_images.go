@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netguard"
@@ -303,7 +304,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			// the failure so the admin can tell why the choice is missing.
 			preview, err := h.imageSvc.LocalImagePreview(ctx, resolved.parentItem.ContentID, img.URL)
 			if err != nil {
-				slog.WarnContext(ctx, "admin images: local image preview failed", "component", "api", "content_id", contentID, "error", err)
+				slog.WarnContext(ctx, "admin images: local image preview failed", "component", "api", "content_id", contentID, "error", logredact.SanitizeText(err.Error()))
 				if providerErrors == nil {
 					providerErrors = map[string]string{}
 				}

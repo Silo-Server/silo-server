@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -341,5 +342,27 @@ func TestFetchItemImagesWithLocalReportsDiscoveryFailureWithoutItsText(t *testin
 	}
 	if strings.Contains(got, "api_key") || strings.Contains(got, "/media/") {
 		t.Fatalf("local failure message %q leaks the underlying error", got)
+	}
+}
+
+// The discovery failure is still logged for the admin, with credential
+// assignments masked, including one nested inside another assignment.
+func TestFetchItemImagesWithLocalLogsDiscoveryFailureWithoutSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	local := &recordingImageProvider{err: errors.New("nfo read failed: desc = api_key=secret-value")}
+	service, _ := newLocalPickerServiceForTest(local, nil, []string{t.TempDir()})
+	if _, _, err := service.FetchItemImagesWithLocal(context.Background(), map[string]string{"tmdb": "1"}, "series", "en", 7, "local-series-1"); err != nil {
+		t.Fatalf("FetchItemImagesWithLocal: %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "local artwork discovery failed") || !strings.Contains(out, "nfo read failed") {
+		t.Fatalf("log = %q, want the discovery failure with its context", out)
+	}
+	if strings.Contains(out, "secret-value") {
+		t.Fatalf("log = %q, leaks the api_key value", out)
 	}
 }

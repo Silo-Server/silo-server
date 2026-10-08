@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // localArtworkPreviewWidth matches the "card" width the admin picker shows
@@ -40,7 +41,7 @@ func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, provider
 	if err != nil {
 		// Sidecar discovery does not use the chain, so a chain failure still
 		// lists the item's local artwork and reports the failure.
-		slog.WarnContext(ctx, "metadata: image provider chain unavailable for picker", "component", "metadata", "folder_id", folderID, "error", err)
+		slog.WarnContext(ctx, "metadata: image provider chain unavailable for picker", "component", "metadata", "folder_id", folderID, "error", logredact.SanitizeText(err.Error()))
 		images, providerErrors = nil, map[string]string{"chain": "Image provider chain unavailable"}
 	}
 	images = slices.DeleteFunc(images, func(image RemoteImage) bool {
@@ -48,9 +49,10 @@ func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, provider
 	})
 	local, err := s.localItemImages(ctx, contentType, folderID, contentID)
 	if err != nil {
-		// The error can carry paths and provider text, so it goes to the log
-		// and the listing only says which source failed.
-		slog.WarnContext(ctx, "metadata: local artwork discovery failed for picker", "component", "metadata", "folder_id", folderID, "content_id", contentID, "error", err)
+		// The error can carry paths and provider text, so the listing only says
+		// which source failed, and the log keeps the text with any credential
+		// assignments masked.
+		slog.WarnContext(ctx, "metadata: local artwork discovery failed for picker", "component", "metadata", "folder_id", folderID, "content_id", contentID, "error", logredact.SanitizeText(err.Error()))
 		if providerErrors == nil {
 			providerErrors = map[string]string{}
 		}
