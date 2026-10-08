@@ -18,6 +18,10 @@
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
+./internal/apiv2 TestProfileQuotaConcurrentNativeCreates
+./internal/apiv2 TestProfileQuotaDowngradeBlocksStaleNativeCreateAndPreservesHistory
+./internal/apiv2 TestProfileQuotaNativeCreateRollback
+./internal/userstore/pgstore TestCreateProfileLibraryFailureRollsBack
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB

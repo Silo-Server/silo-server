@@ -35,12 +35,17 @@ func scanProfile(scanner interface {
 }
 
 func (s *PostgresUserStore) CreateProfile(ctx context.Context, p userstore.Profile) error {
-	return createProfile(ctx, s.pool, s.userID, p)
+	return s.WithPreferenceSettingsTransaction(ctx, func(tx userstore.PreferenceSettingsWriter) error {
+		return tx.CreateProfile(ctx, p)
+	})
 }
 
+// createProfile must run in the caller's transaction, including account
+// provisioning and preference synchronization. The account lock serializes
+// creation with both other replicas and administrator quota changes.
 func createProfile(
 	ctx context.Context,
-	exec preferenceSettingsExecutor,
+	exec pgx.Tx,
 	userID int,
 	p userstore.Profile,
 ) error {
@@ -58,20 +63,26 @@ func createProfile(
 		p.ShowForcedSubtitles = true
 	}
 
-	// The first profile created for a user becomes the primary, giving it
-	// rights to manage the household's other profiles without requiring a
-	// server-wide admin role.
-	var hasExisting bool
+	var maxProfiles int
 	if err := exec.QueryRow(ctx,
-		"SELECT EXISTS(SELECT 1 FROM user_profiles WHERE user_id = $1)", userID,
-	).Scan(&hasExisting); err != nil {
+		"SELECT max_profiles FROM users WHERE id = $1 FOR NO KEY UPDATE", userID,
+	).Scan(&maxProfiles); err != nil {
+		return fmt.Errorf("locking profile quota for user %d: %w", userID, err)
+	}
+	// Keep the count in a separate statement after taking the lock so it sees
+	// the preceding creator's committed rows rather than a pre-lock snapshot.
+	var existing int
+	if err := exec.QueryRow(ctx,
+		"SELECT COUNT(*) FROM user_profiles WHERE user_id = $1", userID,
+	).Scan(&existing); err != nil {
 		return fmt.Errorf("checking existing profiles for user %d: %w", userID, err)
 	}
-	if !hasExisting {
-		p.IsPrimary = true
-	} else {
-		p.IsPrimary = false
+	if existing >= maxProfiles {
+		return &userstore.ProfileLimitError{Limit: maxProfiles}
 	}
+	// An over-cap household after a downgrade keeps its profiles and history.
+	// Only creation is refused. The first committed profile becomes primary.
+	p.IsPrimary = existing == 0
 
 	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (

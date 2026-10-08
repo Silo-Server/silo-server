@@ -23,7 +23,7 @@ type preferenceSettingsExecutor interface {
 }
 
 type preferenceSettingsTx struct {
-	exec   preferenceSettingsExecutor
+	exec   pgx.Tx
 	userID int
 }
 
@@ -33,7 +33,9 @@ func (s *PostgresUserStore) WithPreferenceSettingsTransaction(
 	ctx context.Context,
 	fn func(userstore.PreferenceSettingsWriter) error,
 ) error {
-	tx, err := s.pool.Begin(ctx)
+	// The quota count after an account lock must see a preceding creator's
+	// commit, even when the connection's default isolation was customized.
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("beginning preference settings transaction: %w", err)
 	}

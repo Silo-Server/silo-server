@@ -59,6 +59,15 @@ Omitted update fields preserve their values. Nullable policy overrides accept
 `false`, and zero concurrency limits retain their distinct meanings. Account
 identity and ordinary boolean fields reject null.
 
+`max_profiles` is an explicit account limit of at least one, independent of
+stream and transcode limits. PostgreSQL profile creation reads the current limit
+and household count while holding the account row lock in its write transaction.
+Concurrent creates and account-limit edits therefore cannot use a stale limit to
+add a profile. A full household answers `409 conflict` on
+`POST /api/v2/profiles`. Lowering the limit below the current household size keeps
+every existing profile and its history; further profile creation is refused until
+the household is below the limit.
+
 `max_remote_stream_bitrate_kbps` and `max_local_stream_bitrate_kbps` are separate
 nullable account overrides. `null` inherits the corresponding access-group
 value; `0` explicitly allows unlimited bitrate. Both access-group fields

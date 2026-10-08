@@ -438,6 +438,11 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 
 	if err := h.createProfileWithSettingsSync(ctx, store, userID, profile, settingsSync); err != nil {
+		var limit *userstore.ProfileLimitError
+		if errors.As(err, &limit) {
+			return none, apiError(http.StatusConflict, "profile_limit_reached",
+				fmt.Sprintf("This account has reached its profile limit (%d)", limit.Limit))
+		}
 		slog.ErrorContext(ctx, "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
