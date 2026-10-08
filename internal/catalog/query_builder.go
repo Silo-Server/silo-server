@@ -1882,6 +1882,11 @@ func parseDuration(s string) (string, error) {
 	return spec.sqlInterval(), nil
 }
 
+// maxSpanAmount bounds a span in each unit so the SQL interval, NOW() minus
+// it, and the Go cutoff all stay in range: about 1000 years, or 250 years of
+// hours, which a time.Duration can still hold.
+var maxSpanAmount = map[byte]int{'h': 250 * 365 * 24, 'd': 1000 * 365, 'w': 1000 * 52, 'm': 1000 * 12, 'y': 1000}
+
 func parseDurationSpec(s string) (relativeDuration, error) {
 	normalized := strings.ToLower(strings.TrimSpace(s))
 	if len(normalized) < 2 {
@@ -1895,12 +1900,14 @@ func parseDurationSpec(s string) (relativeDuration, error) {
 		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
 	}
 
-	switch unit {
-	case 'h', 'd', 'w', 'm', 'y':
-		return relativeDuration{amount: amount, unit: unit}, nil
-	default:
+	limit, ok := maxSpanAmount[unit]
+	if !ok {
 		return relativeDuration{}, fmt.Errorf("unsupported duration unit %q", unit)
 	}
+	if amount > limit {
+		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
+	}
+	return relativeDuration{amount: amount, unit: unit}, nil
 }
 
 func (d relativeDuration) sqlInterval() string {
