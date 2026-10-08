@@ -3,6 +3,7 @@ package catalog
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -436,6 +437,11 @@ func (qb *QueryBuilder) buildRule(rule QueryRule) (string, error) {
 	case "release_date":
 		return qb.buildReleaseDateClause(rule)
 	case querySortLatestEpisodeAdded:
+		// An episode row has no newest episode of its own, so it matches no
+		// bound; the cross-type search evaluates show rules against episodes.
+		if isEpisodeCatalogScope(qb.mediaScope) {
+			return qb.buildTimestampRuleClause("NULL::timestamptz", rule)
+		}
 		return qb.buildTimestampRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
 	case querySortLastAirDate:
 		return qb.buildDateRuleClause(queryColumnSQL(qb.alias, def.columnSQL), rule)
@@ -1153,8 +1159,14 @@ func ruleInterval(rule QueryRule) (string, error) {
 func (qb *QueryBuilder) buildNumericRuleClause(column string, rule QueryRule) (string, error) {
 	switch rule.Op {
 	case "gt", "gte", "lt", "lte":
+		if _, ok := catalogFloat(rule.Value); !ok {
+			return "", fmt.Errorf("%s requires a number", rule.Field)
+		}
 		return qb.buildTypedComparisonClause(column, comparisonSQL[rule.Op], rule.Value, "numeric"), nil
 	case "between":
+		if _, ok := catalogFloatRange(rule.Value); !ok {
+			return "", fmt.Errorf("%s between requires [min, max] numbers", rule.Field)
+		}
 		return qb.buildTypedBetweenClause(column, rule.Value, "numeric")
 	default:
 		return "", fmt.Errorf("unsupported operator %q for %s", rule.Op, rule.Field)
@@ -1215,7 +1227,7 @@ func (qb *QueryBuilder) buildDecadeClause(rule QueryRule) (string, error) {
 // decadeStart reads a decade rule's value as the decade's first year.
 func decadeStart(value any) (int, bool) {
 	year, ok := catalogFloat(value)
-	if !ok || year < 0 || year > 9999 {
+	if !ok || math.IsNaN(year) || year < 0 || year > 9999 {
 		return 0, false
 	}
 	start := int(year)

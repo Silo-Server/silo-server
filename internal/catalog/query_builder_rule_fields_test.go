@@ -199,18 +199,38 @@ func TestValidate_NewRuleOperatorsPerField(t *testing.T) {
 	}
 }
 
-func TestValidate_EpisodeScopeRejectsLatestEpisodeAdded(t *testing.T) {
-	def := QueryDefinition{
+func TestBuild_LatestEpisodeAddedMatchesNoEpisode(t *testing.T) {
+	// The cross-type search evaluates an unscoped definition's rules against
+	// episode rows, so the episode scope must accept the field and match nothing.
+	qb := NewQueryBuilder("mi").WithMediaScope("episode")
+	clause, _ := buildSingleRule(t, qb, QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"})
+	if clause != "(NULL::timestamptz >= NOW() - INTERVAL '7 days')" {
+		t.Fatalf("unexpected clause %q", clause)
+	}
+	_, _, err := NewQueryBuilder("mi").WithMediaScope("episode").Build(QueryDefinition{
 		MediaScope: "episode",
 		Match:      "all",
-		Groups:     []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "latest_episode_added", Op: "in_last", Value: "7d"}}}},
+		Groups:     []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "latest_episode_added", Op: "not_in_last", Value: "soon"}}}},
+	})
+	if err == nil {
+		t.Fatal("expected a malformed span to be rejected in the episode scope too")
 	}
-	if err := def.Validate(); err == nil {
-		t.Fatal("expected latest_episode_added to be rejected for the episode scope")
-	}
-	def.MediaScope = "series"
-	if err := def.Validate(); err != nil {
-		t.Fatalf("expected latest_episode_added to be accepted for the series scope, got %v", err)
+}
+
+func TestBuild_NewRuleFieldsRejectMalformedValues(t *testing.T) {
+	for _, rule := range []QueryRule{
+		{Field: "decade", Op: "is", Value: "NaN"},
+		{Field: "runtime", Op: "lt", Value: ""},
+		{Field: "rating_tmdb", Op: "between", Value: []any{"", ""}},
+		{Field: "rating_rt_critic", Op: "gte", Value: "high"},
+	} {
+		_, _, err := NewQueryBuilder("mi").Build(QueryDefinition{
+			Match:  "all",
+			Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}},
+		})
+		if err == nil {
+			t.Errorf("%s %s %v: expected the value to be rejected before it reaches SQL", rule.Field, rule.Op, rule.Value)
+		}
 	}
 }
 

@@ -419,9 +419,6 @@ func (q QueryDefinition) ValidateWithOptions(allowPersonalizedSorts, allowPerson
 			if normalized.MediaScope == "ebook" && rule.Field == "narrator" {
 				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported for ebook media_scope", i, j, rule.Field)
 			}
-			if isEpisodeCatalogScope(normalized.MediaScope) && rule.Field == querySortLatestEpisodeAdded {
-				return fmt.Errorf("groups[%d].rules[%d].field %q is not supported for episode media_scope", i, j, rule.Field)
-			}
 			if !def.allows(rule.Op) {
 				return fmt.Errorf("groups[%d].rules[%d].op %q is not supported for field %q", i, j, rule.Op, rule.Field)
 			}

@@ -494,10 +494,15 @@ Each rule is `{field, op, value}`; an operator a field does not list returns `42
 `not_in_last` keeps titles whose date falls before the span; a title without the
 date matches neither `in_last` nor `not_in_last`, and a title with no runtime
 matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
-show's newest episode, so movies never match them, and the `episode` media scope
-rejects `latest_episode_added`. The personalized `last_watched` field also takes
-`not_in_last`; a title the profile never finished counts as finished long ago, and
-a show's last watched date is its most recently finished episode.
+show's newest episode, so movies never match them. An episode row never matches
+`latest_episode_added`, and in the `episode` scope `last_air_date` is the
+episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
+still apply when an administrator hides that rating source, so a saved collection
+keeps its members; the web editor only stops offering those fields.
+
+The personalized `last_watched` field also takes `not_in_last`. A title the
+profile never finished counts as finished long ago, and a show's last watched
+date is its most recently finished episode.
 
 `GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
 when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
