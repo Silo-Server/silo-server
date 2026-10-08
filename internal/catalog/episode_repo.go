@@ -864,27 +864,43 @@ func (r *EpisodeRepository) listIDsByParent(ctx context.Context, parentColumn st
 	return result, rows.Err()
 }
 
-// ListFilelessIDsBySeries returns the series' episodes that no library holds
-// a file for: the rows episodeAvailabilityPredicate leaves out. Metadata
-// creates them, and a history import or a deleted file can leave watches on
-// them that history removal still has to reach.
-func (r *EpisodeRepository) ListFilelessIDsBySeries(ctx context.Context, seriesID string) ([]string, error) {
-	return r.listFilelessIDs(ctx, "series_id", seriesID)
+// PartitionIDsBySeries splits a series' episode IDs into those a library
+// holds a file for (the rows episodeAvailabilityPredicate keeps) and those it
+// doesn't. Metadata creates file-less rows, and a history import or a deleted
+// file can leave watches on them that history removal still has to reach.
+// One statement reads both sets, so a file linked mid-read can't drop an
+// episode from both.
+func (r *EpisodeRepository) PartitionIDsBySeries(ctx context.Context, seriesID string) (withFile, fileless []string, err error) {
+	return r.partitionIDs(ctx, "series_id", seriesID)
 }
 
-// ListFilelessIDsBySeason is the season counterpart of ListFilelessIDsBySeries.
-func (r *EpisodeRepository) ListFilelessIDsBySeason(ctx context.Context, seasonID string) ([]string, error) {
-	return r.listFilelessIDs(ctx, "season_id", seasonID)
+// PartitionIDsBySeason is the season counterpart of PartitionIDsBySeries.
+func (r *EpisodeRepository) PartitionIDsBySeason(ctx context.Context, seasonID string) (withFile, fileless []string, err error) {
+	return r.partitionIDs(ctx, "season_id", seasonID)
 }
 
-func (r *EpisodeRepository) listFilelessIDs(ctx context.Context, parentColumn, parentID string) ([]string, error) {
+func (r *EpisodeRepository) partitionIDs(ctx context.Context, parentColumn, parentID string) (withFile, fileless []string, err error) {
 	// parentColumn comes only from the two fixed-column wrappers above.
-	rows, err := r.pool.Query(ctx, fmt.Sprintf(`SELECT content_id FROM episodes
-		WHERE %s = $1 AND NOT %s`, parentColumn, episodeAvailabilityPredicate), parentID)
+	rows, err := r.pool.Query(ctx, fmt.Sprintf(`SELECT content_id, %s FROM episodes
+		WHERE %s = $1
+		ORDER BY season_number ASC, episode_number ASC`, episodeAvailabilityPredicate, parentColumn), parentID)
 	if err != nil {
-		return nil, fmt.Errorf("listing file-less episode ids by %s: %w", parentColumn, err)
+		return nil, nil, fmt.Errorf("partitioning episode ids by %s: %w", parentColumn, err)
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+	defer rows.Close()
+	for rows.Next() {
+		var contentID string
+		var available bool
+		if err := rows.Scan(&contentID, &available); err != nil {
+			return nil, nil, fmt.Errorf("scanning episode ids by %s: %w", parentColumn, err)
+		}
+		if available {
+			withFile = append(withFile, contentID)
+		} else {
+			fileless = append(fileless, contentID)
+		}
+	}
+	return withFile, fileless, rows.Err()
 }
 
 // buildListBySeriesGroupedBySeasonQuery returns the SQL and bound args used by

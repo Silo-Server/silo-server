@@ -1044,15 +1044,7 @@ func (h *PersonalDataHandler) seriesEpisodeIDs(ctx context.Context, seriesID str
 	if h.episodeRepo == nil {
 		return nil, nil, catalog.ErrItemNotFound
 	}
-	episodes, err := h.episodeRepo.ListBySeries(ctx, seriesID)
-	if err != nil {
-		return nil, nil, err
-	}
-	fileless, err := h.episodeRepo.ListFilelessIDsBySeries(ctx, seriesID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return historyEpisodeIDs(episodes), fileless, nil
+	return h.episodeRepo.PartitionIDsBySeries(ctx, seriesID)
 }
 
 // seasonEpisodeIDs is seriesEpisodeIDs for one season.
@@ -1060,15 +1052,7 @@ func (h *PersonalDataHandler) seasonEpisodeIDs(ctx context.Context, seasonID str
 	if h.episodeRepo == nil {
 		return nil, nil, catalog.ErrItemNotFound
 	}
-	episodes, err := h.episodeRepo.ListBySeasonID(ctx, seasonID)
-	if err != nil {
-		return nil, nil, err
-	}
-	fileless, err := h.episodeRepo.ListFilelessIDsBySeason(ctx, seasonID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return historyEpisodeIDs(episodes), fileless, nil
+	return h.episodeRepo.PartitionIDsBySeason(ctx, seasonID)
 }
 
 // watchedHistoryItemIDBatch bounds each filter read below SQLite's default
@@ -1116,17 +1100,6 @@ func compactHistoryItemIDs(ids []string) []string {
 		unique = append(unique, id)
 	}
 	return unique
-}
-
-func historyEpisodeIDs(episodes []*models.Episode) []string {
-	ids := make([]string, 0, len(episodes))
-	for _, episode := range episodes {
-		if episode == nil || strings.TrimSpace(episode.ContentID) == "" {
-			continue
-		}
-		ids = append(ids, episode.ContentID)
-	}
-	return ids
 }
 
 func (h *PersonalDataHandler) userStoreFor(ctx context.Context, userID int, profileID string) (userstore.UserStore, string, bool) {
