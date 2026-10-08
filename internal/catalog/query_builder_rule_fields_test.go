@@ -232,7 +232,8 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "last_air_date", Op: "gt", Value: "not-a-date"},
 		{Field: "last_air_date", Op: "lt", Value: "0000-01-01"},
 		{Field: "release_date", Op: "not_in_last", Value: "2147483648d"},
-		{Field: "added_at", Op: "in_last", Value: "6501y"},
+		{Field: "added_at", Op: "in_last", Value: "7000y"},
+		{Field: "added_at", Op: "in_last", Value: "70000000h"},
 		{Field: "rating_imdb", Op: "gt", Value: "high"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
 	} {
@@ -253,7 +254,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "title", Op: "begins_with", Value: "the "},
 		{Field: "decade", Op: "is", Value: 1990.0},
 		{Field: "release_date", Op: "not_in_last", Value: "1y"},
-		{Field: "added_at", Op: "in_last", Value: "6500y"},
+		{Field: "added_at", Op: "in_last", Value: "6700y"},
 		{Field: "added_at", Op: "in_last", Value: "3000000h"},
 		{Field: "rating_imdb", Op: "between", Value: []any{"7", 9.5}},
 		{Field: "last_air_date", Op: "between", Value: []any{"2024-01-01", "2024-12-31"}},

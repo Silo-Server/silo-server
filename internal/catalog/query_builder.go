@@ -1884,17 +1884,14 @@ func parseDuration(s string) (string, error) {
 	return spec.sqlInterval(), nil
 }
 
-// maxSpanYears bounds a span so NOW() minus it stays after PostgreSQL's
-// earliest timestamp (4713 BC); a longer span cannot be evaluated at all.
-const maxSpanYears = 6500
+// postgresMinTimestamp is PostgreSQL's earliest timestamp and date,
+// 4714-11-24 BC (year -4713 in Go's proleptic calendar). A span whose
+// cutoff falls before it cannot be evaluated, so it is refused.
+var postgresMinTimestamp = time.Date(-4713, time.November, 24, 0, 0, 0, 0, time.UTC)
 
-var maxSpanAmount = map[byte]int{
-	'h': maxSpanYears * 365 * 24,
-	'd': maxSpanYears * 365,
-	'w': maxSpanYears * 52,
-	'm': maxSpanYears * 12,
-	'y': maxSpanYears,
-}
+// maxSpanAmount keeps the cutoff arithmetic from overflowing before that
+// check; in every unit it reaches far past 4714 BC.
+const maxSpanAmount = 100_000_000
 
 func parseDurationSpec(s string) (relativeDuration, error) {
 	normalized := strings.ToLower(strings.TrimSpace(s))
@@ -1909,14 +1906,16 @@ func parseDurationSpec(s string) (relativeDuration, error) {
 		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
 	}
 
-	limit, ok := maxSpanAmount[unit]
-	if !ok {
+	switch unit {
+	case 'h', 'd', 'w', 'm', 'y':
+	default:
 		return relativeDuration{}, fmt.Errorf("unsupported duration unit %q", unit)
 	}
-	if amount > limit {
+	spec := relativeDuration{amount: amount, unit: unit}
+	if amount > maxSpanAmount || spec.cutoffTime(time.Now().UTC()).Before(postgresMinTimestamp) {
 		return relativeDuration{}, fmt.Errorf("invalid duration: %q", s)
 	}
-	return relativeDuration{amount: amount, unit: unit}, nil
+	return spec, nil
 }
 
 func (d relativeDuration) sqlInterval() string {
