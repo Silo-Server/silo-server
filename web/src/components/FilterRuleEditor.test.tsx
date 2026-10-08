@@ -10,6 +10,10 @@ import {
 
 import FilterRuleEditor, { getFilterRuleFieldOptions } from "./FilterRuleEditor";
 
+vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
+  useExtendedQueryRules: () => true,
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));

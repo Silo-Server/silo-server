@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -18,12 +18,20 @@ beforeAll(() => {
 
 let latest: FilterRule | undefined;
 
-function Row({ initial, personalized = true }: { initial: FilterRule; personalized?: boolean }) {
+function Row({
+  initial,
+  personalized = true,
+  extendedRules = true,
+}: {
+  initial: FilterRule;
+  personalized?: boolean;
+  extendedRules?: boolean;
+}) {
   const [rule, setRule] = useState(initial);
   return (
     <FilterRuleRow
       rule={rule}
-      fieldOptions={getFilterRuleFieldOptions(personalized, "movie")}
+      fieldOptions={getFilterRuleFieldOptions(personalized, "movie", undefined, extendedRules)}
       allowPersonalizedFilters={personalized}
       onChange={(updates) => {
         const next = { ...rule, ...updates };
@@ -36,9 +44,11 @@ function Row({ initial, personalized = true }: { initial: FilterRule; personaliz
   );
 }
 
-function renderRow(initial: FilterRule, personalized = true) {
+function renderRow(initial: FilterRule, personalized = true, extendedRules = true) {
   latest = undefined;
-  return render(<Row initial={initial} personalized={personalized} />);
+  return render(
+    <Row initial={initial} personalized={personalized} extendedRules={extendedRules} />,
+  );
 }
 
 function open(combobox: HTMLElement) {
@@ -122,6 +132,30 @@ describe("FilterRuleRow", () => {
     expect(condition()).toHaveTextContent("contains");
     expect(optionNames(condition())).toEqual(["is", "is not", "contains"]);
     expect(screen.getByRole("combobox", { name: "Value" })).toHaveTextContent("Drama");
+  });
+
+  it("offers the newer fields and “is not in the last” only to a server that takes them", () => {
+    renderRow({ field: "release_date", op: "in_last", value: "30d" }, true, false);
+    const fields = optionNames(field());
+    for (const name of ["Title", "Decade", "Duration", "TMDB rating", "RT critic score"]) {
+      expect(fields).not.toContain(name);
+    }
+    expect(fields).toContain("IMDb rating");
+    expect(optionNames(condition())).toEqual([
+      "is in the last",
+      "is before",
+      "is after",
+      "is between",
+    ]);
+  });
+
+  it("keeps a saved rule an older server wouldn't offer editable", () => {
+    renderRow({ field: "release_date", op: "not_in_last", value: "1y" }, true, false);
+    expect(condition()).toHaveTextContent("is not in the last");
+    cleanup();
+    renderRow({ field: "title", op: "begins_with", value: "The " }, true, false);
+    expect(field()).toHaveTextContent("Title");
+    expect(optionNames(condition())).toContain("ends with");
   });
 
   it("keeps a saved Status rule editable", () => {

@@ -66,6 +66,8 @@ export interface CollectionFieldOption {
   ratingSource?: string;
   /** Describes a show's episodes, so it is offered only where shows can match. */
   showsOnly?: boolean;
+  /** Taken only by a server that advertises `extended_query_rules`. */
+  extended?: boolean;
 }
 
 const IS_OPERATORS: CollectionOperatorOption[] = [
@@ -217,6 +219,7 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
     operators: TEXT_OPERATORS,
     inputType: "text",
     valueType: "string",
+    extended: true,
   },
   facetField(
     "genre",
@@ -258,10 +261,15 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
     inputType: "select",
     valueType: "number",
     selectOptions: decadeOptions(),
+    extended: true,
   },
   dateField("release_date", "Release date", "title"),
   // A show's newest episode, by when it aired.
-  { ...dateField("last_air_date", "Latest episode aired", "title"), showsOnly: true },
+  {
+    ...dateField("last_air_date", "Latest episode aired", "title"),
+    showsOnly: true,
+    extended: true,
+  },
   {
     // media_items.runtime holds minutes; a title without one matches no bound.
     value: "runtime",
@@ -272,11 +280,12 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
     valueType: "number",
     supportsRange: true,
     unit: "min",
+    extended: true,
   },
   ratingField("rating_imdb", "IMDb rating"),
-  ratingField("rating_tmdb", "TMDB rating"),
-  ratingField("rating_rt_critic", "RT critic score", "rt_critic"),
-  ratingField("rating_rt_audience", "RT audience score", "rt_audience"),
+  { ...ratingField("rating_tmdb", "TMDB rating"), extended: true },
+  { ...ratingField("rating_rt_critic", "RT critic score", "rt_critic"), extended: true },
+  { ...ratingField("rating_rt_audience", "RT audience score", "rt_audience"), extended: true },
   {
     // The metadata match state, which only explains a saved rule.
     value: "status",
@@ -331,7 +340,11 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
   { ...dateField("last_watched", "Last watched", "you"), personalized: true },
   dateField("added_at", "Added", "library"),
   // A show's newest episode, by when its file arrived.
-  { ...dateField("latest_episode_added", "Latest episode added", "library"), showsOnly: true },
+  {
+    ...dateField("latest_episode_added", "Latest episode added", "library"),
+    showsOnly: true,
+    extended: true,
+  },
 ];
 
 export function getCollectionSortOptions(
@@ -373,18 +386,30 @@ export function getDefaultRuleValue(field: string, op: string): FilterRule["valu
 
 /**
  * The fields a rule can pick, given where it is used: personalized fields
- * only where rules resolve per profile, and ratings only while their source
- * is shown. Unset `shownRatingSources` offers every rating.
+ * only where rules resolve per profile, ratings only while their source is
+ * shown, and the extended fields and "is not in the last" only on a server
+ * that takes them. Unset `shownRatingSources` offers every rating.
  */
 export function availableCollectionFields(
   allowPersonalized: boolean,
   shownRatingSources?: ReadonlySet<string>,
+  extendedRules = true,
 ): CollectionFieldOption[] {
-  return COLLECTION_FIELD_OPTIONS.filter(
+  const fields = COLLECTION_FIELD_OPTIONS.filter(
     (option) =>
       (allowPersonalized || !option.personalized) &&
-      (!option.ratingSource || !shownRatingSources || shownRatingSources.has(option.ratingSource)),
+      (!option.ratingSource ||
+        !shownRatingSources ||
+        shownRatingSources.has(option.ratingSource)) &&
+      (extendedRules || !option.extended),
   );
+  if (extendedRules) return fields;
+  return fields.map((option) => ({
+    ...option,
+    operators: option.operators.map((op) =>
+      op.value === "not_in_last" ? { ...op, hidden: true } : op,
+    ),
+  }));
 }
 
 /** The rule a new line starts with. */

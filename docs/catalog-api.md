@@ -509,7 +509,8 @@ date is its most recently finished episode.
 `GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
 when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
 Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
-operators, and `not_in_last`. Older servers answer those rules with `422`.
+operators, and `not_in_last`. Older servers answer those rules with `422`, so the
+web rule editor offers them only while the flag is true.
 
 ### Search continuation
 

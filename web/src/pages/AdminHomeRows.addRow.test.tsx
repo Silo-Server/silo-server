@@ -35,6 +35,10 @@ vi.mock("@/lib/recipes", async () => ({
   ...(await vi.importActual<typeof import("@/lib/recipes")>("@/lib/recipes")),
   fetchRecipeCatalog: async () => recipeCatalogFixture,
 }));
+vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
+  useExtendedQueryRules: () => true,
+}));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
 }));

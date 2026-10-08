@@ -30,6 +30,7 @@ import { FacetValuePicker } from "@/components/ui/facet-value-picker";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
 import { createCatalogSearchState, useCatalogFilters } from "@/hooks/queries/catalog";
 import type { FacetValueScope } from "@/hooks/queries/facetValues";
+import { useExtendedQueryRules } from "@/hooks/queries/personSearch";
 import { formatLanguage } from "@/lib/languageDisplay";
 import {
   getDefaultQuerySortOrder,
@@ -63,14 +64,16 @@ const SHOW_SCOPES: ReadonlySet<FilterRuleMediaScope> = new Set(["all", "video", 
 
 /**
  * The fields a rule row offers. `shownRatingSources` leaves out ratings an
- * administrator hid; unset offers every rating.
+ * administrator hid; unset offers every rating. `extendedRules` false leaves
+ * out what only a server advertising `extended_query_rules` takes.
  */
 export function getFilterRuleFieldOptions(
   allowPersonalizedFilters = false,
   mediaScope: FilterRuleMediaScope = "all",
   shownRatingSources?: ReadonlySet<string>,
+  extendedRules = true,
 ) {
-  return availableCollectionFields(allowPersonalizedFilters, shownRatingSources)
+  return availableCollectionFields(allowPersonalizedFilters, shownRatingSources, extendedRules)
     .filter((option) => !option.showsOnly || SHOW_SCOPES.has(mediaScope))
     .map((option) => {
       // Ebook and manga are read rather than watched, so relabel "watched".
@@ -232,13 +235,14 @@ export function FilterRuleRow({
   }
 
   // Status and genre "contains" are offered only to a rule that already uses
-  // them. A field this scope or the server's shown ratings leave out stays
-  // offered to a rule that already compares it.
-  const offered = fieldOptions.some((f) => f.value === fieldDef.value)
-    ? fieldOptions
-    : [...fieldOptions, fieldDef];
+  // them. A field this scope, the server's shown ratings or an older server
+  // leave out stays offered to a rule that already compares it.
+  const offeredDef = fieldOptions.find((f) => f.value === fieldDef.value);
+  const offered = offeredDef ? fieldOptions : [...fieldOptions, fieldDef];
   const fields = offered.filter((f) => !f.hidden || f.value === fieldDef.value);
-  const operators = fieldDef.operators.filter((op) => !op.hidden || op.value === rule.op);
+  const operators = (offeredDef ?? fieldDef).operators.filter(
+    (op) => !op.hidden || op.value === rule.op,
+  );
 
   return (
     <div role={label ? "group" : undefined} aria-label={label} className={size.row}>
@@ -695,10 +699,12 @@ export default function FilterRuleEditor({
 }: FilterRuleEditorProps) {
   const config = value || { match: "all", groups: [] };
   const shownRatingSources = useShownRatingSources();
+  const extendedRules = useExtendedQueryRules();
   const fieldOptions = getFilterRuleFieldOptions(
     allowPersonalizedFilters,
     mediaScope,
     shownRatingSources,
+    extendedRules,
   );
 
   function updateConfig(updates: Partial<FilterConfig>) {
