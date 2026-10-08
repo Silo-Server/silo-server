@@ -59,6 +59,7 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id(show), shows)
 		batchEquivExec(t, pool, `INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, id(show))
 		batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1 || '-e1', $1, $1 || '-s1', 1, 1, 'Pilot')`, id(show))
+		batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1 || '-e1', $2)`, id(show), shows)
 	}
 	// Only Fresh Show's episode was finished, three days ago. Stale Show's
 	// episode and 100% Wolf were started yesterday but not finished, which
@@ -95,6 +96,9 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		{"show watched in the last", "series", QueryRule{Field: "last_watched", Op: "in_last", Value: "7d"}, []string{"fresh"}},
 		{"show not watched in the last", "series", QueryRule{Field: "last_watched", Op: "not_in_last", Value: "7d"}, []string{"stale"}},
 		{"unfinished title not watched", "movie", QueryRule{Field: "last_watched", Op: "in_last", Value: "7d"}, []string{}},
+		// The episode fast path leaves title to the generic executor, whose
+		// placeholders follow the episode relation's library arguments.
+		{"episode title", "episode", QueryRule{Field: "title", Op: "is", Value: "pilot"}, []string{"fresh-e1", "stale-e1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
