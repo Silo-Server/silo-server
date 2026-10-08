@@ -510,7 +510,9 @@ date is its most recently finished episode.
 when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
 Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
 operators, and `not_in_last`. Older servers answer those rules with `422`, so the
-web rule editor offers them only while the flag is true.
+web rule editor offers them only while the flag is true. `/api/v1` keeps its frozen
+rule vocabulary: its catalog requests, including `POST /api/v1/catalog/query`,
+refuse those fields and `not_in_last` with the `400` they got before.
 
 ### Search continuation
 

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"errors"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -236,7 +237,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		if err := def.Validate(); err == nil {
 			t.Errorf("%s %s %v: expected validation to reject the value", rule.Field, rule.Op, rule.Value)
 		}
-		if err := validateCatalogOverlayQuery("", def, catalogQueryRuleFields, catalogQuerySortFields(), false); !errors.Is(err, ErrInvalidCatalogRequest) {
+		if err := validateCatalogOverlayQuery(CatalogRequest{Query: def}, catalogQueryRuleFields, catalogQuerySortFields(), false); !errors.Is(err, ErrInvalidCatalogRequest) {
 			t.Errorf("%s %s %v: expected an invalid-request error, got %v", rule.Field, rule.Op, rule.Value, err)
 		}
 	}
@@ -249,6 +250,47 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 	}}}}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("expected well-formed values to validate, got %v", err)
+	}
+}
+
+func TestV1RequestsKeepTheFrozenRuleVocabulary(t *testing.T) {
+	// /api/v1 refuses the rules /api/v2 added, with the messages it gave
+	// before they existed; /api/v2 opts in and accepts them.
+	for _, tc := range []struct {
+		field, op, value string
+		v1Error          string
+		postError        string
+	}{
+		{"title", "contains", "x", `groups[0].rules[0].field "title" is not supported`, `groups[0].rules[0].field "title" is not supported`},
+		{"release_date", "not_in_last", "1y", `groups[0].rules[0] is invalid`, `groups[0].rules[0].op "not_in_last" is not supported for field "release_date"`},
+	} {
+		values := url.Values{
+			"q":                          {"dune"},
+			"groups[0][rules][0][field]": {tc.field},
+			"groups[0][rules][0][op]":    {tc.op},
+			"groups[0][rules][0][value]": {tc.value},
+		}
+		v1, err := ParseCatalogRequest(values)
+		if err != nil {
+			t.Fatalf("ParseCatalogRequest: %v", err)
+		}
+		if err := validateCatalogQueryRequest(v1, false); !errors.Is(err, ErrInvalidCatalogRequest) || !strings.Contains(err.Error(), tc.v1Error) {
+			t.Errorf("v1 %s %s: got %v, want an invalid request naming %q", tc.field, tc.op, err, tc.v1Error)
+		}
+		v2, err := ParseCatalogRequestWithOptions(values, CatalogRequestOptions{ExtendedRules: true})
+		if err != nil {
+			t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+		}
+		if err := validateCatalogQueryRequest(v2, false); err != nil {
+			t.Errorf("v2 %s %s: expected the rule to be accepted, got %v", tc.field, tc.op, err)
+		}
+		// POST /api/v1/catalog/query validates its body with ValidateV1Rules.
+		if err := ValidateV1Rules(v1.Query); err == nil || err.Error() != tc.postError {
+			t.Errorf("ValidateV1Rules %s %s: got %v, want %q", tc.field, tc.op, err, tc.postError)
+		}
+	}
+	if err := ValidateV1Rules(QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{{Field: "release_date", Op: "in_last", Value: "1y"}}}}}); err != nil {
+		t.Errorf("expected a v1 rule to pass, got %v", err)
 	}
 }
 

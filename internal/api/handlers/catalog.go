@@ -569,7 +569,12 @@ func (h *CatalogHandler) HandlePostCatalogQuery(w http.ResponseWriter, r *http.R
 	}
 
 	// The filter body is validated before the access filter so an invalid
-	// filter and an unresolvable policy answer in the v1 order.
+	// filter and an unresolvable policy answer in the v1 order. A rule /api/v2
+	// added is refused as v1 refused it before.
+	if err := catalog.ValidateV1Rules(req.FilterConfig); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
+		return
+	}
 	if _, _, err := sections.NewFilterBuilder("mi").Build(req.FilterConfig); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid filter: "+err.Error())
 		return

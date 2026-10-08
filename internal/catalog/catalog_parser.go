@@ -47,6 +47,9 @@ type CatalogRequestOptions struct {
 	// type. /api/v2 opts in; the frozen /api/v1 grammar keeps dropping it like
 	// any other unrecognized type.
 	SearchMediaScopes bool
+	// ExtendedRules accepts the rule fields and not_in_last added after the
+	// /api/v1 freeze. /api/v2 opts in; without it the request keeps V1Rules.
+	ExtendedRules bool
 }
 
 // ParseCatalogRequest converts catalog URL params into a normalized request.
@@ -58,8 +61,9 @@ func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
 // grammar.
 func ParseCatalogRequestWithOptions(values url.Values, options CatalogRequestOptions) (CatalogRequest, error) {
 	req := CatalogRequest{
-		Source: CatalogSource(strings.ToLower(strings.TrimSpace(values.Get("source")))),
-		Limit:  20,
+		Source:  CatalogSource(strings.ToLower(strings.TrimSpace(values.Get("source")))),
+		Limit:   20,
+		V1Rules: !options.ExtendedRules,
 	}
 	if req.Source == "" {
 		req.Source = CatalogSourceQuery

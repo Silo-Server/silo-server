@@ -1700,8 +1700,7 @@ func validateCatalogQueryRequest(req CatalogRequest, allowPersonalizedSorts bool
 		return fmt.Errorf("%w: source %q is not supported yet", ErrInvalidCatalogRequest, req.Source)
 	}
 	return validateCatalogOverlayQuery(
-		req.SearchQuery,
-		req.Query,
+		req,
 		catalogQueryRuleFields,
 		QuerySortFieldSet(allowPersonalizedSorts),
 		true,
@@ -1718,7 +1717,7 @@ func validateCatalogPersonalRequest(req CatalogRequest, allowPersonalizedSorts b
 	if req.Source == CatalogSourceHistory && allowPersonalizedSorts {
 		sortFields[historyDateViewedSort] = true
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, sortFields, false)
+	return validateCatalogOverlayQuery(req, catalogPersonalRuleFields, sortFields, false)
 }
 
 func validateCatalogPersonRequest(req CatalogRequest) error {
@@ -1728,7 +1727,7 @@ func validateCatalogPersonRequest(req CatalogRequest) error {
 	if req.PersonID <= 0 {
 		return fmt.Errorf("%w: person_id is required", ErrInvalidCatalogRequest)
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogQueryRuleFields, catalogQuerySortFields(), false)
+	return validateCatalogOverlayQuery(req, catalogQueryRuleFields, catalogQuerySortFields(), false)
 }
 
 func validateCatalogSectionRequest(req CatalogRequest) error {
@@ -1763,7 +1762,7 @@ func validateCatalogCollectionRequest(req CatalogRequest, allowPersonalizedSorts
 	if err := validateCatalogExactCollectionRequest(req); err != nil {
 		return err
 	}
-	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
+	return validateCatalogOverlayQuery(req, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
 }
 
 func catalogRequestHasOverlay(req CatalogRequest) bool {
@@ -1780,7 +1779,8 @@ func catalogQueryHasFilter(def QueryDefinition) bool {
 		def.Limit != nil
 }
 
-func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
+func validateCatalogOverlayQuery(req CatalogRequest, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
+	def := req.Query
 	if !IsValidMediaScope(def.MediaScope) {
 		return fmt.Errorf("%w: media_scope must be 'movie', 'series', 'episode', 'audiobook', 'ebook', 'manga', or 'video'", ErrInvalidCatalogRequest)
 	}
@@ -1799,11 +1799,11 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 			return fmt.Errorf("%w: groups[%d].match must be 'all' or 'any'", ErrInvalidCatalogRequest, i)
 		}
 		for j, rule := range group.Rules {
-			if !ruleFields[rule.Field] {
+			if !ruleFields[rule.Field] || (req.V1Rules && v2RuleFields[rule.Field]) {
 				return fmt.Errorf("%w: groups[%d].rules[%d].field %q is not supported", ErrInvalidCatalogRequest, i, j, rule.Field)
 			}
-			def, ok := queryFieldDefs[rule.Field]
-			if !ok || !def.allows(rule.Op) {
+			fieldDef, ok := queryFieldDefs[rule.Field]
+			if !ok || !fieldDef.allows(rule.Op) || (req.V1Rules && rule.Op == ruleOpNotInLast) {
 				return fmt.Errorf("%w: groups[%d].rules[%d] is invalid", ErrInvalidCatalogRequest, i, j)
 			}
 			if err := validateRuleValue(rule); err != nil {
@@ -1822,7 +1822,7 @@ func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFi
 		if !allowRelevance {
 			return fmt.Errorf("%w: relevance sort is only supported for query source", ErrInvalidCatalogRequest)
 		}
-		if strings.TrimSpace(searchQuery) == "" {
+		if strings.TrimSpace(req.SearchQuery) == "" {
 			return fmt.Errorf("%w: relevance sort requires q", ErrInvalidCatalogRequest)
 		}
 		return nil
