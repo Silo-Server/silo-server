@@ -27,9 +27,10 @@ func NewPersonRepository(pool *pgxpool.Pool) *PersonRepository {
 	return &PersonRepository{pool: pool}
 }
 
-// FindOrCreate looks up a person by tmdb_id, imdb_id, or case-insensitive name.
-// If found, it enriches empty fields with new data and returns the existing ID.
-// If not found, it creates a new person and returns the new ID.
+// FindOrCreate looks up a person by tmdb_id, imdb_id, or a provider-safe
+// case-insensitive name match. If found, it enriches empty fields with new data
+// and returns the existing ID. If not found, it creates a new person and
+// returns the new ID.
 func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (int64, error) {
 	var existingID int64
 
@@ -54,13 +55,31 @@ func (r *PersonRepository) FindOrCreate(ctx context.Context, p models.Person) (i
 	}
 
 	if p.Name != "" {
-		err := r.pool.QueryRow(ctx, "SELECT id FROM people WHERE LOWER(name) = LOWER($1)", p.Name).Scan(&existingID)
-		if err == nil {
-			return r.enrichExisting(ctx, existingID, p)
-		}
-		if err != pgx.ErrNoRows {
+		rows, err := r.pool.Query(ctx, `
+			SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
+			FROM people
+			WHERE LOWER(name) = LOWER($1)
+			ORDER BY id`, p.Name)
+		if err != nil {
 			return 0, fmt.Errorf("lookup by name: %w", err)
 		}
+		for rows.Next() {
+			candidate := models.Person{}
+			if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
+				rows.Close()
+				return 0, fmt.Errorf("scan name lookup: %w", err)
+			}
+			if !canResolvePersonByName(p, candidate) {
+				continue
+			}
+			rows.Close()
+			return r.enrichExisting(ctx, candidate.ID, p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("iterate name lookup: %w", err)
+		}
+		rows.Close()
 	}
 
 	// Not found — create new person
@@ -213,8 +232,9 @@ func (r *PersonRepository) enrichExisting(ctx context.Context, id int64, p model
 }
 
 // BatchFindOrCreate resolves a batch of people in 5 phases: lookup by tmdb_id,
-// imdb_id, and name; enrich found people; insert new people. Returns a slice
-// of IDs positionally matching the input. Zero values indicate failures.
+// imdb_id, and provider-safe name matching; enrich found people; insert new
+// people. Returns a slice of IDs positionally matching the input. Zero values
+// indicate failures.
 func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []models.Person) ([]int64, error) {
 	if len(people) == 0 {
 		return nil, nil
@@ -319,7 +339,9 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 		rows.Close()
 	}
 
-	// Phase 3: Batch lookup by name (remaining).
+	// Phase 3: Batch lookup by name (remaining). A name is not identity: only a
+	// shared provider id, or two records with no provider identity at all, may
+	// resolve here. This prevents unrelated namesakes from being folded together.
 	var nameValues []string
 	nameLookup := make(map[string][]int) // LOWER(name) → unique indices
 	for i, p := range uniquePeople {
@@ -331,24 +353,27 @@ func (r *PersonRepository) BatchFindOrCreate(ctx context.Context, people []model
 	}
 	if len(nameValues) > 0 {
 		rows, err := r.pool.Query(ctx,
-			"SELECT id, LOWER(name) FROM people WHERE LOWER(name) = ANY($1::text[])",
+			`SELECT id, name, tmdb_id, imdb_id, tvdb_id, plex_guid
+			 FROM people
+			 WHERE LOWER(name) = ANY($1::text[])
+			 ORDER BY id`,
 			nameValues)
 		if err != nil {
 			return nil, fmt.Errorf("batch lookup by name: %w", err)
 		}
 		for rows.Next() {
-			var id int64
-			var name string
-			if err := rows.Scan(&id, &name); err != nil {
+			candidate := models.Person{}
+			if err := rows.Scan(&candidate.ID, &candidate.Name, &candidate.TmdbID, &candidate.ImdbID, &candidate.TvdbID, &candidate.PlexGUID); err != nil {
 				rows.Close()
 				return nil, fmt.Errorf("scanning name result: %w", err)
 			}
-			for _, ui := range nameLookup[name] {
-				if !resolved[ui] {
-					uniqueIDs[ui] = id
-					resolved[ui] = true
-					toEnrich = append(toEnrich, enrichEntry{id, uniquePeople[ui]})
+			for _, ui := range nameLookup[strings.ToLower(candidate.Name)] {
+				if resolved[ui] || !canResolvePersonByName(uniquePeople[ui], candidate) {
+					continue
 				}
+				uniqueIDs[ui] = candidate.ID
+				resolved[ui] = true
+				toEnrich = append(toEnrich, enrichEntry{candidate.ID, uniquePeople[ui]})
 			}
 		}
 		rows.Close()
@@ -1019,6 +1044,36 @@ func externalIDsCompatible(a, b models.Person) bool {
 		idsCompatible(a.ImdbID, b.ImdbID) &&
 		idsCompatible(a.TvdbID, b.TvdbID) &&
 		idsCompatible(a.PlexGUID, b.PlexGUID)
+}
+
+// canResolvePersonByName permits the legacy name fallback only when it has an
+// identity signal stronger than the name itself. A shared provider id proves
+// the rows refer to the same provider entity; two entirely unidentified rows
+// may also reuse one name-only placeholder. Disjoint provider identities never
+// match merely because two people have the same name.
+func canResolvePersonByName(a, b models.Person) bool {
+	if !personNamesMatch(a.Name, b.Name) || !externalIDsCompatible(a, b) {
+		return false
+	}
+	if !hasExternalPersonID(a) && !hasExternalPersonID(b) {
+		return true
+	}
+	return sharedExternalPersonID(a, b)
+}
+
+func hasExternalPersonID(p models.Person) bool {
+	return p.TmdbID != "" || p.ImdbID != "" || p.TvdbID != "" || p.PlexGUID != ""
+}
+
+func sharedExternalPersonID(a, b models.Person) bool {
+	return sharedNonEmptyID(a.TmdbID, b.TmdbID) ||
+		sharedNonEmptyID(a.ImdbID, b.ImdbID) ||
+		sharedNonEmptyID(a.TvdbID, b.TvdbID) ||
+		sharedNonEmptyID(a.PlexGUID, b.PlexGUID)
+}
+
+func sharedNonEmptyID(x, y string) bool {
+	return x != "" && x == y
 }
 
 func idsCompatible(x, y string) bool {
