@@ -49,9 +49,12 @@ export function useSeriesEpisodes(
   const nextEpisodes = nextEpisodesData?.episodes ?? [];
 
   // The server lists an episode this viewer can't play (every file outside
-  // their access) with no files. Leaving it out lets Next, Previous and
-  // autoplay step over it.
-  const playable = [...currentEpisodes, ...nextEpisodes].filter((ep) => ep.files.length > 0);
+  // their access) with no files, and marks a file it couldn't read as
+  // unreadable, which playback refuses. Leaving out an episode with no
+  // readable file lets Next, Previous and autoplay step over it.
+  const playable = [...currentEpisodes, ...nextEpisodes].filter((ep) =>
+    ep.files.some((file) => !file.unreadable),
+  );
   const episodes: EpisodeRef[] = playable.map((ep) => ({
     contentId: ep.content_id,
     seasonNumber: ep.season_number,

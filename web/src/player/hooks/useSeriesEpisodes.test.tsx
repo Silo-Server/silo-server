@@ -23,20 +23,34 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 }));
 
 const file = { file_id: 1, resolution: "1080p" } as EpisodeFile;
+const unreadableFile = { file_id: 2, resolution: "1080p", unreadable: true } as EpisodeFile;
 
-/** Builds a season from per-episode playability, numbering episodes from 1. */
-function season(seasonNumber: number, playable: boolean[]): void {
+/**
+ * An episode's files as the viewer's season listing returns them: one
+ * playable file (true), none (false), only a file the server couldn't read,
+ * or that file next to a playable one.
+ */
+type Files = boolean | "unreadable" | "partly unreadable";
+
+function filesFor(files: Files): EpisodeFile[] {
+  if (files === "unreadable") return [unreadableFile];
+  if (files === "partly unreadable") return [unreadableFile, file];
+  return files ? [file] : [];
+}
+
+/** Builds a season from per-episode files, numbering episodes from 1. */
+function season(seasonNumber: number, episodes: Files[]): void {
   catalog.seasons.set(
     seasonNumber,
-    playable.map(
-      (canPlay, index) =>
+    episodes.map(
+      (files, index) =>
         ({
           content_id: `s${seasonNumber}e${index + 1}`,
           season_number: seasonNumber,
           episode_number: index + 1,
           title: `Episode ${index + 1}`,
           runtime: 1800,
-          files: canPlay ? [file] : [],
+          files: filesFor(files),
         }) as EpisodeListItem,
     ),
   );
@@ -77,6 +91,15 @@ describe("useSeriesEpisodes", () => {
     const { episodes, nextEpisode } = await playing(1, 2);
 
     // Previous from episode 4 is the entry before it in this list.
+    expect(episodes.map((ep) => ep.contentId)).toEqual(["s1e1", "s1e2", "s1e4"]);
+    expect(nextEpisode?.contentId).toBe("s1e4");
+  });
+
+  it("steps over an episode whose only file the server could not read", async () => {
+    season(1, [true, true, "unreadable", "partly unreadable"]);
+
+    const { episodes, nextEpisode } = await playing(1, 2);
+
     expect(episodes.map((ep) => ep.contentId)).toEqual(["s1e1", "s1e2", "s1e4"]);
     expect(nextEpisode?.contentId).toBe("s1e4");
   });
