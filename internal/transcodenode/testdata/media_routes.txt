@@ -1,4 +1,6 @@
 # fixture 1
+GET /admin/drain	non-media
+POST /admin/drain	non-media
 POST /admin/force-reload	non-media
 POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media
@@ -22,6 +24,8 @@ GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	t
 POST /transcode/{session_id}/segment/{name}/downloaded	non-media
 POST /trickplay/extract	non-media
 # fixture 2
+GET /admin/drain	non-media
+POST /admin/drain	non-media
 POST /admin/force-reload	non-media
 POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media

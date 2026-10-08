@@ -145,13 +145,18 @@ func TestWorkerControlsRetainProtocolAndBearerGate(t *testing.T) {
 		"proxy":          proxy.NewServer(watcher, nil).Handler(),
 		"transcode_node": transcodenode.NewServer(watcher, nil).Handler(),
 	}
-	count := 0
+	count, drainControls := 0, 0
 	for _, op := range describeWorkerProtocols().Operations {
 		if op.Method != http.MethodPost || !strings.HasPrefix(op.Path, "/admin/") {
 			continue
 		}
 		count++
-		if op.RetrySafety != "non_retryable" || op.Description == "" {
+		expectedRetry := "non_retryable"
+		if op.Path == "/admin/drain" {
+			drainControls++
+			expectedRetry = "natural_idempotent"
+		}
+		if op.RetrySafety != expectedRetry || op.Description == "" {
 			t.Fatalf("command lacks uncertainty semantics: %+v", op)
 		}
 		if op.Responses["401"].Content["text/plain"] == nil {
@@ -163,16 +168,16 @@ func TestWorkerControlsRetainProtocolAndBearerGate(t *testing.T) {
 		if response.Code != http.StatusUnauthorized || response.Header().Get("Content-Type") != "text/plain; charset=utf-8" {
 			t.Fatalf("%s %s bearer refusal: %d %s", op.Listener, op.Path, response.Code, response.Body)
 		}
-		if op.Path == "/admin/reprobe-capabilities" {
+		if op.Path == "/admin/reprobe-capabilities" || op.Path == "/admin/drain" {
 			if op.Responses["409"] == nil || op.Responses["503"] == nil || op.Responses["200"].Content["application/json"] == nil {
-				t.Fatal("incomplete reprobe protocol", op.Listener)
+				t.Fatal("incomplete worker control protocol", op.Listener)
 			}
 		} else if op.Responses["204"] == nil || len(op.Responses["204"].Content) != 0 || op.Responses["500"] == nil {
 			t.Fatal("reload must preserve empty success and possible failure", op.Listener, op.Path)
 		}
 	}
-	if count != 6 {
-		t.Fatalf("got %d worker controls, want 6", count)
+	if count != 8 || drainControls != 2 || count-drainControls != 6 {
+		t.Fatalf("got %d worker controls (%d drain), want 6 legacy and 2 drain", count, drainControls)
 	}
 }
 

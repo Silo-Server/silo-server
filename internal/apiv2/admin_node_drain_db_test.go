@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,8 +21,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
+	"github.com/Silo-Server/silo-server/internal/workerdrain"
 )
 
 // The registered native routes, durable production stores, config watcher and
@@ -53,7 +57,7 @@ func TestAdminNodeDrainPostgresProductionPath(t *testing.T) {
 		listener.Close()
 		t.Fatal(err)
 	}
-	worker := proxy.NewServer(watcher, nil).Handler()
+	worker := proxy.NewServer(watcher, nodesessions.NewTracker(nil, url, name, "proxy")).Handler()
 	unregistered := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/admin/drain", nil)
 	request.Header.Set("Authorization", "Bearer "+secret)
@@ -299,5 +303,83 @@ func TestAdminNodeDrainPostgresProductionPath(t *testing.T) {
 	}
 	if response := privateRead(http.MethodGet, "/stream/direct/"+token); response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("old process reopened admission after URL reuse: %d %s", response.Code, response.Body.String())
+	}
+}
+
+// A known unsealed token must not reinterpret positively deleted PG authority
+// as the bounded-continuity path for a transient connection failure.
+func TestWorkerDrainKnownPermitMissingAuthorityPostgresProductionPath(t *testing.T) {
+	pool, _, native, url := nativeNodeCreationFixture(t)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO server_settings(key,value) VALUES ('server.identity_id',$1) ON CONFLICT(key) DO NOTHING`, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	created := do(t, native, http.MethodPost, Prefix+"/admin/nodes", fmt.Sprintf(`{"name":"authority-worker","type":"proxy","url":%q,"enabled":false}`, url), bearer(adminToken))
+	var node AdminNode
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &node) != nil {
+		t.Fatalf("disabled registration: %d %s", created.Code, created.Body.String())
+	}
+	id, err := strconv.Atoi(string(node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := "synthetic-known-permit-secret"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	watcher := nodeconfig.NewWatcher(pool, nil, &cache.NoopEventBus{}, nodeconfig.BootstrapOverrides{Mode: "proxy", NodeURL: url, NodeName: "authority-worker"})
+	dir := t.TempDir()
+	watcher.OnLoad(func(cfg *config.Config) { cfg.Auth.JWTSecret = secret; cfg.Playback.TranscodeDir = dir })
+	if err := watcher.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := watcher.NodeRowID(); !ok || got != id {
+		t.Fatalf("fresh registration binding: %d %t", got, ok)
+	}
+	worker := proxy.NewServer(watcher, nodesessions.NewTracker(nil, url, "authority-worker", "proxy")).Handler()
+	media := filepath.Join(dir, "sample.mp4")
+	if err := os.WriteFile(media, []byte("owned fixture media"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	token, err := streamtoken.Sign(streamtoken.Claims{SessionID: "known-unsealed", MediaPath: media, PlayMethod: "direct"}, secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if authenticated {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		response := httptest.NewRecorder()
+		worker.ServeHTTP(response, req)
+		return response
+	}
+	if response := request("/stream/direct/"+token, false); response.Code != http.StatusOK {
+		t.Fatalf("pre-loss actual media: %d %s", response.Code, response.Body.String())
+	}
+	before := request("/admin/drain", true)
+	var status workerdrain.Status
+	if before.Code != http.StatusOK || json.Unmarshal(before.Body.Bytes(), &status) != nil || status.Fenced || status.ActiveRequests != 0 || status.ActiveReservations != 1 {
+		t.Fatalf("known unsealed permit not retained: %d %s", before.Code, before.Body.String())
+	}
+	// Keep the watcher's remembered ID, but positively remove that exact row.
+	removed := do(t, native, http.MethodDelete, Prefix+"/admin/nodes/"+string(node.ID), "", with(bearer(adminToken), "If-Match", node.ConfigETag))
+	if removed.Code != http.StatusNoContent {
+		t.Fatalf("guarded authority removal: %d %s", removed.Code, removed.Body.String())
+	}
+	if got, ok := watcher.NodeRowID(); !ok || got != id {
+		t.Fatalf("fixture lost remembered identity before fresh lookup: %d %t", got, ok)
+	}
+	if response := request("/stream/direct/"+token, false); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("known permit survived positive registration loss: %d %s", response.Code, response.Body.String())
+	}
+	if response := request("/admin/drain", true); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing registration produced proof: %d %s", response.Code, response.Body.String())
+	}
+	var remaining int
+	if err := pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM stream_nodes WHERE id=$1`, id).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("exact registration cleanup: %d %v", remaining, err)
+	}
+	if data, err := os.ReadFile(media); err != nil || string(data) != "owned fixture media" {
+		t.Fatalf("authority loss changed media: %q %v", data, err)
 	}
 }

@@ -8,14 +8,26 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
+func transportDrainKey(id string) string {
+	if id == "" {
+		return ""
+	}
+	return "transport:" + id
+}
+
+func artifactDrainKey(id string) string { return "artifact:" + id }
+
 const (
 	drainStartSegment     = "start"
 	drainTranscodeSegment = "transcode"
+	downloadPreparePath   = "/downloads/prepare"
+	transcodeStartPath    = "/transcode/start"
 )
 
 func (s *Server) drainActiveJobs() int {
@@ -31,7 +43,7 @@ func (s *Server) drainActiveJobs() int {
 func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		if s.drain == nil || path == "/admin/drain" || path == "/api/v1/health" || path == "/metrics" || path == "/status" || path == "/admin/reload-config" || path == "/admin/force-reload" || r.Method == http.MethodDelete || strings.HasSuffix(path, "/progress") || strings.HasSuffix(path, "/downloaded") {
+		if s.drain == nil || path == "/admin/drain" || path == "/api/v1/health" || path == "/metrics" || path == "/status" || path == "/admin/reload-config" || path == "/admin/force-reload" || path == downloadPreparePath || r.Method == http.MethodDelete || strings.HasSuffix(path, "/progress") || strings.HasSuffix(path, "/downloaded") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -44,9 +56,12 @@ func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 		key := ""
 		parts := strings.Split(strings.Trim(path, "/"), "/")
 		if len(parts) >= 2 && (parts[0] == drainTranscodeSegment || parts[0] == "remux") && parts[1] != drainStartSegment {
-			key = parts[1]
+			key = transportDrainKey(parts[1])
 		}
-		if path == "/transcode/start" {
+		if len(parts) == 3 && parts[0] == "downloads" && parts[1] == "artifacts" && downloadprepare.ValidArtifactID(parts[2]) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			key = artifactDrainKey(parts[2])
+		}
+		if path == transcodeStartPath {
 			body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
 			if err != nil {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -57,7 +72,7 @@ func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 				SessionID string `json:"session_id"`
 			}
 			if json.Unmarshal(body, &input) == nil {
-				key = input.SessionID
+				key = transportDrainKey(input.SessionID)
 			}
 		}
 		end, err := s.drain.Begin(r.Context(), key, time.Now().Add(playback.MaxTokenTTL))

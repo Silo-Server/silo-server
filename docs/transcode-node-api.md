@@ -80,8 +80,8 @@ work, and subtitle-cache fills through child exit and publication/discard cleanu
 These cover the interval before job registration and after the ordinary job count
 drops. Request reservations cover in-flight
 execution and egress; bounded session permits cover gaps between media requests.
-Permits remain until signed expiry, a positive session-deny marker, or confirmed
-transport teardown. Header-authenticated media and internal transport permits
+Permits remain until signed expiry, a positive session-deny marker, confirmed
+transport teardown, or successful deletion of the exact prepared artifact. Header-authenticated media and internal transport permits
 use the maximum token lifetime, currently 24 hours. Absence from Redis and quiet
 bandwidth are never proof that a permit ended.
 
@@ -103,6 +103,28 @@ retirement observations. An admitted, unsealed media identity may continue only
 until its original permit expiry; an outage cannot extend that permit or reopen
 a sealed worker. Ordinary token playback therefore keeps its bounded continuity
 without treating unavailable database authority as a drain acknowledgement.
+A positively missing or changed registration or server realm refuses even a
+known, unsealed permit; this is distinct from a temporary source I/O failure.
+
+Authority reads and explicit remote deny lookups run outside the gate's state
+mutex, so slow database or Redis calls cannot block request release or independent
+lookups. An internal epoch changes on binding, fence changes, every positive
+identity loss, and zero sealing. Older successful reads and errors are discarded;
+three consecutive stale reads refuse admission and proof. Positive deny replies
+apply only to the observed permit generation, so revoke followed by re-admission
+cannot lose its new permit to an older response. Final counters and timestamps
+are sampled after those checks, under the sealing mutex.
+
+Prepared-download admission uses an artifact namespace separate from transport
+identities. A successful preparation or reuse retains the artifact permit before
+its request reservation and artifact lifecycle lock are released. An already
+admitted artifact's authenticated GET and HEAD may continue during retirement.
+Preparation, including a known artifact ID, refuses after fencing; a restarted
+worker cannot adopt a permit merely because the file exists. A definitive missing
+file removes its permit, and successful exact deletion revokes only that artifact.
+Failed preparation retains no new permit; uncertain deletion retains its existing
+permit. A preparation begun before fencing may finish and transfer its reservation,
+which still prevents a zero receipt until deletion or bounded expiry.
 
 Only zero execution, request, and permit reservations sets `drained=true`.
 That observation seals admission under the same worker mutex, so a late dispatch

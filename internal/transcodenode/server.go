@@ -524,7 +524,8 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		s.registeredNodeURL = watcher.NodeRegisteredURL
 		if watcher.HasDrainAuthority() {
 			s.drain = workerdrain.New(watcher.ReadDrainFence, s.drainActiveJobs, func(ctx context.Context, key string) bool {
-				return s.streamDeny != nil && s.streamDeny.Denied(ctx, key)
+				transportID, ok := strings.CutPrefix(key, "transport:")
+				return ok && s.streamDeny != nil && s.streamDeny.Denied(ctx, transportID)
 			})
 		}
 	}
@@ -966,6 +967,13 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	if !s.requireApprovedInputPath(w, r, req.InputPath) {
 		return
 	}
+	finishPreparation, err := s.drain.BeginPreparation(r.Context(), artifactDrainKey(req.ArtifactID), time.Now().Add(playback.MaxTokenTTL))
+	if err != nil {
+		http.Error(w, "worker retiring or drain authority unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	published := false
+	defer func() { finishPreparation(published) }()
 	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
 	artifactRoot := s.artifactRoot
 	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
@@ -979,11 +987,15 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	if _, reusable := existingDownloadPrepareResult(outputPath, req); reusable {
 		readUnlock := s.lockSessionLifecycleRead("download-artifact-" + req.ArtifactID)
 		result, stillReusable := existingDownloadPrepareResult(outputPath, req)
-		readUnlock()
 		if stillReusable {
+			// Transfer the reservation before deletion can acquire the same
+			// artifact lock and positively revoke its exact permit.
+			defer func() { finishPreparation(published); readUnlock() }()
+			published = true
 			writeDownloadPrepareResult(w, result)
 			return
 		}
+		readUnlock()
 	}
 	// Claimed only once this request is committed to producing something: a
 	// prepared download encodes on the GPU like any transcode, and the tone-map
@@ -1002,8 +1014,9 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	unlock := s.lockSessionLifecycle("download-artifact-" + req.ArtifactID)
-	defer unlock()
+	defer func() { finishPreparation(published); unlock() }()
 	if result, ok := existingDownloadPrepareResult(outputPath, req); ok {
+		published = true
 		writeDownloadPrepareResult(w, result)
 		return
 	}
@@ -1061,6 +1074,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	published = true
 	writeDownloadPrepareResult(w, result)
 }
 
@@ -1200,6 +1214,7 @@ func (s *Server) handleDownloadArtifact(w http.ResponseWriter, r *http.Request) 
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			s.drain.Revoke(artifactDrainKey(artifactID))
 			http.NotFound(w, r)
 			return
 		}
@@ -1246,6 +1261,7 @@ func (s *Server) handleDeleteDownloadArtifact(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	s.drain.Revoke(artifactDrainKey(artifactID))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2537,7 +2553,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	s.drain.Revoke(sessionID)
+	s.drain.Revoke(transportDrainKey(sessionID))
 
 	w.WriteHeader(http.StatusNoContent)
 }

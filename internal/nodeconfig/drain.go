@@ -21,14 +21,20 @@ func (w *Watcher) ReadDrainFence(ctx context.Context) (int, string, string, erro
 	}
 	id, ok := w.NodeRowID()
 	if !ok {
-		return 0, "", "", workerdrain.ErrUnavailable
+		return 0, "", "", workerdrain.ErrIdentityUnavailable
 	}
 	var fence, realm string
 	err := w.pool.QueryRow(ctx, `SELECT COALESCE(f.fence_id,''), s.value FROM stream_nodes n
 		LEFT JOIN stream_node_drain_fences f ON f.node_id=n.id
 		JOIN server_settings s ON s.key=$2 WHERE n.id=$1`, id, serveridentity.Key).Scan(&fence, &realm)
-	if errors.Is(err, pgx.ErrNoRows) || strings.TrimSpace(realm) == "" {
-		return 0, "", "", workerdrain.ErrUnavailable
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", "", workerdrain.ErrIdentityUnavailable
+	}
+	if err != nil {
+		return 0, "", "", err
+	}
+	if strings.TrimSpace(realm) == "" {
+		return 0, "", "", workerdrain.ErrIdentityUnavailable
 	}
 	return id, fence, strings.TrimSpace(realm), err
 }

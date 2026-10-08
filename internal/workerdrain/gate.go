@@ -14,8 +14,14 @@ import (
 var ErrUnavailable = errors.New("worker drain authority unavailable")
 var ErrFenced = errors.New("worker admission fenced")
 
+// ErrIdentityUnavailable distinguishes positive registration/realm loss from
+// a transient source I/O failure; known permits cannot use outage continuity.
+var ErrIdentityUnavailable = errors.Join(ErrUnavailable, errors.New("worker identity missing or changed"))
+
+var errAuthorityStale = errors.Join(ErrUnavailable, errors.New("worker authority changed during lookup"))
+
 // Source resolves the worker's stable registered identity and current durable
-// fence. Calls are serialized with admission and status inside this process.
+// fence. It may be called concurrently; each read must resolve fresh authority.
 type Source func(context.Context) (nodeID int, fenceID, nativeServerID string, err error)
 
 // Identity correlates public health with an authenticated drain receipt from
@@ -39,47 +45,90 @@ type Status struct {
 }
 
 type Gate struct {
-	mu         sync.Mutex
-	source     Source
-	jobs       func() int
-	revoked    func(context.Context, string) bool
-	now        func() time.Time
-	instanceID string
-	serverID   string
-	nodeID     int
-	fenceID    string
-	sealed     bool
-	active     int
-	permits    map[string]time.Time
-	lastPruned time.Time
+	mu                sync.Mutex
+	source            Source
+	jobs              func() int
+	revoked           func(context.Context, string) bool
+	now               func() time.Time
+	instanceID        string
+	serverID          string
+	nodeID            int
+	fenceID           string
+	sealed            bool
+	active            int
+	permits           map[string]time.Time
+	lastPruned        time.Time
+	authorityEpoch    uint64
+	identityLost      bool
+	permitVersions    map[string]uint64
+	nextPermitVersion uint64
 }
 
 func New(source Source, jobs func() int, revoked func(context.Context, string) bool) *Gate {
-	return &Gate{source: source, jobs: jobs, revoked: revoked, now: time.Now, instanceID: uuid.NewString(), permits: make(map[string]time.Time)}
+	return &Gate{source: source, jobs: jobs, revoked: revoked, now: time.Now, instanceID: uuid.NewString(), permits: make(map[string]time.Time), permitVersions: make(map[string]uint64)}
 }
 
+// syncLocked enters and returns with mu held, releasing it around source I/O.
+// An epoch change invalidates both successes and errors from an older read.
 func (g *Gate) syncLocked(ctx context.Context) error {
 	if g.source == nil {
 		return ErrUnavailable
 	}
-	id, fence, serverID, err := g.source(ctx)
-	if err != nil {
-		return err
+	for attempt := 0; attempt < 3; attempt++ {
+		epoch := g.authorityEpoch
+		g.mu.Unlock()
+		id, fence, serverID, err := g.source(ctx)
+		g.mu.Lock()
+		if epoch != g.authorityEpoch {
+			continue
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err != nil {
+			if errors.Is(err, ErrIdentityUnavailable) {
+				g.loseIdentityLocked()
+			}
+			return err
+		}
+		if id <= 0 || serverID == "" || g.nodeID != 0 && (g.nodeID != id || g.serverID != serverID) {
+			g.loseIdentityLocked()
+			return ErrIdentityUnavailable
+		}
+		if g.nodeID == 0 || g.identityLost || fence != g.fenceID {
+			g.authorityEpoch++
+		}
+		g.nodeID, g.serverID, g.identityLost = id, serverID, false
+		if fence != g.fenceID {
+			// Only a fresh explicit durable cancellation can reopen sealing.
+			g.fenceID, g.sealed = fence, false
+		}
+		return nil
 	}
-	if id <= 0 || serverID == "" {
-		return ErrUnavailable
+	return errAuthorityStale
+}
+
+func (g *Gate) loseIdentityLocked() {
+	// Every positive loss invalidates reads already in flight, including reads
+	// that began after an earlier loss but before another foreign observation.
+	g.authorityEpoch++
+	g.identityLost = true
+}
+
+func (g *Gate) retainLocked(key string, expiry time.Time) {
+	if key == "" || !expiry.After(g.now()) {
+		return
 	}
-	if g.nodeID != 0 && (g.nodeID != id || g.serverID != serverID) {
-		return ErrUnavailable
+	if expiry.After(g.permits[key]) {
+		g.permits[key] = expiry
 	}
-	g.nodeID = id
-	g.serverID = serverID
-	if fence != g.fenceID {
-		// Only an explicit durable cancellation can reopen a sealed worker.
-		g.fenceID = fence
-		g.sealed = false
-	}
-	return nil
+	g.nextPermitVersion++
+	g.permitVersions[key] = g.nextPermitVersion
+}
+
+func (g *Gate) revokeLocked(key string) {
+	delete(g.permits, key)
+	delete(g.permitVersions, key)
 }
 
 // PublicIdentity returns the last verified process/realm binding. Its first
@@ -99,17 +148,44 @@ func (g *Gate) PublicIdentity(ctx context.Context) Identity {
 	return Identity{NativeServerID: g.serverID, WorkerInstanceID: g.instanceID}
 }
 
-func (g *Gate) pruneLocked(ctx context.Context, force bool) {
+// pruneLocked keeps expiry checks local. Explicit deny observations run without
+// mu and apply only to the exact permit generation that was observed.
+func (g *Gate) pruneLocked(ctx context.Context, force bool) bool {
 	now := g.now()
 	if !force && now.Sub(g.lastPruned) < time.Minute {
-		return
+		return true
 	}
 	g.lastPruned = now
 	for key, expiry := range g.permits {
-		if !expiry.After(now) || (force && g.revoked != nil && g.revoked(ctx, key)) {
-			delete(g.permits, key)
+		if !expiry.After(now) {
+			g.revokeLocked(key)
 		}
 	}
+	if !force || g.revoked == nil || len(g.permits) == 0 {
+		return true
+	}
+	versions := make(map[string]uint64, len(g.permits))
+	for key := range g.permits {
+		versions[key] = g.permitVersions[key]
+	}
+	epoch := g.authorityEpoch
+	g.mu.Unlock()
+	denied := make([]string, 0, len(versions))
+	for key := range versions {
+		if g.revoked(ctx, key) {
+			denied = append(denied, key)
+		}
+	}
+	g.mu.Lock()
+	if epoch != g.authorityEpoch || ctx.Err() != nil {
+		return false
+	}
+	for _, key := range denied {
+		if current, exists := g.permitVersions[key]; exists && current == versions[key] {
+			g.revokeLocked(key)
+		}
+	}
+	return true
 }
 
 // Begin reserves a request before any execution or egress can start. Existing
@@ -128,7 +204,7 @@ func (g *Gate) Begin(ctx context.Context, key string, expiry time.Time) (func(),
 		// temporary authority outage. No new identity, renewal, background work
 		// or retirement receipt is allowed without current durable authority.
 		expires, known := g.permits[key]
-		if g.sealed || key == "" || !known || !expires.After(g.now()) {
+		if g.identityLost || errors.Is(err, ErrIdentityUnavailable) || errors.Is(err, errAuthorityStale) || ctx.Err() != nil || g.sealed || key == "" || !known || !expires.After(g.now()) {
 			return nil, err
 		}
 		authorityConfirmed = false
@@ -137,7 +213,7 @@ func (g *Gate) Begin(ctx context.Context, key string, expiry time.Time) (func(),
 	// sweeps are bounded, and potentially remote deny lookups belong to the
 	// explicit retirement observation rather than every media segment.
 	if prior, ok := g.permits[key]; ok && !prior.After(g.now()) {
-		delete(g.permits, key)
+		g.revokeLocked(key)
 	}
 	g.pruneLocked(ctx, false)
 	_, known := g.permits[key]
@@ -145,11 +221,32 @@ func (g *Gate) Begin(ctx context.Context, key string, expiry time.Time) (func(),
 		return nil, ErrFenced
 	}
 	if authorityConfirmed && key != "" && expiry.After(g.now()) && expiry.After(g.permits[key]) {
-		g.permits[key] = expiry
+		g.retainLocked(key, expiry)
 	}
 	g.active++
 	var once sync.Once
 	return func() { once.Do(func() { g.mu.Lock(); g.active--; g.mu.Unlock() }) }, nil
+}
+
+// BeginPreparation admits new one-shot preparation, never a known-ID retry
+// after fencing. Successful publication transfers its reservation to a retained
+// artifact permit before request release. Failed preparation retains nothing.
+func (g *Gate) BeginPreparation(ctx context.Context, key string, expiry time.Time) (func(bool), error) {
+	end, err := g.Begin(ctx, "", time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	var once sync.Once
+	return func(published bool) {
+		once.Do(func() {
+			if g != nil && published {
+				g.mu.Lock()
+				g.retainLocked(key, expiry)
+				g.mu.Unlock()
+			}
+			end()
+		})
+	}, nil
 }
 
 // Observe samples actual worker execution plus request and permit reservations.
@@ -165,7 +262,9 @@ func (g *Gate) Observe(ctx context.Context) (Status, error) {
 	if err := g.syncLocked(ctx); err != nil {
 		return Status{}, err
 	}
-	g.pruneLocked(ctx, true)
+	if !g.pruneLocked(ctx, true) {
+		return Status{}, errAuthorityStale
+	}
 	jobs := 0
 	if g.jobs != nil {
 		jobs = g.jobs()
@@ -173,8 +272,9 @@ func (g *Gate) Observe(ctx context.Context) (Status, error) {
 	if jobs < 0 {
 		return Status{}, ErrUnavailable
 	}
-	if g.fenceID != "" && jobs == 0 && g.active == 0 && len(g.permits) == 0 {
+	if g.fenceID != "" && jobs == 0 && g.active == 0 && len(g.permits) == 0 && !g.sealed {
 		g.sealed = true
+		g.authorityEpoch++
 	}
 	return Status{NodeID: g.nodeID, FenceID: g.fenceID, WorkerInstanceID: g.instanceID, NativeServerID: g.serverID, Fenced: g.fenceID != "", Drained: g.fenceID != "" && g.sealed && jobs == 0 && g.active == 0 && len(g.permits) == 0, ActiveJobs: jobs, ActiveRequests: g.active, ActiveReservations: len(g.permits), ObservedAt: g.now().UTC()}, nil
 }
@@ -186,6 +286,6 @@ func (g *Gate) Revoke(key string) {
 		return
 	}
 	g.mu.Lock()
-	delete(g.permits, key)
+	g.revokeLocked(key)
 	g.mu.Unlock()
 }

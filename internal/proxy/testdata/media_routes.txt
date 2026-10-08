@@ -1,4 +1,6 @@
 # fixture 1
+GET /admin/drain	non-media
+POST /admin/drain	non-media
 POST /admin/force-reload	non-media
 POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media
@@ -31,6 +33,8 @@ GET /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
 HEAD /stream/v3/{session_id}/master.m3u8	media	manifest	viewer_egress	true	true
 GET /stream/v3/{session_id}/segment/{name}	media	playback	viewer_egress	true	true
 # fixture 2
+GET /admin/drain	non-media
+POST /admin/drain	non-media
 POST /admin/force-reload	non-media
 POST /admin/reload-config	non-media
 POST /admin/reprobe-capabilities	non-media
