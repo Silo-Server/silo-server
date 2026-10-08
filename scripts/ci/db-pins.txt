@@ -143,6 +143,11 @@
 # Settings: one query per batched resolution, whatever its scopes and keys.
 ./internal/userstore/pgstore TestPostgresResolutionIssuesOneQuery
 
+# Subtree file reads bound file_path on the folder path index under a generic
+# plan, and match the same literal paths as a prefix LIKE.
+./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
+
 # Book scans (beta): unchanged files skip without per-file or literary-works
 # queries.
 ./internal/scanner TestUnchangedBooksDoNotQueryLiteraryWorks

@@ -3251,17 +3251,26 @@ func (r *FileRepository) GetByFolder(ctx context.Context, folderID int) ([]*mode
 // GetByFolderAndPathPrefix returns all files for a folder that live under a
 // subtree path.
 func (r *FileRepository) GetByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*models.MediaFile, error) {
-	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	query, args := folderPathPrefixQuery(fileColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by folder and path prefix: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// folderPathPrefixQuery selects columns for the files of a folder at or under
+// pathPrefix. The range bounds let the (media_folder_id, file_path
+// text_pattern_ops) index narrow the subtree even under a generic plan, which
+// a parameterized LIKE cannot do.
+func folderPathPrefixQuery(columns string, folderID int, pathPrefix string) (string, []any) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT ` + columns + ` FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
+		ORDER BY file_path ASC`
+	return query, append([]any{folderID}, args...)
 }
 
 // ListByGroupKey returns all present media files in a logical content group.
