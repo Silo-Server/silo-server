@@ -1745,12 +1745,10 @@ sensitive and machine-managed keys with 404. Missing and empty values also remai
 404. The setup wizard uses this route for its Redis configuration read and treats
 only 404 as absence, rejecting stale responses after an authority change.
 
-`GET /api/v2/admin/settings/sections` reuses the existing profile-section flag
-reader: read failures preserve the disabled default. It requires acting-admin
-authority. `GET /api/v2/admin/playback-routing/capabilities` exposes the shared
-routing vocabulary under the same authority; these are configuration choices,
-not evidence of available worker capacity. No recorded first-party consumer uses
-these two discovery reads.
+`GET /api/v2/admin/playback-routing/capabilities` exposes the shared routing
+vocabulary under acting-admin authority; these are configuration choices, not
+evidence of available worker capacity. No recorded first-party consumer uses
+this read.
 
 ### Jellyfin compatibility status
 
@@ -1891,16 +1889,12 @@ web query and manual-refresh cache writer share the captured authority key and
 reject results decoded after an authority switch. These are aggregate observations,
 not an atomic cluster snapshot. No native or Jellyfin caller uses this admin read.
 
-`PUT /api/v2/admin/settings/sections` replaces `allow_profile_custom_sections`.
-The administrator GET on the same path now returns an actor/profile-bound ETag
-and supports conditional reads. PUT requires `If-Match`, accepts `If-None-Match` as an additional exclusion, and
-evaluates both against current canonical state inside the existing settings
-transaction; stale state returns 412, and unchanged state performs no write.
-The required boolean rejects omitted and null values. The response contains the
-canonical flag and its ETag. The profile-facing flag reader keeps its existing
-disabled default on read failure; the write fails closed without an atomic store.
-No first-party or internal writer is recorded, so no new UI or native flow is added.
-The bridge writer and profile section enforcement remain unchanged.
+There is no setting for whether profiles may add rule rows: they always may.
+`GET`/`PUT /api/v2/admin/settings/sections` (`getAdminSectionSettings`,
+`updateAdminSectionSettings`) were removed before the v2 lock. The frozen v1
+`GET /api/v1/admin/settings/sections` answers `allow_profile_custom_sections:
+true`, and v1 `PUT` checks that the body is JSON, changes nothing, and answers
+the same. A stored `sections.allow_profile_custom_sections` row is ignored.
 
 ### Offline-download preparation
 

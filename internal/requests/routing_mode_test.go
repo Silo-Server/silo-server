@@ -247,6 +247,24 @@ func TestPreviewUnderStandard(t *testing.T) {
 	}
 }
 
+func TestPreviewUnderStandardWithOnlyA4KServer(t *testing.T) {
+	store := standardStore(RoutingFacts{})
+	store.integrations = store.integrations[1:]
+	svc := modeService(store, &fakeTMDBClient{detail: &tmdb.MediaDetail{ID: 129, Year: 2001}})
+
+	preview, err := svc.PreviewRoute(context.Background(), Viewer{IsAdmin: true}, MediaTypeMovie, 129, 0)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	hd, uhd := preview.Tiers[0], preview.Tiers[1]
+	if hd.IntegrationID != "" || hd.Reason != "The only server is marked 4K, so there is no HD version; requests from users without 4K fail." {
+		t.Fatalf("HD tier = %+v", hd)
+	}
+	if uhd.IntegrationID != "radarr-4k" {
+		t.Fatalf("4K tier = %+v, want Standard's 4K Radarr", uhd)
+	}
+}
+
 // routingModeRepository is the lifecycle test schema with the route and mode
 // tables, the mode set to Standard.
 func routingModeRepository(t *testing.T) (*Repository, *pgxpool.Pool) {

@@ -1330,15 +1330,18 @@ export interface Collection {
   name: string;
   description?: string;
   collection_type: UserCollectionType;
+  /** Every profile on the login sees the collection read-only; otherwise only its creator. */
   is_shared: boolean;
-  allowed_profile_ids: string[];
   query_definition: QueryDefinition;
   sort_config: Record<string, unknown>;
+  /** Position in the creator's own order of collections. */
   sort_order: number;
   group_id?: string | null;
   source_url?: string;
   source_config?: Record<string, unknown>;
   sync_schedule?: string;
+  /** The cadence `sync_schedule` names; "custom" for a schedule no name produces. */
+  sync_cadence?: UserCollectionSyncCadence;
   next_sync_at?: string;
   last_sync_at?: string;
   last_sync_status?: UserCollectionSyncStatus;
@@ -1349,6 +1352,10 @@ export interface Collection {
   include_in_server_collections?: boolean;
   poster_url?: string;
   poster_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its titles, not an uploaded or imported image. */
+  poster_is_collage?: boolean;
+  /** Whether it holds the list's `contains_item` title; only on the profile's own manual collections. */
+  contains?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1373,17 +1380,9 @@ export interface CollectionItem {
   added_at: string;
 }
 
-export interface CollectionGroup {
-  id: string;
-  name: string;
-  slug: string;
-  default_sort_mode: GroupSortMode;
-  sort_order: number;
-}
-
 export interface CollectionsListResponse {
+  /** The profile's own collections in its order, then other profiles' shared ones. */
   collections: Collection[];
-  groups: CollectionGroup[];
 }
 
 export interface CollectionCapabilitiesResponse {
@@ -1478,11 +1477,6 @@ export interface QueryDefinitionInput {
   limit?: number;
 }
 
-export interface SmartCollectionAccess {
-  is_shared: boolean;
-  allowed_profile_ids: string[];
-}
-
 export interface CollectionPreviewRequest {
   query_definition: QueryDefinition;
   limit?: number;
@@ -1501,9 +1495,10 @@ export interface CollectionPreviewResponse {
 
 export interface CreateCollectionRequest {
   name: string;
+  /** Accepted when collection capabilities report `create_description`. */
+  description?: string;
   collection_type?: "manual" | "smart";
   is_shared?: boolean;
-  allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
   /** Filter-only QueryDefinition fragment; omit for no display filter. */
@@ -1516,7 +1511,6 @@ export interface UpdateCollectionRequest {
   name?: string;
   description?: string;
   is_shared?: boolean;
-  allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
   source_url?: string;
@@ -1528,6 +1522,8 @@ export interface UpdateCollectionRequest {
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
+  /** A synced list's cadence; "" stops scheduled syncs. */
+  sync_schedule?: UserCollectionSyncSchedule;
 }
 
 export interface LibraryCollection {
@@ -1546,6 +1542,8 @@ export interface LibraryCollection {
   backdrop_url: string;
   poster_thumbhash?: string;
   backdrop_thumbhash?: string;
+  /** `poster_url` is the collage the server made of its members, not an uploaded or template image. */
+  poster_is_collage?: boolean;
   source_url: string;
   query_definition: QueryDefinition;
   sort_config: Record<string, unknown>;
@@ -1559,6 +1557,10 @@ export interface LibraryCollection {
   sync_schedule?: string;
   next_sync_at?: string;
   item_count: number;
+  /** Admin list only: turned-on Home rows that show it. */
+  home_row_count?: number;
+  /** Admin list only: Home and library page rows that show it, turned-off ones included. */
+  row_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -1764,6 +1766,7 @@ export interface ImportTraktCollectionResponse {
 // concerns). sync_schedule is restricted to a fixed set so we can guarantee
 // the >=24h minimum interval without parsing user-supplied cron.
 export type UserCollectionSyncSchedule = "" | "daily" | "weekly" | "monthly";
+export type UserCollectionSyncCadence = UserCollectionSyncSchedule | "custom";
 
 export interface UserImportSharedFields {
   title: string;
@@ -1778,10 +1781,6 @@ export interface UserImportSharedFields {
   library_ids?: number[];
   /** Default order viewers land on; `{}` keeps the source list's own order. */
   sort_config?: CollectionSortConfig;
-}
-
-export interface ImportUserMDBListCollectionRequest extends UserImportSharedFields {
-  url: string;
 }
 
 export interface MDBListListSummary {
@@ -1804,17 +1803,6 @@ export interface MDBListDiscoveryResponse {
   lists: MDBListListSummary[];
 }
 
-export interface ImportUserTMDBCollectionRequest extends UserImportSharedFields {
-  preset: ImportTMDBCollectionRequest["preset"];
-  media_type: ImportTMDBCollectionRequest["media_type"];
-  time_window?: ImportTMDBCollectionRequest["time_window"];
-}
-
-export interface ImportUserTMDBListCollectionRequest extends UserImportSharedFields {
-  /** A public TMDB list page URL or its numeric ID. */
-  url: string;
-}
-
 // A completed sync always has a non-empty status; the empty-string variant in
 // UserCollectionSyncStatus only appears on un-synced rows.
 export type UserCollectionSyncResultStatus = Exclude<UserCollectionSyncStatus, "">;
@@ -1826,11 +1814,6 @@ export interface UserCollectionSyncResult {
   items_unmatched: number;
   started_at: string;
   completed_at: string;
-}
-
-export interface ImportUserCollectionResponse {
-  collection: Collection;
-  sync?: UserCollectionSyncResult;
 }
 
 // Media Requests
@@ -4616,7 +4599,9 @@ export function queryDefinitionFromSectionConfig(
               ? "ebook"
               : config.media_scope === "manga" || config.filter_type === "manga"
                 ? "manga"
-                : undefined;
+                : config.media_scope === "video"
+                  ? "video"
+                  : undefined;
 
   const legacySortField = typeof config.sort === "string" ? config.sort : undefined;
   const legacySortOrder = typeof config.order === "string" ? config.order : undefined;
@@ -4664,6 +4649,8 @@ export interface SettingsSectionEntry {
   id: string;
   section_type: string;
   title: string;
+  /** The admin row's own title; empty for a profile-built row. Absent on entries built locally. */
+  default_title?: string;
   featured: boolean;
   item_limit: number;
   hidden: boolean;

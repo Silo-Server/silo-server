@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { components } from "@/api/v2/schema";
 import { v2Problem } from "@/api/v2/problems.test-support";
+import { everyRecipe } from "@/lib/homeRows/recipeCatalogFixture.test-support";
+import { matchRecipePreset } from "@/lib/recipes";
 
 import {
   buildHomeLayoutFile,
@@ -66,7 +68,8 @@ function target(overrides: Partial<HomeLayoutImportTarget> = {}): HomeLayoutImpo
       ["recently_added", { adminOnly: false }],
       ["profile_activity_feed", { adminOnly: false }],
       ["trending_discover", { adminOnly: false }],
-      ["custom_filter", { adminOnly: true }],
+      ["custom_filter", { adminOnly: false }],
+      ["admin_curated_list", { adminOnly: true }],
     ]),
     allowAdminOnlyRecipes: true,
     personalCollectionIds: new Set(["mine"]),
@@ -289,8 +292,11 @@ describe("planHomeLayoutImport on the same server", () => {
             scope: "home",
             overrides: [
               { user_section_type: "collection", user_config: { user_collection_id: "theirs" } },
-              { section_type: "custom_filter", title: "Filtered" },
-              { section_type: "genre", title: "Legacy genre" },
+              {
+                section_type: "admin_curated_list",
+                title: "Staff picks",
+                config: { item_ids: ["x"] },
+              },
               { user_section_type: "trending_discover", user_config: { source: "trakt" } },
               { user_section_type: "hidden_gems", removed: true },
             ],
@@ -306,8 +312,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan.skippedPages).toEqual(["Library 9"]);
     expect(plan.skippedSections).toEqual([
       { page: "Home", title: "collection", reason: "collection" },
-      { page: "Home", title: "Filtered", reason: "custom_disabled" },
-      { page: "Home", title: "Legacy genre", reason: "custom_disabled" },
+      { page: "Home", title: "Staff picks", reason: "custom_disabled" },
       { page: "Home", title: "trending_discover", reason: "trakt" },
     ]);
   });
@@ -944,5 +949,96 @@ describe("importPage", () => {
     await expect(importPage(page, false, otherServer, sequentialIds())).rejects.toBe(refused);
     expect(otherServer.save).toHaveBeenCalledTimes(1);
     expect(otherServer.listView).not.toHaveBeenCalled();
+  });
+});
+
+// Characterization for the Home rows redesign (#1705): one profile-built row
+// of each kind, stored as the server echoes what the editor saves, survives
+// export and import unchanged. The redesign must not change these.
+describe("home layout round trip for every row kind", () => {
+  const presetRows = everyRecipe().flatMap((def) =>
+    def.presets.slice(0, 1).map((preset) => ({
+      section_type: def.type,
+      title: preset.display_name,
+      config: { ...preset.default_params },
+    })),
+  );
+  const ownRows = [
+    ...presetRows,
+    { section_type: "custom_filter", title: "90s Horror", config: { match: "any", groups: [] } },
+    { section_type: "genre", title: "Horror", config: { filter_type: "movie", groups: [] } },
+    { section_type: "collection", title: "Mine", config: { user_collection_id: "mine" } },
+    { section_type: "collection", title: "Ghibli", config: { library_collection_id: "lib-1" } },
+  ];
+  const exported = buildHomeLayoutFile({
+    serverId: "server-a",
+    exportedAt: new Date("2026-09-29T12:00:00.000Z"),
+    libraries: [{ id: 1, name: "Movies", type: "movie" }],
+    pages: [
+      {
+        scope: "home",
+        overrides: [
+          stored({
+            id: "o-admin",
+            section_id: "admin-1",
+            position: 0,
+            hidden: true,
+            title: "Renamed",
+          }),
+          ...ownRows.map((row, index) =>
+            stored({
+              ...row,
+              id: `o-${index}`,
+              position: index + 1,
+              is_user_added: true,
+              featured: index === 0,
+              item_limit: 20,
+            }),
+          ),
+        ],
+      },
+    ],
+  });
+
+  function importAs(allowAdminOnlyRecipes: boolean) {
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const recipes = new Map(
+      everyRecipe().map((def) => [def.type, { adminOnly: def.admin_only }] as const),
+    );
+    return planHomeLayoutImport(
+      parsed.file,
+      target({ recipes, allowAdminOnlyRecipes }),
+      sequentialIds(),
+    );
+  }
+
+  it("imports every kind back unchanged into an admin account", () => {
+    const plan = importAs(true);
+    const written = exported.pages[0]!.overrides;
+
+    expect(plan.skippedSections).toEqual([]);
+    expect(plan.pages[0]!.overrides).toEqual(
+      written.map((override, index) =>
+        override.section_id ? override : { ...override, id: `new-${index}` },
+      ),
+    );
+    // Rows saved from a preset still name that preset after the trip.
+    for (const override of plan.pages[0]!.overrides.slice(1, presetRows.length + 1)) {
+      const def = everyRecipe().find((d) => d.type === override.section_type)!;
+      expect(matchRecipePreset(def, override.config)?.display_name).toBe(override.title);
+    }
+  });
+
+  it("imports rule rows but not Editor's picks into an account that is not an admin", () => {
+    const plan = importAs(false);
+
+    expect(plan.skippedSections).toEqual([
+      { page: "Home", title: "Editor's Picks", reason: "custom_disabled" },
+    ]);
+    expect(plan.pages[0]!.overrides).toHaveLength(exported.pages[0]!.overrides.length - 1);
+    expect(plan.pages[0]!.overrides.map((override) => override.title)).toEqual(
+      expect.arrayContaining(["90s Horror", "Horror"]),
+    );
   });
 });

@@ -91,16 +91,15 @@ func (r *CatalogResolver) resolveLibraryCollectionCursor(ctx context.Context, re
 		return nil, ErrCatalogSourceNotFound
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindLibrary, collection.ID, collection.SortConfig, func(effective CatalogRequest) (*CatalogResult, error) {
-		if IsLiveQueryType(collection.CollectionType) || catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
-			def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
-			if err != nil {
-				return nil, err
-			}
-			def, ok := scopeLibraryCollectionDefinition(def, collection)
-			if !ok {
-				return &CatalogResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false, TotalExact: true}, nil
-			}
-			return r.resolveSmartCollectionCursor(ctx, effective, access, def)
+		membership, err := catalogLibraryCollectionMembership(collection, access)
+		if err != nil {
+			return nil, err
+		}
+		if membership.OutOfScope {
+			return &CatalogResult{Items: []*models.MediaItem{}, TotalExact: true}, nil
+		}
+		if membership.Live {
+			return r.resolveSmartCollectionCursor(ctx, effective, access, membership.Query)
 		}
 		return r.resolveLibraryMembershipQueryCursor(ctx, effective, access)
 	})
@@ -123,6 +122,10 @@ func (r *CatalogResolver) resolveUserCollectionCursor(ctx context.Context, req C
 	collection, err := store.GetCollection(ctx, req.CollectionID)
 	if err != nil || !ProfileCanAccessCollection(collection, access.ProfileID) {
 		return nil, ErrCatalogSourceNotFound
+	}
+	access, err = r.userCollectionAccess(ctx, access, collection)
+	if err != nil {
+		return nil, err
 	}
 	result, err := r.resolveCollectionWithEffectiveSort(ctx, req, access, userstore.CollectionKindUser, collection.ID, []byte(collection.SortConfig), func(effective CatalogRequest) (*CatalogResult, error) {
 		sqlState := userstore.HasCatalogSQLState(store)

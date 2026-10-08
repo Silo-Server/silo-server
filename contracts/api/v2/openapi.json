@@ -3394,6 +3394,12 @@
               "null"
             ]
           },
+          "home_row_count": {
+            "description": "Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -3455,6 +3461,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -3462,6 +3475,12 @@
             "type": "string"
           },
           "query_definition": {},
+          "row_count": {
+            "description": "Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "slug": {
             "type": "string"
           },
@@ -3505,6 +3524,7 @@
           "featured",
           "poster_url",
           "backdrop_url",
+          "poster_is_collage",
           "source_url",
           "query_definition",
           "sort_config",
@@ -3588,9 +3608,26 @@
           "item_reorder": {
             "type": "boolean"
           },
+          "mdblist_search": {
+            "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "schedule_time_zone": {
+            "$ref": "#/components/schemas/CollectionScheduleTimeZone"
+          },
+          "section_references": {
+            "description": "listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "state": {
             "description": "Support and configuration state, not health",
@@ -3601,6 +3638,13 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "template_summaries": {
+            "description": "listAdminCollectionTemplateBundles returns each bundle's templates",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
@@ -3609,6 +3653,10 @@
           "import_sources",
           "artwork",
           "item_reorder",
+          "template_summaries",
+          "mdblist_search",
+          "schedule_time_zone",
+          "section_references",
           "revision",
           "state",
           "allowed"
@@ -3997,6 +4045,71 @@
         "required": [
           "total",
           "items"
+        ],
+        "type": "object"
+      },
+      "AdminCollectionSection": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "featured": {
+            "description": "The row is its page's hero banner.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "library_id": {
+            "description": "The library whose page holds the row; null for a Home row.",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "page_row_count": {
+            "description": "Rows on the page that holds this row, turned-off rows included.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "position": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "home",
+              "library"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope",
+          "library_id",
+          "section_type",
+          "title",
+          "featured",
+          "enabled",
+          "position",
+          "page_row_count"
         ],
         "type": "object"
       },
@@ -20259,20 +20372,57 @@
         "additionalProperties": false,
         "properties": {
           "has_more": {
-            "description": "Whether more values matched than limit",
+            "description": "Whether more values than limit start with q",
             "type": "boolean"
           },
           "matches": {
-            "description": "Empty, never null",
+            "description": "Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "values": {
+            "description": "The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/CatalogFacetValue"
+            },
+            "type": "array"
+          },
+          "values_has_more": {
+            "description": "Whether more values matched than limit for values",
+            "type": "boolean"
           }
         },
         "required": [
           "matches",
-          "has_more"
+          "has_more",
+          "values",
+          "values_has_more"
+        ],
+        "type": "object"
+      },
+      "CatalogFacetValue": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "Titles in the scope with this value; values can lag catalog changes by up to two minutes",
+            "examples": [
+              42
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "value": {
+            "examples": [
+              "Warner Bros. Pictures"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "count"
         ],
         "type": "object"
       },
@@ -21528,6 +21678,10 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "facet_value_search": {
+            "description": "searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q",
+            "type": "boolean"
+          },
           "max_sessions_per_account": {
             "description": "Oldest ranking sessions expire when this retention bound is exceeded",
             "format": "int64",
@@ -22074,6 +22228,26 @@
             "description": "The page's items; empty, never null",
             "items": {
               "$ref": "#/components/schemas/AdminCollectionMember"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionAdminCollectionSection": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminCollectionSection"
             },
             "type": "array"
           },
@@ -22750,6 +22924,20 @@
             ],
             "type": "boolean"
           },
+          "contains_item": {
+            "description": "listCollections accepts contains_item and marks the acting profile's own manual collections with contains",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "create_description": {
+            "description": "createCollection stores a description for the acting account",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "display_filter_fields": {
             "description": "Catalog query fields a display filter may use",
             "examples": [
@@ -22773,7 +22961,7 @@
             "type": "boolean"
           },
           "groups": {
-            "description": "The acting account supports collection groups",
+            "description": "Always false: personal collection groups are no longer supported",
             "type": "boolean"
           },
           "import_sources": {
@@ -22803,9 +22991,37 @@
             "description": "The acting account supports reordering collection items",
             "type": "boolean"
           },
+          "login_sharing": {
+            "description": "is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it",
+            "type": "boolean"
+          },
+          "mdblist_search": {
+            "description": "searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "poster_collages": {
+            "description": "A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "preview_posters": {
+            "description": "previewCollection items carry poster_url when the title has a poster",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
+          },
+          "schedule_time_zone": {
+            "$ref": "#/components/schemas/CollectionScheduleTimeZone"
           },
           "sort_preference_kinds": {
             "description": "collection_kind values the sort-preference operations accept",
@@ -22831,10 +23047,18 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "sync_schedule_editable": {
+            "description": "updateCollection accepts sync_schedule on a synced list; false when imports is false",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
           "groups",
+          "login_sharing",
           "imports",
           "import_sources",
           "artwork",
@@ -22845,6 +23069,13 @@
           "collection_sort_preferences",
           "effective_collection_sort",
           "sort_preference_kinds",
+          "create_description",
+          "mdblist_search",
+          "schedule_time_zone",
+          "sync_schedule_editable",
+          "contains_item",
+          "preview_posters",
+          "poster_collages",
           "revision",
           "state",
           "allowed"
@@ -23217,7 +23448,7 @@
         "additionalProperties": false,
         "properties": {
           "group_id": {
-            "description": "The group whose collections are ordered; omitted or null orders the ungrouped section",
+            "description": "Omit or send null: personal collection groups are no longer supported, and any other value is a validation failure",
             "examples": [
               "g1"
             ],
@@ -23228,7 +23459,7 @@
             ]
           },
           "ordered_ids": {
-            "description": "Every visible collection in the scope, exactly once, in the new order",
+            "description": "Each of the acting profile's own collections, exactly once, in the new order; another profile's collection is a validation failure",
             "examples": [
               [
                 "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
@@ -23307,6 +23538,38 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "CollectionScheduleTimeZone": {
+        "additionalProperties": false,
+        "properties": {
+          "abbreviation": {
+            "description": "Current zone abbreviation as the node's time zone database reports it; some zones report a numeric form such as -03",
+            "examples": [
+              "CDT"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "IANA zone name, from the node's TZ environment variable or UTC when TZ is empty or names no known zone; omitted when the node uses its system default zone or a TZ file path",
+            "examples": [
+              "America/Chicago"
+            ],
+            "type": "string"
+          },
+          "utc_offset": {
+            "description": "Current offset from UTC, daylight saving time included",
+            "examples": [
+              "-05:00"
+            ],
+            "pattern": "^[+-][0-9]{2}:[0-9]{2}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "utc_offset",
+          "abbreviation"
         ],
         "type": "object"
       },
@@ -23505,11 +23768,19 @@
             },
             "type": "array"
           },
+          "templates": {
+            "description": "The bundle's templates, in template_ids order.",
+            "items": {
+              "$ref": "#/components/schemas/CollectionTemplateSummary"
+            },
+            "type": "array"
+          },
           "title": {
             "type": "string"
           }
         },
         "required": [
+          "templates",
           "id",
           "title",
           "description",
@@ -23529,6 +23800,44 @@
         },
         "required": [
           "categories"
+        ],
+        "type": "object"
+      },
+      "CollectionTemplateSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "featured": {
+            "description": "Collections created from this template are pinned first on their shelf.",
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "media_kind": {
+            "type": "string"
+          },
+          "needs_setup": {
+            "description": "Applying the template creates an empty collection that cannot sync until an administrator sets its source.",
+            "type": "boolean"
+          },
+          "poster_path": {
+            "description": "Server-relative path of the template's poster image.",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source",
+          "media_kind",
+          "featured",
+          "needs_setup"
         ],
         "type": "object"
       },
@@ -23920,6 +24229,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -24004,7 +24320,8 @@
           "last_sync_message",
           "item_count",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "poster_is_collage"
         ],
         "type": "object"
       },
@@ -29708,6 +30025,13 @@
             "format": "int64",
             "type": "integer"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -29726,7 +30050,8 @@
           "id",
           "title",
           "poster_url",
-          "item_count"
+          "item_count",
+          "poster_is_collage"
         ],
         "type": "object"
       },
@@ -31219,13 +31544,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -35069,27 +35395,19 @@
       "PersonalCollection": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "description": "Profiles a shared collection is limited to; empty means every profile on the account",
-            "examples": [
-              []
-            ],
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "collection_type": {
             "description": "manual, smart, or an import source (mdblist, tmdb, trakt)",
             "examples": [
               "manual"
             ],
             "type": "string"
+          },
+          "contains": {
+            "description": "Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
@@ -35119,7 +35437,7 @@
             "description": "Display filter fragment; absent when none"
           },
           "group_id": {
-            "description": "null when ungrouped",
+            "description": "Always null: personal collection groups are no longer supported",
             "examples": [
               "g1"
             ],
@@ -35144,6 +35462,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does",
             "examples": [
               false
             ],
@@ -35201,6 +35520,13 @@
               "null"
             ]
           },
+          "poster_is_collage": {
+            "description": "poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "examples": [
               ""
@@ -35229,6 +35555,7 @@
             "description": "Default sort document; {} when unset"
           },
           "sort_order": {
+            "description": "Position in its creator's own order of collections",
             "examples": [
               0
             ],
@@ -35240,6 +35567,20 @@
           },
           "source_url": {
             "description": "Where an imported collection is synced from; empty otherwise",
+            "examples": [
+              ""
+            ],
+            "type": "string"
+          },
+          "sync_cadence": {
+            "description": "The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces",
+            "enum": [
+              "",
+              "daily",
+              "weekly",
+              "monthly",
+              "custom"
+            ],
             "examples": [
               ""
             ],
@@ -35271,13 +35612,13 @@
           "description",
           "collection_type",
           "is_shared",
-          "allowed_profile_ids",
           "query_definition",
           "sort_config",
           "sort_order",
           "group_id",
           "source_url",
           "sync_schedule",
+          "sync_cadence",
           "next_sync_at",
           "last_sync_at",
           "last_sync_status",
@@ -35286,6 +35627,7 @@
           "include_in_server_collections",
           "poster_url",
           "poster_thumbhash",
+          "poster_is_collage",
           "created_at",
           "updated_at"
         ],
@@ -35309,7 +35651,7 @@
         "additionalProperties": false,
         "properties": {
           "groups": {
-            "description": "The account's collection groups in sort order; empty, never null",
+            "description": "Always empty: personal collection groups are no longer supported",
             "items": {
               "$ref": "#/components/schemas/CollectionGroup"
             },
@@ -35336,21 +35678,6 @@
       "PersonalCollectionCreate": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "description": "Profiles a shared collection is limited to",
-            "examples": [
-              []
-            ],
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "collection_type": {
             "description": "Defaults to manual",
             "enum": [
@@ -35359,6 +35686,13 @@
             ],
             "examples": [
               "manual"
+            ],
+            "type": "string"
+          },
+          "description": {
+            "description": "Empty when omitted. Send only when getCollectionCapabilities reports create_description; otherwise the request fails",
+            "examples": [
+              "For wet afternoons"
             ],
             "type": "string"
           },
@@ -35372,6 +35706,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
@@ -35511,6 +35846,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "poster_url": {
+            "description": "Card-size poster URL; omitted when the item has none",
+            "type": "string"
+          },
           "title": {
             "type": "string"
           },
@@ -35553,23 +35892,12 @@
       "PersonalCollectionUpdate": {
         "additionalProperties": false,
         "properties": {
-          "allowed_profile_ids": {
-            "items": {
-              "description": "Opaque identifier",
-              "examples": [
-                "1"
-              ],
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          },
           "description": {
             "type": "string"
           },
           "display_query_definition": {},
           "group_id": {
-            "description": "Null removes the group; omitted leaves it unchanged",
+            "description": "Omit: personal collection groups are no longer supported, and setting it answers capability_unsupported",
             "examples": [
               "1"
             ],
@@ -35583,6 +35911,7 @@
             "type": "boolean"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login",
             "type": "boolean"
           },
           "library_ids": {
@@ -35611,6 +35940,19 @@
           "query_definition": {},
           "sort_config": {},
           "source_url": {
+            "type": "string"
+          },
+          "sync_schedule": {
+            "description": "A synced list's cadence; empty stops scheduled syncs. Cron expressions are refused. Accepted when getCollectionCapabilities reports sync_schedule_editable",
+            "enum": [
+              "",
+              "daily",
+              "weekly",
+              "monthly"
+            ],
+            "examples": [
+              "weekly"
+            ],
             "type": "string"
           }
         },
@@ -38371,9 +38713,10 @@
         "additionalProperties": false,
         "properties": {
           "allow_profile_custom_sections": {
-            "description": "Whether non-admin profiles may build sections from admin-only recipes",
+            "deprecated": true,
+            "description": "Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it.",
             "examples": [
-              false
+              true
             ],
             "type": "boolean"
           }
@@ -38398,6 +38741,13 @@
               true
             ],
             "type": "boolean"
+          },
+          "default_title": {
+            "description": "The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
           },
           "featured": {
             "examples": [
@@ -38447,6 +38797,7 @@
             "type": "string"
           },
           "title": {
+            "description": "The title this profile sees: its own title override, or the administrator's title",
             "examples": [
               "Continue Watching"
             ],
@@ -38457,6 +38808,7 @@
           "id",
           "section_type",
           "title",
+          "default_title",
           "featured",
           "item_limit",
           "hidden",
@@ -39619,6 +39971,7 @@
         "additionalProperties": false,
         "properties": {
           "admin_only": {
+            "description": "Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has",
             "examples": [
               false
             ],
@@ -44236,13 +44589,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -44411,13 +44765,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -45012,13 +45367,14 @@
             "description": "Display filter fragment"
           },
           "is_shared": {
+            "description": "Show the collection to every profile on the login; defaults to false",
             "examples": [
               false
             ],
             "type": "boolean"
           },
           "library_ids": {
-            "description": "Libraries the sync matches against; every library when omitted",
+            "description": "Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted",
             "examples": [
               [
                 "1"
@@ -45300,6 +45656,13 @@
             ],
             "type": "string"
           },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
           "poster_thumbhash": {
             "type": "string"
           },
@@ -45324,6 +45687,7 @@
           "name",
           "collection_type",
           "item_count",
+          "poster_is_collage",
           "created_at",
           "updated_at"
         ],
@@ -61740,7 +62104,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List collection template bundles.",
+        "summary": "List collection template bundles, each with a summary of its templates.",
         "tags": [
           "admin-collections"
         ],
@@ -62279,7 +62643,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List supported collection templates.",
+        "summary": "List the collection templates with an mdblist, tmdb or tmdb_list source.",
         "tags": [
           "admin-collections"
         ],
@@ -64472,6 +64836,176 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/collections/{id}/sections": {
+      "get": {
+        "operationId": "listAdminCollectionSections",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminCollectionSection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the administrator Home and library page rows that show a collection. Rows profiles added themselves are not listed.",
+        "tags": [
+          "admin-collections"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -108035,437 +108569,6 @@
         "x-silo-class": "acting_admin"
       }
     },
-    "/api/v2/admin/settings/sections": {
-      "get": {
-        "operationId": "getAdminSectionSettings",
-        "parameters": [
-          {
-            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
-            "in": "header",
-            "name": "If-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileSectionFlags"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "304": {
-            "description": "The representation named by If-None-Match is current; no body.",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "412": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Failed",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Read section permission configuration; read failures retain the disabled default.",
-        "tags": [
-          "admin-settings"
-        ],
-        "x-silo-class": "acting_admin",
-        "x-silo-conditional": true,
-        "x-silo-service-backed": true
-      },
-      "put": {
-        "operationId": "updateAdminSectionSettings",
-        "parameters": [
-          {
-            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
-            "in": "header",
-            "name": "If-Match",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
-            "in": "header",
-            "name": "If-None-Match",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
-            "in": "header",
-            "name": "X-Profile-Id",
-            "schema": {
-              "examples": [
-                "1"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
-            "in": "header",
-            "name": "X-Profile-Token",
-            "schema": {
-              "examples": [
-                "pvt_5f3a9c1e7b2d4e8fa0c6"
-              ],
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProfileSectionFlags"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProfileSectionFlags"
-                }
-              }
-            },
-            "description": "OK",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "406": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Not Acceptable"
-          },
-          "408": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Timeout"
-          },
-          "412": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Failed",
-            "headers": {
-              "ETag": {
-                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Request Entity Too Large"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unsupported Media Type"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          },
-          "428": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Precondition Required"
-          },
-          "429": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Too Many Requests"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            },
-            "description": "Service Unavailable"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Replace section permission configuration under the existing settings transaction guard.",
-        "tags": [
-          "admin-settings"
-        ],
-        "x-silo-class": "acting_admin",
-        "x-silo-demo-restricted": true,
-        "x-silo-guarded": true,
-        "x-silo-retry-safety": "natural_idempotent",
-        "x-silo-service-backed": true
-      }
-    },
     "/api/v2/admin/settings/sensitive-status": {
       "get": {
         "operationId": "getAdminSensitiveSettingsStatus",
@@ -128264,6 +128367,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -128506,6 +128634,31 @@
             }
           },
           {
+            "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+            "explode": true,
+            "in": "query",
+            "name": "library_ids",
+            "schema": {
+              "description": "Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section",
+              "examples": [
+                [
+                  "1",
+                  "2"
+                ]
+              ],
+              "items": {
+                "description": "Opaque identifier",
+                "examples": [
+                  "1"
+                ],
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "type": "array"
+            }
+          },
+          {
             "explode": false,
             "in": "query",
             "name": "collection_id",
@@ -128576,12 +128729,12 @@
             }
           },
           {
-            "description": "Case-insensitive prefix",
+            "description": "Case-insensitive search text; see matches and values for how each answers it",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Case-insensitive prefix",
+              "description": "Case-insensitive search text; see matches and values for how each answers it",
               "examples": [
                 "ste"
               ],
@@ -128589,13 +128742,13 @@
             }
           },
           {
-            "description": "Most matches to return; default 20, maximum 100",
+            "description": "Most values to return in matches and in values; default 20, maximum 100",
             "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
               "default": 20,
-              "description": "Most matches to return; default 20, maximum 100",
+              "description": "Most values to return in matches and in values; default 20, maximum 100",
               "format": "int64",
               "maximum": 100,
               "minimum": 1,
@@ -128710,7 +128863,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Prefix typeahead over one facet of a scope.",
+        "summary": "Typeahead over one facet of a scope, with title counts.",
         "tags": [
           "catalog"
         ],
@@ -132588,6 +132741,19 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "description": "A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item",
+            "explode": false,
+            "in": "query",
+            "name": "contains_item",
+            "schema": {
+              "description": "A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item",
+              "examples": [
+                "01J9Z8C3W4R5T6Y7U8I9O0P1Q5"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -132697,7 +132863,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the collections the acting profile owns or may see, with the account's collection groups.",
+        "summary": "List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order.",
         "tags": [
           "collections"
         ],
@@ -132869,6 +133035,16 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
           },
           "503": {
             "content": {
@@ -133264,6 +133440,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133280,7 +133466,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Create an account-wide collection group. Not idempotent: a retry after a lost response creates a second group.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133416,6 +133602,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133432,7 +133628,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the canonical collection editor state and its strong validator.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133650,6 +133846,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133666,7 +133872,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the order of the account's collection groups. Retries are not safe after an intervening mutation.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -133848,6 +134054,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -133864,7 +134080,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delete a collection group; its collections become ungrouped.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -134027,6 +134243,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -134043,7 +134269,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Read the canonical collection editor state and its strong validator.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -134275,6 +134501,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -134291,7 +134527,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update a collection group; omitted members are unchanged. Retries are not safe after an intervening mutation.",
+        "summary": "Not supported: personal collection groups were removed, and this operation answers capability_unsupported.",
         "tags": [
           "collections"
         ],
@@ -135403,10 +135639,12 @@
             }
           },
           {
+            "description": "Omit: personal collection groups are no longer supported, and any value is a validation failure",
             "explode": false,
             "in": "query",
             "name": "group_id",
             "schema": {
+              "description": "Omit: personal collection groups are no longer supported, and any value is a validation failure",
               "type": "string"
             }
           }
@@ -135759,7 +135997,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation.",
+        "summary": "Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation.",
         "tags": [
           "collections"
         ],
@@ -137189,6 +137427,16 @@
             },
             "description": "Internal Server Error"
           },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Implemented"
+          },
           "503": {
             "content": {
               "application/problem+json": {
@@ -137205,7 +137453,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update the creator's collection; omitted fields are unchanged.",
+        "summary": "Update the creator's collection; omitted fields are unchanged. Another profile's shared collection answers permission_denied.",
         "tags": [
           "collections"
         ],
@@ -173436,8 +173684,7 @@
         "tags": [
           "profile_sections"
         ],
-        "x-silo-class": "profile_scoped",
-        "x-silo-service-backed": true
+        "x-silo-class": "profile_scoped"
       }
     },
     "/api/v2/profile/sections/settings": {

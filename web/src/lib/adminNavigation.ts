@@ -11,9 +11,9 @@ import {
   LayoutPanelTop,
   Library,
   MonitorSmartphone,
-  PanelsTopLeft,
   Puzzle,
   Radio,
+  Rows2,
   ScrollText,
   Send,
   Server,
@@ -109,9 +109,9 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
       },
       {
         label: "Sections",
-        description: "Home and catalog section configuration.",
-        keywords: ["home rows", "rails", "featured sections"],
-        icon: PanelsTopLeft,
+        description: "Rows on Home and on library pages.",
+        keywords: ["home rows", "rows", "rails", "featured sections"],
+        icon: Rows2,
         href: "/admin/sections",
       },
       {

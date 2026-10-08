@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	sectionspkg "github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -433,5 +435,54 @@ func TestTraktCollectionImportsAreDisabled(t *testing.T) {
 		t.Fatalf("profile Trakt import error = %#v", err)
 	} else if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Code != "unsupported_source" {
 		t.Fatalf("profile Trakt import error = %#v", err)
+	}
+}
+
+// A profile that is not an admin may always add rule rows, and keeps and
+// changes the Editor's picks rows it already has, but can't add a new one.
+func TestProfileRuleRowsAndKeptEditorsPicks(t *testing.T) {
+	query := SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}
+	picks := SectionOverrideWrite{ID: "picks", IsUserAdded: true, UserSectionType: "admin_curated_list", UserConfig: json.RawMessage(`{"item_ids":["a","b"]}`)}
+	rules := SectionOverrideWrite{ID: "rules", IsUserAdded: true, UserSectionType: "custom_filter", UserConfig: json.RawMessage(`{"filter":{}}`)}
+	stored := []userstore.SectionOverride{{ID: "picks", IsUserAdded: true, UserSectionType: "admin_curated_list", UserConfig: `{"item_ids":["a"]}`}}
+	profile := apimw.SetClaims(t.Context(), &auth.Claims{Role: "user", UserID: 1})
+	admin := apimw.SetClaims(t.Context(), &auth.Claims{Role: "admin", UserID: 1})
+
+	cases := []struct {
+		name   string
+		ctx    context.Context
+		stored []userstore.SectionOverride
+		writes []SectionOverrideWrite
+		refuse bool
+	}{
+		{"rule row with nothing saved", profile, nil, []SectionOverrideWrite{rules}, false},
+		{"kept and changed Editor's picks beside a new rule row", profile, stored, []SectionOverrideWrite{picks, rules}, false},
+		{"new Editor's picks", profile, nil, []SectionOverrideWrite{picks}, true},
+		{"Editor's picks over another row's ID", profile, []userstore.SectionOverride{{ID: "picks", IsUserAdded: true, UserSectionType: "hidden_gems"}}, []SectionOverrideWrite{picks}, true},
+		{"Editor's picks over a server row's override", profile, []userstore.SectionOverride{{ID: "picks", SectionID: "admin-1", SectionType: "admin_curated_list"}}, []SectionOverrideWrite{picks}, true},
+		{"admin adds Editor's picks", admin, nil, []SectionOverrideWrite{picks}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &sourcePolicyStore{overrides: tc.stored}
+			h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
+			err := h.SaveProfileOverrides(tc.ctx, query, tc.writes)
+			if !tc.refuse {
+				if err != nil {
+					t.Fatalf("SaveProfileOverrides: %v", err)
+				}
+				if len(store.overrides) != len(tc.writes) {
+					t.Fatalf("saved %+v", store.overrides)
+				}
+				return
+			}
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Status != 403 || apiErr.Code != "custom_disabled" {
+				t.Fatalf("error = %#v, want 403 custom_disabled", err)
+			}
+			if len(store.overrides) != len(tc.stored) {
+				t.Fatalf("refused save changed the store: %+v", store.overrides)
+			}
+		})
 	}
 }

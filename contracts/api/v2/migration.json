@@ -15988,18 +15988,18 @@
       "consumer_call_sites": [],
       "section": "admin-settings",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The `sections.allow_profile_custom_sections` admin setting routes\"); still registered on the bridge surface, retired by the tombstone. No successor: profiles may always add rule rows, so there is no setting.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "GET",
-        "path": "/api/v2/admin/settings/sections",
-        "operation_id": "getAdminSectionSettings"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Reuse existing profile-section flag foundation. Store read errors preserve disabled default; no recorded native/web consumer. Independent review pending."
+      "notes": "The v2 operations (getAdminSectionSettings, updateAdminSectionSettings) were removed before the v2 lock when the \"Let profiles add rule rows\" setting was retired: profiles may always add rule rows, and only an admin adds new Editor's picks rows. The frozen v1 route reads allow_profile_custom_sections as true; a stored sections.allow_profile_custom_sections row is ignored. getProfileSectionFlags keeps allow_profile_custom_sections, always true and deprecated. No native or Jellyfin consumer exists. Removal ratified 2026-10-05 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -16040,21 +16040,18 @@
       "consumer_call_sites": [],
       "section": "admin-settings",
       "release_flow": "core_admin",
-      "tier": 1,
-      "disposition": "ported",
-      "disposition_rule": "default_ported",
-      "disposition_rationale": "No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.",
-      "owner": null,
+      "tier": 2,
+      "disposition": "removed",
+      "disposition_rule": "v1_scope_removals_table",
+      "disposition_rationale": "Listed in docs/architecture/v1-scope.md removals (\"The `sections.allow_profile_custom_sections` admin setting routes\"); still registered on the bridge surface, retired by the tombstone. No successor: profiles may always add rule rows, so there is no setting.",
+      "owner": "Quick104",
       "review_state": "ratified",
       "v2": {
-        "method": "PUT",
-        "path": "/api/v2/admin/settings/sections",
-        "operation_id": "updateAdminSectionSettings"
+        "method": null,
+        "path": null,
+        "operation_id": null
       },
-      "notes": "Guarded boolean replacement through existing settings UpdateAtomic. No-change no write; admin GET now supplies actor/profile-bound ETag and conditional reads. Existing profile read/default-on-error semantics and bridge writer unchanged. No recorded web/native/Jellyfin writer; no UI invented. Independent new-write/additive-admin-read review pending.",
-      "concurrency": "if_match",
-      "retry_safety": "natural_idempotent",
-      "retry_safety_note": "Same desired boolean has no additional effect; canonical guard runs inside the settings transaction. Reusing a stale explicit validator fails rather than overwriting a changed flag."
+      "notes": "The v2 operations (getAdminSectionSettings, updateAdminSectionSettings) were removed before the v2 lock when the \"Let profiles add rule rows\" setting was retired: profiles may always add rule rows, and only an admin adds new Editor's picks rows. The frozen v1 route accepts a JSON body, changes nothing, and answers allow_profile_custom_sections true; a stored sections.allow_profile_custom_sections row is ignored. getProfileSectionFlags keeps allow_profile_custom_sections, always true and deprecated. No native or Jellyfin consumer exists. Removal ratified 2026-10-05 (owner decision, Quick104)."
     },
     {
       "listener": "api",
@@ -35186,7 +35183,7 @@
         "path": "/api/v2/profile/sections/settings",
         "operation_id": "getProfileSectionSettings"
       },
-      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag."
+      "notes": "Conditionally registered: authMiddleware != nil; sectionHandler != nil. v2 registers the operation unconditionally and reports capability state instead. Path keeps the v1 shape. Collection envelope (items) instead of {sections}; config is an extension bag. Adds default_title, the administrator's title for the row, which v1 does not return."
     },
     {
       "listener": "api",
@@ -38254,17 +38251,9 @@
       "upgrades_websocket": false,
       "capability_endpoint": null,
       "consumers": [
-        "web"
+        "unused"
       ],
-      "consumer_call_sites": [
-        {
-          "repo": "web",
-          "file": "src/lib/recipes.ts",
-          "line": 79,
-          "types": [],
-          "match": "mechanical"
-        }
-      ],
+      "consumer_call_sites": [],
       "section": "catalog-home",
       "release_flow": "browse_search",
       "tier": 1,

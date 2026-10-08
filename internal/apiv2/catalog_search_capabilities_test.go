@@ -26,6 +26,9 @@ func TestCatalogSearchCapabilities(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"person_prefetch":true`) {
 		t.Fatal("person prefetch reads are not advertised", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"facet_value_search":true`) {
+		t.Fatal("facet value search is not advertised", rec.Body.String())
+	}
 	if !strings.Contains(rec.Body.String(), `"video_with_episodes_scope":true`) {
 		t.Fatal("the video_with_episodes search scope is not advertised", rec.Body.String())
 	}

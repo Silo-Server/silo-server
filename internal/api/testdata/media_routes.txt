@@ -92,6 +92,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -326,8 +327,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media
@@ -1337,6 +1336,7 @@ PUT /api/v2/admin/collections/{id}/items/order	non-media
 DELETE /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/items/{item_id}	non-media
 PUT /api/v2/admin/collections/{id}/poster	non-media
+GET /api/v2/admin/collections/{id}/sections	non-media
 POST /api/v2/admin/collections/{id}/sync	non-media
 GET /api/v2/admin/dashboard/capabilities	non-media
 DELETE /api/v2/admin/dashboard/layout	non-media
@@ -1571,8 +1571,6 @@ PUT /api/v2/admin/settings	non-media
 POST /api/v2/admin/settings/check/{kind}	non-media
 GET /api/v2/admin/settings/effective	non-media
 GET /api/v2/admin/settings/restart-keys	non-media
-GET /api/v2/admin/settings/sections	non-media
-PUT /api/v2/admin/settings/sections	non-media
 GET /api/v2/admin/settings/sensitive-status	non-media
 GET /api/v2/admin/settings/{key}	non-media
 PUT /api/v2/admin/settings/{key}	non-media

@@ -285,22 +285,17 @@ func (s *stubFacetFetcher) AudiobookSeries(ctx context.Context, filters BrowseFi
 	return nil, nil
 }
 
-func (s *stubFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *stubFacetFetcher) SearchColumnValues(ctx context.Context, column facetColumn, filters BrowseFilters, baseRelation string, mediaScope string, search facetSearch) ([]FacetValue, bool, error) {
 	s.hit()
 	return nil, false, nil
 }
 
-func (s *stubFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *stubFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]FacetValue, bool, error) {
 	s.hit()
 	return nil, false, nil
 }
 
-func (s *stubFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
-	s.hit()
-	return nil, false, nil
-}
-
-func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *stubFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]FacetValue, bool, error) {
 	s.hit()
 	return nil, false, nil
 }
@@ -346,23 +341,19 @@ func (s *recordingFacetFetcher) AudiobookSeries(ctx context.Context, filters Bro
 	return nil, nil
 }
 
-func (s *recordingFacetFetcher) SearchDistinctArrayColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *recordingFacetFetcher) SearchColumnValues(ctx context.Context, column facetColumn, filters BrowseFilters, baseRelation string, mediaScope string, search facetSearch) ([]FacetValue, bool, error) {
 	return nil, false, nil
 }
 
-func (s *recordingFacetFetcher) SearchDistinctScalarColumn(ctx context.Context, column string, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
-	return nil, false, nil
-}
-
-func (s *recordingFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *recordingFacetFetcher) SearchPeopleByKind(ctx context.Context, kind models.PersonKind, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]FacetValue, bool, error) {
 	s.mu.Lock()
 	s.searchPeopleKind = kind
 	s.searchMediaScope = mediaScope
 	s.mu.Unlock()
-	return []string{"Author"}, false, nil
+	return []FacetValue{{Value: "Author", Count: 1}}, false, nil
 }
 
-func (s *recordingFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]string, bool, error) {
+func (s *recordingFacetFetcher) SearchAudiobookSeries(ctx context.Context, filters BrowseFilters, baseRelation string, mediaScope string, prefix string, limit int) ([]FacetValue, bool, error) {
 	return nil, false, nil
 }
 
@@ -603,7 +594,10 @@ func TestSearchFacet_EbookScopeForwardsMediaScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SearchFacet returned error: %v", err)
 	}
-	if len(result.Matches) != 1 || result.Matches[0] != "Author" {
+	if len(result.Values) != 1 || result.Values[0] != (FacetValue{Value: "Author", Count: 1}) {
+		t.Fatalf("values = %v, want Author", result.Values)
+	}
+	if !slices.Equal(result.Matches, []string{"Author"}) {
 		t.Fatalf("matches = %v, want Author", result.Matches)
 	}
 

@@ -1,8 +1,9 @@
 {
-  "revision": "ec966ce0e901578a98aa51e9daae0db0ee834c5b59dd7845b80ecc81bcae7203",
+  "revision": "3e1c28b18db74bb3167f7331d3387693ae45f5305fe9749d7580c44022885a22",
   "state": "available",
   "allowed": true,
   "people_media_scope": true,
+  "facet_value_search": true,
   "person_prefetch": true,
   "video_with_episodes_scope": true,
   "provider": "meilisearch",

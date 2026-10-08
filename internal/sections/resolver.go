@@ -83,8 +83,9 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 	return result
 }
 
-// ResolveForSettings is like Resolve but includes hidden sections with Hidden=true.
-// Used by the settings UI so users can toggle visibility.
+// ResolveForSettings is like Resolve but includes hidden sections with Hidden=true
+// and keeps each admin section's own title in DefaultTitle. Used by the
+// settings UI so users can toggle visibility and undo a rename.
 func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride) []ResolvedSection {
 	overrideBySection := make(map[string]*ProfileSectionOverride)
 	var userAdded []ProfileSectionOverride
@@ -135,6 +136,10 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			}
 		}
 
+		// Both titles get the same readable fallback from the same config, so
+		// an admin title saved as the raw key still equals Title when the
+		// profile has no title override.
+		rs.DefaultTitle = readableTitle(rs.SectionType, s.Title, rs.Config)
 		rs.Title = readableTitle(rs.SectionType, rs.Title, rs.Config)
 		result = append(result, rs)
 	}

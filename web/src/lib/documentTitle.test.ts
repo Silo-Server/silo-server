@@ -41,6 +41,7 @@ describe("resolveAdminDocumentTitle", () => {
     expect(resolveAdminDocumentTitle("/admin/collections")).toBe("Admin Collections");
     expect(resolveAdminDocumentTitle("/admin/diagnostics")).toBe("Admin Client Diagnostics");
     expect(resolveAdminDocumentTitle("/admin/policy")).toBe("Admin Policy");
+    expect(resolveAdminDocumentTitle("/admin/sections")).toBe("Admin Sections");
     expect(resolveAdminDocumentTitle("/admin/tasks/refresh-metadata")).toBe("Admin Task");
   });
 
