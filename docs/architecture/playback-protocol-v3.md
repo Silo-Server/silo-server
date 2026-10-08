@@ -1557,6 +1557,12 @@ A transformation is a named, versioned media operation with claims attached.
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
+`server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
+enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby
+Vision RPUs with `dovi_rpu`. An executor on recipe 1 is never offered a recipe 2
+plan, and a copy started under recipe 1 cannot be reopened on an upgraded
+executor, so that session replans.
+
 `audio_to_aac` recipe version 2 treats the selected source channel count as a
 byte-affecting input. When a source with more than two channels is encoded to
 stereo, FFmpeg first rematrixes it to stereo, then applies up to 6 dB of input
