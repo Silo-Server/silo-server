@@ -232,7 +232,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "last_air_date", Op: "gt", Value: "not-a-date"},
 		{Field: "last_air_date", Op: "lt", Value: "0000-01-01"},
 		{Field: "release_date", Op: "not_in_last", Value: "2147483648d"},
-		{Field: "added_at", Op: "in_last", Value: "1001y"},
+		{Field: "added_at", Op: "in_last", Value: "6501y"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
@@ -252,12 +252,22 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "title", Op: "begins_with", Value: "the "},
 		{Field: "decade", Op: "is", Value: 1990.0},
 		{Field: "release_date", Op: "not_in_last", Value: "1y"},
-		{Field: "added_at", Op: "in_last", Value: "1000y"},
+		{Field: "added_at", Op: "in_last", Value: "6500y"},
+		{Field: "added_at", Op: "in_last", Value: "3000000h"},
 		{Field: "last_air_date", Op: "between", Value: []any{"2024-01-01", "2024-12-31"}},
 		{Field: "latest_episode_added", Op: "gt", Value: "2024-01-01T00:00:00Z"},
 	}}}}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("expected well-formed values to validate, got %v", err)
+	}
+}
+
+func TestRelativeDurationCutoff_LongHourSpanDoesNotOverflow(t *testing.T) {
+	// 3,000,000 hours is past what a time.Duration holds (about 292 years).
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	got := relativeDuration{amount: 3_000_000, unit: 'h'}.cutoffTime(now)
+	if want := now.AddDate(0, 0, -125_000); !got.Equal(want) {
+		t.Fatalf("cutoff = %v, want %v", got, want)
 	}
 }
 

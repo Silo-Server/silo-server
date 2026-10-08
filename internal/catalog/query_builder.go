@@ -1883,10 +1883,17 @@ func parseDuration(s string) (string, error) {
 	return spec.sqlInterval(), nil
 }
 
-// maxSpanAmount bounds a span in each unit so the SQL interval, NOW() minus
-// it, and the Go cutoff all stay in range: about 1000 years, or 250 years of
-// hours, which a time.Duration can still hold.
-var maxSpanAmount = map[byte]int{'h': 250 * 365 * 24, 'd': 1000 * 365, 'w': 1000 * 52, 'm': 1000 * 12, 'y': 1000}
+// maxSpanYears bounds a span so NOW() minus it stays after PostgreSQL's
+// earliest timestamp (4713 BC); a longer span cannot be evaluated at all.
+const maxSpanYears = 6500
+
+var maxSpanAmount = map[byte]int{
+	'h': maxSpanYears * 365 * 24,
+	'd': maxSpanYears * 365,
+	'w': maxSpanYears * 52,
+	'm': maxSpanYears * 12,
+	'y': maxSpanYears,
+}
 
 func parseDurationSpec(s string) (relativeDuration, error) {
 	normalized := strings.ToLower(strings.TrimSpace(s))
@@ -1931,7 +1938,8 @@ func (d relativeDuration) sqlInterval() string {
 func (d relativeDuration) cutoffTime(now time.Time) time.Time {
 	switch d.unit {
 	case 'h':
-		return now.Add(-time.Duration(d.amount) * time.Hour)
+		// Seconds rather than a time.Duration, which overflows past about 292 years.
+		return time.Unix(now.Unix()-int64(d.amount)*3600, int64(now.Nanosecond())).In(now.Location())
 	case 'd':
 		return now.AddDate(0, 0, -d.amount)
 	case 'w':
