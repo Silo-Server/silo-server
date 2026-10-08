@@ -28,8 +28,7 @@ import {
 } from "@/components/collections/collectionBuilderFields";
 import { FacetValuePicker } from "@/components/ui/facet-value-picker";
 import { PersonSearchSelect } from "@/components/ui/person-search-select";
-import { createCatalogSearchState, useCatalogFilters } from "@/hooks/queries/catalog";
-import type { FacetValueScope } from "@/hooks/queries/facetValues";
+import { type FacetValueScope, useRuleLanguages } from "@/hooks/queries/facetValues";
 import { useExtendedQueryRules } from "@/hooks/queries/personSearch";
 import { formatLanguage } from "@/lib/languageDisplay";
 import {
@@ -419,6 +418,7 @@ function RuleValueControl({
       return (
         <LanguageValueSelect
           source={fieldDef.languageSource ?? "original"}
+          scope={valueScope ?? {}}
           value={String(rule.value ?? "")}
           onChange={onChange}
           className={cn(size.control, size.value)}
@@ -469,24 +469,25 @@ const LANGUAGE_LISTS = {
 } as const;
 
 /**
- * A language the viewer's titles have, by name. Original language comes from
- * the titles' metadata; audio and subtitle languages from their files. A saved
- * language no title has any more stays listed so the rule keeps reading right.
+ * A language the titles in the rule's scope have, by name. Original language
+ * comes from the titles' metadata; audio and subtitle languages from their
+ * files. A saved language no title has any more stays listed so the rule
+ * keeps reading right.
  */
 function LanguageValueSelect({
   source,
+  scope,
   value,
   onChange,
   className,
 }: {
   source: CollectionLanguageSource;
+  scope: FacetValueScope;
   value: string;
   onChange: (value: string) => void;
   className: string;
 }) {
-  const filters = useCatalogFilters(createCatalogSearchState("query"), {
-    includeTechnical: source !== "original",
-  });
+  const filters = useRuleLanguages(scope, { includeTechnical: source !== "original" });
   const codes = new Set(filters.data?.[LANGUAGE_LISTS[source]] ?? []);
   if (value) codes.add(value);
   const options = [...codes]

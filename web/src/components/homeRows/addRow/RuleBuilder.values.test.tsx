@@ -104,6 +104,10 @@ describe("RuleBuilder value pickers", () => {
     const options = await screen.findAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual(["English", "Japanese"]);
     await userEvent.click(screen.getByRole("option", { name: "Japanese" }));
+    // Only the languages of the rule's libraries and kind of titles.
+    expect(v2Recorder.callsOf("GET /api/v2/catalog/filters").map((c) => c.query)).toEqual([
+      { source: "query", type: "movie", library_ids: ["1"] },
+    ]);
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
         groups: [{ match: "all", rules: [{ field: "audio_language", op: "is", value: "ja" }] }],

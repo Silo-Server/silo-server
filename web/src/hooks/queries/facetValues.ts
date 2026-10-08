@@ -4,6 +4,7 @@
  */
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { catalogFiltersFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 
 import type { CatalogFacetName } from "./catalog";
@@ -75,5 +76,34 @@ export function useFacetValues(facet: CatalogFacetName, q: string, scope: FacetV
     },
     placeholderData: keepPreviousData,
     staleTime: 60 * 1000,
+  });
+}
+
+/**
+ * The catalog filter lists for the titles in a rule's libraries and kind of
+ * titles, which a language picker reads its languages from. Audio and
+ * subtitle languages come from files, so only `includeTechnical` asks for them.
+ */
+export function useRuleLanguages(
+  scope: FacetValueScope,
+  { includeTechnical }: { includeTechnical: boolean },
+) {
+  const libraryIds = [...(scope.libraryIds ?? [])].sort((a, b) => a - b);
+  const type = scope.mediaScope && scope.mediaScope !== "all" ? scope.mediaScope : undefined;
+  return useQuery({
+    queryKey: ["catalog", "ruleLanguages", { libraryIds, type, includeTechnical }] as const,
+    queryFn: async ({ signal }) =>
+      catalogFiltersFromV2(
+        await v2("GET /api/v2/catalog/filters", {
+          query: {
+            source: "query",
+            type,
+            library_ids: libraryIds.length > 0 ? libraryIds.map(String) : undefined,
+            skip_technical: includeTechnical ? undefined : true,
+          },
+          signal,
+        }),
+      ),
+    staleTime: 5 * 60 * 1000,
   });
 }
