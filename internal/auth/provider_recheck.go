@@ -696,6 +696,11 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 				return fmt.Errorf("withdrawing provider device sign-in approvals: %w", err)
 			}
+			// A Jellyfin-compatible session does not record the identity it
+			// signed in through, so every one the account holds ends.
+			if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{identity.UserID}); err != nil {
+				return err
+			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,

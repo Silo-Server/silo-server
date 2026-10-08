@@ -36,9 +36,11 @@ when it falls outside the requested page, or null for API-key callers and an adm
 inspecting another account. Account-wide admin revocation also ends existing sessions
 opened through "View as user" by that account and withdraws its approved, uncollected
 device sign-ins, including temporary remote-playback approvals that would mint a native
-login session. It also revokes the account's Audiobookshelf-compatible sessions and,
-after commit, ends its Jellyfin-compatible sessions on every node, as a password reset
-does. The response counts revoked live login sessions, not withdrawn approvals or
+login session. The same transaction revokes the account's Audiobookshelf-compatible
+sessions and deletes its stored Jellyfin-compatible sessions, as a password reset does;
+when any of it fails, nothing is revoked and the request fails. After commit, every node
+drops the Jellyfin-compatible sessions it holds in memory. The response counts revoked
+live login sessions, not withdrawn approvals or
 compatibility sessions. Single-session revocation leaves other sessions and device approvals unchanged.
 Other accounts' own sessions remain usable. API keys are not login sessions and are not
 revoked here.

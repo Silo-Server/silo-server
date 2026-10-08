@@ -183,20 +183,16 @@ func (s *SessionStore) Delete(token string) {
 	}
 }
 
-// DeleteByUserID removes all compat sessions for a given Silo user ID.
-func (s *SessionStore) DeleteByUserID(userID int) {
+// EvictUser drops a Silo account's compat sessions from this store's memory.
+// Signing an account out deletes its stored sessions in the revoking
+// transaction (auth.RevokeSignInsInTransaction); each replica then calls
+// EvictUser so the copies it already loaded stop working too.
+func (s *SessionStore) EvictUser(userID int) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for token, session := range s.sessions {
 		if session.StreamAppUserID == userID {
 			delete(s.sessions, token)
-		}
-	}
-	s.mu.Unlock()
-	if s.repo != nil {
-		if repo, ok := s.repo.(*SessionRepository); ok {
-			if _, err := repo.DeleteByUserID(context.Background(), userID); err != nil {
-				slog.Warn("jellycompat session store delete by user failed", "user_id", userID, "error", err)
-			}
 		}
 	}
 }

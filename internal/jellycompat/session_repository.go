@@ -159,12 +159,3 @@ func (r *SessionRepository) DeleteExpired(ctx context.Context, now time.Time) (i
 	}
 	return int(tag.RowsAffected()), nil
 }
-
-// DeleteByUserID removes all compat sessions for a given Silo user.
-func (r *SessionRepository) DeleteByUserID(ctx context.Context, userID int) (int, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1`, userID)
-	if err != nil {
-		return 0, fmt.Errorf("delete compat sessions by user: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
-}
