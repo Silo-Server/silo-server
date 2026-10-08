@@ -209,3 +209,7 @@
 
 # Jellyfin password#PIN sign-ins share the per-profile PIN lockout.
 ./internal/jellycompat TestLoginPINAttemptsShareProfileLimitDB
+
+# Log partitions: migration 028 and partman cut the same UTC periods on a
+# server whose TimeZone is not UTC, so no write falls into the default.
+./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
