@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 const defaultSortField = "added_at"
@@ -174,8 +175,28 @@ func validateRuleValue(rule QueryRule) error {
 		} else if _, ok := catalogFloat(rule.Value); !ok {
 			return fmt.Errorf("%s requires a number", rule.Field)
 		}
+	case querySortLatestEpisodeAdded, querySortLastAirDate:
+		if rule.Op == "between" {
+			bounds, ok := catalogStringRange(rule.Value)
+			if !ok || !isRuleDate(bounds[0]) || !isRuleDate(bounds[1]) {
+				return fmt.Errorf("%s between requires [from, to] dates such as 2024-01-31", rule.Field)
+			}
+		} else if bound, ok := rule.Value.(string); !ok || !isRuleDate(bound) {
+			return fmt.Errorf("%s requires a date such as 2024-01-31", rule.Field)
+		}
 	}
 	return nil
+}
+
+// isRuleDate reports whether a date rule's bound is a calendar date
+// (2024-01-31) or an RFC 3339 time, the forms the editor and clients send.
+func isRuleDate(value string) bool {
+	value = strings.TrimSpace(value)
+	if _, err := time.Parse(time.DateOnly, value); err == nil {
+		return true
+	}
+	_, err := time.Parse(time.RFC3339, value)
+	return err == nil
 }
 
 var querySortDefs = map[string]querySortDef{

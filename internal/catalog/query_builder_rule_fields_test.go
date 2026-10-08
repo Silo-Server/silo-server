@@ -229,6 +229,8 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "rating_rt_critic", Op: "gte", Value: "high"},
 		{Field: "title", Op: "contains", Value: 3.0},
 		{Field: "release_date", Op: "not_in_last", Value: "soon"},
+		{Field: "last_air_date", Op: "gt", Value: "not-a-date"},
+		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
 		if _, _, err := NewQueryBuilder("mi").Build(def); err == nil {
@@ -247,6 +249,8 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "title", Op: "begins_with", Value: "the "},
 		{Field: "decade", Op: "is", Value: 1990.0},
 		{Field: "release_date", Op: "not_in_last", Value: "1y"},
+		{Field: "last_air_date", Op: "between", Value: []any{"2024-01-01", "2024-12-31"}},
+		{Field: "latest_episode_added", Op: "gt", Value: "2024-01-01T00:00:00Z"},
 	}}}}
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("expected well-formed values to validate, got %v", err)
