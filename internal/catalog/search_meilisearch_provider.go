@@ -159,6 +159,12 @@ func NewMeilisearchSearchProvider(
 }
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
+	if p != nil && p.fallback != nil && strings.TrimSpace(req.Access.NamePrefix) != "" {
+		// The index has no sort-title key to filter on, and its ranking window
+		// is capped, so a prefix applied afterwards would drop matches ranked
+		// past the window. PostgreSQL applies it before ranking and limits.
+		return p.fallback.Search(ctx, req)
+	}
 	if req.CursorPaging {
 		return p.searchCursorPage(ctx, req)
 	}

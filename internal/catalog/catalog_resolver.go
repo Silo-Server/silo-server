@@ -2587,19 +2587,26 @@ func filterCatalogNamePrefix(items []*models.MediaItem, raw string) []*models.Me
 
 	filtered := make([]*models.MediaItem, 0, len(items))
 	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		// Trim spaces only, as SQL BTRIM does in sortTitleKeyExpr.
-		key := strings.Trim(item.SortTitle, " ")
-		if key == "" {
-			key = item.Title
-		}
-		if strings.HasPrefix(strings.ToLower(key), prefix) {
+		if catalogNamePrefixMatches(item, prefix) {
 			filtered = append(filtered, item)
 		}
 	}
 	return filtered
+}
+
+// catalogNamePrefixMatches reports whether item's sort key starts with prefix.
+// Episodes carry their trimmed title as sort title, so this also matches the
+// episode sort_key.
+func catalogNamePrefixMatches(item *models.MediaItem, raw string) bool {
+	if item == nil {
+		return false
+	}
+	// Trim spaces only, as SQL BTRIM does in sortTitleKeyExpr.
+	key := strings.Trim(item.SortTitle, " ")
+	if key == "" {
+		key = item.Title
+	}
+	return strings.HasPrefix(strings.ToLower(key), strings.ToLower(strings.TrimSpace(raw)))
 }
 
 func catalogStringValue(value any) (string, bool) {
