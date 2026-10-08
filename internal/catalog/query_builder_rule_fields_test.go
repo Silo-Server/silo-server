@@ -233,6 +233,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "last_air_date", Op: "lt", Value: "0000-01-01"},
 		{Field: "release_date", Op: "not_in_last", Value: "2147483648d"},
 		{Field: "added_at", Op: "in_last", Value: "6501y"},
+		{Field: "rating_imdb", Op: "gt", Value: "high"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
@@ -254,6 +255,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "release_date", Op: "not_in_last", Value: "1y"},
 		{Field: "added_at", Op: "in_last", Value: "6500y"},
 		{Field: "added_at", Op: "in_last", Value: "3000000h"},
+		{Field: "rating_imdb", Op: "between", Value: []any{"7", 9.5}},
 		{Field: "last_air_date", Op: "between", Value: []any{"2024-01-01", "2024-12-31"}},
 		{Field: "latest_episode_added", Op: "gt", Value: "2024-01-01T00:00:00Z"},
 	}}}}

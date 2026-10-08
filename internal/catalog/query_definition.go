@@ -167,7 +167,7 @@ func validateRuleValue(rule QueryRule) error {
 		if _, ok := decadeStart(rule.Value); !ok {
 			return fmt.Errorf("decade requires a year such as 1990")
 		}
-	case querySortRuntime, querySortRatingTMDb, querySortRatingRTCritic, querySortRatingRTAudience:
+	case "rating_imdb", querySortRuntime, querySortRatingTMDb, querySortRatingRTCritic, querySortRatingRTAudience:
 		if rule.Op == "between" {
 			if _, ok := catalogFloatRange(rule.Value); !ok {
 				return fmt.Errorf("%s between requires [min, max] numbers", rule.Field)
