@@ -214,46 +214,6 @@
 # server whose TimeZone is not UTC, so no write falls into the default.
 ./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
 
-# Log partitions: migration 028 and partman cut the same UTC periods on a
-# server whose TimeZone is not UTC, so no write falls into the default.
-./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
-
-# Search normalization: the number-token function keeps its output and stays
-# inlinable.
-./migrations TestSearchNumberTokenInlinesPostgres
-
-# Log partitions: migration 028 and partman cut the same UTC periods on a
-# server whose TimeZone is not UTC, so no write falls into the default.
-./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
-
-# Search normalization: the number-token function keeps its output and stays
-# inlinable.
-./migrations TestSearchNumberTokenInlinesPostgres
-
-# Indexes left invalid by an interrupted concurrent build are rebuilt without
-# blocking reads or writes on their tables.
-./internal/database TestInvalidIndexRebuildKeepsTablesAvailablePostgres
-
-# Log partitions: migration 028 and partman cut the same UTC periods on a
-# server whose TimeZone is not UTC, so no write falls into the default.
-./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
-
-# Search normalization: the number-token function keeps its output and stays
-# inlinable.
-./migrations TestSearchNumberTokenInlinesPostgres
-
-# Indexes left invalid by an interrupted concurrent build are rebuilt without
-# blocking reads or writes on their tables.
-./internal/database TestInvalidIndexRebuildKeepsTablesAvailablePostgres
-
-# Pool connections run with JIT off unless the server, database, role or
-# DATABASE_URL already chose jit.
-./internal/database TestNewPoolDisablesJITUnlessConfiguredPostgres
-
-# Log partitions: migration 028 and partman cut the same UTC periods on a
-# server whose TimeZone is not UTC, so no write falls into the default.
-./internal/database TestLogPartitionsMatchPartmanOnNonUTCServer
-
 # Search normalization: the number-token function keeps its output and stays
 # inlinable.
 ./migrations TestSearchNumberTokenInlinesPostgres
