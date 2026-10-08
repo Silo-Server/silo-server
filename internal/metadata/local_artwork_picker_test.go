@@ -25,6 +25,7 @@ import (
 type recordingImageProvider struct {
 	slug     string
 	images   []RemoteImage
+	err      error
 	requests []ImageRequest
 }
 
@@ -33,7 +34,7 @@ func (p *recordingImageProvider) Name() string       { return p.Slug() }
 func (p *recordingImageProvider) ForTypes() []string { return []string{"series"} }
 func (p *recordingImageProvider) GetImages(_ context.Context, req ImageRequest) ([]RemoteImage, error) {
 	p.requests = append(p.requests, req)
-	return p.images, nil
+	return p.images, p.err
 }
 
 const (
@@ -319,7 +320,26 @@ func TestFetchItemImagesWithLocalSurvivesChainFailure(t *testing.T) {
 	if len(images) != 1 || images[0].URL != poster {
 		t.Fatalf("images = %+v, want only the local poster", images)
 	}
-	if providerErrors["chain"] == "" {
-		t.Fatalf("provider errors = %v, want the chain failure", providerErrors)
+	if got := providerErrors["chain"]; got != "Image provider chain unavailable" {
+		t.Fatalf("provider errors = %v, want the fixed chain failure message", providerErrors)
+	}
+}
+
+// A discovery failure is reported by source only. Its error text can carry
+// paths or provider details, so it stays in the log and out of the listing.
+func TestFetchItemImagesWithLocalReportsDiscoveryFailureWithoutItsText(t *testing.T) {
+	local := &recordingImageProvider{err: errors.New("nfo read failed: desc = api_key=secret-value /media/Other/Show/tvshow.nfo")}
+	service, _ := newLocalPickerServiceForTest(local, nil, []string{t.TempDir()})
+
+	_, providerErrors, err := service.FetchItemImagesWithLocal(context.Background(), map[string]string{"tmdb": "1"}, "series", "en", 7, "local-series-1")
+	if err != nil {
+		t.Fatalf("FetchItemImagesWithLocal: %v", err)
+	}
+	got := providerErrors[imageCacheLocalProviderID]
+	if got != "Local artwork discovery failed" {
+		t.Fatalf("provider errors = %v, want the fixed local failure message", providerErrors)
+	}
+	if strings.Contains(got, "api_key") || strings.Contains(got, "/media/") {
+		t.Fatalf("local failure message %q leaks the underlying error", got)
 	}
 }

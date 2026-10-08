@@ -109,8 +109,9 @@ func TestAdminItemImagesOffersPreviewableLocalImages(t *testing.T) {
 		t.Fatalf("choices = %+v, want the provider poster and the local poster", out.Images)
 	}
 	// The admin is told why the backdrop is missing.
-	if out.ProviderErrors["local"] == "" {
-		t.Fatalf("provider errors = %v, want the local preview failure", out.ProviderErrors)
+	// It is told by source only: the preview error stays in the log.
+	if got := out.ProviderErrors["local"]; got != "Local image preview failed" {
+		t.Fatalf("provider errors = %v, want the fixed local preview failure", out.ProviderErrors)
 	}
 }
 

@@ -41,17 +41,20 @@ func (s *MetadataService) FetchItemImagesWithLocal(ctx context.Context, provider
 		// Sidecar discovery does not use the chain, so a chain failure still
 		// lists the item's local artwork and reports the failure.
 		slog.WarnContext(ctx, "metadata: image provider chain unavailable for picker", "component", "metadata", "folder_id", folderID, "error", err)
-		images, providerErrors = nil, map[string]string{"chain": err.Error()}
+		images, providerErrors = nil, map[string]string{"chain": "Image provider chain unavailable"}
 	}
 	images = slices.DeleteFunc(images, func(image RemoteImage) bool {
 		return isLocalImageSourcePath(image.URL)
 	})
 	local, err := s.localItemImages(ctx, contentType, folderID, contentID)
 	if err != nil {
+		// The error can carry paths and provider text, so it goes to the log
+		// and the listing only says which source failed.
+		slog.WarnContext(ctx, "metadata: local artwork discovery failed for picker", "component", "metadata", "folder_id", folderID, "content_id", contentID, "error", err)
 		if providerErrors == nil {
 			providerErrors = map[string]string{}
 		}
-		providerErrors[imageCacheLocalProviderID] = err.Error()
+		providerErrors[imageCacheLocalProviderID] = "Local artwork discovery failed"
 	}
 	return append(images, local...), providerErrors, nil
 }

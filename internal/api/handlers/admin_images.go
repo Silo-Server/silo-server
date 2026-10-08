@@ -307,7 +307,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 				if providerErrors == nil {
 					providerErrors = map[string]string{}
 				}
-				providerErrors[localImageProviderID] = err.Error()
+				providerErrors[localImageProviderID] = "Local image preview failed"
 				continue
 			}
 			displayURL = preview
