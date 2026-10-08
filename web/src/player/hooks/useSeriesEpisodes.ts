@@ -7,7 +7,8 @@ import type { EpisodeRef } from "../types";
  * Fetches the episode list for the current season and (conditionally) the next
  * season so that cross-season "next episode" navigation works.
  *
- * Returns a flat, chronologically-sorted EpisodeRef[] spanning up to two seasons.
+ * Returns a flat, chronologically-sorted EpisodeRef[] spanning up to two seasons,
+ * holding only the episodes this viewer can play.
  */
 export function useSeriesEpisodes(
   seriesId: string | undefined,
@@ -47,7 +48,11 @@ export function useSeriesEpisodes(
   const currentEpisodes = currentEpisodesData?.episodes ?? [];
   const nextEpisodes = nextEpisodesData?.episodes ?? [];
 
-  const episodes: EpisodeRef[] = [...currentEpisodes, ...nextEpisodes].map((ep) => ({
+  // The server lists an episode this viewer can't play (every file outside
+  // their access) with no files. Leaving it out lets Next, Previous and
+  // autoplay step over it.
+  const playable = [...currentEpisodes, ...nextEpisodes].filter((ep) => ep.files.length > 0);
+  const episodes: EpisodeRef[] = playable.map((ep) => ({
     contentId: ep.content_id,
     seasonNumber: ep.season_number,
     episodeNumber: ep.episode_number,
