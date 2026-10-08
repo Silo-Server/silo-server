@@ -73,9 +73,7 @@ let items: AdminCollection[];
 let observers: Array<{ callback: IntersectionObserverCallback; targets: Set<Element> }>;
 
 function rowOf(title: string): HTMLElement {
-  const row = screen
-    .getAllByRole("listitem")
-    .find((item) => within(item).queryByText(title, { exact: true }));
+  const row = screen.getByText(title, { exact: true }).closest("li");
   if (!row) throw new Error(`No row titled ${title}`);
   return row;
 }
@@ -782,12 +780,12 @@ describe("AdminCollections List peeks", () => {
     reveal(...onScreen);
 
     await waitFor(() => expect(peekCalls()).toHaveLength(PEEK_MAX_IN_FLIGHT));
-    while (answers.length > 0) {
+    for (let completed = 0; completed < onScreen.length; completed += 1) {
+      await waitFor(() => expect(answers.length).toBeGreaterThan(0));
       await act(async () => answers.shift()!());
-      await waitFor(() => undefined);
     }
+    await waitFor(() => expect(client.isFetching()).toBe(0));
     await waitFor(() => expect(peekCalls()).toHaveLength(8));
-    while (answers.length > 0) await act(async () => answers.shift()!());
     expect(most).toBeLessThanOrEqual(PEEK_MAX_IN_FLIGHT);
     expect(new Set(peekCalls().map((call) => call.path))).toEqual(
       new Set(
