@@ -1057,6 +1057,9 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 		if err != nil {
 			return nil, nil, redisURLError(err)
 		}
+		if options.PoolSize < 0 {
+			return nil, nil, errRedisNegativePoolSize
+		}
 		return options, nil, nil
 	}
 
@@ -1071,6 +1074,9 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 	}
 	if strings.TrimSpace(failover.MasterName) == "" {
 		return nil, nil, fmt.Errorf("redis: %s must name the Sentinel master", redisSentinelMasterParam)
+	}
+	if failover.PoolSize < 0 {
+		return nil, nil, errRedisNegativePoolSize
 	}
 	if host, port, err := net.SplitHostPort(u.Host); err != nil || host == "" || port == "" {
 		// go-redis would fall back to port 6379, the Redis port.
@@ -1098,6 +1104,11 @@ func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, erro
 	}
 	return nil, failover, nil
 }
+
+// errRedisNegativePoolSize refuses a negative pool_size. go-redis replaces
+// only 0 with its default and panics building a client from a negative size,
+// which the connection check and every start would then do.
+var errRedisNegativePoolSize = errors.New("redis: pool_size must be 0 or more; leave it out for the default")
 
 // percentDecoded decodes the escapes in s that are valid and keeps the rest as
 // they are. url.QueryUnescape gives up at the first invalid one.
