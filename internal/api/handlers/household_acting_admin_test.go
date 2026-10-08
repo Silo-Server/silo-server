@@ -220,7 +220,6 @@ func TestHandleCreateAPIKey_RequiresActingAdmin(t *testing.T) {
 		keys := &fakeAPIKeyStore{}
 		h := NewAPIKeyHandler(keys)
 		h.Stores = testUserStoreProvider{store: store}
-		h.Users = stubUserRepo{user: &models.User{ID: 1, Role: models.RoleAdmin}}
 		h.ProfileTokens = tokens
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/api-keys", strings.NewReader(`{"label":"ci"}`))
 		req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // resolvePostgresTargets checks an anchor directly, then tries the latest
@@ -76,26 +78,22 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 		WHERE target.play_content_id IS NOT NULL
 	`, fileSQL, progress, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
 
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolving postgres playable targets: %w", err)
-	}
-	defer rows.Close()
 	result := make(map[string]PlayableTarget, len(keysByOrd))
-	for rows.Next() {
+	err := r.queryPlayableTargets(ctx, query, args, func(rows pgx.Rows) error {
 		var ord int64
 		var contentID string
 		var season *int
 		if err := rows.Scan(&ord, &contentID, &season); err != nil {
-			return nil, fmt.Errorf("scanning postgres playable target: %w", err)
+			return fmt.Errorf("scanning postgres playable target: %w", err)
 		}
 		if ord < 1 || ord > int64(len(keysByOrd)) {
-			return nil, fmt.Errorf("postgres playable target ordinality %d is outside the requested set", ord)
+			return fmt.Errorf("postgres playable target ordinality %d is outside the requested set", ord)
 		}
 		result[keysByOrd[ord-1]] = PlayableTarget{ContentID: contentID, SeasonNumber: season}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating postgres playable targets: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolving postgres playable targets: %w", err)
 	}
 	return result, nil
 }

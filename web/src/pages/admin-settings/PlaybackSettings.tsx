@@ -23,7 +23,7 @@ import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {

@@ -1290,28 +1290,32 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with the same source
-exclusions as `profiles_active_24h` above, so marking something watched counts
-as a play. Episodes are rolled up to their series, so a season binge reads as
-one show and a title's `media_item_id` is a series content id for TV.
+`plays` on both lists counts `user_watch_history` rows with source `playback`
+or `legacy` (the default for rows written without a source). Playback from Silo
+and Jellyfin clients both writes `playback` rows. Marking something watched is
+not a play: `manual` rows from Silo clients and `jellycompat` rows from
+Jellyfin clients are all marks, and marking a series writes one row per
+episode, so both are excluded. Episodes are rolled up to their series, so a
+season binge reads as one show and a title's `media_item_id` is a series
+content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
 (`admin_playback_history.watched_seconds`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry that was only ever marked watched has no sessions and reports
-`0`. Because `watched_seconds` records a session's final absolute position, a
-resumed session would claim the already-watched stretch again, so each
+minute. An entry with no finalized session in the window reports `0`. Because
+`watched_seconds` records a session's final absolute position, a resumed
+session would claim the already-watched stretch again, so each
 session's contribution is capped at its wall-clock length; the figure is an
 estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
-row; a profile that has only ever marked things watched falls back to its
-profile id. Ties are broken on a stable key (`media_item_id`, or
-`user_id`/`profile_id`) so equal rows keep their order between refreshes. No
-poster URLs are returned — the bar-list widgets do not need them, and it keeps
+row with a nonempty profile name; a profile with no such row falls back to its
+profile id, even if it has unnamed rows. Ties are broken on a stable key
+(`media_item_id`, or `user_id`/`profile_id`) so equal rows keep their order
+between refreshes. No poster URLs are returned — the bar-list widgets do not need them, and it keeps
 the query cheap.
 
 Both lists are `[]` on a server with no history, never `null`.
@@ -1570,6 +1574,19 @@ admitted before the setting was turned off fails with the same message. v1 run
 responses and realtime history-import events carry the same safe summaries as
 the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
 
+A Plex import races the addresses plex.tv advertised for the selected server, up to
+eight, and keeps the first that returns a library listing for the rest of the run. A
+session-backed run (`plex_session_id`) takes the list from the stored session; a client
+holding its own token sends the preferred address in `plex_base_url` and the rest in
+`plex_base_urls` (up to 31). When any address is HTTPS, cleartext ones are dropped,
+because each probe carries the Plex token. Addresses the account may not reach under
+the policy above are skipped, and the run is refused only when none remain; the eight
+raced are the first that remain. The Plex token is removed from any redirect that
+leaves the host it was sent to or downgrades from HTTPS to HTTP.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
+`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
+member, so check the capability before sending the field.
+
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.
 Already committed history effects are retained. Historical personal jobs without durable
@@ -1728,12 +1745,10 @@ sensitive and machine-managed keys with 404. Missing and empty values also remai
 404. The setup wizard uses this route for its Redis configuration read and treats
 only 404 as absence, rejecting stale responses after an authority change.
 
-`GET /api/v2/admin/settings/sections` reuses the existing profile-section flag
-reader: read failures preserve the disabled default. It requires acting-admin
-authority. `GET /api/v2/admin/playback-routing/capabilities` exposes the shared
-routing vocabulary under the same authority; these are configuration choices,
-not evidence of available worker capacity. No recorded first-party consumer uses
-these two discovery reads.
+`GET /api/v2/admin/playback-routing/capabilities` exposes the shared routing
+vocabulary under acting-admin authority; these are configuration choices, not
+evidence of available worker capacity. No recorded first-party consumer uses
+this read.
 
 ### Jellyfin compatibility status
 
@@ -1874,16 +1889,12 @@ web query and manual-refresh cache writer share the captured authority key and
 reject results decoded after an authority switch. These are aggregate observations,
 not an atomic cluster snapshot. No native or Jellyfin caller uses this admin read.
 
-`PUT /api/v2/admin/settings/sections` replaces `allow_profile_custom_sections`.
-The administrator GET on the same path now returns an actor/profile-bound ETag
-and supports conditional reads. PUT requires `If-Match`, accepts `If-None-Match` as an additional exclusion, and
-evaluates both against current canonical state inside the existing settings
-transaction; stale state returns 412, and unchanged state performs no write.
-The required boolean rejects omitted and null values. The response contains the
-canonical flag and its ETag. The profile-facing flag reader keeps its existing
-disabled default on read failure; the write fails closed without an atomic store.
-No first-party or internal writer is recorded, so no new UI or native flow is added.
-The bridge writer and profile section enforcement remain unchanged.
+There is no setting for whether profiles may add rule rows: they always may.
+`GET`/`PUT /api/v2/admin/settings/sections` (`getAdminSectionSettings`,
+`updateAdminSectionSettings`) were removed before the v2 lock. The frozen v1
+`GET /api/v1/admin/settings/sections` answers `allow_profile_custom_sections:
+true`, and v1 `PUT` checks that the body is JSON, changes nothing, and answers
+the same. A stored `sections.allow_profile_custom_sections` row is ignored.
 
 ### Offline-download preparation
 

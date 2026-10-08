@@ -23,6 +23,7 @@ vi.mock("@/hooks/queries/profiles", () => ({
 }));
 vi.mock("@/hooks/queries/history-import", () => ({
   useHistoryImportSources: () => ({ data: [], isLoading: false }),
+  useHistoryImportCapability: () => ({ data: undefined }),
   useHistoryImportRuns: () => ({
     data: [
       {

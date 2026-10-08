@@ -704,12 +704,14 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	}
 
 	profileID := ""
+	var profile *userstore.Profile
 	if record.ClientPurpose == DeviceLoginPurposeRemote {
 		if !record.Temporary || record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
 			return nil, ErrDeviceLoginNoProfile
 		}
 		profileID = strings.TrimSpace(*record.ApprovedProfileID)
-		if err := s.validateProfileOwnership(ctx, user.ID, profileID); err != nil {
+		profile, err = s.loadOwnedProfile(ctx, user.ID, profileID)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -759,9 +761,11 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 			return nil, errors.New("profile token service is not configured")
 		}
 		profileToken, _, err = s.profiles.Mint(access.ProfileTokenClaims{
-			UserID:         user.ID,
-			SessionID:      sessionID,
-			ProfileID:      profileID,
+			UserID:      user.ID,
+			SessionID:   sessionID,
+			ProfileID:   profileID,
+			PINRevision: profile.PINRevision,
+			// Only for nodes running an older release during a rolling deploy.
 			PolicyRevision: user.AccessPolicyRevision,
 		})
 		if err != nil {
@@ -967,25 +971,28 @@ func (s *DeviceLoginService) validateApprovingProfile(ctx context.Context, userI
 	if err := s.validateApprovingUser(ctx, userID); err != nil {
 		return err
 	}
-	return s.validateProfileOwnership(ctx, userID, profileID)
+	_, err := s.loadOwnedProfile(ctx, userID, profileID)
+	return err
 }
 
-func (s *DeviceLoginService) validateProfileOwnership(ctx context.Context, userID int, profileID string) error {
+// loadOwnedProfile returns the user's profile, or ErrDeviceLoginNoProfile
+// when the user has no such profile.
+func (s *DeviceLoginService) loadOwnedProfile(ctx context.Context, userID int, profileID string) (*userstore.Profile, error) {
 	if s.stores == nil {
-		return errors.New("user store provider is not configured")
+		return nil, errors.New("user store provider is not configured")
 	}
 	store, err := s.stores.ForUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("load approving user store: %w", err)
+		return nil, fmt.Errorf("load approving user store: %w", err)
 	}
 	profile, err := store.GetProfile(ctx, profileID)
 	if err != nil {
-		return fmt.Errorf("load approving profile: %w", err)
+		return nil, fmt.Errorf("load approving profile: %w", err)
 	}
 	if profile == nil {
-		return ErrDeviceLoginNoProfile
+		return nil, ErrDeviceLoginNoProfile
 	}
-	return nil
+	return profile, nil
 }
 
 func validateDeviceLoginDecision(record *deviceLoginRecord) error {

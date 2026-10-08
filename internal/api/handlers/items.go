@@ -220,6 +220,15 @@ func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchPr
 	h.catalogResolver.WithSearchProvider(provider)
 }
 
+// SetPersonalCollectionAccess limits the catalog's reads of another
+// profile's shared personal collection to its owner's access.
+func (h *ItemsHandler) SetPersonalCollectionAccess(owners catalog.PersonalCollectionAccess) {
+	if h == nil || h.catalogResolver == nil || owners == nil {
+		return
+	}
+	h.catalogResolver.WithPersonalCollectionAccess(owners)
+}
+
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
 	h.localWatchDispatcher = dispatcher
 }

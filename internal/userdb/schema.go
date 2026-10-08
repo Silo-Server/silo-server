@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     show_forced_subtitles BOOLEAN NOT NULL DEFAULT true,
     library_restrictions_enabled BOOLEAN DEFAULT false,
     max_playback_quality TEXT DEFAULT '',
+    pin_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -287,6 +288,21 @@ CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);
 ` + settingContractSchema + jellycompatDisplayPrefsSchema + playbackSinkSchema + playbackSourceSchema + onboardingRevisionSchema
+
+// profilePINRevisionSchema advances profiles.pin_revision whenever pin_hash
+// changes, the SQLite twin of the Postgres user_profiles_pin_revision trigger.
+// Profile tokens are bound to the revision. The trigger lives in the file, so
+// every writer advances it, including a process from an older release that
+// still holds a connection it opened before the v30 migration. Install it only
+// after migrations add pin_revision: earlier table renames validate all trigger
+// references, including references to columns that do not exist yet.
+const profilePINRevisionSchema = `
+CREATE TRIGGER IF NOT EXISTS profiles_pin_revision AFTER UPDATE OF pin_hash ON profiles
+WHEN NEW.pin_hash IS NOT OLD.pin_hash
+BEGIN
+ UPDATE profiles SET pin_revision = OLD.pin_revision + 1 WHERE id = NEW.id;
+END;
+`
 
 // The selected account database supplies account scope. Receipts deliberately
 // do not reference watch_history: deleting history must not reopen a stop.

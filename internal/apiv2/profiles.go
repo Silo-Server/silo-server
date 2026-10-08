@@ -219,8 +219,9 @@ func registerProfiles(reg *Registry) {
 		// profile's playback preferences. Non-retryable until the profiles
 		// section guards it: the profile row converges, but v1 bumps the
 		// account-wide access_policy_revision on field presence rather than
-		// an effective change, so an identical retry invalidates tokens
-		// minted in between across sibling profiles (ledger DEFECT note).
+		// an effective change, and a retried PIN advances the profile's PIN
+		// revision again, ending that profile's tokens minted in between
+		// (ledger DEFECT note).
 		Class:           ClassProfileScoped,
 		ProfileOptional: true,
 		// Demo restriction is a v2 addition: v1's demo guard does not list
@@ -518,7 +519,7 @@ type ProfilePINCheckInput struct {
 // an error: valid is false and no token is issued.
 type ProfileVerification struct {
 	Valid        bool            `json:"valid" doc:"Whether the PIN matched" example:"true"`
-	ProfileToken string          `json:"profile_token,omitempty" doc:"Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match" example:"pvt_5f3a9c1e7b2d4e8fa0c6"`
+	ProfileToken string          `json:"profile_token,omitempty" doc:"Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session and the profile's current PIN, so it stops being accepted when the session ends or the profile's PIN changes. Absent when the PIN did not match" example:"pvt_5f3a9c1e7b2d4e8fa0c6"`
 	ExpiresAt    NullableInstant `json:"expires_at" doc:"When the token stops being accepted; null when no token was issued or it does not expire" example:"2026-01-02T15:04:05.000Z"`
 }
 
@@ -529,7 +530,8 @@ type ProfileVerificationOutput struct {
 
 // verifyProfilePIN runs the same check and mint as v1 POST
 // /profiles/{id}/verify-pin. The token semantics are v1's: bound to the
-// caller's login session and the account's policy revision.
+// caller's login session and the profile's PIN revision (see
+// docs/architecture/profile-verification-tokens.md).
 func (reg *Registry) verifyProfilePIN(ctx context.Context, in *ProfilePINCheckInput) (*ProfileVerificationOutput, error) {
 	if reg.deps.Profiles == nil {
 		return nil, unavailable("profile")

@@ -3,9 +3,11 @@ package sections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -95,6 +97,10 @@ type Fetcher struct {
 	// now has onto the library watchlist before the watchlist section reads
 	// it. Nil skips promotion.
 	WatchlistPromoter catalog.WatchlistPromoter
+
+	// CollectionOwners limits a row of another profile's shared personal
+	// collection to its owner's access. Without it such a row fails.
+	CollectionOwners catalog.PersonalCollectionAccess
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -324,7 +330,11 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		// cached entry; the pointed-to *MediaItem must not be mutated in place
 		// (see cloneMediaItems). The per-user overlay still runs fresh in
 		// buildSectionsResponse.
-		key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+		var key string
+		key, err = f.resolvedListKey(ctx, resolved, libraryID, libraryIDs, filter)
+		if err != nil {
+			return SectionWithItems{}, err
+		}
 		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
 			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		})
@@ -1083,6 +1093,17 @@ func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libr
 	return results
 }
 
+// LogFetchError records a section that failed to load and is shown empty. A
+// row whose server or personal collection was deleted is expected to stay on
+// a layout until someone removes it, so it logs at debug instead of error.
+func LogFetchError(ctx context.Context, component string, sec ResolvedSection, err error) {
+	if errors.Is(err, catalog.ErrLibraryCollectionNotFound) || errors.Is(err, userstore.ErrCollectionNotFound) {
+		slog.DebugContext(ctx, "section collection no longer exists", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+		return
+	}
+	slog.ErrorContext(ctx, "fetching section items", "component", component, "section_id", sec.ID, "type", sec.SectionType, "error", err)
+}
+
 type sectionFetchRunner func(context.Context, ResolvedSection) (SectionWithItems, error)
 
 func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConcurrency int, runner sectionFetchRunner) []SectionWithItems {
@@ -1104,7 +1125,7 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 
 			result, err := runner(ctx, sec)
 			if err != nil {
-				slog.ErrorContext(ctx, "fetching section items", "component", "sections", "section_id", sec.ID, "type", sec.SectionType, "error", err)
+				LogFetchError(ctx, "sections", sec, err)
 				result = SectionWithItems{
 					ResolvedSection: sec,
 					Items:           []*models.MediaItem{},
@@ -1248,6 +1269,24 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return nil, 0, fmt.Errorf("loading library collection: %w", err)
 	}
 
+	// Library collection rails are shared across profiles (see
+	// isCacheableSectionType), so only the creator's user-agnostic default
+	// sort applies here — a viewer's personal override is honored on the
+	// collection's own browse page.
+	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
+	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess.AllowedLibraryIDs)
+	if err != nil {
+		// The stored query no longer parses or validates, e.g. a legacy
+		// per-profile rule. Like jellycompat, list nothing rather than fail
+		// every request that shows the row; the collection's page reports it.
+		slog.DebugContext(ctx, "library collection query is unusable", "component", "sections",
+			"collection_id", collection.ID, "error", err)
+		return []*models.MediaItem{}, 0, nil
+	}
+	if membership.Live {
+		return catalog.PreviewLiveLibraryCollection(ctx, f.pool, membership, queryAccess, s.ItemLimit)
+	}
+
 	collectionItems, err := f.CollectionRepo.ListItems(ctx, cfg.LibraryCollectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing collection items: %w", err)
@@ -1256,18 +1295,12 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	// Library collection rails are shared across profiles (see
-	// isCacheableSectionType), so only the creator's user-agnostic default
-	// applies here — a viewer's personal override is honored on the collection's
-	// own browse page.
-	defaultSort, hasDefaultSort := catalog.ParseCollectionDefaultSort(collection.SortConfig, false)
-	if hasDefaultSort {
+	if membership.Sort.Field != "" {
 		contentIDs := make([]string, 0, len(collectionItems))
 		for _, item := range collectionItems {
 			contentIDs = append(contentIDs, item.MediaItemID)
 		}
-		queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
-		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, defaultSort, queryAccess, s.ItemLimit, "")
+		items, total, err := catalog.QueryCollectionItemsBySort(ctx, f.pool, contentIDs, membership.Sort, queryAccess, s.ItemLimit, "")
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1338,17 +1371,13 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 	}
 
 	// Verify the requesting profile can access this collection.
-	if collection.ProfileID != profileID && collection.CreatorProfileID != profileID {
-		canAccess := false
-		for _, allowed := range collection.AllowedProfileIDs {
-			if allowed == profileID {
-				canAccess = true
-				break
-			}
-		}
-		if !canAccess {
-			return []*models.MediaItem{}, 0, nil
-		}
+	if !collection.VisibleTo(profileID) {
+		return []*models.MediaItem{}, 0, nil
+	}
+	// Another profile's collection shows only what its owner can access too.
+	filter, err = catalog.PersonalCollectionFilter(ctx, f.CollectionOwners, filter, userID, profileID, collection.CreatorProfileID)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	// Smart / live-query collection: parse the query definition and use the
@@ -1402,7 +1431,10 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		return items, total, nil
 	}
 
-	// Exact collection: fetch stored items.
+	// Exact collection: fetch stored items. The lookups below prefer the
+	// section's library scope over filter.AllowedLibraryIDs, so limit that
+	// scope to the owner-narrowed filter first.
+	libraryIDs = narrowLibraryScope(libraryIDs, filter.AllowedLibraryIDs)
 	collectionItems, err := store.ListCollectionItems(ctx, collectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing user collection items: %w", err)
@@ -2814,6 +2846,26 @@ func effectiveFetchLibraryIDs(libraryIDs []int, filter catalog.AccessFilter) []i
 	return nil
 }
 
+// narrowLibraryScope limits a caller's library scope to allowed so the scope
+// can never widen access. Nil on either side is unrestricted; when both are
+// set the result is their intersection, empty but non-nil when they share no
+// library so it still denies everything.
+func narrowLibraryScope(scope, allowed []int) []int {
+	switch {
+	case allowed == nil:
+		return scope
+	case scope == nil:
+		return allowed
+	}
+	narrowed := make([]int, 0, len(scope))
+	for _, id := range scope {
+		if slices.Contains(allowed, id) && !slices.Contains(narrowed, id) {
+			narrowed = append(narrowed, id)
+		}
+	}
+	return narrowed
+}
+
 func applyEpisodeTargetLibraryAccess(
 	filter catalog.AccessFilter,
 	libraryID *int,
@@ -2836,11 +2888,8 @@ func collectionRailQueryAccess(filter catalog.AccessFilter, libraryID *int, libr
 	result := filter
 	effectiveLibraryIDs := effectiveFetchLibraryIDs(libraryIDs, filter)
 	if libraryID == nil {
-		if effectiveLibraryIDs == nil {
-			result.AllowedLibraryIDs = nil
-		} else {
-			result.AllowedLibraryIDs = append([]int(nil), effectiveLibraryIDs...)
-		}
+		// Clone keeps an empty scope non-nil, so it still denies everything.
+		result.AllowedLibraryIDs = slices.Clone(effectiveLibraryIDs)
 		return result
 	}
 

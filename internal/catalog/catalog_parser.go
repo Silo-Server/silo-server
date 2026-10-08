@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -35,14 +36,39 @@ type catalogRuleBuilder struct {
 	indexedValues map[int]any
 }
 
+// ErrSearchMediaScopeSource refuses a search-only type on a source other than
+// query, whose text search is the only one that reaches the episode catalog.
+var ErrSearchMediaScopeSource = errors.New(`type "video_with_episodes" is only supported with source "query"`)
+
+// CatalogRequestOptions widens the shared catalog grammar for callers that
+// opt in.
+type CatalogRequestOptions struct {
+	// SearchMediaScopes accepts the search-only MediaScopeVideoWithEpisodes in
+	// type. /api/v2 opts in; the frozen /api/v1 grammar keeps dropping it like
+	// any other unrecognized type.
+	SearchMediaScopes bool
+}
+
 // ParseCatalogRequest converts catalog URL params into a normalized request.
 func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
+	return ParseCatalogRequestWithOptions(values, CatalogRequestOptions{})
+}
+
+// ParseCatalogRequestWithOptions is ParseCatalogRequest with an opt-in
+// grammar.
+func ParseCatalogRequestWithOptions(values url.Values, options CatalogRequestOptions) (CatalogRequest, error) {
 	req := CatalogRequest{
 		Source: CatalogSource(strings.ToLower(strings.TrimSpace(values.Get("source")))),
 		Limit:  20,
 	}
 	if req.Source == "" {
 		req.Source = CatalogSourceQuery
+	}
+	searchMediaScope := options.SearchMediaScopes && isSearchMediaScope(values.Get("type"))
+	// Refuse the search-only scope before a source's own checks run, so the
+	// refusal always names type rather than whatever the source rejects first.
+	if searchMediaScope && req.Source != CatalogSourceQuery && isKnownCatalogSource(req.Source) {
+		return CatalogRequest{}, ErrSearchMediaScopeSource
 	}
 
 	if limit := ParseIntParam(values.Get("limit")); limit > 0 {
@@ -144,7 +170,29 @@ func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
 		return CatalogRequest{}, fmt.Errorf("unsupported catalog source %q", req.Source)
 	}
 
+	if searchMediaScope {
+		// Text search applies the scope through SearchMediaScope; every other
+		// read of the request (a browse without q, filters, facets) lists media
+		// items, which never include episode rows, so it uses MediaScopeVideo.
+		req.Query.MediaScope = MediaScopeVideo
+		req.SearchMediaScope = MediaScopeVideoWithEpisodes
+	}
+
 	return req, nil
+}
+
+// isSearchMediaScope reports whether a raw type names the search-only scope.
+func isSearchMediaScope(raw string) bool {
+	return strings.ToLower(strings.TrimSpace(raw)) == MediaScopeVideoWithEpisodes
+}
+
+func isKnownCatalogSource(source CatalogSource) bool {
+	switch source {
+	case CatalogSourceQuery, CatalogSourceSection, CatalogSourceLibraryCollection, CatalogSourceUserCollection,
+		CatalogSourceFavorites, CatalogSourceWatchlist, CatalogSourceHistory, CatalogSourcePerson:
+		return true
+	}
+	return false
 }
 
 func parseCatalogSkipTotal(raw string) bool {

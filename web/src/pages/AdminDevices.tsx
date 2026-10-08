@@ -15,6 +15,7 @@ import {
   type AdminDeviceSetting,
   useAdminDeviceDetail,
   useAdminDeviceOverrides,
+  useAdminUserSettings,
   useAdminDevices,
   useDeleteAdminUserDeviceSetting,
   useDeleteAllAdminUserDeviceSettingsForDevice,
@@ -1376,10 +1377,14 @@ function DeviceDetailPanel({
   // values API, because the detail endpoint's `settings` array still reports
   // the legacy device-settings table that nothing writes to any more.
   const { data, isLoading } = useAdminDeviceDetail(userId, deviceId);
-  const { data: overrides, isLoading: overridesLoading } = useAdminDeviceOverrides(
-    userId,
-    deviceId,
-  );
+  const {
+    data: overrides,
+    isLoading: overridesLoading,
+    isError: overridesError,
+  } = useAdminDeviceOverrides(userId, deviceId);
+  // The owner's stored values at every scope, so rows the device doesn't
+  // override can show what they inherit. Same cached list the overrides read.
+  const { data: storedSettings } = useAdminUserSettings(userId);
   const updateSetting = useUpdateAdminUserDeviceSetting();
   const deleteSetting = useDeleteAdminUserDeviceSetting();
   const deleteProfileOverrides = useDeleteAllAdminUserDeviceSettingsForDevice();
@@ -1444,6 +1449,19 @@ function DeviceDetailPanel({
         <Skeleton className="h-16 w-full rounded-md" />
         <Skeleton className="h-32 w-full rounded-md" />
         <Skeleton className="h-32 w-full rounded-md" />
+      </div>
+    );
+  }
+
+  // Without the stored values every row would read as "app default" and
+  // edits would start from values the account may not have.
+  if (overridesError) {
+    return (
+      <div className="flex min-h-[320px] flex-col items-center justify-center gap-1 text-center">
+        <div className="text-foreground text-sm font-medium">
+          Couldn't load this device's settings
+        </div>
+        <div className="text-muted-foreground max-w-xs text-xs">Reload the page to try again.</div>
       </div>
     );
   }
@@ -1732,6 +1750,7 @@ function DeviceDetailPanel({
             profiles={profileTabs}
             initialProfileId={initialProfileId}
             showAllSettings={effectiveShowAllSettings}
+            storedSettings={storedSettings}
             device={{
               userId: data.user_id,
               deviceId: data.device_id,

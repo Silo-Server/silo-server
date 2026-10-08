@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
 
@@ -327,4 +329,102 @@ func removeCollectionImageVariants(
 		return fmt.Errorf("deleting collection variants: %w", err)
 	}
 	return nil
+}
+
+// collectionCollageComposer composes collection collages from title posters
+// and stores them under one artwork prefix (catalog.CollageGenerator). Each
+// collage is stored in the collection's collage directory with its key as the
+// revision, so every node that builds the same collage writes the same
+// objects.
+type collectionCollageComposer struct {
+	prefix     string
+	store      blobstore.Store
+	posters    itemPosterSigner
+	httpClient *http.Client
+}
+
+// NewPersonalCollectionCollageGenerator composes personal collection
+// collages and stores them beside their uploaded posters. It returns nil
+// when artwork storage or poster signing is not configured, which leaves
+// personal collections without collages.
+func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, httpClient *http.Client) catalog.CollageGenerator {
+	if store == nil || posters == nil {
+		return nil
+	}
+	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, httpClient: httpClient}
+}
+
+// ComposeCollectionCollage fetches the source posters, composes them and
+// stores the result.
+func (c collectionCollageComposer) ComposeCollectionCollage(ctx context.Context, collectionID, key string, sources []string) (string, string, error) {
+	if len(sources) == 0 {
+		return "", "", collage.ErrNotEnoughImages
+	}
+
+	slog.InfoContext(ctx, "collage: generating poster", "component", "api", "collection_id", collectionID, "item_poster_count", len(sources))
+
+	// Resolve poster paths to fetchable URLs. The collage is stored under the
+	// key of all its sources, so a source that doesn't resolve or download
+	// fails the build rather than being left out. A later read retries it.
+	resolved := c.posters.PresignImageURLs(ctx, sources, "poster", "small")
+	imageData := make([][]byte, 0, len(sources))
+	for _, path := range sources {
+		imageURL := resolved[path]
+		if imageURL == "" {
+			return "", "", fmt.Errorf("collage source %q did not resolve", path)
+		}
+		data, err := c.fetchImage(ctx, imageURL)
+		if err != nil {
+			// A transport error names the presigned URL; keep it out of logs.
+			if urlErr, ok := errors.AsType[*url.Error](err); ok {
+				err = urlErr.Err
+			}
+			return "", "", fmt.Errorf("fetching collage source %q: %w", path, err)
+		}
+		imageData = append(imageData, data)
+	}
+
+	composited, err := collage.ComposePoster(imageData)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Process through the standard image pipeline (generates WebP variants + thumbhash).
+	s3Path, thumbhash, err := putCollectionImageVariants(ctx, c.store, collectionCollageDir(c.prefix, collectionID), key, collectionPosterWidths, composited)
+	if err != nil {
+		return "", "", fmt.Errorf("processing collage image: %w", err)
+	}
+	if want := c.CollectionCollagePath(collectionID, key); s3Path != want {
+		return "", "", fmt.Errorf("collage stored at %q, want %q", s3Path, want)
+	}
+
+	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
+	return s3Path, thumbhash, nil
+}
+
+// CollectionCollagePath returns the path ComposeCollectionCollage stores the
+// collection's collage key under.
+func (c collectionCollageComposer) CollectionCollagePath(collectionID, key string) string {
+	return artworkkey.Original(collectionCollageDir(c.prefix, collectionID), key, ".webp")
+}
+
+// fetchImage downloads an image from a resolved URL.
+func (c collectionCollageComposer) fetchImage(ctx context.Context, imageURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := c.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image fetch returned status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, collectionImageMaxBytes))
 }

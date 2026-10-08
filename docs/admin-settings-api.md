@@ -88,6 +88,38 @@ once and disables mutation retries; a lost response must not trigger automatic
 replay. This corrects the inventory's earlier assumption that every check was
 read-only. Demo mode blocks this operation.
 
+### Redis database number
+
+`redis.db` is the Redis database number: empty by default, otherwise a whole
+number of 0 or more. A value replaces the number in `redis.url`, for a
+single-server URL and for a Sentinel URL. A change needs a restart.
+
+- The effective settings report the number in use under `redis.db`: the stored
+  value, otherwise the number in `redis.url`, which is 0 when the URL has none.
+  The key is absent while nothing is stored and there is no `redis.url` the
+  server can parse.
+- A process started with `REDIS_URL` takes the whole connection from the
+  environment and does not apply `redis.db`. The effective value is then the
+  number in `REDIS_URL`, or 0 when `REDIS_URL` cannot be parsed, and
+  `managed_by_env` in the sensitive-status response lists `redis.db` next to
+  `redis.url`. `redis.db` is not a secret, so `configured` never lists it.
+- The batch write and the single-key write store the same value, whatever was
+  stored before: nothing when the write leaves no `redis.url` in place, nothing
+  when that URL already names the number, and the number otherwise. A batch
+  that also sets `redis.url` is judged against the URL it sets. A write that
+  does not include `redis.db` leaves the stored value alone.
+- Under `REDIS_URL` a write of a number is refused with a `422` validation
+  problem whose detail is `redis.db is managed by an environment variable`. A
+  write of the empty value succeeds, so a stored number the environment
+  overrides can be removed.
+- `GET /api/v2/admin/settings/{key}` reads the stored value. For `redis.db` it
+  answers 404 while no number is stored, including when the effective settings
+  report one. Under `REDIS_URL` it answers the effective value.
+- The web forms stage the number the Database number field shows with an edit
+  of `redis.url`, so a new URL alone does not move the install to another
+  database. That includes a cleared URL, so a URL emptied and typed again keeps
+  the number; a save that leaves no URL stores no number.
+
 ### HEVC encoding
 
 `playback.allow_hevc_encoding` is a boolean setting, default `false`. When

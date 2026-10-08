@@ -3447,17 +3447,25 @@ func (r *FileRepository) FindParentContentIDForStem(ctx context.Context, folderI
 
 // FindUnambiguousParentContentIDForDir returns the single content id owning
 // the primary files under dir, or "" when the directory holds no matched
-// content or more than one distinct item (ambiguous — caller defers).
-func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string) (string, error) {
+// content or more than one distinct item (ambiguous — caller defers). Rows
+// marked missing still count: dropping them could leave a sibling as the sole
+// owner and bind the extra to the wrong item. Rows at excludePaths are
+// ignored: they are extras still carrying a primary link from before they
+// were classified.
+func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string, excludePaths []string) (string, error) {
+	if excludePaths == nil {
+		excludePaths = []string{}
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT COALESCE(e.series_id, mf.content_id) AS parent_id
 		FROM media_files mf
 		LEFT JOIN episodes e ON e.content_id = mf.episode_id
 		WHERE mf.media_folder_id = $1
 		  AND mf.file_path LIKE $2 ESCAPE '\'
+		  AND mf.file_path <> ALL($3::text[])
 		  AND mf.extra_id IS NULL
 		  AND (mf.content_id IS NOT NULL OR mf.episode_id IS NOT NULL)
-		LIMIT 2`, folderID, pathPrefixLike(dir))
+		LIMIT 2`, folderID, pathPrefixLike(dir), excludePaths)
 	if err != nil {
 		return "", fmt.Errorf("finding parent by dir: %w", err)
 	}

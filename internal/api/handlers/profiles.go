@@ -187,17 +187,7 @@ type verifyPINResponse struct {
 // device settings, and two definitions of "is this the household parent" would
 // eventually disagree.
 func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store userstore.UserStore) (bool, error) {
-	return canManageHousehold(r, store, h.userLookupOrNil(), h.ProfileTokens)
-}
-
-// userLookupOrNil returns UserRepo as the narrow interface the household check
-// wants, preserving nil-ness: a typed nil in a non-nil interface would defeat
-// the fail-closed check there.
-func (h *ProfileHandler) userLookupOrNil() userLookup {
-	if h.UserRepo == nil {
-		return nil
-	}
-	return h.UserRepo
+	return canManageHousehold(r, store, h.ProfileTokens)
 }
 
 func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
@@ -311,7 +301,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -515,7 +505,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		ActiveProfileID: activeProfileIDOf(r),
 		Request:         req,
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -715,7 +705,7 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 		ProfileID:       profileID,
 		ActiveProfileID: activeProfileIDOf(r),
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {
@@ -887,14 +877,27 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 
-	// Only a profile that exists and has a PIN gets an attempt budget, so
-	// requests naming arbitrary IDs add no limiter entries.
+	// Read the PIN revision before checking the PIN. A PIN change that lands
+	// between the two reads leaves the token on the older revision, which
+	// validation refuses; reading after would bind a proof of the old PIN to
+	// the new revision. Only a profile that exists and has a PIN gets an
+	// attempt budget, so requests naming arbitrary IDs add no limiter entries.
 	profile, err := store.GetProfile(ctx, cmd.ProfileID)
 	if err != nil {
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load profile")
 	}
 	if profile == nil || profile.PINHash == "" {
 		return none, apiError(http.StatusNotFound, "not_found", "Profile not found or has no PIN")
+	}
+
+	// The account revision is the claim an older node checks during a rolling
+	// deploy, so it is read before the PIN check for the same reason.
+	var user *models.User
+	if h.UserRepo != nil && h.ProfileTokens != nil {
+		user, err = h.UserRepo.GetByID(ctx, cmd.UserID)
+		if err != nil || user == nil {
+			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user policy")
+		}
 	}
 
 	// The attempt is counted before the PIN is checked, so concurrent
@@ -911,19 +914,16 @@ func (h *ProfileHandler) VerifyPIN(ctx context.Context, cmd ProfileVerifyPINComm
 	if valid {
 		h.PINAttempts.Reset(ctx, attemptKey)
 	}
-	if !valid || h.UserRepo == nil || h.ProfileTokens == nil {
+	if !valid || user == nil {
 		return ProfileVerification{Valid: valid}, nil
 	}
 
-	user, err := h.UserRepo.GetByID(ctx, cmd.UserID)
-	if err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user policy")
-	}
-
 	token, expiresAt, err := h.ProfileTokens.Mint(access.ProfileTokenClaims{
-		UserID:         cmd.UserID,
-		SessionID:      cmd.SessionID,
-		ProfileID:      cmd.ProfileID,
+		UserID:      cmd.UserID,
+		SessionID:   cmd.SessionID,
+		ProfileID:   cmd.ProfileID,
+		PINRevision: profile.PINRevision,
+		// Only for nodes running an older release during a rolling deploy.
 		PolicyRevision: user.AccessPolicyRevision,
 	})
 	if err != nil {
@@ -1023,7 +1023,7 @@ func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *h
 		UserID:          userID,
 		ActiveProfileID: activeProfileIDOf(r),
 		VerifyProfile: func(id string) error {
-			return verifyProfileToken(r, h.userLookupOrNil(), h.ProfileTokens, id)
+			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, id)
 		},
 	})
 	if err != nil {

@@ -273,7 +273,7 @@ func TestSentinelURLReachesTheMasterSentinelNames(t *testing.T) {
 	if err := client.Set(t.Context(), "key", "value", 0).Err(); err != nil {
 		t.Fatalf("write through Sentinel: %v", err)
 	}
-	bus := NewEventBus(rawURL)
+	bus := NewEventBus(config.RedisConfig{URL: rawURL})
 	t.Cleanup(func() { _ = bus.Close() })
 	if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
 		t.Fatalf("subscribe through Sentinel: %v", err)
@@ -323,7 +323,7 @@ func TestNewRedisClientForRoleRejectsInvalidSentinelURL(t *testing.T) {
 // main logs the error a subscription returns, and go-redis quotes the dial
 // address in it, so a URL that does not parse must not become the address.
 func TestEventBusErrorDoesNotQuoteAnInvalidURL(t *testing.T) {
-	bus := NewEventBus("redis://watcher:sentinel-secret@127.0.0.1:26379?master_name=mymaster&password=redis-secret&route_randomly=true")
+	bus := NewEventBus(config.RedisConfig{URL: "redis://watcher:sentinel-secret@127.0.0.1:26379?master_name=mymaster&password=redis-secret&route_randomly=true"})
 	t.Cleanup(func() { _ = bus.Close() })
 	err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {})
 	if err == nil {
@@ -339,7 +339,7 @@ func TestEventBusErrorDoesNotQuoteAnInvalidURL(t *testing.T) {
 
 func TestEventBusStillAcceptsABareAddress(t *testing.T) {
 	server := startRESPTestServer(t, nil, respTestRedis)
-	bus := NewEventBus(server.addr)
+	bus := NewEventBus(config.RedisConfig{URL: server.addr})
 	t.Cleanup(func() { _ = bus.Close() })
 	if err := bus.Subscribe(t.Context(), ChannelAdmin, func(Event) {}); err != nil {
 		t.Fatalf("subscribe with a bare host:port: %v", err)
@@ -357,9 +357,9 @@ func TestUnparsedRedisValueIsDialedOnlyWhenItIsABareAddress(t *testing.T) {
 		"redis.example:6379", "redis_1.example-a:6379", "127.0.0.1:6379", "[::1]:6379", "[fe80::1%eth0]:6379", ":6379",
 		"/run/redis/redis.sock",
 	} {
-		options := unparsedRedisOptions(address, parseErr)
-		if options.Addr != address || options.Dialer != nil {
-			t.Errorf("unparsedRedisOptions(%q) dials %q, want the address itself", address, options.Addr)
+		options := unparsedRedisOptions(config.RedisConfig{URL: address, DB: "5"}, parseErr)
+		if options.Addr != address || options.Dialer != nil || options.DB != 5 {
+			t.Errorf("unparsedRedisOptions(%q) dials %q on database %d, want the address itself on database 5", address, options.Addr, options.DB)
 		}
 	}
 	refused := []string{
@@ -387,7 +387,7 @@ func TestUnparsedRedisValueIsDialedOnlyWhenItIsABareAddress(t *testing.T) {
 	// A zone belongs to an IP address.
 	refused = append(refused, "secret%redis.example:6379")
 	for _, value := range refused {
-		options := unparsedRedisOptions(value, parseErr)
+		options := unparsedRedisOptions(config.RedisConfig{URL: value}, parseErr)
 		if strings.Contains(options.Addr, "secret") || options.Dialer == nil {
 			t.Errorf("unparsedRedisOptions(%q) dials %q, want no dial at all", value, options.Addr)
 			continue
@@ -443,7 +443,7 @@ func respTestPublishing(t *testing.T, event Event) func(args []string) (string, 
 func TestEventBusDeliversEventsFromASingleServer(t *testing.T) {
 	want := Event{Type: EventSettingsChanged, Payload: "from a single server"}
 	server := startRESPTestServer(t, nil, respTestPublishing(t, want))
-	bus := newRedisEventBus("redis://" + server.addr + "/2")
+	bus := newRedisEventBus(config.RedisConfig{URL: "redis://" + server.addr + "/2"})
 	t.Cleanup(func() { _ = bus.Close() })
 	events := make(chan Event, 64)
 	if err := bus.Subscribe(t.Context(), ChannelAdmin, func(event Event) { events <- event }); err != nil {
@@ -466,13 +466,13 @@ func TestEventBusDeliversEventsFromASingleServer(t *testing.T) {
 // server keeps the receive path it always had.
 func TestOnlyASentinelURLGetsTheSilenceLimit(t *testing.T) {
 	for _, single := range []string{"redis://127.0.0.1:6379/1", "127.0.0.1:6379"} {
-		bus := newRedisEventBus(single)
+		bus := newRedisEventBus(config.RedisConfig{URL: single})
 		if bus.silenceLimit != 0 || bus.pingInterval != 0 {
 			t.Errorf("newRedisEventBus(%q) has a silence limit of %s, want none", single, bus.silenceLimit)
 		}
 		_ = bus.Close()
 	}
-	bus := newRedisEventBus("redis://127.0.0.1:26379/1?master_name=mymaster")
+	bus := newRedisEventBus(config.RedisConfig{URL: "redis://127.0.0.1:26379/1?master_name=mymaster"})
 	t.Cleanup(func() { _ = bus.Close() })
 	if bus.silenceLimit != 10*time.Second || bus.pingInterval != 3*time.Second {
 		t.Fatalf("a Sentinel URL gives silence limit %s and ping interval %s, want 10s and 3s", bus.silenceLimit, bus.pingInterval)
@@ -490,7 +490,7 @@ func sentinelTestBus(t *testing.T, master *atomic.Pointer[respTestServer], silen
 		}
 		return respTestSentinel(t, master.Load().addr)(args)
 	})
-	bus := newRedisEventBus("redis://" + sentinel.addr + "?master_name=mymaster")
+	bus := newRedisEventBus(config.RedisConfig{URL: "redis://" + sentinel.addr + "?master_name=mymaster"})
 	bus.pingInterval, bus.silenceLimit = 20*time.Millisecond, silenceLimit
 	t.Cleanup(func() { _ = bus.Close() })
 	return bus, sentinel
@@ -716,7 +716,7 @@ func TestEventBusRefusesASubscriptionOnceCloseHasBegun(t *testing.T) {
 	var master atomic.Pointer[respTestServer]
 	master.Store(server)
 	behindSentinel, _ := sentinelTestBus(t, &master, 200*time.Millisecond, 0)
-	single := newRedisEventBus("redis://" + server.addr)
+	single := newRedisEventBus(config.RedisConfig{URL: "redis://" + server.addr})
 	for name, bus := range map[string]*RedisEventBus{"Sentinel": behindSentinel, "single server": single} {
 		// What Close does first. The client stays open, as it is while Close
 		// is still closing the subscriptions it knows.
@@ -914,12 +914,12 @@ func TestSentinelURLFollowsFailover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
-	client, _, err := newRedisClient(rawURL)
+	client, _, err := newRedisClient(config.RedisConfig{URL: rawURL})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = client.Close() })
-	bus := newRedisEventBus(rawURL)
+	bus := newRedisEventBus(config.RedisConfig{URL: rawURL})
 	t.Cleanup(func() { _ = bus.Close() })
 
 	key := fmt.Sprintf("silo:test:sentinel:%d", time.Now().UnixNano())

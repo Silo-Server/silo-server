@@ -111,6 +111,14 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("/admin/settings?tab=");
   });
 
+  it("includes a Home rows link in the content navigation", () => {
+    const markup = renderSidebar();
+
+    expect(markup).toContain('href="/admin/home-rows"');
+    expect(markup).toContain(">Home rows<");
+    expect(markup).not.toContain('href="/admin/sections"');
+  });
+
   it("hides Policy navigation when the editor capability is unavailable", () => {
     mockUsePolicyCapability.mockReturnValueOnce({
       data: {

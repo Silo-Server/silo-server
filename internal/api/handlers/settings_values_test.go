@@ -1619,7 +1619,6 @@ func newHouseholdValuesHandler(t *testing.T, pin string) (*SettingValuesHandler,
 		t.Fatalf("registering sibling device: %v", err)
 	}
 
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
 }

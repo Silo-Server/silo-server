@@ -45,4 +45,10 @@ type CatalogRequest struct {
 	// preference edited mid-pagination cannot order later pages differently than
 	// the order already advertised to the client. Nil resolves normally.
 	ResolvedSort *QuerySort
+	// SearchMediaScope, when set, replaces Query.MediaScope for a text search
+	// on the query source. It carries search-only scopes such as
+	// MediaScopeVideoWithEpisodes, whose item types span media items and the
+	// episode catalog; Query.MediaScope then holds the scope every other read
+	// of the request uses.
+	SearchMediaScope string
 }

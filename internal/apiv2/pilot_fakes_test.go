@@ -475,7 +475,6 @@ func pilotDeps(progress *fakeProgress, profiles *fakeProfiles) Dependencies {
 	deps.Profiles = profiles
 	deps.Libraries = fakeLibraries{known: []int{1, 2, 3, 4}}
 	deps.ProfileSections = &fakeProfileSections{rows: fixtureSectionOverrides()}
-	deps.SectionFlags = fakeSectionFlags{allow: true}
 	two, yes := 2, true
 	groupID := int64(2)
 	last := fixedTime()
@@ -973,14 +972,10 @@ func (f *fakeProfileSections) ResolveProfileSectionSettings(_ context.Context, u
 		return nil, f.err
 	}
 	return []sections.ResolvedSection{
-		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Keep watching", DefaultTitle: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
 		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
 	}, nil
 }
-
-type fakeSectionFlags struct{ allow bool }
-
-func (f fakeSectionFlags) AllowProfileCustomSections(context.Context) bool { return f.allow }
 
 func fixtureSectionOverrides() []userstore.SectionOverride {
 	pos, featured, limit := 2, false, 10

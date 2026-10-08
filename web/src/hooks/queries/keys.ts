@@ -123,11 +123,12 @@ export const collectionKeys = {
   list: () => ["collections", "list"] as const,
   server: () => ["collections", "server"] as const,
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
+  /** The list, each own manual collection marked with whether it holds the title. */
+  containing: (contentId: string) => ["collections", "containing", contentId] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
   mdblistSearch: (query: string) => ["collections", "mdblist", "search", query] as const,
-  mdblistTop: () => ["collections", "mdblist", "top"] as const,
 };
 
 export const requestKeys = {
@@ -253,6 +254,7 @@ export const notificationKeys = {
 export const historyImportKeys = {
   all: ["history-imports"] as const,
   sources: () => ["history-imports", "sources"] as const,
+  capability: () => ["history-imports", "capability"] as const,
   runs: (limit = 10) => ["history-imports", "runs", limit] as const,
   run: (id?: string) => ["history-imports", "run", id] as const,
   plexCheck: (sessionId?: string) => ["history-imports", "plex-check", sessionId] as const,
@@ -291,6 +293,8 @@ export const sectionKeys = {
     ["sections", "library", libraryId, "items", sectionId] as const,
   adminList: (scope: string, libraryId?: number) =>
     ["sections", "admin", scope, libraryId] as const,
+  /** Mutation key on every admin row write, so the Home rows list can wait for them. */
+  adminWrite: () => ["sections", "admin-write"] as const,
   profileOverrides: (scope: string, libraryId?: string) =>
     ["sections", "profile", scope, libraryId] as const,
   profileOverridesRaw: (scope: string, libraryId?: string) =>
@@ -386,9 +390,15 @@ export const adminKeys = {
   catalogImportSources: () => ["admin", "catalog", "importSources"] as const,
   localImportSources: () => ["admin", "catalog", "localImportSources"] as const,
   collections: (libraryId?: number) => ["admin", "collections", libraryId] as const,
+  /** The admin Home and library page rows that show a server collection. */
+  collectionRows: (collectionId: string) => ["admin", "collections", "rows", collectionId] as const,
   collectionGroups: (libraryId?: number) => ["admin", "collectionGroups", libraryId] as const,
   collectionTemplates: () => ["admin", "collections", "templates"] as const,
   collectionTemplateBundles: () => ["admin", "collections", "templateBundles"] as const,
+  // Outside "collections": refreshing the admin collections after a write
+  // doesn't re-run a dry run; Starter packs checks its pack again itself.
+  starterPackDryRun: (packId: string, body: unknown) =>
+    ["admin", "starterPackDryRun", packId, body] as const,
   libraryProviders: (id: number) => ["admin", "libraries", id, "providers"] as const,
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
