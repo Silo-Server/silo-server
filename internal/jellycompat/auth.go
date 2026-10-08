@@ -164,14 +164,20 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 				s.StreamAppTokenExpiry = a.now().Add(time.Duration(newPair.ExpiresIn) * time.Second)
 				return nil
 			})
+			if errors.Is(updateErr, ErrSessionNotFound) {
+				// Signed out while the tokens refreshed, such as by an
+				// account-wide revocation.
+				writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
+				return
+			}
 			if updateErr != nil {
 				slog.WarnContext(r.Context(), "jellycompat auth: session update after refresh failed", "component", "jellycompat",
 					"token_prefix", safeTokenPrefix(token),
 					"error", updateErr,
 				)
-			} else {
+			} else if refreshed, ok := a.sessions.Get(token); ok {
 				// Re-read the session to get the updated tokens.
-				session, _ = a.sessions.Get(token)
+				session = refreshed
 			}
 		}
 

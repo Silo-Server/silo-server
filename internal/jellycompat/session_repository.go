@@ -72,19 +72,29 @@ func (r *SessionRepository) scanCompatSession(row pgx.Row) (*Session, error) {
 	return &session, nil
 }
 
+// encryptTokens encrypts the session's bridged Silo access and refresh
+// tokens for storage (write-path contract).
+func (r *SessionRepository) encryptTokens(session Session) (accessToken, refreshToken string, err error) {
+	accessToken, err = r.cipher.Encrypt(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token))
+	if err != nil {
+		return "", "", fmt.Errorf("encrypt streamapp access token: %w", err)
+	}
+	refreshToken, err = r.cipher.Encrypt(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token))
+	if err != nil {
+		return "", "", fmt.Errorf("encrypt streamapp refresh token: %w", err)
+	}
+	return accessToken, refreshToken, nil
+}
+
 // Upsert inserts or updates a compat session.
 func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 	if session.Token == "" {
 		session.Token = uuid.NewString()
 	}
 
-	accessToken, err := r.cipher.Encrypt(session.StreamAppAccessToken, jellycompatTokenAAD("streamapp_access_token", session.Token))
+	accessToken, refreshToken, err := r.encryptTokens(session)
 	if err != nil {
-		return fmt.Errorf("encrypt streamapp access token: %w", err)
-	}
-	refreshToken, err := r.cipher.Encrypt(session.StreamAppRefreshToken, jellycompatTokenAAD("streamapp_refresh_token", session.Token))
-	if err != nil {
-		return fmt.Errorf("encrypt streamapp refresh token: %w", err)
+		return err
 	}
 
 	_, err = r.pool.Exec(ctx, `
@@ -125,6 +135,53 @@ func (r *SessionRepository) Upsert(ctx context.Context, session Session) error {
 	)
 	if err != nil {
 		return fmt.Errorf("upsert compat session: %w", err)
+	}
+	return nil
+}
+
+// UpdateByToken rewrites a stored compat session. It never inserts: when the
+// row is gone (signed out, swept after expiry, or deleted by an account-wide
+// revocation) it returns ErrSessionNotFound, so a sliding extension or token
+// refresh that races a revocation cannot bring the session back.
+func (r *SessionRepository) UpdateByToken(ctx context.Context, session Session) error {
+	accessToken, refreshToken, err := r.encryptTokens(session)
+	if err != nil {
+		return err
+	}
+
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE jellycompat_sessions SET
+			username = $2,
+			account_username = $3,
+			profile_id = $4,
+			profile_name = $5,
+			pseudo_user_id = $6,
+			streamapp_user_id = $7,
+			streamapp_access_token = $8,
+			streamapp_refresh_token = $9,
+			streamapp_token_expiry = $10,
+			created_at = $11,
+			expires_at = $12
+		WHERE token = $1
+	`,
+		session.Token,
+		session.Username,
+		session.AccountUsername,
+		session.ProfileID,
+		session.ProfileName,
+		session.PseudoUserID,
+		session.StreamAppUserID,
+		accessToken,
+		refreshToken,
+		session.StreamAppTokenExpiry,
+		session.CreatedAt,
+		session.ExpiresAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update compat session: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrSessionNotFound
 	}
 	return nil
 }

@@ -25,6 +25,7 @@
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestLoginAccountNameWithHashDB
+./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
