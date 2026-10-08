@@ -203,8 +203,9 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 
 // readableTitle replaces a blank title, or one that is just the raw
 // section_type key (older editors saved that when no title was typed), with
-// the recipe's display name: the preset whose default params all match the
-// section config, else the recipe's first preset. Other titles pass through.
+// the recipe's display name: the preset whose default params match the
+// section config on the most keys (as the web editor's matchRecipePreset
+// picks), else the recipe's first preset. Other titles pass through.
 func readableTitle(sectionType SectionType, title string, config json.RawMessage) string {
 	if t := strings.TrimSpace(title); t != "" && t != string(sectionType) {
 		return title
@@ -219,6 +220,7 @@ func readableTitle(sectionType SectionType, title string, config json.RawMessage
 	}
 	var cfg map[string]any
 	_ = json.Unmarshal(config, &cfg)
+	best, bestScore := presets[0].DisplayName, -1
 	for _, p := range presets {
 		var params map[string]any
 		if json.Unmarshal(p.DefaultParams, &params) != nil {
@@ -231,9 +233,9 @@ func readableTitle(sectionType SectionType, title string, config json.RawMessage
 				break
 			}
 		}
-		if matched {
-			return p.DisplayName
+		if matched && len(params) > bestScore {
+			best, bestScore = p.DisplayName, len(params)
 		}
 	}
-	return presets[0].DisplayName
+	return best
 }

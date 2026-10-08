@@ -262,6 +262,7 @@ func TestResolve_ReplacesRawSectionTypeTitle(t *testing.T) {
 	admin := []*PageSection{
 		{ID: "1", Position: 0, SectionType: "trending_on_server", Title: "trending_on_server", Config: json.RawMessage(`{"window":"7d"}`)},
 		{ID: "2", Position: 1, SectionType: "trending_on_server", Title: "Hot Right Now", Config: json.RawMessage(`{"window":"7d"}`)},
+		{ID: "3", Position: 2, SectionType: "format_showcase", Title: "format_showcase", Config: json.RawMessage(`{"format":"4k","sort":"recent"}`)},
 	}
 
 	result := Resolve(admin, nil)
@@ -270,5 +271,8 @@ func TestResolve_ReplacesRawSectionTypeTitle(t *testing.T) {
 	}
 	if result[1].Title != "Hot Right Now" {
 		t.Errorf("custom title = %q, want unchanged", result[1].Title)
+	}
+	if result[2].Title != "New in 4K" {
+		t.Errorf("most specific preset = %q, want %q", result[2].Title, "New in 4K")
 	}
 }
