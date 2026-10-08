@@ -89,6 +89,7 @@
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
+./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase

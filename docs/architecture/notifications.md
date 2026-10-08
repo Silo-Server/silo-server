@@ -153,9 +153,10 @@ An operational delivery that names a catalog item (`request.fulfilled`,
 through `series_id`) is created only when the recipient can open that item,
 checked as fanout checks an episode. A requester or follower without access
 is skipped, and the request still counts as notified. A scope that cannot be
-resolved fails the dispatch, so the request is retried. The scope is resolved
-before the dispatch transaction opens, because the resolver reads through the
-connection pool. `request.approved` and `request.declined` name no catalog
+resolved fails that recipient's dispatch and the request is retried; the
+other recipients are still told, and the retry skips every recipient that
+already has its delivery. The scope is resolved before the dispatch
+transaction opens, because the resolver reads through the connection pool. `request.approved` and `request.declined` name no catalog
 item; they repeat the title the requester submitted.
 
 Approval is the one transition whose two destinations disagree. Server

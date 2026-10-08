@@ -235,6 +235,46 @@ func TestNotifyFulfilledRetriesWhenRecipientScopeFails(t *testing.T) {
 	}
 }
 
+// TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients covers the retry of a
+// partly delivered request. A recipient whose scope fails does not stop the
+// ones after it, and the retry skips recipients an earlier pass told, so the
+// requester's scope failing later cannot hold the request back.
+func TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients(t *testing.T) {
+	pool := inboxPageDB(t)
+	c := seedAccessCatalog(t, pool)
+	var failing map[string]bool
+	var resolved []string
+	system := newAccessSystem(pool, scopeFunc(func(_ context.Context, input access.ResolveInput) (access.Scope, error) {
+		resolved = append(resolved, input.ProfileID)
+		if failing[input.ProfileID] {
+			return access.Scope{}, errors.New("connection reset")
+		}
+		return access.Scope{}, nil
+	}))
+	notifier := NewRequestFulfillmentNotifier(system)
+	req := fulfilledRequest(requests.Follower{UserID: 2, ProfileID: "first"}, requests.Follower{UserID: 3, ProfileID: "second"})
+	fulfilled := `type = '` + DeliveryTypeRequestFulfilled + `'`
+
+	failing = map[string]bool{"first": true}
+	if err := notifier.NotifyFulfilled(t.Context(), req, c.series); err == nil {
+		t.Fatal("first pass succeeded, want the scope error")
+	}
+	if got := deliveryRecipients(t, pool, fulfilled); !slices.Equal(got, []string{"requester", "second"}) {
+		t.Fatalf("first pass told %v, want requester and second", got)
+	}
+
+	failing, resolved = map[string]bool{"requester": true}, nil
+	if err := notifier.NotifyFulfilled(t.Context(), req, c.series); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if !slices.Equal(resolved, []string{"first"}) {
+		t.Errorf("retry resolved %v, want only first", resolved)
+	}
+	if got := deliveryRecipients(t, pool, fulfilled); !slices.Equal(got, []string{"first", "requester", "second"}) {
+		t.Errorf("told %v after retry, want all three once", got)
+	}
+}
+
 // TestDispatchOperationalResolvesBeforeHoldingConnection runs request.fulfilled
 // on a one-connection pool with a resolver that reads through that pool, as
 // the production resolver does. Resolving inside the dispatch transaction

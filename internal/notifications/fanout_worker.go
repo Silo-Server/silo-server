@@ -218,7 +218,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// candidates that can open the episode now are captured, which keeps the
 	// title off every channel for the rest. Eligibility is checked first, so
 	// scopes are resolved only for candidates who would get a delivery;
-	// fanOutEvent checks it again under the inbox locks.
+	// fanOutEvent evaluates eligibility again under the inbox locks. Access is
+	// checked only here: changing it takes no inbox lock, so a second check
+	// under the locks would not close the gap before commit. A delivery
+	// created in that gap is like one created just before the change.
 	recipients := newRecipientAccess(w.scopes)
 	candidatesByEvent := make(map[string]map[string]struct{}, len(fanout))
 	profiles := make(map[string]struct{})

@@ -22,6 +22,10 @@ func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, profile
 	return !f.disabled[profileID], nil
 }
 
+func (f *fakeFulfillmentBackend) fulfilledDelivered(context.Context, requests.Follower, string) (bool, error) {
+	return false, nil
+}
+
 func (f *fakeFulfillmentBackend) dispatchFulfilled(_ context.Context, delivery Delivery) error {
 	f.deliveries = append(f.deliveries, delivery)
 	return nil
