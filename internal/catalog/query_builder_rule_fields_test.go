@@ -252,6 +252,19 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 	}
 }
 
+func TestCatalogRuleMatchesItem_HourSpanEndsToday(t *testing.T) {
+	// SQL subtracts the span from CURRENT_DATE, so "1h" reaches into
+	// yesterday whatever the time now.
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+	item := &models.MediaItem{ReleaseDate: &yesterday}
+	if !catalogRuleMatchesItem(item, QueryRule{Field: "release_date", Op: "in_last", Value: "1h"}) {
+		t.Error("expected yesterday to be in the last hour of dates")
+	}
+	if catalogRuleMatchesItem(item, QueryRule{Field: "release_date", Op: "not_in_last", Value: "1h"}) {
+		t.Error("expected yesterday not to be before the last hour of dates")
+	}
+}
+
 func TestUserHistoryCTESQLRollsEpisodesUpToSeries(t *testing.T) {
 	sql := UserHistoryCTESQL(1)
 	for _, fragment := range []string{

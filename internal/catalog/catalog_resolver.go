@@ -2986,28 +2986,24 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 	if err != nil {
 		return false
 	}
-	if op == ruleOpNotInLast {
-		cutoff, ok := catalogSpanCutoff(value, time.Now().UTC())
-		return ok && actualTime.Before(catalogDateOnly(cutoff))
-	}
-
-	switch op {
-	case "gt", "gte", "lt", "lte", "between", "is", "is_not", "in_last":
-	default:
-		return false
-	}
-
-	if op == "in_last" {
-		duration, ok := catalogStringValue(value)
+	if op == ruleOpInLast || op == ruleOpNotInLast {
+		// The span ends today, as CURRENT_DATE does in the SQL rule, so an
+		// hour span reaches back into yesterday whatever the time now.
+		spanStart, ok := catalogSpanCutoff(value, catalogDateOnly(time.Now()))
 		if !ok {
 			return false
 		}
-		spec, err := parseDurationSpec(duration)
-		if err != nil {
-			return false
+		cutoff := catalogDateOnly(spanStart)
+		if op == ruleOpNotInLast {
+			return actualTime.Before(cutoff)
 		}
-		cutoff := catalogDateOnly(spec.cutoffTime(time.Now().UTC()))
 		return !actualTime.Before(cutoff)
+	}
+
+	switch op {
+	case "gt", "gte", "lt", "lte", "between", "is", "is_not":
+	default:
+		return false
 	}
 
 	if op == "between" {
