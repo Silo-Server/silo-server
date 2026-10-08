@@ -16,9 +16,10 @@ func fixedNow() time.Time {
 type rowSessionRepo struct {
 	rows    map[string]Session
 	deletes int
-	// afterGet, when set, runs after GetByToken has read a row and before it
-	// returns, as a revocation committing while the read is in flight.
-	afterGet func()
+	// afterGet and afterUpdate, when set, run after GetByToken has read a row
+	// or UpdateByToken has written one, as a revocation committing then.
+	afterGet    func()
+	afterUpdate func()
 }
 
 func (r *rowSessionRepo) Upsert(_ context.Context, session Session) error {
@@ -31,6 +32,9 @@ func (r *rowSessionRepo) UpdateByToken(_ context.Context, session Session) error
 		return ErrSessionNotFound
 	}
 	r.rows[session.Token] = session
+	if r.afterUpdate != nil {
+		r.afterUpdate()
+	}
 	return nil
 }
 
