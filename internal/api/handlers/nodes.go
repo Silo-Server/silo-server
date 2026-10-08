@@ -55,6 +55,7 @@ type NodeCapabilityRefresher interface {
 
 // NodeHandler handles CRUD operations and health checks for stream nodes.
 type NodeHandler struct {
+	drainStore        AdminNodeDrainStore
 	configuration     AdminNodeConfigurationStore
 	configurationWake chan struct{}
 	repo              NodeRepository

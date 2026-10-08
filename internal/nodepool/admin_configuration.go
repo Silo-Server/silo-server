@@ -38,7 +38,7 @@ func (s *AdminConfigurationStore) Snapshot(ctx context.Context) ([]*Node, int64,
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(ctx, `SELECT id, admin_revision FROM stream_nodes`)
+	rows, err := tx.Query(ctx, `SELECT id, GREATEST(admin_revision, drain_revision) FROM stream_nodes`)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -64,7 +64,7 @@ func (s *AdminConfigurationStore) Snapshot(ctx context.Context) ([]*Node, int64,
 
 func readConfigurationRevision(ctx context.Context, tx pgx.Tx, id int) (int64, error) {
 	var revision int64
-	err := tx.QueryRow(ctx, `SELECT admin_revision FROM stream_nodes WHERE id=$1 FOR UPDATE`, id).Scan(&revision)
+	err := tx.QueryRow(ctx, `SELECT GREATEST(admin_revision, drain_revision) FROM stream_nodes WHERE id=$1 FOR UPDATE`, id).Scan(&revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNodeNotFound
 	}
@@ -123,7 +123,7 @@ func (s *AdminConfigurationStore) Create(ctx context.Context, input CreateNodeIn
 }
 
 func matchesCreation(node *Node, input CreateNodeInput) bool {
-	return node.Name == input.Name && node.Type == input.Type && node.URL == input.URL && node.Enabled &&
+	return node.Name == input.Name && node.Type == input.Type && node.URL == input.URL && node.Enabled == input.enabledOnCreate() &&
 		reflect.DeepEqual(node.PublicURL, normalizeOverride(input.PublicURL)) &&
 		reflect.DeepEqual(node.Group, normalizeGroup(input.Group)) &&
 		reflect.DeepEqual(node.MaxJobs, normalizeCap(input.MaxJobs)) &&

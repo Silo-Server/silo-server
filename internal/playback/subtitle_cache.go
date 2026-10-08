@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -86,6 +87,13 @@ const (
 // rewritten as needed (tee writer for fills, cached-.sup input for windowed
 // serves, cleared window for background warms).
 type SUPExtractFunc func(ctx context.Context, opts StreamExtractOpts) error
+
+var subtitleFillsInFlight atomic.Int64
+
+// SubtitleFillsInFlight includes fills reserved before a background warm is
+// scheduled. Claims survive the FFmpeg child and publication/discard cleanup;
+// zero proves that no cache fill is pending or running in this process.
+func SubtitleFillsInFlight() int { return int(subtitleFillsInFlight.Load()) }
 
 // NewSubtitleCache builds a cache rooted under the transcode directory
 // returned by transcodeDir at call time (so runtime config changes are
@@ -462,6 +470,9 @@ type SubtitleCacheFill struct {
 	// failed flips when a temp-file write errors (e.g. disk full); the tee
 	// keeps serving the client and Commit refuses to publish the entry.
 	failed bool
+	// A failed Commit may be followed by Discard. The original fill must never
+	// release a newer fill for the same cache key or decrement its claim twice.
+	releaseOnce sync.Once
 }
 
 // BeginFill reserves the in-flight slot for the given track and creates the
@@ -494,6 +505,7 @@ func (c *SubtitleCache) beginFill(inputPath string, trackIndex int, format strin
 		return nil
 	}
 	c.inflight[key] = make(chan struct{})
+	subtitleFillsInFlight.Add(1)
 	c.mu.Unlock()
 
 	tmp, err := os.CreateTemp(dir, key+".part-*")
@@ -518,6 +530,7 @@ func (c *SubtitleCache) release(key string) {
 	if done, ok := c.inflight[key]; ok {
 		close(done)
 		delete(c.inflight, key)
+		subtitleFillsInFlight.Add(-1)
 	}
 	c.mu.Unlock()
 }
@@ -569,7 +582,7 @@ func (f *SubtitleCacheFill) Commit() error {
 		f.Discard()
 		return errors.New("source file changed during extract; cache fill discarded")
 	}
-	defer f.c.release(f.key)
+	defer f.release()
 
 	tmpPath := f.tmp.Name()
 	if err := f.tmp.Sync(); err != nil {
@@ -597,7 +610,11 @@ func (f *SubtitleCacheFill) Commit() error {
 // file is already gone and re-removal is a no-op).
 func (f *SubtitleCacheFill) Discard() {
 	f.closeAndRemoveTmp()
-	f.c.release(f.key)
+	f.release()
+}
+
+func (f *SubtitleCacheFill) release() {
+	f.releaseOnce.Do(func() { f.c.release(f.key) })
 }
 
 func (f *SubtitleCacheFill) closeAndRemoveTmp() {

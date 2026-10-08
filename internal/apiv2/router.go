@@ -192,6 +192,7 @@ type Dependencies struct {
 	AdminNodeCommands                AdminNodeCommandsService
 	AdminNodeReload                  AdminNodeReloadService
 	AdminNodeConfiguration           AdminNodeConfigurationService
+	AdminNodeDrain                   AdminNodeDrainService
 	AdminServerStatus                AdminServerStatusService
 	AdminServerRestart               AdminServerRestartService
 	AdminBrandingAssets              AdminBrandingAssetService

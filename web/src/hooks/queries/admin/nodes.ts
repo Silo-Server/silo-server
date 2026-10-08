@@ -144,7 +144,7 @@ function useNodeWrite() {
       if (intent.action === "create") {
         result = await v2("POST /api/v2/admin/nodes", {
           ...common,
-          body: intent.body as CreateNodeRequest,
+          body: { ...(intent.body as CreateNodeRequest), enabled: true },
           onResponse,
         });
       } else {

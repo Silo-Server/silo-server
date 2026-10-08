@@ -792,6 +792,8 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 // is empty today; the reconcile test refuses an unmapped guarded operation
 // that is not listed here.
 var guardedWithoutLegacyRow = map[string]string{
+	"beginAdminNodeDrain":          "V2-only durable worker admission fence: v1 disable removes placement but cannot confirm retirement. The node's monotonic configuration revision guards publication.",
+	"cancelAdminNodeDrain":         "V2-only cancellation of the durable worker admission fence: the node's monotonic configuration revision guards cancellation and invalidates earlier drain receipts.",
 	"updateRequestRoute":           "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
 	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
@@ -1127,6 +1129,8 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"beginAdminNodeDrain":                  "V2-only durable worker admission fence (v1 is frozen). An unchanged fence is reused; replay with a pre-publication validator returns 412 without another fence.",
+	"cancelAdminNodeDrain":                 "V2-only cancellation of the durable worker admission fence. Cancellation leaves placement disabled and advances the configuration revision; a replay with the old validator returns 412 without effects.",
 	"createShuffle":                        "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
 	"advanceShuffle":                       "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
 	"skipShuffleItem":                      "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",

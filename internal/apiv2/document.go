@@ -629,6 +629,7 @@ func registerAll(reg *Registry) {
 	registerAdminNodeCommands(reg)
 	registerAdminNodeReload(reg)
 	registerAdminNodeConfiguration(reg)
+	registerAdminNodeDrain(reg)
 	registerAdminServerStatus(reg)
 	registerAdminBrandingAssets(reg)
 	registerAdminJellyfinCompatWeb(reg)

@@ -111,6 +111,17 @@
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
 
+# Guarded worker retirement, realm binding, and disabled commissioning.
+./internal/nodepool TestAdminNodeDrainTransactions
+./internal/nodepool TestAdminNodeDrainPublicationFaultRollsBack
+./internal/nodepool TestAdminNodeDrainConcurrentMigrationRollbackPreservesFence
+./internal/nodepool TestAdminNodeDrainMigrationRollbackPreservesConfigurationRevision
+./internal/apiv2 TestAdminNodeDrainPostgresProductionPath
+./internal/apiv2 TestAdminNodeDisabledCreationPostgresProductionPath
+./internal/apiv2 TestAdminNodeDisabledPublicationFaultsPostgresProductionPath
+./internal/apiv2 TestAdminNodeLateDisabledCreationPostgresProductionPath
+./internal/apiv2 TestAdminNodeCreationPreservesEnabledDefaultsPostgresProductionPath
+
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB

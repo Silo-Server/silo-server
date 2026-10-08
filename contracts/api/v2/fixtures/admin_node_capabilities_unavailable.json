@@ -1,0 +1,7 @@
+{
+  "revision": "c94aa508b5791bb321829684aa314520de10b17ac8658f8168de92a13bf9b781",
+  "state": "not_configured",
+  "allowed": false,
+  "worker_drain": false,
+  "disabled_creation": false
+}

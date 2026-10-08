@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/workerdrain"
 )
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
@@ -185,6 +186,7 @@ func ValidateThrottleAttestation(req TranscodeStartRequest, response TranscodeSt
 
 // HealthResponse is the JSON response for GET /api/v1/health.
 type HealthResponse struct {
+	workerdrain.Identity
 	Status     string `json:"status"`
 	ActiveJobs int32  `json:"active_jobs"`
 	// CapabilitiesHash identifies this node's last computed hardware capability
@@ -259,6 +261,7 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
+	drain                     *workerdrain.Gate
 	watcher                   *nodeconfig.Watcher
 	streamDeny                *playback.StreamDeny
 	nodeRowID                 func() (int, bool)
@@ -519,6 +522,11 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	if watcher != nil {
 		s.nodeRowID = watcher.NodeRowID
 		s.registeredNodeURL = watcher.NodeRegisteredURL
+		if watcher.HasDrainAuthority() {
+			s.drain = workerdrain.New(watcher.ReadDrainFence, s.drainActiveJobs, func(ctx context.Context, key string) bool {
+				return s.streamDeny != nil && s.streamDeny.Denied(ctx, key)
+			})
+		}
 	}
 	return s
 }
@@ -574,6 +582,11 @@ func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{}
 		return done
 	}
 	playbackCfg := cfg.Playback
+	endDrainWork, err := s.drain.Begin(ctx, "", time.Time{})
+	if err != nil {
+		close(done)
+		return done
+	}
 	// Claimed here, before the goroutine exists. Warmup is a real smoke encode
 	// and the listener opens while it may still be running, so an admin re-probe
 	// arriving in a node's first seconds must not see an idle gate — and a claim
@@ -583,6 +596,7 @@ func (s *Server) StartHardwareEncoderWarmup(ctx context.Context) <-chan struct{}
 	s.gpu.holdWork()
 	go func() {
 		defer close(done)
+		defer endDrainWork()
 		defer s.gpu.endWork()
 		if err := playback.WarmHardwareEncoder(ctx, playbackCfg.FFmpegPath, playbackCfg.HWAccel, playbackCfg.HWDevice); err != nil {
 			slog.DebugContext(ctx, "transcode node hardware encoder warmup failed", "component", "transcodenode", "error", err)
@@ -889,6 +903,7 @@ func (s *Server) router() chi.Router {
 	declareTranscodeNodeMediaRoutes()
 	s.startIdleReaper()
 	r := chi.NewRouter()
+	r.Use(s.drainMiddleware)
 	r.Get("/api/v1/health", s.handleHealth)
 	// Unauthenticated, matching the API listener's own /metrics posture: a
 	// scrape target that needs a credential is a scrape target that goes
@@ -917,6 +932,8 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		r.Get("/admin/drain", s.handleDrain)
+		r.Post("/admin/drain", s.handleDrain)
 	})
 	return r
 }
@@ -1255,10 +1272,15 @@ func (s *Server) trackDownloadPrepare(ctx context.Context, info nodesessions.Ses
 	}
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	identityCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	identity := s.drain.PublicIdentity(identityCtx)
+	w.Header().Set("Cache-Control", "no-store")
 	snapshot := s.metrics.Snapshot().RedactPaths()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(HealthResponse{
+		Identity:         identity,
 		Status:           "ok",
 		ActiveJobs:       s.activeJobs.Load(),
 		CapabilitiesHash: s.storedCapabilityHash(),
@@ -1306,6 +1328,11 @@ func (s *Server) StartMetricsSampler(ctx context.Context) {
 var ErrCapabilityBuildBusy = errors.New("capability build refused while the node is re-probing")
 
 func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
+	end, err := s.drain.Begin(ctx, "", time.Time{})
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	defer end()
 	// A snapshot runs ffmpeg on the GPU whenever the probe caches are cold, so
 	// it registers as GPU work. That is what stops a manual re-probe from
 	// claiming an apparently idle encoder and running its own smoke matrix
@@ -2510,6 +2537,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
+	s.drain.Revoke(sessionID)
 
 	w.WriteHeader(http.StatusNoContent)
 }

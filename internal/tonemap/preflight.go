@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -63,6 +64,24 @@ var ffmpegVersionCache = struct {
 	group   singleflight.Group
 }{entries: make(map[string][]byte)}
 
+var preflightsInFlight atomic.Int64
+
+// PreflightsInFlight reports outstanding claims on source-preflight and
+// FFmpeg identity work. Claims begin before singleflight schedules a command
+// and survive a canceled caller until its shared result arrives. Coalesced
+// callers each retain a claim, so the count may exceed the number of processes;
+// zero proves that none of this work is pending or running.
+func PreflightsInFlight() int {
+	return int(preflightsInFlight.Load())
+}
+
+func releaseDetachedPreflight(resultCh <-chan singleflight.Result) {
+	go func() {
+		<-resultCh
+		preflightsInFlight.Add(-1)
+	}()
+}
+
 var (
 	// ErrSourcePreflightUnavailable identifies an operational validation failure
 	// that may succeed when the executor or probe is retried.
@@ -105,6 +124,7 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 		if ok {
 			return cachedPreflightError(entry)
 		}
+		preflightsInFlight.Add(1)
 		resultCh := sourcePreflightCache.group.DoChan(key, func() (any, error) {
 			entry, ok := sourcePreflightCacheLookup(key, time.Now())
 			if ok {
@@ -129,8 +149,10 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 		})
 		select {
 		case <-preflightCtx.Done():
+			releaseDetachedPreflight(resultCh)
 			return fmt.Errorf("%w: %w", ErrSourcePreflightUnavailable, preflightCtx.Err())
 		case result := <-resultCh:
+			preflightsInFlight.Add(-1)
 			if result.Err != nil {
 				return result.Err
 			}
@@ -141,6 +163,8 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 			return cachedPreflightError(entry)
 		}
 	}
+	preflightsInFlight.Add(1)
+	defer preflightsInFlight.Add(-1)
 	return runSourcePreflight(preflightCtx, request, run)
 }
 
@@ -241,6 +265,8 @@ func sourcePreflightKey(ctx context.Context, request SourcePreflightRequest, run
 func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run CommandRunner) ([]byte, error) {
 	resolved, cacheKey, cacheable := FFmpegBinaryIdentity(ffmpegPath)
 	if !cacheable {
+		preflightsInFlight.Add(1)
+		defer preflightsInFlight.Add(-1)
 		return runBounded(ctx, run, ffmpegPath, "-version")
 	}
 	ffmpegVersionCache.Lock()
@@ -250,6 +276,7 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 		return result, nil
 	}
 	ffmpegVersionCache.Unlock()
+	preflightsInFlight.Add(1)
 	resultCh := ffmpegVersionCache.group.DoChan(cacheKey, func() (any, error) {
 		ffmpegVersionCache.Lock()
 		cached, ok := ffmpegVersionCache.entries[cacheKey]
@@ -273,8 +300,10 @@ func ffmpegVersionForPreflight(ctx context.Context, ffmpegPath string, run Comma
 	})
 	select {
 	case <-ctx.Done():
+		releaseDetachedPreflight(resultCh)
 		return nil, ctx.Err()
 	case result := <-resultCh:
+		preflightsInFlight.Add(-1)
 		if result.Err != nil {
 			return nil, result.Err
 		}

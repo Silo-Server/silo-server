@@ -1744,7 +1744,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, deviceSignInFixtureCases()...)
 	cases = append(cases, externalSignInFixtureCases()...)
 	cases = append(cases, adminDownloadPreparationControlFixtureCases()...)
-	return append(cases, loginSessionFixtureCases()...)
+	cases = append(cases, loginSessionFixtureCases()...)
+	return append(cases, adminNodeDrainFixtureCases()...)
 }
 
 func loginSessionFixtureCases() []fixtureCase {

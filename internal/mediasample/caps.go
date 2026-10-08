@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -125,6 +126,16 @@ var capsCache = struct {
 	list listFunc
 }{entries: make(map[string]Capabilities), list: runListing}
 
+var capabilitiesInFlight atomic.Int64
+
+// CapabilitiesInFlight reports claims on unfinished FFmpeg capability
+// inventories, including pending singleflight admission and work detached from
+// canceled callers. Coalesced callers each retain a claim until the inventory
+// completes; zero proves that no listing is pending or running.
+func CapabilitiesInFlight() int {
+	return int(capabilitiesInFlight.Load())
+}
+
 // LoadCapabilities returns the inventory for the ffmpeg binary at ffmpegPath.
 // Inventories are cached per binary identity (resolved path, size, and
 // modification time), so replacing the binary in place loads a new one.
@@ -141,6 +152,7 @@ func LoadCapabilities(ctx context.Context, ffmpegPath string) (Capabilities, err
 	list := capsCache.list
 	capsCache.Unlock()
 
+	capabilitiesInFlight.Add(1)
 	resultCh := capsCache.group.DoChan(key, func() (any, error) {
 		capsCache.Lock()
 		cached, ok := capsCache.entries[key]
@@ -159,8 +171,13 @@ func LoadCapabilities(ctx context.Context, ffmpegPath string) (Capabilities, err
 	})
 	select {
 	case <-ctx.Done():
+		go func() {
+			<-resultCh
+			capabilitiesInFlight.Add(-1)
+		}()
 		return Capabilities{}, ctx.Err()
 	case result := <-resultCh:
+		capabilitiesInFlight.Add(-1)
 		if result.Err != nil {
 			return Capabilities{}, result.Err
 		}

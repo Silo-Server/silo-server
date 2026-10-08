@@ -19,6 +19,7 @@ type AdminNodeCreateBody struct {
 	Name             string `json:"name" minLength:"1" maxLength:"1024"`
 	Type             string `json:"type" enum:"proxy,transcode"`
 	URL              string `json:"url" minLength:"1" maxLength:"8192"`
+	Enabled          *bool  `json:"enabled,omitempty" default:"true" doc:"Create disabled for worker commissioning; activate separately with a guarded configuration update."`
 	PublicURL        string `json:"public_url,omitempty" maxLength:"8192"`
 	Group            string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs          *int   `json:"max_jobs,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
@@ -84,6 +85,12 @@ func adminNodeConfigurationProblem(err error) error {
 	if errors.Is(err, nodepool.ErrNodeConfigurationConflict) {
 		return NewProblem(TypeConflict, "Node URL already has a different configuration.")
 	}
+	if p, ok := errors.AsType[*pgconn.PgError](err); ok && p.Code == "23514" && p.ConstraintName == "stream_node_drain_requires_disabled" {
+		return NewProblem(TypeConflict, "Cancel the worker drain before enabling this node.")
+	}
+	if p, ok := errors.AsType[*pgconn.PgError](err); ok && p.Code == "23514" && p.ConstraintName == "stream_node_drain_target_fenced" {
+		return NewProblem(TypeConflict, "Cancel the worker drain before changing this node's identity.")
+	}
 	if p, ok := errors.AsType[*pgconn.PgError](err); ok && p.Code == "23505" && p.ConstraintName == "stream_nodes_url_key" {
 		return NewProblem(TypeConflict, "Node URL is already configured.")
 	}
@@ -102,7 +109,7 @@ func adminNodeConfigurationOutput(ctx context.Context, node *nodepool.Node, err 
 	return &AdminNodeConfigurationOutput{ETag: tag, Body: body}, nil
 }
 func registerAdminNodeConfiguration(reg *Registry) {
-	create := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes", "createAdminNode", "admin-nodes", "Persist node configuration and durable pool invalidation. An identical natural URL configuration resolves a repeated create; conflicting configuration returns 409. No worker probe or replica completion acknowledgement."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyUniqueConstraint}
+	create := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes", "createAdminNode", "admin-nodes", "Persist node configuration and durable pool invalidation. Omitted enabled defaults to true; enabled=false commissions without placement until a separate guarded activation. An identical natural URL configuration, including enabled, resolves a repeated create; conflicting configuration returns 409. No worker probe or replica completion acknowledgement."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyUniqueConstraint}
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = append(create.Errors, http.StatusConflict)
 	Register(reg, create, func(ctx context.Context, in *AdminNodeCreateInput) (*AdminNodeConfigurationOutput, error) {
@@ -110,7 +117,7 @@ func registerAdminNodeConfiguration(reg *Registry) {
 			return nil, unavailable("administrator nodes")
 		}
 		b := in.Body
-		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps})
+		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, Enabled: b.Enabled, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps})
 		return adminNodeConfigurationOutput(ctx, node, err)
 	})
 	update := Operation{Operation: humaOp("PUT", Prefix+"/admin/nodes/{id}", "updateAdminNode", "admin-nodes", "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}

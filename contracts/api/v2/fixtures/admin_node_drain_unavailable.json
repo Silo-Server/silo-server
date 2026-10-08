@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+  "title": "Dependency unavailable",
+  "status": 503,
+  "detail": "The worker drain service is not available on this server.",
+  "instance": "urn:silo:request:0000000000000000000002df"
+}

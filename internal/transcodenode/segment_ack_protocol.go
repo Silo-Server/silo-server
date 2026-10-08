@@ -9,6 +9,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
+const idempotent = "natural_idempotent"
+
 // ProtocolSegmentAcknowledgement retains the private downstream-completion hop.
 func ProtocolSegmentAcknowledgement() workerprotocol.Operation {
 	const (
@@ -19,7 +21,6 @@ func ProtocolSegmentAcknowledgement() workerprotocol.Operation {
 		bearerClass      = "node_bearer"
 		sessionParameter = "session_id"
 		textMedia        = "text/plain"
-		idempotent       = "natural_idempotent"
 	)
 	parameters := []*huma.Param{
 		{Name: sessionParameter, In: pathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Existing transport session."},

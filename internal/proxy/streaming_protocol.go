@@ -9,11 +9,12 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
+const kindRemux = "remux"
+
 // ProtocolStreaming describes the remaining proxy remux/HLS token and grant
 // routes. Only these existing relays retain open-ended origin responses.
 func ProtocolStreaming() []workerprotocol.Operation {
 	const (
-		kindRemux           = "remux"
 		kindAudio           = "audio"
 		kindManifest        = "manifest"
 		kindSegment         = "segment"

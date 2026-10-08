@@ -97,5 +97,5 @@ func (s *Server) probesInFlight() int {
 	if s.countProbesInFlight != nil {
 		return s.countProbesInFlight()
 	}
-	return playback.HWProbesInFlight() + tonemap.ProbesInFlight()
+	return playback.HWProbesInFlight() + playback.SubtitleFillsInFlight() + playback.CopySeekAnchorsInFlight() + tonemap.ProbesInFlight() + tonemap.PreflightsInFlight() + mediasample.CapabilitiesInFlight()
 }

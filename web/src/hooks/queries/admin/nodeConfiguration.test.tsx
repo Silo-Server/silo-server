@@ -226,6 +226,12 @@ it("setup create preserves authenticated profile absence", async () => {
   act(() => result.current.mutate({ name: "Setup", type: "proxy", url: node.url }));
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   const headers = new Headers(fetchMock.mock.calls[0]![1].headers);
+  expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({
+    name: "Setup",
+    type: "proxy",
+    url: node.url,
+    enabled: true,
+  });
   expect(headers.get("Authorization")).toBe("Bearer synthetic");
   expect(headers.get("X-Profile-Id")).toBe("");
   expect(result.current.isAuthorityActive()).toBe(true);

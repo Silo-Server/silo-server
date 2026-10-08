@@ -2707,6 +2707,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
+			nodeHandler.SetDrainStore(nodepool.NewAdminConfigurationStore(deps.DB))
+			v2deps.AdminNodeDrain = nodeHandler
 		}
 	}
 	var rateLimitHandler *handlers.RateLimitHandler

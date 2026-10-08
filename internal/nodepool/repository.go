@@ -227,6 +227,9 @@ type CreateNodeInput struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 	URL  string `json:"url"`
+	// Enabled is supplied by native v2 commissioning. The frozen v1 decoder
+	// ignores it, preserving the enabled=true default of that contract.
+	Enabled *bool `json:"-"`
 	// PublicURL is meaningful for proxy nodes only; see Node.PublicURL.
 	// Accepted on any node for symmetry with the acceleration overrides,
 	// which are likewise scoped by what reads them rather than rejected.
@@ -234,6 +237,10 @@ type CreateNodeInput struct {
 	Group            string `json:"group"`              // empty = ungrouped
 	MaxJobs          *int   `json:"max_jobs"`           // nil or <= 0 = unlimited
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps"` // nil or <= 0 = unlimited
+}
+
+func (i CreateNodeInput) enabledOnCreate() bool {
+	return i.Enabled == nil || *i.Enabled
 }
 
 // Validate checks required fields and allowed values.
@@ -504,11 +511,11 @@ func (r *Repository) Create(ctx context.Context, input CreateNodeInput) (*Node, 
 		return nil, err
 	}
 	row := r.pool.QueryRow(ctx,
-		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps, enabled)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+nodeColumns,
 		input.Name, input.Type, input.URL, normalizeOverride(input.PublicURL), normalizeGroup(input.Group),
-		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps))
+		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps), input.enabledOnCreate())
 	return scanNode(row)
 }
 

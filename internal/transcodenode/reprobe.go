@@ -62,7 +62,7 @@ func (s *Server) handleReprobeCapabilities(w http.ResponseWriter, r *http.Reques
 	// same exclusion the transcode-start path consults, so from here until the
 	// deferred release no new GPU work is admitted.
 	busy, ok := s.gpu.beginReprobe(func() int {
-		return int(s.activeJobs.Load()) + playback.HWProbesInFlight() + tonemap.ProbesInFlight()
+		return int(s.activeJobs.Load()) + playback.HWProbesInFlight() + playback.SubtitleFillsInFlight() + playback.CopySeekAnchorsInFlight() + tonemap.ProbesInFlight() + tonemap.PreflightsInFlight() + mediasample.CapabilitiesInFlight()
 	})
 	if !ok {
 		slog.InfoContext(r.Context(), "transcode node capability re-probe refused while busy",

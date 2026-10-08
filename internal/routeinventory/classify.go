@@ -837,6 +837,9 @@ var infrastructureMiddleware = []string{
 	// token on every listener; it records the access path and never grants
 	// or changes authorization.
 	"netaccess.Middleware",
+	// drainMiddleware fences new worker admissions. Token validation identifies
+	// existing permits; it never grants the route's bearer or media authority.
+	"drainMiddleware",
 }
 
 func classifyAuth(middleware []string) (string, []string) {

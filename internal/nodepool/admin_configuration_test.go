@@ -16,14 +16,18 @@ import (
 func configurationTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_NODE_CONFIGURATION_TEST_DATABASE_URL")
+	dedicated := dsn != ""
 	if dsn == "" {
-		t.Skip("SILO_NODE_CONFIGURATION_TEST_DATABASE_URL is not set")
+		dsn = os.Getenv("SILO_TEST_DATABASE_URL")
+	}
+	if dsn == "" {
+		t.Skip("requires a disposable PostgreSQL fixture")
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ConnConfig.Database != "silo_operations_node_configuration_test" {
+	if dedicated && cfg.ConnConfig.Database != "silo_operations_node_configuration_test" {
 		t.Fatal("refusing non-owned node configuration database")
 	}
 	admin, err := pgxpool.NewWithConfig(t.Context(), cfg)
@@ -53,16 +57,22 @@ func configurationTestPool(t *testing.T) *pgxpool.Pool {
  active_jobs integer NOT NULL DEFAULT 0, node_group text, max_jobs integer, max_bandwidth_kbps integer,
  egress_kbps integer NOT NULL DEFAULT 0, last_health_check timestamptz, created_at timestamptz NOT NULL DEFAULT now(),
  capabilities jsonb, capabilities_hash text, capabilities_refreshed_at timestamptz, last_stats jsonb,
- hw_accel_override text, hw_device_override text, capability_drift text, capability_drift_baseline jsonb)`)
+ hw_accel_override text, hw_device_override text, capability_drift text, capability_drift_baseline jsonb, network_access jsonb)`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../migrations/sql/20260906205459_node_admin_configuration_revisions.sql")
-	if err != nil {
+	if _, err = pool.Exec(t.Context(), `CREATE TABLE server_settings(key text PRIMARY KEY, value text NOT NULL);
+	 INSERT INTO server_settings VALUES ('server.identity_id','synthetic-node-realm')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(t.Context(), strings.Split(string(migration), "-- +goose Down")[0]); err != nil {
-		t.Fatal(err)
+	for _, filename := range []string{"20260906205459_node_admin_configuration_revisions.sql", "20261008031132_add_worker_drain_fences.sql"} {
+		migration, err := os.ReadFile("../../migrations/sql/" + filename)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(t.Context(), strings.Split(string(migration), "-- +goose Down")[0]); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return pool
 }

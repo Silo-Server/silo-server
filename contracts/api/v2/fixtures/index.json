@@ -2339,6 +2339,64 @@
       "body_file": "admin_network_access_unknown_host.json"
     },
     {
+      "name": "admin_node_capabilities_unavailable",
+      "operation_id": "getAdminNodeCapabilities",
+      "scenario": "The administrator discovers unavailable drain and disabled commissioning services without guessing a build version.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/nodes/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"d35adbeff1618be39295a58c4631eeb22f37843f8fcd921108ab5bf25bb52c4f\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminNodeDrainCapabilities",
+      "body_file": "admin_node_capabilities_unavailable.json"
+    },
+    {
+      "name": "admin_node_drain_requires_authentication",
+      "operation_id": "getAdminNodeDrain",
+      "scenario": "A worker retirement observation requires acting administrator authority.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/nodes/17/drain"
+      },
+      "expected_status": 401,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_node_drain_requires_authentication.json"
+    },
+    {
+      "name": "admin_node_drain_unavailable",
+      "operation_id": "getAdminNodeDrain",
+      "scenario": "A missing drain service cannot return a retirement receipt.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/nodes/17/drain",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 503,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_node_drain_unavailable.json"
+    },
+    {
       "name": "admin_password_reset_email",
       "operation_id": "createAdminUserPasswordReset",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",

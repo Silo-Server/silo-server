@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -19,13 +20,22 @@ const (
 )
 
 var (
-	copySeekProbeGroup singleflight.Group
-	copySeekProbeSlots = make(chan struct{}, maxConcurrentCopySeekProbes)
+	copySeekProbeGroup      singleflight.Group
+	copySeekProbeSlots      = make(chan struct{}, maxConcurrentCopySeekProbes)
+	copySeekAnchorsInFlight atomic.Int64
 )
 
 type copySeekAnchor struct {
 	seconds float64
 	segment int
+}
+
+// CopySeekAnchorsInFlight reports claims on unfinished shared seek-anchor work.
+// Claims include pending admission and survive caller cancellation. Coalesced
+// callers can each own a claim, so this is not an exact child-process count;
+// zero means no seek-anchor work remains queued or running.
+func CopySeekAnchorsInFlight() int {
+	return int(copySeekAnchorsInFlight.Load())
 }
 
 // ResolveCopySeekAnchor returns the keyframe timestamp FFmpeg's input seek will
@@ -64,6 +74,7 @@ func ResolveCopySeekAnchor(
 		strconv.FormatFloat(requestedSeekSeconds, 'f', 6, 64),
 		strconv.Itoa(segmentDuration),
 	}, "\x00")
+	copySeekAnchorsInFlight.Add(1)
 	resultCh := copySeekProbeGroup.DoChan(key, func() (any, error) {
 		probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySeekProbeTimeout)
 		defer cancel()
@@ -79,8 +90,15 @@ func ResolveCopySeekAnchor(
 
 	select {
 	case <-ctx.Done():
+		// The shared probe uses WithoutCancel and can outlive this caller.
+		// Transfer its claim until the command and slot cleanup complete.
+		go func() {
+			<-resultCh
+			copySeekAnchorsInFlight.Add(-1)
+		}()
 		return 0, 0, ctx.Err()
 	case result := <-resultCh:
+		copySeekAnchorsInFlight.Add(-1)
 		if result.Err != nil {
 			return 0, 0, result.Err
 		}

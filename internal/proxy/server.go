@@ -37,6 +37,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
+	"github.com/Silo-Server/silo-server/internal/workerdrain"
 )
 
 // proxyRangeHeader is the HTTP Range header the media routes accept.
@@ -44,6 +45,7 @@ const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
+	drain   *workerdrain.Gate
 	watcher *nodeconfig.Watcher
 	tracker *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
@@ -144,6 +146,11 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 	}
 	if watcher != nil {
 		server.nodeRowID = watcher.NodeRowID
+		if watcher.HasDrainAuthority() {
+			server.drain = workerdrain.New(watcher.ReadDrainFence, server.probesInFlight, func(ctx context.Context, key string) bool {
+				return server.streamDeny != nil && server.streamDeny.Denied(ctx, key)
+			})
+		}
 	}
 	return server
 }
@@ -236,6 +243,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) router() chi.Router {
 	declareProxyMediaRoutes()
 	r := chi.NewRouter()
+	r.Use(s.drainMiddleware)
 	if s.clientIP != nil {
 		r.Use(clientip.Middleware(s.clientIP))
 	}
@@ -305,6 +313,8 @@ func (s *Server) router() chi.Router {
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
 		r.Get("/status", s.handleStatus)
+		r.Get("/admin/drain", s.handleDrain)
+		r.Post("/admin/drain", s.handleDrain)
 		// Network access providers running beside this proxy; the API fans its
 		// admin status/connect/disconnect out to these with the node bearer.
 		r.Get("/network-access/status", s.handleNetworkAccessStatus)
@@ -358,6 +368,11 @@ func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 // caller must keep the previous hash rather than publish the partial report,
 // exactly as a transcode node does.
 func (s *Server) buildCapabilitySnapshot(ctx context.Context) (playback.HWAccelInfo, error) {
+	end, err := s.drain.Begin(ctx, "", time.Time{})
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	defer end()
 	s.capabilityBuildMu.Lock()
 	defer s.capabilityBuildMu.Unlock()
 	return s.buildCapabilitySnapshotLocked(ctx)
@@ -474,6 +489,7 @@ func (s *Server) storeCapabilityHash(hash string) {
 }
 
 type healthResponse struct {
+	workerdrain.Identity
 	Status     string `json:"status"`
 	ActiveJobs int    `json:"active_jobs"`
 	EgressKbps int    `json:"egress_kbps"`
@@ -504,7 +520,11 @@ type healthResponse struct {
 	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	identityCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	identity := s.drain.PublicIdentity(identityCtx)
+	w.Header().Set("Cache-Control", "no-store")
 	activeJobs := 0
 	if s.tracker != nil {
 		activeJobs = s.tracker.ActiveCount()
@@ -516,6 +536,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(healthResponse{
+		Identity:         identity,
 		Status:           "ok",
 		ActiveJobs:       activeJobs,
 		EgressKbps:       s.egress.RateKbps(),
