@@ -160,8 +160,10 @@ func validateRuleValue(rule QueryRule) error {
 	}
 	switch rule.Field {
 	case querySortTitle:
-		if _, ok := rule.Value.(string); !ok {
-			return fmt.Errorf("title requires a string value")
+		// An empty value would make contains, begins_with and ends_with match
+		// every title.
+		if text, ok := rule.Value.(string); !ok || strings.TrimSpace(text) == "" {
+			return fmt.Errorf("title requires a non-empty string")
 		}
 	case ruleFieldDecade:
 		if _, ok := decadeStart(rule.Value); !ok {

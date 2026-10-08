@@ -228,6 +228,7 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "rating_tmdb", Op: "between", Value: []any{"", ""}},
 		{Field: "rating_rt_critic", Op: "gte", Value: "high"},
 		{Field: "title", Op: "contains", Value: 3.0},
+		{Field: "title", Op: "contains", Value: "  "},
 		{Field: "decade", Op: "is", Value: 0.0},
 		{Field: "decade", Op: "is", Value: 5.0},
 		{Field: "release_date", Op: "not_in_last", Value: "soon"},

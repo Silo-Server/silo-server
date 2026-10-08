@@ -486,7 +486,7 @@ Each rule is `{field, op, value}`; an operator a field does not list returns `42
 and so does a value of the wrong shape: a span not like `30d` or reaching back before
 PostgreSQL's earliest date (4714 BC), a non-numeric bound,
 a decade that is not a year from 10 on (decade 0 would catch every title with no
-year), a `title` value that is not a string, or a
+year), a `title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
 
