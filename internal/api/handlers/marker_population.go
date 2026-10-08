@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -22,7 +23,7 @@ func populateFileMarkers(ctx context.Context, population MarkerPopulationService
 	defer cancel()
 	populated, _, err := population.Populate(lookupCtx, file)
 	if err != nil {
-		slog.WarnContext(ctx, "marker lookup failed", "file_id", file.ID, "error", err)
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "marker lookup failed", "file_id", file.ID, "error", err)
 	}
 	if populated == nil {
 		return file

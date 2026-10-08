@@ -2877,6 +2877,10 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 				return
 			case <-ticker.C:
 				enabled, err := s.folderEnabledState(watchCtx, folderID)
+				if watchCtx.Err() != nil {
+					// The scan finished while the check ran.
+					return
+				}
 				if err != nil {
 					slog.WarnContext(ctx, "scanner: failed to refresh folder state", "component", "scanner", "folder_id", folderID, "error", err)
 					continue
