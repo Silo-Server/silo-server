@@ -478,6 +478,32 @@ identity after any count or duration sort. Work grouping chooses the first
 accessible ebook/audiobook edition under the complete source order before applying
 the group cursor. A query cap limits source editions before grouping.
 
+### Rule fields and operators
+
+Catalog query rule groups, `custom_filter` sections, and Smart collections share
+one rule vocabulary (`queryFieldDefs` in `internal/catalog/query_definition.go`).
+Each rule is `{field, op, value}`; an operator a field does not list returns `422`.
+
+| Operators | Fields | Value |
+| --- | --- | --- |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
+| `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
+| `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
+
+`not_in_last` keeps titles whose date falls before the span; a title without the
+date matches neither `in_last` nor `not_in_last`, and a title with no runtime
+matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
+show's newest episode, so movies never match them, and the `episode` media scope
+rejects `latest_episode_added`. The personalized `last_watched` field also takes
+`not_in_last`; a title the profile never finished counts as finished long ago, and
+a show's last watched date is its most recently finished episode.
+
+`GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
+when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
+Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
+operators, and `not_in_last`. Older servers answer those rules with `422`.
+
 ### Search continuation
 
 Text searches with a nonempty `q` and the default `query` source accept explicit
