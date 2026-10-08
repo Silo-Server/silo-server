@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -106,6 +109,9 @@ func requireRequestedVersionWithoutSubtitleV3(t *testing.T, plan *playback.PlanV
 	if warned != 1 {
 		t.Fatalf("subtitle_track_unavailable reported %d times: %#v", warned, plan.DegradationWarnings)
 	}
+	if !slices.Contains(plan.DegradationWarnings, playback.SubtitleNotShownWarningV3()) {
+		t.Fatalf("warnings = %#v, want the subtitle reported as on the file but not shown", plan.DegradationWarnings)
+	}
 }
 
 // A subtitle that only the requested file cannot show is no reason to switch
@@ -161,4 +167,74 @@ func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *te
 		t.Fatalf("subtitle replan = %#v", replanned)
 	}
 	requireRequestedVersionWithoutSubtitleV3(t, replanned.PlaybackPlan, source)
+}
+
+// The active alternate is kept during an output change only to keep the
+// viewer's subtitle. When the new output cannot show that subtitle on the
+// alternate either, playback still returns to the requested edition without
+// it: the requested edition is the picture the viewer asked for.
+func TestHandleReplanPlaybackV3OutputChangeReturnsToRequestedEditionWhenSubtitleCannotBeShown(t *testing.T) {
+	handler, active, requested, startRequest := subtitleBlockedHDRFixtureV3(t)
+	failedAt := time.Now().UTC()
+	repaired := *requested
+	*requested = models.MediaFile{ID: repaired.ID, ContentID: repaired.ContentID, FilePath: repaired.FilePath, ProbeFailedAt: &failedAt}
+	startRequest.FileID = requested.ID
+	original := startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	original.Subtitles.EmbeddedBitmap = true
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
+
+	// The requested 1080p edition is unreadable at start, so playback lands
+	// on the 4K edition, the only one with the English PGS.
+	rec := httptest.NewRecorder()
+	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != active.ID {
+		t.Fatalf("start did not land on the 4K edition: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	*requested = repaired
+
+	subtitleIndex := 0
+	subtitled := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-track-0001",
+		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-track-attempt-0001",
+		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+		QualityPreference: "auto",
+		SelectedTracks: playback.SelectedTracksV3{
+			Audio:    started.PlaybackPlan.SelectedTracks.Audio,
+			Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(active.ID, "subtitle", subtitleIndex), Index: &subtitleIndex},
+		},
+		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if subtitled.PlaybackPlan == nil || subtitled.PlaybackPlan.EffectiveMediaFileID != active.ID || subtitled.PlaybackPlan.SelectedTracks.Subtitle == nil {
+		t.Fatalf("the PGS on the 4K edition was not selected: %#v", subtitled)
+	}
+
+	// The new output cannot draw PGS, so the 4K edition would need a burn-in
+	// its HDR picture cannot take.
+	nextContext := startRequest.ClientPlaybackContext
+	nextContext.Output.OutputContextID = "route-2"
+	nextContext.Deliveries = maps.Clone(startRequest.ClientPlaybackContext.Deliveries)
+	original.Subtitles.EmbeddedBitmap = false
+	nextContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
+	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-output-0001",
+		FailedPlanID: subtitled.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-output-attempt-0001",
+		PlanAttemptKey: subtitled.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 40,
+		QualityPreference: "auto",
+		SelectedTracks:    subtitled.PlaybackPlan.SelectedTracks,
+		Capabilities:      startRequest.Capabilities, ClientPlaybackContext: nextContext,
+	})
+	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
+		t.Fatalf("output change = %#v", replanned)
+	}
+	plan := replanned.PlaybackPlan
+	if plan.EffectiveMediaFileID != requested.ID || plan.SelectedTracks.Subtitle != nil {
+		t.Fatalf("effective file = %d subtitle = %#v, want the requested edition %d without the subtitle", plan.EffectiveMediaFileID, plan.SelectedTracks.Subtitle, requested.ID)
+	}
+	if !slices.Contains(plan.DegradationWarnings, playback.SubtitleTrackUnavailableWarningV3()) {
+		t.Fatalf("warnings = %#v, want the subtitle reported as not on this file", plan.DegradationWarnings)
+	}
 }
