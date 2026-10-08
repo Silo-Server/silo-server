@@ -37,14 +37,14 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	var warnings []string
 	hidden, err := p.hiddenFromResume(ctx, resumableItems)
 	if err != nil {
-		slog.WarnContext(ctx, "emby history import: continue watching list unavailable", "component", "historyimport", "error", err)
+		slog.WarnContext(ctx, "emby history import: continue watching list unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbyResumeListUnavailable)
 	}
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
 	if err != nil {
-		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", err)
+		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbyFavoritesUnavailable)
 		favoriteItems = nil
 	}
@@ -65,7 +65,7 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems))
 	if err != nil {
 		// Episodes carrying their own provider IDs still match without it.
-		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", err)
+		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbySeriesUnavailable)
 		seriesMeta = map[string]embyItem{}
 	}

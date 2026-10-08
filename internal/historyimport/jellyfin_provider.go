@@ -90,13 +90,17 @@ func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error
 	return records, warnings, nil
 }
 
-// jellyfinWarningLogError renders a non-fatal fetch error for the log. An HTTP
-// error keeps only its status: its body is up to 2 KB of server text that can
-// echo credentials in forms logredact.SanitizeText doesn't recognize, such as
-// JSON-escaped quotes.
 func jellyfinWarningLogError(err error) string {
+	return warningLogError("jellyfin", err)
+}
+
+// warningLogError renders a non-fatal fetch error from source for the log. An
+// HTTP error keeps only its status: its body is up to 2 KB of server text that
+// can echo credentials in forms logredact.SanitizeText doesn't recognize, such
+// as JSON-escaped quotes.
+func warningLogError(source string, err error) string {
 	if status := UpstreamHTTPStatus(err); status != 0 {
-		return fmt.Sprintf("jellyfin http %d", status)
+		return fmt.Sprintf("%s http %d", source, status)
 	}
 	return logredact.SanitizeText(logredact.SanitizeURLError(err).Error())
 }
