@@ -225,6 +225,13 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
+	} else if req.V1Rules && req.CollectionType != nil && *req.CollectionType == collectionTypeSmart &&
+		existing.CollectionType != collectionTypeSmart && len(existing.QueryDefinition) > 0 {
+		// Switching to Smart activates the stored rules, so, as with a changed
+		// section definition, a v1 update must find them in its vocabulary.
+		if err := catalog.ValidateV1Rules(existing.QueryDefinition); err != nil {
+			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
+		}
 	}
 
 	sortConfig := req.SortConfig
