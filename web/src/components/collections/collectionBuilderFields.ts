@@ -23,6 +23,9 @@ export const COLLECTION_FIELD_GROUPS: ReadonlyArray<[CollectionFieldGroup, strin
 /** The catalog facets a rule value can be picked from. */
 export type CollectionValueFacet = "genre" | "studio" | "network" | "country" | "content_rating";
 
+/** Which of a title's languages a language rule compares. */
+export type CollectionLanguageSource = "original" | "audio" | "subtitle";
+
 export interface CollectionFieldOption {
   value: string;
   label: string;
@@ -30,9 +33,18 @@ export interface CollectionFieldOption {
   operators: CollectionOperatorOption[];
   /**
    * `facet` picks from the values titles carry; `date` is a calendar date, or
-   * "in the last" a number of days, weeks, months or years.
+   * "in the last" a number of days, weeks, months or years; `language` picks
+   * from the languages titles have.
    */
-  inputType: "text" | "number" | "select" | "boolean" | "person_search" | "facet" | "date";
+  inputType:
+    | "text"
+    | "number"
+    | "select"
+    | "boolean"
+    | "person_search"
+    | "facet"
+    | "date"
+    | "language";
   valueType?: "string" | "number" | "boolean";
   supportsRange?: boolean;
   selectOptions?: Array<{ value: string; label: string }>;
@@ -45,6 +57,15 @@ export interface CollectionFieldOption {
   searchLabel?: string;
   /** Shown after a number, in the unit the server compares. */
   unit?: string;
+  /** For `language` fields: which of a title's languages the rule compares. */
+  languageSource?: CollectionLanguageSource;
+  /**
+   * The rating source the field compares, for a rating an administrator can
+   * hide. Offered only while that source is shown.
+   */
+  ratingSource?: string;
+  /** Describes a show's episodes, so it is offered only where shows can match. */
+  showsOnly?: boolean;
 }
 
 const IS_OPERATORS: CollectionOperatorOption[] = [
@@ -60,12 +81,37 @@ const NUMBER_OPERATORS: CollectionOperatorOption[] = [
   { value: "between", label: "is between" },
 ];
 
-const DATE_OPERATORS: CollectionOperatorOption[] = [
-  { value: "gt", label: "after" },
-  { value: "lt", label: "before" },
-  { value: "between", label: "between" },
-  { value: "in_last", label: "in the last" },
+/** Whole or part of a free-text value, compared ignoring case. */
+const TEXT_OPERATORS: CollectionOperatorOption[] = [
+  { value: "contains", label: "contains" },
+  { value: "not_contains", label: "does not contain" },
+  { value: "is", label: "is" },
+  { value: "is_not", label: "is not" },
+  { value: "begins_with", label: "begins with" },
+  { value: "ends_with", label: "ends with" },
 ];
+
+/** A span ending today first, since rows and collections mostly want recent titles. */
+const DATE_OPERATORS: CollectionOperatorOption[] = [
+  { value: "in_last", label: "is in the last" },
+  { value: "not_in_last", label: "is not in the last" },
+  { value: "lt", label: "is before" },
+  { value: "gt", label: "is after" },
+  { value: "between", label: "is between" },
+];
+
+/** The conditions that take a span such as "30d" rather than a date. */
+export const RELATIVE_DATE_OPERATORS: ReadonlySet<string> = new Set(["in_last", "not_in_last"]);
+
+/** Decades from this one back to the 1900s, as the decade's first year. */
+function decadeOptions(): Array<{ value: string; label: string }> {
+  const latest = Math.floor(new Date().getFullYear() / 10) * 10;
+  const options = [];
+  for (let decade = latest; decade >= 1900; decade -= 10) {
+    options.push({ value: String(decade), label: `${decade}s` });
+  }
+  return options;
+}
 
 const SWITCH_OPERATORS: CollectionOperatorOption[] = [{ value: "is", label: "is" }];
 
@@ -99,6 +145,52 @@ function personField(value: string, label: string): CollectionFieldOption {
   };
 }
 
+function dateField(
+  value: string,
+  label: string,
+  group: CollectionFieldGroup,
+): CollectionFieldOption {
+  return {
+    value,
+    label,
+    group,
+    operators: DATE_OPERATORS,
+    inputType: "date",
+    valueType: "string",
+    supportsRange: true,
+  };
+}
+
+function ratingField(value: string, label: string, ratingSource?: string): CollectionFieldOption {
+  return {
+    value,
+    label,
+    group: "title",
+    operators: NUMBER_OPERATORS,
+    inputType: "number",
+    valueType: "number",
+    supportsRange: true,
+    ...(ratingSource ? { ratingSource } : {}),
+  };
+}
+
+function languageField(
+  value: string,
+  label: string,
+  group: CollectionFieldGroup,
+  languageSource: CollectionLanguageSource,
+): CollectionFieldOption {
+  return {
+    value,
+    label,
+    group,
+    operators: IS_OPERATORS,
+    inputType: "language",
+    valueType: "string",
+    languageSource,
+  };
+}
+
 function switchField(
   value: string,
   label: string,
@@ -118,6 +210,14 @@ function switchField(
 
 /** In field-picker order: grouped Title, People, File, You, Library. */
 export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
+  {
+    value: "title",
+    label: "Title",
+    group: "title",
+    operators: TEXT_OPERATORS,
+    inputType: "text",
+    valueType: "string",
+  },
   facetField(
     "genre",
     "Genre",
@@ -128,6 +228,7 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
   facetField("network", "Network", ["network", "networks"]),
   facetField("country", "Country", ["country", "countries"]),
   facetField("content_rating", "Content rating", ["rating", "content ratings"]),
+  languageField("original_language", "Original language", "title", "original"),
   {
     value: "type",
     label: "Type",
@@ -144,29 +245,38 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
     value: "year",
     label: "Year",
     group: "title",
-    operators: [{ value: "is", label: "is" }, ...NUMBER_OPERATORS],
+    operators: [...IS_OPERATORS, ...NUMBER_OPERATORS],
     inputType: "number",
     valueType: "number",
     supportsRange: true,
   },
   {
-    value: "release_date",
-    label: "Release date",
+    value: "decade",
+    label: "Decade",
     group: "title",
-    operators: DATE_OPERATORS,
-    inputType: "date",
-    valueType: "string",
-    supportsRange: true,
+    operators: IS_OPERATORS,
+    inputType: "select",
+    valueType: "number",
+    selectOptions: decadeOptions(),
   },
+  dateField("release_date", "Release date", "title"),
+  // A show's newest episode, by when it aired.
+  { ...dateField("last_air_date", "Latest episode aired", "title"), showsOnly: true },
   {
-    value: "rating_imdb",
-    label: "IMDb rating",
+    // media_items.runtime holds minutes; a title without one matches no bound.
+    value: "runtime",
+    label: "Duration",
     group: "title",
     operators: NUMBER_OPERATORS,
     inputType: "number",
     valueType: "number",
     supportsRange: true,
+    unit: "min",
   },
+  ratingField("rating_imdb", "IMDb rating"),
+  ratingField("rating_tmdb", "TMDB rating"),
+  ratingField("rating_rt_critic", "RT critic score", "rt_critic"),
+  ratingField("rating_rt_audience", "RT audience score", "rt_audience"),
   {
     // The metadata match state, which only explains a saved rule.
     value: "status",
@@ -200,6 +310,8 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
   },
   switchField("hdr", "HDR", "file"),
   switchField("dolby_vision", "Dolby Vision", "file"),
+  languageField("audio_language", "Audio language", "file", "audio"),
+  languageField("subtitle_language", "Subtitle language", "file", "subtitle"),
   {
     // media_files.bitrate holds kilobits per second.
     value: "bitrate",
@@ -215,15 +327,11 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
   switchField("favorited", "Favorited", "you", true),
   switchField("in_watchlist", "In watchlist", "you", true),
   switchField("in_progress", "In progress", "you", true),
-  {
-    value: "added_at",
-    label: "Added",
-    group: "library",
-    operators: DATE_OPERATORS,
-    inputType: "date",
-    valueType: "string",
-    supportsRange: true,
-  },
+  // For a show, when its most recently finished episode was watched.
+  { ...dateField("last_watched", "Last watched", "you"), personalized: true },
+  dateField("added_at", "Added", "library"),
+  // A show's newest episode, by when its file arrived.
+  { ...dateField("latest_episode_added", "Latest episode added", "library"), showsOnly: true },
 ];
 
 export function getCollectionSortOptions(
@@ -261,6 +369,22 @@ export function getDefaultRuleValue(field: string, op: string): FilterRule["valu
     return 0;
   }
   return "";
+}
+
+/**
+ * The fields a rule can pick, given where it is used: personalized fields
+ * only where rules resolve per profile, and ratings only while their source
+ * is shown. Unset `shownRatingSources` offers every rating.
+ */
+export function availableCollectionFields(
+  allowPersonalized: boolean,
+  shownRatingSources?: ReadonlySet<string>,
+): CollectionFieldOption[] {
+  return COLLECTION_FIELD_OPTIONS.filter(
+    (option) =>
+      (allowPersonalized || !option.personalized) &&
+      (!option.ratingSource || !shownRatingSources || shownRatingSources.has(option.ratingSource)),
+  );
 }
 
 /** The rule a new line starts with. */

@@ -8,6 +8,7 @@ import {
   getFilterRuleFieldOptions,
 } from "@/components/FilterRuleEditor";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
+import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -97,7 +98,8 @@ export function RuleBuilder({
   const subject = context === "collection" ? "collection" : "row";
   const { groups } = value;
   const scope: MediaScope = value.media_scope ?? "all";
-  const fieldOptions = getFilterRuleFieldOptions(allowPersonalized, scope);
+  const shownRatingSources = useShownRatingSources();
+  const fieldOptions = getFilterRuleFieldOptions(allowPersonalized, scope, shownRatingSources);
   const several = groups.length > 1;
   // Follows the picker's summary: "library"/"libraries" only follows a summary that shows a
   // name, and counts every chosen library, named or not.

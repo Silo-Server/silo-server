@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { QueryDefinition } from "@/api/types";
 import { installV2Recorder, v2Recorder } from "@/test/v2Recorder";
@@ -11,7 +11,20 @@ import { RuleBuilder } from "./RuleBuilder";
 vi.mock("@/api/v2/request", async () => (await import("@/test/v2Recorder")).mockV2Request());
 installV2Recorder();
 
-function renderBuilder(value: QueryDefinition) {
+beforeAll(() => {
+  // Radix Select reads pointer capture and scrolls options, which jsdom lacks.
+  Object.defineProperties(Element.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+});
+
+function renderBuilder(
+  value: QueryDefinition,
+  onChange: (value: QueryDefinition) => void = () => {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
@@ -21,10 +34,20 @@ function renderBuilder(value: QueryDefinition) {
           { id: 1, name: "Movies" },
           { id: 2, name: "4K Movies" },
         ]}
-        onChange={() => {}}
+        onChange={onChange}
       />
     </QueryClientProvider>,
   );
+}
+
+function languageRule(field: string, value: string): QueryDefinition {
+  return {
+    library_ids: [1],
+    media_scope: "movie",
+    match: "all",
+    groups: [{ match: "all", rules: [{ field, op: "is", value }] }],
+    sort: { field: "title", order: "asc" },
+  };
 }
 
 describe("RuleBuilder value pickers", () => {
@@ -62,5 +85,47 @@ describe("RuleBuilder value pickers", () => {
         },
       ]),
     );
+  });
+
+  it("pick an audio language by name from the languages titles have", async () => {
+    v2Recorder.answer("GET /api/v2/catalog/filters", {
+      genres: [],
+      studios: [],
+      networks: [],
+      countries: [],
+      original_languages: ["fr"],
+      content_ratings: [],
+      technical: { resolutions: [], audio_languages: ["ja", "en"], subtitle_languages: [] },
+    });
+    const onChange = vi.fn();
+    renderBuilder(languageRule("audio_language", ""), onChange);
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Value" }));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["English", "Japanese"]);
+    await userEvent.click(screen.getByRole("option", { name: "Japanese" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        groups: [{ match: "all", rules: [{ field: "audio_language", op: "is", value: "ja" }] }],
+      }),
+    );
+  });
+
+  it("keep a saved language no title has any more", async () => {
+    v2Recorder.answer("GET /api/v2/catalog/filters", {
+      genres: [],
+      studios: [],
+      networks: [],
+      countries: [],
+      original_languages: ["fr"],
+      content_ratings: [],
+    });
+    renderBuilder(languageRule("original_language", "de"));
+
+    const value = screen.getByRole("combobox", { name: "Value" });
+    await waitFor(() => expect(value).toHaveTextContent("German"));
+    await userEvent.click(value);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual(["French", "German"]);
   });
 });

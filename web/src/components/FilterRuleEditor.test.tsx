@@ -85,10 +85,51 @@ describe("FilterRuleEditor", () => {
     const movieOptions = getFilterRuleFieldOptions(true, "movie");
 
     expect(ebookOptions.find((option) => option.value === "watched")?.label).toBe("Read");
+    expect(ebookOptions.find((option) => option.value === "last_watched")?.label).toBe("Last read");
     expect(ebookOptions.find((option) => option.value === "in_progress")?.label).toBe(
       "In progress",
     );
     expect(movieOptions.find((option) => option.value === "watched")?.label).toBe("Watched");
+  });
+
+  it("offers fields about a show's episodes only where shows can match", () => {
+    const values = (scope: Parameters<typeof getFilterRuleFieldOptions>[1]) =>
+      getFilterRuleFieldOptions(false, scope).map((option) => option.value);
+    for (const scope of ["all", "video", "series"] as const) {
+      expect(values(scope)).toEqual(
+        expect.arrayContaining(["latest_episode_added", "last_air_date"]),
+      );
+    }
+    for (const scope of ["movie", "episode", "ebook"] as const) {
+      expect(values(scope)).not.toContain("latest_episode_added");
+      expect(values(scope)).not.toContain("last_air_date");
+    }
+  });
+
+  it("offers a rating only while its source is shown", () => {
+    const values = (sources?: ReadonlySet<string>) =>
+      getFilterRuleFieldOptions(false, "movie", sources).map((option) => option.value);
+    expect(values(new Set(["imdb", "tmdb"]))).not.toContain("rating_rt_critic");
+    expect(values(new Set(["imdb", "tmdb", "rt_critic"]))).toEqual(
+      expect.arrayContaining(["rating_imdb", "rating_tmdb", "rating_rt_critic"]),
+    );
+    expect(values(new Set(["imdb", "tmdb", "rt_critic"]))).not.toContain("rating_rt_audience");
+    expect(values()).toEqual(expect.arrayContaining(["rating_rt_critic", "rating_rt_audience"]));
+  });
+
+  it("keeps a saved rule on a hidden rating editable", () => {
+    render(
+      <FilterRuleEditor
+        value={{
+          match: "all",
+          groups: [{ match: "all", rules: [{ field: "rating_rt_critic", op: "gte", value: 90 }] }],
+        }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "Rule not editable here" })).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Field" })).toHaveTextContent("RT critic score");
+    expect(screen.getByRole("spinbutton", { name: "Value" })).toHaveValue(90);
   });
 
   it("names each rule's controls by the rule's number", () => {
@@ -162,7 +203,7 @@ describe("FilterRuleEditor", () => {
             {
               match: "all",
               rules: [
-                { field: "original_language", op: "is", value: "fr" },
+                { field: "narrator", op: "is", value: "Kobna Holdbrook-Smith" },
                 { field: "author", op: "is", value: "Ursula K. Le Guin" },
               ],
             },
@@ -178,7 +219,7 @@ describe("FilterRuleEditor", () => {
         .getAllByRole("group", { name: "Rule not editable here" })
         .map((rule) => rule.textContent),
     ).toEqual([
-      'Not editable here original_language is "fr"Remove',
+      'Not editable here narrator is "Kobna Holdbrook-Smith"Remove',
       'Not editable here author is "Ursula K. Le Guin"Remove',
     ]);
   });
