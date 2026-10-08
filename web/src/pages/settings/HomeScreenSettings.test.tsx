@@ -2,18 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { SettingsSectionEntry } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { canAddAdminOnlyRecipes } from "@/lib/sectionTypes";
 
 import {
   applySectionDeletion,
-  canMutateSectionSettings,
   buildSectionOverrides,
+  canMutateSectionSettings,
   createOverrideIdSource,
   hydrateRemovedSystemSections,
-  shouldRestoreLatestSaveFailure,
-} from "@/lib/sectionOverrides";
-
-import { buildProfileGallerySection, sectionSaveErrorMessage } from "./HomeScreenSettings";
+  sectionSaveErrorMessage,
+} from "@/lib/homeRows/profileOverrides";
+import { buildProfileGallerySection } from "@/lib/homeRows/payloads";
 
 function makeSection(overrides: Partial<SettingsSectionEntry> = {}): SettingsSectionEntry {
   return {
@@ -233,33 +231,15 @@ describe("HomeScreenSettings helpers", () => {
       ),
     ).toBe(true);
   });
-
-  it("only restores rollback state for the latest save attempt in the current selection", () => {
-    expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 3, 3)).toBe(true);
-    expect(shouldRestoreLatestSaveFailure("library:1", "library:1", 4, 3)).toBe(false);
-    expect(shouldRestoreLatestSaveFailure("library:2", "library:1", 3, 3)).toBe(false);
-  });
 });
 
-describe("HomeScreenSettings custom section permission", () => {
-  it("offers admin-only recipes to admins and to profiles the server allows", () => {
-    expect(canAddAdminOnlyRecipes("admin", false)).toBe(true);
-    expect(canAddAdminOnlyRecipes("admin", undefined)).toBe(true);
-    expect(canAddAdminOnlyRecipes("user", true)).toBe(true);
-  });
-
-  it("withholds admin-only recipes from other profiles, including before the flag loads", () => {
-    expect(canAddAdminOnlyRecipes("user", false)).toBe(false);
-    expect(canAddAdminOnlyRecipes("user", undefined)).toBe(false);
-    expect(canAddAdminOnlyRecipes(undefined, undefined)).toBe(false);
-  });
-
+describe("HomeScreenSettings save refusals", () => {
   it("explains a permission denial with the server's stated cause", () => {
     const refused = new V2ProblemError("replaceProfileSectionOverrides", {
       type: "https://siloserver.org/docs/api/v2/problems/permission_denied",
       title: "Permission denied",
       status: 403,
-      detail: "this server does not allow profiles to build custom sections",
+      detail: "Only an admin can add an Editor's picks row.",
       instance: "test",
     });
     const invalid = new V2ProblemError("replaceProfileSectionOverrides", {
@@ -279,12 +259,144 @@ describe("HomeScreenSettings custom section permission", () => {
     });
 
     expect(sectionSaveErrorMessage(refused)).toBe(
-      "Failed to save section changes: this server does not allow profiles to build custom sections",
+      "Could not save your rows: Only an admin can add an Editor's picks row.",
     );
     expect(sectionSaveErrorMessage(demo)).toBe(
-      "Failed to save section changes: This action is not available in demo mode.",
+      "Could not save your rows: This action is not available in demo mode.",
     );
-    expect(sectionSaveErrorMessage(invalid)).toBe("Failed to save section changes");
-    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Failed to save section changes");
+    expect(sectionSaveErrorMessage(invalid)).toBe("Could not save your rows");
+    expect(sectionSaveErrorMessage(new Error("network"))).toBe("Could not save your rows");
+  });
+});
+
+// Characterization for the Home rows redesign: the exact override set each
+// page edit saves today, built the way the page's handlers build it.
+describe("override set saved by each Home Screen edit", () => {
+  const page = [
+    makeSection({ id: "admin-a", title: "Recently Added", position: 0 }),
+    makeSection({
+      id: "admin-b",
+      section_type: "continue_watching",
+      title: "Continue Watching",
+      position: 1,
+      config: { continue_type: "watching" },
+    }),
+    makeSection({
+      id: "own-c",
+      section_type: "collection",
+      title: "Mine",
+      is_custom: true,
+      customized: true,
+      position: 2,
+      config: { user_collection_id: "user-1" },
+    }),
+  ];
+  const ids = {
+    savedOverrides: [{ id: "saved-a", section_id: "admin-a", position: 0 }],
+    newId: (sectionId: string) => `new-${sectionId}`,
+  };
+  const adminA = {
+    section_id: "admin-a",
+    id: "saved-a",
+    hidden: false,
+    title: "Recently Added",
+    featured: false,
+    item_limit: 20,
+    section_type: undefined,
+    config: { media_scope: "movie" },
+  };
+  const adminB = {
+    section_id: "admin-b",
+    id: "new-admin-b",
+    hidden: false,
+    title: "Continue Watching",
+    featured: false,
+    item_limit: 20,
+    section_type: undefined,
+    config: { continue_type: "watching" },
+  };
+  const ownC = {
+    section_id: undefined,
+    id: "own-c",
+    hidden: false,
+    title: "Mine",
+    featured: false,
+    item_limit: 20,
+    section_type: "collection",
+    config: { user_collection_id: "user-1" },
+  };
+
+  it("hides a row", () => {
+    const next = page.map((s) => (s.id === "admin-b" ? { ...s, hidden: true } : s));
+    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "admin-b" })).toEqual([
+      { ...adminA, position: 0 },
+      { ...adminB, position: 1, hidden: true },
+      { ...ownC, position: 2 },
+    ]);
+  });
+
+  it("renames a row", () => {
+    const next = page.map((s) => (s.id === "admin-a" ? { ...s, title: "New Movies" } : s));
+    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "admin-a" })).toEqual([
+      { ...adminA, position: 0, title: "New Movies" },
+      { ...adminB, position: 1 },
+      { ...ownC, position: 2 },
+    ]);
+  });
+
+  it("moves a row", () => {
+    const next = [page[2]!, page[0]!, page[1]!];
+    expect(buildSectionOverrides(next, [], { ...ids, changedSectionId: "own-c" })).toEqual([
+      { ...ownC, position: 0 },
+      { ...adminA, position: 1 },
+      { ...adminB, position: 2 },
+    ]);
+  });
+
+  it("adds a row from the gallery at the end", () => {
+    const added = buildProfileGallerySection(
+      {
+        section_type: "trending_on_server",
+        title: "Trending This Week",
+        item_limit: 20,
+        featured: false,
+        enabled: true,
+        config: { window: "7d" },
+      },
+      page.length,
+    );
+    expect(buildSectionOverrides([...page, added], [], ids)).toEqual([
+      { ...adminA, position: 0 },
+      { ...adminB, position: 1 },
+      { ...ownC, position: 2 },
+      {
+        section_id: undefined,
+        id: added.id,
+        position: 3,
+        hidden: false,
+        title: "Trending This Week",
+        featured: false,
+        item_limit: 20,
+        section_type: "trending_on_server",
+        config: { window: "7d" },
+      },
+    ]);
+  });
+
+  it("removes a server row", () => {
+    const next = applySectionDeletion(page, [], "admin-a");
+    expect(buildSectionOverrides(next.sections, next.removedSystemSections, ids)).toEqual([
+      { ...adminB, position: 0 },
+      { ...ownC, position: 1 },
+      { section_id: "admin-a", id: "saved-a", removed: true },
+    ]);
+  });
+
+  it("deletes the profile's own row", () => {
+    const next = applySectionDeletion(page, [], "own-c");
+    expect(buildSectionOverrides(next.sections, next.removedSystemSections, ids)).toEqual([
+      { ...adminA, position: 0 },
+      { ...adminB, position: 1 },
+    ]);
   });
 });

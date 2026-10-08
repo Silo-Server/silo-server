@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -148,5 +149,73 @@ func TestAdminSectionWildcardPatchRemergesAfterConcurrentWriteDB(t *testing.T) {
 	}
 	if updated.Title != "My draft" || updated.Position != 41 || updated.Enabled || !strings.Contains(string(updated.Config), "movie") {
 		t.Fatalf("wildcard replay lost concurrent unmentioned fields: %+v", updated)
+	}
+}
+
+func TestAdminSectionCreateRejectsEmptyEditorsPicks(t *testing.T) {
+	_, err := (&SectionHandler{}).CreateAdminSection(t.Context(), AdminSectionCreate{
+		Title: "Editor's Picks", SectionType: string(sections.SectionAdminCuratedList),
+		Config: json.RawMessage(`{"item_ids":[]}`), ValidateRecipe: true,
+	})
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Message, "item_ids") {
+		t.Fatalf("error = %#v, want a 400 naming item_ids", err)
+	}
+}
+
+func TestAdminSectionUpdateValidatesRecipeConfigDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := sections.NewRepository(f.pool)
+	h := NewSectionHandler(repo, nil)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM page_sections WHERE library_id=$1`, f.library)
+	})
+	picks, err := h.CreateAdminSection(t.Context(), AdminSectionCreate{Scope: "library", LibraryID: &f.library, Title: "Picks", SectionType: string(sections.SectionAdminCuratedList), Enabled: true, Config: json.RawMessage(`{"item_ids":["a"]}`), ValidateRecipe: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = h.UpdateAdminSection(t.Context(), picks.ID, AdminSectionUpdate{Config: json.RawMessage(`{"item_ids":[]}`), ValidateRecipe: true})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("emptying Editor's Picks: error = %#v, want 400", err)
+	}
+	stored, err := repo.GetByID(t.Context(), picks.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stored.Config), `"a"`) {
+		t.Fatalf("rejected update changed the row: %s", stored.Config)
+	}
+
+	// A row saved before create validated its recipe can still be switched off.
+	legacy, err := repo.Create(t.Context(), &sections.PageSection{Scope: "library", LibraryID: &f.library, SectionType: sections.SectionAdminCuratedList, Title: "Empty picks", ItemLimit: 20, Config: json.RawMessage(`{"item_ids":[]}`), Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The admin editor echoes the unchanged type and config with every save.
+	updated, err := h.UpdateAdminSection(t.Context(), legacy.ID, AdminSectionUpdate{
+		Enabled: new(false), SectionType: string(legacy.SectionType), Config: json.RawMessage(`{"item_ids": []}`), ValidateRecipe: true,
+	})
+	if err != nil {
+		t.Fatalf("disabling an existing row with its unchanged config echoed: %v", err)
+	}
+	if updated.Enabled {
+		t.Fatalf("row stayed enabled: %+v", updated)
+	}
+}
+
+// The frozen /api/v1 routes don't request the recipe check, so they keep
+// storing what they stored before it existed.
+func TestAdminSectionV1WritesSkipRecipeConfigDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	h := NewSectionHandler(sections.NewRepository(f.pool), nil)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM page_sections WHERE library_id=$1`, f.library)
+	})
+	empty, err := h.CreateAdminSection(t.Context(), AdminSectionCreate{Scope: "library", LibraryID: &f.library, Title: "Picks", SectionType: string(sections.SectionAdminCuratedList), Enabled: true, Config: json.RawMessage(`{"item_ids":[]}`)})
+	if err != nil {
+		t.Fatalf("v1 create of an empty Editor's Picks row: %v", err)
+	}
+	if _, err := h.UpdateAdminSection(t.Context(), empty.ID, AdminSectionUpdate{Config: json.RawMessage(`{"item_ids":[]}`), Title: "Still empty"}); err != nil {
+		t.Fatalf("v1 update of an empty Editor's Picks row: %v", err)
 	}
 }

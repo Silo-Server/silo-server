@@ -73,7 +73,7 @@ func (f *fakeAdminProfileSections) ResolveAccountProfileSectionSettings(_ contex
 		return nil, err
 	}
 	return []sections.ResolvedSection{
-		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
+		{ID: "s-continue", SectionType: "continue_watching", Title: "Continue Watching", DefaultTitle: "Continue Watching", ItemLimit: 20, Position: 0, Customized: true, Hidden: true},
 		{ID: "u-gems", SectionType: "hidden_gems", Title: "Hidden gems", ItemLimit: 12, Position: 1, IsCustom: true, Config: json.RawMessage(`{"library_ids":[3]}`)},
 	}, nil
 }

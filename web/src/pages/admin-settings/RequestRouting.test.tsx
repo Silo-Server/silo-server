@@ -1127,6 +1127,64 @@ describe("Where requests go: try a title", () => {
       "Everything else — decides 4K: none",
     ]);
   });
+
+  it("says why there is no HD version when Everything else has no HD server", async () => {
+    const note = "Everything else sends no HD version; requests from users without 4K fail.";
+    serve({
+      servers: allServers,
+      routes: ready,
+      handlers: {
+        "GET /api/v2/admin/request-routes/titles": (options) =>
+          reply(options, {
+            items: [{ tmdb_id: 42, media_type: "series", title: "Bluey", year: 2018 }],
+          }),
+        "POST /api/v2/admin/request-routes/preview": (options) =>
+          reply(options, {
+            ...preview,
+            rules: [
+              {
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                is_fallback: true,
+                enabled: true,
+                unmet_conditions: [],
+                hd: "skips",
+                uhd: "sends",
+              },
+            ],
+            tiers: [
+              {
+                quality: "1080p",
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                note,
+              },
+              {
+                quality: "2160p",
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                integration_id: "sonarr-1",
+                integration_name: "Sonarr",
+              },
+            ],
+          }),
+      },
+    });
+    mount();
+    const series = await section("Series");
+    fireEvent.change(within(series).getByRole("searchbox", { name: "Search series" }), {
+      target: { value: "Blu" },
+    });
+    fireEvent.click(await within(series).findByRole("button", { name: /Bluey/ }));
+
+    const result = (await within(series).findByText("Bluey (2018)")).parentElement!;
+    expect(await within(result).findByText(note)).toBeInTheDocument();
+    expect(result).toHaveTextContent("HD version → none");
+    expect(result).not.toHaveTextContent("doesn't send 4K versions");
+    expect(within(result).getAllByRole("listitem").at(-1)?.textContent).toBe(
+      "Everything else — decides HD: none · decides 4K",
+    );
+  });
 });
 
 describe("Where requests go: names, second lines and refused conditions", () => {

@@ -887,6 +887,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/collections/{id}/sections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the administrator Home and library page rows that show a collection. Rows profiles added themselves are not listed. */
+    get: operations["listAdminCollectionSections"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/collections/{id}/sync": {
     parameters: {
       query?: never;
@@ -1031,7 +1048,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List collection template bundles. */
+    /** List collection template bundles, each with a summary of its templates. */
     get: operations["listAdminCollectionTemplateBundles"];
     put?: never;
     post?: never;
@@ -1082,7 +1099,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List supported collection templates. */
+    /** List the collection templates with an mdblist, tmdb or tmdb_list source. */
     get: operations["listAdminCollectionTemplates"];
     put?: never;
     post?: never;
@@ -4363,24 +4380,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v2/admin/settings/sections": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read section permission configuration; read failures retain the disabled default. */
-    get: operations["getAdminSectionSettings"];
-    /** Replace section permission configuration under the existing settings transaction guard. */
-    put: operations["updateAdminSectionSettings"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v2/admin/settings/sensitive-status": {
     parameters: {
       query?: never;
@@ -6137,7 +6136,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Prefix typeahead over one facet of a scope. */
+    /** Typeahead over one facet of a scope, with title counts. */
     get: operations["searchCatalogFacet"];
     put?: never;
     post?: never;
@@ -6459,7 +6458,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the collections the acting profile owns or may see, with the account's collection groups. */
+    /** List the acting profile's own collections in its order, then the collections other profiles on the login share, grouped by creator and each in its creator's order. */
     get: operations["listCollections"];
     put?: never;
     /** Create a manual or smart collection for the acting profile. Not idempotent: a retry after a lost response creates a second collection. */
@@ -6485,7 +6484,7 @@ export interface paths {
     delete: operations["deleteCollection"];
     options?: never;
     head?: never;
-    /** Update the creator's collection; omitted fields are unchanged. */
+    /** Update the creator's collection; omitted fields are unchanged. Another profile's shared collection answers permission_denied. */
     patch: operations["updateCollection"];
     trace?: never;
   };
@@ -6619,7 +6618,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create an account-wide collection group. Not idempotent: a retry after a lost response creates a second group. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     post: operations["createCollectionGroup"];
     delete?: never;
     options?: never;
@@ -6634,15 +6633,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the canonical collection editor state and its strong validator. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     get: operations["getCollectionGroup"];
     put?: never;
     post?: never;
-    /** Delete a collection group; its collections become ungrouped. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     delete: operations["deleteCollectionGroup"];
     options?: never;
     head?: never;
-    /** Update a collection group; omitted members are unchanged. Retries are not safe after an intervening mutation. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     patch: operations["updateCollectionGroup"];
     trace?: never;
   };
@@ -6653,9 +6652,9 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read the canonical collection editor state and its strong validator. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     get: operations["getCollectionGroupsOrder"];
-    /** Replace the order of the account's collection groups. Retries are not safe after an intervening mutation. */
+    /** Not supported: personal collection groups were removed, and this operation answers capability_unsupported. */
     put: operations["reorderCollectionGroups"];
     post?: never;
     delete?: never;
@@ -6775,7 +6774,7 @@ export interface paths {
     };
     /** Read the canonical collection editor state and its strong validator. */
     get: operations["getCollectionOrder"];
-    /** Replace the order of the collections in one group (or the ungrouped section). Retries are not safe after an intervening mutation. */
+    /** Replace the order of the acting profile's own collections. Retries are not safe after an intervening mutation. */
     put: operations["reorderCollections"];
     post?: never;
     delete?: never;
@@ -7579,6 +7578,23 @@ export interface paths {
     };
     /** List the acting profile's watch history as catalog cards, most recent watch first. */
     get: operations["listHistory"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/history-imports/capability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Describe what an import run may rely on, including Plex connection fallback. */
+    get: operations["getHistoryImportCapability"];
     put?: never;
     post?: never;
     delete?: never;
@@ -12941,6 +12957,11 @@ export interface components {
        */
       group_id: string | null;
       /**
+       * Format: int64
+       * @description Turned-on rows on the administrator Home page that show this collection; turned-off rows are not counted. Set on listAdminCollections items only. Rows profiles added themselves are not counted.
+       */
+      home_row_count?: number;
+      /**
        * @description Opaque identifier
        * @example 1
        */
@@ -12968,9 +12989,19 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       next_sync_at?: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first members it can access, composed by the server because the collection has no uploaded or template poster. False for an uploaded or template poster and whenever poster_url is empty, including before the collage is built and on reads that carry no poster_url
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       poster_url: string;
       query_definition: unknown;
+      /**
+       * Format: int64
+       * @description Rows on the administrator Home and library pages that show this collection, turned-off rows included. Set on listAdminCollections items only. Rows profiles added themselves are not counted.
+       */
+      row_count?: number;
       slug: string;
       sort_config: unknown;
       /** Format: int64 */
@@ -13012,13 +13043,29 @@ export interface components {
       import_sources: ("mdblist" | "tmdb" | "tmdb_list")[];
       imports: boolean;
       item_reorder: boolean;
+      /**
+       * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
+       * @example true
+       */
+      mdblist_search: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      schedule_time_zone: components["schemas"]["CollectionScheduleTimeZone"];
+      /**
+       * @description listAdminCollectionSections lists the rows that show a collection, and listAdminCollections items carry home_row_count and row_count
+       * @example true
+       */
+      section_references: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description listAdminCollectionTemplateBundles returns each bundle's templates
+       * @example true
+       */
+      template_summaries: boolean;
     };
     AdminCollectionCreate: {
       backdrop_url?: string;
@@ -13148,6 +13195,32 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
       /** Format: int64 */
       total: number;
+    };
+    AdminCollectionSection: {
+      enabled: boolean;
+      /** @description The row is its page's hero banner. */
+      featured: boolean;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      id: string;
+      /**
+       * @description The library whose page holds the row; null for a Home row.
+       * @example 1
+       */
+      library_id: string | null;
+      /**
+       * Format: int64
+       * @description Rows on the page that holds this row, turned-off rows included.
+       */
+      page_row_count: number;
+      /** Format: int64 */
+      position: number;
+      /** @enum {string} */
+      scope: "home" | "library";
+      section_type: string;
+      title: string;
     };
     AdminCollectionSyncRun: {
       /**
@@ -19120,10 +19193,24 @@ export interface components {
       order: string;
     };
     CatalogFacetMatches: {
-      /** @description Whether more values matched than limit */
+      /** @description Whether more values than limit start with q */
       has_more: boolean;
-      /** @description Empty, never null */
+      /** @description Values that start with q, case-insensitively, A-Z; empty for an empty q. Empty, never null */
       matches: string[];
+      /** @description The ranked answer, each value with its title count. For genre, studio, network, country, original_language and content_rating a value matches when it or any word in it starts with q; whole-value matches rank first, then more titles, then A-Z, and an empty q returns the most common values. For author, narrator and series these are the names in matches. Empty, never null */
+      values: components["schemas"]["CatalogFacetValue"][];
+      /** @description Whether more values matched than limit for values */
+      values_has_more: boolean;
+    };
+    CatalogFacetValue: {
+      /**
+       * Format: int64
+       * @description Titles in the scope with this value; values can lag catalog changes by up to two minutes
+       * @example 42
+       */
+      count: number;
+      /** @example Warner Bros. Pictures */
+      value: string;
     };
     CatalogFilters: {
       /** @description First 1000 alphabetically; searchCatalogFacet pages the rest */
@@ -19603,6 +19690,7 @@ export interface components {
         | "watchlist"
         | "history"
         | "person";
+      /** @description Media scope, as the listCatalogItems type parameter */
       type?: string;
     };
     CatalogQueryGroup: {
@@ -19658,6 +19746,8 @@ export interface components {
     CatalogSearchCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q */
+      facet_value_search?: boolean;
       /**
        * Format: int64
        * @description Oldest ranking sessions expire when this retention bound is exceeded
@@ -19686,6 +19776,8 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description listCatalogItems and queryCatalogItems accept type=video_with_episodes on the query source (text search over movies, series, and episodes), and listPeople accepts it as media_scope */
+      video_with_episodes_scope?: boolean;
     };
     CatalogSearchDiagnostics: {
       fallback_reason?: string;
@@ -19833,6 +19925,12 @@ export interface components {
     CollectionAdminCollectionMember: {
       /** @description The page's items; empty, never null */
       items: components["schemas"]["AdminCollectionMember"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    CollectionAdminCollectionSection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AdminCollectionSection"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
@@ -20038,6 +20136,16 @@ export interface components {
       /** @example true */
       collection_sort_preferences: boolean;
       /**
+       * @description listCollections accepts contains_item and marks the acting profile's own manual collections with contains
+       * @example true
+       */
+      contains_item: boolean;
+      /**
+       * @description createCollection stores a description for the acting account
+       * @example true
+       */
+      create_description: boolean;
+      /**
        * @description Catalog query fields a display filter may use
        * @example [
        *       "type",
@@ -20048,7 +20156,7 @@ export interface components {
       display_filter_presets: components["schemas"]["CollectionDisplayFilterPresets"];
       /** @example true */
       effective_collection_sort: boolean;
-      /** @description The acting account supports collection groups */
+      /** @description Always false: personal collection groups are no longer supported */
       groups: boolean;
       /**
        * @description Import sources the acting account can create a collection from; empty when imports is false
@@ -20063,8 +20171,26 @@ export interface components {
       imports: boolean;
       /** @description The acting account supports reordering collection items */
       item_reorder: boolean;
+      /** @description is_shared shows a collection to every profile on the login, listCollections includes other profiles' shared collections, and only a collection's creator changes or orders it */
+      login_sharing: boolean;
+      /**
+       * @description searchMDBListLists and listTopMDBListLists return lists; false when the server has no MDBList API key
+       * @example true
+       */
+      mdblist_search: boolean;
+      /**
+       * @description A collection with no uploaded or imported poster shows a collage of its first titles the acting profile can see in poster_url, marked by poster_is_collage, on listCollections, getLibraryCollections and listLibraryUserCollections, once the server has built it. False when the server has no artwork storage or the acting account's store keeps no artwork
+       * @example true
+       */
+      poster_collages: boolean;
+      /**
+       * @description previewCollection items carry poster_url when the title has a poster
+       * @example true
+       */
+      preview_posters: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      schedule_time_zone: components["schemas"]["CollectionScheduleTimeZone"];
       /**
        * @description collection_kind values the sort-preference operations accept
        * @example [
@@ -20080,6 +20206,11 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description updateCollection accepts sync_schedule on a synced list; false when imports is false
+       * @example true
+       */
+      sync_schedule_editable: boolean;
     };
     CollectionDisplayFilterPresets: {
       /**
@@ -20218,12 +20349,12 @@ export interface components {
     };
     CollectionOrder: {
       /**
-       * @description The group whose collections are ordered; omitted or null orders the ungrouped section
+       * @description Omit or send null: personal collection groups are no longer supported, and any other value is a validation failure
        * @example g1
        */
       group_id?: string | null;
       /**
-       * @description Every visible collection in the scope, exactly once, in the new order
+       * @description Each of the acting profile's own collections, exactly once, in the new order; another profile's collection is a validation failure
        * @example [
        *       "01J9Z8C3W4R5T6Y7U8I9O0P1Q4"
        *     ]
@@ -20247,6 +20378,23 @@ export interface components {
       items: components["schemas"]["PlaybackSubtitleFont"][];
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+    };
+    CollectionScheduleTimeZone: {
+      /**
+       * @description Current zone abbreviation as the node's time zone database reports it; some zones report a numeric form such as -03
+       * @example CDT
+       */
+      abbreviation: string;
+      /**
+       * @description IANA zone name, from the node's TZ environment variable or UTC when TZ is empty or names no known zone; omitted when the node uses its system default zone or a TZ file path
+       * @example America/Chicago
+       */
+      name?: string;
+      /**
+       * @description Current offset from UTC, daylight saving time included
+       * @example -05:00
+       */
+      utc_offset: string;
     };
     CollectionSortPreference: {
       /**
@@ -20319,10 +20467,24 @@ export interface components {
       description: string;
       id: string;
       template_ids: string[];
+      /** @description The bundle's templates, in template_ids order. */
+      templates: components["schemas"]["CollectionTemplateSummary"][];
       title: string;
     };
     CollectionTemplateCatalog: {
       categories: components["schemas"]["CategoryGroup"][];
+    };
+    CollectionTemplateSummary: {
+      /** @description Collections created from this template are pinned first on their shelf. */
+      featured: boolean;
+      id: string;
+      media_kind: string;
+      /** @description Applying the template creates an empty collection that cannot sync until an administrator sets its source. */
+      needs_setup: boolean;
+      /** @description Server-relative path of the template's poster image. */
+      poster_path?: string;
+      source: string;
+      title: string;
     };
     CollectionUserLibrary: {
       /** @description The page's items; empty, never null */
@@ -20461,6 +20623,11 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       next_sync_at?: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived; empty when none */
       poster_url: string;
@@ -22215,6 +22382,28 @@ export interface components {
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
     };
+    HistoryImportCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /**
+       * Format: int64
+       * @description How many Plex addresses one run races, counting plex_base_url
+       * @example 8
+       */
+      max_plex_connections: number;
+      /**
+       * @description Whether plex_base_urls is honored and the advertised connections are raced
+       * @example true
+       */
+      plex_connection_fallback: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
     HistoryImportRun: {
       /** @description False on the personal API, which has no cancellation command */
       cancelable: boolean;
@@ -22345,6 +22534,13 @@ export interface components {
       plex_account_token?: string;
       /** @description Plex: a server address when the client holds its own token */
       plex_base_url?: string;
+      /**
+       * @description Plex: the other addresses plex.tv advertised for the same server, in preference order. Addresses the account may not reach under the local network policy are skipped, and the run races up to max_plex_connections of the rest, counting plex_base_url, keeping the first that answers. plex_base_url stays the preferred one.
+       * @example [
+       *       "https://relay.plex.direct:443"
+       *     ]
+       */
+      plex_base_urls?: string[];
       /** @description Plex: the client identifier of the server chosen from checkPlexPin */
       plex_server_id?: string;
       /** @description Plex: the authenticated session from createPlexPin */
@@ -22808,6 +23004,11 @@ export interface components {
        * @example 12
        */
       item_count: number;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived; empty when none */
       poster_url: string;
@@ -23626,10 +23827,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -24951,15 +25155,15 @@ export interface components {
     };
     PersonalCollection: {
       /**
-       * @description Profiles a shared collection is limited to; empty means every profile on the account
-       * @example []
-       */
-      allowed_profile_ids: string[];
-      /**
        * @description manual, smart, or an import source (mdblist, tmdb, trakt)
        * @example manual
        */
       collection_type: string;
+      /**
+       * @description Whether the collection holds the listCollections contains_item title. Present only when contains_item is sent, and then only on the acting profile's own manual collections; false for a title the profile cannot access
+       * @example true
+       */
+      contains?: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -24976,7 +25180,7 @@ export interface components {
       /** @description Display filter fragment; absent when none */
       display_query_definition?: unknown;
       /**
-       * @description null when ungrouped
+       * @description Always null: personal collection groups are no longer supported
        * @example g1
        */
       group_id: string | null;
@@ -24987,7 +25191,10 @@ export interface components {
       id: string;
       /** @example false */
       include_in_server_collections: boolean;
-      /** @example false */
+      /**
+       * @description Every profile on the login sees the collection read-only, including profiles added later; otherwise only its creator does
+       * @example false
+       */
       is_shared: boolean;
       /**
        * Format: int64
@@ -25015,6 +25222,11 @@ export interface components {
        * @example 2026-01-02T03:04:05.678Z
        */
       next_sync_at: string | null;
+      /**
+       * @description poster_url is a collage of the collection's first titles the acting profile can see, composed by the server because the collection has no uploaded or imported poster. False for an uploaded or imported poster and whenever poster_url is empty: before the collage is built, when no title the profile can see has a poster, and on getCollection and updateCollection, which carry no poster_url for any poster because their body sits behind a strong ETag. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       /** @example  */
       poster_thumbhash: string;
       /**
@@ -25033,6 +25245,7 @@ export interface components {
       sort_config: unknown;
       /**
        * Format: int64
+       * @description Position in its creator's own order of collections
        * @example 0
        */
       sort_order: number;
@@ -25043,6 +25256,12 @@ export interface components {
        * @example
        */
       source_url: string;
+      /**
+       * @description The cadence sync_schedule names; empty when the collection is not synced, custom for a schedule no cadence name produces
+       * @example
+       * @enum {string}
+       */
+      sync_cadence: "" | "daily" | "weekly" | "monthly" | "custom";
       /**
        * @description Empty when the collection is not synced
        * @example
@@ -25060,7 +25279,7 @@ export interface components {
       position: number;
     };
     PersonalCollectionCollection: {
-      /** @description The account's collection groups in sort order; empty, never null */
+      /** @description Always empty: personal collection groups are no longer supported */
       groups: components["schemas"]["CollectionGroup"][];
       /** @description The page's items; empty, never null */
       items: components["schemas"]["PersonalCollection"][];
@@ -25069,21 +25288,24 @@ export interface components {
     };
     PersonalCollectionCreate: {
       /**
-       * @description Profiles a shared collection is limited to
-       * @example []
-       */
-      allowed_profile_ids?: string[];
-      /**
        * @description Defaults to manual
        * @example manual
        * @enum {string}
        */
       collection_type?: "manual" | "smart";
+      /**
+       * @description Empty when omitted. Send only when getCollectionCapabilities reports create_description; otherwise the request fails
+       * @example For wet afternoons
+       */
+      description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
       /** @example false */
       include_in_server_collections?: boolean;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /** @example Rainy days */
       name: string;
@@ -25140,6 +25362,8 @@ export interface components {
        * @example 1
        */
       content_id: string;
+      /** @description Card-size poster URL; omitted when the item has none */
+      poster_url?: string;
       title: string;
       type: string;
     };
@@ -25152,15 +25376,15 @@ export interface components {
       total: number;
     };
     PersonalCollectionUpdate: {
-      allowed_profile_ids?: string[];
       description?: string;
       display_query_definition?: unknown;
       /**
-       * @description Null removes the group; omitted leaves it unchanged
+       * @description Omit: personal collection groups are no longer supported, and setting it answers capability_unsupported
        * @example 1
        */
       group_id?: string | null;
       include_in_server_collections?: boolean;
+      /** @description Show the collection to every profile on the login */
       is_shared?: boolean;
       library_ids?: string[];
       /** Format: int64 */
@@ -25170,6 +25394,12 @@ export interface components {
       query_definition?: unknown;
       sort_config?: unknown;
       source_url?: string;
+      /**
+       * @description A synced list's cadence; empty stops scheduled syncs. Cron expressions are refused. Accepted when getCollectionCapabilities reports sync_schedule_editable
+       * @example weekly
+       * @enum {string}
+       */
+      sync_schedule?: "" | "daily" | "weekly" | "monthly";
     };
     PersonCollection: {
       /** @description The page's items; empty, never null */
@@ -26423,8 +26653,9 @@ export interface components {
     };
     ProfileSectionFlags: {
       /**
-       * @description Whether non-admin profiles may build sections from admin-only recipes
-       * @example false
+       * @deprecated
+       * @description Deprecated; always true. Profiles may always add rule rows (custom_filter). Whether a profile that is not an admin may add a new row of a recipe is that recipe's admin_only in listSectionRecipes; follow it instead of this flag. Kept for clients that still read it.
+       * @example true
        */
       allow_profile_custom_sections: boolean;
     };
@@ -26438,6 +26669,11 @@ export interface components {
        * @example true
        */
       customized: boolean;
+      /**
+       * @description The administrator's title for this row; title shows it unless the profile saved a title override. Empty for a section the profile built
+       * @example Continue Watching
+       */
+      default_title: string;
       /** @example false */
       featured: boolean;
       /**
@@ -26467,7 +26703,10 @@ export interface components {
        * @example continue_watching
        */
       section_type: string;
-      /** @example Continue Watching */
+      /**
+       * @description The title this profile sees: its own title override, or the administrator's title
+       * @example Continue Watching
+       */
       title: string;
     };
     ProfileSectionSettingCollection: {
@@ -26570,7 +26809,7 @@ export interface components {
        */
       expires_at: string | null;
       /**
-       * @description Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match
+       * @description Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session and the profile's current PIN, so it stops being accepted when the session ends or the profile's PIN changes. Absent when the PIN did not match
        * @example pvt_5f3a9c1e7b2d4e8fa0c6
        */
       profile_token?: string;
@@ -26933,7 +27172,10 @@ export interface components {
       recipes: components["schemas"]["RecipeDefinition"][];
     };
     RecipeDefinition: {
-      /** @example false */
+      /**
+       * @description Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has
+       * @example false
+       */
       admin_only: boolean;
       /** @example true */
       avoid_duplicates: boolean;
@@ -29012,10 +29254,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29088,10 +29333,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29197,10 +29445,13 @@ export interface components {
       description?: string;
       /** @description Display filter fragment */
       display_query_definition?: unknown;
-      /** @example false */
+      /**
+       * @description Show the collection to every profile on the login; defaults to false
+       * @example false
+       */
       is_shared?: boolean;
       /**
-       * @description Libraries the sync matches against; every library when omitted
+       * @description Libraries the sync matches against, limited to the libraries the collection's owner can access; every library the owner can access when omitted
        * @example [
        *       "1"
        *     ]
@@ -29319,6 +29570,11 @@ export interface components {
       item_count: number;
       /** @example Rainy days */
       name: string;
+      /**
+       * @description poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty. See getCollectionCapabilities poster_collages
+       * @example false
+       */
+      poster_is_collage: boolean;
       poster_thumbhash?: string;
       /** @description Presigned, short-lived */
       poster_url?: string;
@@ -29358,6 +29614,11 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * @description Whether listUserLibraries accepts include_hidden
+       * @example true
+       */
+      supports_include_hidden: boolean;
     };
     ValidationClaimsV3: {
       audio: components["schemas"]["AudioClaimsV3"];
@@ -39792,6 +40053,117 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminCollectionSections: {
+    parameters: {
+      query?: never;
+      header?: {
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CollectionAdminCollectionSection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -71545,300 +71917,6 @@ export interface operations {
       };
     };
   };
-  getAdminSectionSettings: {
-    parameters: {
-      query?: never;
-      header?: {
-        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
-        "If-Match"?: string;
-        "If-None-Match"?: string;
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProfileSectionFlags"];
-        };
-      };
-      /** @description The representation named by If-None-Match is current; no body. */
-      304: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
-  updateAdminSectionSettings: {
-    parameters: {
-      query?: never;
-      header: {
-        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
-        "If-Match": string;
-        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
-        "If-None-Match"?: string;
-        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
-        "X-Profile-Id"?: string;
-        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
-        "X-Profile-Token"?: string;
-      };
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["ProfileSectionFlags"];
-      };
-    };
-    responses: {
-      /** @description OK */
-      200: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ProfileSectionFlags"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Not Acceptable */
-      406: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Timeout */
-      408: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Failed */
-      412: {
-        headers: {
-          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
-          ETag?: string;
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Request Entity Too Large */
-      413: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unsupported Media Type */
-      415: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Unprocessable Entity */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Precondition Required */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Too Many Requests */
-      429: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Internal Server Error */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-      /** @description Service Unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/problem+json": components["schemas"]["Problem"];
-        };
-      };
-    };
-  };
   getAdminSensitiveSettingsStatus: {
     parameters: {
       query?: never;
@@ -84588,7 +84666,7 @@ export interface operations {
           | "person";
         /** @description Metadata match state */
         status?: string;
-        /** @description Media scope: movie, series, episode, audiobook, ebook, podcast, video, … */
+        /** @description Media scope: movie, series, episode, audiobook, ebook, manga, or video (movies and series). video_with_episodes, for source=query only, searches movies, series, and episodes when q is set and lists movies and series without q; check getCatalogSearchCapabilities.video_with_episodes_scope first */
         type?: string;
         year_max?: number;
         year_min?: number;
@@ -84823,6 +84901,8 @@ export interface operations {
         collection_id?: string;
         /** @description Opaque identifier */
         library_id?: string;
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
         /** @description Opaque identifier */
         person_id?: string;
         scope?: "home" | "library";
@@ -84839,6 +84919,7 @@ export interface operations {
           | "watchlist"
           | "history"
           | "person";
+        /** @description Media scope, as on listCatalogItems; video_with_episodes lists the facets of video */
         type?: string;
       };
       header: {
@@ -84961,11 +85042,13 @@ export interface operations {
           | "series";
         /** @description Opaque identifier */
         library_id?: string;
-        /** @description Most matches to return; default 20, maximum 100 */
+        /** @description Restrict to several libraries, one library_ids parameter per id; combines with library_id. Libraries the viewer cannot see are dropped, and a scope left with none is empty. Not accepted with source=section */
+        library_ids?: string[];
+        /** @description Most values to return in matches and in values; default 20, maximum 100 */
         limit?: number;
         /** @description Opaque identifier */
         person_id?: string;
-        /** @description Case-insensitive prefix */
+        /** @description Case-insensitive search text; see matches and values for how each answers it */
         q?: string;
         scope?: "home" | "library";
         section_id?: string;
@@ -84981,6 +85064,7 @@ export interface operations {
           | "watchlist"
           | "history"
           | "person";
+        /** @description Media scope, as on listCatalogItems; video_with_episodes lists the facets of video */
         type?: string;
       };
       header: {
@@ -86232,8 +86316,16 @@ export interface operations {
       query?: {
         /** @description Most people to answer */
         limit?: number;
-        /** @description Restrict people to accessible credits in this media scope; omitted searches all media scopes */
-        media_scope?: "video" | "movie" | "series" | "episode" | "audiobook" | "ebook" | "manga";
+        /** @description Restrict people to accessible credits in this media scope; omitted searches all media scopes. video covers movies and series; video_with_episodes adds episodes (check getCatalogSearchCapabilities.video_with_episodes_scope first) */
+        media_scope?:
+          | "video"
+          | "video_with_episodes"
+          | "movie"
+          | "series"
+          | "episode"
+          | "audiobook"
+          | "ebook"
+          | "manga";
         /** @description Name prefix or fragment; empty lists the first people */
         q?: string;
       };
@@ -87420,7 +87512,10 @@ export interface operations {
   };
   listCollections: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description A title's content id. Each of the acting profile's own manual collections then carries contains. Accepted when getCollectionCapabilities reports contains_item */
+        contains_item?: string;
+      };
       header: {
         /** @description The household profile acting for this request; it must belong to the authenticated account. */
         "X-Profile-Id": string;
@@ -87644,6 +87739,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -88053,6 +88157,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89331,6 +89444,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -89436,6 +89558,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89567,6 +89698,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -89740,6 +89880,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Not Implemented */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Service Unavailable */
       503: {
         headers: {
@@ -89840,6 +89989,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -90003,6 +90161,15 @@ export interface operations {
       };
       /** @description Internal Server Error */
       500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Implemented */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -90791,6 +90958,7 @@ export interface operations {
   getCollectionOrder: {
     parameters: {
       query?: {
+        /** @description Omit: personal collection groups are no longer supported, and any value is a validation failure */
         group_id?: string;
       };
       header: {
@@ -99042,6 +99210,116 @@ export interface operations {
       /** @description Not Acceptable */
       406: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getHistoryImportCapability: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HistoryImportCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -127475,7 +127753,10 @@ export interface operations {
   };
   listUserLibraries: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Also list libraries the profile hid itself (ui.disabled_library_ids), for a screen that shows them again. Without an account, profile, or policy library limit they are listed either way. Navigation should omit it and filter by the setting */
+        include_hidden?: boolean;
+      };
       header?: {
         /** @description Optional. When present, it must name a profile of the authenticated account. */
         "X-Profile-Id"?: string;

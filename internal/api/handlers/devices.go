@@ -31,10 +31,9 @@ type DeviceHandler struct {
 	// key a forget or clear removed. Nil (as in tests) skips publishing.
 	EventsHub *evt.Hub
 
-	// UserRepo and ProfileTokens enable ?scope=household for the household
-	// parent. Both nil means the whole-household read is simply unavailable —
-	// never that it is unguarded.
-	UserRepo      userLookup
+	// ProfileTokens enables ?scope=household for a PIN-locked household
+	// parent. Nil means that parent's whole-household read is simply
+	// unavailable — never that it is unguarded.
 	ProfileTokens *access.ProfileTokenService
 }
 
@@ -85,7 +84,7 @@ func (h *DeviceHandler) HandleListDevices(w http.ResponseWriter, r *http.Request
 	// caller remembering to ask for less.
 	household := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("scope")), "household")
 	if household {
-		allowed, err := canManageHousehold(r, store, h.UserRepo, h.ProfileTokens)
+		allowed, err := canManageHousehold(r, store, h.ProfileTokens)
 		if err != nil {
 			writeProfileManagementPermissionError(w, err)
 			return
@@ -177,7 +176,7 @@ func (h *DeviceHandler) removeDevice(w http.ResponseWriter, r *http.Request, for
 	// The household parent may forget or clear a family member's device, on the
 	// same guard the settings routes use.
 	if named := strings.TrimSpace(r.URL.Query().Get("profile_id")); named != "" && named != profileID {
-		allowed, err := canManageHousehold(r, store, h.UserRepo, h.ProfileTokens)
+		allowed, err := canManageHousehold(r, store, h.ProfileTokens)
 		if err != nil {
 			writeProfileManagementPermissionError(w, err)
 			return

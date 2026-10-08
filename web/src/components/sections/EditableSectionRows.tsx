@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { sectionTypeLabel } from "@/lib/sectionTypes";
+import { rowKindLabel } from "@/lib/homeRows/catalog";
 import { queryDefinitionFromSectionConfig } from "@/api/types";
 import type { Library } from "@/api/types";
 import { matchRecipePreset, type RecipeCatalogResponse } from "@/lib/recipes";
@@ -35,7 +35,7 @@ export function recipeLabel(
       if (label) return label;
     }
   }
-  return sectionTypeLabel(type);
+  return rowKindLabel(type);
 }
 
 function continueTypeLabel(config?: Record<string, unknown>): string | null {
@@ -299,7 +299,7 @@ export function SortableSectionCardRow({
           <SectionSummaryBadges section={section} catalog={catalog} showVisibility />
         </div>
         <div className="text-muted-foreground text-[13px]">
-          {sectionTypeLabel(section.sectionType)} . {section.itemLimit} items
+          {rowKindLabel(section.sectionType)} . {section.itemLimit} items
         </div>
       </div>
       {actions}

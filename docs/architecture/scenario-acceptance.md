@@ -1504,8 +1504,8 @@ issue credentials once, insert exactly one session, and consume exactly its
 request. The next poll returns consumed without credentials or stored changes.
 Signed access/refresh tokens bind the member account, role and new session with
 exact token kinds and lifetimes. Temporary polling additionally validates the
-signed profile proof against the current account policy revision and the actual
-unlocked primary profile. Its session expiry is capped at 24 hours; wire expiry
+signed profile proof against the current account policy revision, the profile's
+PIN revision and the actual unlocked primary profile. Its session expiry is capped at 24 hours; wire expiry
 must equal the stored expiry at v1 second or v2 millisecond precision.
 
 V2 nests credentials under `tokens`, uses string account IDs, supplies explicit
@@ -1763,7 +1763,8 @@ tables. A collecting poll must add exactly one login session and move exactly on
 fixture request from approved to consumed, bound to that session; the two-poll
 `consumed.r1` sequence verifies the first collection and the credential-free second
 poll separately. Remote approval must carry the member's unlocked primary profile, a
-profile token bound to account, session, profile and policy revision, and a stored
+profile token bound to account, session, profile and PIN revision (and carrying the account's
+policy revision for older nodes), and a stored
 session expiry capped at 24 hours; the wire instant equals that expiry truncated to
 seconds on v1 and milliseconds on v2. V2 projects nested tokens, string account IDs,
 always-present profile fields, no-store and problem errors; v1 oracles, requirements

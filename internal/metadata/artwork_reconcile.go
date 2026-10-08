@@ -317,16 +317,16 @@ func artworkSweepSurfaces() []artworkSweepSurface {
 		{name: "person photos", table: peopleTable, keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: "photo_path", sourceCol: "photo_source_path", clearSet: plainClear("photo_path")},
 
 		// Admin/user uploads: no re-downloadable source. Clearing falls back
-		// to the generated collage (admin collections), the generated poster
-		// (user collections), or the default tile (library posters); admins
-		// re-upload anything they want back. alwaysVerify protects surviving
-		// uploads from blind bulk resets.
+		// to the generated collage (collections) or the default tile (library
+		// posters); admins re-upload anything they want back. alwaysVerify
+		// protects surviving uploads from blind bulk resets.
 		{name: "collection posters", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', poster_auto_generated = FALSE, poster_from_template = FALSE, updated_at = NOW()`, alwaysVerify: true},
 		{name: "collection backdrops", table: "library_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "backdrop_url", clearSet: `backdrop_url = '', backdrop_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
 		// Generated collection collages. A cleared row reads as a missing
 		// collage, which the next viewer's read rebuilds.
 		{name: "collection collages", table: "library_collection_poster_variants", keyCols: []artworkSweepKey{textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "user collection posters", table: "user_personal_collections", keyCols: []artworkSweepKey{textSweepKey("id")}, pathCol: "poster_url", clearSet: `poster_url = '', poster_thumbhash = '', updated_at = NOW()`, alwaysVerify: true},
+		{name: "user collection collages", table: "user_personal_collection_poster_variants", keyCols: []artworkSweepKey{int64SweepKey("user_id"), textSweepKey("collection_id"), textSweepKey("variant_key")}, pathCol: "poster_path", clearSet: `poster_path = '', poster_thumbhash = ''`, alwaysVerify: true},
 		{name: "library posters", table: "media_folders", keyCols: []artworkSweepKey{int64SweepKey("id")}, pathCol: posterPathColumn, clearSet: `poster_path = ''`, alwaysVerify: true},
 	}
 }

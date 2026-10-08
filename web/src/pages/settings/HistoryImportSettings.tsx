@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useProfiles } from "@/hooks/queries/profiles";
 import {
   useCreateHistoryImportRun,
+  useHistoryImportCapability,
   useHistoryImportRun,
   useHistoryImportRuns,
   type PersonalImportRun,
@@ -29,6 +30,7 @@ import {
   createPlexPin,
   buildPlexAuthURL,
   getPreferredPlexServerURL,
+  getPlexFallbackURLs,
   type BrowserPlexServer,
 } from "@/lib/plexAuth";
 import {
@@ -168,6 +170,13 @@ export default function HistoryImportSettings() {
   const selectedPlexOAuthServerURL = selectedPlexOAuthServer
     ? getPreferredPlexServerURL(selectedPlexOAuthServer)
     : "";
+  // The server races these and keeps the first that answers, so a server whose
+  // preferred address is blocked by a reverse proxy still imports.
+  const { data: importCapability } = useHistoryImportCapability();
+  const selectedPlexOAuthFallbackURLs =
+    selectedPlexOAuthServer && importCapability?.plex_connection_fallback
+      ? getPlexFallbackURLs(selectedPlexOAuthServer)
+      : [];
 
   useEffect(() => {
     if (returnedPlexAuth !== "1") {
@@ -292,6 +301,9 @@ export default function HistoryImportSettings() {
           profile_id: effectiveProfileId,
           source: "plex",
           plex_base_url: selectedPlexOAuthServerURL,
+          ...(selectedPlexOAuthFallbackURLs.length > 0
+            ? { plex_base_urls: selectedPlexOAuthFallbackURLs }
+            : {}),
           plex_token: selectedPlexOAuthServer.accessToken,
           plex_account_token: plexAccountToken || undefined,
         });

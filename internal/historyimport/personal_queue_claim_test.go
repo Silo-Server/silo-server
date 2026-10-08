@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,7 +48,7 @@ func TestPersonalClaimRequiresExactRunningAuthority(t *testing.T) {
 		t.Fatalf("personal claim metadata=%+v", claim)
 	}
 	credential, err := repo.readPersonalRunCredentials(ctx, claim)
-	if err != nil || credential != directPersonalAdmission().Credentials {
+	if err != nil || !reflect.DeepEqual(credential, directPersonalAdmission().Credentials) {
 		t.Fatalf("claimed credential mismatch: %v", err)
 	}
 	for _, bad := range []RunClaim{{RunID: run.ID, DispatchKind: "personal"}, {RunID: run.ID, DispatchKind: "personal", Generation: 2}, {RunID: run.ID, DispatchKind: "admin", Generation: 1}} {

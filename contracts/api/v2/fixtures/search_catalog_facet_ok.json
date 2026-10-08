@@ -2,5 +2,12 @@
   "matches": [
     "Frank Herbert"
   ],
-  "has_more": true
+  "has_more": true,
+  "values": [
+    {
+      "value": "Frank Herbert",
+      "count": 6
+    }
+  ],
+  "values_has_more": true
 }

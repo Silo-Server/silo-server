@@ -113,4 +113,39 @@ func TestCreateLibrarySeedsUserCollectionsGroupAndSurfacesPersonalCollectionDB(t
 	if len(tab.Groups[0].Collections) != 1 || tab.Groups[0].Collections[0].ID != personal.ID {
 		t.Fatalf("personal collections = %+v", tab.Groups[0].Collections)
 	}
+
+	// Another profile on the login sees the owner's shared, opted-in
+	// collection there, with its creator, and never a private one or an
+	// Audiobookshelf row.
+	viewerID := profileID + "-viewer"
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'Viewer')`, viewerID, userID); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := store.CreateCollection(t.Context(), userstore.CreateCollectionInput{
+		CreatorProfileID:           profileID,
+		Name:                       "Shared personal collection",
+		CollectionType:             "manual",
+		IsShared:                   true,
+		QueryDefinition:            fmt.Sprintf(`{"library_ids":[%d]}`, created.ID),
+		IncludeInServerCollections: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO user_personal_collections (id, user_id, profile_id, creator_profile_id, name, collection_type, is_shared, include_in_server_collections)
+		VALUES ($1, $2, $3, $3, 'Audiobookshelf playlist', 'playlist', TRUE, TRUE)`, fmt.Sprintf("abs-%d", suffix), userID, profileID); err != nil {
+		t.Fatal(err)
+	}
+	tab, err = collections.LibraryCollectionsTab(t.Context(), created.ID, userID, viewerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tab.Groups) != 1 || len(tab.Groups[0].Collections) != 1 {
+		t.Fatalf("viewer's user collections = %+v", tab.Groups)
+	}
+	if got := tab.Groups[0].Collections[0]; got.ID != shared.ID || got.CreatorProfileID == nil || *got.CreatorProfileID != profileID {
+		t.Fatalf("viewer's user collection = %+v, want %s by %s", got, shared.ID, profileID)
+	}
 }

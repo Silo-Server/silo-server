@@ -12,6 +12,7 @@ import {
 } from "@/components/admin/deviceOverrides";
 import { DeviceList, deviceSelectionKey, lastSeenLabel } from "@/components/settings/DeviceList";
 import { DeviceSettingGroups } from "@/components/settings/DeviceSettingGroups";
+import { ProfileLaunchSettingsGroup } from "@/components/settings/ProfileLaunchSettingsGroup";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
 import { useClearDeviceSettings, useForgetDevice, useMyDevices } from "@/hooks/queries/devices";
 import {
@@ -106,6 +107,12 @@ export default function DeviceSettings() {
           differently there and change it — from here, whichever device you&apos;re holding.
         </p>
       </header>
+
+      {/* Kept by this browser itself, not the server, so it sits apart from
+          the device list, which edits server-held settings for any device. */}
+      <div className={cn(showDetailOnMobile && "hidden xl:block")}>
+        <ProfileLaunchSettingsGroup />
+      </div>
 
       {canSeeHousehold ? (
         <div className={cn(showDetailOnMobile && "hidden xl:block")}>
