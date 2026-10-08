@@ -171,7 +171,7 @@ type RedisEventBus struct {
 
 // newRedisEventBus creates a RedisEventBus connected to the Redis cfg names.
 func newRedisEventBus(cfg config.RedisConfig) *RedisEventBus {
-	client, sentinel, err := newRedisClient(cfg)
+	client, sentinel, err := newRedisClient(cfg, false)
 	if err != nil {
 		client = redis.NewClient(unparsedRedisOptions(cfg, err))
 	}
@@ -445,10 +445,23 @@ func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {
 // NewRedisClientForRole associates all standalone or Sentinel operations and
 // pool pressure with a bounded operational role.
 func NewRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, error) {
+	return newRedisClientForRole(cfg, role, false)
+}
+
+// NewDeadlineRedisClientForRole is NewRedisClientForRole for callers that must
+// not wait past their context's deadline, such as a sweep other work waits on.
+// Its socket reads and writes honor that deadline, so a Redis that stops
+// answering frees the connection when the caller gives up instead of holding
+// it for the URL's read timeout, which may be unlimited.
+func NewDeadlineRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, error) {
+	return newRedisClientForRole(cfg, role, true)
+}
+
+func newRedisClientForRole(cfg config.RedisConfig, role string, honorContextDeadlines bool) (*redis.Client, error) {
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	client, _, err := newRedisClient(cfg)
+	client, _, err := newRedisClient(cfg, honorContextDeadlines)
 	if err != nil {
 		return nil, err
 	}
@@ -459,13 +472,15 @@ func NewRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, 
 // a Sentinel URL. A Sentinel client asks Sentinel for the master each time it
 // opens a connection, and closes its pooled connections when Sentinel
 // announces a new master.
-func newRedisClient(cfg config.RedisConfig) (*redis.Client, bool, error) {
+func newRedisClient(cfg config.RedisConfig, honorContextDeadlines bool) (*redis.Client, bool, error) {
 	options, failover, err := cfg.Options()
 	if err != nil {
 		return nil, false, err
 	}
 	if failover != nil {
+		failover.ContextTimeoutEnabled = failover.ContextTimeoutEnabled || honorContextDeadlines
 		return redis.NewFailoverClient(failover), true, nil
 	}
+	options.ContextTimeoutEnabled = options.ContextTimeoutEnabled || honorContextDeadlines
 	return redis.NewClient(options), false, nil
 }

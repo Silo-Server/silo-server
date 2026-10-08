@@ -75,6 +75,10 @@ func (tr *Tracker) pruneDeliveredLocked(now time.Time) {
 // The time comes from the record's remaining TTL, which Redis counts on its own
 // clock, so node and API clocks never need to agree. It is accurate to within
 // the write throttle.
+//
+// The API's idle sweep waits on this lookup, so rdb should honor ctx's deadline
+// on its sockets (cache.NewDeadlineRedisClientForRole); otherwise a Redis that
+// stops answering holds the sweep for the client's read timeout.
 func RecentDeliveries(ctx context.Context, rdb *redis.Client, sessionIDs []string) (map[string]time.Time, error) {
 	if rdb == nil || len(sessionIDs) == 0 {
 		return nil, nil
@@ -84,21 +88,8 @@ func RecentDeliveries(ctx context.Context, rdb *redis.Client, sessionIDs []strin
 	for i, id := range sessionIDs {
 		cmds[i] = pipe.PTTL(ctx, deliveryKeyPrefix+id)
 	}
-	// The client's socket timeouts come from its URL and need not honor ctx, and
-	// the API's idle sweep waits on this lookup, so stop waiting at ctx's
-	// deadline even if the pipeline is still blocked on a stalled Redis.
-	done := make(chan error, 1)
-	go func() {
-		_, err := pipe.Exec(ctx)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if err != nil {
-			return nil, err
-		}
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, err
 	}
 	now := time.Now()
 	recent := make(map[string]time.Time)

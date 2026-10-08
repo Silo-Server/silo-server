@@ -150,9 +150,9 @@ func TestPruneDeliveredDropsExpiredThrottleEntries(t *testing.T) {
 	}
 }
 
-// The API's idle sweep waits on this lookup, so a Redis that accepts the
-// connection and never answers must not hold it past the caller's deadline,
-// whatever socket timeouts the client was configured with.
+// The API's idle sweep waits on this lookup, so with a client that honors
+// context deadlines, a Redis that accepts the connection and never answers must
+// not hold it past the caller's deadline, however long the read timeout is.
 func TestRecentDeliveriesStopsAtTheDeadlineOfAStalledRedis(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -171,7 +171,7 @@ func TestRecentDeliveriesStopsAtTheDeadlineOfAStalledRedis(t *testing.T) {
 			mu.Unlock()
 		}
 	}()
-	rdb := redis.NewClient(&redis.Options{Addr: ln.Addr().String(), ReadTimeout: time.Minute, MaxRetries: -1})
+	rdb := redis.NewClient(&redis.Options{Addr: ln.Addr().String(), ReadTimeout: time.Minute, MaxRetries: -1, ContextTimeoutEnabled: true})
 	t.Cleanup(func() {
 		_ = ln.Close()
 		mu.Lock()
