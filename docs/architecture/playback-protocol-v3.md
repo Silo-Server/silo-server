@@ -324,15 +324,32 @@ on the 45-second window. Both windows are fixed. These count as activity:
 | The `POST /playback/start` that created the session | Starts the clock |
 | A `POST /playback/{session_id}/replan` that returns a playable plan | Counts once; it is not a heartbeat |
 | `POST /playback/{session_id}/progress` | The heartbeat. Progress reports are the only way to report a pause |
-| A request for an HLS playlist or segment (`server_remux_hls`, `server_transcode_hls`) | Each request counts |
-| A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count |
+| A request for an HLS playlist or segment (`server_remux_hls`, `server_transcode_hls`) | Each request counts. Through a proxy node, see below |
+| A request to the `stream.url` of `original_http` or `server_remux_progressive` | The session is kept while the request is open; its start and end count. Through a proxy node, see below |
 | A valid `hello`, `ack`, or `result` frame on the control socket (below), and the socket closing after a `hello` | Opening the socket, its pings, and frames that fail validation do not count |
 
 `capability`, `route-events`, `/sync/progress`, subtitle sidecar requests, and a
 `replan` that is refused, ends in a terminal, or replays an earlier answer do
-not count. When a proxy node serves the media, this server never sees the media
-requests, so it waits at least five minutes before ending such a session; the
-pause state still comes only from progress reports. Whether progress reports
+not count.
+
+When a proxy node serves the media, this server does not see the media
+requests. Instead the node records delivery in Redis
+(`silo:playback-delivery:{session_id}`) as media bytes reach the client: only
+a playlist, segment, or progressive response with a 2xx status that actually
+sends bytes counts, and a long progressive response keeps counting while it
+flows. The node writes at most once every 20 seconds per session, and a record
+expires six minutes after its last write. On every sweep this server reads the
+records of its proxy-served sessions and counts a live record as activity at
+the time it was written. Such a session therefore ends five minutes after its
+last delivery or other activity, give or take the 20-second write interval and
+the sweep interval, or after the paused grace if its last progress report was a
+pause. A record lives longer than five minutes so that even a late sweep still
+finds the last delivery. The pause state still comes only from progress reports.
+A client that fetches media without reporting progress, such as a Cast receiver
+whose sender phone went to sleep, therefore keeps its session while it plays.
+If Redis cannot be read, the sweep falls back to the other activity. Sessions
+created through the Jellyfin compatibility layer are not marked as
+proxy-served and do not read these records. Whether progress reports
 alone should keep alive a session whose media requests have stopped is raised
 in [#666](https://github.com/Silo-Server/silo-server/issues/666).
 
