@@ -110,6 +110,15 @@ describe("FilterRuleEditor", () => {
     }
   });
 
+  it("leaves out the Rotten Tomatoes scores where only episodes match, since episodes have none", () => {
+    const values = (scope: Parameters<typeof getFilterRuleFieldOptions>[1]) =>
+      getFilterRuleFieldOptions(false, scope).map((option) => option.value);
+    expect(values("episode")).not.toContain("rating_rt_critic");
+    expect(values("episode")).not.toContain("rating_rt_audience");
+    expect(values("episode")).toContain("rating_tmdb");
+    expect(values("series")).toContain("rating_rt_critic");
+  });
+
   it("offers a rating only while its source is shown", () => {
     const values = (sources?: ReadonlySet<string>) =>
       getFilterRuleFieldOptions(false, "movie", sources).map((option) => option.value);

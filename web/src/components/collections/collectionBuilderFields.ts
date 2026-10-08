@@ -68,6 +68,8 @@ export interface CollectionFieldOption {
   showsOnly?: boolean;
   /** Taken only by a server that advertises `extended_query_rules`. */
   extended?: boolean;
+  /** Episodes carry no value for it, so it is not offered where only episodes match. */
+  noEpisodeValue?: boolean;
 }
 
 const IS_OPERATORS: CollectionOperatorOption[] = [
@@ -284,8 +286,16 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
   },
   ratingField("rating_imdb", "IMDb rating"),
   { ...ratingField("rating_tmdb", "TMDB rating"), extended: true },
-  { ...ratingField("rating_rt_critic", "RT critic score", "rt_critic"), extended: true },
-  { ...ratingField("rating_rt_audience", "RT audience score", "rt_audience"), extended: true },
+  {
+    ...ratingField("rating_rt_critic", "RT critic score", "rt_critic"),
+    extended: true,
+    noEpisodeValue: true,
+  },
+  {
+    ...ratingField("rating_rt_audience", "RT audience score", "rt_audience"),
+    extended: true,
+    noEpisodeValue: true,
+  },
   {
     // The metadata match state, which only explains a saved rule.
     value: "status",

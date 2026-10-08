@@ -73,7 +73,11 @@ export function getFilterRuleFieldOptions(
   extendedRules = true,
 ) {
   return availableCollectionFields(allowPersonalizedFilters, shownRatingSources, extendedRules)
-    .filter((option) => !option.showsOnly || SHOW_SCOPES.has(mediaScope))
+    .filter(
+      (option) =>
+        (!option.showsOnly || SHOW_SCOPES.has(mediaScope)) &&
+        (!option.noEpisodeValue || mediaScope !== "episode"),
+    )
     .map((option) => {
       // Ebook and manga are read rather than watched, so relabel "watched".
       if (mediaScope !== "ebook" && mediaScope !== "manga") {
