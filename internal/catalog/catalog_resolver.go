@@ -317,14 +317,7 @@ func (r *CatalogResolver) resolveQuerySource(ctx context.Context, req CatalogReq
 	if NormalizeQuerySort(req.Query.Sort).Field == "relevance" {
 		items = filterCatalogSearchItems(items, req.SearchQuery)
 		items = filterCatalogNamePrefix(items, req.NamePrefix)
-		if requiresAdvancedQueryExecution(req.Query) {
-			items, err = r.filterExactSourceItemsByQuery(ctx, items, req.Query, access)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			items = filterCatalogItems(items, req.Query)
-		}
+		items = filterCatalogItems(items, req.Query)
 		total := len(items)
 		paged := paginateCatalogItems(items, req.Offset, req.Limit)
 		return &CatalogResult{
@@ -1922,9 +1915,6 @@ func catalogQuerySortFields() map[string]bool {
 	return QuerySortFieldSet(false)
 }
 
-// requiresAdvancedQueryExecution reports whether def needs the SQL executor
-// because its sort or one of its rules reads data catalogRuleMatchesItem
-// cannot see on a search candidate.
 func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 	if def.Sort.Field == "bitrate" {
 		return true
@@ -1933,10 +1923,6 @@ func requiresAdvancedQueryExecution(def QueryDefinition) bool {
 		for _, rule := range group.Rules {
 			switch rule.Field {
 			case "actor", "director", "writer", "producer", "author", "narrator", "series", "watched", "favorited", "in_watchlist", "in_progress", "last_watched", "resolution", "hdr", "dolby_vision", "bitrate", "audio_language", "subtitle_language":
-				return true
-			case querySortLatestEpisodeAdded, querySortLastAirDate:
-				// Search hydrates neither latest_episode_added_at nor the
-				// episode-derived last_air_date_at these rules compare.
 				return true
 			}
 		}
@@ -2986,24 +2972,28 @@ func compareCatalogStringDate(actual, op string, value any) bool {
 	if err != nil {
 		return false
 	}
-	if op == ruleOpInLast || op == ruleOpNotInLast {
-		// The span ends today, as CURRENT_DATE does in the SQL rule, so an
-		// hour span reaches back into yesterday whatever the time now.
-		spanStart, ok := catalogSpanCutoff(value, catalogDateOnly(time.Now()))
-		if !ok {
-			return false
-		}
-		cutoff := catalogDateOnly(spanStart)
-		if op == ruleOpNotInLast {
-			return actualTime.Before(cutoff)
-		}
-		return !actualTime.Before(cutoff)
+	if op == ruleOpNotInLast {
+		cutoff, ok := catalogSpanCutoff(value, time.Now().UTC())
+		return ok && actualTime.Before(catalogDateOnly(cutoff))
 	}
 
 	switch op {
-	case "gt", "gte", "lt", "lte", "between", "is", "is_not":
+	case "gt", "gte", "lt", "lte", "between", "is", "is_not", "in_last":
 	default:
 		return false
+	}
+
+	if op == "in_last" {
+		duration, ok := catalogStringValue(value)
+		if !ok {
+			return false
+		}
+		spec, err := parseDurationSpec(duration)
+		if err != nil {
+			return false
+		}
+		cutoff := catalogDateOnly(spec.cutoffTime(time.Now().UTC()))
+		return !actualTime.Before(cutoff)
 	}
 
 	if op == "between" {

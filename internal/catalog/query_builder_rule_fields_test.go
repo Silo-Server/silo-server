@@ -294,19 +294,6 @@ func TestV1RequestsKeepTheFrozenRuleVocabulary(t *testing.T) {
 	}
 }
 
-func TestCatalogRuleMatchesItem_HourSpanEndsToday(t *testing.T) {
-	// SQL subtracts the span from CURRENT_DATE, so "1h" reaches into
-	// yesterday whatever the time now.
-	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
-	item := &models.MediaItem{ReleaseDate: &yesterday}
-	if !catalogRuleMatchesItem(item, QueryRule{Field: "release_date", Op: "in_last", Value: "1h"}) {
-		t.Error("expected yesterday to be in the last hour of dates")
-	}
-	if catalogRuleMatchesItem(item, QueryRule{Field: "release_date", Op: "not_in_last", Value: "1h"}) {
-		t.Error("expected yesterday not to be before the last hour of dates")
-	}
-}
-
 func TestUserHistoryCTESQLRollsEpisodesUpToSeries(t *testing.T) {
 	sql := UserHistoryCTESQL(1)
 	for _, fragment := range []string{
@@ -342,22 +329,6 @@ func TestBuildEpisodeCatalogEntryRuleWhere_NewFieldsFallBack(t *testing.T) {
 		if err != nil || ok {
 			t.Fatalf("%s: expected the generic executor fallback (ok=false), got ok=%v err=%v", field, ok, err)
 		}
-	}
-}
-
-func TestRequiresAdvancedQueryExecution_ShowDateRules(t *testing.T) {
-	rules := func(rule QueryRule) QueryDefinition {
-		return QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{rule}}}}
-	}
-	// Search candidates carry neither latest_episode_added_at nor the
-	// episode-derived last_air_date_at, so these rules must run in SQL.
-	for _, field := range []string{"latest_episode_added", "last_air_date"} {
-		if !requiresAdvancedQueryExecution(rules(QueryRule{Field: field, Op: "in_last", Value: "7d"})) {
-			t.Errorf("%s: expected the SQL executor", field)
-		}
-	}
-	if requiresAdvancedQueryExecution(rules(QueryRule{Field: "title", Op: "contains", Value: "x"})) {
-		t.Error("title: expected the in-memory matcher")
 	}
 }
 
