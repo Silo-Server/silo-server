@@ -60,9 +60,12 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		batchEquivExec(t, pool, `INSERT INTO seasons (content_id, series_id, season_number) VALUES ($1 || '-s1', $1, 1)`, id(show))
 		batchEquivExec(t, pool, `INSERT INTO episodes (content_id, series_id, season_id, season_number, episode_number, title) VALUES ($1 || '-e1', $1, $1 || '-s1', 1, 1, 'Pilot')`, id(show))
 	}
-	// Only Fresh Show's episode was watched, three days ago.
-	batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at) VALUES ($1, $2, $3, $4, NOW() - INTERVAL '3 days')`,
-		prefix+"-history", userID, profile, id("fresh")+"-e1")
+	// Only Fresh Show's episode was finished, three days ago. Stale Show's was
+	// started yesterday but not finished, which does not date the show.
+	batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES
+		($1, $3, $4, $5, NOW() - INTERVAL '3 days', TRUE),
+		($2, $3, $4, $6, NOW() - INTERVAL '1 day', FALSE)`,
+		prefix+"-history", prefix+"-unfinished", userID, profile, id("fresh")+"-e1", id("stale")+"-e1")
 
 	executor := &QueryExecutor{Pool: pool}
 	viewer := AccessFilter{UserID: userID, ProfileID: profile}

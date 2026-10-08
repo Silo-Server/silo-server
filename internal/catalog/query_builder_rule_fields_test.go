@@ -330,7 +330,7 @@ func TestV1RequestsKeepTheFrozenRuleVocabulary(t *testing.T) {
 func TestUserHistoryCTESQLRollsEpisodesUpToSeries(t *testing.T) {
 	sql := UserHistoryCTESQL(1)
 	for _, fragment := range []string{
-		"LEFT JOIN episodes ep ON ep.content_id = src.media_item_id",
+		"LEFT JOIN episodes ep ON src.finished AND ep.content_id = src.media_item_id",
 		"(VALUES (src.media_item_id), (ep.series_id)) AS watched(media_item_id)",
 		"WHERE watched.media_item_id IS NOT NULL",
 		// History removals name the episode, so hiding is checked before the rollup.
