@@ -1226,10 +1226,12 @@ func (qb *QueryBuilder) buildDecadeClause(rule QueryRule) (string, error) {
 	return clause, nil
 }
 
-// decadeStart reads a decade rule's value as the decade's first year.
+// decadeStart reads a decade rule's value as the decade's first year. Decade
+// 0 is refused: media_items.year is 0 when the year is unknown, so it would
+// catch every undated title.
 func decadeStart(value any) (int, bool) {
 	year, ok := catalogFloat(value)
-	if !ok || math.IsNaN(year) || year < 0 || year > 9999 {
+	if !ok || math.IsNaN(year) || year < 10 || year > 9999 {
 		return 0, false
 	}
 	start := int(year)
