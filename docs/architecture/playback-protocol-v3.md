@@ -338,8 +338,10 @@ requests. Instead the node records delivery in Redis
 a playlist, segment, or progressive response with a 2xx status that actually
 sends bytes counts, and a long progressive response keeps counting while it
 flows. The node writes at most once every 20 seconds per session, and a record
-expires six minutes after its last write. On every sweep this server reads the
-records of its proxy-served sessions and counts a live record as activity at
+expires six minutes after its last write. Delivery writes use a two-second
+deadline that also bounds socket I/O, even when Redis socket timeouts are
+disabled. On every sweep this server reads the records of its proxy-served
+sessions and counts a live record as activity at
 the time it was written. Such a session therefore ends five minutes after its
 last delivery or other activity, give or take the 20-second write interval and
 the sweep interval, or after the paused grace if its last progress report was a
