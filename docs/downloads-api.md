@@ -2029,3 +2029,34 @@ The differences a migrating client has to handle:
 
 Do not fall back to the bridge after an uncertain v2 request. Reconcile the
 registry on v2 and make an explicit new request.
+
+## Download bandwidth accounting
+
+`download.server_bandwidth_mbps` is the aggregate native-download ceiling across
+API instances. `download.user_bandwidth_mbps` is an aggregate per-account ceiling
+shared by all that account's profiles and concurrent downloads; it is a server
+default applied independently to each account, not a nullable account override.
+Both use decimal Mbps (`1 Mbps = 125000 bytes/s`); zero is unlimited. Both ceilings
+apply, so the stricter available budget wins. These are download byte controls,
+separate from playback media bitrate and prepared-file storage capacity.
+
+Capped delivery requires the shared Redis database used by the installation.
+Each forward read exposes at most 32768 charged bytes. One global bucket and one
+account bucket are atomically debited, with a burst of `max(rate/4, 32768)` bytes
+per bucket across the installation. For any interval of length T, charged bytes
+are bounded by `rate*T + burst`; HTTP/socket buffering may shift the observed
+arrival times of previously charged chunks. Redis time and retained balances
+prevent additional budgets from API/proxy restarts. All serving nodes must run
+the implementation; capped proxy routing remains disabled for compatibility
+with older workers. API delivery of worker artifacts is charged once at egress.
+
+Saved bandwidth edits are read at the next byte chunk, including on transfers
+that started unlimited. A pending chunk rechecks rates at most every 250 ms;
+there is no cached full-bucket refill on edit. A failed authoritative settings
+read or shared budget operation stops delivery without exposing uncharged bytes.
+These reads have a one-second deadline. Clients must handle incomplete bodies
+and retry using their existing Range/resume flow after dependency recovery.
+
+`download.max_per_period` counts registrations independently for each account
+in the rolling `download.period_duration`; zero is unlimited. It is not a
+server-wide registration quota or a cumulative downloaded-byte quota.
