@@ -57,9 +57,11 @@ export type TMDBPreset =
   | "on_the_air";
 type TMDBMediaType = "movie" | "tv" | "all";
 type TMDBTimeWindow = "day" | "week";
-// "other" covers TMDB modes the editor cannot change (template franchise and
-// discover sources); their stored source is kept as-is.
-type TMDBSourceKind = "preset" | "list" | "other";
+// "other" covers TMDB modes the editor cannot change (template discover
+// sources); their stored source is kept as-is.
+type TMDBSourceKind = "preset" | "list" | "franchise" | "other";
+// The create dialog offers only the sources it can build from scratch.
+type TMDBCreateSourceKind = Exclude<TMDBSourceKind, "franchise" | "other">;
 type TraktSourceKind = "preset" | "list";
 type TraktPreset = "trending" | "popular" | "recommended";
 type TraktMediaType = "movie" | "tv";
@@ -246,7 +248,7 @@ function normalizeTMDBPresetMediaType(preset: TMDBPreset, mediaType: TMDBMediaTy
 }
 
 export function parseTMDBPresetSourceConfig(
-  collection: LibraryCollection | null,
+  collection: Partial<LibraryCollection> | null,
 ): TMDBPresetSourceConfig {
   const cfg = collection?.source_config;
   const preset: TMDBPreset =
@@ -277,9 +279,93 @@ export function parseTMDBPresetSourceConfig(
   return { preset, mediaType, timeWindow, limit };
 }
 
+export interface TMDBCollectionSourceConfig {
+  mode: "tmdb_collection" | "tmdb_preset";
+  collectionId: string;
+  limit: string;
+}
+
+export function parseTMDBCollectionSourceConfig(
+  collection: Partial<LibraryCollection> | null,
+): TMDBCollectionSourceConfig {
+  const cfg = collection?.source_config;
+  const isCollectionMode =
+    cfg?.mode === "tmdb_collection" ||
+    (typeof collection?.source_url === "string" &&
+      collection.source_url.startsWith("tmdb://collection/"));
+
+  let collectionId = "";
+  if (typeof cfg?.collection_id === "number" && cfg.collection_id > 0) {
+    collectionId = String(cfg.collection_id);
+  } else if (typeof cfg?.collection_id === "string" && cfg.collection_id.trim().length > 0) {
+    collectionId = cfg.collection_id.trim();
+  } else if (
+    typeof collection?.source_url === "string" &&
+    collection.source_url.startsWith("tmdb://collection/")
+  ) {
+    const urlId = collection.source_url.replace("tmdb://collection/", "").trim();
+    if (urlId && urlId !== "0") {
+      collectionId = urlId;
+    }
+  }
+
+  const limit =
+    typeof cfg?.limit === "number" && Number.isFinite(cfg.limit) && cfg.limit > 0
+      ? String(cfg.limit)
+      : "";
+
+  return {
+    mode: isCollectionMode ? "tmdb_collection" : "tmdb_preset",
+    collectionId,
+    limit,
+  };
+}
+
+// parseTmdbCollectionId reads a TMDB collection ID from its number input.
+// The input accepts exponent notation, so the whole value is parsed: parseInt
+// would read "1e3" as 1 rather than 1000. Anything but a safe positive
+// integer is undefined, so validation and saving agree.
+export function parseTmdbCollectionId(value: string): number | undefined {
+  const trimmed = value.trim();
+  const parsed = Number(trimmed);
+  return trimmed !== "" && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+// parseTmdbCollectionLimit reads the franchise Max Items input the same way,
+// so "1e2" saves as 100. Blank means no limit.
+export function parseTmdbCollectionLimit(value: string): number | undefined {
+  return parseTmdbCollectionId(value);
+}
+
+export function buildTMDBCollectionSourceInput({
+  collectionId,
+  limit,
+}: {
+  collectionId: string;
+  limit: string;
+}): {
+  source_url: string;
+  source_config: Record<string, unknown>;
+} {
+  const parsedId = parseTmdbCollectionId(collectionId) ?? 0;
+  const parsedLimit = parseTmdbCollectionLimit(limit);
+  const source_config: Record<string, unknown> = {
+    mode: "tmdb_collection",
+    collection_id: parsedId,
+  };
+  if (parsedLimit !== undefined) {
+    source_config.limit = parsedLimit;
+  }
+  return {
+    source_url: `tmdb://collection/${parsedId}`,
+    source_config,
+  };
+}
+
 function tmdbSourceKindOf(collection: LibraryCollection | null): TMDBSourceKind {
   const mode = collection?.source_config?.mode;
   if (mode === "tmdb_list") return "list";
+  if (parseTMDBCollectionSourceConfig(collection).mode === "tmdb_collection") return "franchise";
   if (mode === undefined || mode === "" || mode === "tmdb_preset") return "preset";
   return "other";
 }
@@ -778,7 +864,7 @@ export function TMDBPresetForm({
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [sourceKind, setSourceKind] = useState<Exclude<TMDBSourceKind, "other">>("preset");
+  const [sourceKind, setSourceKind] = useState<TMDBCreateSourceKind>("preset");
   const [listUrl, setListUrl] = useState("");
   const [preset, setPreset] = useState<TMDBPreset>("trending");
   const [timeWindow, setTimeWindow] = useState<TMDBTimeWindow>("day");
@@ -929,7 +1015,7 @@ export function TMDBPresetForm({
           <Label htmlFor="tmdb-source">Source</Label>
           <Select
             value={sourceKind}
-            onValueChange={(v) => setSourceKind(v as Exclude<TMDBSourceKind, "other">)}
+            onValueChange={(v) => setSourceKind(v as TMDBCreateSourceKind)}
           >
             <SelectTrigger id="tmdb-source">
               <SelectValue />
@@ -1574,14 +1660,23 @@ export function CollectionEditForm({
   const [editSyncSchedule, setEditSyncSchedule] = useState(collection.sync_schedule ?? "");
 
   const tmdbDefaults = parseTMDBPresetSourceConfig(collection);
+  const tmdbCollectionDefaults = parseTMDBCollectionSourceConfig(collection);
+  const isMDBListCollection = collection.collection_type === "mdblist";
+  const isTMDBCollection = collection.collection_type === "tmdb";
+  const isTraktCollection = collection.collection_type === "trakt";
+
+  const [tmdbCollectionId, setTmdbCollectionId] = useState(tmdbCollectionDefaults.collectionId);
   const [tmdbPreset, setTmdbPreset] = useState<TMDBPreset>(tmdbDefaults.preset);
   const [tmdbTimeWindow, setTmdbTimeWindow] = useState<TMDBTimeWindow>(tmdbDefaults.timeWindow);
   const [tmdbMediaType, setTmdbMediaType] = useState<TMDBMediaType>(tmdbDefaults.mediaType);
-  const [tmdbLimit, setTmdbLimit] = useState(tmdbDefaults.limit);
   const [tmdbSourceKind, setTmdbSourceKind] = useState<TMDBSourceKind>(() =>
     tmdbSourceKindOf(collection),
   );
+  const [tmdbLimit, setTmdbLimit] = useState(
+    tmdbSourceKind === "franchise" ? tmdbCollectionDefaults.limit : tmdbDefaults.limit,
+  );
   const [tmdbListUrl, setTmdbListUrl] = useState(() => parseTMDBListSourceURL(collection));
+  const isTMDBFranchise = isTMDBCollection && tmdbSourceKind === "franchise";
   const traktDefaults = parseTraktPresetSourceConfig(collection);
   const [traktSourceKind, setTraktSourceKind] = useState<TraktSourceKind>(traktDefaults.sourceKind);
   const [traktListUrl, setTraktListUrl] = useState(traktDefaults.listUrl);
@@ -1590,13 +1685,14 @@ export function CollectionEditForm({
   const [traktProfileId, setTraktProfileId] = useState(traktDefaults.profileId);
   const [traktLimit, setTraktLimit] = useState(traktDefaults.limit);
 
-  const isMDBListCollection = collection.collection_type === "mdblist";
-  const isTMDBCollection = collection.collection_type === "tmdb";
-  const isTraktCollection = collection.collection_type === "trakt";
   const parsedSourceLimit = parseOptionalPositiveInteger(sourceLimit);
   const hasInvalidSourceLimit = sourceLimit.trim().length > 0 && parsedSourceLimit === undefined;
   const missingSourceURL = isMDBListCollection && sourceUrl.trim().length === 0;
-  const parsedTmdbLimit = parseOptionalPositiveInteger(tmdbLimit);
+  const hasInvalidTmdbCollectionId =
+    isTMDBFranchise && parseTmdbCollectionId(tmdbCollectionId) === undefined;
+  const parsedTmdbLimit = isTMDBFranchise
+    ? parseTmdbCollectionLimit(tmdbLimit)
+    : parseOptionalPositiveInteger(tmdbLimit);
   const hasInvalidTmdbLimit = tmdbLimit.trim().length > 0 && parsedTmdbLimit === undefined;
   const parsedTraktLimit = parseOptionalPositiveInteger(traktLimit);
   const hasInvalidTraktLimit = traktLimit.trim().length > 0 && parsedTraktLimit === undefined;
@@ -1612,7 +1708,11 @@ export function CollectionEditForm({
     ? tmdbSourceKind === "other"
       ? undefined
       : libraryEligibilityForMediaKind(
-          tmdbSourceKind === "list" ? "mixed" : normalizedTMDBMediaType,
+          tmdbSourceKind === "franchise"
+            ? "movie"
+            : tmdbSourceKind === "list"
+              ? "mixed"
+              : normalizedTMDBMediaType,
         )
     : isTraktCollection
       ? libraryEligibilityForMediaKind(isTraktListMode ? "mixed" : traktMediaType)
@@ -1644,6 +1744,13 @@ export function CollectionEditForm({
         url: sourceUrl,
         ...(parsedSourceLimit ? { limit: parsedSourceLimit } : {}),
       };
+    } else if (isTMDBFranchise) {
+      const tmdbSource = buildTMDBCollectionSourceInput({
+        collectionId: tmdbCollectionId,
+        limit: tmdbLimit,
+      });
+      sourceUrlValue = tmdbSource.source_url;
+      sourceConfig = tmdbSource.source_config;
     } else if (isTMDBCollection && tmdbSourceKind === "list") {
       const tmdbListSource = buildTMDBListSourceInput({ listUrl: tmdbListUrl, limit: tmdbLimit });
       sourceUrlValue = tmdbListSource.source_url;
@@ -1865,8 +1972,8 @@ export function CollectionEditForm({
 
         {isTMDBCollection && tmdbSourceKind === "other" ? (
           <p className="text-muted-foreground border-border rounded-lg border px-4 py-3 text-sm">
-            This collection follows a TMDB franchise or discover filter from a template. Its source
-            can&apos;t be changed here; saving keeps it as it is.
+            This collection follows a TMDB discover filter from a template. Its source can&apos;t be
+            changed here; saving keeps it as it is.
           </p>
         ) : null}
 
@@ -1884,11 +1991,46 @@ export function CollectionEditForm({
                 <SelectContent>
                   <SelectItem value="preset">Preset (Trending, Popular, Top Rated…)</SelectItem>
                   <SelectItem value="list">Public list (themoviedb.org URL)</SelectItem>
+                  <SelectItem value="franchise">Franchise (TMDB collection ID)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {tmdbSourceKind === "list" ? (
+            {tmdbSourceKind === "franchise" ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="tmdb-collection-id">TMDB Collection ID</Label>
+                  <Input
+                    id="tmdb-collection-id"
+                    type="number"
+                    min={1}
+                    step={1}
+                    inputMode="numeric"
+                    value={tmdbCollectionId}
+                    onChange={(event) => setTmdbCollectionId(event.target.value)}
+                    placeholder="e.g. 86311 (The Avengers Collection)"
+                    required
+                  />
+                  <p className="text-muted-foreground text-xs">
+                    The numeric ID of the TMDB collection / franchise to sync.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="tmdb-collection-limit">Max Items</Label>
+                  <Input
+                    id="tmdb-collection-limit"
+                    type="number"
+                    min={1}
+                    max={COLLECTION_MAX_ITEMS}
+                    step={1}
+                    inputMode="numeric"
+                    value={tmdbLimit}
+                    onChange={(event) => setTmdbLimit(event.target.value)}
+                    placeholder="Leave blank for all items"
+                  />
+                </div>
+              </div>
+            ) : tmdbSourceKind === "list" ? (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
                   <TMDBListURLField
@@ -2145,6 +2287,7 @@ export function CollectionEditForm({
             libraryIds.length === 0 ||
             hasInvalidSourceLimit ||
             missingSourceURL ||
+            hasInvalidTmdbCollectionId ||
             hasInvalidTmdbLimit ||
             invalidTMDBListURL ||
             hasInvalidTraktLimit ||

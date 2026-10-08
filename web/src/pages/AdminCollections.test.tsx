@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { LibraryCollection } from "@/api/types";
 
 import {
+  buildTMDBCollectionSourceInput,
   buildTMDBPresetSourceInput,
   collectionsInAdminScope,
+  parseTMDBCollectionSourceConfig,
   parseTMDBPresetSourceConfig,
+  parseTmdbCollectionId,
+  parseTmdbCollectionLimit,
   toAdminCollectionBuilderValue,
   toAdminCollectionRequest,
 } from "./adminCollectionsShared";
@@ -164,5 +168,90 @@ describe("AdminCollections helpers", () => {
         media_type: "movie",
       },
     });
+  });
+
+  it("parses a TMDB franchise collection source config from source_config or source_url", () => {
+    expect(
+      parseTMDBCollectionSourceConfig({
+        id: "c1",
+        title: "Avengers",
+        library_id: 1,
+        collection_type: "tmdb",
+        source_url: "tmdb://collection/86311",
+        source_config: {
+          mode: "tmdb_collection",
+          collection_id: 86311,
+          limit: 10,
+        },
+        visibility: "visible",
+        featured: false,
+        sort_config: { sort_by: "release_date", sort_order: "asc" },
+        created_at: "",
+        updated_at: "",
+      } as unknown as LibraryCollection),
+    ).toEqual({
+      mode: "tmdb_collection",
+      collectionId: "86311",
+      limit: "10",
+    });
+
+    // Placeholder franchise template created by bundle
+    expect(
+      parseTMDBCollectionSourceConfig({
+        id: "c2",
+        title: "TMDB Franchise",
+        library_id: 1,
+        collection_type: "tmdb",
+        source_url: "tmdb://collection/0",
+        source_config: {
+          mode: "tmdb_collection",
+          collection_id: 0,
+        },
+        visibility: "visible",
+        featured: false,
+        sort_config: { sort_by: "release_date", sort_order: "asc" },
+        created_at: "",
+        updated_at: "",
+      } as unknown as LibraryCollection),
+    ).toEqual({
+      mode: "tmdb_collection",
+      collectionId: "",
+      limit: "",
+    });
+  });
+
+  it("builds a TMDB franchise source input with deterministic URL and config", () => {
+    expect(
+      buildTMDBCollectionSourceInput({
+        collectionId: "86311",
+        limit: "4",
+      }),
+    ).toEqual({
+      source_url: "tmdb://collection/86311",
+      source_config: {
+        mode: "tmdb_collection",
+        collection_id: 86311,
+        limit: 4,
+      },
+    });
+  });
+
+  it("parses a TMDB collection ID entered in exponent notation", () => {
+    const exponent = buildTMDBCollectionSourceInput({ collectionId: "1e3", limit: "" });
+    expect(exponent.source_config).toEqual({ mode: "tmdb_collection", collection_id: 1000 });
+    for (const invalid of ["1.5", "12abc", "-4"]) {
+      const input = buildTMDBCollectionSourceInput({ collectionId: invalid, limit: "" });
+      expect(input.source_config.collection_id).toBe(0);
+      // The Save check uses the same parser, so it rejects what would save as 0.
+      expect(parseTmdbCollectionId(invalid)).toBeUndefined();
+    }
+    expect(parseTmdbCollectionId(" 1e3 ")).toBe(1000);
+  });
+
+  it("parses the franchise limit as a whole value", () => {
+    const input = buildTMDBCollectionSourceInput({ collectionId: "10", limit: "1e2" });
+    expect(input.source_config.limit).toBe(100);
+    expect(parseTmdbCollectionLimit("1.5")).toBeUndefined();
+    expect(parseTmdbCollectionLimit("")).toBeUndefined();
   });
 });
