@@ -4797,8 +4797,8 @@ export interface RateLimitConfig {
   active_backend?: string;
   /**
    * Whether the Redis backend can be selected at all (GET responses only).
-   * Sentinel and REDIS_URL deployments have no stored `redis.url`, so only the
-   * server can answer this.
+   * REDIS_URL deployments have no stored `redis.url`, so only the server can
+   * answer this.
    */
   redis_available?: boolean;
 }

@@ -1151,11 +1151,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 			settingValuesHandler.EventsHub = deps.EventsHub
 			// Household management: a primary profile acting for another
-			// profile on its own account. Without both of these the widening
-			// is unavailable rather than unguarded.
-			if userRepo != nil {
-				settingValuesHandler.UserRepo = userRepo
-			}
+			// profile on its own account. Without the token service a
+			// PIN-locked primary cannot widen rather than widening unguarded.
 			settingValuesHandler.ProfileTokens = profileTokenService
 			if deps.FolderRepo != nil {
 				settingValuesHandler.SetLibraryLookup(deps.FolderRepo)
@@ -1168,9 +1165,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		deviceHandler = handlers.NewDeviceHandler(deps.UserStoreProvider)
 		deviceHandler.EventsHub = deps.EventsHub
-		if userRepo != nil {
-			deviceHandler.UserRepo = userRepo
-		}
 		deviceHandler.ProfileTokens = profileTokenService
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
@@ -2427,7 +2421,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -3148,7 +3142,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 					r.Use(demoGuard.Guard)
 				}
 
-				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, userRepo, profileTokenService)
+				apiKeyHandler := newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, profileTokenService)
 				r.Route("/api-keys", func(r chi.Router) {
 					r.Post("/", apiKeyHandler.HandleCreateAPIKey)
 					r.Get("/", apiKeyHandler.HandleListAPIKeys)
@@ -5231,19 +5225,14 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 }
 
 // newPersonalAPIKeyHandler builds the account-scoped API key handler with the
-// household check its creation path runs. A nil user repository stays a nil
-// interface so the PIN check fails closed instead of calling through it.
+// household check its creation path runs.
 func newPersonalAPIKeyHandler(
 	repo *auth.APIKeyRepository,
 	stores userstore.UserStoreProvider,
-	users *auth.UserRepository,
 	tokens *access.ProfileTokenService,
 ) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
-	if users != nil {
-		h.Users = users
-	}
 	h.ProfileTokens = tokens
 	return h
 }

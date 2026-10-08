@@ -553,7 +553,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   terminal state, node creation, whose cross-replica pool reload runs after the insert
   without a transaction, push device registration (Apple and FCM), whose update overwrites
   a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
-  field presence rather than on an effective change, the provider device-auth poll, whose
+  field presence rather than on an effective change and the profile's PIN revision whenever
+  the request carries a PIN, the provider device-auth poll, whose
   completion check is a plain read ahead of the plugin call, admin user update, whose
   password branch re-hashes and revokes every session on each attempt, profile creation,
   whose name and limit checks run in application code with no unique index on the
@@ -1395,7 +1396,7 @@ deliberate v1 differences, recorded per row in the ledger: `createProfile` answe
 `Location`; `deleteProfile` and `deleteProfileAvatar` are plain `204`s (v1 returned the profile
 from an avatar removal); `listHouseholdSessions` is an unpaginated `items` collection with string
 ids, UTC-millisecond instants and `null` for members the reporting node did not know; `verifyProfilePIN`
-keeps v1's token semantics (bound to the login session and policy revision, `no-store`) and
+keeps v1's token semantics (bound to the login session and the profile's PIN revision, `no-store`) and
 reports `expires_at` as a nullable instant. PIN verification is `non_retryable`: a replayed wrong
 PIN counts as another lockout attempt. `uploadProfileAvatar` is the first Huma multipart
 operation (form part `avatar`, JPEG/PNG/WebP): a JSON body is `415`, a part outside the declared

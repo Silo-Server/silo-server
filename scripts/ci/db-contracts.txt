@@ -111,3 +111,6 @@
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
+
+# Admin top-activity leaderboards count playback, not marked-watched rows.
+./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks

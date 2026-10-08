@@ -3,9 +3,12 @@ package cache
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"net"
 	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/redis/go-redis/v9"
@@ -110,14 +113,14 @@ type EventBus interface {
 	Close() error
 }
 
-// NewEventBus returns an EventBus. When redisURL is empty a no-op
+// NewEventBus returns an EventBus. When cfg has no URL a no-op
 // implementation is returned that silently succeeds on every call and
 // has zero external dependencies.
-func NewEventBus(redisURL string) EventBus {
-	if redisURL == "" {
+func NewEventBus(cfg config.RedisConfig) EventBus {
+	if cfg.URL == "" {
 		return &NoopEventBus{}
 	}
-	return newRedisEventBus(redisURL)
+	return newRedisEventBus(cfg)
 }
 
 // ---------------------------------------------------------------------------
@@ -155,29 +158,89 @@ type RedisEventBus struct {
 	// db is the database number the client selects; see redisChannel.
 	db int
 
+	// Set for a Sentinel URL only. A subscription pings its server every
+	// pingInterval and leaves one that has been silent for silenceLimit.
+	pingInterval time.Duration
+	silenceLimit time.Duration
+
 	mu   sync.Mutex
 	subs []subscription
 	once sync.Once // ensures Close is idempotent
 	done chan struct{}
 }
 
-// newRedisEventBus creates a RedisEventBus connected to the given Redis URL.
-func newRedisEventBus(redisURL string) *RedisEventBus {
-	opts, err := redis.ParseURL(redisURL)
+// newRedisEventBus creates a RedisEventBus connected to the Redis cfg names.
+func newRedisEventBus(cfg config.RedisConfig) *RedisEventBus {
+	client, sentinel, err := newRedisClient(cfg)
 	if err != nil {
-		// If the URL cannot be parsed, treat it as a simple address.
-		opts = &redis.Options{Addr: redisURL}
+		client = redis.NewClient(unparsedRedisOptions(cfg, err))
 	}
-	return newRedisEventBusFromOptions(opts)
+	return newRedisEventBusFromClient(client, sentinel)
 }
 
-func newRedisEventBusFromOptions(opts *redis.Options) *RedisEventBus {
-	return &RedisEventBus{
-		client: instrumentRedis(redis.NewClient(opts), "events"),
-		db:     opts.DB,
+// newRedisEventBusFromClient creates a RedisEventBus on client. sentinel says
+// whether the client follows the master of a Sentinel deployment.
+func newRedisEventBusFromClient(client *redis.Client, sentinel bool) *RedisEventBus {
+	bus := &RedisEventBus{
+		client: instrumentRedis(client, "events"),
+		db:     client.Options().DB,
 		done:   make(chan struct{}),
 	}
+	if sentinel {
+		bus.pingInterval, bus.silenceLimit = 3*time.Second, 10*time.Second
+	}
+	return bus
 }
+
+// unparsedRedisOptions treats a value that is not a URL as a bare address,
+// applying the validated database override before the client is built.
+// Anything else can carry passwords, and go-redis quotes the address in dial
+// errors, so every command fails with the parse error instead.
+func unparsedRedisOptions(cfg config.RedisConfig, parseErr error) *redis.Options {
+	if isBareRedisAddress(cfg.URL) {
+		db, err := config.NormalizeRedisDB(cfg.DB)
+		if err == nil {
+			options := &redis.Options{Addr: cfg.URL}
+			if db != "" {
+				// NormalizeRedisDB has already validated the integer.
+				options.DB, _ = strconv.Atoi(db)
+			}
+			return options
+		}
+		parseErr = err
+	}
+	return &redis.Options{
+		Addr: "invalid-redis-url",
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			return nil, parseErr
+		},
+	}
+}
+
+// isBareRedisAddress reports whether value is a host:port with a numeric
+// port, or the path of a socket. A host name, the zone of an IPv6 address
+// and the parts of a path are made of letters, digits, dots, hyphens and
+// underscores.
+func isBareRedisAddress(value string) bool {
+	if strings.HasPrefix(value, "/") {
+		return strings.Trim(value, redisHostNameCharacters+"/") == ""
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return false
+	}
+	address, zone, _ := strings.Cut(host, "%")
+	if strings.Trim(zone, redisHostNameCharacters) != "" {
+		return false
+	}
+	if net.ParseIP(address) == nil && (zone != "" || strings.Trim(address, redisHostNameCharacters) != "") {
+		return false
+	}
+	_, err = strconv.ParseUint(port, 10, 16)
+	return err == nil
+}
+
+const redisHostNameCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"
 
 // redisChannel returns the Redis channel that carries an event-bus channel
 // for a client on the given database number. Redis delivers a published
@@ -217,11 +280,31 @@ func (r *RedisEventBus) Subscribe(ctx context.Context, channel string, handler E
 		return err
 	}
 
+	// A Sentinel subscription pings and redials for as long as the bus is
+	// open, which can be long after the caller's context has ended.
+	listenCtx, stopListening := context.WithCancel(context.Background())
+	sub := subscription{pubsub: pubsub, cancel: func() { cancel(); stopListening() }}
+
 	r.mu.Lock()
-	r.subs = append(r.subs, subscription{pubsub: pubsub, cancel: cancel})
+	select {
+	case <-r.done:
+		// Close has taken the list of subscriptions and would never end
+		// this one.
+		r.mu.Unlock()
+		sub.cancel()
+		_ = pubsub.Close()
+		return errors.New("redis event bus is closed")
+	default:
+	}
+	r.subs = append(r.subs, sub)
 	r.mu.Unlock()
 
-	go r.listen(pubsub, handler)
+	if r.silenceLimit > 0 {
+		go r.keepAlive(listenCtx, pubsub)
+		go r.listenToMaster(listenCtx, pubsub, handler)
+	} else {
+		go r.listen(pubsub, handler)
+	}
 	return nil
 }
 
@@ -246,6 +329,76 @@ func (r *RedisEventBus) listen(pubsub *redis.PubSub, handler EventHandler) {
 	}
 }
 
+// listenToMaster is listen for a Sentinel deployment, where the server behind
+// a subscription can stop being the master.
+//
+// go-redis reconnects a subscription only when its connection breaks. A
+// master that freezes or drops off the network leaves the connection open
+// and silent, so after Sentinel promotes a replica the bus would publish to
+// the new master and keep listening to the old one. Here each receive has a
+// deadline, keepAlive makes a healthy server answer within it, and go-redis
+// drops a connection whose deadline passes. The next connection goes to the
+// master Sentinel names at that moment.
+func (r *RedisEventBus) listenToMaster(ctx context.Context, pubsub *redis.PubSub, handler EventHandler) {
+	for {
+		receiveCtx, cancel := context.WithTimeout(ctx, r.silenceLimit)
+		msg, err := pubsub.Receive(receiveCtx)
+		cancel()
+		if err != nil {
+			if !redial(ctx, pubsub) {
+				return
+			}
+			continue
+		}
+		message, ok := msg.(*redis.Message)
+		if !ok {
+			// A pong or a subscription confirmation.
+			continue
+		}
+		var evt Event
+		if err := json.Unmarshal([]byte(message.Payload), &evt); err != nil {
+			// Skip malformed messages.
+			continue
+		}
+		handler(evt)
+	}
+}
+
+// redial retries until the subscription has a connection again, and reports
+// false when ctx ended first, which Close does. It runs outside the receive
+// deadline, which is for a server that has gone silent and not for the time
+// a new connection takes. The client's dial, read and write timeouts limit
+// each attempt.
+func redial(ctx context.Context, pubsub *redis.PubSub) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(100 * time.Millisecond):
+		}
+		if pubsub.Ping(ctx) == nil {
+			return true
+		}
+	}
+}
+
+// keepAlive pings the subscription's server, so that an idle subscription
+// still hears from a healthy one.
+func (r *RedisEventBus) keepAlive(ctx context.Context, pubsub *redis.PubSub) {
+	ticker := time.NewTicker(r.pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// A failed ping needs no handling: listenToMaster sees the same
+			// broken or silent connection.
+			_ = pubsub.Ping(ctx)
+		}
+	}
+}
+
 // Close stops all subscriber goroutines and closes the Redis client.
 // It is safe to call Close multiple times; only the first call has any
 // effect.
@@ -259,11 +412,16 @@ func (r *RedisEventBus) Close() error {
 		r.subs = nil
 		r.mu.Unlock()
 
+		// End the subscriptions' contexts before closing them. A Sentinel
+		// subscription that is redialling holds its lock until the dial
+		// ends, and Close would wait for each of them in turn.
+		for _, s := range subs {
+			s.cancel()
+		}
 		for _, s := range subs {
 			if err := s.pubsub.Close(); err != nil && firstErr == nil {
 				firstErr = err
 			}
-			s.cancel()
 		}
 
 		if err := CloseRedisClient(r.client); err != nil && firstErr == nil {
@@ -278,7 +436,7 @@ func (r *RedisEventBus) Close() error {
 // ---------------------------------------------------------------------------
 
 // NewRedisClient creates a Redis client based on the config.
-// Returns nil and no error if no Redis URL or Sentinel config is provided.
+// Returns nil and no error if no Redis URL is provided.
 // Returns an error if configuration is present but invalid.
 func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {
 	return NewRedisClientForRole(cfg, "application")
@@ -287,20 +445,27 @@ func NewRedisClient(cfg config.RedisConfig) (*redis.Client, error) {
 // NewRedisClientForRole associates all standalone or Sentinel operations and
 // pool pressure with a bounded operational role.
 func NewRedisClientForRole(cfg config.RedisConfig, role string) (*redis.Client, error) {
-	if cfg.SentinelMaster != "" && len(cfg.SentinelAddresses) > 0 {
-		return instrumentRedis(redis.NewFailoverClient(&redis.FailoverOptions{
-			MasterName:       cfg.SentinelMaster,
-			SentinelAddrs:    cfg.SentinelAddresses,
-			SentinelPassword: cfg.SentinelPassword,
-			DB:               0,
-		}), role), nil
-	}
 	if cfg.URL == "" {
 		return nil, nil
 	}
-	opt, err := redis.ParseURL(cfg.URL)
+	client, _, err := newRedisClient(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("invalid redis URL: %w", err)
+		return nil, err
 	}
-	return instrumentRedis(redis.NewClient(opt), role), nil
+	return instrumentRedis(client, role), nil
+}
+
+// newRedisClient builds the client cfg names and reports whether its URL is
+// a Sentinel URL. A Sentinel client asks Sentinel for the master each time it
+// opens a connection, and closes its pooled connections when Sentinel
+// announces a new master.
+func newRedisClient(cfg config.RedisConfig) (*redis.Client, bool, error) {
+	options, failover, err := cfg.Options()
+	if err != nil {
+		return nil, false, err
+	}
+	if failover != nil {
+		return redis.NewFailoverClient(failover), true, nil
+	}
+	return redis.NewClient(options), false, nil
 }

@@ -77,7 +77,7 @@ func TestHistoryImportV1ProfileAuthorization(t *testing.T) {
 	}
 	stores := mappedTestUserStoreProvider{stores: map[int]userstore.UserStore{1: store}}
 	tokens := access.NewProfileTokenService("history-import-profile-test-secret", 0)
-	profileToken, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "session-1", ProfileID: "primary"})
+	profileToken, _, err := tokens.Mint(access.ProfileTokenClaims{UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: pinRevision(t, store, "primary")})
 	if err != nil {
 		t.Fatal(err)
 	}

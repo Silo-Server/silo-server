@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 29
+const schemaVersion = 30
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -16,10 +16,15 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("unsupported sqlite schema version %d", version)
 	}
 	if version == 0 {
+		if _, err := db.Exec(profilePINRevisionSchema); err != nil {
+			return fmt.Errorf("creating profile PIN revision trigger: %w", err)
+		}
 		return setUserVersion(db, schemaVersion)
 	}
 	if version == schemaVersion {
-		return nil
+		// Already-v30 stores may have been opened before the trigger existed.
+		_, err := db.Exec(profilePINRevisionSchema)
+		return err
 	}
 
 	tx, err := db.Begin()
@@ -286,6 +291,22 @@ func runMigrations(db *sql.DB) error {
 		if _, err := tx.Exec("PRAGMA user_version = 29"); err != nil {
 			return err
 		}
+	}
+	if version < 30 {
+		// Same reasoning as v27: a fresh profiles table already has the column.
+		// Profile tokens are bound to it; the Postgres store adds the same
+		// column in 20261006192309_profile_pin_revision.sql.
+		if !columnExists(tx, "profiles", "pin_revision") {
+			if _, err := tx.Exec(`ALTER TABLE profiles ADD COLUMN pin_revision INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migration v30 failed: %w", err)
+			}
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 30"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(profilePINRevisionSchema); err != nil {
+		return fmt.Errorf("creating profile PIN revision trigger: %w", err)
 	}
 	return tx.Commit()
 }

@@ -161,7 +161,15 @@ func TestUpdateProfile_PINChangeClearsLockout(t *testing.T) {
 	}
 	requirePINLocked(t, postVerifyPIN(t, h, "profile-2", "5678"))
 
-	req := newAuthorizedProfileRequestWithRole(http.MethodPut, "/profiles/profile-2", `{"pin":"2468"}`, "admin", "")
+	// The household parent (the PIN-locked primary, profile-1) verifies its
+	// own PIN and resets the kid's.
+	verify := postVerifyPIN(t, h, "profile-1", "1234")
+	var parent verifyPINResponse
+	if err := json.Unmarshal(verify.Body.Bytes(), &parent); err != nil || parent.ProfileToken == "" {
+		t.Fatalf("parent verify-pin: status = %d, body = %s", verify.Code, verify.Body.String())
+	}
+	req := newAuthorizedProfileRequestWithSession(http.MethodPut, "/profiles/profile-2", `{"pin":"2468"}`, "user", "profile-1", "sess-1")
+	req.Header.Set("X-Profile-Token", parent.ProfileToken)
 	rr := httptest.NewRecorder()
 	h.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-2"))
 	if rr.Code != http.StatusOK {

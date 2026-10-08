@@ -116,8 +116,16 @@ type ResolveInput struct {
 
 // ProfileTokenClaims are the claims embedded in a verified profile token.
 type ProfileTokenClaims struct {
-	UserID         int
-	SessionID      string
-	ProfileID      string
+	UserID    int
+	SessionID string
+	ProfileID string
+	// PINRevision is the profile's userstore.Profile.PINRevision when its PIN
+	// was verified. A token is accepted only while it still matches, so
+	// changing the profile's PIN invalidates it and nothing else does.
+	PINRevision int64
+	// PolicyRevision is the account's access_policy_revision at mint time.
+	// Validation ignores it; it is still written so a node running a release
+	// from before PINRevision, which compares this claim, accepts the token
+	// during a rolling deploy. It can be dropped once no such node remains.
 	PolicyRevision int64
 }

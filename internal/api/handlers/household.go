@@ -8,16 +8,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
-
-// userLookup is the slice of the user repository the household check needs: a
-// profile token is only valid against the access-policy revision it was minted
-// for, so verifying one means reading the user's current revision.
-type userLookup interface {
-	GetByID(ctx context.Context, id int) (*models.User, error)
-}
 
 // canManageHousehold reports whether the caller may act for the whole household
 // — every profile on their own account — rather than only for themselves.
@@ -50,11 +42,10 @@ type userLookup interface {
 func canManageHousehold(
 	r *http.Request,
 	store userstore.UserStore,
-	users userLookup,
 	tokens *access.ProfileTokenService,
 ) (bool, error) {
 	return canManageHouseholdAs(r.Context(), store, activeProfileIDOf(r), func(profileID string) error {
-		return verifyProfileToken(r, users, tokens, profileID)
+		return verifyProfileTokenIn(r, store, tokens, profileID)
 	})
 }
 
@@ -122,15 +113,39 @@ func profileLessAdminMayManage(ctx context.Context, store userstore.UserStore) (
 }
 
 // verifyProfileToken checks the X-Profile-Token a PIN-locked profile must
-// present. Missing dependencies fail closed: a handler wired without a token
-// service cannot verify a PIN, and "cannot verify" is not "verified".
+// present, reading the profile from the caller's own store. Missing
+// dependencies fail closed: a handler wired without a token service cannot
+// verify a PIN, and "cannot verify" is not "verified".
 func verifyProfileToken(
 	r *http.Request,
-	users userLookup,
+	stores userstore.UserStoreProvider,
 	tokens *access.ProfileTokenService,
 	profileID string,
 ) error {
-	if users == nil || tokens == nil {
+	if stores == nil || tokens == nil {
+		return access.ErrProfileUnverified
+	}
+	userID := apimw.GetUserID(r.Context())
+	if userID == 0 {
+		return access.ErrProfileUnverified
+	}
+	store, err := stores.ForUser(r.Context(), userID)
+	if err != nil {
+		return fmt.Errorf("opening user store: %w", err)
+	}
+	return verifyProfileTokenIn(r, store, tokens, profileID)
+}
+
+// verifyProfileTokenIn is verifyProfileToken against an already opened store
+// for the calling account. The token must match the profile's current PIN
+// revision (see access.CheckProfileToken).
+func verifyProfileTokenIn(
+	r *http.Request,
+	store userstore.UserStore,
+	tokens *access.ProfileTokenService,
+	profileID string,
+) error {
+	if store == nil || tokens == nil {
 		return access.ErrProfileUnverified
 	}
 
@@ -144,24 +159,13 @@ func verifyProfileToken(
 		return access.ErrProfileUnverified
 	}
 
-	user, err := users.GetByID(r.Context(), userID)
+	profile, err := store.GetProfile(r.Context(), profileID)
 	if err != nil {
-		return fmt.Errorf("loading user policy: %w", err)
+		return fmt.Errorf("loading profile: %w", err)
 	}
-	if user == nil {
+	if profile == nil {
 		return access.ErrProfileUnverified
 	}
 
-	profileClaims, err := tokens.Validate(r.Header.Get("X-Profile-Token"))
-	if err != nil {
-		return err
-	}
-	if profileClaims.UserID != userID ||
-		profileClaims.SessionID != claims.SessionID ||
-		profileClaims.ProfileID != profileID ||
-		profileClaims.PolicyRevision != user.AccessPolicyRevision {
-		return access.ErrProfileUnverified
-	}
-
-	return nil
+	return access.CheckProfileToken(tokens, r.Header.Get("X-Profile-Token"), userID, claims.SessionID, profile)
 }

@@ -114,6 +114,9 @@ func assertHouseholdCreation(t *testing.T, e *Env, id string, resp response, seq
 			}
 		}
 		want["pin_hash"] = hash
+		// The PIN is set after the insert, which advances the new profile's
+		// own PIN revision once.
+		want["pin_revision"] = float64(1)
 	}
 	equal(want, added)
 	if resp.Status != http.StatusCreated {

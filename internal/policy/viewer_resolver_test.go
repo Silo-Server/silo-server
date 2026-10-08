@@ -199,8 +199,9 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				AccessPolicyRevision: 5,
 			},
 			profile: &userstore.Profile{
-				ID:      "prof-1",
-				PINHash: "pin-hash",
+				ID:          "prof-1",
+				PINHash:     "pin-hash",
+				PINRevision: 3,
 			},
 			input: access.ResolveInput{
 				UserID:       1,
@@ -209,11 +210,14 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				ProfileToken: "valid",
 			},
 			tokens: stubProfileTokenValidator{
+				// The account revision moved on since minting; only the
+				// profile's PIN revision binds the token.
 				claims: &access.ProfileTokenClaims{
 					UserID:         1,
 					SessionID:      "sess-1",
 					ProfileID:      "prof-1",
-					PolicyRevision: 5,
+					PINRevision:    3,
+					PolicyRevision: 4,
 				},
 			},
 			wantNilAllowed: true,
@@ -319,8 +323,9 @@ func TestViewerResolverPINErrorsMatchLegacy(t *testing.T) {
 		AccessPolicyRevision: 5,
 	}
 	profile := &userstore.Profile{
-		ID:      "prof-1",
-		PINHash: "pin-hash",
+		ID:          "prof-1",
+		PINHash:     "pin-hash",
+		PINRevision: 2,
 	}
 	pdp := newViewerResolverTestPDP(t, ctx)
 
@@ -350,7 +355,9 @@ func TestViewerResolverPINErrorsMatchLegacy(t *testing.T) {
 			},
 		},
 		{
-			name: "revision mismatch",
+			// The PIN changed since minting. A matching account revision
+			// does not rescue the token.
+			name: "pin revision mismatch",
 			input: access.ResolveInput{
 				UserID:       1,
 				SessionID:    "sess-1",
@@ -362,7 +369,8 @@ func TestViewerResolverPINErrorsMatchLegacy(t *testing.T) {
 					UserID:         1,
 					SessionID:      "sess-1",
 					ProfileID:      "prof-1",
-					PolicyRevision: 4,
+					PINRevision:    1,
+					PolicyRevision: 5,
 				},
 			},
 		},

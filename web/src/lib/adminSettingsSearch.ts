@@ -110,6 +110,7 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "Redis",
           "Use Redis",
           "Connection URL",
+          "Database number",
           "Public storage",
           "Private storage",
           "Endpoint",

@@ -667,6 +667,33 @@ func normalizeLoadedConfig(cfg *config.Config) {
 	cfg.Playback.FFmpegPath = playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 }
 
+// applyBootstrapOverrides replaces the settings the process environment owns
+// in a config built from the database.
+func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
+	cfg.Server.Listen = bc.Listen
+	cfg.Server.Mode = bc.Mode
+	cfg.Database.URL = bc.DatabaseURL
+	cfg.JellyfinCompat.Listen = bc.JFListen
+	cfg.Redis = cfg.Redis.WithBootstrapURL(bc.RedisURL)
+}
+
+// addRedisBootstrapSettings records what REDIS_URL supplies to this process
+// in the maps the admin settings handlers read: the keys an admin cannot save
+// here and the values in effect. REDIS_URL names the database number too, so
+// redis.db is one of them and reports the number in use. With a value the
+// parser cannot read, a server that stays up has only the event bus connected,
+// to a bare address and on database 0.
+func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values map[string]string) {
+	if redisURL == "" {
+		return
+	}
+	configured["redis.url"] = true
+	values["redis.url"] = redisURL
+	configured[config.RedisDBSettingKey] = true
+	db, _ := (config.RedisConfig{URL: redisURL}).Database()
+	values[config.RedisDBSettingKey] = strconv.Itoa(db)
+}
+
 // main starts the Silo server or a requested maintenance command.
 func main() {
 	var storageAdmission *pglock.NodeAdmission
@@ -885,13 +912,7 @@ func main() {
 	normalizeLoadedConfig(cfg)
 
 	// Step 7: Apply bootstrap overrides
-	cfg.Server.Listen = bc.Listen
-	cfg.Server.Mode = bc.Mode
-	cfg.Database.URL = bc.DatabaseURL
-	cfg.JellyfinCompat.Listen = bc.JFListen
-	if bc.RedisURL != "" {
-		cfg.Redis.URL = bc.RedisURL
-	}
+	applyBootstrapOverrides(cfg, bc)
 
 	// Step 8: Recreate pool if max_connections differs from bootstrap default
 	if cfg.Database.MaxConnections != bootstrapDBCfg.MaxConnections {
@@ -1010,7 +1031,7 @@ func main() {
 		}()
 	}
 
-	eventBus := cache.NewEventBus(cfg.Redis.URL)
+	eventBus := cache.NewEventBus(cfg.Redis)
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		if event.Type == cache.EventScanComplete {
 			sections.InvalidateResolvedListCache()
@@ -1209,10 +1230,7 @@ func main() {
 
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
-	if bc.RedisURL != "" {
-		bootstrapSensitiveConfigured["redis.url"] = true
-		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
-	}
+	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues)
 	if rawTrustedProxies := strings.TrimSpace(os.Getenv(clientip.EnvTrustedProxies)); rawTrustedProxies != "" {
 		normalizedTrustedProxies, normalizeErr := clientip.NormalizeCIDRList(rawTrustedProxies)
 		if normalizeErr != nil {
@@ -1250,8 +1268,7 @@ func main() {
 		shutdownWork = append(shutdownWork, done)
 	}
 	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
-	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
-		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
+	redisBootstrapAvailable := normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil
 
 	// The API routes connect the subtitle sync service to this hook; the
 	// Jellyfin routes share it, so a first play from either side syncs.

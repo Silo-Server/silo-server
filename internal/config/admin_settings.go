@@ -2,8 +2,10 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/mail"
 	"net/url"
 	"path/filepath"
@@ -792,6 +794,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
+	case RedisDBSettingKey:
+		return NormalizeRedisDB(value)
 	case "theme.catalog_url":
 		return normalizeAdminThemeURL(key, value)
 
@@ -922,7 +926,7 @@ func ValidateRedisRateLimitTransport(values map[string]string, redisBootstrapAva
 	if strings.EqualFold(strings.TrimSpace(effective["ratelimit.backend"]), "redis") &&
 		redisURL == "" &&
 		!redisBootstrapAvailable {
-		return fmt.Errorf("redis.url or a bootstrap Redis/Sentinel transport is required when ratelimit.backend is redis")
+		return fmt.Errorf("redis.url or a bootstrap REDIS_URL is required when ratelimit.backend is redis")
 	}
 	return nil
 }
@@ -933,10 +937,198 @@ func NormalizeRedisURL(raw string) (string, error) {
 	if value == "" {
 		return "", nil
 	}
-	if _, err := redisv9.ParseURL(value); err != nil {
+	if _, _, err := ParseRedisURL(value); err != nil {
 		return "", fmt.Errorf("redis.url must be a valid redis://, rediss://, or unix:// URL: %w", err)
 	}
 	return value, nil
+}
+
+// RedisDBSettingKey is the setting that replaces the database number in
+// redis.url.
+const RedisDBSettingKey = "redis.db"
+
+// NormalizeRedisDB accepts an empty value, which leaves the database number
+// to redis.url, or a whole number of 0 or more.
+func NormalizeRedisDB(raw string) (string, error) {
+	db, set, err := parseRedisDB(raw)
+	if err != nil || !set {
+		return "", err
+	}
+	return strconv.Itoa(db), nil
+}
+
+// parseRedisDB reads a redis.db value and reports whether it names a number.
+func parseRedisDB(raw string) (db int, set bool, err error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return 0, false, nil
+	}
+	db, err = strconv.Atoi(value)
+	if err != nil || db < 0 {
+		return 0, false, fmt.Errorf("%s must be a whole number, 0 or more", RedisDBSettingKey)
+	}
+	return db, true, nil
+}
+
+// Options returns the options every Redis client is built from: what
+// ParseRedisURL reads from URL, on database DB when DB is set. The error says
+// which of the two cannot be read.
+func (c RedisConfig) Options() (*redisv9.Options, *redisv9.FailoverOptions, error) {
+	options, failover, err := ParseRedisURL(c.URL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid redis URL: %w", err)
+	}
+	db, set, err := parseRedisDB(c.DB)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch {
+	case !set:
+	case failover != nil:
+		failover.DB = db
+	default:
+		options.DB = db
+	}
+	return options, failover, nil
+}
+
+// Database returns the database number the config's clients are on. It
+// reports false when there is no URL or the config cannot be parsed.
+func (c RedisConfig) Database() (int, bool) {
+	if strings.TrimSpace(c.URL) == "" {
+		return 0, false
+	}
+	options, failover, err := c.Options()
+	if err != nil {
+		return 0, false
+	}
+	var db int
+	if failover != nil {
+		db = failover.DB
+	} else {
+		db = options.DB
+	}
+	// go-redis accepts a negative number in a URL and leaves the connection
+	// on database 0.
+	return max(db, 0), true
+}
+
+// WithBootstrapURL returns the config of a process started with REDIS_URL.
+// The environment names the whole connection, database number included, so
+// the saved redis.db is not applied to it. An empty bootstrapURL changes
+// nothing.
+func (c RedisConfig) WithBootstrapURL(bootstrapURL string) RedisConfig {
+	if bootstrapURL == "" {
+		return c
+	}
+	return RedisConfig{URL: bootstrapURL}
+}
+
+// redisSentinelMasterParam is the query parameter that makes a redis.url name
+// a Sentinel deployment instead of one Redis server.
+const redisSentinelMasterParam = "master_name"
+
+// ParseRedisURL parses a redis.url value and returns exactly one set of
+// options. A URL with a master_name parameter names a Sentinel deployment:
+// its host and any addr parameters are Sentinel addresses, its user info
+// authenticates to Sentinel, and the username and password parameters
+// authenticate to the Redis servers. Any other URL names one Redis server.
+// The URL path is the database number, unless a db parameter overrides it.
+//
+// The URL can carry passwords and the errors are logged, so an error says
+// what is wrong without quoting any part of the URL.
+func ParseRedisURL(raw string) (*redisv9.Options, *redisv9.FailoverOptions, error) {
+	raw = strings.TrimSpace(raw)
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, nil, errors.New("redis: the URL is malformed" + redisURLEncodingHint)
+	}
+	query, queryErr := url.ParseQuery(u.RawQuery)
+	sentinel := query.Has(redisSentinelMasterParam)
+	mentioned := strings.Contains(percentDecoded(u.RawQuery), redisSentinelMasterParam) || strings.Contains(u.Fragment, redisSentinelMasterParam)
+	if mentioned && (queryErr != nil || strings.Contains(raw, "#")) {
+		// go-redis drops a pair it cannot parse and everything after a #. A
+		// dropped master_name would turn the URL into a single-server URL for
+		// the Sentinel port, and a dropped addr or password is just as silent.
+		return nil, nil, errors.New("redis: a parameter of the URL cannot be read" + redisURLEncodingHint)
+	}
+	if !sentinel {
+		options, err := redisv9.ParseURL(raw)
+		if err != nil {
+			return nil, nil, redisURLError(err)
+		}
+		return options, nil, nil
+	}
+
+	if strings.Contains(u.RawQuery, "+") {
+		// A + in a query string is a space, so a password with a + in it
+		// would reach Redis changed.
+		return nil, nil, errors.New("redis: a + in a Sentinel URL parameter means a space; write %2B for a plus sign")
+	}
+	failover, err := redisv9.ParseFailoverURL(raw)
+	if err != nil {
+		return nil, nil, redisURLError(err)
+	}
+	if strings.TrimSpace(failover.MasterName) == "" {
+		return nil, nil, fmt.Errorf("redis: %s must name the Sentinel master", redisSentinelMasterParam)
+	}
+	if host, port, err := net.SplitHostPort(u.Host); err != nil || host == "" || port == "" {
+		// go-redis would fall back to port 6379, the Redis port.
+		return nil, nil, errors.New("redis: the Sentinel address needs a host and a port, for example sentinel-1:26379; name further Sentinels with addr parameters")
+	}
+	if failover.RouteByLatency || failover.RouteRandomly || failover.ReplicaOnly || failover.UseDisconnectedReplicas {
+		// These options are for reading from replicas. Silo's clients write,
+		// and go-redis panics when a single client is built with a routing
+		// option.
+		return nil, nil, errors.New("redis: route_by_latency, route_randomly, replica_only and use_disconnected_replicas are not supported; Silo reads and writes on the master")
+	}
+	if failover.DialTimeout < 0 || failover.ReadTimeout < 0 {
+		// go-redis reads a read timeout of 0 or less as no timeout. A
+		// subscription that redials into a frozen master would then wait for
+		// its answer for ever, and never move to the master Sentinel promotes.
+		// With a dial timeout of 0 or less every dial fails at once.
+		return nil, nil, errors.New("redis: dial_timeout and read_timeout must be more than 0 in a Sentinel URL; leave them out for the defaults")
+	}
+	if failover.DialTimeout == 0 {
+		// go-redis's Sentinel dialer reads the timeout from these options,
+		// where its 5 second default is not filled in, and a subscription's
+		// dial has no other limit. A dial to a master that is gone would wait
+		// until the kernel gives up.
+		failover.DialTimeout = 5 * time.Second
+	}
+	return nil, failover, nil
+}
+
+// percentDecoded decodes the escapes in s that are valid and keeps the rest as
+// they are. url.QueryUnescape gives up at the first invalid one.
+func percentDecoded(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if value, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(value))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+const redisURLEncodingHint = "; percent-encode reserved characters in user names and passwords"
+
+// redisURLError keeps what is wrong with a URL and drops the value go-redis
+// quotes after it, which can be part of a password that was not
+// percent-encoded.
+func redisURLError(err error) error {
+	problem, _, _ := strings.Cut(strings.TrimPrefix(err.Error(), "redis: "), ": ")
+	switch problem {
+	case "unexpected option", "invalid database number", "invalid URL path":
+		// What a reserved character in a password turns into.
+		problem += redisURLEncodingHint
+	}
+	return errors.New("redis: " + problem)
 }
 
 func normalizeAdminBool(key, value string) (string, error) {

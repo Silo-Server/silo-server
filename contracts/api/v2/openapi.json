@@ -38626,7 +38626,7 @@
             ]
           },
           "profile_token": {
-            "description": "Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session. Absent when the PIN did not match",
+            "description": "Send as X-Profile-Token with X-Profile-Id to act as the unlocked profile; bound to this login session and the profile's current PIN, so it stops being accepted when the session ends or the profile's PIN changes. Absent when the PIN did not match",
             "examples": [
               "pvt_5f3a9c1e7b2d4e8fa0c6"
             ],
