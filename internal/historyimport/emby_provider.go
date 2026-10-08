@@ -35,6 +35,11 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 		return nil, nil, err
 	}
 	var warnings []string
+	hidden, err := p.hiddenFromResume(ctx, resumableItems)
+	if err != nil {
+		slog.WarnContext(ctx, "emby history import: continue watching list unavailable", "component", "historyimport", "error", err)
+		warnings = append(warnings, warnEmbyResumeListUnavailable)
+	}
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
@@ -74,6 +79,7 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	}
 	for _, item := range watchedItems {
 		for _, record := range embyWatchedRecords(item, seriesMeta[item.SeriesID]) {
+			record.HiddenFromResume = hidden[item.ID]
 			add(record)
 		}
 	}
@@ -116,6 +122,31 @@ func embyWatchedRecords(item embyItem, series embyItem) []Record {
 		records = append(records, next)
 	}
 	return records
+}
+
+// hiddenFromResume returns the resumable items the user hid from Emby's
+// Continue Watching. Hiding leaves an item's user data unchanged and the
+// IsResumable filter still returns it; only Emby's own resume list leaves it
+// out. On error nothing is reported hidden.
+func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyItem) (map[string]bool, error) {
+	if len(resumable) == 0 {
+		return nil, nil
+	}
+	listed, err := p.client.FetchResumeItems(ctx, p.auth)
+	if err != nil {
+		return nil, err
+	}
+	shown := make(map[string]bool, len(listed))
+	for _, item := range listed {
+		shown[item.ID] = true
+	}
+	hidden := make(map[string]bool)
+	for _, item := range resumable {
+		if !shown[item.ID] {
+			hidden[item.ID] = true
+		}
+	}
+	return hidden, nil
 }
 
 func (p *EmbyProvider) fetchSeriesMetadata(ctx context.Context, items []embyItem) (map[string]embyItem, error) {
@@ -195,6 +226,9 @@ func mergeRecords(a, b Record) Record {
 	}
 	if b.PreferTMDB {
 		result.PreferTMDB = true
+	}
+	if b.HiddenFromResume {
+		result.HiddenFromResume = true
 	}
 	result.FavoriteOnly = result.FavoriteOnly && b.FavoriteOnly
 	if b.PlayCount > result.PlayCount {

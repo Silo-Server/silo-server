@@ -201,7 +201,11 @@ type Record struct {
 	Favorite     bool
 	FavoriteOnly bool
 	PreferTMDB   bool
-	UpdatedAt    time.Time
+	// HiddenFromResume marks an in-progress item the user hid from the
+	// source's Continue Watching. Its progress is still imported, and the
+	// profile gets a matching Continue Watching dismissal.
+	HiddenFromResume bool
+	UpdatedAt        time.Time
 }
 
 type Match struct {

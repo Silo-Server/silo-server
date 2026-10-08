@@ -17,16 +17,20 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// fakeEmby answers /Users/{id}/Items the way Emby 4.8 through 4.10 do: lists
-// page by StartIndex and Limit, and ProductionYear, UserData.PlayCount, and
-// UserData.LastPlayedDate stay empty unless Fields names them.
+// fakeEmby answers /Users/{id}/Items and /Users/{id}/Items/Resume the way
+// Emby 4.8 through 4.10 do: lists page by StartIndex and Limit, and
+// ProductionYear, UserData.PlayCount, and UserData.LastPlayedDate stay empty
+// unless Fields names them. The IsResumable filter returns every resumable
+// item, while the Resume list leaves out the ones hidden from Continue
+// Watching and returns nothing without a type filter.
 type fakeEmby struct {
 	t         *testing.T
 	played    []embyItem
 	resumable []embyItem
+	hidden    []string // resumable item IDs hidden from Continue Watching
 	favorites []embyItem
 	series    []embyItem
-	failures  map[string]int // Filters value, or "Ids", answered with this status
+	failures  map[string]int // Filters value, "Ids", or "Resume", answered with this status
 	pageCap   int            // when set, pages hold at most this many items
 
 	mu       sync.Mutex
@@ -42,6 +46,16 @@ func (f *fakeEmby) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := query.Get("Filters")
 	var items []embyItem
 	switch {
+	case strings.HasSuffix(r.URL.Path, "/Items/Resume"):
+		key = "Resume"
+		if query.Get("IncludeItemTypes") == "" && query.Get("MediaTypes") == "" {
+			break
+		}
+		for _, item := range f.resumable {
+			if !slices.Contains(f.hidden, item.ID) {
+				items = append(items, item)
+			}
+		}
 	case query.Get("Ids") != "":
 		key = "Ids"
 		ids := strings.Split(query.Get("Ids"), ",")
@@ -181,6 +195,50 @@ func TestEmbyProviderFetchImportsWatchDatesYearsAndPlayCounts(t *testing.T) {
 	partial := records["movie-2"]
 	if partial.Played || partial.PositionSeconds != 600 || !partial.UpdatedAt.Equal(resumed) {
 		t.Fatalf("resumable movie = played:%v pos:%v updated:%v, want false/600/%v", partial.Played, partial.PositionSeconds, partial.UpdatedAt, resumed)
+	}
+}
+
+func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
+	t.Parallel()
+
+	stopped := time.Date(2026, 10, 8, 19, 59, 13, 0, time.UTC)
+	resumable := func(id, name, tmdb string, positionTicks int64) embyItem {
+		item := embyItem{ID: id, Name: name, Type: "Movie", RunTimeTicks: 6_000_000_000, ProviderIDs: map[string]string{"Tmdb": tmdb}}
+		item.UserData.PlaybackPositionTicks = positionTicks
+		item.UserData.PlayCount = 1
+		item.UserData.LastPlayedDate = &stopped
+		return item
+	}
+	fake := &fakeEmby{
+		resumable: []embyItem{
+			resumable("9", "Alien", "348", 2_700_000_000),
+			resumable("8", "Heat", "949", 2_400_000_000),
+		},
+		hidden: []string{"8"},
+	}
+
+	records, warnings := fetchEmbyRecords(t, fake.provider(t))
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if visible := records["9"]; visible.HiddenFromResume || visible.PositionSeconds != 270 || !visible.UpdatedAt.Equal(stopped) {
+		t.Fatalf("visible resumable movie = hidden:%v pos:%v updated:%v, want false/270/%v", visible.HiddenFromResume, visible.PositionSeconds, visible.UpdatedAt, stopped)
+	}
+	// The hidden movie keeps its position and play date; the import dismisses
+	// it from Continue Watching instead of dropping it.
+	if hidden := records["8"]; !hidden.HiddenFromResume || hidden.PositionSeconds != 240 || !hidden.UpdatedAt.Equal(stopped) {
+		t.Fatalf("hidden resumable movie = hidden:%v pos:%v updated:%v, want true/240/%v", hidden.HiddenFromResume, hidden.PositionSeconds, hidden.UpdatedAt, stopped)
+	}
+
+	// Without Emby's resume list nothing can be told apart: the import keeps
+	// every position, hides nothing, and says why.
+	fake.failures = map[string]int{"Resume": http.StatusInternalServerError}
+	records, warnings = fetchEmbyRecords(t, fake.provider(t))
+	if !slices.Equal(warnings, []string{warnEmbyResumeListUnavailable}) {
+		t.Fatalf("warnings = %v, want %q", warnings, warnEmbyResumeListUnavailable)
+	}
+	if records["8"].HiddenFromResume || records["8"].PositionSeconds != 240 {
+		t.Fatalf("hidden movie without resume list = %+v, want imported and not hidden", records["8"])
 	}
 }
 
