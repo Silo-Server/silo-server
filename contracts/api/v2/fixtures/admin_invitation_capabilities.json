@@ -1,8 +1,10 @@
 {
-  "revision": "03f880d6f06bd0e346a5f68463218f5476dc82046f69ed857446345aa5980c24",
+  "revision": "3335feebe8e73cc7f68726af84a54d546408bd6c01f0c5852bcf8dc4098e2e31",
   "state": "available",
   "allowed": true,
   "default_profile": true,
   "profileless": true,
+  "profile_limit": true,
+  "non_replacing_creation": true,
   "email_delivery": false
 }

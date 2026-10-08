@@ -30,6 +30,19 @@
 ./internal/invitations TestInvitationAtomicConcurrentAccept
 ./internal/invitations TestInvitationAtomicRollbackAndExpiry
 
+# Native v2 invitation limits, guarded address admission and safe rollback.
+./internal/invitations TestInvitationProfileLimitAcceptanceDB
+./internal/invitations TestInvitationProfileLimitAtomicFaultsDB
+./internal/invitations TestInvitationProfileLimitInvalidInsertPreservesSourceDB
+./internal/invitations TestInvitationProfileLimitMigrationDownDB
+./internal/invitations TestInvitationProfileLimitMigrationDownConcurrentCreateDB
+./internal/invitations TestInvitationNonReplacingCreationDB
+./internal/invitations TestInvitationNonReplacingLegacyAndResendDB
+./internal/invitations TestInvitationNonReplacingConcurrentFreshLegacyCreateDB
+./internal/invitations TestInvitationNonReplacingConcurrentAcceptanceDB
+./internal/invitations TestInvitationNonReplacingConcurrentLegacyReplacementDB
+./internal/apiv2 TestInvitationNonReplacingNativeHTTPDB
+
 # Task locks and bounded history cleanup.
 ./internal/taskmanager/tasks TestDetectIntroMarkersAdvisoryLockPostgres
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres

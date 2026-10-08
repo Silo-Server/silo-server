@@ -36,7 +36,7 @@ func (f *fakeRepo) Create(_ context.Context, input models.CreateInvitationInput,
 	inv := &models.Invitation{
 		ID: f.nextID, Email: input.Email, Delivery: input.Delivery, TokenHash: tokenHash,
 		Role: input.Role, AccessGroupID: input.AccessGroupID,
-		LibraryIDs: input.LibraryIDs, CreateProfile: input.CreateProfile,
+		LibraryIDs: input.LibraryIDs, MaxProfiles: input.MaxProfiles, CreateProfile: input.CreateProfile,
 		ShowTour: input.ShowTour, Note: input.Note,
 		InvitedBy: input.InvitedBy, ExpiresAt: input.ExpiresAt,
 		CreatedAt: time.Now(), UpdatedAt: time.Now(),

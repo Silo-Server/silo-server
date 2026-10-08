@@ -18,6 +18,9 @@ import (
 // DefaultTTL bounds how long a claim link stays usable.
 const DefaultTTL = 7 * 24 * time.Hour
 
+// MaxProfileLimit is the largest value the PostgreSQL integer column accepts.
+const MaxProfileLimit = 1<<31 - 1
+
 // Account roles an invitation may grant.
 const (
 	roleUser  = models.RoleUser
@@ -26,12 +29,14 @@ const (
 
 // Errors surfaced to the API layer.
 var (
-	ErrInvalidEmail   = errors.New("invalid email address")
-	ErrRoleNotAllowed = errors.New("inviter may not grant this role")
-	ErrAdminGrouped   = errors.New("admin accounts cannot belong to an access group")
-	ErrEmailTaken     = errors.New("an account with this email already exists")
-	ErrSessionStart   = errors.New("invitation accepted but login failed")
-	ErrNoLinkBase     = errors.New("no external URL is configured for invitation links")
+	ErrInvalidEmail        = errors.New("invalid email address")
+	ErrRoleNotAllowed      = errors.New("inviter may not grant this role")
+	ErrAdminGrouped        = errors.New("admin accounts cannot belong to an access group")
+	ErrEmailTaken          = errors.New("an account with this email already exists")
+	ErrInvitationExists    = errors.New("a pending invitation with this email already exists")
+	ErrSessionStart        = errors.New("invitation accepted but login failed")
+	ErrNoLinkBase          = errors.New("no external URL is configured for invitation links")
+	ErrInvalidProfileLimit = errors.New("profile limit must be between one and 2147483647")
 	// ErrEmailUnavailable refuses an explicit email delivery when no mail
 	// sender is configured, instead of creating a link the admin did not ask for.
 	ErrEmailUnavailable = errors.New("email delivery is not configured")
@@ -156,21 +161,24 @@ type SendResult struct {
 type SendInput struct {
 	// Email is required unless Delivery is DeliveryLink, which forbids it on
 	// a new invitation.
-	Email         string
-	Delivery      Delivery
-	Role          string
-	AccessGroupID *int64
-	LibraryIDs    []int
-	CreateProfile bool
-	ShowTour      bool
-	Note          string
+	Email string
+	// ReplaceExisting defaults to true; false refuses a pending address.
+	ReplaceExisting *bool
+	Delivery        Delivery
+	Role            string
+	AccessGroupID   *int64
+	LibraryIDs      []int
+	MaxProfiles     *int
+	CreateProfile   bool
+	ShowTour        bool
+	Note            string
 	// InvitedBy is the authenticated caller. The inviter's name for the
 	// email and their admin status for the role-escalation check are read
 	// from the database, not trusted from the request.
 	InvitedBy int64
 }
 
-// Send validates, supersedes any live invitation for the address, stores the
+// Send validates, applies the requested pending-invitation policy, stores the
 // new one, and emails the claim link as input.Delivery asks. With
 // DeliveryDefault and no email configured the invitation is still created and
 // the claim URL returned for manual delivery.
@@ -179,6 +187,9 @@ func (s *Service) Send(ctx context.Context, input SendInput) (*SendResult, error
 }
 
 func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*SendResult, error) {
+	if input.MaxProfiles != nil && (*input.MaxProfiles < 1 || *input.MaxProfiles > MaxProfileLimit) {
+		return nil, ErrInvalidProfileLimit
+	}
 	var email string
 	switch input.Delivery {
 	case DeliveryLink:
@@ -262,16 +273,18 @@ func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*
 	}
 
 	createInput := models.CreateInvitationInput{
-		Email:         email,
-		Delivery:      stored,
-		Role:          role,
-		AccessGroupID: input.AccessGroupID,
-		LibraryIDs:    input.LibraryIDs,
-		CreateProfile: input.CreateProfile,
-		ShowTour:      input.ShowTour,
-		Note:          strings.TrimSpace(input.Note),
-		InvitedBy:     input.InvitedBy,
-		ExpiresAt:     s.now().Add(s.ttl),
+		Email:           email,
+		ReplaceExisting: input.ReplaceExisting,
+		Delivery:        stored,
+		Role:            role,
+		AccessGroupID:   input.AccessGroupID,
+		LibraryIDs:      input.LibraryIDs,
+		MaxProfiles:     input.MaxProfiles,
+		CreateProfile:   input.CreateProfile,
+		ShowTour:        input.ShowTour,
+		Note:            strings.TrimSpace(input.Note),
+		InvitedBy:       input.InvitedBy,
+		ExpiresAt:       s.now().Add(s.ttl),
 	}
 	var inv *models.Invitation
 	if sourceID == nil {
@@ -371,6 +384,7 @@ func (s *Service) Resend(ctx context.Context, id, resentBy int64, delivery Deliv
 		Role:          prior.Role,
 		AccessGroupID: prior.AccessGroupID,
 		LibraryIDs:    prior.LibraryIDs,
+		MaxProfiles:   prior.MaxProfiles,
 		CreateProfile: prior.CreateProfile,
 		ShowTour:      prior.ShowTour,
 		Note:          prior.Note,
@@ -463,7 +477,7 @@ func (s *Service) Accept(ctx context.Context, token, email, password, deviceName
 			address = entered
 		}
 		return s.accounts.CreateAccountInTransaction(ctx, tx, auth.CreateAccountInput{
-			User:           models.CreateUserInput{Username: address, Email: address, Password: password, Role: inv.Role, LibraryIDs: inv.LibraryIDs, AccessGroupID: inv.AccessGroupID},
+			User:           models.CreateUserInput{Username: address, Email: address, Password: password, Role: inv.Role, LibraryIDs: inv.LibraryIDs, AccessGroupID: inv.AccessGroupID, MaxProfiles: inv.MaxProfiles},
 			DefaultProfile: auth.DefaultProfileOptions{Enabled: inv.CreateProfile, Name: profileNameFromEmail(address)},
 		})
 	})

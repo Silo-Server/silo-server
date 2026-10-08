@@ -1,6 +1,8 @@
 {
-  "revision": "d41626e5b18eee5ac67e2812df285fb04a37f263b73a8d0b4733b67e3d77e999",
+  "revision": "8783ad7b669046bdc6cc387367ab5705167178f2fcb0a295345657d48b85cc30",
   "state": "available",
   "default_profile": true,
-  "profileless": true
+  "profileless": true,
+  "profile_limit": true,
+  "non_replacing_creation": true
 }

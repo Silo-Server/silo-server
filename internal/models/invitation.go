@@ -30,6 +30,7 @@ type Invitation struct {
 	Role          string
 	AccessGroupID *int64
 	LibraryIDs    []int // nil = all libraries
+	MaxProfiles   *int  // nil = use the account DB default (5); minimum 1
 	CreateProfile bool
 	ShowTour      bool
 	Note          string
@@ -65,14 +66,17 @@ func (i *Invitation) Status(now time.Time) string {
 // CreateInvitationInput carries the admin's choices for a new invitation.
 type CreateInvitationInput struct {
 	// Email is empty for a link invitation.
-	Email         string
-	Delivery      string
-	Role          string
-	AccessGroupID *int64
-	LibraryIDs    []int
-	CreateProfile bool
-	ShowTour      bool
-	Note          string
-	InvitedBy     int64
-	ExpiresAt     time.Time
+	Email string
+	// ReplaceExisting defaults to true when nil; false refuses a pending address.
+	ReplaceExisting *bool
+	Delivery        string
+	Role            string
+	AccessGroupID   *int64
+	LibraryIDs      []int
+	MaxProfiles     *int
+	CreateProfile   bool
+	ShowTour        bool
+	Note            string
+	InvitedBy       int64
+	ExpiresAt       time.Time
 }

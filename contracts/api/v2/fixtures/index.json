@@ -1409,7 +1409,7 @@
           "Authorization": "Bearer tok-admin",
           "X-Profile-Id": "p-primary"
         },
-        "body": "{\"email\":\"invitee@example.invalid\"}"
+        "body": "{\"email\":\"invitee@example.invalid\",\"max_profiles\":2,\"replace_existing\":false}"
       },
       "expected_status": 201,
       "response_headers": {
@@ -1432,7 +1432,7 @@
           "Authorization": "Bearer tok-admin",
           "X-Profile-Id": "p-primary"
         },
-        "body": "{\"email\":\"invitee@example.invalid\",\"note\":\"smtp-failed\"}"
+        "body": "{\"email\":\"invitee@example.invalid\",\"max_profiles\":2,\"replace_existing\":false,\"note\":\"smtp-failed\"}"
       },
       "expected_status": 201,
       "response_headers": {

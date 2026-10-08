@@ -18,7 +18,7 @@ func TestInvitationServiceCommittedOutcomesDB(t *testing.T) {
 	sessions := &fakeSessions{err: errors.New("session unavailable")}
 	sender := &fakeMail{configured: true, err: errors.New("SMTP acknowledgement lost")}
 	svc := NewService(f.repo, users, auth.NewAccountProvisioner(users, pgstore.NewPostgresProvider(f.pool)), sessions, sender, nil, nil, "https://server.example.invalid")
-	sent, err := svc.Send(t.Context(), SendInput{Email: "Claim@EXAMPLE.invalid", Role: models.RoleUser, InvitedBy: 1, CreateProfile: true, LibraryIDs: []int{}})
+	sent, err := svc.Send(t.Context(), SendInput{Email: "Claim@EXAMPLE.invalid", Role: models.RoleUser, InvitedBy: 1, CreateProfile: true, MaxProfiles: new(2), LibraryIDs: []int{}})
 	if err == nil || sent == nil || sent.EmailSent || len(sender.sent) != 1 {
 		t.Fatalf("committed delivery result=%v err=%v sends=%d", sent, err, len(sender.sent))
 	}
@@ -31,7 +31,7 @@ func TestInvitationServiceCommittedOutcomesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Username != auth.NormalizeUsername(sent.Invitation.Email) || stored.Email != auth.NormalizeEmail(sent.Invitation.Email) || stored.Role != models.RoleUser || stored.LibraryIDs == nil || len(stored.LibraryIDs) != 0 {
+	if stored.Username != auth.NormalizeUsername(sent.Invitation.Email) || stored.Email != auth.NormalizeEmail(sent.Invitation.Email) || stored.Role != models.RoleUser || stored.LibraryIDs == nil || len(stored.LibraryIDs) != 0 || stored.MaxProfiles != 2 {
 		t.Fatalf("bound account state: %#v", stored)
 	}
 	inv, err := f.repo.GetByID(t.Context(), sent.Invitation.ID)
@@ -40,6 +40,9 @@ func TestInvitationServiceCommittedOutcomesDB(t *testing.T) {
 	}
 	if inv.AcceptedUserID == nil || *inv.AcceptedUserID != int64(user.ID) {
 		t.Fatal("post-commit login failure lost invitation claim")
+	}
+	if inv.MaxProfiles == nil || *inv.MaxProfiles != 2 {
+		t.Fatal("uncertain delivery or post-commit login failure lost profile limit")
 	}
 	var profiles int
 	if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM user_profiles WHERE user_id=$1`, user.ID).Scan(&profiles); err != nil || profiles != 1 {

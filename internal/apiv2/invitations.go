@@ -34,8 +34,10 @@ type InvitationService interface {
 
 type InvitationCapabilities struct {
 	Capability
-	DefaultProfile bool `json:"default_profile" doc:"Whether the selected profile store can atomically provision a requested default profile."`
-	Profileless    bool `json:"profileless"`
+	DefaultProfile       bool `json:"default_profile" doc:"Whether the selected profile store can atomically provision a requested default profile."`
+	Profileless          bool `json:"profileless"`
+	ProfileLimit         bool `json:"profile_limit" doc:"Whether invitations can bind an account profile limit atomically at acceptance."`
+	NonReplacingCreation bool `json:"non_replacing_creation" doc:"Whether replace_existing=false can refuse a pending address without superseding its invitation."`
 }
 type InvitationCapabilitiesOutput struct {
 	Status       int
@@ -93,6 +95,7 @@ type AdminInvitation struct {
 	AccessGroupID  *ID      `json:"access_group_id,omitempty"`
 	LibraryIDs     []ID     `json:"library_ids" nullable:"true" doc:"Null inherits library access; an empty array is an explicit empty override."`
 	CreateProfile  bool     `json:"create_profile"`
+	MaxProfiles    *int     `json:"max_profiles,omitempty" minimum:"1" maximum:"2147483647" doc:"Initial account profile limit, applied atomically at acceptance. Absent uses the account default (5)."`
 	ShowTour       bool     `json:"show_tour"`
 	Note           string   `json:"note"`
 	InvitedBy      ID       `json:"invited_by"`
@@ -118,14 +121,16 @@ type AdminInvitationResendInput struct {
 type AdminInvitationCreateInput struct {
 	RawBody []byte
 	Body    struct {
-		Email         string `json:"email,omitempty" maxLength:"254" doc:"Required unless delivery is link, which forbids it."`
-		Delivery      string `json:"delivery,omitempty" enum:"link,email" doc:"link: create a link to share, with no address and no email. email: email the link; fails when email is not configured. Omitted: email when configured, otherwise return the link for manual delivery."`
-		Role          string `json:"role,omitempty" enum:"user,admin" default:"user"`
-		AccessGroupID *ID    `json:"access_group_id,omitempty" pattern:"^[1-9][0-9]*$"`
-		LibraryIDs    []ID   `json:"library_ids,omitempty" doc:"Omit for inherited access; send [] for an explicit empty override."`
-		CreateProfile *bool  `json:"create_profile,omitempty" default:"true"`
-		ShowTour      *bool  `json:"show_tour,omitempty" default:"true"`
-		Note          string `json:"note,omitempty" maxLength:"4096"`
+		Email           string `json:"email,omitempty" maxLength:"254" doc:"Required unless delivery is link, which forbids it."`
+		ReplaceExisting *bool  `json:"replace_existing,omitempty" default:"true" doc:"False refuses an existing pending invitation for this address with 409 and changes nothing. Omitted or true supersedes it. Resend remains an explicit replacement of its requested source."`
+		Delivery        string `json:"delivery,omitempty" enum:"link,email" doc:"link: create a link to share, with no address and no email. email: email the link; fails when email is not configured. Omitted: email when configured, otherwise return the link for manual delivery."`
+		Role            string `json:"role,omitempty" enum:"user,admin" default:"user"`
+		AccessGroupID   *ID    `json:"access_group_id,omitempty" pattern:"^[1-9][0-9]*$"`
+		LibraryIDs      []ID   `json:"library_ids,omitempty" doc:"Omit for inherited access; send [] for an explicit empty override."`
+		CreateProfile   *bool  `json:"create_profile,omitempty" default:"true"`
+		MaxProfiles     *int   `json:"max_profiles,omitempty" minimum:"1" maximum:"2147483647" doc:"Initial account profile limit, applied atomically at acceptance. Omit to use the account default (5)."`
+		ShowTour        *bool  `json:"show_tour,omitempty" default:"true"`
+		Note            string `json:"note,omitempty" maxLength:"4096"`
 	}
 }
 type InvitationDelivery struct {
@@ -143,7 +148,7 @@ func invitationOf(inv *models.Invitation) AdminInvitation {
 	if delivery == "" {
 		delivery = invitationDeliveryUnknown
 	}
-	out := AdminInvitation{ID: IDFromInt(inv.ID), Email: inv.Email, Delivery: delivery, Role: roleOf(inv.Role), CreateProfile: inv.CreateProfile, ShowTour: inv.ShowTour, Note: inv.Note, InvitedBy: IDFromInt(inv.InvitedBy), InvitedByName: inv.InvitedByName, Status: inv.Status(time.Now()), ExpiresAt: NewInstant(inv.ExpiresAt), CreatedAt: NewInstant(inv.CreatedAt)}
+	out := AdminInvitation{ID: IDFromInt(inv.ID), Email: inv.Email, Delivery: delivery, Role: roleOf(inv.Role), CreateProfile: inv.CreateProfile, MaxProfiles: inv.MaxProfiles, ShowTour: inv.ShowTour, Note: inv.Note, InvitedBy: IDFromInt(inv.InvitedBy), InvitedByName: inv.InvitedByName, Status: inv.Status(time.Now()), ExpiresAt: NewInstant(inv.ExpiresAt), CreatedAt: NewInstant(inv.CreatedAt)}
 	if inv.LibraryIDs != nil {
 		out.LibraryIDs = make([]ID, 0, len(inv.LibraryIDs))
 		for _, id := range inv.LibraryIDs {
@@ -170,6 +175,8 @@ func invitationProblem(err error, public bool) *Problem {
 			return NewProblem(TypeNotFound, "Invitation not found or no longer available.")
 		}
 		return NewProblem(TypeConflict, "The invitation changed; reload before continuing.")
+	case errors.Is(err, invitations.ErrInvitationExists):
+		return NewProblem(TypeConflict, "A pending invitation already uses this email. Revoke it explicitly before creating another.")
 	case errors.Is(err, invitations.ErrEmailTaken):
 		return NewProblem(TypeConflict, "An account already uses this email or username.")
 	case public && (errors.Is(err, invitations.ErrInvalidEmail) || errors.Is(err, invitations.ErrEmailRequired)):
@@ -178,6 +185,9 @@ func invitationProblem(err error, public bool) *Problem {
 			WithErrors(ProblemError{Location: locationBody + ".email", Code: codeInvalid, Detail: "Enter a valid email address, like name@example.com."})
 	case errors.Is(err, invitations.ErrInvalidEmail), errors.Is(err, invitations.ErrAdminGrouped):
 		return NewProblem(TypeValidationFailed, "Invalid invitation configuration.")
+	case errors.Is(err, invitations.ErrInvalidProfileLimit):
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationBody + ".max_profiles", Code: codeInvalid, Detail: "Profile limit must be between 1 and 2147483647."})
 	case errors.Is(err, invitations.ErrRoleNotAllowed):
 		return NewProblem(TypePermissionDenied, "The requested role is not allowed.")
 	case errors.Is(err, auth.ErrLocalLoginDisabled):
@@ -248,7 +258,7 @@ func registerInvitations(reg *Registry) {
 			profile = reg.deps.Invitations.SupportsDefaultProfile()
 			profileless = true
 		}
-		return &InvitationCapabilitiesOutput{Body: InvitationCapabilities{Capability: Capability{State: state}, DefaultProfile: profile, Profileless: profileless}}, nil
+		return &InvitationCapabilitiesOutput{Body: InvitationCapabilities{Capability: Capability{State: state}, DefaultProfile: profile, Profileless: profileless, ProfileLimit: reg.deps.Invitations != nil, NonReplacingCreation: reg.deps.Invitations != nil}}, nil
 	}
 	Register(reg, op(http.MethodGet, "/invitations/capabilities", "getInvitationCapabilities", true), capabilities)
 	Register(reg, op(http.MethodGet, "/admin/invitations/capabilities", "getAdminInvitationCapabilities", false), func(ctx context.Context, in *CapabilityInput) (*AdminInvitationCapabilitiesOutput, error) {
@@ -375,7 +385,7 @@ func registerInvitations(reg *Registry) {
 		} else if p := invalidEmailProblem(in.Body.Email); p != nil {
 			return nil, p
 		}
-		input := invitations.SendInput{Email: in.Body.Email, Delivery: delivery, Role: in.Body.Role, CreateProfile: createProfile, ShowTour: showTour, Note: in.Body.Note, InvitedBy: int64(claimsFrom(ctx).UserID)}
+		input := invitations.SendInput{Email: in.Body.Email, ReplaceExisting: in.Body.ReplaceExisting, Delivery: delivery, Role: in.Body.Role, CreateProfile: createProfile, MaxProfiles: in.Body.MaxProfiles, ShowTour: showTour, Note: in.Body.Note, InvitedBy: int64(claimsFrom(ctx).UserID)}
 		if in.Body.AccessGroupID != nil {
 			id, p := invitationID(*in.Body.AccessGroupID)
 			if p != nil {

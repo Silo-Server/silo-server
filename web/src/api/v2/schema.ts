@@ -14297,6 +14297,11 @@ export interface components {
       invited_by_name: string;
       /** @description Null inherits library access; an empty array is an explicit empty override. */
       library_ids: string[] | null;
+      /**
+       * Format: int64
+       * @description Initial account profile limit, applied atomically at acceptance. Absent uses the account default (5).
+       */
+      max_profiles?: number;
       note: string;
       /** @enum {string} */
       role: "user" | "admin";
@@ -14311,6 +14316,10 @@ export interface components {
       default_profile: boolean;
       /** @description Whether email is configured, so an invitation can be created with delivery=email. */
       email_delivery: boolean;
+      /** @description Whether replace_existing=false can refuse a pending address without superseding its invitation. */
+      non_replacing_creation: boolean;
+      /** @description Whether invitations can bind an account profile limit atomically at acceptance. */
+      profile_limit: boolean;
       profileless: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -14337,7 +14346,17 @@ export interface components {
       email?: string;
       /** @description Omit for inherited access; send [] for an explicit empty override. */
       library_ids?: string[];
+      /**
+       * Format: int64
+       * @description Initial account profile limit, applied atomically at acceptance. Omit to use the account default (5).
+       */
+      max_profiles?: number;
       note?: string;
+      /**
+       * @description False refuses an existing pending invitation for this address with 409 and changes nothing. Omitted or true supersedes it. Resend remains an explicit replacement of its requested source.
+       * @default true
+       */
+      replace_existing: boolean;
       /**
        * @default user
        * @enum {string}
@@ -22789,6 +22808,10 @@ export interface components {
       allowed?: boolean;
       /** @description Whether the selected profile store can atomically provision a requested default profile. */
       default_profile: boolean;
+      /** @description Whether replace_existing=false can refuse a pending address without superseding its invitation. */
+      non_replacing_creation: boolean;
+      /** @description Whether invitations can bind an account profile limit atomically at acceptance. */
+      profile_limit: boolean;
       profileless: boolean;
       /** @description Opaque revision of this document */
       revision: string;

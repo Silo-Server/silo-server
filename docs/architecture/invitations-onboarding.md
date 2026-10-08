@@ -74,9 +74,13 @@ dump yields no usable links.
   explicit email request with no mail sender configured creates nothing.
 - **One live invitation per address.** A partial unique index
   (`invitations_one_pending_idx`, on `email` where neither accepted nor
-  revoked) enforces it; `Repository.Create` revokes any live invitation for
-  the address in the same transaction. Re-invite and resend therefore
-  *supersede*: a forwarded copy of the old link stops working.
+  revoked) enforces it. By default `Repository.Create` revokes any pending
+  invitation for the address in the same transaction. V2 creation can request
+  `replace_existing=false`: it locks a possible source without changing it and
+  refuses the address; the unique index closes concurrent-insert races.
+  Expired unrevoked rows also occupy that index. Exact-source resend still
+  replaces only its locked source. A forwarded copy of a superseded link stops
+  working.
 - **Accept commits account and claim together.** The invitation repository
   locks the token row and provisions the account and requested PostgreSQL
   profile through the same transaction. The final claim checks wall-clock
@@ -86,6 +90,18 @@ dump yields no usable links.
   the account. Resend accepts only the requested pending or expired source;
   it cannot revive revoked or accepted history or supersede a newer link from
   a stale request.
+- **The initial profile limit is part of the claim.** An optional stored
+  `max_profiles` is a positive integer, applied through account provisioning
+  before creating the default profile in that same transaction. Null means the
+  existing account database default (5), including invitations created before
+  the field existed. Resend copies the locked source limit rather than trusting
+  a prior service read. A profile or claim failure rolls back the limit together
+  with the account and profile; a later login failure leaves them committed.
+  Migration rollback locks the invitations table before checking for claimable
+  nonnull caps and refuses to discard them. Accepted accounts retain their
+  independently stored limit after the invitation column is removed.
+  This creation field and its `profile_limit` capability are v2 additions; the
+  v1 invitation DTOs remain frozen.
 - **Profile storage must support the transaction.** Required default profiles
   use the PostgreSQL provider's transaction capability, preserved through the
   notification wrapper. A SQLite profile store cannot join that transaction:

@@ -72,6 +72,7 @@ func (f *fakeInvitations) Send(_ context.Context, in invitations.SendInput) (*in
 	}
 	r := f.row
 	r.CreateProfile = in.CreateProfile
+	r.MaxProfiles = in.MaxProfiles
 	r.ShowTour = in.ShowTour
 	r.LibraryIDs = in.LibraryIDs
 	r.Email = in.Email

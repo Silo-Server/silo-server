@@ -8,7 +8,10 @@ import type { components } from "./schema";
 import { v2, type V2Body } from "./request";
 export type AdminInvitation = components["schemas"]["AdminInvitation"];
 export type InvitationDelivery = components["schemas"]["InvitationDelivery"];
-export type CreateInvitationBody = V2Body<"POST /api/v2/admin/invitations">;
+type InvitationRequestBody = V2Body<"POST /api/v2/admin/invitations">;
+export type CreateInvitationBody = Omit<InvitationRequestBody, "replace_existing"> & {
+  replace_existing?: InvitationRequestBody["replace_existing"];
+};
 export type InvitationDeliveryChoice = NonNullable<CreateInvitationBody["delivery"]>;
 export type InvitationAuthority = ProfileRequestContextSnapshot;
 export type InvitationPage = {
@@ -80,11 +83,13 @@ export async function createAdminInvitation(
   const result = await v2("POST /api/v2/admin/invitations", {
     body: {
       email: body.email,
+      replace_existing: body.replace_existing ?? true,
       delivery: body.delivery,
       role: body.role,
       access_group_id: body.access_group_id,
       library_ids: body.library_ids,
       create_profile: body.create_profile,
+      max_profiles: body.max_profiles,
       show_tour: body.show_tour,
       note: body.note,
     },

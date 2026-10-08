@@ -46,11 +46,30 @@ func atomicInvitationDB(t *testing.T) atomicInvitationFixture {
 		admin.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = admin.Exec(context.WithoutCancel(ctx), "DROP SCHEMA "+q+" CASCADE"); admin.Close() })
+	t.Cleanup(func() {
+		cleanupCtx := context.WithoutCancel(ctx)
+		defer admin.Close()
+		if _, err := admin.Exec(cleanupCtx, "DROP SCHEMA "+q+" CASCADE"); err != nil {
+			t.Errorf("remove invitation fixture: %v", err)
+		}
+		var retained bool
+		if err := admin.QueryRow(cleanupCtx, `SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname=$1)`, schema).Scan(&retained); err != nil || retained {
+			t.Errorf("invitation fixture cleanup retained schema: retained=%v err=%v", retained, err)
+		}
+	})
 	for _, table := range []string{"users", "user_profiles", "user_profile_allowed_libraries", "invitations"} {
 		if _, err = admin.Exec(ctx, "CREATE TABLE "+q+"."+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// LIKE preserves the unique predicate but renames indexes. Keep the native
+	// conflict identity so repository tests exercise its exact production branch.
+	var pendingIndex string
+	if err = admin.QueryRow(ctx, `SELECT c.relname FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=$1::regclass AND i.indisunique AND pg_get_expr(i.indpred,i.indrelid) LIKE '%accepted_at%' AND pg_get_expr(i.indpred,i.indrelid) LIKE '%revoked_at%'`, q+".invitations").Scan(&pendingIndex); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admin.Exec(ctx, "ALTER INDEX "+pgx.Identifier{schema, pendingIndex}.Sanitize()+" RENAME TO invitations_one_pending_idx"); err != nil {
+		t.Fatal(err)
 	}
 	if _, err = admin.Exec(ctx, "ALTER TABLE "+q+".users ALTER COLUMN id DROP IDENTITY IF EXISTS; CREATE SEQUENCE "+q+".user_fixture_seq; ALTER TABLE "+q+".users ALTER COLUMN id SET DEFAULT nextval('"+q+".user_fixture_seq'); ALTER TABLE "+q+".user_profiles ADD FOREIGN KEY(user_id) REFERENCES "+q+".users(id); ALTER TABLE "+q+".invitations ADD FOREIGN KEY(invited_by) REFERENCES "+q+".users(id), ADD FOREIGN KEY(accepted_user_id) REFERENCES "+q+".users(id)"); err != nil {
 		t.Fatal(err)

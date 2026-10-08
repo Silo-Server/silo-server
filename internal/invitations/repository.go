@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -56,7 +57,7 @@ func HashToken(token string) string {
 // invitationColumns are the table columns plus the joined inviter name.
 const invitationColumns = `
 	i.id, COALESCE(i.email, ''), COALESCE(i.delivery, ''), i.token_hash, i.role, i.access_group_id, i.library_ids,
-	i.create_profile, i.show_tour, i.note, i.invited_by,
+	i.create_profile, i.max_profiles, i.show_tour, i.note, i.invited_by,
 	COALESCE(u.username, ''),
 	i.expires_at, i.accepted_at, i.accepted_user_id, i.revoked_at,
 	i.created_at, i.updated_at`
@@ -67,7 +68,7 @@ func scanInvitation(row pgx.Row) (*models.Invitation, error) {
 	var inv models.Invitation
 	err := row.Scan(
 		&inv.ID, &inv.Email, &inv.Delivery, &inv.TokenHash, &inv.Role, &inv.AccessGroupID,
-		&inv.LibraryIDs, &inv.CreateProfile, &inv.ShowTour, &inv.Note,
+		&inv.LibraryIDs, &inv.CreateProfile, &inv.MaxProfiles, &inv.ShowTour, &inv.Note,
 		&inv.InvitedBy, &inv.InvitedByName,
 		&inv.ExpiresAt, &inv.AcceptedAt, &inv.AcceptedUserID, &inv.RevokedAt,
 		&inv.CreatedAt, &inv.UpdatedAt,
@@ -81,9 +82,9 @@ func scanInvitation(row pgx.Row) (*models.Invitation, error) {
 	return &inv, nil
 }
 
-// Create inserts a new invitation, first revoking any live invitation for
-// the same address so "re-invite supersedes" holds atomically (backed by the
-// invitations_one_pending_idx partial unique index). Returns the stored row;
+// Create inserts a new invitation. Unless ReplaceExisting is explicitly false,
+// it first revokes any pending invitation for the same address. Both admission
+// modes use the invitations_one_pending_idx unique index. Returns the stored row;
 // the raw token is the caller's to deliver and is not retrievable later.
 func (r *Repository) Create(ctx context.Context, input models.CreateInvitationInput, tokenHash string) (*models.Invitation, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -128,6 +129,9 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 	}
 	input.Email, input.Role, input.AccessGroupID = prior.Email, prior.Role, prior.AccessGroupID
 	input.LibraryIDs, input.CreateProfile, input.ShowTour, input.Note = prior.LibraryIDs, prior.CreateProfile, prior.ShowTour, prior.Note
+	input.MaxProfiles = prior.MaxProfiles
+	// Resend replaces only its locked source, independently of create admission.
+	input.ReplaceExisting = nil
 	inv, err := createInvitation(ctx, tx, input, tokenHash)
 	if err != nil {
 		return nil, err
@@ -141,7 +145,11 @@ func (r *Repository) Resend(ctx context.Context, id int64, input models.CreateIn
 func createInvitation(ctx context.Context, tx pgx.Tx, input models.CreateInvitationInput, tokenHash string) (*models.Invitation, error) {
 	// A link invitation has no address yet: nothing to supersede or check.
 	if input.Email != "" {
-		if err := supersedeForAddress(ctx, tx, input.Email); err != nil {
+		if input.ReplaceExisting != nil && !*input.ReplaceExisting {
+			if err := refusePendingForAddress(ctx, tx, input.Email); err != nil {
+				return nil, err
+			}
+		} else if err := supersedeForAddress(ctx, tx, input.Email); err != nil {
 			return nil, err
 		}
 	}
@@ -149,16 +157,20 @@ func createInvitation(ctx context.Context, tx pgx.Tx, input models.CreateInvitat
 		WITH inserted AS (
 			INSERT INTO invitations (
 				email, token_hash, role, access_group_id, library_ids,
-				create_profile, show_tour, note, invited_by, expires_at, delivery
-			) VALUES (NULLIF($1, ''), $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''))
+				create_profile, show_tour, note, invited_by, expires_at, delivery, max_profiles
+			) VALUES (NULLIF($1, ''), $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12)
 			RETURNING *
 		)
 		SELECT `+invitationColumns+` FROM inserted i LEFT JOIN users u ON u.id = i.invited_by`,
 		input.Email, tokenHash, input.Role, input.AccessGroupID, input.LibraryIDs,
-		input.CreateProfile, input.ShowTour, input.Note, input.InvitedBy, input.ExpiresAt, input.Delivery,
+		input.CreateProfile, input.ShowTour, input.Note, input.InvitedBy, input.ExpiresAt, input.Delivery, input.MaxProfiles,
 	)
 	inv, err := scanInvitation(row)
 	if err != nil {
+		var pgerr *pgconn.PgError
+		if input.ReplaceExisting != nil && !*input.ReplaceExisting && errors.As(err, &pgerr) && pgerr.Code == "23505" && pgerr.ConstraintName == "invitations_one_pending_idx" {
+			return nil, ErrInvitationExists
+		}
 		return nil, err
 	}
 	return inv, nil
@@ -174,6 +186,26 @@ func supersedeForAddress(ctx context.Context, tx pgx.Tx, email string) error {
 	if err != nil {
 		return fmt.Errorf("superseding prior invitation: %w", err)
 	}
+	return checkAddressAccountFree(ctx, tx, email)
+}
+
+// refusePendingForAddress locks a possible source without changing it. Waiting
+// for acceptance/replacement makes the subsequent account check see its commit.
+// The partial unique index arbitrates a competing insert when there is no row.
+// Expired unrevoked rows also occupy that index and must be explicitly revoked.
+func refusePendingForAddress(ctx context.Context, tx pgx.Tx, email string) error {
+	var id int64
+	err := tx.QueryRow(ctx, `SELECT id FROM invitations WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL FOR UPDATE`, email).Scan(&id)
+	if err == nil {
+		return ErrInvitationExists
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("checking pending invitation: %w", err)
+	}
+	return checkAddressAccountFree(ctx, tx, email)
+}
+
+func checkAddressAccountFree(ctx context.Context, tx pgx.Tx, email string) error {
 	var taken bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM users WHERE email=$1 OR username=$2)`, auth.NormalizeEmail(email), auth.NormalizeUsername(email)).Scan(&taken); err != nil {
 		return err

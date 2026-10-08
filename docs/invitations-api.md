@@ -19,8 +19,13 @@ and claim links. No raw claim token is retained for response replay.
 | POST | `/admin/invitations/{id}/resend` | Replace the exact pending/expired source with a new invitation |
 | DELETE | `/admin/invitations/{id}` | Idempotently revoke that link; never delete an account |
 
-Capabilities use the shared `revision` and `state` head, plus `default_profile`
-and `profileless`. `default_profile` reflects the actual selected provider's
+Capabilities use the shared `revision` and `state` head, plus `default_profile`,
+`profileless`, `profile_limit`, and `non_replacing_creation`. `profile_limit`
+reports support for binding an account profile limit at invitation creation and
+applying it atomically at acceptance; it is false when the invitation service is not configured.
+`non_replacing_creation` reports support for `replace_existing: false` on
+administrator creation and is also false without a configured invitation service.
+`default_profile` reflects the actual selected provider's
 transaction capability, including its notification wrapper. It is false for
 SQLite; profileless acceptance remains available. Capability is not a live
 storage health check. A claim lookup's `acceptance_available` is false when that
@@ -59,12 +64,33 @@ it is not an idempotency key or a way to replay a lost credential response.
 Administrator creation takes optional `delivery`, `email`, optional `role`
 (default `user`), optional
 string `access_group_id`, optional string-ID array `library_ids`, optional
-`create_profile` and `show_tour` (both default true), and optional `note`.
+`create_profile` and `show_tour` (both default true), optional `max_profiles`
+(an integer from 1 to 2147483647, the storage column's range), optional
+`replace_existing` (default true), and optional `note`.
+`max_profiles` sets the initial account limit in the same transaction that
+creates the account, optional default profile, and invitation claim. Omission
+preserves the account database default of 5; it does not mean zero or unlimited.
+The limit also applies with `create_profile: false`. Administrator metadata
+includes `max_profiles` when explicitly bound and omits it otherwise. Resend
+preserves the stored limit from the locked source invitation; its request cannot
+replace that limit. The public claim lookup and acceptance request do not expose
+or allow the invitee to choose it. Rolling back the profile-limit migration
+refuses while any explicitly capped invitation remains unexpired, unaccepted,
+and unrevoked; those caps cannot silently become the account default.
 Omitted library IDs inherit access; `[]` is an explicit empty override. Omit
 optional members instead of sending null. Explicit false must remain false.
 Default-profile requests are refused before effects when unsupported. Only the
 server Owner may create or resend an invitation with role `admin`; another
 administrator receives `403 permission_denied`.
+
+`replace_existing: false` refuses an address with an unaccepted, unrevoked
+invitation using `409 conflict`. It changes neither that invitation nor its token,
+and sends nothing. Expired invitations also occupy the pending-address index
+until explicitly revoked. Admission is transactional: a concurrent create or
+acceptance cannot turn this request into a replacement. Omission or true retains
+ordinary supersession. This option has no address to guard for a new link
+invitation. Resend remains an explicit replacement of its exact requested source,
+independent of this creation option.
 
 `delivery` chooses how the link reaches the invitee:
 
@@ -131,7 +157,9 @@ All three POST operations are **non-retryable**, including authentication-refres
 replay. Revoke is naturally idempotent. See
 [the storage invariants](architecture/invitations-onboarding.md) for transaction,
 SQLite, expiry, login, and delivery boundaries. Legacy invitation routes remain
-available; consumer migration is reviewed separately.
+available with their frozen request and response fields; `max_profiles`,
+`profile_limit`, `replace_existing`, and `non_replacing_creation` are native v2
+additions. Consumer migration is reviewed separately.
 
 
 ## V2 signup invite codes

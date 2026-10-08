@@ -6,6 +6,7 @@
     "role": "user",
     "library_ids": null,
     "create_profile": true,
+    "max_profiles": 2,
     "show_tour": true,
     "note": "",
     "invited_by": "2",

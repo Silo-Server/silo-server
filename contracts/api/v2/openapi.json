@@ -6992,6 +6992,13 @@
               "null"
             ]
           },
+          "max_profiles": {
+            "description": "Initial account profile limit, applied atomically at acceptance. Absent uses the account default (5).",
+            "format": "int64",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "type": "integer"
+          },
           "note": {
             "type": "string"
           },
@@ -7047,6 +7054,14 @@
             "description": "Whether email is configured, so an invitation can be created with delivery=email.",
             "type": "boolean"
           },
+          "non_replacing_creation": {
+            "description": "Whether replace_existing=false can refuse a pending address without superseding its invitation.",
+            "type": "boolean"
+          },
+          "profile_limit": {
+            "description": "Whether invitations can bind an account profile limit atomically at acceptance.",
+            "type": "boolean"
+          },
           "profileless": {
             "type": "boolean"
           },
@@ -7069,6 +7084,8 @@
           "email_delivery",
           "default_profile",
           "profileless",
+          "profile_limit",
+          "non_replacing_creation",
           "revision",
           "state",
           "allowed"
@@ -7116,9 +7133,21 @@
             },
             "type": "array"
           },
+          "max_profiles": {
+            "description": "Initial account profile limit, applied atomically at acceptance. Omit to use the account default (5).",
+            "format": "int64",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "type": "integer"
+          },
           "note": {
             "maxLength": 4096,
             "type": "string"
+          },
+          "replace_existing": {
+            "default": true,
+            "description": "False refuses an existing pending invitation for this address with 409 and changes nothing. Omitted or true supersedes it. Resend remains an explicit replacement of its requested source.",
+            "type": "boolean"
           },
           "role": {
             "default": "user",
@@ -29497,6 +29526,14 @@
             "description": "Whether the selected profile store can atomically provision a requested default profile.",
             "type": "boolean"
           },
+          "non_replacing_creation": {
+            "description": "Whether replace_existing=false can refuse a pending address without superseding its invitation.",
+            "type": "boolean"
+          },
+          "profile_limit": {
+            "description": "Whether invitations can bind an account profile limit atomically at acceptance.",
+            "type": "boolean"
+          },
           "profileless": {
             "type": "boolean"
           },
@@ -29518,6 +29555,8 @@
         "required": [
           "default_profile",
           "profileless",
+          "profile_limit",
+          "non_replacing_creation",
           "revision",
           "state"
         ],

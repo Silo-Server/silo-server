@@ -38,6 +38,8 @@ it("preserves false, explicit empty libraries, omitted inheritance, and exact st
         email: row.email,
         role: "user",
         create_profile: false,
+        replace_existing: false,
+        max_profiles: 2,
         show_tour: false,
         library_ids: [],
       })
@@ -47,6 +49,8 @@ it("preserves false, explicit empty libraries, omitted inheritance, and exact st
     email: row.email,
     role: "user",
     create_profile: false,
+    replace_existing: false,
+    max_profiles: 2,
     show_tour: false,
     library_ids: [],
   });
@@ -60,6 +64,7 @@ it("preserves false, explicit empty libraries, omitted inheritance, and exact st
     email: row.email,
     role: "user",
     create_profile: true,
+    replace_existing: true,
     show_tour: true,
   });
   await resendAdminInvitation(row.id);
