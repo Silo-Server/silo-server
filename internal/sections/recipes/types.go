@@ -95,16 +95,18 @@ type ResolverContext struct {
 
 // SectionItemMeta mirrors sections.SectionItemMeta but lives here to avoid import cycles.
 type SectionItemMeta struct {
-	SeriesID          *string
-	SeriesTitle       string
-	SeasonNumber      *int
-	EpisodeNumber     *int
-	Badges            []string
-	PositionSeconds   *float64
-	DurationSeconds   *float64
-	ProgressUpdatedAt *string
-	ItemSource        string    // "in_progress" or "next_up"
-	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	SeriesID                *string
+	SeriesTitle             string
+	SeasonNumber            *int
+	EpisodeNumber           *int
+	Badges                  []string
+	PositionSeconds         *float64
+	DurationSeconds         *float64
+	ProgressUpdatedAt       *string
+	ItemSource              string    // "in_progress" or "next_up"
+	SortTimestamp           time.Time // when the preceding episode was completed (for ordering)
+	SeriesBackdropPath      string
+	SeriesBackdropThumbhash string
 }
 
 // ResolvedItems is the resolver's output.

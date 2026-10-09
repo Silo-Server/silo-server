@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -481,6 +482,102 @@ func TestBuildSectionsResponseBatchResolvesImageURLs(t *testing.T) {
 	}
 	if got := resp.Sections[0].Items[0].LogoURL; got != "resolved:/logo/original.png" {
 		t.Fatalf("logo URL = %q", got)
+	}
+}
+
+func TestBuildSectionsResponseSignsEpisodeSeriesBackdropsInTheSameBatch(t *testing.T) {
+	resolver := &countingSectionImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	fetcher := &stubSectionEpisodeFetcher{meta: map[string]sections.SectionItemMeta{
+		"episode-recent": {SeriesBackdropPath: "/recent-series/original.jpg", SeriesBackdropThumbhash: "recent-hash"},
+	}}
+	h := &SectionHandler{DetailSvc: detailSvc, episodeFetcher: fetcher}
+	withItems := []sections.SectionWithItems{
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "continue", SectionType: sections.SectionContinueWatching, Title: "Continue"},
+			Items: []*models.MediaItem{{
+				ContentID: "episode-continue", Type: "episode", Title: "Pilot",
+				BackdropPath: "/continue-still/original.jpg",
+			}},
+			ItemMeta: map[string]sections.SectionItemMeta{
+				"episode-continue": {SeriesBackdropPath: "/continue-series/original.jpg", SeriesBackdropThumbhash: "continue-hash"},
+			},
+		},
+		{
+			ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recent"},
+			Items: []*models.MediaItem{
+				{ContentID: "episode-recent", Type: "episode", Title: "Finale", BackdropPath: "/recent-still/original.jpg"},
+				{ContentID: "movie", Type: "movie", Title: "Heat", BackdropPath: "/movie/original.jpg"},
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sections", nil)
+	resp := h.buildSectionsResponse(req, withItems, nil)
+
+	if resolver.batchCalls != 1 {
+		t.Fatalf("batch calls = %d, want 1", resolver.batchCalls)
+	}
+	tests := []struct {
+		item                sectionItemResponse
+		sectionType         sections.SectionType
+		still, series, hash string
+	}{
+		{resp.Sections[0].Items[0], sections.SectionContinueWatching, "/continue-still/original.jpg", "/continue-series/original.jpg", "continue-hash"},
+		{resp.Sections[1].Items[0], sections.SectionRecentlyAdded, "/recent-still/original.jpg", "/recent-series/original.jpg", "recent-hash"},
+	}
+	for _, tt := range tests {
+		if want := "resolved:" + sectionBackdropPath(tt.sectionType, tt.still); tt.item.BackdropURL != want {
+			t.Errorf("%s backdrop URL = %q, want %q", tt.item.ContentID, tt.item.BackdropURL, want)
+		}
+		if want := "resolved:" + sectionBackdropPath(tt.sectionType, tt.series); tt.item.SeriesBackdropURL != want {
+			t.Errorf("%s series backdrop URL = %q, want %q", tt.item.ContentID, tt.item.SeriesBackdropURL, want)
+		}
+		if tt.item.SeriesBackdropThumbhash != tt.hash {
+			t.Errorf("%s series backdrop thumbhash = %q, want %q", tt.item.ContentID, tt.item.SeriesBackdropThumbhash, tt.hash)
+		}
+	}
+	if movie := resp.Sections[1].Items[1]; movie.SeriesBackdropURL != "" {
+		t.Errorf("movie series backdrop URL = %q, want none", movie.SeriesBackdropURL)
+	}
+	// /api/v1 is frozen: the series backdrop is apiv2's alone.
+	v1, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal v1 response: %v", err)
+	}
+	if bytes.Contains(v1, []byte("series_backdrop")) {
+		t.Errorf("v1 response carries a series backdrop: %s", v1)
+	}
+}
+
+func TestBuildSectionsResponseCarriesDatesForApiv2Only(t *testing.T) {
+	released, lastAired := "1995-12-15", "2024-03-01"
+	h := &SectionHandler{}
+	withItems := []sections.SectionWithItems{{
+		ResolvedSection: sections.ResolvedSection{ID: "recent", SectionType: sections.SectionRecentlyAdded, Title: "Recent"},
+		Items: []*models.MediaItem{
+			{ContentID: "movie", Type: "movie", Title: "Heat", Status: "matched", ReleaseDate: &released},
+			{ContentID: "series", Type: "series", Title: "Show", Status: "matched", LastAirDate: &lastAired},
+		},
+	}}
+
+	resp := h.buildSectionsResponse(httptest.NewRequest(http.MethodGet, "/sections", nil), withItems, nil)
+
+	movie, series := resp.Sections[0].Items[0], resp.Sections[0].Items[1]
+	if movie.ReleaseDate == nil || *movie.ReleaseDate != released {
+		t.Errorf("movie release date = %v, want %s", movie.ReleaseDate, released)
+	}
+	if series.LastAirDate == nil || *series.LastAirDate != lastAired {
+		t.Errorf("series last air date = %v, want %s", series.LastAirDate, lastAired)
+	}
+	// /api/v1 is frozen: the dates reach apiv2 alone.
+	v1, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal v1 response: %v", err)
+	}
+	if bytes.Contains(v1, []byte("release_date")) || bytes.Contains(v1, []byte("last_air_date")) {
+		t.Errorf("v1 response carries a date: %s", v1)
 	}
 }
 

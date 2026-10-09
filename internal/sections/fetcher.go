@@ -45,6 +45,11 @@ type SectionItemMeta struct {
 	ProgressUpdatedAt *string
 	ItemSource        string    // "in_progress" or "next_up"
 	SortTimestamp     time.Time // when the preceding episode was completed (for ordering)
+	// An episode's series backdrop. The item's own backdrop is the episode's
+	// still where it has one, so a client that wants the show's picture reads
+	// this instead.
+	SeriesBackdropPath      string
+	SeriesBackdropThumbhash string
 }
 
 const recentSeasonPremiereBadgeWindowDays = 14
@@ -2763,6 +2768,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			e.overview,
 			e.runtime,
 			e.rating_imdb,
+			e.rating_tmdb,
 			COALESCE(NULLIF(s.poster_path, ''), NULLIF(si.poster_path, ''), NULLIF(e.still_path, ''), '') AS poster_path,
 			COALESCE(NULLIF(s.poster_thumbhash, ''), NULLIF(si.poster_thumbhash, ''), NULLIF(e.still_thumbhash, ''), '') AS poster_thumbhash,
 			e.season_number,
@@ -2774,7 +2780,9 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			COALESCE(NULLIF(e.still_path, ''), NULLIF(si.backdrop_path, ''), '') AS backdrop_path,
 			COALESCE(NULLIF(e.still_thumbhash, ''), NULLIF(si.backdrop_thumbhash, ''), '') AS backdrop_thumbhash,
 			si.logo_path,
-			si.status
+			si.status,
+			si.backdrop_path,
+			si.backdrop_thumbhash
 		FROM %s
 		WHERE %s
 	`, fromClause, strings.Join(conditions, " AND "))
@@ -2789,12 +2797,14 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 	itemMeta := map[string]SectionItemMeta{}
 	for rows.Next() {
 		var (
-			item          models.MediaItem
-			seriesID      string
-			seasonNumber  int
-			episodeNumber int
-			seriesTitle   string
-			airDate       *time.Time
+			item                    models.MediaItem
+			seriesID                string
+			seasonNumber            int
+			episodeNumber           int
+			seriesTitle             string
+			airDate                 *time.Time
+			seriesBackdrop          string
+			seriesBackdropThumbhash string
 		)
 		item.Type = "episode"
 		err := rows.Scan(
@@ -2804,6 +2814,7 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.Overview,
 			&item.Runtime,
 			&item.RatingIMDB,
+			&item.RatingTMDB,
 			&item.PosterPath,
 			&item.PosterThumbhash,
 			&seasonNumber,
@@ -2816,17 +2827,25 @@ func (f *Fetcher) fetchEpisodeTargetsByContentIDs(ctx context.Context, contentID
 			&item.BackdropThumbhash,
 			&item.LogoPath,
 			&item.Status,
+			&seriesBackdrop,
+			&seriesBackdropThumbhash,
 		)
 		if err != nil {
 			return nil, nil, fmt.Errorf("scanning episode section item: %w", err)
 		}
+		if airDate != nil {
+			releaseDate := airDate.Format("2006-01-02")
+			item.ReleaseDate = &releaseDate
+		}
 		items = append(items, &item)
 		itemMeta[item.ContentID] = SectionItemMeta{
-			SeriesID:      &seriesID,
-			SeriesTitle:   seriesTitle,
-			SeasonNumber:  &seasonNumber,
-			EpisodeNumber: &episodeNumber,
-			Badges:        recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			SeriesID:                &seriesID,
+			SeriesTitle:             seriesTitle,
+			SeasonNumber:            &seasonNumber,
+			EpisodeNumber:           &episodeNumber,
+			Badges:                  recentSeasonPremiereBadges(seasonNumber, episodeNumber, airDate),
+			SeriesBackdropPath:      seriesBackdrop,
+			SeriesBackdropThumbhash: seriesBackdropThumbhash,
 		}
 	}
 	if err := rows.Err(); err != nil {

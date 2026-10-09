@@ -19327,6 +19327,9 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      series_backdrop_thumbhash?: string;
+      /** @description On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
       series_title?: string;
@@ -19516,6 +19519,9 @@ export interface components {
       season_count?: number;
       /** Format: int64 */
       season_number?: number;
+      series_backdrop_thumbhash?: string;
+      /** @description On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
       series_title?: string;
@@ -22342,6 +22348,9 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      series_backdrop_thumbhash?: string;
+      /** @description On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
       series_title?: string;
@@ -30700,6 +30709,9 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      series_backdrop_thumbhash?: string;
+      /** @description On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
       series_title?: string;
@@ -30863,6 +30875,9 @@ export interface components {
       runtime?: number;
       /** Format: int64 */
       season_number?: number;
+      series_backdrop_thumbhash?: string;
+      /** @description On an episode's section card, its series' backdrop; backdrop_url is the episode's own still where it has one. Presigned, short-lived */
+      series_backdrop_url?: string;
       /** @description Owning series of an episode or season */
       series_id?: string;
       series_title?: string;
