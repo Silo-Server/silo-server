@@ -50,10 +50,9 @@ type SettingValuesHandler struct {
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
 
-	// UserRepo and ProfileTokens enable household management: a primary profile
-	// naming another profile on its own account. Both nil means the widening is
-	// simply unavailable — never that it is unguarded.
-	UserRepo      userLookup
+	// ProfileTokens enables household management for a PIN-locked primary
+	// profile naming another profile on its own account. Nil means that
+	// widening is simply unavailable — never that it is unguarded.
 	ProfileTokens *access.ProfileTokenService
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -60,6 +61,8 @@ func TestLibraryJobAcceptanceMonitorAndSafePolling(t *testing.T) {
 	hidden := bearer(memberToken)
 	hidden["If-None-Match"] = poll.Header().Get("ETag")
 	requireProblem(t, do(t, h, http.MethodGet, location, "", hidden), TypeNotFound)
+	started := fixedTime().Add(time.Minute)
+	job.StartedAt = &started
 	job.Status = adminjob.StatusFailed
 	failure := do(t, h, http.MethodGet, location, "", headers)
 	if failure.Code != 200 || failure.Header().Get("Retry-After") != "" {
@@ -72,6 +75,9 @@ func TestLibraryJobAcceptanceMonitorAndSafePolling(t *testing.T) {
 	decodeJSON(t, failure.Body, &body)
 	if body.Failure == nil || !body.Terminal || body.State != "failed" {
 		t.Fatalf("failure shape %+v", body)
+	}
+	if body.StartedAt == nil || body.StartedAt.String() != "2026-01-02T03:05:05.678Z" || body.FinishedAt != nil || body.RefreshResult != nil {
+		t.Fatalf("job instants/results = %+v", body)
 	}
 	job.Status = adminjob.StatusCompleted
 	job.ResultPayload = json.RawMessage(`{"library_id":1,"deleted_media_files":3,"private":"private-path"}`)

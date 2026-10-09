@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 type overlayQueryTrace struct{ rows atomic.Int64 }
@@ -214,6 +215,8 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 		{}, {Resolution: "480p"}, {Resolution: "1080p"}, {Resolution: "2160p"},
 		{Resolution: "4K"}, {Resolution: "UHD"}, {Resolution: "\t+002160p\n"},
 		{Resolution: "\u00a02160p\u00a0"}, {Resolution: "-2160p"}, {Resolution: "hd"},
+		{Resolution: "9223372036854775807p"}, {Resolution: "-9223372036854775808p"},
+		{Resolution: "9223372036854775808p"}, {Resolution: "0000000000000000000000000000001080p"},
 		{Resolution: "1080p", HDR: true},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{DolbyVision: "profile 8"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{DVProfile: 5}}},
@@ -222,6 +225,9 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{HDR10Plus: true}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10Plus"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: " HDR10 "}}},
+		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "\u00a0HDR10\u00a0"}}},
+		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "\u1680HLG\u3000"}}},
+		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "DOVIWithHDR10\u0085"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SomethingWithHLG"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{ColorTransfer: "SMPTE2084"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{ColorTransfer: "ARIB-STD-B67"}}},
@@ -254,33 +260,67 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 
 func BenchmarkOverlaySummaries(b *testing.B) {
 	pool, _ := overlayTestPool(b)
-	// 300 series, 30 episodes each; enough track metadata to exercise the wide
-	// projection cost without using a private library or cached badge results.
+	// Six long-running series, 4,200 episodes each, with wide track metadata.
+	// Compare the actual scanner projection previously used by catalog cards.
 	_, err := pool.Exec(b.Context(), `INSERT INTO media_files
   (id,content_id,episode_id,resolution,video_tracks,audio_tracks,subtitle_tracks)
-  SELECT n,'series-'||((n-1)/30),'episode-'||n,
+  SELECT n,'series-'||((n-1)/4200),'episode-'||n,
    CASE WHEN n%5=0 THEN '2160p' ELSE '1080p' END,
    '[{"video_range_type":"HDR10"}]'::jsonb,
    jsonb_build_array(jsonb_build_object('codec','aac','title',repeat('track ',200))),
    jsonb_build_array(jsonb_build_object('language','eng','title',repeat('subtitle ',200)))
-  FROM generate_series(1,9000) n;
+  FROM generate_series(1,25200) n;
   ANALYZE media_files;`)
 	if err != nil {
 		b.Fatal(err)
 	}
-	ids := make([]string, 300)
+	ids := make([]string, 6)
 	for i := range ids {
 		ids[i] = fmt.Sprintf("series-%d", i)
 	}
 	fetcher := &Fetcher{pool: pool}
-	b.ReportAllocs()
-	for b.Loop() {
-		got, err := fetcher.ListOverlaySummaries(b.Context(), ids, catalog.AccessFilter{})
+	fileRepo := scanner.NewFileRepository(pool)
+	legacy := func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
+		files, err := fileRepo.ListOverlayFilesByContentIDs(ctx, ids)
 		if err != nil {
-			b.Fatal(err)
+			return nil, err
 		}
-		if len(got) != len(ids) {
-			b.Fatalf("got %d cards, want %d", len(got), len(ids))
+		out := make(map[string]*models.OverlaySummary, len(files))
+		for id, files := range files {
+			if summary := overlays.BuildSummary(files); summary != nil {
+				out[id] = summary
+			}
 		}
+		return out, nil
+	}
+	want, err := legacy(b.Context())
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		read func(context.Context) (map[string]*models.OverlaySummary, error)
+	}{
+		{name: "scanner-projection", read: legacy},
+		{name: "sql-winners", read: func(ctx context.Context) (map[string]*models.OverlaySummary, error) {
+			return fetcher.ListOverlaySummaries(ctx, ids, catalog.AccessFilter{})
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			got, err := tc.read(b.Context())
+			if err != nil || !reflect.DeepEqual(got, want) {
+				b.Fatalf("summaries = %#v, err %v; scanner summaries = %#v", got, err, want)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				got, err := tc.read(b.Context())
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(got) != len(ids) {
+					b.Fatalf("got %d cards, want %d", len(got), len(ids))
+				}
+			}
+		})
 	}
 }

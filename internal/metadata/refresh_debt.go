@@ -149,7 +149,9 @@ func nextRefreshAtForDebt(reasonMask int64, attemptCount int, now time.Time) tim
 
 // logRefreshDebtTerminal emits a one-time notice when an episode-incomplete debt row first
 // crosses into the terminal give-up state, so the demotion is observable in logs rather
-// than silent. Logging on the exact transition attempt keeps it to a single line per row.
+// than silent. Logging on the exact transition attempt keeps it to a single line per row,
+// so only the sync for the target whose claim or failure set the count may call it;
+// series-wide sweeps that re-sync other rows must not.
 func logRefreshDebtTerminal(targetType, contentID string, reasonMask int64, attemptCount int) {
 	if attemptCount == refreshDebtEpisodeTerminalAttempts &&
 		isTerminalEpisodeDebt(reasonMask, attemptCount) {

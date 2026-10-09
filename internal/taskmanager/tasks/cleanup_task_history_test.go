@@ -117,10 +117,13 @@ func TestTaskHistoryCleanupTaskUsesConfiguredRetention(t *testing.T) {
 		taskmanager.SettingKeyHistoryRetentionDays: "7",
 		taskmanager.SettingKeyHistoryKeepPerTask:   "25",
 	}}
-	pruner := &fakeTaskHistoryPruner{}
+	pruner := &fakeTaskHistoryPruner{
+		result: taskmanager.HistoryPruneResult{Deleted: 25000, LimitReached: true},
+	}
+	progress := &taskHistoryCleanupProgress{}
 
 	before := time.Now().UTC().AddDate(0, 0, -7)
-	if err := NewTaskHistoryCleanupTask(pruner, store).Execute(context.Background(), &taskHistoryCleanupProgress{}); err != nil {
+	if err := NewTaskHistoryCleanupTask(pruner, store).Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	after := time.Now().UTC().AddDate(0, 0, -7)
@@ -129,6 +132,9 @@ func TestTaskHistoryCleanupTaskUsesConfiguredRetention(t *testing.T) {
 	}
 	if pruner.cutoff.Before(before) || pruner.cutoff.After(after) {
 		t.Fatalf("cutoff = %v, want a 7 day window between %v and %v", pruner.cutoff, before, after)
+	}
+	if result := progress.decode(t); result.Deleted != 25000 || !result.LimitReached {
+		t.Fatalf("result = %#v, want 25000 deleted with limit reached", result)
 	}
 }
 
@@ -192,28 +198,6 @@ func TestTaskHistoryCleanupTaskReturnsPruneError(t *testing.T) {
 	}
 	if got := progress.reports[len(progress.reports)-1]; !strings.Contains(got, "failed after deleting 10000 executions") {
 		t.Fatalf("last progress report = %q", got)
-	}
-}
-
-func TestTaskHistoryCleanupTaskCapsWorkPerRun(t *testing.T) {
-	wantDeleted := int64(taskHistoryCleanupBatchSize * taskHistoryCleanupMaxBatches)
-	pruner := &fakeTaskHistoryPruner{
-		result: taskmanager.HistoryPruneResult{
-			Deleted:      wantDeleted,
-			LimitReached: true,
-		},
-	}
-	progress := &taskHistoryCleanupProgress{}
-
-	if err := NewTaskHistoryCleanupTask(pruner, &fakeSettingsStore{}).Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	if pruner.calls != 1 {
-		t.Fatalf("pruner calls = %d, want 1", pruner.calls)
-	}
-	result := progress.decode(t)
-	if result.Deleted != wantDeleted || !result.LimitReached {
-		t.Fatalf("result = %#v, want %d deleted with limit reached", result, wantDeleted)
 	}
 }
 

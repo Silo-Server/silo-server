@@ -144,11 +144,13 @@ func TestPlaybackV2StartUsesTypedServiceAndOpaqueIDs(t *testing.T) {
 }
 
 func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &fakePlaybackService{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
 	for _, variation := range []string{"numeric file", "protocol", "profile", "installation", "unknown field", "null start"} {
 		t.Run(variation, func(t *testing.T) {
-			deps, _ := catalogDeps(t)
-			fake := &fakePlaybackService{}
-			deps.Playback = fake
+			*fake = fakePlaybackService{}
 			body := playbackStartFixture(t)
 			switch variation {
 			case "numeric file":
@@ -164,7 +166,7 @@ func TestPlaybackV2RejectsInvalidInputBeforeService(t *testing.T) {
 			case "null start":
 				body["start_position"] = nil
 			}
-			response := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
+			response := do(t, h, http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
 			if response.Code != 422 {
 				t.Fatalf("validation: %d %s", response.Code, response.Body.String())
 			}
@@ -229,5 +231,28 @@ func TestPlaybackV2ProblemMapping(t *testing.T) {
 	}
 	if problem := playbackProblem(errors.New("opaque")); problem.Type != TypeDependencyUnavailable.URI() {
 		t.Fatalf("opaque error: %+v", problem)
+	}
+}
+
+// v2 names every source entry, video or audio-only, without touching other
+// entries or the shared plan that v1 serializes.
+func TestPlaybackQualitiesNamesTheSourceEntry(t *testing.T) {
+	plan := []playback.AvailableQualityV3{
+		{Label: playback.QualityOriginalV3, Height: 2160, BitrateKbps: 40_000, PreservesSource: true},
+		{Label: "1080p-medium", DisplayName: "1080p Medium", Height: 1080, BitrateKbps: 6_000},
+	}
+	got := playbackQualities(plan)
+	if got[0].DisplayName != sourceQualityDisplayName || got[1].DisplayName != "1080p Medium" {
+		t.Fatalf("v2 qualities = %#v", got)
+	}
+	if plan[0].DisplayName != "" {
+		t.Fatalf("shared plan changed: %#v", plan[0])
+	}
+	audio := playbackQualities([]playback.AvailableQualityV3{{Label: playback.QualityOriginalV3, BitrateKbps: 128, PreservesSource: true}})
+	if audio[0].DisplayName != sourceQualityDisplayName {
+		t.Fatalf("audio-only source entry = %#v", audio[0])
+	}
+	if playbackQualities(nil) != nil {
+		t.Fatal("an absent menu stays absent")
 	}
 }

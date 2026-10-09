@@ -16,7 +16,6 @@ func TestSessionInfoPreservesStartedAtAcrossTouches(t *testing.T) {
 	claims := &streamtoken.Claims{SessionID: "s", UserID: 42, ProfileID: "p", MediaFileID: 77, OriginalStartedAtUnixNano: started.UnixNano()}
 
 	first := sessionInfo(tracker, claims, "transcode")
-	time.Sleep(time.Millisecond)
 	second := sessionInfo(tracker, claims, "transcode")
 	if first.StartedAtUnixNano != started.UnixNano() || second.StartedAtUnixNano != first.StartedAtUnixNano {
 		t.Fatalf("touch reset StartedAtUnixNano: first=%d second=%d want=%d", first.StartedAtUnixNano, second.StartedAtUnixNano, started.UnixNano())

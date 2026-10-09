@@ -9,10 +9,12 @@ import type {
 } from "@/api/types";
 import CastCarousel from "@/components/CastCarousel";
 import PageBack from "@/components/PageBack";
+import { tmdbRating } from "@/components/ratings/ratings";
 import { MoreLikeThisRow } from "@/components/RecommendationGrid";
 import RequestPosterCard from "@/components/RequestPosterCard";
 import { SeasonStatus } from "@/components/RequestSeasonsDialog";
 import { useCreateMediaRequest } from "@/hooks/queries/useRequests";
+import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import {
   formatRequestSeasonMeta,
@@ -46,6 +48,8 @@ export default function ExternalTitleContent({ item, libraryHref }: ExternalTitl
     [isSeries, item.creators, item.director],
   );
   const recommendations = item.recommendations ?? [];
+  const tmdbScore = tmdbRating(item.vote_average);
+  const tmdbRatings = tmdbScore ? [tmdbScore] : [];
 
   return (
     <DetailLayout
@@ -68,9 +72,7 @@ export default function ExternalTitleContent({ item, libraryHref }: ExternalTitl
               status={isSeries ? item.status || undefined : undefined}
             />
           }
-          scoreRow={
-            <ScoreRow ratingTmdb={item.vote_average || undefined} tmdbVoteCount={item.vote_count} />
-          }
+          scoreRow={<ScoreRow ratings={tmdbRatings} tmdbVoteCount={item.vote_count} />}
           overview={item.overview}
           crewLine={
             <HeroCrewLine
@@ -120,7 +122,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
                 </div>
               )}
             </div>
-            <p className="truncate px-0.5 pt-2.5 text-[13px] font-semibold">
+            <p className="truncate px-0.5 pt-2.5 text-[0.8125rem] font-semibold">
               {season.name || name}
             </p>
             <p className="text-muted-foreground truncate px-0.5 text-xs">
@@ -137,6 +139,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
 /** "More Like This" for a TMDB title: request cards, each able to request its title. */
 function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
   const createRequest = useCreateMediaRequest();
+  const watchlist = useWatchlistTitleToggle();
   return (
     <MoreLikeThisRow
       items={items}
@@ -152,6 +155,8 @@ function TitleRecommendations({ items }: { items: RequestMediaResult[] }) {
             createRequest.variables?.tmdb_id === item.tmdb_id
           }
           onRequest={() => createRequest.mutate(requestInputFromMediaResult(item))}
+          onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
+          isWatchlistPending={watchlist.isPending(item)}
         />
       )}
     />
@@ -170,8 +175,8 @@ function castFromTMDB(cast: RequestMediaCastMember[]): CastMember[] {
 
 /**
  * TMDB names a movie's director and a series' creators without person IDs,
- * so the crew line shows them unlinked. Library series credit their creators
- * as directors under a "Created by" label; this follows suit.
+ * so the crew line shows them unlinked. Both go in as Director credits, which
+ * the crew line leads with by default; a series labels them "Created by".
  */
 function crewFromTMDB(names: string[]): CrewMember[] {
   return names.map((name) => ({ name, job: "Director", person_id: "" }));

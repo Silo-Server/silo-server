@@ -45,7 +45,7 @@ func adminLogsSocketDeps(f *fakeAdminLogsSocket) Dependencies {
 	admin := &auth.Claims{UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
 	member := &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
 	unbounded := &auth.Claims{UserID: 2, Role: "admin", SessionID: "s2", TokenType: auth.TokenTypeAccess}
-	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{adminToken: admin, memberToken: member, "tok-unbounded": unbounded}}, fakeSessions{map[string]bool{"s1": true, "s2": true}}, nil, nil)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{map[string]*auth.Claims{adminToken: admin, memberToken: member, "tok-unbounded": unbounded}}, fakeSessions{map[string]string{"s1": "user", "s2": "admin"}}, nil, nil)
 	return deps
 }
 

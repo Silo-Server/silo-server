@@ -13,7 +13,6 @@ import (
 // Domain-owned documents have explicit product names in the native contract.
 // These names are API identifiers, independent of their Go package spelling.
 var domainSchemaNames = map[reflect.Type]string{
-	reflect.TypeFor[templates.Bundle]():         "CollectionTemplateBundle",
 	reflect.TypeFor[templates.Catalog]():        "CollectionTemplateCatalog",
 	reflect.TypeFor[templates.Template]():       "CollectionTemplate",
 	reflect.TypeFor[onboarding.Step]():          "OnboardingStep",

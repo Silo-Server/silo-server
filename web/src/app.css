@@ -569,17 +569,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   * {
     border-color: var(--border);
   }
+  /* Root size is relative to the browser's default font size (16px unless the
+     user changed it), so rem-based text follows the browser text-size setting.
+     The in-app text scale multiplies on top of it. */
   html {
-    font-size: 16px;
+    font-size: 100%;
     font-weight: 400;
     --ui-text-scale-factor: 1;
+    /* Unitless root font size over 16px, for text whose size is not rem-based
+       (card overlay badges scale with the card in container units). Browsers
+       without CSS trigonometry fall back to the in-app scale factor. */
+    --ui-root-text-ratio: var(--ui-text-scale-factor);
+  }
+  @supports (width: calc(1px * tan(atan2(1rem, 16px)))) {
+    html {
+      --ui-root-text-ratio: tan(atan2(1rem, 16px));
+    }
   }
   html[data-text-scale="large"] {
-    font-size: 18px;
+    font-size: 112.5%;
     --ui-text-scale-factor: 1.12;
   }
   html[data-text-scale="x-large"] {
-    font-size: 20px;
+    font-size: 125%;
     --ui-text-scale-factor: 1.24;
   }
   html[data-text-weight="strong"] {
@@ -1354,34 +1366,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       transparent
     );
     margin-inline: 0.25rem;
-  }
-
-  /* Range-input thumb for the subtitle appearance panel's opacity slider.
-     Mirrors the seek bar's hover thumb so form controls feel native to the
-     player chrome rather than browser-default.                              */
-  .player-subtitle-opacity-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: #ffffff;
-    border: none;
-    box-shadow:
-      0 2px 8px rgb(0 0 0 / 0.5),
-      inset 0 0 0 1px rgb(0 0 0 / 0.12);
-    cursor: pointer;
-  }
-  .player-subtitle-opacity-slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: #ffffff;
-    border: none;
-    box-shadow:
-      0 2px 8px rgb(0 0 0 / 0.5),
-      inset 0 0 0 1px rgb(0 0 0 / 0.12);
-    cursor: pointer;
   }
 
   /* ── Media Card ──────────────────────────────────────────── */
@@ -2160,6 +2144,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
+  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
+     height the widget's fixed rows leave it. Below lg the rows are
+     content-sized, so there is no height to take and the plot would measure
+     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  .admin-chart-fill {
+    flex: 1 1 0%;
+    min-height: 10rem;
+  }
+
   /* ── Dashboard Widget Scrollbars ──────────────────────────── */
   /* Widget bodies scroll inside their row, so the default OS bar
      sits right on top of the theme. One rule covers every widget:
@@ -2212,6 +2205,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .admin-widget {
       grid-column: span var(--widget-span) / span var(--widget-span);
       grid-row: span var(--widget-rows) / span var(--widget-rows);
+    }
+
+    .admin-chart-fill {
+      min-height: 0;
     }
   }
 
@@ -2323,11 +2320,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      a 260px blank strip on the banner's left (issue #1290). The admin
      area is its own shell: AdminLayout publishes `data-admin-shell` and
      draws a fixed 240px sidebar (`w-[240px]` / `lg:ml-[240px]`), and the
-     audiobook MiniBar can be open there.                              */
+     audiobook MiniBar can be open there.
+
+     The breakpoint is Tailwind's `lg` (64rem), where both shells show their
+     sidebar. A rem media query follows the browser's default font size, so
+     a fixed 1024px here kept the offset while a larger browser font had
+     already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
+    /* How far fixed page chrome (the collection editor's save bar) rises to
+       clear whichever background playback bar shows. usePlaybackBarHeight
+       measures each bar, bottom inset included, on the root while it shows. */
+    --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
   }
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     :root[data-app-shell] {
       --app-sidebar-offset: 260px;
     }
@@ -2374,10 +2380,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      since it is `z-50` against the sidebar's `z-40`/`45` it painted over the
      logo on the way in and left a gap on the way out.
 
-     Breakpoint deliberately matches `--app-sidebar-offset` (1024px) rather than
-     Tailwind's `lg` (64rem): `html[data-text-scale]` re-bases rem, so at large
-     text those two diverge and the compensation must follow whichever query
-     actually changes the margin it is compensating for. */
+     Breakpoint deliberately matches `--app-sidebar-offset` (64rem): the
+     compensation must follow whichever query actually changes the margin it is
+     compensating for. `html[data-text-scale]` does not move it; rem in a media
+     query resolves against the browser's default font size, not the root
+     element's. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
@@ -2389,7 +2396,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow-x: clip;
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     .impersonation-banner {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }

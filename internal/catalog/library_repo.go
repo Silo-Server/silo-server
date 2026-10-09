@@ -19,12 +19,31 @@ import (
 // junction table.
 type LibraryItemRepository struct {
 	pool *pgxpool.Pool
+	// removalGrace holds an orphaned item back from deletion while one of its
+	// files went missing within this window. See WithRemovalGrace.
+	removalGrace time.Duration
 }
 
 // NewLibraryItemRepository creates a new LibraryItemRepository backed by the
 // given pool.
 func NewLibraryItemRepository(pool *pgxpool.Pool) *LibraryItemRepository {
 	return &LibraryItemRepository{pool: pool}
+}
+
+// WithRemovalGrace returns a copy of the repository whose membership
+// reconciliation keeps an orphaned movie or series while any of its files was
+// marked missing within grace (the scanner's file removal grace). Its membership is
+// still removed, so the item is hidden at once, but a replacement file that
+// arrives in time (an arr upgrade deletes the old release before importing
+// the new one) relinks to the same item: collections, manual edits, artwork,
+// and the added date survive. A reconciliation after the grace has passed
+// deletes the item; until then the trash sweep keeps its file rows (see
+// scanner FileRepository.DeleteMissingByFolder). Zero keeps the immediate
+// delete.
+func (r *LibraryItemRepository) WithRemovalGrace(grace time.Duration) *LibraryItemRepository {
+	cp := *r
+	cp.removalGrace = max(grace, 0)
+	return &cp
 }
 
 // libraryItemColumns is the list of columns returned by all SELECT queries on
@@ -448,6 +467,42 @@ func (r *LibraryItemRepository) Delete(ctx context.Context, contentID string, fo
 // its surviving media_files rows and syncPresentLibraryState re-inserts the
 // membership from those rows.
 func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int, protectedPathPrefixes []string) (int, int, []string, error) {
+	return r.reconcileMemberships(ctx, folderID, nil, protectedPathPrefixes, false)
+}
+
+// ReconcileItemMemberships removes stale memberships and orphaned items only
+// for the supplied content IDs. File presence is checked across the whole
+// folder, so a version outside the scanned subtree preserves its membership.
+// An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileItemMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, protectedPathPrefixes, false)
+}
+
+// ReconcileRelinkedItems cleans up after code outside the scanner relinks
+// files away from the listed items. It removes their memberships in the folder
+// when no present file there still links to them, and deletes those left with
+// no membership and no file rows at all. An item that still has file rows is
+// kept: those files may sit under an unreachable root, which only a scan can
+// tell, and the scan's orphan check covers them. An empty list removes nothing.
+func (r *LibraryItemRepository) ReconcileRelinkedItems(ctx context.Context, folderID int, contentIDs []string) (int, int, []string, error) {
+	if len(contentIDs) == 0 {
+		return 0, 0, nil, nil
+	}
+	return r.reconcileMemberships(ctx, folderID, contentIDs, nil, true)
+}
+
+// reconcileMemberships limits removal to contentIDs when it is non-nil. With
+// onlyFileless, orphans that still have file rows are left for a scan.
+func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folderID int, contentIDs, protectedPathPrefixes []string, onlyFileless bool) (int, int, []string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mil.content_id = ANY($2::text[])"
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("beginning membership reconciliation transaction: %w", err)
@@ -460,7 +515,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// series (no remaining chapters) are cleaned up separately by the manga scan.
 	rows, err := tx.Query(ctx, `
 		DELETE FROM media_item_libraries mil
-		WHERE mil.media_folder_id = $1
+		WHERE mil.media_folder_id = $1`+itemPredicate+`
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM media_files mf
@@ -475,7 +530,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			  AND mi.type = 'manga'
 		  )
 		RETURNING mil.content_id
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("deleting stale folder memberships: %w", err)
 	}
@@ -500,21 +555,42 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	// protected-root pass. The latter no longer have a membership to return from
 	// the DELETE above, but their surviving media_files row still ties them to
 	// this folder so they can be reconsidered after the root recovers.
-	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	// Relink cleanup considers every listed item: one an earlier relink kept
+	// because it still had files has no membership left to remove here, yet
+	// may just have lost its last file.
+	orphanCandidates := removedContentIDs
+	if onlyFileless {
+		orphanCandidates = contentIDs
+	}
+	orphanIDs, err := collectOrphanIDs(ctx, tx, orphanCandidates)
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
-	if err != nil {
-		return 0, 0, nil, err
+	if onlyFileless {
+		orphanIDs, err = excludeOrphansWithFiles(ctx, tx, orphanIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	} else {
+		previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID, contentIDs)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	}
-	orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
 	if len(orphanIDs) > 0 {
 
 		// Exempt orphans whose files sit under an unreachable root: the files
 		// still exist, the root is just offline. See the doc comment above.
 		if len(orphanIDs) > 0 && len(protectedPathPrefixes) > 0 {
 			orphanIDs, err = excludeOrphansUnderProtectedPrefixes(ctx, tx, orphanIDs, folderID, protectedPathPrefixes)
+			if err != nil {
+				return 0, 0, nil, err
+			}
+		}
+
+		if len(orphanIDs) > 0 && r.removalGrace > 0 && !onlyFileless {
+			orphanIDs, err = excludeOrphansWithRecentlyMissingFiles(ctx, tx, orphanIDs, time.Now().UTC().Add(-r.removalGrace))
 			if err != nil {
 				return 0, 0, nil, err
 			}
@@ -583,17 +659,23 @@ func deleteOrphanedItemsAndImageDirs(ctx context.Context, tx pgx.Tx, orphanIDs [
 	return deletedContentIDs, imageDirs, nil
 }
 
-func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, contentIDs []string) ([]string, error) {
+	args := []any{folderID}
+	itemPredicate := ""
+	if contentIDs != nil {
+		args = append(args, contentIDs)
+		itemPredicate = " AND mf.content_id = ANY($2::text[])"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT DISTINCT mf.content_id
 		FROM media_files mf
-		WHERE mf.media_folder_id = $1
+		WHERE mf.media_folder_id = $1`+itemPredicate+`
 		  AND mf.content_id IS NOT NULL
 		  AND mf.content_id <> ''
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
 		  )
-	`, folderID)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
 	}
@@ -601,6 +683,53 @@ func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
 		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+// excludeOrphansWithRecentlyMissingFiles returns the orphanIDs to delete now:
+// all but movies and series with a file marked missing at or after cutoff. A
+// held item keeps its file rows, so collectFolderFileOrphanIDs finds it again
+// on a later pass. Book items (ebooks, manga chapters, audiobooks) are never
+// held: their parent and chapter listings read child tables that only an
+// item delete clears, so a held item would stay listed.
+func excludeOrphansWithRecentlyMissingFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string, cutoff time.Time) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM media_items mi
+			JOIN media_files mf ON mf.content_id = mi.content_id
+			WHERE mi.content_id = cid
+			  AND mi.type IN ('movie', 'series')
+			  AND mf.missing_since >= $2
+		)
+	`, orphanIDs, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans with recently missing files: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting orphans without recently missing files: %w", err)
+	}
+	return ids, nil
+}
+
+// excludeOrphansWithFiles returns the orphanIDs no media_files row links to.
+func excludeOrphansWithFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string) ([]string, error) {
+	if len(orphanIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = cid)
+	`, orphanIDs)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans that still have files: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting fileless orphans: %w", err)
 	}
 	return ids, nil
 }

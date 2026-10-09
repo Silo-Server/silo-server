@@ -15,9 +15,12 @@ type ProfileTokenService struct {
 }
 
 type profileJWTClaims struct {
-	UserID         int    `json:"user_id"`
-	SessionID      string `json:"session_id"`
-	ProfileID      string `json:"profile_id"`
+	UserID    int    `json:"user_id"`
+	SessionID string `json:"session_id"`
+	ProfileID string `json:"profile_id"`
+	// PINRevision is a pointer so a token minted before the claim existed
+	// reads as absent rather than as revision 0, and is refused.
+	PINRevision    *int64 `json:"pin_revision,omitempty"`
 	PolicyRevision int64  `json:"policy_revision"`
 	jwt.RegisteredClaims
 }
@@ -28,7 +31,8 @@ func NewProfileTokenService(secret string, ttl time.Duration) *ProfileTokenServi
 }
 
 // Mint creates a signed profile token. When ttl is zero or negative, the token
-// is durable and is invalidated by session/profile/policy checks instead.
+// is durable and is invalidated by the session, profile and PIN-revision checks
+// instead.
 func (s *ProfileTokenService) Mint(claims ProfileTokenClaims) (string, time.Time, error) {
 	now := time.Now().UTC()
 	var expiresAt time.Time
@@ -43,6 +47,7 @@ func (s *ProfileTokenService) Mint(claims ProfileTokenClaims) (string, time.Time
 		UserID:           claims.UserID,
 		SessionID:        claims.SessionID,
 		ProfileID:        claims.ProfileID,
+		PINRevision:      &claims.PINRevision,
 		PolicyRevision:   claims.PolicyRevision,
 		RegisteredClaims: registeredClaims,
 	})
@@ -74,10 +79,17 @@ func (s *ProfileTokenService) Validate(tokenStr string) (*ProfileTokenClaims, er
 	if !token.Valid {
 		return nil, ErrProfileUnverified
 	}
+	if claims.PINRevision == nil {
+		// Minted before tokens were bound to the profile's PIN revision. Its
+		// policy_revision cannot show whether the PIN changed since, so it
+		// proves nothing now; the client enters the PIN once more.
+		return nil, fmt.Errorf("%w: token predates pin_revision", ErrProfileUnverified)
+	}
 	return &ProfileTokenClaims{
 		UserID:         claims.UserID,
 		SessionID:      claims.SessionID,
 		ProfileID:      claims.ProfileID,
+		PINRevision:    *claims.PINRevision,
 		PolicyRevision: claims.PolicyRevision,
 	}, nil
 }

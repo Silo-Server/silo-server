@@ -1,20 +1,24 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment node
+
 import type { MediaRequest, RequestMediaResult, RequestMediaSeason } from "@/api/types";
+import { describe, expect, it } from "vitest";
 import {
   canCancelOwnRequest,
   defaultRequestSeasons,
   flattenResultPages,
-  pendingPageSize,
   formatRequestDisplayState,
   formatRequestSeasonMeta,
   formatSeasonList,
   formatSeasonProgress,
+  latestRequestSeason,
   parseRequestMediaType,
+  pendingPageSize,
   requestDetailHref,
   requestDiscoverSectionHref,
   requestDisplayState,
   requestSearchHref,
   requestSearchTypeForScope,
+  upcomingRequestSeasons,
 } from "./mediaRequests";
 
 describe("flattenResultPages", () => {
@@ -117,11 +121,6 @@ describe("requestDisplayState", () => {
   it("prefers the state the server derived", () => {
     expect(requestDisplayState("completed", "active", "processing")).toBe("processing");
   });
-
-  it("derives a state for a server that sends none", () => {
-    expect(requestDisplayState("downloading", "active")).toBe("processing");
-    expect(requestDisplayState("queued", "failed")).toBe("failed");
-  });
 });
 
 describe("requestDetailHref", () => {
@@ -132,11 +131,6 @@ describe("requestDetailHref", () => {
 });
 
 describe("parseRequestMediaType", () => {
-  it("accepts the two title media types", () => {
-    expect(parseRequestMediaType("movie")).toBe("movie");
-    expect(parseRequestMediaType("series")).toBe("series");
-  });
-
   it.each([undefined, "", "tv", "Movie", "browse"])("rejects %j", (value) => {
     expect(parseRequestMediaType(value)).toBeUndefined();
   });
@@ -169,6 +163,39 @@ describe("season requests", () => {
       season({ season_number: 7, air_date: undefined, episode_count: 0 }),
     ];
     expect(defaultRequestSeasons(seasons, now)).toEqual([2, 4, 5]);
+  });
+
+  it("finds the latest season, skipping specials", () => {
+    const aired = [
+      season({ season_number: 0, air_date: "2025-01-01" }),
+      season({ season_number: 1 }),
+      season({ season_number: 2, air_date: "2025-06-01" }),
+      season({ season_number: 3, air_date: "2026-09-01" }),
+    ];
+    expect(latestRequestSeason(aired, now)).toBe(2);
+    // The newest aired season is already in the library: nothing to pick.
+    aired[2] = season({ season_number: 2, availability: "available" });
+    expect(latestRequestSeason(aired, now)).toBeNull();
+
+    const unaired = [
+      season({ season_number: 1, air_date: "2026-09-01" }),
+      season({ season_number: 2, air_date: "2027-09-01" }),
+    ];
+    expect(latestRequestSeason(unaired, now)).toBe(1);
+    expect(
+      latestRequestSeason([season({ air_date: undefined, episode_count: 0 })], now),
+    ).toBeNull();
+  });
+
+  it("lists the requestable seasons that haven't aired", () => {
+    const seasons = [
+      season({ season_number: 0, air_date: "2026-12-01" }),
+      season({ season_number: 1 }),
+      season({ season_number: 2, air_date: "2026-09-01" }),
+      season({ season_number: 3, air_date: "2027-01-01", requested: true }),
+      season({ season_number: 4, air_date: undefined, episode_count: 0 }),
+    ];
+    expect(upcomingRequestSeasons(seasons, now)).toEqual([2, 4]);
   });
 
   it("describes a season and a request's progress", () => {

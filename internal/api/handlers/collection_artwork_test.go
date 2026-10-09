@@ -554,7 +554,7 @@ func TestCollectionArtworkError_HidesServerFailures(t *testing.T) {
 
 // Linux libvips reads a truncated PNG's header and fails inside Process; other
 // builds may accept the damaged data. Either way it must not become a 500.
-func TestGenerateCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testing.T) {
+func TestUploadCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 600, 900))
 	for y := 0; y < 900; y++ {
 		for x := 0; x < 600; x++ {
@@ -567,7 +567,11 @@ func TestGenerateCollectionImageVariants_TruncatedPNGIsNotAServerError(t *testin
 	}
 	data := buf.Bytes()
 
-	_, err := generateCollectionImageVariants("poster", data[:len(data)/2])
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesystem: %v", err)
+	}
+	_, _, err = uploadCollectionImageVariants(t.Context(), store, userCollectionImagePrefix, "c1", "poster", data[:len(data)/2])
 	if err == nil {
 		return
 	}

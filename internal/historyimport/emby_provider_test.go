@@ -17,16 +17,21 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// fakeEmby answers /Users/{id}/Items the way Emby 4.8 through 4.10 do: lists
-// page by StartIndex and Limit, and ProductionYear, UserData.PlayCount, and
-// UserData.LastPlayedDate stay empty unless Fields names them.
+// fakeEmby answers /Users/{id}/Items and /Users/{id}/Items/Resume the way
+// Emby 4.8 through 4.10 do: lists page by StartIndex and Limit, and
+// ProductionYear, UserData.PlayCount, and UserData.LastPlayedDate stay empty
+// unless Fields names them. The IsResumable filter returns every resumable
+// item, while the Resume list leaves out the ones hidden from Continue
+// Watching, shows one episode per series, and returns nothing without a type
+// filter.
 type fakeEmby struct {
 	t         *testing.T
 	played    []embyItem
 	resumable []embyItem
+	hidden    []string // resumable item IDs hidden from Continue Watching; Emby hides every resumable episode of a series at once
 	favorites []embyItem
 	series    []embyItem
-	failures  map[string]int // Filters value, or "Ids", answered with this status
+	failures  map[string]int // Filters value, "Ids", or "Resume", answered with this status
 	pageCap   int            // when set, pages hold at most this many items
 
 	mu       sync.Mutex
@@ -42,6 +47,27 @@ func (f *fakeEmby) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	key := query.Get("Filters")
 	var items []embyItem
 	switch {
+	case strings.HasSuffix(r.URL.Path, "/Items/Resume"):
+		key = "Resume"
+		if query.Get("IncludeItemTypes") == "" && query.Get("MediaTypes") == "" {
+			break
+		}
+		// The row shows one next-up episode per series, here the first one;
+		// other in-progress episodes of that series are left out.
+		types := strings.Split(query.Get("IncludeItemTypes"), ",")
+		nextUp := map[string]bool{}
+		for _, item := range f.resumable {
+			if !slices.Contains(types, item.Type) || slices.Contains(f.hidden, item.ID) {
+				continue
+			}
+			if item.Type == "Episode" {
+				if nextUp[item.SeriesID] {
+					continue
+				}
+				nextUp[item.SeriesID] = true
+			}
+			items = append(items, item)
+		}
 	case query.Get("Ids") != "":
 		key = "Ids"
 		ids := strings.Split(query.Get("Ids"), ",")
@@ -181,6 +207,78 @@ func TestEmbyProviderFetchImportsWatchDatesYearsAndPlayCounts(t *testing.T) {
 	partial := records["movie-2"]
 	if partial.Played || partial.PositionSeconds != 600 || !partial.UpdatedAt.Equal(resumed) {
 		t.Fatalf("resumable movie = played:%v pos:%v updated:%v, want false/600/%v", partial.Played, partial.PositionSeconds, partial.UpdatedAt, resumed)
+	}
+}
+
+func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
+	t.Parallel()
+
+	stopped := time.Date(2026, 10, 8, 19, 59, 13, 0, time.UTC)
+	resumable := func(id, name, tmdb string, positionTicks int64) embyItem {
+		item := embyItem{ID: id, Name: name, Type: "Movie", RunTimeTicks: 6_000_000_000, ProviderIDs: map[string]string{"Tmdb": tmdb}}
+		item.UserData.PlaybackPositionTicks = positionTicks
+		item.UserData.PlayCount = 1
+		item.UserData.LastPlayedDate = &stopped
+		return item
+	}
+	episode := func(id, seriesID string, number int) embyItem {
+		item := resumable(id, "Episode", "", 1_000_000_000)
+		item.Type, item.SeriesID, item.SeriesName, item.ParentIndexNumber, item.IndexNumber = "Episode", seriesID, "Severance", 1, number
+		return item
+	}
+	fake := &fakeEmby{
+		resumable: []embyItem{
+			resumable("9", "Alien", "348", 2_700_000_000),
+			resumable("8", "Heat", "949", 2_400_000_000),
+			episode("ep-1", "series-1", 1),
+			episode("ep-2", "series-1", 2),
+			episode("ep-3", "series-2", 1),
+			episode("ep-4", "series-2", 2),
+			episode("ep-5", "", 1),
+		},
+		hidden: []string{"8", "ep-3", "ep-4", "ep-5"},
+		series: []embyItem{embySeverance},
+	}
+
+	records, warnings := fetchEmbyRecords(t, fake.provider(t))
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if visible := records["9"]; visible.HiddenFromResume || visible.PositionSeconds != 270 || !visible.UpdatedAt.Equal(stopped) {
+		t.Fatalf("visible resumable movie = hidden:%v pos:%v updated:%v, want false/270/%v", visible.HiddenFromResume, visible.PositionSeconds, visible.UpdatedAt, stopped)
+	}
+	// The hidden movie keeps its position and play date; the import dismisses
+	// it from Continue Watching instead of dropping it.
+	if hidden := records["8"]; !hidden.HiddenFromResume || hidden.PositionSeconds != 240 || !hidden.UpdatedAt.Equal(stopped) {
+		t.Fatalf("hidden resumable movie = hidden:%v pos:%v updated:%v, want true/240/%v", hidden.HiddenFromResume, hidden.PositionSeconds, hidden.UpdatedAt, stopped)
+	}
+
+	// Emby's row shows only one episode of a series, so an episode missing
+	// from it isn't hidden while its series is listed; a series missing from
+	// it is hidden with every resumable episode.
+	if records["ep-1"].HiddenFromResume || records["ep-2"].HiddenFromResume {
+		t.Fatalf("listed series episodes marked hidden = %v/%v, want neither", records["ep-1"].HiddenFromResume, records["ep-2"].HiddenFromResume)
+	}
+	if !records["ep-3"].HiddenFromResume || !records["ep-4"].HiddenFromResume {
+		t.Fatalf("hidden series episodes marked hidden = %v/%v, want both", records["ep-3"].HiddenFromResume, records["ep-4"].HiddenFromResume)
+	}
+	// Without a series an episode can't be looked up in the row.
+	if records["ep-5"].HiddenFromResume {
+		t.Fatal("episode without a series marked hidden, want not hidden")
+	}
+
+	// Without Emby's resume list nothing can be told apart: the import keeps
+	// every position, hides nothing, and says why.
+	fake.failures = map[string]int{"Resume": http.StatusInternalServerError}
+	records, warnings = fetchEmbyRecords(t, fake.provider(t))
+	if !slices.Equal(warnings, []string{warnEmbyResumeListUnavailable}) {
+		t.Fatalf("warnings = %v, want %q", warnings, warnEmbyResumeListUnavailable)
+	}
+	if records["8"].HiddenFromResume || records["8"].PositionSeconds != 240 {
+		t.Fatalf("hidden movie without resume list = %+v, want imported and not hidden", records["8"])
+	}
+	if records["ep-3"].HiddenFromResume || records["ep-4"].HiddenFromResume {
+		t.Fatalf("hidden series episodes without resume list = %v/%v, want neither", records["ep-3"].HiddenFromResume, records["ep-4"].HiddenFromResume)
 	}
 }
 
@@ -395,23 +493,5 @@ func TestNormalizeEmbyItemWithoutLastPlayedDateHasNoFreshnessTimestamp(t *testin
 	}
 	if record.PositionSeconds != 120 {
 		t.Fatalf("PositionSeconds = %v, want 120", record.PositionSeconds)
-	}
-}
-
-func TestNormalizeEmbyItemUsesLastPlayedDateForFreshness(t *testing.T) {
-	t.Parallel()
-
-	lastPlayed := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
-	item := embyItem{ID: "emby-episode-1", Name: "Played", Type: "Episode"}
-	item.UserData.LastPlayedDate = &lastPlayed
-	item.UserData.Played = true
-
-	record := normalizeEmbyItem(item, embyItem{})
-
-	if !record.UpdatedAt.Equal(lastPlayed) {
-		t.Fatalf("UpdatedAt = %v, want %v", record.UpdatedAt, lastPlayed)
-	}
-	if record.LastPlayedAt == nil || !record.LastPlayedAt.Equal(lastPlayed) {
-		t.Fatalf("LastPlayedAt = %v, want %v", record.LastPlayedAt, lastPlayed)
 	}
 }

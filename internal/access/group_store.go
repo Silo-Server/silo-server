@@ -471,81 +471,56 @@ func (s *GroupStore) DeleteConditional(ctx context.Context, id int64, guard Grou
 // DeleteMovingMembers deletes a group as DeleteConditional does, but first
 // moves its members into the default group in the same transaction, so a
 // regular account never falls back to having no group. Each moved account's
-// access_policy_revision is bumped, as for other group changes. onMoved runs
-// inside the transaction with the moved user IDs (callers revoke their
-// sign-ins there, as a single-user group change does), and the IDs are
-// returned for work that must follow the commit. If no default group exists
-// the members are left to the foreign key, as DeleteConditional does.
-func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard GroupPrecondition, onMoved func(context.Context, pgx.Tx, []int) error) ([]int, error) {
+// access_policy_revision is bumped, as for other group changes; members stay
+// signed in and pick up the default group's policy on their next request. If
+// no default group exists the members are left to the foreign key, as
+// DeleteConditional does.
+func (s *GroupStore) DeleteMovingMembers(ctx context.Context, id int64, guard GroupPrecondition) error {
 	if !guard.valid() {
-		return nil, ErrGroupInvalidPrecondition
+		return ErrGroupInvalidPrecondition
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("beginning access group delete: %w", err)
+		return fmt.Errorf("beginning access group delete: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	if err = lockGroupWriters(ctx, tx); err != nil {
-		return nil, err
+		return err
 	}
 	row, err := lockGroup(ctx, tx, id, guard)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if row.IsDefault {
-		return nil, ErrDefaultGroupRequired
+		return ErrDefaultGroupRequired
 	}
-	moved, err := moveGroupMembersToDefault(ctx, tx, id)
-	if err != nil {
-		return nil, err
-	}
-	if len(moved) > 0 && onMoved != nil {
-		if err = onMoved(ctx, tx, moved); err != nil {
-			return nil, err
-		}
+	if err = moveGroupMembersToDefault(ctx, tx, id); err != nil {
+		return err
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM access_groups WHERE id=$1`, id); err != nil {
-		return nil, err
+		return err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return moved, nil
+	return tx.Commit(ctx)
 }
 
 // moveGroupMembersToDefault reassigns every member of group id to the default
-// group and returns their user IDs. It returns none when there is no default
-// group other than id.
-func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) ([]int, error) {
+// group. It moves none when there is no default group other than id.
+func moveGroupMembersToDefault(ctx context.Context, tx pgx.Tx, id int64) error {
 	var defaultID int64
 	err := tx.QueryRow(ctx, `SELECT id FROM access_groups WHERE is_default AND id <> $1`, id).Scan(&defaultID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("finding the default access group: %w", err)
+		return fmt.Errorf("finding the default access group: %w", err)
 	}
-	rows, err := tx.Query(ctx, `
+	if _, err := tx.Exec(ctx, `
 		UPDATE users
 		SET access_group_id = $1, access_policy_revision = access_policy_revision + 1
-		WHERE access_group_id = $2
-		RETURNING id`, defaultID, id)
-	if err != nil {
-		return nil, fmt.Errorf("moving access group members to the default group: %w", err)
+		WHERE access_group_id = $2`, defaultID, id); err != nil {
+		return fmt.Errorf("moving access group members to the default group: %w", err)
 	}
-	defer rows.Close()
-	var moved []int
-	for rows.Next() {
-		var userID int
-		if err := rows.Scan(&userID); err != nil {
-			return nil, fmt.Errorf("reading moved access group member: %w", err)
-		}
-		moved = append(moved, userID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("moving access group members to the default group: %w", err)
-	}
-	return moved, nil
+	return nil
 }
 
 // GetPolicyForUser returns the access-group policy for a user, or nil when

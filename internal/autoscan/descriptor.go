@@ -21,6 +21,13 @@ const (
 	ConnectionRequired ConnectionRequirement = "required"
 )
 
+// Connection kinds a descriptor can restrict binding to. They match the kind
+// stored on an autoscan connection.
+const (
+	ConnectionKindSonarr = "sonarr"
+	ConnectionKindRadarr = "radarr"
+)
+
 // normalizeConnectionRequirement maps a manifest-supplied string onto a known
 // requirement, falling back to ConnectionOptional for absent or unrecognized
 // values so an unknown future value never hides the connection step outright.

@@ -48,7 +48,7 @@ type ItemsHandler struct {
 	images           *ImageCache
 	nextUpRepo       *catalog.NextUpRepository
 	browseRepo       *catalog.BrowseRepository
-	personRepo       *catalog.PersonRepository
+	personRepo       itemPersonRepository
 	detailSvc        *catalog.DetailService
 	durationSrc      probedDurationSource
 	itemRepo         itemRepoForBatchLoader
@@ -61,6 +61,10 @@ type ItemsHandler struct {
 	// collections is optional; when set, library collections are exposed as
 	// Jellyfin BoxSets. posterPresigner/presignTTL resolve their artwork keys.
 	collections collectionSource
+	// collectionPosters is optional; when set, BoxSets show each viewer the
+	// collage of the members it can access. Without it, only uploaded and
+	// template posters are shown.
+	collectionPosters CollectionPosterResolver
 	// queryExecutor is optional; when set, smart (live-query) collections
 	// resolve their BoxSet children at read time instead of from stored items.
 	queryExecutor   smartCollectionQueryExecutor
@@ -93,7 +97,6 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		images:       images,
 		nextUpRepo:   nextUpRepo,
 		browseRepo:   browseRepo,
-		personRepo:   personRepo,
 		detailSvc:    detailSvc,
 		durationSrc:  detailSvc,
 		itemRepo:     itemRepo,
@@ -107,7 +110,17 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 	if seasonRepo != nil {
 		h.seasonRepo = seasonRepo
 	}
+	if personRepo != nil {
+		h.personRepo = personRepo
+	}
 	return h
+}
+
+// itemPersonRepository is what GET /Items/{id} needs to answer a person.
+type itemPersonRepository interface {
+	GetVisible(ctx context.Context, id int64, filter catalog.AccessFilter) (*models.Person, error)
+	EnsureAccessible(ctx context.Context, id int64, filter catalog.AccessFilter) error
+	CountItemsByType(ctx context.Context, personID int64) (map[string]int, error)
 }
 
 // HandleViews serves GET /Users/{userId}/Views.
@@ -482,7 +495,10 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	person, err := h.personRepo.Get(r.Context(), personID)
+	// A person whose credits are all on titles the viewer cannot see reads as
+	// unknown, matching native person detail.
+	access := h.resolveAccessFilter(r.Context(), session)
+	person, err := h.personRepo.GetVisible(r.Context(), personID, access)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "NotFound", "Person not found")
@@ -543,7 +559,7 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 	if photoURL != "" {
 		// The signed tag authorizes anonymous image GETs, so mint it only for a
 		// viewer with a visible credit; the image route refuses everyone else.
-		err := h.personRepo.EnsureAccessible(r.Context(), personID, h.resolveAccessFilter(r.Context(), session))
+		err := h.personRepo.EnsureAccessible(r.Context(), personID, access)
 		switch {
 		case err == nil:
 			dto.ImageTags = map[string]string{compatImagePrimary: personPrimaryImageTag(h.mapper.imageTagSigner, routeID, person.PhotoPath, person.PhotoThumbhash)}
@@ -1408,8 +1424,8 @@ func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch. Jellyfin expects a flat list of parent series,
-// so this compatibility path explicitly opts out of the native TV scan-event
-// grouping that may return episode cards or repeat a series across scan runs.
+// so this compatibility path explicitly opts out of the native TV arrival-event
+// grouping that may return episode cards or repeat a series across arrivals.
 // The cached *models.MediaItem values are treated read-only;
 // LocalizeItemModels deep-copies before any presign mutation.
 func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
@@ -1869,6 +1885,12 @@ func (h *ItemsHandler) HandleEpisodes(w http.ResponseWriter, r *http.Request) {
 // the result before detail hydration. Only the bounded AdjacentTo window
 // bypasses paging.
 func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery, seriesID, requestedSeasonID string, page bool) {
+	// Jellyfin returns every episode when Limit is absent, and Infuse relies on
+	// that to build its season list; parseItemsQuery's default page size is for
+	// item browsing.
+	if query.limitDefaulted {
+		query.limit = catalog.MaxEpisodePageSize
+	}
 	seasons, err := h.content.ListSeasons(r.Context(), session, seriesID, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)

@@ -47,6 +47,9 @@ type fakeItemRepo struct {
 	// referenced reports whether something links to an item, for
 	// DeleteIfUnreferenced. Nil treats every item as unreferenced.
 	referenced func(contentID string) bool
+
+	// unmatchedIDs is what ListUnmatchedByFolderAndPathPrefix returns.
+	unmatchedIDs []string
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -115,6 +118,22 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	return nil
 }
 
+func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	item, ok := r.items[contentID]
+	if !ok {
+		return false, fmt.Errorf("%w: %s", catalog.ErrItemNotFound, contentID)
+	}
+	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") {
+		return false, nil
+	}
+	cp := *item
+	cp.Status = status
+	r.items[contentID] = &cp
+	return true, nil
+}
+
 func (r *fakeItemRepo) InsertIfAbsent(_ context.Context, item *models.MediaItem) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -164,7 +183,9 @@ func (r *fakeItemRepo) ReplacePeople(_ context.Context, _ string, _ []models.Ite
 }
 
 func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ int, _ string, _ int) ([]string, error) {
-	return nil, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.unmatchedIDs...), nil
 }
 
 // TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the
@@ -432,13 +453,17 @@ func (r *fakeRefreshDebtRepo) MarkTargetSuccess(_ context.Context, targetType, c
 		delete(r.debts, key)
 		return nil
 	}
-	r.debts[key] = &models.MetadataRefreshDebt{
-		TargetType:    targetType,
-		ContentID:     contentID,
-		Priority:      priority,
-		ReasonMask:    reasonMask,
-		NextRefreshAt: nextRefreshAt,
+	debt := &models.MetadataRefreshDebt{TargetType: targetType, ContentID: contentID}
+	if existing, ok := r.debts[key]; ok {
+		// Mirror the repository's upsert: a success leaves attempt_count and
+		// last_attempt_at alone, so terminal give-up survives later syncs.
+		debt.AttemptCount = existing.AttemptCount
+		debt.LastAttemptAt = existing.LastAttemptAt
 	}
+	debt.Priority = priority
+	debt.ReasonMask = reasonMask
+	debt.NextRefreshAt = nextRefreshAt
+	r.debts[key] = debt
 	return nil
 }
 
@@ -482,8 +507,6 @@ type fakeFileRepo struct {
 	mu                  sync.Mutex
 	contentIDs          map[int]string    // fileID -> contentID
 	rootContent         map[string]string // "folderID:rootPath" -> contentID
-	rootCandidates      map[string][]string
-	rootCandidateStatus map[string]string
 	groupContent        map[string]string // "folderID:version:key" -> contentID
 	groupFiles          map[string][]*models.MediaFile
 	matchStamps         map[int]time.Time // fileID -> match_attempted_at
@@ -496,14 +519,12 @@ type fakeFileRepo struct {
 
 func newFakeFileRepo() *fakeFileRepo {
 	return &fakeFileRepo{
-		contentIDs:          make(map[int]string),
-		rootContent:         make(map[string]string),
-		rootCandidates:      make(map[string][]string),
-		rootCandidateStatus: make(map[string]string),
-		groupContent:        make(map[string]string),
-		groupFiles:          make(map[string][]*models.MediaFile),
-		matchStamps:         make(map[int]time.Time),
-		updateErrors:        make(map[int]error),
+		contentIDs:   make(map[int]string),
+		rootContent:  make(map[string]string),
+		groupContent: make(map[string]string),
+		groupFiles:   make(map[string][]*models.MediaFile),
+		matchStamps:  make(map[int]time.Time),
+		updateErrors: make(map[int]error),
 	}
 }
 
@@ -540,14 +561,6 @@ func (r *fakeFileRepo) FindContentIDByRootPath(_ context.Context, folderID int, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	key := fmt.Sprintf("%d:%s", folderID, rootPath)
-	if candidates := r.rootCandidates[key]; len(candidates) > 0 {
-		for _, candidate := range candidates {
-			if strings.EqualFold(strings.TrimSpace(r.rootCandidateStatus[candidate]), "matched") {
-				return candidate, nil
-			}
-		}
-		return candidates[0], nil
-	}
 	if cid, ok := r.rootContent[key]; ok {
 		return cid, nil
 	}
@@ -635,24 +648,32 @@ func (r *fakeFileRepo) ListByObservedRootPath(_ context.Context, folderID int, o
 	return out, nil
 }
 
-func (r *fakeFileRepo) UpdateContentIDByObservedRootPath(_ context.Context, folderID int, observedRootPath, contentID string) (int, error) {
+func (r *fakeFileRepo) UpdateContentIDByObservedRootPath(_ context.Context, folderID int, observedRootPath, contentID string) (int, []string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	updated := 0
+	var replaced []string
 	for _, files := range r.groupFiles {
 		for _, file := range files {
 			if file == nil || file.MediaFolderID != folderID || file.ObservedRootPath != observedRootPath {
 				continue
 			}
-			if existing := r.contentIDs[file.ID]; existing == contentID {
+			existing, ok := r.contentIDs[file.ID]
+			if !ok {
+				existing = file.ContentID
+			}
+			if existing == contentID {
 				continue
+			}
+			if existing != "" && !slices.Contains(replaced, existing) {
+				replaced = append(replaced, existing)
 			}
 			r.contentIDs[file.ID] = contentID
 			updated++
 		}
 	}
 	r.rootContent[fmt.Sprintf("%d:%s", folderID, observedRootPath)] = contentID
-	return updated, nil
+	return updated, replaced, nil
 }
 
 // setRootContent pre-seeds a root path -> content_id mapping for testing.
@@ -661,18 +682,6 @@ func (r *fakeFileRepo) setRootContent(folderID int, rootPath, contentID string) 
 	defer r.mu.Unlock()
 	key := fmt.Sprintf("%d:%s", folderID, rootPath)
 	r.rootContent[key] = contentID
-}
-
-func (r *fakeFileRepo) setRootCandidates(folderID int, rootPath string, candidates map[string]string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	key := fmt.Sprintf("%d:%s", folderID, rootPath)
-	r.rootCandidates[key] = r.rootCandidates[key][:0]
-	for contentID, status := range candidates {
-		r.rootCandidates[key] = append(r.rootCandidates[key], contentID)
-		r.rootCandidateStatus[contentID] = status
-	}
-	slices.Sort(r.rootCandidates[key])
 }
 
 func (r *fakeFileRepo) setGroupContent(folderID int, groupKeyVersion int, contentGroupKey, contentID string) {
@@ -1337,13 +1346,14 @@ func TestSyncRefreshDebtForItemKeepsFailedCurrentProviderID(t *testing.T) {
 	}
 }
 
-func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
+func TestShouldReanchorProviderContentIDRequiresManualRefreshOrCorrection(t *testing.T) {
 	const anchoredID = "movie-tmdb-111"
 	tests := []struct {
 		name      string
 		contentID string
 		isNew     bool
 		mode      RefreshMode
+		corrected bool
 		want      bool
 	}{
 		{
@@ -1351,8 +1361,16 @@ func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
 			contentID: anchoredID, mode: ModeScheduledRefresh,
 		},
 		{
-			name:      "identify",
+			name:      "identify confirming the match",
 			contentID: anchoredID, mode: ModeIdentify,
+		},
+		{
+			name:      "identify rejecting the live anchor",
+			contentID: anchoredID, mode: ModeIdentify, corrected: true, want: true,
+		},
+		{
+			name:      "scheduled refresh with a corrected identity",
+			contentID: anchoredID, mode: ModeScheduledRefresh, corrected: true,
 		},
 		{
 			name:      "manual refresh",
@@ -1369,7 +1387,7 @@ func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldReanchorProviderContentID(tt.contentID, tt.isNew, tt.mode); got != tt.want {
+			if got := shouldReanchorProviderContentID(tt.contentID, tt.isNew, tt.mode, tt.corrected); got != tt.want {
 				t.Fatalf("shouldReanchorProviderContentID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -1769,6 +1787,45 @@ func TestCreateOrFindSkeleton_WithFolderIDs(t *testing.T) {
 	}
 }
 
+func TestCreateOrFindSkeleton_UntaggedVersionRespectsTaggedSibling(t *testing.T) {
+	const root = "/media/movies/Dune (2021)"
+	for _, tc := range []struct {
+		name        string
+		siblingPath string
+		wantFlagged bool
+	}{
+		{name: "tagged sibling", siblingPath: root + "/Dune (2021) [imdbid-tt1160419] [Bluray-1080p].mkv"},
+		{name: "untagged sibling", siblingPath: root + "/Dune (2021) [Bluray-1080p].mkv", wantFlagged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			ctx := context.Background()
+			h.service.folderRepo = &fakeMetadataFolderRepo{
+				folders: map[int]*models.MediaFolder{
+					10: {ID: 10, Type: "movies", Enabled: true},
+				},
+			}
+			sibling := &models.MediaFile{ID: 1, MediaFolderID: 10, FilePath: tc.siblingPath, ObservedRootPath: root}
+			file := &models.MediaFile{
+				ID:               2,
+				MediaFolderID:    10,
+				FilePath:         root + "/Dune (2021) [Bluray-2160p].mkv",
+				ObservedRootPath: root,
+			}
+			h.fileRepo.setGroupFiles(10, 1, "dune", sibling, file)
+
+			if _, err := h.service.createOrFindSkeleton(ctx, file, 10); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			_, flagged := h.skippedRootRepo.skipped["10:"+root]
+			if flagged != tc.wantFlagged {
+				t.Fatalf("root flagged = %v, want %v", flagged, tc.wantFlagged)
+			}
+		})
+	}
+}
+
 func TestCreateOrFindSkeleton_IDTaggedMovieFolderBeatsDivergentReleaseFilename(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -1969,35 +2026,21 @@ func TestCreateOrFindSkeleton_MixedLibraryEpisodeShapedMovieStaysMovie(t *testin
 	}
 }
 
-// TestPendingItemLifecycle_UnmatchedTransition verifies that the worker
-// correctly transitions a pending item to "unmatched" when enrichment fails.
-func TestPendingItemLifecycle_UnmatchedTransition(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	// Pre-create an item with status "pending".
-	contentID := "test-content-123"
-	h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: contentID,
-		Status:    "pending",
-		Title:     "Test Movie",
-		Year:      2020,
-		Type:      "movie",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	})
-
-	// Call updateItemStatus to simulate what the worker does on failure.
-	h.service.updateItemStatus(ctx, contentID, "unmatched")
-
-	item, err := h.itemRepo.GetByID(ctx, contentID)
-	if err != nil {
-		t.Fatalf("item not found: %v", err)
-	}
-	if item.Status != "unmatched" {
-		t.Errorf("expected status=unmatched, got %q", item.Status)
+// A provisional status never replaces an accepted match: the item may have
+// been matched after the caller read it.
+func TestUpdateItemStatusKeepsMatchedItem(t *testing.T) {
+	for _, status := range []string{"unmatched", "pending", "ambiguous"} {
+		t.Run(status, func(t *testing.T) {
+			h := newTestHarness()
+			h.itemRepo.items["matched-item"] = &models.MediaItem{ContentID: "matched-item", Type: "movie", Title: "Matched", Status: "matched"}
+			changed, err := h.service.updateItemStatus(t.Context(), "matched-item", status)
+			if err != nil || changed {
+				t.Fatalf("updateItemStatus(%s) = %v, %v; want unchanged", status, changed, err)
+			}
+			if got := h.itemRepo.items["matched-item"].Status; got != "matched" {
+				t.Fatalf("status = %q, want matched", got)
+			}
+		})
 	}
 }
 
@@ -2308,63 +2351,6 @@ func TestCreateOrFindSkeleton_SeriesSkipsPendingExternalIDDedupAcrossRoots(t *te
 	}
 }
 
-func TestCreateOrFindSkeleton_SeriesPrefersMatchedRootItemOverProvisionalShell(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "pending-root-shell",
-		Status:    "pending",
-		Title:     "Example Show",
-		Year:      2024,
-		Type:      "series",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert pending shell: %v", err)
-	}
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "matched-series",
-		Status:    "matched",
-		Title:     "Example Show",
-		Year:      2024,
-		Type:      "series",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("upsert matched series: %v", err)
-	}
-	h.fileRepo.setRootCandidates(10, "/media/shows/Example Show", map[string]string{
-		"pending-root-shell": "pending",
-		"matched-series":     "matched",
-	})
-
-	file := &models.MediaFile{
-		ID:               1,
-		MediaFolderID:    10,
-		FilePath:         "/media/shows/Example Show/Season 01/Example.Show.S01E03.mkv",
-		ObservedRootPath: "/media/shows/Example Show",
-		BaseTitle:        "Example Show",
-		BaseYear:         2024,
-		BaseType:         "series",
-	}
-
-	result, err := h.service.createOrFindSkeleton(ctx, file, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got, want := result.ContentID, "matched-series"; got != want {
-		t.Fatalf("ContentID = %q, want %q", got, want)
-	}
-	if result.IsNew {
-		t.Fatal("expected IsNew=false when a matched same-root series already exists")
-	}
-}
-
 func TestCreateOrFindSkeleton_SeriesSkipsTitleYearDedupAcrossRoots(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -2567,5 +2553,46 @@ func TestCreateOrFindSkeleton_AmbiguousScannedGroupCreatesAmbiguousItem(t *testi
 	}
 	if item.Status != "ambiguous" {
 		t.Fatalf("item.Status = %q, want ambiguous", item.Status)
+	}
+}
+
+func TestIdentityCorrectionRejectsLiveAnchor(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejected.add("tvdb", "73244")
+	stale := make(providerIDValueSet)
+	stale.add("tvdb", "73244")
+	corrected := map[string]string{"tvdb": "78107", "tmdb": "2316"}
+	if !identityCorrectionRejectsLiveAnchor("series-tvdb-73244", corrected, rejected) {
+		t.Error("a rejected live anchor should re-anchor")
+	}
+	if identityCorrectionRejectsLiveAnchor("series-tvdb-73244", corrected, rejected, stale) {
+		t.Error("a rejected anchor recorded stale should keep the id")
+	}
+	if identityCorrectionRejectsLiveAnchor("series-tvdb-78107", corrected, rejected) {
+		t.Error("an anchor the correction kept should keep the id")
+	}
+	if identityCorrectionRejectsLiveAnchor("146000000000000100", corrected, rejected) {
+		t.Error("a legacy id has no anchor to reject")
+	}
+}
+
+// A single-key choice rejects the stored IDs it doesn't restate, but when the
+// chosen title's providers return the anchor again the choice only added a
+// provider ID to the same title, so the item keeps its id.
+func TestIdentityCorrectionKeepsAnchorTheProvidersRestate(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejected.add("tmdb", "555")
+	sameShow := map[string]string{"tvdb": "78107", "tmdb": "555"}
+	if identityCorrectionRejectsLiveAnchor("series-tmdb-555", sameShow, rejected) {
+		t.Error("an anchor the chosen title's providers restate should keep the id")
+	}
+
+	rejected = make(providerIDValueSet)
+	rejected.add("imdb", "tt0000100")
+	if identityCorrectionRejectsLiveAnchor("movie-imdb-tt0000100", map[string]string{"tmdb": "200", "imdb": "TT0000100"}, rejected) {
+		t.Error("an IMDb anchor restated in another case should keep the id")
+	}
+	if !identityCorrectionRejectsLiveAnchor("movie-imdb-tt0000100", map[string]string{"tmdb": "200"}, rejected) {
+		t.Error("an anchor the chosen title's providers don't return should re-anchor")
 	}
 }

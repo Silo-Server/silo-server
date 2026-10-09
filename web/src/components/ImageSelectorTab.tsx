@@ -108,6 +108,16 @@ export default function ImageSelectorTab({
         Image changes apply immediately and are not affected by Cancel.
       </div>
 
+      {item.type === "season" && (
+        <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertCircle className="size-3.5 shrink-0" />
+          <span>
+            Only seeing one poster? Check for plugin updates and update TMDB and TVDB to load full
+            season artwork galleries.
+          </span>
+        </div>
+      )}
+
       {/* Image type tabs */}
       <div className="flex shrink-0 items-center gap-1">
         {availableTabs.map((tab) => (

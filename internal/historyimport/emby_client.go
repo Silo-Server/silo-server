@@ -214,18 +214,27 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 }
 
 func (c *EmbyClient) FetchItems(ctx context.Context, auth embyLocalAuth, filter string) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, filter, "Movie,Episode")
+	return c.fetchItems(ctx, auth, "Items", filter, "Movie,Episode")
 }
 
 // FetchFavoriteItems includes seasons so the provider can report the season
 // favorites Silo has no target for, rather than dropping them silently.
 func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series,Season,Episode")
+	return c.fetchItems(ctx, auth, "Items", "IsFavorite", "Movie,Series,Season,Episode")
 }
 
-// fetchItems pages through the user's items so a large library is read in
-// bounded responses instead of one body racing the client timeout.
-func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter, includeItemTypes string) ([]embyItem, error) {
+// FetchResumeItems pages through the user's Continue Watching row. Emby leaves
+// out items the user hid from it, which the IsResumable filter still returns
+// with unchanged user data, and shows at most one episode per series. The
+// endpoint needs a type filter: without one Emby 4.10 answers with no items.
+func (c *EmbyClient) FetchResumeItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
+	return c.fetchItems(ctx, auth, "Items/Resume", "", "Movie,Episode")
+}
+
+// fetchItems pages through one of the user's item lists (endpoint is relative
+// to /Users/{id}) so a large library is read in bounded responses instead of
+// one body racing the client timeout.
+func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
 	for startIndex := 0; ; {
 		query := url.Values{}
@@ -233,12 +242,14 @@ func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter,
 		query.Set("EnableUserData", "true")
 		query.Set("Fields", embyItemFields)
 		query.Set("IncludeItemTypes", includeItemTypes)
-		query.Set("Filters", filter)
+		if filter != "" {
+			query.Set("Filters", filter)
+		}
 		query.Set("StartIndex", strconv.Itoa(startIndex))
 		query.Set("Limit", strconv.Itoa(embyPageSize))
-		payload, err := c.getItems(ctx, auth, query)
+		payload, err := c.getItems(ctx, auth, endpoint, query)
 		if err != nil {
-			return nil, fmt.Errorf("fetching Emby items with filter %s: %w", filter, err)
+			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
 		items = append(items, payload.Items...)
 		startIndex += len(payload.Items)
@@ -267,7 +278,7 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 		if strings.TrimSpace(includeItemTypes) != "" {
 			query.Set("IncludeItemTypes", includeItemTypes)
 		}
-		payload, err := c.getItems(ctx, auth, query)
+		payload, err := c.getItems(ctx, auth, "Items", query)
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
@@ -276,8 +287,8 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 	return items, nil
 }
 
-func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, query url.Values) (embyItemsResponse, error) {
-	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
+func (c *EmbyClient) getItems(ctx context.Context, auth embyLocalAuth, endpoint string, query url.Values) (embyItemsResponse, error) {
+	path := fmt.Sprintf("%s/Users/%s/%s?%s", auth.BaseURL, url.PathEscape(auth.UserID), endpoint, query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return embyItemsResponse{}, err

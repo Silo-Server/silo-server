@@ -38,6 +38,7 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { getInitials } from "@/lib/text";
 import { cn } from "@/lib/utils";
 import { Search } from "lucide-react";
+import { EnterKeyHint, Kbd } from "@/components/ui/kbd";
 import CardPlayOverlay from "./CardPlayOverlay";
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
 
@@ -75,6 +76,10 @@ function searchResultOptionId(index: number): string {
   return `search-result-${index}`;
 }
 
+function scrollSearchResultIntoView(index: number) {
+  document.getElementById(searchResultOptionId(index))?.scrollIntoView?.({ block: "nearest" });
+}
+
 function typeLabel(type: BrowseItem["type"]): string {
   switch (type) {
     case "movie":
@@ -105,12 +110,14 @@ function GlobalSearchResultRow({
   item,
   index,
   isSelected,
+  onSelect,
   onPick,
   onPlay,
 }: {
   item: BrowseItem;
   index: number;
   isSelected: boolean;
+  onSelect: () => void;
   onPick: (contentId: string) => void;
   onPlay: () => void;
 }) {
@@ -127,7 +134,11 @@ function GlobalSearchResultRow({
   // layout (same gap/padding/poster box) so it tracks the poster without
   // hard-coded offsets, and is pointer-events-none so row clicks pass through.
   return (
-    <div className="group/media hover:bg-muted/80 data-[selected]:bg-accent relative rounded-md transition-colors">
+    <div
+      data-selected={isSelected || undefined}
+      onMouseMove={isSelected ? undefined : onSelect}
+      className="group/media data-[selected]:bg-accent relative rounded-md transition-colors"
+    >
       <div
         id={searchResultOptionId(index)}
         role="option"
@@ -135,7 +146,6 @@ function GlobalSearchResultRow({
         aria-label={[item.title, item.year > 0 ? String(item.year) : null, typeLabel(item.type)]
           .filter(Boolean)
           .join(", ")}
-        data-selected={isSelected || undefined}
         onClick={() => onPick(item.content_id)}
         className={ROW_LAYOUT_CLASSES}
       >
@@ -161,7 +171,7 @@ function GlobalSearchResultRow({
               onError={onError}
             />
           ) : (
-            <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[10px] leading-tight">
+            <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[0.625rem] leading-tight">
               {item.title.slice(0, 24)}
             </div>
           )}
@@ -173,6 +183,7 @@ function GlobalSearchResultRow({
             {typeLabel(item.type)}
           </div>
         </div>
+        {isSelected && <EnterKeyHint />}
       </div>
       {item.play_content_id ? (
         <div className={`pointer-events-none absolute inset-0 ${ROW_LAYOUT_CLASSES}`}>
@@ -197,10 +208,21 @@ function ResultGroupHeading({ id, children }: { id: string; children: string }) 
     <div
       id={id}
       role="presentation"
-      className="text-muted-foreground px-3 pt-2 pb-1 text-[10px] font-medium tracking-[0.1em] uppercase"
+      className="text-muted-foreground px-3 pt-2 pb-1 text-[0.625rem] font-medium tracking-[0.1em] uppercase"
     >
       {children}
     </div>
+  );
+}
+
+function KeyHint({ keys, children }: { keys: string[]; children: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {keys.map((key) => (
+        <Kbd key={key}>{key}</Kbd>
+      ))}
+      {children}
+    </span>
   );
 }
 
@@ -208,11 +230,13 @@ function GlobalSearchPersonRow({
   person,
   index,
   isSelected,
+  onSelect,
   onPick,
 }: {
   person: Person;
   index: number;
   isSelected: boolean;
+  onSelect: () => void;
   onPick: (personId: string) => void;
 }) {
   const { loaded, onLoad, onError } = useImageLoaded(person.photo_url);
@@ -225,11 +249,9 @@ function GlobalSearchPersonRow({
       aria-selected={isSelected}
       aria-label={`${person.name}, Person`}
       data-selected={isSelected || undefined}
+      onMouseMove={isSelected ? undefined : onSelect}
       onClick={() => onPick(person.id)}
-      className={cn(
-        ROW_LAYOUT_CLASSES,
-        "hover:bg-muted/80 data-[selected]:bg-accent rounded-md transition-colors",
-      )}
+      className={cn(ROW_LAYOUT_CLASSES, "data-[selected]:bg-accent rounded-md transition-colors")}
     >
       <div className="flex w-10 shrink-0 justify-center">
         <div
@@ -262,6 +284,7 @@ function GlobalSearchPersonRow({
         <div className="truncate text-sm font-medium">{person.name}</div>
         <div className="text-muted-foreground text-xs">Person</div>
       </div>
+      {isSelected && <EnterKeyHint />}
     </div>
   );
 }
@@ -275,6 +298,8 @@ export function GlobalSearch({
   // Selection follows a result, not a position, so a row stays selected when
   // people results arrive and reorder the list.
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Whether the pointer made the current selection, so it is not scrolled.
+  const selectedByPointerRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useViewTransitionNavigate();
   const beginSidebarItemNavigation = useSidebarItemNavigation();
@@ -432,16 +457,19 @@ export function GlobalSearch({
   const optionCount = optionKeys.length;
   const selectedIndex = selectedKey === null ? -1 : optionKeys.indexOf(selectedKey);
 
-  // Auto-scroll the selected result into view. DOM focus deliberately stays in
-  // the input; aria-activedescendant carries the selection.
+  // Keep a keyboard selection in view, including when late results move it.
+  // A pointer selection is already under the pointer; scrolling it would slide
+  // the next row under a still pointer and select that one too.
   useEffect(() => {
-    if (selectedIndex >= 0) {
-      document.getElementById(searchResultOptionId(selectedIndex))?.scrollIntoView?.({
-        block: "nearest",
-      });
+    if (selectedIndex >= 0 && !selectedByPointerRef.current) {
+      scrollSearchResultIntoView(selectedIndex);
     }
   }, [selectedIndex]);
-  const hasMore = previewQuery.data?.has_more ?? false;
+  const selectByPointer = (key: string) => {
+    selectedByPointerRef.current = true;
+    setSelectedKey(key);
+  };
+
   const showLoading = (previewQuery.isFetching || peopleQuery.isFetching) && resultCount === 0;
   const showEmpty =
     !previewQuery.isFetching &&
@@ -457,12 +485,17 @@ export function GlobalSearch({
   // With nothing else to show, a failed people search cannot claim "No matches".
   const showError = previewQuery.isError || (peopleQuery.isError && resultCount === 0);
   function moveResultFocus(nextIndex: number) {
-    if (optionCount === 0) {
+    if (optionCount === 0 || nextIndex < 0) {
       setSelectedKey(null);
       searchInputRef.current?.focus();
       return;
     }
-    setSelectedKey(optionKeys[((nextIndex % optionCount) + optionCount) % optionCount]!);
+    selectedByPointerRef.current = false;
+    const index = Math.min(nextIndex, optionCount - 1);
+    setSelectedKey(optionKeys[index]!);
+    // Clamping can keep the same selection, so the effect above will not run.
+    // Reveal it now if the pointer selected a clipped row or the viewer scrolled away.
+    if (index === selectedIndex) scrollSearchResultIntoView(index);
   }
   function pickSelected() {
     const item = items[selectedIndex - itemOffset];
@@ -488,6 +521,7 @@ export function GlobalSearch({
       item={item}
       index={itemOffset + i}
       isSelected={itemOffset + i === selectedIndex}
+      onSelect={() => selectByPointer(`item:${item.content_id}`)}
       onPick={handlePickItem}
       onPlay={() => setOpen(false)}
     />
@@ -509,6 +543,7 @@ export function GlobalSearch({
             person={person}
             index={peopleOffset + i}
             isSelected={peopleOffset + i === selectedIndex}
+            onSelect={() => selectByPointer(`person:${person.id}`)}
             onPick={handlePickPerson}
           />
         ))}
@@ -560,6 +595,7 @@ export function GlobalSearch({
               // as soon as the search box takes focus.
               onFocus={prefetchCatalog}
               aria-label="Search"
+              enterKeyHint="search"
               role="combobox"
               aria-expanded={showResultsPanel}
               aria-autocomplete="list"
@@ -577,7 +613,7 @@ export function GlobalSearch({
                   moveResultFocus(selectedIndex + 1);
                 } else if (e.key === "ArrowUp") {
                   e.preventDefault();
-                  moveResultFocus(selectedIndex < 0 ? optionCount - 1 : selectedIndex - 1);
+                  moveResultFocus(selectedIndex - 1);
                 } else if (e.key === "Enter" && pickSelected()) {
                   e.preventDefault();
                 } else if (e.key === "Escape") {
@@ -585,9 +621,16 @@ export function GlobalSearch({
                 }
               }}
             />
-            <kbd className="bg-muted text-muted-foreground pointer-events-none ml-2 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
-              ESC
-            </kbd>
+            {/* Esc moves to the footer once there are results; until a row is
+                selected, Enter searches, so the ↵ chip sits here. */}
+            {!showResultsPanel ? (
+              <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
+            ) : optionCount > 0 && selectedIndex < 0 ? (
+              <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
+                <EnterKeyHint />
+                See all
+              </span>
+            ) : null}
           </div>
         </form>
         {showResultsPanel && (
@@ -627,6 +670,7 @@ export function GlobalSearch({
                         optionId: (index) => searchResultOptionId(resultCount + index),
                         selectedIndex:
                           selectedIndex >= resultCount ? selectedIndex - resultCount : -1,
+                        onSelect: (index) => selectByPointer(optionKeys[resultCount + index]!),
                         onPick: handlePickRequest,
                       }}
                     />
@@ -639,12 +683,9 @@ export function GlobalSearch({
                 ? `${resultCount} library results, ${requestRows.length} request suggestions`
                 : `${resultCount} results found`}
             </div>
-            <div className="text-muted-foreground border-t px-3 py-2 text-center text-xs">
-              {hasMore ? (
-                <p>Showing top results. Press Enter for all results.</p>
-              ) : (
-                <p>Press Enter to open the full search page.</p>
-              )}
+            <div className="text-muted-foreground hidden items-center justify-center gap-4 border-t px-3 py-2 text-xs sm:flex">
+              <KeyHint keys={["↑", "↓"]}>Navigate</KeyHint>
+              <KeyHint keys={["Esc"]}>Close</KeyHint>
             </div>
           </div>
         )}

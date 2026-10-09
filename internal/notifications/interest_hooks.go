@@ -64,6 +64,16 @@ func (s *interestTrackingStore) ListAllSectionOverrides(ctx context.Context) ([]
 	return enumerator.ListAllSectionOverrides(ctx)
 }
 
+// ManualCollectionsHolding preserves Add to collection's membership read;
+// both backing stores implement it.
+func (s *interestTrackingStore) ManualCollectionsHolding(ctx context.Context, creatorProfileID, mediaItemID string) ([]string, error) {
+	reader, ok := s.UserStore.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, errors.New("collection membership reads are not supported")
+	}
+	return reader.ManualCollectionsHolding(ctx, creatorProfileID, mediaItemID)
+}
+
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
 	store, err := p.inner.ForUser(ctx, userID)
 	if err != nil || store == nil {
@@ -369,6 +379,17 @@ func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, m
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
 	return err
+}
+
+// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
+// and Plex imports, and promotion of a watchlisted title that has since
+// reached the library, all write through it.
+func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err == nil && inserted {
+		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	}
+	return inserted, err
 }
 
 func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {

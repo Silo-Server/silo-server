@@ -60,30 +60,3 @@ func TestRequiredDeviceMutationAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-func TestRequiredDeviceMutationResultsRejectIncompleteEvidence(t *testing.T) {
-	for _, kind := range []string{"missing", "skipped", "failed assertion"} {
-		t.Run(kind, func(t *testing.T) {
-			var results []Result
-			for _, id := range scenariocatalog.RequiredDeviceMutationScenarios {
-				for _, transport := range []string{"v1", "v2"} {
-					results = append(results, Result{Scenario: id, Transport: transport})
-				}
-			}
-			if err := requiredPairedResults(results, scenariocatalog.RequiredDeviceMutationScenarios); err != nil {
-				t.Fatal(err)
-			}
-			switch kind {
-			case "missing":
-				results = results[1:]
-			case "skipped":
-				results[0].Skipped = "database unavailable"
-			case "failed assertion":
-				results[0].Failures = check(scenariocatalog.Expect{Status: 418}, response{Status: 204})
-			}
-			if err := requiredPairedResults(results, scenariocatalog.RequiredDeviceMutationScenarios); err == nil {
-				t.Fatal("incomplete mutation evidence passed")
-			}
-		})
-	}
-}

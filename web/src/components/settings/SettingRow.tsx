@@ -6,18 +6,30 @@ interface SettingRowProps {
   label: string;
   description: string;
   control: (id: string) => ReactNode;
+  /** Optional leading glyph, drawn in a small round tile. */
+  icon?: ReactNode;
 }
 
-export function SettingRow({ label, description, control }: SettingRowProps) {
+export function SettingRow({ label, description, control, icon }: SettingRowProps) {
   const id = useId();
 
   return (
     <div className="border-border/50 grid gap-3 border-t pt-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-      <div className="min-w-0 space-y-1">
-        <Label htmlFor={id} className="text-sm font-medium">
-          {label}
-        </Label>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+      <div className="flex min-w-0 items-center gap-3">
+        {icon ? (
+          <span
+            aria-hidden="true"
+            className="bg-foreground/8 text-foreground flex size-9 shrink-0 items-center justify-center rounded-full [&_svg]:size-4"
+          >
+            {icon}
+          </span>
+        ) : null}
+        <div className="min-w-0 space-y-1">
+          <Label htmlFor={id} className="text-sm font-medium">
+            {label}
+          </Label>
+          <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+        </div>
       </div>
       <div className="flex md:justify-end">{control(id)}</div>
     </div>

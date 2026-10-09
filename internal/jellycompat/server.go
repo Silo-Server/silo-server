@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -67,8 +68,12 @@ type Dependencies struct {
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
 	LoginResolver   loginResolver
-	Authenticator   *Authenticator
-	WebFS           fs.FS
+	// ProfilePINAttempts is the native API's profile PIN limiter, shared so
+	// password#pin guesses count against the same per-profile budget. Nil
+	// gets a process-local limiter.
+	ProfilePINAttempts *ratelimit.AttemptLimiter
+	Authenticator      *Authenticator
+	WebFS              fs.FS
 	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.
@@ -131,12 +136,21 @@ type Dependencies struct {
 	Recommender            recommendations.Recommender
 	RecWorker              *recommendations.Worker
 
+	// CollectionPosters picks each viewer's BoxSet poster; without it BoxSets
+	// show only uploaded and template posters.
+	CollectionPosters CollectionPosterResolver
+
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// SubtitlePlaySync aligns a subtitle the first time a client is served
+	// it, when it was never synced; nil leaves that to a request.
+	SubtitlePlaySync subtitles.PlaySyncer
+	// Trickplay serves seek-bar preview sheets; nil answers 404.
+	Trickplay TrickplaySheets
 }
 
 // CurrentConfig returns the live config when hot reload is wired, falling

@@ -12,7 +12,9 @@
       "mode": "oauth",
       "default": false,
       "icon_url": "https://plugins.example.test/icon.svg",
-      "installation_id": "3"
+      "installation_id": "3",
+      "native_start_path": "/api/v2/auth/oauth/3/native/start"
     }
-  ]
+  ],
+  "password_login": true
 }

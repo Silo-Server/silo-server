@@ -15,17 +15,21 @@ In a `mixed` library, `ResolvePathContext` (`internal/naming/filename.go`) and
    such as `01` counts only when the file name has an episode token; series libraries accept it
    without one.
 2. Movie-folder evidence (`detectInferMovieFolderEvidence`) makes it a movie: the parent folder
-   carries a provider tag, or is a trusted title-and-year folder whose title the file name
-   matches.
+   carries a TMDB or IMDb tag, or is a trusted title-and-year folder whose title the file name
+   matches. A TVDB-only tag isn't evidence by itself, because Sonarr adds the show's TVDB ID to
+   series folders. A TVDB-only folder has no movie evidence when the file name has an episode
+   token and the folder's own title doesn't look like an episode code; otherwise it gets the
+   title-and-year check.
 3. An episode token (`S01E02`, `1x02`, ...) makes it a series.
 4. Anything else is a movie.
 
 `movies` and `series` libraries skip this and take the library type. Step 2 comes before step 3
 on purpose: a tagged movie folder must not become a series because its title looks like an
 episode code (`TestResolvePathContext`, "mixed library obvious movie folder beats episode
-token"). As a result, episodes in a provider-tagged show folder with no season folder classify as
-movies, and an air-date name alone never makes a file a series. Metadata providers run after this
-decision; an NFO never changes the type (see [local-nfo-metadata.md](local-nfo-metadata.md)).
+token"). As a result, episodes in a TMDB- or IMDb-tagged show folder with no season folder
+classify as movies, and an air-date name alone never makes a file a series. Metadata providers
+run after this decision; an NFO never changes the type (see
+[local-nfo-metadata.md](local-nfo-metadata.md)).
 `TestEpisodePatternAgreesAcrossClassifiers` keeps the two classifiers' episode detection in step.
 
 ## Episode numbers
@@ -93,12 +97,46 @@ override typed as a series (or untyped). Tests: `TestStaleFlatSeriesQueueDoesNot
     (`deepestOverrideAncestor`) and replaces the inferred type, title, year, and provider IDs.
     The root becomes `resolved` with override source `manual`.
   - A group override, which the admin **Override** action on an ambiguous root writes
-    (`LibraryHandler.SetRootOverride`), is applied by `applyGroupOverrides`
-    (`internal/scanner/group_inference.go`) the same way, with high type confidence.
+    (`LibraryHandler.SetRootOverride`), is keyed by the root's content group and does not record
+    the root. The scanner applies it to the scanned group and location snapshots
+    (`applyGroupOverrides`, `internal/scanner/group_inference.go`) with high type confidence, and
+    leaves the files' stored group keys alone. The matcher applies its forced type, title, year,
+    and provider IDs (`applyGroupOverride`, `internal/metadata/service.go`) in two places:
+    - When it first links a file (`createOrFindSkeleton`), for every file in the group, whichever
+      root the file is in.
+    - When it matches files again that already link to a pending, unmatched, or ambiguous item
+      (`MatchWorker.applyQueuedGroupOverride`, `internal/metadata/worker.go`).
+
+    In both places a structured provider tag in the path beats a forced ID for the same provider,
+    and a forced ID beats a heuristic folder ID (a bare trailing IMDb ID). When the worker
+    matches a linked item again:
+    - When a matched item already owns a forced provider ID, the match moves the provisional
+      item's files to it and removes the provisional item (`rebindItemToExistingItem`).
+    - An ambiguous item is stored as `pending`, so the match replaces its scanned title.
+    - A matched item keeps its identity, even when its queue row runs again, and so does an
+      item that a split pinned as unmatched.
+    - Roots that are different titles can share a group key (two bare `Season` folders, or one
+      title with no year), each on its own item. A movie or series item gets the override only
+      when its present files and the group's present files are the same
+      (`itemOwnsContentGroup`). Otherwise the worker logs a warning and treats the item as if it
+      had no override, so an ambiguous item stays unmatched.
+    - The worker stores an ambiguous item's `pending` status only while the item is still
+      unmatched. When another writer matched or removed the item first, the queue row records
+      an error and the retry reads the item as it now is.
   - A file identity override beats a root override.
   - A location that identity overrides split across groups is not flagged ambiguous
     (`aggregateLocationState`).
 - Saving an override does not start a scan; the scanner applies it on the next one, and later
-  scans keep it. Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
+  scans keep it. Both match-queue fingerprints include a group override's forced values
+  (`matchQueueGroupOverrideHashSQL`, `internal/metadata/match_queue_policy.go`), so the queue sync at
+  the end of that scan wakes a match that was parked or backed off without the override.
+  Tests: `TestApplyGroupOverrides_ForcesResolvedIdentity`,
   `TestInferGroupAssignments_FileOverrideBeatsRootOverride`, and
-  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`).
+  `TestInferGroupAssignments_OverridesConvergeAcrossRescans` (`internal/scanner/group_inference_test.go`);
+  `TestQueuedIdentityAppliesGroupOverrideToLinkedProvisionalItem`
+  (`internal/metadata/queued_identity_parity_test.go`),
+  `TestSeriesQueuePassesGroupOverrideForLinkedProvisionalRoot`
+  (`internal/metadata/series_queue_override_test.go`),
+  `TestSeriesQueueGroupOverrideRelinksLinkedProvisionalRoot`
+  (`internal/metadata/group_override_rebind_db_test.go`), and
+  `TestMatchQueueGroupOverrideWakesBackedOffRows` (`internal/metadata/match_queue_state_db_test.go`).

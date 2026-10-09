@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { formatExportProgressLabel } from "./adminCatalogMaintenanceFormatters";
 import { createEmptyPathRewrite, updatePathRewrite } from "./adminCatalogMaintenancePathRewrites";

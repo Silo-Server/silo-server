@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 )
@@ -123,15 +124,17 @@ func (c *Client) doGet(ctx context.Context, path string, dest any) error {
 	reqURL := c.baseURL + path + sep + "api_key=" + url.QueryEscape(c.apiKey)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// reqURL carries the API key and a *url.Error prints the whole URL, so
+		// these errors drop the query string before callers log or store them.
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 		if err != nil {
-			return fmt.Errorf("tmdb: create request: %w", err)
+			return fmt.Errorf("tmdb: create request: %w", logredact.SanitizeURLError(err))
 		}
 		req.Header.Set("Accept", "application/json")
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("tmdb: request failed: %w", err)
+			return fmt.Errorf("tmdb: request failed: %w", logredact.SanitizeURLError(err))
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -1605,6 +1608,66 @@ func pickUSTVRating(cr *contentRatingsResponse) string {
 		}
 	}
 	return ""
+}
+
+// External ID sources accepted by FindByExternalID.
+const (
+	ExternalSourceIMDb = "imdb_id"
+	ExternalSourceTVDB = "tvdb_id"
+)
+
+// FindByExternalID looks a title up by another provider's ID through TMDB's
+// /find/{external_id} endpoint. source is ExternalSourceIMDb or
+// ExternalSourceTVDB. It returns every movie and series TMDB lists for the
+// ID, with Silo-facing media types ("movie", "series"); no result is an empty
+// slice, not an error. Results are not cached: callers use it to recover a
+// title whose TMDB ID stopped resolving, which is rare and wants a fresh
+// answer.
+func (c *Client) FindByExternalID(ctx context.Context, source, externalID string) ([]MediaResult, error) {
+	externalID = strings.TrimSpace(externalID)
+	if externalID == "" {
+		return nil, fmt.Errorf("tmdb: external id must not be empty")
+	}
+	switch source {
+	case ExternalSourceIMDb, ExternalSourceTVDB:
+	default:
+		return nil, fmt.Errorf("tmdb: invalid external source %q", source)
+	}
+	path := "/find/" + url.PathEscape(externalID) + "?external_source=" + url.QueryEscape(source)
+	var resp findResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return nil, err
+	}
+	out := make([]MediaResult, 0, len(resp.MovieResults)+len(resp.TVResults))
+	for _, item := range resp.MovieResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "movie",
+			Title:        item.Title,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.ReleaseDate,
+			Year:         releaseYear(item.ReleaseDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	for _, item := range resp.TVResults {
+		out = append(out, MediaResult{
+			ID:           item.ID,
+			MediaType:    "series",
+			Title:        item.Name,
+			Overview:     item.Overview,
+			PosterPath:   item.PosterPath,
+			BackdropPath: item.BackdropPath,
+			ReleaseDate:  item.FirstAirDate,
+			Year:         releaseYear(item.FirstAirDate),
+			Popularity:   item.Popularity,
+			VoteAverage:  item.VoteAverage,
+		})
+	}
+	return out, nil
 }
 
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {

@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
+func TestRecentTVRepositoryGroupsArrivalsAndPaginates(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -27,11 +27,12 @@ func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
 	series := func(name string) string { return fmt.Sprintf("recent-tv-%s-%d", name, suffix) }
 	episode := func(name string) string { return fmt.Sprintf("recent-tv-episode-%s-%d", name, suffix) }
 	run := func(name string) string { return fmt.Sprintf("recent-tv-run-%s-%d", name, suffix) }
-	seriesA, seriesB, seriesC, seriesD := series("a"), series("b"), series("c"), series("d")
+	seriesA, seriesB, seriesC, seriesD, seriesE := series("a"), series("b"), series("c"), series("d"), series("e")
 	epA1, epA2 := episode("a1"), episode("a2")
 	epB1, epB2, epB3, epB4 := episode("b1"), episode("b2"), episode("b3"), episode("b4")
 	epC1 := episode("c1")
-	runA1, runA2, runB1, runB2 := run("a1"), run("a2"), run("b1"), run("b2")
+	epE1, epE2, epE3 := episode("e1"), episode("e2"), episode("e3")
+	runE1, runE2, runE3 := run("e1"), run("e2"), run("e3")
 
 	var tvFolderID, movieFolderID int
 	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('series', $1, true) RETURNING id`, series("tv-folder")).Scan(&tvFolderID); err != nil {
@@ -41,62 +42,71 @@ func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
 		t.Fatalf("seed movie folder: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{seriesA, seriesB, seriesC, seriesD})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{seriesA, seriesB, seriesC, seriesD, seriesE})
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{tvFolderID, movieFolderID})
 	})
 
 	base := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_items (content_id, type, title, status, genres, created_at)
-		VALUES ($1, 'series', 'Alpha Show', 'matched', '{}'::text[], $5),
-		       ($2, 'series', 'Beta Show', 'matched', '{}'::text[], $5),
-		       ($3, 'series', 'Classic Show', 'matched', '{}'::text[], $5),
-		       ($4, 'series', 'Dormant Show', 'matched', '{}'::text[], $5)
-	`, seriesA, seriesB, seriesC, seriesD, base); err != nil {
+		VALUES ($1, 'series', 'Alpha Show', 'matched', '{}'::text[], $6),
+		       ($2, 'series', 'Beta Show', 'matched', '{}'::text[], $6),
+		       ($3, 'series', 'Classic Show', 'matched', '{}'::text[], $6),
+		       ($4, 'series', 'Dormant Show', 'matched', '{}'::text[], $6),
+		       ($5, 'series', 'Echo Show', 'matched', '{}'::text[], $6)
+	`, seriesA, seriesB, seriesC, seriesD, seriesE, base); err != nil {
 		t.Fatalf("seed series: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
-		VALUES ($1, $5, $6), ($2, $5, $7), ($3, $5, $8), ($4, $5, $9)
-	`, seriesA, seriesB, seriesC, seriesD, tvFolderID,
-		base.Add(time.Minute), base.Add(4*time.Minute), base.Add(2*time.Minute), base.Add(3*time.Minute)); err != nil {
+		VALUES ($1, $6, $7), ($2, $6, $8), ($3, $6, $9), ($4, $6, $10), ($5, $6, $11)
+	`, seriesA, seriesB, seriesC, seriesD, seriesE, tvFolderID,
+		base.Add(time.Minute), base.Add(4*time.Minute), base.Add(2*time.Minute), base.Add(3*time.Minute), base.Add(10*time.Minute)); err != nil {
 		t.Fatalf("seed series memberships: %v", err)
 	}
+	// Echo arrives the way arr imports do: one scan run per episode. The runs
+	// differ, but each arrival lands within the gap of the previous one, so the
+	// chain is one event even though it spans more than the gap end to end.
+	eArrivals := []time.Time{base.Add(10 * time.Minute), base.Add(10*time.Minute + recentTVArrivalGap), base.Add(4 * time.Hour)}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO scan_runs (id, media_folder_id, mode, status, requested_at, completed_at)
-		VALUES ($1, $5, 'library', 'completed', $6, $6),
-		       ($2, $5, 'library', 'completed', $7, $7),
-		       ($3, $5, 'library', 'completed', $8, $8),
-		       ($4, $5, 'library', 'completed', $9, $9)
-	`, runA1, runA2, runB1, runB2, tvFolderID,
-		base.Add(5*time.Minute), base.Add(10*time.Minute), base.Add(7*time.Minute), base.Add(9*time.Minute)); err != nil {
+		VALUES ($1, $4, 'file', 'completed', $5, $5),
+		       ($2, $4, 'file', 'completed', $6, $6),
+		       ($3, $4, 'file', 'completed', $7, $7)
+	`, runE1, runE2, runE3, tvFolderID, eArrivals[0], eArrivals[1], eArrivals[2]); err != nil {
 		t.Fatalf("seed scan runs: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-		VALUES ($1, $8, 1, 1, 'Alpha One'), ($2, $8, 2, 1, 'Alpha Two'),
-		       ($3, $9, 1, 1, 'Beta One'), ($4, $9, 1, 2, 'Beta Two'),
-		       ($5, $9, 2, 1, 'Beta Three'), ($6, $9, 2, 2, 'Beta Four'),
-		       ($7, $10, 1, 1, 'Classic One')
-	`, epA1, epA2, epB1, epB2, epB3, epB4, epC1, seriesA, seriesB, seriesC); err != nil {
+		VALUES ($1, $11, 1, 1, 'Alpha One'), ($2, $11, 2, 1, 'Alpha Two'),
+		       ($3, $12, 1, 1, 'Beta One'), ($4, $12, 1, 2, 'Beta Two'),
+		       ($5, $12, 2, 1, 'Beta Three'), ($6, $12, 2, 2, 'Beta Four'),
+		       ($7, $13, 1, 1, 'Classic One'),
+		       ($8, $14, 1, 1, 'Echo One'), ($9, $14, 1, 2, 'Echo Two'), ($10, $14, 1, 3, 'Echo Three')
+	`, epA1, epA2, epB1, epB2, epB3, epB4, epC1, epE1, epE2, epE3, seriesA, seriesB, seriesC, seriesE); err != nil {
 		t.Fatalf("seed episodes: %v", err)
 	}
+	// Alpha's two episodes are further apart than the gap, so each stays its
+	// own episode card. Beta gets two multi-episode events. Classic's lone
+	// episode has no scan-run provenance and still renders as an episode.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at, first_seen_scan_run_id)
-		VALUES ($1, $8, $9, $10), ($2, $8, $11, $12),
-		       ($3, $8, $13, $14), ($4, $8, $13, $14),
-		       ($5, $8, $15, $16), ($6, $8, $15, $16),
-		       ($7, $8, $17, NULL)
-	`, epA1, epA2, epB1, epB2, epB3, epB4, epC1, tvFolderID,
-		base.Add(5*time.Minute), runA1, base.Add(10*time.Minute), runA2,
-		base.Add(7*time.Minute), runB1, base.Add(9*time.Minute), runB2, base.Add(2*time.Minute)); err != nil {
+		VALUES ($1, $11, $12, NULL), ($2, $11, $13, NULL),
+		       ($3, $11, $14, NULL), ($4, $11, $14, NULL),
+		       ($5, $11, $15, NULL), ($6, $11, $15, NULL),
+		       ($7, $11, $16, NULL),
+		       ($8, $11, $17, $20), ($9, $11, $18, $21), ($10, $11, $19, $22)
+	`, epA1, epA2, epB1, epB2, epB3, epB4, epC1, epE1, epE2, epE3, tvFolderID,
+		base.Add(5*time.Minute), base.Add(5*time.Minute+recentTVArrivalGap+time.Second),
+		base.Add(7*time.Minute), base.Add(3*time.Hour), base.Add(2*time.Minute),
+		eArrivals[0], eArrivals[1], eArrivals[2], runE1, runE2, runE3); err != nil {
 		t.Fatalf("seed episode memberships: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO media_files (episode_id, media_folder_id, file_path)
 		SELECT episode_id, $1, '/recent-tv/' || episode_id || '.mkv'
 		FROM unnest($2::text[]) AS episode_id
-	`, tvFolderID, []string{epA1, epA2, epB1, epB2, epB3, epB4, epC1}); err != nil {
+	`, tvFolderID, []string{epA1, epA2, epB1, epB2, epB3, epB4, epC1, epE1, epE2, epE3}); err != nil {
 		t.Fatalf("seed available episode files: %v", err)
 	}
 
@@ -106,12 +116,13 @@ func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
 		t.Fatalf("list recent TV: %v", err)
 	}
 	want := []RecentTVTarget{
-		{ContentID: epA2, Type: "episode", AddedAt: base.Add(10 * time.Minute), PlayContentID: epA2},
-		{ContentID: seriesB, Type: "series", AddedAt: base.Add(9 * time.Minute), PlayContentID: epB3},
+		{ContentID: seriesE, Type: "series", AddedAt: eArrivals[2], PlayContentID: epE1},
+		{ContentID: seriesB, Type: "series", AddedAt: base.Add(3 * time.Hour), PlayContentID: epB3},
+		{ContentID: epA2, Type: "episode", AddedAt: base.Add(5*time.Minute + recentTVArrivalGap + time.Second), PlayContentID: epA2},
 		{ContentID: seriesB, Type: "series", AddedAt: base.Add(7 * time.Minute), PlayContentID: epB1},
 		{ContentID: epA1, Type: "episode", AddedAt: base.Add(5 * time.Minute), PlayContentID: epA1},
 		{ContentID: seriesD, Type: "series", AddedAt: base.Add(3 * time.Minute)},
-		{ContentID: seriesC, Type: "series", AddedAt: base.Add(2 * time.Minute), PlayContentID: epC1},
+		{ContentID: epC1, Type: "episode", AddedAt: base.Add(2 * time.Minute), PlayContentID: epC1},
 	}
 	if total != len(want) || hasMore || !equalRecentTVTargets(targets, want) {
 		t.Fatalf("targets = %#v, total %d, hasMore %v; want %#v", targets, total, hasMore, want)
@@ -131,13 +142,7 @@ func TestRecentTVRepositoryGroupsScanBatchesAndPaginates(t *testing.T) {
 		t.Fatalf("count-free page = %#v, total %d, hasMore %v, err %v", preview, previewTotal, previewHasMore, err)
 	}
 
-	uniqueWant := []RecentTVTarget{
-		{ContentID: epA2, Type: "episode", AddedAt: base.Add(10 * time.Minute), PlayContentID: epA2},
-		{ContentID: seriesB, Type: "series", AddedAt: base.Add(9 * time.Minute), PlayContentID: epB3},
-		{ContentID: epA1, Type: "episode", AddedAt: base.Add(5 * time.Minute), PlayContentID: epA1},
-		{ContentID: seriesD, Type: "series", AddedAt: base.Add(3 * time.Minute)},
-		{ContentID: seriesC, Type: "series", AddedAt: base.Add(2 * time.Minute), PlayContentID: epC1},
-	}
+	uniqueWant := []RecentTVTarget{want[0], want[1], want[2], want[4], want[5], want[6]}
 	unique, uniqueTotal, uniqueHasMore, err := repo.List(ctx, RecentTVQuery{
 		LibraryIDs:    []int{tvFolderID},
 		Limit:         20,

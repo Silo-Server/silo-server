@@ -24,12 +24,22 @@ func validatePersonalCredentials(sourceType string, credential personalRunCreden
 	}
 	switch sourceType {
 	case SourceTypeEmby, SourceTypeJellyfin:
-		if credential.ExternalUserID == "" || credential.AccountToken != "" {
+		if credential.ExternalUserID == "" || credential.AccountToken != "" || len(credential.BaseURLs) > 0 {
 			return ErrPersonalCredentialsUnavailable
 		}
 	case SourceTypePlex:
 		if credential.AccountToken == "" || credential.ExternalUserID != "" {
 			return ErrPersonalCredentialsUnavailable
+		}
+		// Each fallback is held to the same rule as the primary address, and
+		// the whole list to the cap a run is allowed to race.
+		if len(plexBaseURLCandidates(credential.BaseURL, credential.BaseURLs, MaxPlexConnectionCandidates+1)) > MaxPlexConnectionCandidates {
+			return ErrPersonalCredentialsUnavailable
+		}
+		for _, fallback := range credential.BaseURLs {
+			if validateSource(Source{Name: "Personal import", SourceType: sourceType, BaseURL: fallback}) != nil {
+				return ErrPersonalCredentialsUnavailable
+			}
 		}
 	default:
 		return ErrPersonalCredentialsUnavailable
@@ -167,7 +177,7 @@ func (r *Repository) consumePersonalSession(ctx context.Context, tx pgx.Tx, in p
 		if err = personalSessionUnexpired(ctx, tx, current.ExpiresAt); err != nil {
 			return err
 		}
-		if current.UserID != expected.UserID || current.PinID != expected.PinID || current.PinCode != expected.PinCode || current.AuthToken != expected.AuthToken || !slices.Equal(current.Servers, expected.Servers) || !current.ExpiresAt.Equal(expected.ExpiresAt) || !current.UpdatedAt.Equal(expected.UpdatedAt) {
+		if current.UserID != expected.UserID || current.PinID != expected.PinID || current.PinCode != expected.PinCode || current.AuthToken != expected.AuthToken || !plexServersEqual(current.Servers, expected.Servers) || !current.ExpiresAt.Equal(expected.ExpiresAt) || !current.UpdatedAt.Equal(expected.UpdatedAt) {
 			return ErrPersonalSessionChanged
 		}
 		selected := slices.IndexFunc(current.Servers, func(s PlexServer) bool { return s.ClientIdentifier == in.SelectedServerID })
@@ -175,7 +185,13 @@ func (r *Repository) consumePersonalSession(ctx context.Context, tx pgx.Tx, in p
 			return ErrPersonalSessionChanged
 		}
 		server := current.Servers[selected]
-		if firstNonEmpty(server.RemoteURL, server.LocalURL) != in.Credentials.BaseURL || server.AccessToken != in.Credentials.ServerToken || current.AuthToken != in.Credentials.AccountToken {
+		// Every address the run may probe has to be one this session already
+		// advertised. Admission may have dropped some for the local network
+		// policy, so the credential is a subset of the list recomputed here
+		// rather than equal to it; recomputing, rather than trusting the
+		// enqueued credential, keeps a caller from adding a destination.
+		advertised := plexSessionCandidates(server)
+		if !containsAll(advertised, in.Credentials.candidates()) || server.AccessToken != in.Credentials.ServerToken || current.AuthToken != in.Credentials.AccountToken {
 			return ErrPersonalSessionChanged
 		}
 		_, err = tx.Exec(ctx, `UPDATE history_import_plex_sessions SET consumed_at=clock_timestamp(),updated_at=clock_timestamp() WHERE id=$1`, current.ID)
@@ -241,4 +257,18 @@ func personalAuthenticatedBaseMatches(sourceType, selected, authenticated string
 		return slices.Contains(baseCandidates(selected), authenticated)
 	}
 	return selected == authenticated
+}
+
+// containsAll reports whether every element of subset is in set. An empty
+// subset is not contained: a run with no address has nothing to race.
+func containsAll(set, subset []string) bool {
+	if len(subset) == 0 {
+		return false
+	}
+	for _, value := range subset {
+		if !slices.Contains(set, value) {
+			return false
+		}
+	}
+	return true
 }

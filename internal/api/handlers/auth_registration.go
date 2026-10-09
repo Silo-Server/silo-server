@@ -3,16 +3,19 @@ package handlers
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
+
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 const (
-	providerModeOAuth   = "oauth"
 	fieldInviteCode     = "invite_code"
 	fieldPassword       = "password"
 	codePasswordTooLong = "password_too_long"
@@ -24,18 +27,42 @@ const (
 // so both transports render the same decision.
 
 // ListProviders lists the login providers a client may offer, omitting OAuth
-// providers when the OAuth routes are not served. v1 GET /auth/providers and
-// v2 listAuthProviders both call it.
+// providers when the OAuth routes are not served and network identity
+// providers, which only the v2 discovery offers (DiscoverProviders). v1 GET
+// /auth/providers calls it.
 func (h *AuthHandler) ListProviders() []auth.LoginProviderInfo {
 	providers := h.service.ListProviders()
 	out := make([]auth.LoginProviderInfo, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Mode == providerModeOAuth && !h.oauthRoutesAvailable {
+		if provider.Mode == auth.ProviderModeOAuth && !h.oauthRoutesAvailable {
+			continue
+		}
+		if provider.Mode == auth.ProviderModeNetwork {
 			continue
 		}
 		out = append(out, provider)
 	}
 	return out
+}
+
+// DiscoverProviders is ListProviders for the v2 discovery (see
+// auth.Service.DiscoverProviders): the local provider is left out while the
+// server turns local password sign-in off. Leaving out OAuth providers when
+// the OAuth routes are not served does not change PasswordLogin.
+func (h *AuthHandler) DiscoverProviders(ctx context.Context) (auth.ProviderDiscovery, error) {
+	discovery, err := h.service.DiscoverProviders(ctx)
+	if err != nil {
+		return auth.ProviderDiscovery{}, err
+	}
+	out := make([]auth.LoginProviderInfo, 0, len(discovery.Providers))
+	for _, provider := range discovery.Providers {
+		if provider.Mode == auth.ProviderModeOAuth && !h.oauthRoutesAvailable {
+			continue
+		}
+		out = append(out, provider)
+	}
+	discovery.Providers = out
+	return discovery, nil
 }
 
 // RefreshedTokensView is a refreshed credential: the token pair without the
@@ -47,8 +74,13 @@ type RefreshedTokensView struct {
 }
 
 // Refresh exchanges a refresh token for a new pair. v1 POST /auth/refresh and
-// v2 refreshSession both call it. A revoked session is 401 session_revoked;
-// any other failure is 401 invalid_token, as on v1.
+// v2 refreshSession both call it. A revoked session is 401 session_revoked.
+// A store failure while checking the session (auth.ErrSessionCheckUnavailable)
+// is a retryable 503 service_unavailable carrying that cause: the token was
+// not judged, so the client must keep it. Any other failure is 401
+// invalid_token, as on v1. A provider re-check that could not reach the
+// provider under the fail_closed outage policy keeps the v1 answer but
+// carries auth.ErrProviderUnavailable, which v2 answers as 503.
 func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (RefreshedTokensView, error) {
 	if refreshToken == "" {
 		return RefreshedTokensView{}, &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: "Refresh token is required", Field: "refresh_token"}
@@ -58,7 +90,23 @@ func (h *AuthHandler) Refresh(ctx context.Context, refreshToken string) (Refresh
 		if errors.Is(err, auth.ErrSessionRevoked) {
 			return RefreshedTokensView{}, apiError(http.StatusUnauthorized, "session_revoked", "Session has been revoked")
 		}
-		return RefreshedTokensView{}, apiError(http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
+		if errors.Is(err, auth.ErrSessionCheckUnavailable) {
+			if ctx.Err() == nil {
+				slog.WarnContext(ctx, "refresh could not check the login session; answering 503", "component", "auth", "error", logredact.SanitizeText(err.Error()))
+			}
+			return RefreshedTokensView{}, &APIError{
+				Status:     http.StatusServiceUnavailable,
+				Code:       apimw.CodeServiceUnavailable,
+				Message:    "The session could not be checked right now; try again shortly",
+				RetryAfter: apimw.CredentialCheckRetryAfterSeconds,
+				cause:      auth.ErrSessionCheckUnavailable,
+			}
+		}
+		invalid := apiError(http.StatusUnauthorized, "invalid_token", "Invalid or expired refresh token")
+		if errors.Is(err, auth.ErrProviderUnavailable) {
+			invalid.cause = auth.ErrProviderUnavailable
+		}
+		return RefreshedTokensView{}, invalid
 	}
 	return RefreshedTokensView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn}, nil
 }
@@ -87,6 +135,20 @@ func (h *AuthHandler) ListSessionsPage(ctx context.Context, userID int, after *a
 		return sessions[:limit], true, nil
 	}
 	return sessions, false, nil
+}
+
+// CurrentLoginSession returns the caller's live login session, or nil when it
+// was revoked or expired after the request authenticated: the session list
+// then reports no current session instead of failing.
+func (h *AuthHandler) CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error) {
+	session, err := h.service.CurrentLoginSession(ctx, userID, sessionID)
+	if auth.IsSessionNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
+	}
+	return session, nil
 }
 
 // RevokeSession revokes one of the caller's sessions. v1 DELETE
@@ -173,6 +235,9 @@ func (h *AuthHandler) Signup(ctx context.Context, in RegistrationInput) (TokenPa
 			return TokenPairView{}, &APIError{Status: http.StatusBadRequest, Code: "code_disabled", Message: "This invite code is no longer active", Field: fieldInviteCode}
 		case auth.IsDuplicate(err):
 			return TokenPairView{}, apiError(http.StatusBadRequest, "duplicate", "Username or email already taken")
+		}
+		if apiErr := externalSignInError(err); apiErr != nil {
+			return TokenPairView{}, apiErr
 		}
 		return TokenPairView{}, apiError(http.StatusInternalServerError, "internal_error", "An unexpected error occurred")
 	}

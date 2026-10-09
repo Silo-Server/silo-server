@@ -12,6 +12,10 @@ import (
 
 // halloweenSeasonalSection builds a ResolvedSection configured for the
 // halloween theme in auto mode.
+type fixedClock time.Time
+
+func (f fixedClock) Now() time.Time { return time.Time(f) }
+
 func halloweenSeasonalSection() ResolvedSection {
 	cfg, _ := json.Marshal(recipes.SeasonalThemedParams{Theme: "halloween", Mode: "auto"})
 	return ResolvedSection{
@@ -29,7 +33,7 @@ func halloweenSeasonalSection() ResolvedSection {
 // without needing a database — the early return runs before any SQL.
 func TestSeasonalThemedSuppressesOffSeason(t *testing.T) {
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)), // Independence Day, well clear of October
+		Clock: fixedClock(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)), // Independence Day, well clear of October
 	}
 	items, total, err := f.fetchSection(
 		context.Background(),
@@ -51,7 +55,7 @@ func TestSeasonalThemedSuppressesOffSeason(t *testing.T) {
 // nil pool — we assert the right kind of failure to confirm the path was reached).
 func TestSeasonalThemedPinnedModeAttemptsQuery(t *testing.T) {
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)),
+		Clock: fixedClock(time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)),
 	}
 	cfg, _ := json.Marshal(recipes.SeasonalThemedParams{Theme: "halloween", Mode: "pinned"})
 	s := ResolvedSection{
@@ -90,7 +94,7 @@ func TestSeasonalThemedPinnedModeAttemptsQuery(t *testing.T) {
 // bypasses the off-season check and attempts the query.
 func TestSeasonalThemedInSeasonAttemptsQuery(t *testing.T) {
 	f := &Fetcher{
-		Clock: recipes.FixedClock(time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)), // mid-October
+		Clock: fixedClock(time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)), // mid-October
 	}
 
 	var reached bool

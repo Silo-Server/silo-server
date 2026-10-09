@@ -30,15 +30,18 @@ func (f *fakeSourceWebhookLifecycle) DeleteAdminAutoscanSourceWebhook(_ context.
 	return err
 }
 func TestAdminSourceWebhookLifecycle(t *testing.T) {
+	f := new(fakeSourceWebhookLifecycle)
+	deps := pilotDeps(nil, nil)
+	deps.AdminSourceWebhookLifecycle = f
+	h := NewHandler(deps)
+	deps.AdminSourceWebhookLifecycle = nil
+	missing := NewHandler(deps)
 	for _, tc := range []struct {
 		action, method, suffix string
 		status                 int
 	}{{"create", "POST", "", 200}, {"rotate", "POST", "/rotate", 200}, {"delete", "DELETE", "", 204}} {
 		t.Run(tc.action, func(t *testing.T) {
-			f := new(fakeSourceWebhookLifecycle)
-			deps := pilotDeps(nil, nil)
-			deps.AdminSourceWebhookLifecycle = f
-			h := NewHandler(deps)
+			*f = fakeSourceWebhookLifecycle{}
 			path := Prefix + "/admin/autoscan/sources/source-a/webhook" + tc.suffix
 			requireProblem(t, do(t, h, tc.method, path, "", nil), TypeAuthenticationRequired)
 			requireProblem(t, do(t, h, tc.method, path, "", bearer(memberToken)), TypePermissionDenied)
@@ -67,8 +70,7 @@ func TestAdminSourceWebhookLifecycle(t *testing.T) {
 					t.Fatal(rec.Code, rec.Body.String(), f.calls)
 				}
 			}
-			deps.AdminSourceWebhookLifecycle = nil
-			requireProblem(t, do(t, NewHandler(deps), tc.method, path, "", bearer(adminToken)), TypeDependencyUnavailable)
+			requireProblem(t, do(t, missing, tc.method, path, "", bearer(adminToken)), TypeDependencyUnavailable)
 		})
 	}
 }

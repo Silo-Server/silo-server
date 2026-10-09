@@ -26,7 +26,7 @@ and `allowed` is `true`; a server without playback wired answers
 `not_configured` with `allowed: false`. `installation_id` is the persisted
 server instance UUID that diagnostics also report. `protocol_versions` is
 `[3]`. `features` is the v3 server feature set plus `sequenced_progress_v1`,
-`fixed_media_file_v1`, and `marker_segments_v1`. When the room service and
+`fixed_media_file_v1`, `marker_segments_v1`, and `trickplay_v1`. When the room service and
 authenticated room socket are configured, it also includes
 `watch_party_source_fallback_v1` and `watch_party_coordinator_v1`.
 The coordinator capability covers shared room
@@ -54,6 +54,20 @@ Marker reads and watch detail can populate the selected file's markers after
 authorization. A provider error leaves the available markers readable.
 See [Marker API](markers-api.md) for reads, manual edits, and provenance.
 
+## Seek previews
+
+The `trickplay_v1` capability covers seek-preview manifests at
+`GET /api/v2/watch/{id}/trickplay?file_id=`. Clients fetch the sheet URLs the
+manifest returns and refresh the manifest after `expires_at`. Local storage
+and S3 with a separate public or token-authenticated delivery endpoint return
+signed `/api/v2/artwork/...` URLs; the server reads the storage API to avoid
+external delivery lag. Standard S3 delivery returns direct presigned URLs.
+See [trickplay](architecture/trickplay.md#serving) for access rules, sheet
+geometry, and revision retention. Like `getWatchState`, the manifest read
+accepts a request without `X-Profile-Id` only while no profile on the account
+is PIN-protected or access-restricted; otherwise it answers `422
+validation_failed` at `header.x-profile-id`.
+
 ## Start
 
 When `playback.allow_hevc_encoding` is enabled, video adaptation may encode
@@ -71,6 +85,13 @@ conversion before its frames feed the software encoder. An optional HEVC probe
 failure removes HEVC availability without invalidating successful AAC or H.264
 capability checks.
 
+A bitrate cap is a ceiling on every encoder. A capped VAAPI encode forces the
+VBR rate-control mode, or CBR where the assigned device offers only that, after
+a cached one-frame check on that device; FFmpeg's automatic mode could choose
+AVBR, which ignores the cap. When the device accepts neither mode, the encode
+uses libx264 or libx265 in the same way, keeping hardware tone mapping where
+the recipe uses it.
+
 The body is the v3 start request plus `installation_id`. `file_id` and
 `profile_id` are strings; `profile_id` must be the authenticated profile. Start
 is idempotent on `playback_attempt_id` plus a digest of the request: replaying
@@ -81,6 +102,24 @@ with `outcome: "adaptation_unavailable"`, `terminal.reason: "session_expired"`
 and `terminal.retryable: true`; mint a new attempt. Local direct and HLS media
 URLs in the plan are projected into the `/api/v2` namespace; the signed `st`
 query they carry is unchanged.
+
+Two terminal reasons describe a source without stream metadata.
+`source_metadata_incomplete` (`retryable: true`) means the file has not been
+probed yet, or its probe lacks a field a route needs; trying again after the
+scan can help. `source_unreadable` (`retryable: false`) means ffprobe ran and
+rejected the file: it is empty, corrupt, or truncated, and no version of it was
+ever probed successfully. A file the server cannot open or read (permissions,
+storage I/O errors) is not reported this way and keeps
+`source_metadata_incomplete`. Retrying cannot help until the file is replaced and
+rescanned. The server records the rejection on the media file during a scan or
+a playback-time probe repair, and a later successful probe clears it. The
+rejection only refers to that file: with alternate versions allowed, the server
+tries the item's other versions the viewer may play (library access and
+playback-quality ceiling) before answering `source_unreadable`.
+Season episode listings mark such files with `unreadable: true` (see
+[Catalog API](catalog-api.md#episode-files)). The v1 start route shares the
+planner, so v1 clients can also receive `source_unreadable`; like any unknown
+reason, they show `terminal.message`.
 
 The web player retries an interrupted START with the identical body, including
 when response headers arrived but reading the body failed. Its 60-second retry
@@ -232,6 +271,64 @@ token TTL as its bound.
 The realtime control socket (`/api/v2/playback/sessions/{session_id}/control/ws`)
 is documented in the [realtime API](realtime-api.md); ownership is the session's
 account and profile.
+
+## Shuffle
+
+A shuffle plays random movies and episodes from one scope until the profile
+stops. The server picks every item, so any client or API process can continue
+a shuffle another one started.
+
+| Operation | Method and path | Success |
+| --- | --- | --- |
+| `getShuffleCapability` | GET `/api/v2/shuffles/capabilities` | 200 capability state and `scope_kinds` |
+| `createShuffle` | POST `/api/v2/shuffles` | 201 shuffle, `Location` |
+| `getShuffle` | GET `/api/v2/shuffles/{shuffle_id}` | 200 shuffle |
+| `advanceShuffle` | POST `/api/v2/shuffles/{shuffle_id}/advance` | 200 shuffle |
+| `skipShuffleItem` | POST `/api/v2/shuffles/{shuffle_id}/skip` | 200 shuffle |
+| `deleteShuffle` | DELETE `/api/v2/shuffles/{shuffle_id}` | 204 |
+
+`createShuffle` takes `{scope: {kind, id}}`. `kind` is `library` (a library
+ID; movie, TV, and mixed libraries), `series` or `season` (a content ID,
+including the `<series>-S<number>` IDs of seasons without stored metadata), or
+`library_collection` or `user_collection` (a collection ID). A collection plays
+its movies, its series' episodes, and any episodes it lists itself. Specials
+play like any other episode.
+A scope the profile cannot see is `404`. A library with no movies or episodes,
+or a scope with nothing the profile can play, is `409 conflict`.
+
+A shuffle is `{id, scope: {kind, id, title, parent_title?}, current, next,
+created_at, updated_at}`. `current` and `next` are catalog item cards; `next`
+equals `current` only when one item can play. `title` names the scope when the
+shuffle started, and `parent_title` is a season's series title.
+
+Picks never repeat an item until every playable item in the scope has played.
+The next cycle never starts with the item that just played. Each pick
+re-applies the profile's library access, file access, playback quality ceiling,
+and parental limits. An item needs a present file in an enabled library.
+
+Play `current`. When it ends, call `advanceShuffle` with `from_content_id` set
+to the item that played: `next` becomes `current` and a new `next` is picked.
+`skipShuffleItem` with `next_content_id` replaces the announced `next` with
+another pick. The skipped item never played, so it stays in the cycle and can
+come up later; when it is the only item the cycle has not played, it stays
+`next`. Advance and skip act only while the named item still holds that
+position, so a retry after a lost response returns the same shuffle unchanged.
+A retried `createShuffle` starts a second shuffle; the first is never read
+again.
+
+If the announced `next` can no longer play when the shuffle is read or moves
+on, because its file went missing or the profile lost access, another pick
+replaces it. When nothing in the scope can play any more, `getShuffle` answers
+`409 conflict`. A shuffle belongs to the profile that started it, and every
+operation re-checks that the profile can still see its scope; another
+profile's shuffle, or one whose scope the profile lost, is `404`. There is no
+separate expiry job: whenever a new shuffle is created, shuffles untouched for
+seven days are deleted.
+
+The web client carries the shuffle in the watch URL as `?shuffle=<id>` and
+plays every pick from the beginning, ignoring saved progress. While a shuffle
+is set, the post-roll screen shows `next` instead of the next episode, and the
+player offers no sequential next or previous episode.
 
 ## v1 bridge
 

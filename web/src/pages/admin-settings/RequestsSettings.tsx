@@ -17,12 +17,12 @@ import {
   useUpdateRequestSettings,
 } from "@/hooks/queries/admin/requests";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { RequestRoutingGroup } from "./RequestRouting";
 import { RequestServersGroup } from "./RequestServers";
 import { requestRouterInstallations } from "./requestServerModel";
-import { SaveBar } from "./SaveBar";
 import { SETTINGS_BUTTON, SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
 import { useStagedDraft } from "./useStagedDraft";
 
@@ -32,6 +32,8 @@ interface GeneralDraft {
   max_requests: string;
   window_days: string;
   force_dual_quality: boolean;
+  /** Absent from servers without watchlist requests; the control hides. */
+  watchlist_requests: boolean | undefined;
 }
 
 function generalDraft(settings: RequestSettings): GeneralDraft {
@@ -41,6 +43,7 @@ function generalDraft(settings: RequestSettings): GeneralDraft {
     max_requests: String(settings.global_max_requests),
     window_days: String(settings.global_window_days),
     force_dual_quality: settings.force_dual_quality,
+    watchlist_requests: settings.watchlist_requests,
   };
 }
 
@@ -147,6 +150,7 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
         global_max_requests: maxRequests ?? base.global_max_requests,
         global_window_days: windowDays ?? base.global_window_days,
         force_dual_quality: draft.force_dual_quality,
+        watchlist_requests: draft.watchlist_requests,
         updated_at: base.updated_at,
         etag: base.etag,
       });
@@ -282,6 +286,16 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                   onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
                   dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}
                 />
+                {draft.watchlist_requests !== undefined ? (
+                  <SettingField
+                    label="Request titles added to a watchlist"
+                    type="toggle"
+                    description="When someone adds a title the library doesn't have to their watchlist, it is requested for them, as if they had pressed Request. Each profile can turn this off for itself."
+                    value={String(draft.watchlist_requests)}
+                    onChange={(value) => editGeneral({ watchlist_requests: value === "true" })}
+                    dirty={draft.watchlist_requests !== baseGeneral.watchlist_requests}
+                  />
+                ) : null}
                 {generalConflict ? (
                   <div className="py-3.5">
                     <EditorConflict onReload={reloadGeneral} />

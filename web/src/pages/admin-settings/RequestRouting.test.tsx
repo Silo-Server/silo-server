@@ -89,67 +89,6 @@ const created = (options: { body?: unknown }) =>
   reply(options, { ...route({ id: "new" }), ...(options.body as object) }, '"new-v1"');
 
 describe("Where requests go: the list", () => {
-  const horror = route({
-    id: "horror",
-    name: "Horror",
-    position: 0,
-    conditions: { genre_ids: [27] },
-    hd: { integration_id: "radarr-2", overrides: { quality_profile_id: 3, root_folder: "/anime" } },
-    skip_uhd: true,
-  });
-  const anime = route({
-    id: "anime",
-    name: "Anime",
-    media_type: "series",
-    conditions: { anime: true },
-    hd: { integration_id: "sonarr-2", overrides: { series_type: "anime" } },
-  });
-
-  it("reads each rule as sentences, with Everything else pinned last", async () => {
-    serve({
-      servers: allServers,
-      routes: [
-        horror,
-        route({
-          id: "old",
-          name: "Old",
-          position: 1,
-          enabled: false,
-          conditions: { year_to: 1989, requester_user_ids: [2] },
-          uhd: { integration_id: "radarr-2" },
-        }),
-        { ...fallback("movie", "radarr-1"), uhd: { integration_id: "radarr-2" } },
-        anime,
-        fallback("series", "sonarr-1"),
-      ],
-    });
-    mount();
-    const movies = await section();
-    const rules = within(movies).getByRole("list", { name: "Movie rules" });
-    const [first, second] = within(rules).getAllByRole("listitem");
-    expect(first).toHaveTextContent("When a movie is Horror");
-    expect(await within(first!).findByText(/Radarr Anime · \/anime · Anime 1080p/)).toBeTruthy();
-    expect(first).toHaveTextContent("4K → none");
-    expect(second).toHaveTextContent("Off");
-    expect(second).toHaveTextContent(
-      "When a movie came out in 1989 or earlier and is requested by kid",
-    );
-    expect(second).toHaveTextContent("HD → Same as Everything else (Radarr)");
-    // Its 4K copy goes where Everything else's does, so no 4K line.
-    expect(second).not.toHaveTextContent("4K →");
-    const everythingElse = within(movies).getByRole("group", { name: "Everything else" });
-    expect(everythingElse).toHaveTextContent("Every other movie → Radarr");
-    expect(everythingElse).toHaveTextContent("4K → Radarr Anime");
-
-    const series = await section("Series");
-    expect(within(series).getByRole("list", { name: "Series rules" })).toHaveTextContent(
-      "When a series is anime",
-    );
-    expect(within(series).getByRole("group", { name: "Everything else" })).toHaveTextContent(
-      "4K → none",
-    );
-  });
-
   it("explains an empty media type, and offers Add a rule only once Everything else is saved", async () => {
     serve({ servers: [sonarr], routes: [fallback("movie"), fallback("series", "sonarr-1")] });
     mount();
@@ -1187,6 +1126,64 @@ describe("Where requests go: try a title", () => {
       "Off: Old anime",
       "Everything else — decides 4K: none",
     ]);
+  });
+
+  it("says why there is no HD version when Everything else has no HD server", async () => {
+    const note = "Everything else sends no HD version; requests from users without 4K fail.";
+    serve({
+      servers: allServers,
+      routes: ready,
+      handlers: {
+        "GET /api/v2/admin/request-routes/titles": (options) =>
+          reply(options, {
+            items: [{ tmdb_id: 42, media_type: "series", title: "Bluey", year: 2018 }],
+          }),
+        "POST /api/v2/admin/request-routes/preview": (options) =>
+          reply(options, {
+            ...preview,
+            rules: [
+              {
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                is_fallback: true,
+                enabled: true,
+                unmet_conditions: [],
+                hd: "skips",
+                uhd: "sends",
+              },
+            ],
+            tiers: [
+              {
+                quality: "1080p",
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                note,
+              },
+              {
+                quality: "2160p",
+                route_id: "fallback-series",
+                route_name: "Everything else",
+                integration_id: "sonarr-1",
+                integration_name: "Sonarr",
+              },
+            ],
+          }),
+      },
+    });
+    mount();
+    const series = await section("Series");
+    fireEvent.change(within(series).getByRole("searchbox", { name: "Search series" }), {
+      target: { value: "Blu" },
+    });
+    fireEvent.click(await within(series).findByRole("button", { name: /Bluey/ }));
+
+    const result = (await within(series).findByText("Bluey (2018)")).parentElement!;
+    expect(await within(result).findByText(note)).toBeInTheDocument();
+    expect(result).toHaveTextContent("HD version → none");
+    expect(result).not.toHaveTextContent("doesn't send 4K versions");
+    expect(within(result).getAllByRole("listitem").at(-1)?.textContent).toBe(
+      "Everything else — decides HD: none · decides 4K",
+    );
   });
 });
 

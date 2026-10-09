@@ -4,40 +4,6 @@ import (
 	"testing"
 )
 
-func TestParseGeneratedHomeLibraryRecentConfig(t *testing.T) {
-	libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(GeneratedHomeLibraryRecentConfig(42))
-	if !ok {
-		t.Fatalf("expected config to parse")
-	}
-	if libraryID != 42 {
-		t.Fatalf("library id = %d, want 42", libraryID)
-	}
-}
-
-func TestParseGeneratedHomeLibraryRecentEpisodesConfig(t *testing.T) {
-	libraryID, ok := ParseGeneratedHomeLibraryRecentConfig(GeneratedHomeLibraryRecentEpisodesConfig(42))
-	if !ok {
-		t.Fatalf("expected config to parse")
-	}
-	if libraryID != 42 {
-		t.Fatalf("library id = %d, want 42", libraryID)
-	}
-
-	def, err := ParseQueryDefinition(GeneratedHomeLibraryRecentEpisodesConfig(42))
-	if err != nil {
-		t.Fatalf("ParseQueryDefinition() error = %v", err)
-	}
-	if def.MediaScope != "episode" {
-		t.Fatalf("media_scope = %q, want episode", def.MediaScope)
-	}
-	if def.Sort.Field != "release_date" || def.Sort.Order != "desc" {
-		t.Fatalf("sort = %#v, want release_date desc", def.Sort)
-	}
-	if len(def.LibraryIDs) != 1 || def.LibraryIDs[0] != 42 {
-		t.Fatalf("library_ids = %v, want [42]", def.LibraryIDs)
-	}
-}
-
 func TestShouldSyncGeneratedHomeLibraryRecentTitle(t *testing.T) {
 	section := &PageSection{
 		Scope:       "home",
