@@ -531,6 +531,8 @@ func TestPersonSearchMatchesWordStartsPostgres(t *testing.T) {
 		word + " Smithers",
 		"A " + word + " Smithers",
 		"Erik GROẞ" + strings.ToUpper(word[5:]),
+		"Jane  Doe" + word[5:],
+		"A Jane Doe" + word[5:],
 	}
 	baseID := time.Now().UnixNano()
 	ids := make([]int64, len(names))
@@ -567,6 +569,7 @@ func TestPersonSearchMatchesWordStartsPostgres(t *testing.T) {
 		{"leading apostrophe", "'" + word, []int64{ids[4]}},
 		{"leading hyphen", "-" + word, []int64{ids[3]}},
 		{"database case folding", "groß" + word[5:], []int64{ids[7]}},
+		{"exact name keeps its own spacing", "jane  doe" + word[5:], []int64{ids[8], ids[9]}},
 		{"mid-word fragment", word[1:], nil},
 		{"wildcards are literal", "%" + word[1:], nil},
 	} {

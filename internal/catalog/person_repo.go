@@ -639,8 +639,10 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 	where := strings.Join(conditions, " AND ")
 	order := "name ASC, id ASC"
 	if scoped && query != "" {
-		order = fmt.Sprintf("(LOWER(name) = LOWER($%d)) DESC, ", argIdx) + order
-		args = append(args, strings.Join(strings.Fields(query), " "))
+		// Words match however they are spaced, so a name equal to the query
+		// as typed or with its whitespace collapsed counts as exact.
+		order = fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d))) DESC, ", argIdx, argIdx+1) + order
+		args = append(args, query, strings.Join(strings.Fields(query), " "))
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
