@@ -529,6 +529,7 @@ func TestPersonSearchMatchesWordStartsPostgres(t *testing.T) {
 		"Jean-" + word,
 		"O'" + word,
 		word + " Smithers",
+		"A " + word + " Smithers",
 	}
 	baseID := time.Now().UnixNano()
 	ids := make([]int64, len(names))
@@ -557,9 +558,13 @@ func TestPersonSearchMatchesWordStartsPostgres(t *testing.T) {
 		name, query string
 		want        []int64 // want[0] must rank first; the rest in any order.
 	}{
-		{"word starts only, exact first", strings.ToUpper(word), []int64{ids[0], ids[1], ids[3], ids[4], ids[5]}},
-		{"partial last word", word + " smi", []int64{ids[5]}},
-		{"words in any order", "smithers " + word, []int64{ids[5]}},
+		{"word starts only, exact first", strings.ToUpper(word), []int64{ids[0], ids[1], ids[3], ids[4], ids[5], ids[6]}},
+		{"partial last word", word + " smi", []int64{ids[6], ids[5]}},
+		{"words in any order", "smithers " + word, []int64{ids[6], ids[5]}},
+		{"exact name ignores extra spaces", word + "  smithers", []int64{ids[5], ids[6]}},
+		{"repeated words", word + " " + strings.ToUpper(word), []int64{ids[6], ids[0], ids[1], ids[3], ids[4], ids[5]}},
+		{"leading apostrophe", "'" + word, []int64{ids[4]}},
+		{"leading hyphen", "-" + word, []int64{ids[3]}},
 		{"mid-word fragment", word[1:], nil},
 		{"wildcards are literal", "%" + word[1:], nil},
 	} {

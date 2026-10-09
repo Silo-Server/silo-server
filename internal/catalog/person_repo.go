@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -639,7 +640,7 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 	order := "name ASC, id ASC"
 	if scoped && query != "" {
 		order = fmt.Sprintf("(LOWER(name) = LOWER($%d)) DESC, ", argIdx) + order
-		args = append(args, query)
+		args = append(args, strings.Join(strings.Fields(query), " "))
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
@@ -666,20 +667,38 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 	return people, rows.Err()
 }
 
+// maxPersonSearchWords caps the distinct query words people search matches
+// on, so a long query cannot add predicates without bound.
+const maxPersonSearchWords = 8
+
 // personNameWordStartConditions matches people whose name has, for every
-// whitespace-separated word of query, a word starting with it. A word starts
-// at the beginning of the name or after a character that is not a letter or
-// digit, so "luc" finds "Jean-Luc" and "brien" finds "O'Brien". Each word
-// also carries a substring ILIKE, which lets idx_people_name_trgm narrow the
-// rows the regex checks. An empty query adds no conditions.
+// distinct whitespace-separated word of query, a word starting with it. A word
+// starts at the beginning of the name or after a character that is not a
+// letter or digit, so "luc" finds "Jean-Luc" and "brien" finds "O'Brien"; a
+// query word that opens with punctuation, like "'brien", carries its own
+// boundary. Each word also carries a substring ILIKE, which lets
+// idx_people_name_trgm narrow the rows the regex checks. An empty query adds
+// no conditions.
 func personNameWordStartConditions(query string, args *[]any, argIdx *int) []string {
-	words := strings.Fields(query)
-	conditions := make([]string, 0, 2*len(words))
-	for _, word := range words {
+	var conditions []string
+	seen := map[string]bool{}
+	for _, word := range strings.Fields(query) {
+		key := strings.ToLower(word)
+		if seen[key] {
+			continue
+		}
+		if len(seen) == maxPersonSearchWords {
+			break
+		}
+		seen[key] = true
+		pattern := escapeRegexLiteral(word)
+		if first, _ := utf8.DecodeRuneInString(word); unicode.IsLetter(first) || unicode.IsDigit(first) {
+			pattern = "(^|[^[:alnum:]])" + pattern
+		}
 		conditions = append(conditions,
 			fmt.Sprintf(`name ILIKE $%d ESCAPE '\'`, *argIdx),
 			fmt.Sprintf("name ~* $%d", *argIdx+1))
-		*args = append(*args, "%"+escapePrefixForLike(word)+"%", "(^|[^[:alnum:]])"+regexp.QuoteMeta(word))
+		*args = append(*args, "%"+escapePrefixForLike(word)+"%", pattern)
 		*argIdx += 2
 	}
 	return conditions
