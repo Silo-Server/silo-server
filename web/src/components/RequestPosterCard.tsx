@@ -269,14 +269,7 @@ function ExternalTitleCard({
           aria-label={label}
           className="block overflow-hidden rounded-xl"
         >
-          <MediaCardArtwork
-            src={tmdbImageURL(posterPath)}
-            alt={title}
-            fallbackLabel={title}
-            lazy
-            dim={dim}
-            fallbackOnError
-          />
+          <MediaCardArtwork src={tmdbImageURL(posterPath)} alt={title} lazy dim={dim} />
         </ViewTransitionLink>
         {libraryContentId || badge ? (
           <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex flex-wrap items-center gap-1.5">
