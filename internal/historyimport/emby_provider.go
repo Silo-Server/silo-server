@@ -15,6 +15,19 @@ type Provider interface {
 type EmbyProvider struct {
 	client *EmbyClient
 	auth   embyLocalAuth
+	// row is the Continue Watching row the last Fetch read, or nil when it
+	// could not be read reliably.
+	row *ContinueWatchingRow
+}
+
+// ContinueWatchingRow reports the shows in Emby's Continue Watching row as
+// of the last Fetch. ok is false when the row could not be read reliably,
+// and then nothing may be hidden on its account.
+func (p *EmbyProvider) ContinueWatchingRow() (ContinueWatchingRow, bool) {
+	if p.row == nil {
+		return ContinueWatchingRow{}, false
+	}
+	return *p.row, true
 }
 
 func NewEmbyProvider(client *EmbyClient, auth embyLocalAuth) *EmbyProvider {
@@ -26,6 +39,7 @@ func NewEmbyProvider(client *EmbyClient, auth embyLocalAuth) *EmbyProvider {
 const maxEmbyEpisodeRange = 10
 
 func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
+	p.row = nil
 	playedItems, err := p.client.FetchItems(ctx, p.auth, "IsPlayed")
 	if err != nil {
 		return nil, nil, err
@@ -35,11 +49,17 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 		return nil, nil, err
 	}
 	var warnings []string
-	hidden, err := p.hiddenFromResume(ctx, resumableItems)
+	// The row is read even when nothing is resumable: a show between
+	// episodes has no resumable episode, and the row is the only place Emby
+	// shows whether it was hidden.
+	listed, err := p.client.FetchResumeItems(ctx, p.auth)
+	rowRead := err == nil
 	if err != nil {
 		slog.WarnContext(ctx, "emby history import: continue watching list unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbyResumeListUnavailable)
+		listed = nil
 	}
+	hidden := hiddenFromResume(resumableItems, listed, rowRead)
 	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
 	// can carry the server's response body. The error itself is logged.
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
@@ -62,12 +82,22 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	}
 
 	watchedItems := slices.Concat(playedItems, resumableItems)
-	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems))
+	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems, listed))
+	seriesMetaRead := err == nil
 	if err != nil {
 		// Episodes carrying their own provider IDs still match without it.
 		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", warningLogError("emby", err))
 		warnings = append(warnings, warnEmbySeriesUnavailable)
 		seriesMeta = map[string]embyItem{}
+	}
+	// Without the series' provider IDs a show in the row that the import
+	// matched under another Emby series could not be recognized, so the row
+	// is only reported when they were read.
+	if rowRead && seriesMetaRead {
+		p.row = continueWatchingRow(listed, seriesMeta)
+		if p.row == nil {
+			slog.WarnContext(ctx, "emby history import: continue watching lists an episode without a series; shows hidden there stay visible", "component", "historyimport")
+		}
 	}
 
 	merged := make(map[string]Record, len(watchedItems)+len(favoriteItems))
@@ -129,15 +159,13 @@ func embyWatchedRecords(item embyItem, series embyItem) []Record {
 // IsResumable filter still returns it; only Emby's own resume list leaves it
 // out. That list shows one episode per series, so episodes are judged by
 // series: hiding an episode hides its whole series, and every resumable
-// episode of a series missing from the list is reported. On error nothing is
-// reported hidden.
-func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyItem) (map[string]bool, error) {
-	if len(resumable) == 0 {
-		return nil, nil
-	}
-	listed, err := p.client.FetchResumeItems(ctx, p.auth)
-	if err != nil {
-		return nil, err
+// episode of a series missing from the list is reported. Each gets a
+// Continue Watching dismissal, which also covers profiles and runs the
+// series pass (see ContinueWatchingRow) cannot act for. Without the list
+// nothing is reported hidden.
+func hiddenFromResume(resumable, listed []embyItem, listRead bool) map[string]bool {
+	if !listRead {
+		return nil
 	}
 	shown := make(map[string]bool, len(listed))
 	for _, item := range listed {
@@ -149,7 +177,7 @@ func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyIte
 			hidden[item.ID] = true
 		}
 	}
-	return hidden, nil
+	return hidden
 }
 
 // resumeListKey is the ID Emby's resume list represents an item by: a movie's
@@ -163,6 +191,59 @@ func resumeListKey(item embyItem) string {
 		return item.SeriesID
 	}
 	return ""
+}
+
+// continueWatchingRow describes the shows in Emby's Continue Watching row:
+// Emby lists one episode per show, either the one in progress or, since Emby
+// 4.6 merged Next Up into the row, the next unstarted one. A listed episode
+// without a series can't be placed, so such a row is not reported (nil):
+// any show the import touched might be the one it stands for.
+//
+// The row also records whether it lists any unstarted episode (IncludesNextUp):
+// Emby can keep Next Up out of the row, and then a show between episodes is
+// missing from it whether or not it was hidden. And it records which of the
+// import's shows Emby counts as unfinished, from each series' unplayed count:
+// a show the user finished at the source is missing from the row too.
+func continueWatchingRow(listed []embyItem, seriesMeta map[string]embyItem) *ContinueWatchingRow {
+	row := &ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}, UnfinishedSourceSeries: map[string]bool{}}
+	for id, series := range seriesMeta {
+		if unplayed := series.UserData.UnplayedItemCount; unplayed != nil && *unplayed > 0 {
+			row.UnfinishedSourceSeries[id] = true
+		}
+	}
+	for _, item := range listed {
+		if !strings.EqualFold(item.Type, "episode") {
+			continue
+		}
+		seriesID := strings.TrimSpace(item.SeriesID)
+		if seriesID == "" {
+			return nil
+		}
+		if !item.UserData.Played && item.UserData.PlaybackPositionTicks == 0 {
+			row.IncludesNextUp = true
+		}
+		if row.SourceSeriesIDs[seriesID] {
+			continue
+		}
+		row.SourceSeriesIDs[seriesID] = true
+		series, ok := seriesMeta[seriesID]
+		if !ok {
+			continue
+		}
+		row.Series = append(row.Series, Record{
+			ExternalID: seriesID,
+			Kind:       KindSeries,
+			Title:      series.Name,
+			Year:       series.ProductionYear,
+			IMDbID:     providerID(series.ProviderIDs, "imdb"),
+			TMDBID:     providerID(series.ProviderIDs, "tmdb"),
+			TVDBID:     providerID(series.ProviderIDs, "tvdb"),
+			// As for favorite series: Emby's primary TMDB identity beats a
+			// stale secondary TVDB ID.
+			PreferTMDB: true,
+		})
+	}
+	return row
 }
 
 func (p *EmbyProvider) fetchSeriesMetadata(ctx context.Context, items []embyItem) (map[string]embyItem, error) {
@@ -216,6 +297,7 @@ func normalizeEmbyItem(item embyItem, series embyItem) Record {
 		record.Kind = KindMovie
 	case "episode":
 		record.Kind = KindEpisode
+		record.SourceSeriesID = strings.TrimSpace(item.SeriesID)
 		record.SeriesTitle = item.SeriesName
 		if record.SeriesTitle == "" {
 			record.SeriesTitle = series.Name

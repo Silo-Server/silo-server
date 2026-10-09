@@ -1522,8 +1522,7 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 }
 
 // ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, including their provenance columns. Used by the admin manual-marker
-// API to remove a marker so detection/online fetch can repopulate it. Returns
+// a file, retaining manual provenance to prevent automatic rediscovery. Returns
 // whether a row was updated.
 func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
@@ -1762,16 +1761,16 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 		changed.preview = changed.preview || applied.preview
 	}
 	if clearFlags.intro {
-		changed.intro = clearSegmentState(&state.intro) || changed.intro
+		changed.intro = clearManualSegmentState(&state.intro, mutationAt) || changed.intro
 	}
 	if clearFlags.credits {
-		changed.credits = clearSegmentState(&state.credits) || changed.credits
+		changed.credits = clearManualSegmentState(&state.credits, mutationAt) || changed.credits
 	}
 	if clearFlags.recap {
-		changed.recap = clearSegmentState(&state.recap) || changed.recap
+		changed.recap = clearManualSegmentState(&state.recap, mutationAt) || changed.recap
 	}
 	if clearFlags.preview {
-		changed.preview = clearSegmentState(&state.preview) || changed.preview
+		changed.preview = clearManualSegmentState(&state.preview, mutationAt) || changed.preview
 	}
 	if !changed.any() {
 		if err := tx.Commit(ctx); err != nil {
@@ -2026,6 +2025,16 @@ func clearSegmentState(state *segmentState) bool {
 	state.confidence = nil
 	state.algorithm = nil
 	state.detectedAt = nil
+	return true
+}
+
+func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
+	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
+	if segmentEqual(*state, next) {
+		return false
+	}
+	*state = next
 	return true
 }
 

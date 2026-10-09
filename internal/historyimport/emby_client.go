@@ -87,6 +87,9 @@ type embyItem struct {
 		PlayCount             int        `json:"PlayCount"`
 		LastPlayedDate        *time.Time `json:"LastPlayedDate"`
 		Played                bool       `json:"Played"`
+		// UnplayedItemCount is a series' unwatched episode count; nil when
+		// Emby left it out.
+		UnplayedItemCount *int `json:"UnplayedItemCount"`
 	} `json:"UserData"`
 }
 
@@ -273,6 +276,9 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 	for chunk := range slices.Chunk(ids, embyIDChunkSize) {
 		query := url.Values{}
 		query.Set("Recursive", "true")
+		// A series' user data carries its unplayed count, which tells a
+		// finished show from one hidden from Continue Watching.
+		query.Set("EnableUserData", "true")
 		query.Set("Fields", embyItemFields)
 		query.Set("Ids", strings.Join(chunk, ","))
 		if strings.TrimSpace(includeItemTypes) != "" {

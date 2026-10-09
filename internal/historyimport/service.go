@@ -47,6 +47,13 @@ type Service struct {
 	runCancels   map[string]context.CancelFunc
 	runCancelsMu sync.Mutex
 	observers    []Observer
+
+	// seriesDrops and nextUp run the pass hiding the shows a source hid from
+	// its Continue Watching (see SetContinueWatchingStores).
+	seriesDrops SeriesDropStore
+	nextUp      NextUpLister
+	// now dates the drops that pass writes; nil means time.Now.
+	now func() time.Time
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -371,6 +378,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 
 	hiddenSuppressed := 0
 	hiddenWarningAt := -1
+	var importedEpisodes []importedEpisode
 	for i, record := range records {
 		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 			s.failClaim(ctx, claim, summary, err)
@@ -450,6 +458,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		if err != nil {
 			summary.Warnings = append(summary.Warnings, err.Error())
 		} else {
+			if record.Kind == KindEpisode {
+				importedEpisodes = append(importedEpisodes, newImportedEpisode(match.MediaItemID, record))
+			}
 			if outcome.ProgressWritten {
 				summary.ProgressUpdated++
 			} else {
@@ -466,6 +477,22 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		}
 
 		s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
+	}
+
+	if reporter, ok := provider.(ContinueWatchingRowReporter); ok {
+		if row, ok := reporter.ContinueWatchingRow(); ok {
+			if err := s.repo.validateRunClaim(ctx, claim); err != nil {
+				s.failClaim(ctx, claim, summary, err)
+				return
+			}
+			dropped, err := s.reconcileContinueWatching(ctx, run.UserID, run.ProfileID, row, importedEpisodes)
+			if err != nil {
+				slog.WarnContext(ctx, "history import: hiding shows hidden at the source failed", "run_id", run.ID, "dropped", dropped, "error", err)
+				summary.Warnings = append(summary.Warnings, warnContinueWatchingNotReconciled)
+			} else if dropped > 0 {
+				slog.InfoContext(ctx, "history import: hid shows hidden from the source's continue watching", "run_id", run.ID, "dropped", dropped)
+			}
+		}
 	}
 
 	if err := s.repo.validateRunClaim(ctx, claim); err != nil {

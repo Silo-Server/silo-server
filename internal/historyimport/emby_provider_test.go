@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,12 +24,14 @@ import (
 // unless Fields names them. The IsResumable filter returns every resumable
 // item, while the Resume list leaves out the ones hidden from Continue
 // Watching, shows one episode per series, and returns nothing without a type
-// filter.
+// filter. Since Emby 4.6 merged Next Up into it, the list also shows the next
+// unstarted episode of a show between episodes (nextUp).
 type fakeEmby struct {
 	t         *testing.T
 	played    []embyItem
 	resumable []embyItem
-	hidden    []string // resumable item IDs hidden from Continue Watching; Emby hides every resumable episode of a series at once
+	nextUp    []embyItem // unstarted next episodes of shows between episodes
+	hidden    []string   // resumable or next-up item IDs hidden from Continue Watching; Emby hides every episode of a series at once
 	favorites []embyItem
 	series    []embyItem
 	failures  map[string]int // Filters value, "Ids", or "Resume", answered with this status
@@ -66,6 +69,13 @@ func (f *fakeEmby) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				nextUp[item.SeriesID] = true
 			}
+			items = append(items, item)
+		}
+		for _, item := range f.nextUp {
+			if !slices.Contains(types, item.Type) || slices.Contains(f.hidden, item.ID) || nextUp[item.SeriesID] {
+				continue
+			}
+			nextUp[item.SeriesID] = true
 			items = append(items, item)
 		}
 	case query.Get("Ids") != "":
@@ -141,6 +151,11 @@ func (f *fakeEmby) provider(t *testing.T) *EmbyProvider {
 	client := NewEmbyClient()
 	client.limiter = newUpstreamRateLimiter(rate.Inf, 1)
 	return NewEmbyProvider(client, embyLocalAuth{BaseURL: server.URL, UserID: "emby-user", AccessToken: "token"})
+}
+
+func withUnplayed(series embyItem, unplayed int) embyItem {
+	series.UserData.UnplayedItemCount = &unplayed
+	return series
 }
 
 func playedEmbyItem(item embyItem, lastPlayed time.Time, count int) embyItem {
@@ -233,10 +248,8 @@ func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
 			episode("ep-1", "series-1", 1),
 			episode("ep-2", "series-1", 2),
 			episode("ep-3", "series-2", 1),
-			episode("ep-4", "series-2", 2),
-			episode("ep-5", "", 1),
 		},
-		hidden: []string{"8", "ep-3", "ep-4", "ep-5"},
+		hidden: []string{"8", "ep-3"},
 		series: []embyItem{embySeverance},
 	}
 
@@ -252,33 +265,132 @@ func TestEmbyProviderFetchMarksItemsHiddenFromContinueWatching(t *testing.T) {
 	if hidden := records["8"]; !hidden.HiddenFromResume || hidden.PositionSeconds != 240 || !hidden.UpdatedAt.Equal(stopped) {
 		t.Fatalf("hidden resumable movie = hidden:%v pos:%v updated:%v, want true/240/%v", hidden.HiddenFromResume, hidden.PositionSeconds, hidden.UpdatedAt, stopped)
 	}
-
 	// Emby's row shows only one episode of a series, so an episode missing
 	// from it isn't hidden while its series is listed; a series missing from
-	// it is hidden with every resumable episode.
+	// it is hidden with every resumable episode. Each episode also carries
+	// its Emby series for the series pass.
 	if records["ep-1"].HiddenFromResume || records["ep-2"].HiddenFromResume {
 		t.Fatalf("listed series episodes marked hidden = %v/%v, want neither", records["ep-1"].HiddenFromResume, records["ep-2"].HiddenFromResume)
 	}
-	if !records["ep-3"].HiddenFromResume || !records["ep-4"].HiddenFromResume {
-		t.Fatalf("hidden series episodes marked hidden = %v/%v, want both", records["ep-3"].HiddenFromResume, records["ep-4"].HiddenFromResume)
+	if !records["ep-3"].HiddenFromResume {
+		t.Fatal("hidden series episode not marked hidden")
 	}
-	// Without a series an episode can't be looked up in the row.
-	if records["ep-5"].HiddenFromResume {
-		t.Fatal("episode without a series marked hidden, want not hidden")
+	if got := records["ep-3"].SourceSeriesID; got != "series-2" {
+		t.Fatalf("episode source series = %q, want series-2", got)
 	}
 
 	// Without Emby's resume list nothing can be told apart: the import keeps
 	// every position, hides nothing, and says why.
 	fake.failures = map[string]int{"Resume": http.StatusInternalServerError}
-	records, warnings = fetchEmbyRecords(t, fake.provider(t))
+	provider := fake.provider(t)
+	records, warnings = fetchEmbyRecords(t, provider)
 	if !slices.Equal(warnings, []string{warnEmbyResumeListUnavailable}) {
 		t.Fatalf("warnings = %v, want %q", warnings, warnEmbyResumeListUnavailable)
 	}
 	if records["8"].HiddenFromResume || records["8"].PositionSeconds != 240 {
 		t.Fatalf("hidden movie without resume list = %+v, want imported and not hidden", records["8"])
 	}
-	if records["ep-3"].HiddenFromResume || records["ep-4"].HiddenFromResume {
-		t.Fatalf("hidden series episodes without resume list = %v/%v, want neither", records["ep-3"].HiddenFromResume, records["ep-4"].HiddenFromResume)
+	if records["ep-3"].HiddenFromResume {
+		t.Fatal("hidden series episode without resume list marked hidden, want not")
+	}
+	if _, ok := provider.ContinueWatchingRow(); ok {
+		t.Fatal("row reported without the resume list, want none")
+	}
+}
+
+func TestEmbyProviderReportsContinueWatchingRowByShow(t *testing.T) {
+	t.Parallel()
+
+	watched := time.Date(2026, 10, 1, 21, 0, 0, 0, time.UTC)
+	episode := func(id, seriesID, seriesName string, number int) embyItem {
+		return embyItem{ID: id, Name: "Episode", Type: "Episode", SeriesID: seriesID, SeriesName: seriesName, ParentIndexNumber: 1, IndexNumber: number}
+	}
+	paused := episode("lasso-3", "lasso", "Ted Lasso", 3)
+	paused.UserData.PlaybackPositionTicks = 6_000_000_000
+	paused.UserData.LastPlayedDate = &watched
+	fake := &fakeEmby{
+		played: []embyItem{
+			playedEmbyItem(episode("bodkin-1", "bodkin", "Bodkin", 1), watched, 1),
+			playedEmbyItem(episode("beef-1", "beef", "BEEF", 1), watched, 1),
+			playedEmbyItem(episode("beef-hd-2", "beef-hd", "BEEF", 2), watched, 1),
+		},
+		resumable: []embyItem{paused},
+		// Bodkin is between episodes and hidden; BEEF is between episodes and
+		// listed through its 4K copy only.
+		nextUp: []embyItem{episode("bodkin-2", "bodkin", "Bodkin", 2), episode("beef-2", "beef", "BEEF", 2)},
+		hidden: []string{"bodkin-2"},
+		series: []embyItem{
+			withUnplayed(embyItem{ID: "lasso", Name: "Ted Lasso", Type: "Series", ProviderIDs: map[string]string{"Tvdb": "383203", "Tmdb": "97546"}}, 9),
+			withUnplayed(embyItem{ID: "bodkin", Name: "Bodkin", Type: "Series", ProviderIDs: map[string]string{"Tmdb": "212017"}}, 6),
+			withUnplayed(embyItem{ID: "beef", Name: "BEEF", Type: "Series", ProviderIDs: map[string]string{"Tmdb": "154385"}}, 9),
+			// Finished at Emby.
+			withUnplayed(embyItem{ID: "beef-hd", Name: "BEEF", Type: "Series", ProviderIDs: map[string]string{"Tmdb": "154385"}}, 0),
+		},
+	}
+
+	provider := fake.provider(t)
+	if _, ok := provider.ContinueWatchingRow(); ok {
+		t.Fatal("row reported before Fetch, want none")
+	}
+	if _, warnings := fetchEmbyRecords(t, provider); len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	row, ok := provider.ContinueWatchingRow()
+	if !ok {
+		t.Fatal("row not reported, want it")
+	}
+	gotIDs := slices.Sorted(maps.Keys(row.SourceSeriesIDs))
+	if want := []string{"beef", "lasso"}; !slices.Equal(gotIDs, want) {
+		t.Fatalf("row shows = %v, want %v (the paused show and the listed next-up show, not the hidden one)", gotIDs, want)
+	}
+	tmdb := map[string]string{}
+	for _, series := range row.Series {
+		if series.Kind != KindSeries || !series.PreferTMDB {
+			t.Fatalf("row series = %+v, want a TMDB-first series record", series)
+		}
+		tmdb[series.ExternalID] = series.TMDBID
+	}
+	if tmdb["beef"] != "154385" || tmdb["lasso"] != "97546" || len(tmdb) != 2 {
+		t.Fatalf("row series TMDB IDs = %v, want beef and lasso", tmdb)
+	}
+	if !row.IncludesNextUp {
+		t.Fatal("row listing an unstarted episode not marked as including Next Up")
+	}
+	unfinished := slices.Sorted(maps.Keys(row.UnfinishedSourceSeries))
+	if want := []string{"beef", "bodkin", "lasso"}; !slices.Equal(unfinished, want) {
+		t.Fatalf("unfinished shows = %v, want %v (not the finished copy)", unfinished, want)
+	}
+	// Series are read with their user data, which carries the unplayed count.
+	for _, query := range fake.requestsFor("Ids") {
+		if query.Get("EnableUserData") != "true" {
+			t.Fatalf("series lookup %v without user data", query)
+		}
+	}
+
+	// A row of in-progress episodes alone doesn't show shows between
+	// episodes.
+	fake.nextUp = nil
+	fetchEmbyRecords(t, provider)
+	if row, ok := provider.ContinueWatchingRow(); !ok || row.IncludesNextUp {
+		t.Fatalf("row of in-progress episodes = %+v, %v; want reported without Next Up", row, ok)
+	}
+	fake.nextUp = []embyItem{episode("bodkin-2", "bodkin", "Bodkin", 2), episode("beef-2", "beef", "BEEF", 2)}
+
+	// A listed episode without a series could stand for any show, so the row
+	// is not reported.
+	fake.nextUp = append(fake.nextUp, embyItem{ID: "orphan", Name: "Episode", Type: "Episode"})
+	fetchEmbyRecords(t, provider)
+	if _, ok := provider.ContinueWatchingRow(); ok {
+		t.Fatal("row with an episode without a series reported, want none")
+	}
+
+	// Without the series' provider IDs a copy of a listed show can't be
+	// recognized, so the row is not reported either.
+	fake.nextUp = fake.nextUp[:len(fake.nextUp)-1]
+	fake.failures = map[string]int{"Ids": http.StatusInternalServerError}
+	fetchEmbyRecords(t, provider)
+	if _, ok := provider.ContinueWatchingRow(); ok {
+		t.Fatal("row reported without series metadata, want none")
 	}
 }
 

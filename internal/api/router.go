@@ -2234,6 +2234,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 		historyImportSvc.SetLocalNetworkAccess(localNetworkAccess)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		historyImportSvc.SetStableIdentityResolver(historyIdentity)
+		// Shows hidden from the source's Continue Watching are dropped through
+		// the same tracker as Home dismissals, so interest recomputes.
+		historyImportSvc.SetContinueWatchingStores(
+			notifications.TrackDroppedSeries(catalog.NewDroppedSeriesRepo(deps.DB), deps.Notifications),
+			catalog.NewNextUpRepository(deps.DB, deps.UserStoreProvider),
+		)
 		if deps.EventsHub != nil {
 			historyImportSvc.AddObserver(evt.NewHistoryImportObserver(deps.EventsHub))
 		}
