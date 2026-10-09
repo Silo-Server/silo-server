@@ -7,7 +7,7 @@ set -euo pipefail
 if ((BASH_VERSINFO[0] < 4)); then
 	if [[ -z "${LEAK_CHECK_BASH_REEXEC:-}" ]]; then
 		for newer_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
-			if [[ -x "$newer_bash" ]]; then
+			if [[ -x "$newer_bash" ]] && "$newer_bash" -c '((BASH_VERSINFO[0] >= 4))'; then
 				LEAK_CHECK_BASH_REEXEC=1 exec "$newer_bash" "$0" "$@"
 			fi
 		done
