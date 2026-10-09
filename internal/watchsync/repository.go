@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -1233,6 +1234,58 @@ func (r *PostgresRepository) GetListMediaItems(ctx context.Context, mediaItemIDs
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate list media items: %w", err)
+	}
+	return result, nil
+}
+
+// GetRatingMediaItems is GetListMediaItems widened to episodes, which are
+// rateable but not listable.
+//
+// An episode is not a row in media_items, so it needs its own read. It carries
+// its own external ids, and the providers match a rated episode by them; the
+// parent series ids and numbers ride along for a provider that addresses an
+// episode as "this show, this season, this episode" instead. The year is the
+// series' and is reported as such, because an episode row has none of its own.
+func (r *PostgresRepository) GetRatingMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
+	result, err := r.GetListMediaItems(ctx, mediaItemIDs)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]string, 0, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if _, found := result[id]; !found {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return result, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0),
+		       e.imdb_id, e.tmdb_id, e.tvdb_id,
+		       COALESCE(series.imdb_id, ''), COALESCE(series.tmdb_id, ''), COALESCE(series.tvdb_id, ''),
+		       e.season_number, e.episode_number
+		FROM episodes e
+		LEFT JOIN media_items series ON series.content_id = e.series_id
+		WHERE e.content_id = ANY($1)
+	`, missing)
+	if err != nil {
+		return nil, fmt.Errorf("get rating episodes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		fav := LocalFavorite{Kind: historyimport.KindEpisode}
+		if err := rows.Scan(&fav.MediaItemID, &fav.Title, &fav.SeriesYear,
+			&fav.IMDbID, &fav.TMDBID, &fav.TVDBID,
+			&fav.SeriesIMDbID, &fav.SeriesTMDBID, &fav.SeriesTVDBID,
+			&fav.SeasonNumber, &fav.EpisodeNumber); err != nil {
+			return nil, fmt.Errorf("scan rating episode: %w", err)
+		}
+		fav.ProviderItemKey = providerItemKeyForLocalFavorite(fav)
+		result[fav.MediaItemID] = fav
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rating episodes: %w", err)
 	}
 	return result, nil
 }

@@ -1461,7 +1461,6 @@ func TestPluginProviderDecodesRatingSnapshot(t *testing.T) {
 		Items: []*pluginv1.WatchSyncRemoteState{
 			remoteRatingState("m1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE, "tt1", 8, timestamppb.New(ratedAt)),
 			remoteRatingState("s1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES, "tt2", 7, nil),
-			// Silo does not sync episode ratings.
 			remoteRatingState("e1", pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE, "tt3", 9, nil),
 		},
 	}}
@@ -1481,11 +1480,15 @@ func TestPluginProviderDecodesRatingSnapshot(t *testing.T) {
 		client.listRequests[0].GetStateKinds()[0] != pluginv1.WatchSyncRemoteStateKind_WATCH_SYNC_REMOTE_STATE_KIND_RATING {
 		t.Fatalf("requests = %#v", client.listRequests)
 	}
-	if !slices.Equal(batch.SnapshotKinds, []string{historyimport.KindMovie, historyimport.KindSeries}) ||
-		batch.UpdatedCursors[pluginRatingsCursorKey] != "cursor-2" || len(batch.Warnings) != 0 || len(batch.Rows) != 2 {
+	if !slices.Equal(batch.SnapshotKinds, []string{historyimport.KindMovie, historyimport.KindSeries, historyimport.KindEpisode}) ||
+		batch.UpdatedCursors[pluginRatingsCursorKey] != "cursor-2" || len(batch.Warnings) != 0 || len(batch.Rows) != 3 {
 		t.Fatalf("batch = %#v", batch)
 	}
-	movie, series := batch.Rows[0], batch.Rows[1]
+	movie, series, episode := batch.Rows[0], batch.Rows[1], batch.Rows[2]
+	if episode.ProviderItemKey != "e1" || episode.Kind != historyimport.KindEpisode ||
+		episode.IMDbID != "tt3" || episode.Rating != 9 || episode.Removed {
+		t.Fatalf("episode row = %#v", episode)
+	}
 	if movie.Provider != testPluginProviderKey || movie.ProviderItemKey != "m1" || movie.Kind != historyimport.KindMovie ||
 		movie.IMDbID != "tt1" || movie.Rating != 8 || !movie.RatedAt.Equal(ratedAt) || movie.Removed {
 		t.Fatalf("movie row = %#v", movie)
@@ -1508,9 +1511,10 @@ func TestPluginProviderRatingSnapshotKindsFollowSupportedMedia(t *testing.T) {
 		media []pluginv1.WatchSyncMediaType
 		want  []string
 	}{
-		{name: "default media", want: []string{historyimport.KindMovie}},
+		// The default set is movies and episodes, and both are rateable.
+		{name: "default media", want: []string{historyimport.KindMovie, historyimport.KindEpisode}},
 		{name: "series only", media: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES}, want: []string{historyimport.KindSeries}},
-		{name: "episodes only", media: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE}},
+		{name: "episodes only", media: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE}, want: []string{historyimport.KindEpisode}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &fakeWatchSyncPluginClient{listResponse: &pluginv1.WatchSyncListRemoteStateResponse{CompleteSnapshot: true}}
@@ -2235,16 +2239,20 @@ func TestPluginProviderRatingExportWatchGateFollowsDescriptor(t *testing.T) {
 	episode := pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE
 	series := pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES
 	for _, tc := range []struct {
-		name          string
-		gated         []pluginv1.WatchSyncMediaType
-		movie, series bool
+		name                   string
+		gated                  []pluginv1.WatchSyncMediaType
+		movie, series, episode bool
 	}{
 		{name: "none"},
 		{name: "movies", gated: []pluginv1.WatchSyncMediaType{movie}, movie: true},
 		{name: "series", gated: []pluginv1.WatchSyncMediaType{series}, series: true},
 		{name: "both", gated: []pluginv1.WatchSyncMediaType{movie, series}, movie: true, series: true},
-		// Only movie and series ratings sync, so an episode entry gates nothing.
-		{name: "episodes", gated: []pluginv1.WatchSyncMediaType{episode}},
+		// Episode ratings sync, so an episode entry gates episodes. Without
+		// this the plugin receives ratings for unwatched episodes and marks
+		// them watched upstream.
+		{name: "episodes", gated: []pluginv1.WatchSyncMediaType{episode}, episode: true},
+		{name: "every kind", gated: []pluginv1.WatchSyncMediaType{movie, series, episode},
+			movie: true, series: true, episode: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			descriptor := ratingTestDescriptor(movie, episode, series)
@@ -2256,8 +2264,11 @@ func TestPluginProviderRatingExportWatchGateFollowsDescriptor(t *testing.T) {
 			if got := provider.RatingExportRequiresWatched(historyimport.KindSeries); got != tc.series {
 				t.Fatalf("series gated = %v, want %v", got, tc.series)
 			}
-			if provider.RatingExportRequiresWatched(historyimport.KindEpisode) || provider.RatingExportRequiresWatched("") {
-				t.Fatal("only movie and series ratings can be gated")
+			if got := provider.RatingExportRequiresWatched(historyimport.KindEpisode); got != tc.episode {
+				t.Fatalf("episode gated = %v, want %v", got, tc.episode)
+			}
+			if provider.RatingExportRequiresWatched("") {
+				t.Fatal("a kind the contract cannot carry must never be gated")
 			}
 		})
 	}

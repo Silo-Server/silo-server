@@ -631,6 +631,14 @@ type listMediaResolver interface {
 	GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
 }
 
+// ratingMediaResolver resolves the kinds a rating can name. It is separate from
+// listMediaResolver because an episode can be rated but not favorited or put on
+// a watchlist, and resolving one for those lists would let an episode id stand
+// in for a title the viewer never added.
+type ratingMediaResolver interface {
+	GetRatingMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
+}
+
 // resolveListMediaItems loads the identity (kind, title, external ids) of
 // movies and series by media item id. Unknown ids are absent from the result.
 func (s *Service) resolveListMediaItems(ctx context.Context, ids []string) (map[string]LocalFavorite, error) {
@@ -639,6 +647,16 @@ func (s *Service) resolveListMediaItems(ctx context.Context, ids []string) (map[
 		return nil, fmt.Errorf("list media resolver is not configured")
 	}
 	return resolver.GetListMediaItems(ctx, ids)
+}
+
+// resolveRatingMediaItems loads the identity of movies, series and episodes by
+// media item id. Unknown ids are absent from the result.
+func (s *Service) resolveRatingMediaItems(ctx context.Context, ids []string) (map[string]LocalFavorite, error) {
+	resolver, ok := s.repo.(ratingMediaResolver)
+	if !ok {
+		return nil, fmt.Errorf("rating media resolver is not configured")
+	}
+	return resolver.GetRatingMediaItems(ctx, ids)
 }
 
 // HandleLocalListEvent mirrors a real-time local list change (add/remove of a

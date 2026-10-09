@@ -1202,11 +1202,16 @@ func (p *PluginProvider) SyncsRatingKind(kind string) bool {
 
 // RatingExportRequiresWatched reports whether the plugin lists the media type
 // of kind in rating_export_requires_watched, meaning its SET_RATING also marks
-// the title watched upstream. Only movie and series ratings are synced.
+// the title watched upstream. It covers every kind a rating can name: leaving
+// one out would send a plugin that declares the type ratings for titles the
+// viewer has not watched, and mark them watched upstream.
 func (p *PluginProvider) RatingExportRequiresWatched(kind string) bool {
 	mediaType := watchSyncMediaType(kind)
-	if mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE &&
-		mediaType != pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES {
+	switch mediaType {
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
+		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES,
+		pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
+	default:
 		return false
 	}
 	return slices.Contains(p.descriptor.GetRatingExportRequiresWatched(), mediaType)
@@ -1214,10 +1219,13 @@ func (p *PluginProvider) RatingExportRequiresWatched(kind string) bool {
 
 // mediaFromLocalFavorite builds list and rating media. A series item carries
 // its own ids, so its SERIES media has them in external_ids and no series_*.
+// An episode also carries its season and episode number, which a provider that
+// addresses an episode through its show needs instead of the episode's own id.
 func mediaFromLocalFavorite(item LocalFavorite) *pluginv1.WatchSyncMedia {
 	return mediaFromIdentity(item.MediaItemID, item.Kind, item.Title, item.Year,
-		item.IMDbID, item.TMDBID, item.TVDBID, "", 0,
-		item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID, 0, 0)
+		item.IMDbID, item.TMDBID, item.TVDBID, "", item.SeriesYear,
+		item.SeriesIMDbID, item.SeriesTMDBID, item.SeriesTVDBID,
+		item.SeasonNumber, item.EpisodeNumber)
 }
 
 func watchSyncMediaType(kind string) pluginv1.WatchSyncMediaType {

@@ -13,7 +13,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// This file syncs a profile's movie and series ratings with a provider. Silo
+// This file syncs a profile's movie, series and episode ratings with a
+// provider. Silo
 // stores 1 to 5 stars; providers use integers from 1 to 10. Every decision is
 // made in stars, so a remote change inside one star (7 to 8) is not a change,
 // and Silo never overwrites a remote 7 with the 8 its 4 stars map to.
@@ -115,7 +116,7 @@ func decideRating(local, remote, base int, localAt, remoteAt time.Time) ratingAc
 	}
 }
 
-// ratingItem is one movie or series in a rating sync.
+// ratingItem is one movie, series or episode in a rating sync.
 type ratingItem struct {
 	identity LocalFavorite
 	local    int
@@ -444,9 +445,9 @@ func (s *Service) sendLocalRatings(ctx context.Context, conn Connection, cfg Ser
 	return err
 }
 
-// loadRatingItems gathers the profile's movie and series ratings and the
-// connection's agreed ratings, keyed by media item. onlyIDs limits both to the
-// listed items; nil loads everything.
+// loadRatingItems gathers the profile's movie, series and episode ratings and
+// the connection's agreed ratings, keyed by media item. onlyIDs limits both to
+// the listed items; nil loads everything.
 func (s *Service) loadRatingItems(ctx context.Context, conn Connection, onlyIDs []string) (map[string]*ratingItem, []string, error) {
 	var local []catalog.UserRating
 	if onlyIDs != nil {
@@ -479,7 +480,7 @@ func (s *Service) loadRatingItems(ctx context.Context, conn Connection, onlyIDs 
 	for _, state := range states {
 		ids = append(ids, state.MediaItemID)
 	}
-	resolved, err := s.resolveListMediaItems(ctx, ids)
+	resolved, err := s.resolveRatingMediaItems(ctx, ids)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -625,8 +626,11 @@ func (s *Service) resolveRemoteRatings(ctx context.Context, items map[string]*ra
 	}
 
 	// Remote-only ratings become items with no local rating and no agreement.
+	// This resolves episodes too: a rating only the provider holds is the one
+	// case where the item is reached from the provider's side, so the list
+	// resolver would drop every episode rating the provider sent.
 	if len(unresolved) > 0 {
-		resolved, err := s.resolveListMediaItems(ctx, unresolved)
+		resolved, err := s.resolveRatingMediaItems(ctx, unresolved)
 		if err != nil {
 			return warnings, err
 		}
@@ -729,8 +733,13 @@ func prefixedID(namespace, id string) string {
 	return namespace + ":" + strings.TrimSpace(id)
 }
 
+// ratingSyncKind answers whether a rated item can reach a provider. It is the
+// full set the plugin contract carries: a season has no media type there, so a
+// season rating would have nowhere to go and Silo does not offer one.
 func ratingSyncKind(kind string) bool {
-	return kind == historyimport.KindMovie || kind == historyimport.KindSeries
+	return kind == historyimport.KindMovie ||
+		kind == historyimport.KindSeries ||
+		kind == historyimport.KindEpisode
 }
 
 type ratingReconcileResult struct {

@@ -286,6 +286,8 @@ func (p *PluginProvider) FetchDropped(
 }
 
 // rateableKinds lists the rating kinds the plugin supports, movies first.
+// rateableKinds names the kinds a complete read covers, so a kind the provider
+// does not rate is never read as "every rating of this kind was removed".
 func (p *PluginProvider) rateableKinds() []string {
 	var kinds []string
 	if p.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE) {
@@ -293,6 +295,9 @@ func (p *PluginProvider) rateableKinds() []string {
 	}
 	if p.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_SERIES) {
 		kinds = append(kinds, historyimport.KindSeries)
+	}
+	if p.supportsMedia(pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE) {
+		kinds = append(kinds, historyimport.KindEpisode)
 	}
 	return kinds
 }
