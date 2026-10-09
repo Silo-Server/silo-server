@@ -403,7 +403,7 @@
         {
           "id": "adm_inv_list.admin_no_profile",
           "category": "authorization",
-          "description": "An admin without a declared profile passes the acting-admin gate.",
+          "description": "An admin session that declares no profile is refused the acting-admin gate once a profile on the account has a PIN or a limit (critical v1 bridge fix).",
           "principal": {
             "class": "admin"
           },
@@ -411,7 +411,44 @@
             "path": "/api/v1/admin/invitations/"
           },
           "expect": {
-            "status": 200
+            "status": 403,
+            "headers": [
+              {
+                "name": "Content-Type",
+                "op": "equals",
+                "value": "application/json"
+              }
+            ],
+            "body": [
+              {
+                "pointer": "/error",
+                "op": "equals",
+                "value": "forbidden"
+              },
+              {
+                "pointer": "",
+                "op": "keys_equal",
+                "value": [
+                  "error",
+                  "message"
+                ]
+              },
+              {
+                "pointer": "/error",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "type",
+                "value": "string"
+              },
+              {
+                "pointer": "/message",
+                "op": "equals",
+                "value": "Admin access requires the account's primary profile"
+              }
+            ]
           },
           "v2_expectation": {
             "kind": "intentional_difference",
@@ -423,27 +460,41 @@
               "path": "/api/v2/admin/invitations"
             },
             "expect": {
-              "status": 200,
-              "headers": [],
+              "status": 403,
+              "headers": [
+                {
+                  "name": "Content-Type",
+                  "op": "equals",
+                  "value": "application/problem+json"
+                },
+                {
+                  "name": "Cache-Control",
+                  "op": "equals",
+                  "value": "no-store"
+                }
+              ],
               "body": [
                 {
-                  "pointer": "/items",
-                  "op": "length",
-                  "value": 3
-                },
-                {
-                  "pointer": "/page/has_more",
+                  "pointer": "/status",
                   "op": "equals",
-                  "value": false
+                  "value": 403
                 },
                 {
-                  "pointer": "/items",
-                  "op": "every",
-                  "value": {
-                    "pointer": "/id",
-                    "op": "type",
-                    "value": "string"
-                  }
+                  "pointer": "/type",
+                  "op": "matches",
+                  "value": "/permission_denied$"
+                },
+                {
+                  "pointer": "/title",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/detail",
+                  "op": "non_empty"
+                },
+                {
+                  "pointer": "/instance",
+                  "op": "non_empty"
                 }
               ]
             }

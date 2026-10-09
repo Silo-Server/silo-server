@@ -2144,6 +2144,15 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
+  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
+     height the widget's fixed rows leave it. Below lg the rows are
+     content-sized, so there is no height to take and the plot would measure
+     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  .admin-chart-fill {
+    flex: 1 1 0%;
+    min-height: 10rem;
+  }
+
   /* ── Dashboard Widget Scrollbars ──────────────────────────── */
   /* Widget bodies scroll inside their row, so the default OS bar
      sits right on top of the theme. One rule covers every widget:
@@ -2196,6 +2205,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     .admin-widget {
       grid-column: span var(--widget-span) / span var(--widget-span);
       grid-row: span var(--widget-rows) / span var(--widget-rows);
+    }
+
+    .admin-chart-fill {
+      min-height: 0;
     }
   }
 
@@ -2307,11 +2320,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      a 260px blank strip on the banner's left (issue #1290). The admin
      area is its own shell: AdminLayout publishes `data-admin-shell` and
      draws a fixed 240px sidebar (`w-[240px]` / `lg:ml-[240px]`), and the
-     audiobook MiniBar can be open there.                              */
+     audiobook MiniBar can be open there.
+
+     The breakpoint is Tailwind's `lg` (64rem), where both shells show their
+     sidebar. A rem media query follows the browser's default font size, so
+     a fixed 1024px here kept the offset while a larger browser font had
+     already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
+    /* How far fixed page chrome (the collection editor's save bar) rises to
+       clear whichever background playback bar shows. usePlaybackBarHeight
+       measures each bar, bottom inset included, on the root while it shows. */
+    --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
   }
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     :root[data-app-shell] {
       --app-sidebar-offset: 260px;
     }
@@ -2358,10 +2380,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      since it is `z-50` against the sidebar's `z-40`/`45` it painted over the
      logo on the way in and left a gap on the way out.
 
-     Breakpoint deliberately matches `--app-sidebar-offset` (1024px) rather than
-     Tailwind's `lg` (64rem): `html[data-text-scale]` re-bases rem, so at large
-     text those two diverge and the compensation must follow whichever query
-     actually changes the margin it is compensating for. */
+     Breakpoint deliberately matches `--app-sidebar-offset` (64rem): the
+     compensation must follow whichever query actually changes the margin it is
+     compensating for. `html[data-text-scale]` does not move it; rem in a media
+     query resolves against the browser's default font size, not the root
+     element's. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
@@ -2373,7 +2396,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow-x: clip;
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) {
     .impersonation-banner {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }

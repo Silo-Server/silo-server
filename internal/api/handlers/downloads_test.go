@@ -1206,6 +1206,20 @@ func TestManagedArtworkThreadsIdentity(t *testing.T) {
 	}
 }
 
+// The series poster kind is v2-only; the frozen v1 route never serves it.
+func TestManagedArtworkV1RefusesSeriesPoster(t *testing.T) {
+	svc := &fakeDownloadService{}
+	h := NewDownloadHandler(svc)
+	req := withChiParams(downloadTestRequest(http.MethodGet, "/downloads/dl1/artwork/series_poster", nil, 7, "pA", "devA"),
+		map[string]string{"id": "dl1", "kind": "series_poster"})
+	rec := httptest.NewRecorder()
+	h.HandleArtwork(rec, req)
+
+	if rec.Code != http.StatusNotFound || svc.gotArtworkKind != "" {
+		t.Fatalf("status = %d, served kind = %q; want 404 without serving", rec.Code, svc.gotArtworkKind)
+	}
+}
+
 // The frozen v1 artwork route keeps its status codes when the image store
 // fails: an upstream error status stays 404, a store it couldn't reach 500.
 func TestManagedArtworkStoreFailureKeepsV1Statuses(t *testing.T) {

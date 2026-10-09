@@ -296,6 +296,17 @@ export function getQuerySortOptions(input: QuerySortOptionsInput = false): Query
   });
 }
 
+/**
+ * The sort scope for a query media scope. Movies & Series ("video") keeps the
+ * sorts valid for every video type, and manga reuses the ebook sorts (its
+ * chapters are ebook items).
+ */
+export function querySortScopeForMediaScope(mediaScope?: string): QuerySortRelevanceScope {
+  if (!mediaScope || mediaScope === "all" || mediaScope === "video") return "all";
+  if (mediaScope === "manga") return "ebook";
+  return mediaScope as QuerySortRelevanceScope;
+}
+
 export function normalizeQuerySortForScope(
   sort?: QuerySortLike | null,
   input: QuerySortOptionsInput = false,

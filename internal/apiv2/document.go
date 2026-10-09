@@ -132,17 +132,29 @@ func documentDeclaration(op *Operation, input reflect.Type) {
 	}
 	op.Security = []map[string][]string{{securitySchemeBearer: {}}}
 	if resolvesProfile(op.Class) {
-		class := op.Class
-		if op.ProfileOptional {
-			class = ClassAuthenticated // documented as optional
-		}
-		profile := profileHeaderParam(class)
-		if op.OperationID == notificationApplePushDisplayOperation {
-			profile.Required = false
-			profile.Description = "Required for access tokens and API keys. Display tokens bind the profile from their claims and ignore this header; a display token is accepted only by this operation."
-		}
-		op.Parameters = append(op.Parameters, profile, profileTokenHeaderParam())
+		op.Parameters = append(op.Parameters, profileHeaderFor(op), profileTokenHeaderParam())
 	}
+}
+
+// profileHeaderFor documents X-Profile-Id for one profile-resolving
+// operation, structured or raw: the class's rule (profileHeaderParam), with
+// a profile-optional operation documented as optional, the household rule on
+// an operation that runs the household profile gate, and the Apple push
+// display operation's token exception.
+func profileHeaderFor(op *Operation) *huma.Param {
+	class := op.Class
+	if op.ProfileOptional {
+		class = ClassAuthenticated // documented as optional
+	}
+	profile := profileHeaderParam(class)
+	if op.HouseholdProfileGate {
+		profile.Description = householdProfileHeaderDescription
+	}
+	if op.OperationID == notificationApplePushDisplayOperation {
+		profile.Required = false
+		profile.Description = "Required for access tokens and API keys. Display tokens bind the profile from their claims and ignore this header; a display token is accepted only by this operation."
+	}
+	return profile
 }
 
 // profileTokenHeaderParam documents X-Profile-Token, which viewer access
@@ -157,6 +169,11 @@ func profileTokenHeaderParam() *huma.Param {
 		Schema:      &huma.Schema{Type: "string", Examples: []any{"pvt_5f3a9c1e7b2d4e8fa0c6"}},
 	}
 }
+
+// householdProfileHeaderDescription documents X-Profile-Id on an operation
+// that runs the household profile gate (Operation.HouseholdProfileGate): the
+// header is optional only while no profile on the account is limited.
+const householdProfileHeaderDescription = "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account."
 
 // profileHeaderParam documents X-Profile-Id the way the class's gate chain
 // really reads it. Only ClassProfileScoped runs RequireProfile, so only it
@@ -563,6 +580,7 @@ func registerAll(reg *Registry) {
 	registerAdminAccountDownloads(reg)
 	registerAdminRequestUsage(reg)
 	registerAdminAccountSettings(reg)
+	registerAdminProfileSections(reg)
 	registerAdminAccessGroups(reg)
 	registerPreferences(reg)
 	registerHome(reg)
@@ -622,7 +640,6 @@ func registerAll(reg *Registry) {
 
 	registerAdminJellyfinCompatStatus(reg)
 	registerAdminJellyfinCompatSettings(reg)
-	registerAdminSectionSettings(reg)
 	registerAdminAutoscanSources(reg)
 	registerAdminAutoscanConnections(reg)
 	registerAdminAutoscanAvailableSources(reg)
@@ -666,6 +683,8 @@ func registerAll(reg *Registry) {
 	registerSubtitleReads(reg)
 	registerViewerSubtitleDeletion(reg)
 	registerSubtitleSync(reg)
+	registerShuffles(reg)
+	registerSubtitleSyncTargets(reg)
 	registerDirectDownloads(reg)
 	registerSubtitleDownloads(reg)
 	registerSubtitleUploads(reg)

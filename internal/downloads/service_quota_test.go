@@ -130,3 +130,229 @@ func TestConcurrentArtifactCreatesCannotBypassQuotaDB(t *testing.T) {
 		t.Fatalf("rejected requests enqueued artifact jobs: %d, want 1", jobs)
 	}
 }
+
+// TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB pins that a season
+// page replacing an existing entry with a prepared file goes through the
+// concurrent limit, like a new prepared entry: the replacement becomes an
+// active download.
+func TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
+	})
+	create := func(id, episodeID, status string) {
+		now := time.Now()
+		if err := f.repo.Create(ctx, &Download{
+			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: f.fileID,
+			ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued, Status: status,
+			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
+			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	suffix := time.Now().UnixNano()
+	existingID := fmt.Sprintf("dl-ep-%d", suffix)
+	create(existingID, "ep-1", StatusReady)
+	// Another download holds the account's only slot.
+	busyID := fmt.Sprintf("dl-busy-%d", suffix)
+	create(busyID, "ep-2", StatusDownloading)
+
+	svc := NewService(f.repo, nil, NewQuantityLimiter(f.repo, 1, 0, 0), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(f.pool), f.repo, nil, stubQuotaPreparer{}, "replacement-quota-test",
+		func() *config.Config { return nil }, nil,
+	))
+	decision := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA,
+		ExpectedEntries: map[string]ManagedCreateExpectation{"ep-1": {ID: existingID, Revision: 1}}}
+	item := managedItem{file: &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024}, contentID: f.contentID, episodeID: "ep-1"}
+
+	if _, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season"); !errors.Is(err, ErrConcurrentLimitReached) {
+		t.Fatalf("replacement with no free slot: err = %v, want ErrConcurrentLimitReached", err)
+	}
+	row, err := f.repo.GetManagedEntry(ctx, f.userID, f.profileA, f.deviceA, f.contentID, "ep-1")
+	if err != nil || row.Format != FormatOriginal || row.Revision != 1 {
+		t.Fatalf("refused replacement changed the entry: %+v %v", row, err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `DELETE FROM downloads WHERE id = $1`, busyID); err != nil {
+		t.Fatal(err)
+	}
+	// A stale guard is refused before any encode is queued for it.
+	stale := req
+	stale.ExpectedEntries = map[string]ManagedCreateExpectation{"ep-1": {ID: existingID, Revision: 7}}
+	if _, err := svc.ensureManagedDecisions(ctx, f.userID, stale, []managedItem{item}, []QualityDecision{decision}, "season"); !errors.Is(err, ErrStatusConflict) {
+		t.Fatalf("stale guard: err = %v, want ErrStatusConflict", err)
+	}
+	var jobs int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, f.fileID).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("stale guard queued %d encode jobs (%v)", jobs, err)
+	}
+	rows, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
+	if err != nil || len(rows) != 1 || rows[0].Status != StatusPreparing || rows[0].Format != FormatTranscode {
+		t.Fatalf("replacement with a free slot: %+v %v", rows, err)
+	}
+}
+
+// TestPreparedReplacementQuotaAccountingDB pins how a prepared replacement is
+// counted: it creates no download, so the period quota ignores it, and a
+// target whose prepared file is already ready takes no concurrent slot.
+func TestPreparedReplacementQuotaAccountingDB(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
+	})
+	suffix := time.Now().UnixNano()
+	create := func(episodeID, status string) string {
+		id := fmt.Sprintf("dl-%s-%d", episodeID, suffix)
+		now := time.Now()
+		if err := f.repo.Create(ctx, &Download{
+			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: f.fileID,
+			ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued, Status: status,
+			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
+			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		return id
+	}
+	artifacts := NewArtifactManager(NewArtifactRepository(f.pool), f.repo, nil, stubQuotaPreparer{}, "replacement-accounting-test",
+		func() *config.Config { return nil }, nil)
+	decision := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	replace := func(svc *Service, episodeID, id string) ([]*Download, error) {
+		req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA,
+			ExpectedEntries: map[string]ManagedCreateExpectation{episodeID: {ID: id, Revision: 1}}}
+		item := managedItem{file: &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024}, contentID: f.contentID, episodeID: episodeID}
+		return svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
+	}
+
+	// At the period limit (this account created two downloads this hour), a
+	// replacement still goes through.
+	first := create("ep-1", StatusReady)
+	create("ep-2", StatusReady)
+	periodOnly := NewService(f.repo, nil, NewQuantityLimiter(f.repo, 0, 2, time.Hour), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	periodOnly.SetArtifactManager(artifacts)
+	if rows, err := replace(periodOnly, "ep-1", first); err != nil || rows[0].Status != StatusPreparing {
+		t.Fatalf("replacement at the period limit: %+v %v", rows, err)
+	}
+
+	// Once the prepared file is ready, another replacement to it takes no
+	// slot, even with the only concurrent slot taken.
+	if _, err := f.pool.Exec(ctx, `UPDATE download_artifacts SET status = 'ready' WHERE media_file_id = $1`, f.fileID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `DELETE FROM downloads WHERE user_id = $1 AND episode_id = 'ep-1'`, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	create("busy", StatusDownloading)
+	oneSlot := NewService(f.repo, nil, NewQuantityLimiter(f.repo, 1, 0, 0), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	oneSlot.SetArtifactManager(artifacts)
+	second := fmt.Sprintf("dl-ep-2-%d", suffix)
+	if rows, err := replace(oneSlot, "ep-2", second); err != nil || rows[0].Status != StatusReady {
+		t.Fatalf("replacement to a ready file with no free slot: %+v %v", rows, err)
+	}
+}
+
+// TestManagedBatchOverConcurrentCapDB pins how a new managed batch is counted
+// against the concurrent cap. Original entries register ready and the app
+// queues their transfers, so a season larger than the cap registers even when
+// the cap is already full. New entries that start preparing do count, so a
+// transcoded season with no free slot is refused without inserting a row or
+// queueing an encode. The period quota still covers every new entry.
+func TestManagedBatchOverConcurrentCapDB(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
+	})
+	countRows := func() int {
+		var n int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM downloads WHERE user_id = $1`, f.userID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// Two downloads already in flight fill the cap of 2.
+	suffix := time.Now().UnixNano()
+	for i, status := range []string{StatusQueued, StatusDownloading} {
+		now := time.Now()
+		if err := f.repo.Create(ctx, &Download{
+			ID: fmt.Sprintf("dl-busy-%d-%d", i, suffix), UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA,
+			MediaFileID: f.fileID, ContentID: f.contentID, EpisodeID: fmt.Sprintf("busy-%d", i), Kind: KindQueued,
+			Status: status, Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
+			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("seed busy download: %v", err)
+		}
+	}
+
+	limiter := NewQuantityLimiter(f.repo, 2, 0, 0)
+	svc := NewService(f.repo, nil, limiter, nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(f.pool), f.repo, nil, stubQuotaPreparer{}, "managed-batch-cap-test",
+		func() *config.Config { return nil }, nil,
+	))
+	req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA}
+	episodes := func(prefix string, n int) []managedItem {
+		items := make([]managedItem, n)
+		for i := range items {
+			items[i] = managedItem{
+				file:      &models.MediaFile{ID: f.fileID, ContentID: f.contentID, FileSize: 1024},
+				contentID: f.contentID, episodeID: fmt.Sprintf("%s-%d", prefix, i+1),
+			}
+		}
+		return items
+	}
+
+	original := episodes("original", 4)
+	rows, err := svc.ensureManaged(ctx, f.userID, req, original, originalDecision(), "season-original")
+	if err != nil {
+		t.Fatalf("original season over a full cap: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("registered %d rows, want 4", len(rows))
+	}
+	for _, row := range rows {
+		if row.Status != StatusReady {
+			t.Fatalf("original entry %s status = %q, want ready", row.EpisodeID, row.Status)
+		}
+	}
+
+	transcoded := episodes("transcoded", 2)
+	decision := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	if _, err := svc.ensureManagedDecisions(ctx, f.userID, req, transcoded, uniformDecisions(decision, len(transcoded)), "season-transcoded"); !errors.Is(err, ErrConcurrentLimitReached) {
+		t.Fatalf("transcoded season with no free slot: err = %v, want ErrConcurrentLimitReached", err)
+	}
+	if got := countRows(); got != 6 {
+		t.Fatalf("refused transcoded season left %d rows, want 6", got)
+	}
+	var jobs int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, f.fileID).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("refused transcoded season queued %d encode jobs (%v)", jobs, err)
+	}
+
+	// Six downloads were created this hour; a period quota of 6 refuses a
+	// seventh, even an original one.
+	limiter.Reload(2, 6, time.Hour)
+	if _, err := svc.ensureManaged(ctx, f.userID, req, episodes("late", 1), originalDecision(), "season-late"); !errors.Is(err, ErrPeriodLimitReached) {
+		t.Fatalf("batch over the period quota: err = %v, want ErrPeriodLimitReached", err)
+	}
+	if got := countRows(); got != 6 {
+		t.Fatalf("refused batch left %d rows, want 6", got)
+	}
+}

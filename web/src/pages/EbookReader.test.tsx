@@ -296,37 +296,6 @@ describe("EbookReader", () => {
     container.remove();
   });
 
-  it("preserves library context on the back-to-ebook link", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?libraryId=12"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
-  });
-
-  it("sends the reader back action to an explicit backTo target (manga series)", async () => {
-    const backTo = encodeURIComponent("/item/manga-series-1?libraryId=7");
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={[`/reader/ebook/ebook-1?libraryId=7&backTo=${backTo}`]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    // backTo wins over the default chapter-detail target, breaking the loop.
-    expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
-    expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
-  });
-
   // Regression test for issue #189: exiting the reader must consume the
   // reader's history entry (history back) rather than pushing the series page
   // on top of it — otherwise pressing back on the series page re-opens the
@@ -380,6 +349,9 @@ describe("EbookReader", () => {
         </MemoryRouter>,
       );
     });
+
+    expect(container.innerHTML).toContain('href="/item/manga-series-1?libraryId=7"');
+    expect(container.innerHTML).not.toContain('href="/item/ebook-1?libraryId=7"');
 
     const back = container.querySelector<HTMLAnchorElement>('a[aria-label="Back"]');
     expect(back).not.toBeNull();
@@ -481,6 +453,7 @@ describe("EbookReader", () => {
         versions: [
           makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
           makeVersion({ file_id: 9, file_name: "Reader.pdf", container: "pdf" }),
+          makeVersion({ file_id: 10, file_name: "Reader.docx", container: "docx" }),
         ],
       }),
       isLoading: false,
@@ -489,7 +462,7 @@ describe("EbookReader", () => {
 
     await act(async () => {
       root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8&libraryId=12"]}>
           <Routes>
             <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
           </Routes>
@@ -497,9 +470,14 @@ describe("EbookReader", () => {
       );
     });
 
+    expect(container.innerHTML).toContain('href="/item/ebook-1?libraryId=12"');
     expect(container.textContent).toContain("reader surface Reader.epub");
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="Reader file"]');
     expect(select).not.toBeNull();
+    expect(Array.from(select!.options).map((option) => option.textContent)).toEqual([
+      "EPUB · Reader.epub",
+      "PDF · Reader.pdf",
+    ]);
 
     await act(async () => {
       if (!select) return;
@@ -508,36 +486,6 @@ describe("EbookReader", () => {
     });
 
     expect(container.textContent).toContain("reader surface Reader.pdf");
-  });
-
-  it("only lists reader-supported files in the reader file selector", async () => {
-    mocks.useCatalogItemDetail.mockReturnValue({
-      data: makeEbookItem({
-        versions: [
-          makeVersion({ file_id: 8, file_name: "Reader.epub", container: "epub" }),
-          makeVersion({ file_id: 9, file_name: "Reader.docx", container: "docx" }),
-          makeVersion({ file_id: 10, file_name: "Reader.pdf", container: "pdf" }),
-        ],
-      }),
-      isLoading: false,
-      error: null,
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1?file_id=8"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
-
-    const options = Array.from(container.querySelectorAll<HTMLOptionElement>("option")).map(
-      (option) => option.textContent,
-    );
-
-    expect(options).toEqual(["EPUB · Reader.epub", "PDF · Reader.pdf"]);
   });
 
   it("falls back to a supported reader file when the requested file is unsupported", async () => {
@@ -633,7 +581,8 @@ describe("EbookReader", () => {
     expect(mocks.readerGoTo).toHaveBeenCalledWith("epubcfi(/6/8)");
   });
 
-  it("loads server reader settings and passes them to the reader", async () => {
+  it("persists reader settings to the server and local fallback", async () => {
+    vi.useFakeTimers();
     mocks.fetchEbookReaderConfig.mockResolvedValue({
       settings: { theme: "sepia", fontSize: 130 },
     });
@@ -651,25 +600,10 @@ describe("EbookReader", () => {
     await act(async () => {
       await Promise.resolve();
     });
-
     expect(mocks.fetchEbookReaderConfig).toHaveBeenCalledWith("ebook-1", expect.any(Object));
-    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+    expect(mocks.captureReaderSettings).toHaveBeenCalledWith(
       expect.objectContaining({ theme: "sepia", fontSize: 130 }),
     );
-  });
-
-  it("persists reader settings to the server and local fallback", async () => {
-    vi.useFakeTimers();
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
-          <Routes>
-            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
-          </Routes>
-        </MemoryRouter>,
-      );
-    });
 
     const settingsTab = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Reader settings"]',

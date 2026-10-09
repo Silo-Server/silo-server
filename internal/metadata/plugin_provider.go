@@ -898,6 +898,8 @@ func personKindFromString(value string) models.PersonKind {
 		return models.PersonKindAuthor
 	case "narrator":
 		return models.PersonKindNarrator
+	case "creator":
+		return models.PersonKindCreator
 	default:
 		return models.PersonKindFromJob(value)
 	}

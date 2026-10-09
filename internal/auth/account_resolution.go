@@ -278,10 +278,14 @@ func lockUser(ctx context.Context, tx rowQuerier, id int) (*models.User, error) 
 
 // linkIdentityTx links identity to user. An account holds at most one
 // identity per installation, and an identity belongs to one account. Linking
-// turns the account's local password off unless it is a break-glass account.
+// turns the account's local password off unless it is a break-glass account
+// or the installation is a network provider: a network identity is an extra
+// way in, so the password keeps working where the overlay does not reach,
+// while the provider vouches for the person (networkRefused).
 // attachSessions moves the account's open local sessions under the identity,
 // for a link the account's holder made (self-service or an administrator);
-// email auto-match revokes them instead.
+// email auto-match revokes them instead. A break-glass account and a network
+// link keep them local: password sessions stay password sessions.
 func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installationID int, identity ExternalIdentity, signedIn, attachSessions bool) (*LinkedIdentity, error) {
 	existing, err := identityBySubject(ctx, tx, installationID, identity.Subject)
 	switch {
@@ -306,16 +310,20 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installat
 		}
 		return nil, err
 	}
-	if user.LocalPasswordLoginEnabled && !user.BreakGlass {
+	network, err := installationIsNetwork(ctx, tx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	keepsPassword := user.BreakGlass || network
+	if user.LocalPasswordLoginEnabled && !keepsPassword {
 		if _, err := tx.Exec(ctx, `UPDATE users SET local_password_login_enabled = false, updated_at = NOW() WHERE id = $1`, user.ID); err != nil {
 			return nil, fmt.Errorf("turning off local password sign-in: %w", err)
 		}
 		user.LocalPasswordLoginEnabled = false
 	}
-	if attachSessions && !user.BreakGlass {
+	if attachSessions && !keepsPassword {
 		// The provider now answers for the account, so its open sessions are
-		// re-checked with the provider like sessions opened through it. A
-		// break-glass account keeps its local sessions independent.
+		// re-checked with the provider like sessions opened through it.
 		if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET identity_id = $1, provider_since = COALESCE(provider_since, created_at)
 			WHERE user_id = $2 AND identity_id IS NULL AND impersonator_user_id IS NULL
 				AND revoked_at IS NULL AND expires_at > NOW()`, linked.ID, user.ID); err != nil {

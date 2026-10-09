@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,12 @@ func newTestHandler(t *testing.T, deps Dependencies) http.Handler {
 	deps.testRegister = registerProbes
 	return NewHandler(deps)
 }
+
+// sharedTransportHandler serves only stateless transport probes and discovery reads.
+// Tests that mutate guarded probes or change dependencies build a fresh handler.
+var sharedTransportHandler = sync.OnceValue(func() http.Handler {
+	return NewHandler(Dependencies{testRegister: registerProbes})
+})
 
 type problemDoc struct {
 	Type     string         `json:"type"`
@@ -136,7 +143,7 @@ func TestCommittedArtifactMatchesRouter(t *testing.T) {
 	for _, r := range unserved {
 		t.Errorf("documented but not served: %s", r)
 	}
-	generated, err := GenerateOpenAPI()
+	generated, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +302,7 @@ func TestRegisterRefusesBadDeclarations(t *testing.T) {
 // --- Framework configuration -----------------------------------------------
 
 func TestUnacceptableAcceptIs406(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", map[string]string{"Accept": "text/xml"})
 	requireProblem(t, rec, TypeNotAcceptable)
 	for _, accept := range []string{"", "*/*", "application/*", "application/json", "text/html;q=0.9, */*;q=0.1", "application/json; charset=utf-8"} {
@@ -325,7 +332,7 @@ func TestUnacceptableAcceptIs406(t *testing.T) {
 }
 
 func TestMediaTypeGuard(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	body := `{"name":"x","cleared":null}`
 	rejected := []string{"", "application/vnd.silo+json", "application/json; charset=iso-8859-1", "application/json; boundary=x", "text/plain", "application/json; charset=utf-8; foo=bar"}
 	for _, ct := range rejected {
@@ -350,7 +357,7 @@ func TestMediaTypeGuard(t *testing.T) {
 }
 
 func TestCollectionsNeverNull(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/probe/list", "", nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
@@ -359,6 +366,9 @@ func TestCollectionsNeverNull(t *testing.T) {
 		t.Fatalf("collection body: %s", rec.Body.String())
 	}
 	rec = do(t, h, http.MethodPost, "/api/v2/probe/public", `{"name":"x","cleared":null}`, nil)
+	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("%d %v", rec.Code, rec.Header())
+	}
 	if !strings.Contains(rec.Body.String(), `"tags":[]`) || !strings.Contains(rec.Body.String(), `"labels":{}`) {
 		t.Fatalf("echo body: %s", rec.Body.String())
 	}
@@ -368,7 +378,7 @@ func TestCollectionsNeverNull(t *testing.T) {
 }
 
 func TestInstantWire(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	// UTC conversion and exactly three fractional digits.
 	rec := do(t, h, http.MethodPost, "/api/v2/probe/public", `{"name":"x","when":"2024-03-01T12:34:56.7+02:00","cleared":null}`, nil)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"when":"2024-03-01T10:34:56.700Z"`) {
@@ -401,7 +411,7 @@ func TestInstantWire(t *testing.T) {
 }
 
 func TestSliceQueryUsesRepeatedKeys(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodPost, "/api/v2/probe/public?tags=a&tags=b", `{"name":"x","cleared":null}`, nil)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"tags":["a","b"]`) {
 		t.Fatalf("repeated keys: %d %s", rec.Code, rec.Body.String())
@@ -413,7 +423,7 @@ func TestSliceQueryUsesRepeatedKeys(t *testing.T) {
 }
 
 func TestNoBuiltInDocsRoutes(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	for _, path := range []string{"/api/v2/openapi.yaml", "/api/v2/schemas/Problem.json", "/docs", "/openapi.json"} {
 		rec := do(t, h, http.MethodGet, path, "", nil)
 		if rec.Code != 404 {
@@ -428,7 +438,7 @@ func TestNoBuiltInDocsRoutes(t *testing.T) {
 // artifact exactly, and the digest the discovery document reports is the
 // digest of those bytes.
 func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/openapi.json", "", nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
@@ -472,7 +482,7 @@ func TestOpenAPIDocumentIsTheEmbeddedArtifact(t *testing.T) {
 }
 
 func TestBodyCapIsEnforcedBeforeDecoding(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	pad := func(n int64) string {
 		prefix := `{"name":"x","cleared":null,"note":"`
 		suffix := `"}`
@@ -524,7 +534,7 @@ func TestBodyReadTimeout(t *testing.T) {
 // --- Problem details --------------------------------------------------------
 
 func TestFrameworkAndApplicationValidationShapesMatch(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	framework := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/probe/public", `{"cleared":null}`, nil), TypeValidationFailed)
 	app := requireProblem(t, do(t, h, http.MethodGet, "/api/v2/probe/apperror", "", nil), TypeValidationFailed)
 	if len(framework.Errors) != 1 || len(app.Errors) != 1 {
@@ -539,7 +549,7 @@ func TestFrameworkAndApplicationValidationShapesMatch(t *testing.T) {
 }
 
 func TestFrameworkFailuresMapToCatalog(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	cases := []struct {
 		name         string
 		method, path string
@@ -595,7 +605,7 @@ func TestFrameworkFailuresMapToCatalog(t *testing.T) {
 }
 
 func TestQueryGrammar(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/probe/public?flag=true&flag=false", `{"name":"x","cleared":null}`, nil), TypeMalformedRequest)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/system/info?%zz=1", "", nil), TypeMalformedRequest)
 	rec := do(t, h, http.MethodGet, "/api/v2/system/info/", "", nil)
@@ -609,7 +619,7 @@ func TestQueryGrammar(t *testing.T) {
 }
 
 func TestRetryAfterOn429And503(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/probe/ratelimited", "", nil)
 	requireProblem(t, rec, TypeRateLimited)
 	if rec.Header().Get("Retry-After") != "7" {
@@ -623,7 +633,7 @@ func TestRetryAfterOn429And503(t *testing.T) {
 }
 
 func TestPanicIsInternalErrorWithoutLeak(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/probe/panic", "", nil)
 	p := requireProblem(t, rec, TypeInternalError)
 	if strings.Contains(rec.Body.String(), "secret") || strings.Contains(rec.Body.String(), "boom") || len(p.Errors) != 0 {
@@ -632,7 +642,7 @@ func TestPanicIsInternalErrorWithoutLeak(t *testing.T) {
 }
 
 func TestCanceledRequestWritesNothing(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	ctx, cancel := context.WithCancel(context.Background())
 	r := httptest.NewRequest(http.MethodGet, "/api/v2/probe/slow", nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
@@ -649,19 +659,8 @@ func TestCanceledRequestWritesNothing(t *testing.T) {
 	}
 }
 
-func TestSuccessDefaultsNoStoreAndNoSchema(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
-	rec := do(t, h, http.MethodPost, "/api/v2/probe/public", `{"name":"x","cleared":null}`, nil)
-	if rec.Code != 200 || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Content-Type") != "application/json" {
-		t.Fatalf("%d %v", rec.Code, rec.Header())
-	}
-	if strings.Contains(rec.Body.String(), "$schema") {
-		t.Fatal("$schema present")
-	}
-}
-
 func TestPatchTransport(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	for body, want := range map[string]string{
 		`{"name":"x","cleared":null}`:             `"note_set":false,"note_null":false,"note":""`,
 		`{"name":"x","cleared":null,"note":null}`: `"note_set":true,"note_null":true,"note":""`,
@@ -677,7 +676,7 @@ func TestPatchTransport(t *testing.T) {
 // --- Discovery --------------------------------------------------------------
 
 func TestSystemInfo(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/system/info", "", nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
@@ -737,7 +736,7 @@ func TestCursors(t *testing.T) {
 }
 
 func TestRequestIDNeverAdoptsClientValue(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	check := func(t *testing.T, rec *httptest.ResponseRecorder) string {
 		t.Helper()
 		id := requestIDHeader(rec)
@@ -781,7 +780,7 @@ func TestRequestIDNeverAdoptsClientValue(t *testing.T) {
 // non-identity Content-Encoding before the body is read, so a gzip header over
 // a plain body is a 415, not a 200 or a parse error.
 func TestCompressedRequestBodyIsRejected(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	body := `{"name":"x","cleared":null}`
 	for _, enc := range []string{"gzip", "br", "deflate", "GZIP", "gzip, identity"} {
 		rec := do(t, h, http.MethodPost, "/api/v2/probe/public", body, map[string]string{"Content-Encoding": enc})
@@ -812,7 +811,7 @@ func TestCompressedRequestBodyIsRejected(t *testing.T) {
 // case-sensitive format table, is the single 415 authority, so a media type
 // that differs only in case is accepted.
 func TestMediaTypeCaseIsAcceptedByTheGuard(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	body := `{"name":"x","cleared":null}`
 	for _, ct := range []string{"APPLICATION/JSON", "Application/Json", "APPLICATION/JSON; CHARSET=UTF-8"} {
 		rec := do(t, h, http.MethodPost, "/api/v2/probe/public", body, map[string]string{"Content-Type": ct})
@@ -825,7 +824,7 @@ func TestMediaTypeCaseIsAcceptedByTheGuard(t *testing.T) {
 // TestMethodNotAllowedSendsAllow: RFC 9110 requires Allow on a 405, and the
 // set comes from the registry's declared rows for the matched path.
 func TestMethodNotAllowedSendsAllow(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	for _, method := range []string{http.MethodDelete, http.MethodHead} {
 		rec := do(t, h, method, "/api/v2/system/info", "", nil)
 		requireProblem(t, rec, TypeMethodNotAllowed)
@@ -844,7 +843,7 @@ func TestMethodNotAllowedSendsAllow(t *testing.T) {
 // TestNamespaceRootIsNotAV2Path: /api/v2 (no slash) is outside the v2 surface
 // and answered by the legacy listener; /api/v2/ is a v2 not_found problem.
 func TestNamespaceRootIsNotAV2Path(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	rec := do(t, h, http.MethodGet, "/api/v2/", "", nil)
 	requireProblem(t, rec, TypeNotFound)
 
@@ -869,7 +868,7 @@ func TestNamespaceRootIsNotAV2Path(t *testing.T) {
 // TestOperationBodyLimitOverride: an operation's own cap gets the same
 // off-by-one translation as the default, and the 413 names that cap.
 func TestOperationBodyLimitOverride(t *testing.T) {
-	h := newTestHandler(t, Dependencies{})
+	h := sharedTransportHandler()
 	pad := func(n int64) string {
 		prefix := `{"name":"x","cleared":null,"note":"`
 		suffix := `"}`

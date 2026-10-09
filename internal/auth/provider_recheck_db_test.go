@@ -12,6 +12,7 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -1170,6 +1171,11 @@ func TestProviderRecheckRolledBackRevocationStoresNothingDB(t *testing.T) {
 	if err == nil || errors.Is(err, ErrSessionRevoked) {
 		t.Fatalf("refresh with the revocation blocked = %v, want a failure", err)
 	}
+	// The store answered, so a refusal that could not be applied refuses the
+	// token instead of asking the client to retry every few seconds.
+	if !errors.Is(err, errAnswerNotApplied) || errors.Is(err, ErrSessionCheckUnavailable) {
+		t.Fatalf("refresh with the revocation blocked = %v, want errAnswerNotApplied, not a retryable outage", err)
+	}
 	after := env.identityState(t)
 	if after.LastCheckStatus != before.LastCheckStatus || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
 		t.Fatalf("a rolled-back revocation stored the answer: before %+v, after %+v", before, after)
@@ -1203,6 +1209,88 @@ func TestProviderRecheckRolledBackRevocationStoresNothingDB(t *testing.T) {
 	if _, err := NewAPIKeyRepository(env.pool).GetByKey(t.Context(), key.Key); err == nil {
 		t.Fatal("the refused account kept its API key")
 	}
+}
+
+// lockRow holds row locks in a transaction the test rolls back.
+func (e *recheckEnv) lockRow(t *testing.T, query string, args ...any) pgx.Tx {
+	t.Helper()
+	holder, err := e.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+	if _, err := holder.Exec(context.Background(), query, args...); err != nil {
+		t.Fatal(err)
+	}
+	return holder
+}
+
+// TestProviderRecheckAnswerFailuresAfterTheCallDB: what a refresh answers
+// when the provider answered but applying the answer failed outside the
+// savepoint (here a row stays locked past the write wait).
+func TestProviderRecheckAnswerFailuresAfterTheCallDB(t *testing.T) {
+	// An active answer whose replacement token committed first is
+	// retryable: the session was not refused, and asking again presents the
+	// token the provider returned.
+	t.Run("active answer", func(t *testing.T) {
+		env := newRecheckEnv(t, "afteractive", "rt-1")
+		env.recheck.writeWait = 200 * time.Millisecond
+		env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "rt-2")
+		_, refresh := env.session(t, true)
+		env.makeDue(t)
+
+		holder := env.lockRow(t, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, env.user.ID)
+		_, err := env.svc.Refresh(t.Context(), refresh)
+		_ = holder.Rollback(context.Background())
+		if !errors.Is(err, ErrSessionCheckUnavailable) || errors.Is(err, errAnswerNotApplied) {
+			t.Fatalf("refresh with the account locked after an active answer = %v, want ErrSessionCheckUnavailable", err)
+		}
+		if got := env.storedToken(t); got != "rt-2" {
+			t.Fatalf("stored token = %q, want the replacement rt-2", got)
+		}
+		if _, err := env.svc.Refresh(t.Context(), refresh); err != nil {
+			t.Fatalf("retried refresh = %v", err)
+		}
+		if env.checker.callCount() != 2 || env.checker.states[1] != "rt-2" {
+			t.Fatalf("calls = %d, states = %v; the retry should present rt-2", env.checker.callCount(), env.checker.states)
+		}
+	})
+
+	// A replacement token that could not be stored may be the only one the
+	// provider accepts now, so asking again cannot succeed: refused.
+	t.Run("replacement not stored", func(t *testing.T) {
+		env := newRecheckEnv(t, "afterlost", "rt-1")
+		env.recheck.writeWait = 200 * time.Millisecond
+		_, refresh := env.session(t, true)
+		env.makeDue(t)
+		env.checker.respond = func(ctx context.Context, req *pluginv1.CheckAccountRequest) (*pluginv1.CheckAccountResponse, error) {
+			env.lockRow(t, `SELECT id FROM plugin_auth_identities WHERE id = $1 FOR UPDATE`, env.identityID)
+			return answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_ACTIVE, "rt-2")(ctx, req)
+		}
+		_, err := env.svc.Refresh(t.Context(), refresh)
+		if !errors.Is(err, errAnswerNotApplied) || errors.Is(err, ErrSessionCheckUnavailable) {
+			t.Fatalf("refresh with the replacement token not stored = %v, want errAnswerNotApplied", err)
+		}
+	})
+
+	// A refusal ends the session either way; it is not retried.
+	t.Run("refusal", func(t *testing.T) {
+		env := newRecheckEnv(t, "afterrefusal", "rt-1")
+		env.recheck.writeWait = 200 * time.Millisecond
+		env.checker.respond = answer(pluginv1.CheckAccountStatus_CHECK_ACCOUNT_STATUS_NOT_FOUND, "")
+		_, refresh := env.session(t, true)
+		env.makeDue(t)
+
+		holder := env.lockRow(t, `SELECT id FROM users WHERE id = $1 FOR UPDATE`, env.user.ID)
+		_, err := env.svc.Refresh(t.Context(), refresh)
+		_ = holder.Rollback(context.Background())
+		if !errors.Is(err, errAnswerNotApplied) || errors.Is(err, ErrSessionCheckUnavailable) {
+			t.Fatalf("refresh with the account locked after a refusal = %v, want errAnswerNotApplied", err)
+		}
+		if got := env.pendingRefusal(t); got != CheckStatusNotFound {
+			t.Fatalf("pending refusal = %q, want %q", got, CheckStatusNotFound)
+		}
+	})
 }
 
 // TestProviderRecheckUnsupportedBoundsCredentialsDB: an UNSUPPORTED answer
@@ -1367,6 +1455,11 @@ func TestProviderRecheckRolledBackRevocationKeepsRotatedStateDB(t *testing.T) {
 	_ = holder.Rollback(context.Background())
 	if err == nil || errors.Is(err, ErrSessionRevoked) {
 		t.Fatalf("refresh with the revocation blocked = %v, want a failure", err)
+	}
+	// The store answered, so a refusal that could not be applied refuses the
+	// token instead of asking the client to retry every few seconds.
+	if !errors.Is(err, errAnswerNotApplied) || errors.Is(err, ErrSessionCheckUnavailable) {
+		t.Fatalf("refresh with the revocation blocked = %v, want errAnswerNotApplied, not a retryable outage", err)
 	}
 	after := env.identityState(t)
 	if after.LastCheckStatus != before.LastCheckStatus || !after.LastCheckedAt.Equal(*before.LastCheckedAt) {
@@ -1628,6 +1721,11 @@ func TestProviderRecheckRolledBackRefusalWithDroppedTokenDB(t *testing.T) {
 	_ = holder.Rollback(context.Background())
 	if err == nil || errors.Is(err, ErrSessionRevoked) {
 		t.Fatalf("refresh with the revocation blocked = %v, want a failure", err)
+	}
+	// The store answered, so a refusal that could not be applied refuses the
+	// token instead of asking the client to retry every few seconds.
+	if !errors.Is(err, errAnswerNotApplied) || errors.Is(err, ErrSessionCheckUnavailable) {
+		t.Fatalf("refresh with the revocation blocked = %v, want errAnswerNotApplied, not a retryable outage", err)
 	}
 	if got := env.storedToken(t); got != "" {
 		t.Fatalf("stored refresh token = %q, want the plugin's state without one", got)
@@ -1937,6 +2035,7 @@ func TestProviderRecheckBreakGlassRefusalKeepsLocalCredentialsDB(t *testing.T) {
 	})
 	providerSession, refresh := env.session(t, true)
 	localSession, _ := env.session(t, false)
+	jellyfin := insertJellyfinSession(t, env.pool, env.user.ID)
 	key, err := NewAPIKeyRepository(env.pool).Create(ctx, env.user.ID, "breakglass", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1948,6 +2047,11 @@ func TestProviderRecheckBreakGlassRefusalKeepsLocalCredentialsDB(t *testing.T) {
 	}
 	if env.sessionRow(t, providerSession).RevokedAt == nil {
 		t.Fatal("the provider session survived the refusal")
+	}
+	// A Jellyfin-compatible session does not record its identity, so the
+	// refusal deletes every one the account holds.
+	if jellyfinSessionExists(t, env.pool, jellyfin) {
+		t.Fatal("the refusal kept the account's Jellyfin-compatible session")
 	}
 	if env.sessionRow(t, localSession).RevokedAt != nil {
 		t.Fatal("the refusal revoked the break-glass account's local session")

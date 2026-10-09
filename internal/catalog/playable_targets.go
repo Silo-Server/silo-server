@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -195,27 +196,16 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 			WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
 			WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, maxRank))
 	}
-	effectiveLibraries := uniquePositiveInts(q.LibraryIDs)
-	if len(effectiveLibraries) > 0 {
-		if q.Access.AllowedLibraryIDs != nil {
-			effectiveLibraries = intersectOptionalInts(effectiveLibraries, q.Access.AllowedLibraryIDs)
-		}
-		effectiveLibraries = subtractInts(effectiveLibraries, q.Access.DisabledLibraryIDs)
-		if len(effectiveLibraries) == 0 {
-			return result, nil
-		}
+	effectiveLibraries, none := q.Access.LibraryScope(uniquePositiveInts(q.LibraryIDs))
+	switch {
+	case none:
+		return result, nil
+	case effectiveLibraries != nil:
 		fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
 		args = append(args, effectiveLibraries)
-	} else {
-		if q.Access.AllowedLibraryIDs != nil {
-			fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = ANY($%d)", argIdx))
-			args = append(args, q.Access.AllowedLibraryIDs)
-			argIdx++
-		}
-		if len(q.Access.DisabledLibraryIDs) > 0 {
-			fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
-			args = append(args, q.Access.DisabledLibraryIDs)
-		}
+	case len(q.Access.DisabledLibraryIDs) > 0:
+		fileConditions = append(fileConditions, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", argIdx))
+		args = append(args, q.Access.DisabledLibraryIDs)
 	}
 
 	// PostgreSQL progress lives beside the catalog, so the database can choose
@@ -343,25 +333,20 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 		         play_content_id
 	`, strings.Join(fileConditions, " AND "), strings.Join(fileConditions, " AND "), strings.Join(fileConditions, " AND "))
 
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolving playable poster targets: %w", err)
-	}
-	defer rows.Close()
 	candidates := make(map[string][]string, len(ids))
 	hints := make(map[string]string, len(ids))
 	// An episode has one season, so one map serves every card.
 	seasons := make(map[string]*int)
-	for rows.Next() {
+	err := r.queryPlayableTargets(ctx, query, args, func(rows pgx.Rows) error {
 		var ord int64
 		var playContentID string
 		var isHint bool
 		var season *int
 		if err := rows.Scan(&ord, &playContentID, &isHint, &season); err != nil {
-			return nil, fmt.Errorf("scanning playable poster target: %w", err)
+			return fmt.Errorf("scanning playable poster target: %w", err)
 		}
 		if ord < 1 || ord > int64(len(keysByOrd)) {
-			return nil, fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
+			return fmt.Errorf("playable poster target ordinality %d is outside the requested set", ord)
 		}
 		key := keysByOrd[ord-1]
 		if season != nil {
@@ -372,12 +357,13 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 			if _, ok := hints[key]; !ok {
 				hints[key] = playContentID
 			}
-			continue
+			return nil
 		}
 		candidates[key] = append(candidates[key], playContentID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating playable poster targets: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("resolving playable poster targets: %w", err)
 	}
 	progress := map[string]userstore.WatchProgress{}
 	if q.ProgressStore != nil {
@@ -471,4 +457,30 @@ func progressUpdatedAfter(candidate, current string) bool {
 		return candidateTime.After(currentTime)
 	}
 	return candidate > current
+}
+
+// queryPlayableTargets runs a target statement with JIT disabled and scans each
+// row. The planner prices the per-card candidate subqueries far above their
+// real cost, which crosses jit_above_cost for a page of cards; compiling then
+// takes about twice as long as running the query.
+func (r *PlayableTargetResolver) queryPlayableTargets(ctx context.Context, query string, args []any, scan func(pgx.Rows) error) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
+		return fmt.Errorf("disabling JIT: %w", err)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := scan(rows); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }

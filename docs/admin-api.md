@@ -1290,28 +1290,32 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with the same source
-exclusions as `profiles_active_24h` above, so marking something watched counts
-as a play. Episodes are rolled up to their series, so a season binge reads as
-one show and a title's `media_item_id` is a series content id for TV.
+`plays` on both lists counts `user_watch_history` rows with source `playback`
+or `legacy` (the default for rows written without a source). Playback from Silo
+and Jellyfin clients both writes `playback` rows. Marking something watched is
+not a play: `manual` rows from Silo clients and `jellycompat` rows from
+Jellyfin clients are all marks, and marking a series writes one row per
+episode, so both are excluded. Episodes are rolled up to their series, so a
+season binge reads as one show and a title's `media_item_id` is a series
+content id for TV.
 
 `total_seconds` is **watched time**, summed from finalized playback sessions
 (`admin_playback_history.watched_seconds`) that *ended* inside the same window
 — the same stop instant `watched_at` records, so plays and watch time see the
 same sessions — not the runtime of what was played. Watch history records the media's full duration,
 so summing that would report three hours for a movie someone abandoned after a
-minute. An entry that was only ever marked watched has no sessions and reports
-`0`. Because `watched_seconds` records a session's final absolute position, a
-resumed session would claim the already-watched stretch again, so each
+minute. An entry with no finalized session in the window reports `0`. Because
+`watched_seconds` records a session's final absolute position, a resumed
+session would claim the already-watched stretch again, so each
 session's contribution is capped at its wall-clock length; the figure is an
 estimate until playback records true elapsed viewing time.
 
 Profile display names live in the per-user stores rather than in watch history,
 so they are read back from that profile's most recent `admin_playback_history`
-row; a profile that has only ever marked things watched falls back to its
-profile id. Ties are broken on a stable key (`media_item_id`, or
-`user_id`/`profile_id`) so equal rows keep their order between refreshes. No
-poster URLs are returned — the bar-list widgets do not need them, and it keeps
+row with a nonempty profile name; a profile with no such row falls back to its
+profile id, even if it has unnamed rows. Ties are broken on a stable key
+(`media_item_id`, or `user_id`/`profile_id`) so equal rows keep their order
+between refreshes. No poster URLs are returned — the bar-list widgets do not need them, and it keeps
 the query cheap.
 
 Both lists are `[]` on a server with no history, never `null`.
@@ -1519,11 +1523,14 @@ issued token so the administrator can assign it to a source.
 
 Personal history imports on both `/api/v1` and `/api/v2` use the acting
 `X-Profile-Id`. A non-primary profile can import only into itself and see only runs
-targeting itself. The primary profile (with its PIN verified when it has one) and
-server admins can act for any profile on their own account. An API key's exemption
+targeting itself. The primary profile (with its PIN verified when it has one) can act
+for any profile on its own account, whether or not the account is an admin. Another
+profile on an admin account acts only for itself; an admin login session without an
+acting profile acts for the household only while no profile on the account has a PIN, a
+maturity limit, or library restrictions, and an admin API key without one always does. An API key's exemption
 from PIN entry does not grant household authority to a locked primary profile.
 Creating a run for another profile without this authority returns 403; reading its
-run returns 404. A non-admin request without an acting profile cannot create a run
+run returns 404. Any other request without an acting profile cannot create a run
 and sees no runs. Lists apply the profile filter before their limit, and v2 cursors
 are bound to the account and acting profile.
 
@@ -1566,6 +1573,19 @@ for every account. The policy is read again when a queued run starts, so a run
 admitted before the setting was turned off fails with the same message. v1 run
 responses and realtime history-import events carry the same safe summaries as
 the v2 monitors. See [Outbound address guard](architecture/outbound-address-guard.md).
+
+A Plex import races the addresses plex.tv advertised for the selected server, up to
+eight, and keeps the first that returns a library listing for the rest of the run. A
+session-backed run (`plex_session_id`) takes the list from the stored session; a client
+holding its own token sends the preferred address in `plex_base_url` and the rest in
+`plex_base_urls` (up to 31). When any address is HTTPS, cleartext ones are dropped,
+because each probe carries the Plex token. Addresses the account may not reach under
+the policy above are skipped, and the run is refused only when none remain; the eight
+raced are the first that remain. The Plex token is removed from any redirect that
+leaves the host it was sent to or downgrades from HTTPS to HTTP.
+`GET /api/v2/history-imports/capability` reports `plex_connection_fallback` and
+`max_plex_connections`. A server without it rejects `plex_base_urls` as an unknown
+member, so check the capability before sending the field.
 
 New queued personal imports survive server restart. Source changes invalidate captured
 configuration without retargeting the import; stale running executions fail without replay.
@@ -1725,12 +1745,10 @@ sensitive and machine-managed keys with 404. Missing and empty values also remai
 404. The setup wizard uses this route for its Redis configuration read and treats
 only 404 as absence, rejecting stale responses after an authority change.
 
-`GET /api/v2/admin/settings/sections` reuses the existing profile-section flag
-reader: read failures preserve the disabled default. It requires acting-admin
-authority. `GET /api/v2/admin/playback-routing/capabilities` exposes the shared
-routing vocabulary under the same authority; these are configuration choices,
-not evidence of available worker capacity. No recorded first-party consumer uses
-these two discovery reads.
+`GET /api/v2/admin/playback-routing/capabilities` exposes the shared routing
+vocabulary under acting-admin authority; these are configuration choices, not
+evidence of available worker capacity. No recorded first-party consumer uses
+this read.
 
 ### Jellyfin compatibility status
 
@@ -1769,7 +1787,10 @@ failures preserve webhook status while omitting the URL. Successful reveals emit
 the v2 delivery path using the existing token and configured public base.
 
 Source timestamps use UTC milliseconds. Path rewrites remain an array; connection
-identity and stored source configuration retain their existing meanings. The web
+identity and stored source configuration retain their existing meanings.
+`webhook_last_received_at` counts provider Test events and deliveries the source
+accepted; a delivery dropped because the source or Autoscan was disabled does not
+update it (see [Autoscan delivery API](autoscan-delivery-api.md)). The web
 collects at most 100 pages of 100 sources, rejects missing/repeated continuations
 or overflow, and discards source URLs decoded after an authority change. Reads do
 not create sources, rotate tokens, dispatch events or update external providers.
@@ -1868,26 +1889,23 @@ web query and manual-refresh cache writer share the captured authority key and
 reject results decoded after an authority switch. These are aggregate observations,
 not an atomic cluster snapshot. No native or Jellyfin caller uses this admin read.
 
-`PUT /api/v2/admin/settings/sections` replaces `allow_profile_custom_sections`.
-The administrator GET on the same path now returns an actor/profile-bound ETag
-and supports conditional reads. PUT requires `If-Match`, accepts `If-None-Match` as an additional exclusion, and
-evaluates both against current canonical state inside the existing settings
-transaction; stale state returns 412, and unchanged state performs no write.
-The required boolean rejects omitted and null values. The response contains the
-canonical flag and its ETag. The profile-facing flag reader keeps its existing
-disabled default on read failure; the write fails closed without an atomic store.
-No first-party or internal writer is recorded, so no new UI or native flow is added.
-The bridge writer and profile section enforcement remain unchanged.
+There is no setting for whether profiles may add rule rows: they always may.
+`GET`/`PUT /api/v2/admin/settings/sections` (`getAdminSectionSettings`,
+`updateAdminSectionSettings`) were removed before the v2 lock. The frozen v1
+`GET /api/v1/admin/settings/sections` answers `allow_profile_custom_sections:
+true`, and v1 `PUT` checks that the body is JSON, changes nothing, and answers
+the same. A stored `sections.allow_profile_custom_sections` row is ignored.
 
 ### Offline-download preparation
 
 `GET /api/v2/admin/downloads/preparations` lists the server-side remux and
 transcode jobs that turn library files into offline downloads. Items come in
 this order: running jobs, jobs waiting to retry, the queue in claim order (with
-a 1-based `queue_position`), and jobs that failed in the last 24 hours, newest
-first. `limit` (1–500, default 200) caps the items; `counts` (`running`,
-`queued`, `retrying`, `failed_recent`) always covers every listed job, so a
-client can tell when items were cut. Each item carries its source and output
+a 1-based `queue_position`), paused jobs in claim order (with `paused_at`), and
+jobs that failed in the last 24 hours, newest first. `limit` (1–500, default
+200) caps the items; `counts` (`running`, `queued`, `retrying`, `paused`,
+`failed_recent`) always covers every listed job, so a client can tell when items
+were cut. Each item carries its source and output
 recipe, the worker of the current or last attempt (`server` with the API node
 id, or `node` with the transcode node id and name), attempt counts, the last
 error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
@@ -1895,11 +1913,26 @@ error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
 cannot report progress, the `log_session_id` its FFmpeg output is logged under,
 and the download rows waiting on it with their account, profile, and device.
 
+`POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
+take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
+distinct id in request order. `outcome` is `applied`, `unchanged` (already in
+the requested state), `not_found` (no such job is being prepared: it finished,
+was canceled, or never existed), or `not_applicable` (pausing or resuming a
+failed job). Pause keeps a job's queue position but no worker claims it until
+it is resumed; a running encode stops and restarts from the beginning on resume,
+and the stopped attempt does not count against the job. Its waiting downloads
+stay `preparing`. Resume returns the job to the queue, or to a retry backoff
+that has not elapsed. Cancel removes running, queued, retrying, paused, and
+failed jobs; every download still waiting on a canceled job becomes `failed`
+with `error_message` `Canceled by an administrator`. A job that finished
+preparing is never touched. The three operations are idempotent.
+
 `GET /api/v2/admin/downloads/preparations/capabilities` reports availability,
-the realtime channel (`download_preparations`), and the failure window in
-seconds. The admin-only channel publishes `download_preparation.changed`
-(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, or is
-requeued, and when a user adds or removes a download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+the realtime channel (`download_preparations`), the failure window in seconds,
+and `controls` when pause, resume, and cancel are available. The admin-only channel publishes `download_preparation.changed`
+(`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, is
+requeued, paused, resumed, or canceled, and when a user adds or removes a
+download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
 five seconds per running job. The subscription snapshot is `null`; re-read the
 list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the
@@ -2171,6 +2204,10 @@ read reuses discovery and its defaults without invoking a provider or reading
 stored source configuration. Descriptor fields, setup form controls, options,
 conditions, validation and manifest defaults retain their existing meanings;
 `default_value` is a plugin-defined JSON extension value, not a stored secret.
+First-party plugins whose manifests predate descriptors get a host compatibility
+descriptor (`internal/autoscan/compat.go`): the CephFS watcher needs no connection,
+and the Sonarr/Radarr poller (`silo.autoscan.arr`) requires a `sonarr` or `radarr`
+connection. Any field the manifest declares itself wins over the compatibility value.
 
 Each page enumerates the full current discovery list, sorts by `(plugin_id,
 capability_id)`, and returns at most `limit` entries (default 50, maximum 200).
@@ -2349,6 +2386,16 @@ submission. No automatic retry, authentication replay or provider update occurs.
 The web edit submission captures identity and input before queueing and refuses
 late completion from another authority or a newer dialog draft.
 
+An update that changes the upstream the plugin is handed clears the poll marker of
+every source bound to it, in the same transaction, so those sources restart from
+now against the new upstream. That upstream is the linked Requests integration
+when there is one, otherwise the connection's base URL: linking, unlinking or
+switching the integration, or changing an unlinked connection's base URL, resets
+markers. Changing the name, kind or API key, or the stored base URL of a linked
+connection, keeps them. The frozen v1 connection update shares this repository
+path. Editing the linked Requests integration itself does not reset markers. A poll that was already running does not restore the old marker; see the
+source update below.
+
 ### Delete an autoscan connection (v2)
 
 `DELETE /api/v2/admin/autoscan/connections/{id}` (`deleteAdminAutoscanConnection`)
@@ -2402,6 +2449,15 @@ inserts can move rows between pages; neither count nor continuation provides a
 snapshot. A full final page may require one additional empty read. Missing service
 returns503; source errors are masked. No scan/worker execution changes.
 
+Completed runs carry `result`: `new`, `updated`, `unchanged`, `missing`,
+`missing_skipped_protected`, `files_deleted`, `items_deleted`,
+`memberships_removed`, `errors` and `skipped`, read from the run's stored result. `missing` counts the files the run
+newly marked missing; files an earlier scan already marked are not counted again.
+`skipped` is non-zero when the run did no work because an overlapping scan of the
+same scope was already in progress.
+Queued, running, failed and cancelled runs omit `result`, because a running run's
+stored value is progress, not an outcome.
+
 The Activity panel retains polling and numbered pages through at most100 cursor
 reads per request. It rejects unsupported/unsafe row values and invalid continuation
 without partial success. Cache identity includes captured profile/PIN generation;
@@ -2421,6 +2477,29 @@ additional empty read. Running events retain the existing start-time placeholder
 in completed_at and their running status. Missing service returns503, private
 source failures500. No execution or worker behavior changes.
 
+Each item also carries `changes`, the changes the event received in reported
+order, capped at 50 entries, and `changes_truncated`, which is true when the event
+received more (`changes_returned` keeps the full count). Events recorded before
+change logging have an empty list. Each change has `source_path` (as reported),
+`rewritten_path` (after the source's path rewrites), optional `scope`, and
+`outcome`: `queued` (created a scan run), `joined` (coalesced into a run for the
+same scope that was already queued or running), `suppressed` (debounced),
+`unresolved` (did not map to a scannable library location), `ignored` (empty path,
+or a file change that resolved to a whole library) or `error` (resolve or enqueue
+failure). `reason` is a machine code for unresolved, ignored and error outcomes:
+resolver reasons such as `no_library_match`, `library_root_offline` or
+`unsupported_extension`, plus `resolves_to_library`, `resolve_failed` and
+`enqueue_failed`; clients treat unknown codes and unknown outcomes as opaque and
+may show `detail`. Resolved changes include `library_id`, `target_mode` and
+`target_path`; queued and joined changes include the covering `scan_run_id`, which
+is how a joined change names a run another event created. A change that joins a
+run that is already running carries reason `follow_up_scan` and no `scan_run_id`:
+that run may have passed the path already, so a follow-up scan of the same scope,
+queued when it finishes, covers the change. Paths are capped at 1024 bytes, and NUL
+characters in them are stored as U+FFFD. `q` also matches the reported and
+rewritten paths in the change log. Nested `scan_runs` carry the same optional
+`result` as the scan history.
+
 The Activity panel keeps polling and numbered pages through at most100 cursor
 reads per requested page. Captured authority/PIN cache identity, stale-response
 checks and no previous-page placeholders isolate authority transitions. Unsupported
@@ -2438,6 +2517,21 @@ against concurrent writers. Failed/not_configured still means settings persisted
 no retry is performed. Missing writer503, invalid422 and masked uncertain500 remain
 separate. There is no revision precondition or replay identity. Reload and reconcile
 uncertain persistence before another explicit submission.
+
+debounce_seconds is the window in which autoscan drops repeat reports of a path.
+A report is dropped only when the same reported path in the same library was
+claimed within the window and still looks as it did at that claim: still missing,
+or a regular file with the same size, modification time and, on Unix, inode. A
+deleted file, or one whose size, modification time or inode changed, queues a
+scan. A rewrite that keeps the size and inode within the filesystem's timestamp
+resolution, or that a network mount's attribute cache hides, can still be
+dropped, as can a same-size, same-time replacement on filesystems that derive
+inode numbers from the path. Reports of existing directories are never dropped.
+Repeats do not extend the window, and 0 disables it. Claims live in Redis and
+are shared by all nodes; on mounts where each node assigns its own inode numbers
+(some FUSE and SMB setups), a repeat handled by a different node does not match
+and scans again. Without Redis, or when a Redis call fails, every report is
+processed.
 
 The web enable switch and advanced form capture body and authority, disable retry
 and authentication replay, and invalidate the canonical reader only for the active
@@ -2517,10 +2611,53 @@ Both require an acting administrator, an enabled boolean and path_rewrites array
 and cap request bodies at64KiB. Nullable/omitted connection unbinds; nullable/omitted
 poll interval inherits the default, otherwise it is1–2147483647 seconds. Empty update
 delivery mode preserves the stored mode. Rewrites need nonblank from/to values.
+
+An update that changes the bound connection (including unbinding it) or the stored
+source configuration clears the source's poll marker, so the next poll starts from
+now. A marker is the plugin's continuation token for one upstream; replaying it
+against another server can repeat or skip that server's history. Changing only the
+label, enabled state, delivery mode, poll interval or path rewrites keeps the marker.
+The rule lives in the repository update, so the frozen v1 source update applies it too.
+A poll cycle re-reads each source just before polling it, so an edit made earlier in
+the cycle is honored; a source whose row cannot be read is skipped until the next cycle. A poll already running during the reset cannot write the old
+upstream's marker back: the poll stores its next marker only if the source's marker,
+connection and source configuration, and the connection's upstream (its linked
+Requests integration, or its base URL when unlinked), still match what the poll
+started from. Otherwise it skips the
+write without an error, leaves `last_run_at` and `last_error` as they were (so the next
+cycle polls the new upstream without waiting for the interval), records its starting
+marker as the event's `marker_after` with a note that the marker was not stored, and
+the next poll starts from the reset marker.
+
 Configuration keys/values, connection and label are normalized as in the bridge.
 Webhook mode is restricted to the built-in identity, with auto/sonarr/radarr provider
 validation. Creation does not create a webhook endpoint. Update returns existing
 webhook state with v2 callback URL projection; reveal failures can omit the URL.
+
+An enabled poll source whose resolved setup descriptor has `connection: required`
+must name a connection: create or update without one returns422 with a `required`
+error at `body.connection_id`. A disabled source may be saved without one, so a
+source stored before this check can still be switched off; enabling it then needs
+a server. When the descriptor cannot be resolved (the plugin is no longer
+installed, or discovery fails during an update) the write is not blocked. The
+frozen v1 source routes do not apply this check.
+
+At poll time, a source whose descriptor requires a connection and has none bound
+is not sent to its plugin; the source and its activity event record "No server
+selected. Edit the source and choose a server." An error a plugin returns over
+gRPC is stored as the status description (the plugin's own text) without the
+`rpc error: code = ... desc =` framing, whatever code the plugin chose. When the
+description is empty, `DeadlineExceeded` stores "Plugin timed out.", `Canceled`
+"Poll canceled.", `Unimplemented` "Plugin does not support polling for changes."
+and any other code `Plugin error: <code>`. Failures the host side produces carry
+transport detail rather than operator-useful text and get a fixed host message:
+the host's call deadline passing stores "Plugin timed out.", a canceled poll
+"Poll canceled.", and every `Unavailable` status "Plugin unavailable.", because
+grpc-go returns that code when the plugin process is gone and it cannot be told
+apart from a plugin-chosen one. A plugin reporting an unreachable upstream server
+should use another code. Failures in host code before the call, such as a
+disabled or stopped plugin, are stored as the host's error text. The full error
+is logged on the server.
 
 Missing source or connection returns404; invalid configuration422; missing dependency503;
 private failures500 with uncertain completion. Both operations are non_retryable.
@@ -2528,10 +2665,17 @@ Update is last-write-wins with no revision/ordering receipt; optional webhook re
 can observe current state. Neither promises execution, scheduling, provider changes
 or durable job completion. The existing webhook setup operation remains separate.
 
-Actual Add/row edit/toggle callers capture copied body and draft authority before
-queueing, disable retry/authentication replay and fence late receipt/callback/cache effects.
-Row drafts retained across PIN replacement cannot submit under the new authority.
-Creation does not close or advance a newer dialog draft after an older acknowledgement.
+The web Add and Edit dialog and the list's enabled switch capture a copied, complete
+body and draft authority before queueing, disable retry/authentication replay and
+fence late receipt/callback/cache effects. A dialog draft retained across PIN
+replacement cannot submit under the new authority. Creation does not advance a dialog
+that was closed after the request was sent, and the dialog cannot be dismissed while
+its request is pending. Edit and the switch send a complete body from the cached source,
+so they wait while a write or source-list read for that source is in flight, and a
+successful update's readback replaces the cached source. A 422 is reported as a definite refusal, not as an uncertain
+outcome. The message is the problem's detail, or the first field detail when the
+detail says "see errors". The server refuses an invalid source with one fixed detail
+that does not name the setting.
 
 ### Autoscan source webhook lifecycle (v2)
 
@@ -2583,9 +2727,14 @@ worker409, and private start failures500. The operation is `non_retryable`: a re
 after the process task finishes can invoke providers again. After a lost response,
 inspect task/activity state before an explicit new command. No job Location is supplied.
 
-The existing poll honors autoscan enabled state and per-source interval floors, skips
-webhook sources, and records per-source provider/enqueue failures in activity without
-necessarily failing the overall task. A successful start does not promise provider
+A run started this way (or through `runAdminTask` for `autoscan_poll`) polls
+every enabled polling source immediately: per-source and default poll intervals apply
+only to scheduled runs. It still does nothing while Autoscan is disabled, skips
+disabled and webhook sources and any source whose poll is already running, and
+records per-source provider/enqueue failures in activity without necessarily failing
+the overall task. The frozen v1 entry points keep the interval behavior:
+`POST /api/v1/admin/autoscan/trigger` and `POST /api/v1/admin/tasks/{key}/run` still
+skip sources polled within their interval. A successful start does not promise provider
 success, new scan runs or completed downstream work. The web Run-now button captures
 profile authority before queueing, disables retries/auth replay, stays pending until
 acknowledgement and fences late feedback/invalidation under a changed authority.

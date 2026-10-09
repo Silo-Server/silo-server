@@ -505,6 +505,17 @@ with `enabled=false` are excluded in both cases. An explicitly empty library
 allowlist returns `items: []`. Optional poster signing uses the existing expiry
 and omits the URL on signing failure.
 
+By default, libraries the profile hid itself (`ui.disabled_library_ids`) appear
+for an unrestricted scope but not for a scope with a library limit (account,
+profile, or policy override). `include_hidden=true` lists them for a limited
+scope too, for a screen that shows a hidden library again; the web
+Settings → Libraries page sends it, and navigation should not. Libraries outside
+the account's or the profile's library limit, or removed by a policy override,
+stay out either way: the viewer scope reports the hidden libraries the policy
+would otherwise allow (`hidden_library_ids` in the scope decision), and the list
+adds only those. `supports_include_hidden` on the capability response advertises
+the parameter. The frozen v1 route keeps the default behavior.
+
 `GET /api/v2/user/libraries/capabilities` exposes `available` under the same
 authority rules. Both operations remain registered when the service is absent;
 discovery returns `available: false`, and listing returns `dependency_unavailable`.

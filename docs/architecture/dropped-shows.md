@@ -24,6 +24,10 @@ Undoing the dismissal (`DELETE` on the same path) undrops it. Movies, audiobooks
 ebooks keep per-item dismissals. Dismissing again refreshes `dropped_at`, which re-drops a
 series the profile watched since.
 
+An Emby history import also drops the shows the user hid from Emby's Continue Watching,
+dated at the run; see
+[history import execution](history-import-execution.md#continue-watching-row).
+
 ## Where drops apply
 
 - Next Up: global lookups (`ListNextUp` without a series) exclude active drops inside the

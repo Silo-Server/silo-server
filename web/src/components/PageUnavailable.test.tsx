@@ -46,18 +46,13 @@ describe("PageUnavailable", () => {
     expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
   });
 
-  it("steps back one entry when the app has history behind the page", async () => {
-    window.history.replaceState({ idx: 2 }, "");
-    renderPage();
-
-    await userEvent.click(screen.getByRole("button", { name: "Back" }));
-
-    expect(mocks.navigate).toHaveBeenCalledWith(-1);
-  });
-
   it("offers Try again for a failed read and holds it while the retry runs", async () => {
+    window.history.replaceState({ idx: 2 }, "");
     const onRetry = vi.fn();
     const { rerender } = renderPage({ onRetry });
+
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(mocks.navigate).toHaveBeenCalledWith(-1);
 
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(onRetry).toHaveBeenCalledTimes(1);

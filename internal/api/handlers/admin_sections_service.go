@@ -6,10 +6,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
@@ -28,7 +30,14 @@ type AdminSectionRestore = restoreDefaultsRequest
 type AdminSectionBulkCreate = bulkCreateSectionRequest
 type AdminSectionBulkResult = bulkCreateSectionResponse
 type AdminSectionPreviewRequest = previewRequest
-type AdminSectionPreviewResult = previewResponse
+
+// AdminSectionPreviewResult is a preview sample plus each item's presigned
+// poster URL keyed by content ID. Items without a poster have no entry.
+type AdminSectionPreviewResult struct {
+	Items      []*models.MediaItem
+	TotalCount int
+	PosterURLs map[string]string
+}
 type adminSectionRevisionKey struct{}
 
 func WithAdminSectionExpectedRevision(ctx context.Context, revision int64) context.Context {
@@ -78,8 +87,13 @@ func (h *SectionHandler) CreateAdminSection(ctx context.Context, req AdminSectio
 		return none, apiError(http.StatusBadRequest, "bad_request", msg)
 	}
 
-	if msg, ok := validateSectionConfig(sections.SectionType(req.SectionType), req.Config); !ok {
+	if msg, ok := validateSectionConfig(sections.SectionType(req.SectionType), req.Config, req.V1Rules); !ok {
 		return none, apiError(http.StatusBadRequest, "bad_request", msg)
+	}
+	if req.ValidateRecipe {
+		if msg, ok := validateRecipeConfig(sections.SectionType(req.SectionType), req.Config); !ok {
+			return none, apiError(http.StatusBadRequest, "bad_request", msg)
+		}
 	}
 
 	sec := &sections.PageSection{
@@ -242,16 +256,63 @@ func (h *SectionBulkHandler) BulkCreateAdminSections(ctx context.Context, req Ad
 }
 
 func (h *SectionHandler) PreviewAdminSection(ctx context.Context, req AdminSectionPreviewRequest) (AdminSectionPreviewResult, error) {
-	return h.previewAdminSection(ctx, req, AccessFilterFromContext(ctx, ""))
+	preview, err := h.previewAdminSection(ctx, req, AccessFilterFromContext(ctx, ""))
+	if err != nil {
+		return AdminSectionPreviewResult{}, err
+	}
+	return AdminSectionPreviewResult{Items: preview.Items, TotalCount: preview.TotalCount, PosterURLs: h.previewPosterURLs(ctx, preview.Items)}, nil
 }
-func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSectionPreviewRequest, filter catalog.AccessFilter) (AdminSectionPreviewResult, error) {
-	var none AdminSectionPreviewResult
+
+// previewPosterURLs presigns each item's poster at the variant a live row
+// serves by default, so a preview shows the image the saved row will show.
+func (h *SectionHandler) previewPosterURLs(ctx context.Context, items []*models.MediaItem) map[string]string {
+	if h.DetailSvc == nil {
+		return nil
+	}
+	posterPaths := make(map[string]string, len(items))
+	paths := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		path := sizedPosterPath(item.PosterPath, imagesize.Unset)
+		if path == "" || path == "-" {
+			continue
+		}
+		posterPaths[item.ContentID] = path
+		if !slices.Contains(paths, path) {
+			paths = append(paths, path)
+		}
+	}
+	resolved := h.DetailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("featured", imagesize.Unset))
+	out := make(map[string]string, len(posterPaths))
+	for contentID, path := range posterPaths {
+		if url := resolved[path].URL; url != "" {
+			out[contentID] = url
+		}
+	}
+	return out
+}
+
+// previewAdminSection is shared with the frozen /api/v1 preview, which
+// serializes previewResponse as is.
+func (h *SectionHandler) previewAdminSection(ctx context.Context, req AdminSectionPreviewRequest, filter catalog.AccessFilter) (previewResponse, error) {
+	var none previewResponse
 	rec, ok := recipes.Get(req.SectionType)
 	if !ok {
 		return none, apiError(http.StatusBadRequest, "unknown_type", "section_type not registered")
 	}
 	if err := rec.Validate(req.Config); err != nil {
 		return none, apiError(http.StatusBadRequest, "invalid_config", err.Error())
+	}
+	// A rule the frozen /api/v1 vocabulary lacks fails as it did when the
+	// fetcher could not parse it.
+	if req.V1Rules {
+		if def, err := sections.ParseQueryDefinition(req.Config); err == nil {
+			if err := catalog.ValidateV1Rules(def); err != nil {
+				return none, apiError(http.StatusInternalServerError, "preview_failed", "parsing query definition: "+err.Error())
+			}
+		}
 	}
 
 	limit := req.ItemLimit
@@ -410,14 +471,26 @@ func (h *SectionHandler) UpdateAdminSection(ctx context.Context, id string, req 
 		if msg, ok := validateSectionScope(existing.Scope, existing.LibraryID); !ok {
 			return none, apiError(400, "bad_request", msg)
 		}
-		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config); !ok {
+		definitionChanged := existing.SectionType != originalType || !jsonConfigEqual(originalConfig, existing.Config)
+		// Like the recipe check below, the v1 rule vocabulary applies only to a
+		// changed definition, so v1 can still rename, move or disable a row
+		// whose rules were saved through v2.
+		if msg, ok := validateSectionConfig(existing.SectionType, existing.Config, req.V1Rules && definitionChanged); !ok {
 			return none, apiError(400, "bad_request", msg)
+		}
+		// Only a changed type or config runs the recipe check, so a row saved
+		// before create ran it can still be moved, renamed or disabled, even
+		// when the client echoes its unchanged type and config.
+		if req.ValidateRecipe && definitionChanged {
+			if msg, ok := validateRecipeConfig(existing.SectionType, existing.Config); !ok {
+				return none, apiError(400, "bad_request", msg)
+			}
 		}
 		willBeTraktBacked := isTraktBackedSection(string(existing.SectionType), existing.Config)
 		if !wasTraktBacked && willBeTraktBacked {
 			return none, apiError(http.StatusBadRequest, "unsupported_source", "new Trakt-backed sections are not supported")
 		}
-		if wasTraktBacked && (existing.SectionType != originalType || !jsonConfigEqual(originalConfig, existing.Config) || (!originalEnabled && existing.Enabled)) {
+		if wasTraktBacked && (definitionChanged || (!originalEnabled && existing.Enabled)) {
 			return none, apiError(http.StatusBadRequest, "legacy_source_immutable", "legacy Trakt section sources cannot be changed or reactivated")
 		}
 

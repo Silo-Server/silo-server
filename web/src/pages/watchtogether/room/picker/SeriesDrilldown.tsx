@@ -148,16 +148,25 @@ export function SeriesDrilldown({
   const seasons = useSeasons(series.content_id);
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
   const [season, setSeason] = useState<number | null>(initialSeason ?? null);
+  // Without a season from the shelf, open where the viewer left off: the
+  // season of the series' play target. The detail carries that season with
+  // the target, so the season list's own targets need not agree with it; wait
+  // for a detail refetch so a stale copy does not choose.
+  const playSeasonNumber = item?.play_season_number;
+  const resolvingSeason = seasons.isLoading || detail.isFetching;
   useEffect(() => {
-    if (season === null && seasonList.length > 0) {
-      const first = seasonList.find((s) => !s.is_specials) ?? seasonList[0]!;
-      setSeason(first.season_number);
-    }
-  }, [season, seasonList]);
+    if (season !== null || seasonList.length === 0 || resolvingSeason) return;
+    const resume = seasonList.find((s) => s.season_number === playSeasonNumber);
+    const first = resume ?? seasonList.find((s) => !s.is_specials) ?? seasonList[0]!;
+    setSeason(first.season_number);
+  }, [season, seasonList, resolvingSeason, playSeasonNumber]);
   const episodesQuery = useSeasonEpisodes(
     season === null ? undefined : series.content_id,
     season ?? -1,
   );
+  // Until a season is chosen the episode query is idle; keep the skeletons up
+  // rather than flash an empty season.
+  const loadingEpisodes = episodesQuery.isLoading || (season === null && resolvingSeason);
   const episodes = useMemo(
     () => (episodesQuery.data?.episodes ?? []).filter((e) => e.files.length > 0),
     [episodesQuery.data?.episodes],
@@ -302,9 +311,7 @@ export function SeriesDrilldown({
                   ? "Specials"
                   : `Season ${currentSeason.season_number}`
                 : "Episodes"}
-              {!episodesQuery.isLoading && episodes.length > 0
-                ? ` · ${episodes.length} episodes`
-                : ""}
+              {!loadingEpisodes && episodes.length > 0 ? ` · ${episodes.length} episodes` : ""}
             </span>
             {members.length > 0 ? (
               <span className="hidden @xl:block">
@@ -316,7 +323,7 @@ export function SeriesDrilldown({
             ref={listRef}
             className="overlay-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2 py-2"
           >
-            {episodesQuery.isLoading
+            {loadingEpisodes
               ? Array.from({ length: 5 }).map((_, i) => (
                   <li key={i} className="bg-surface h-20 animate-pulse rounded-lg" />
                 ))
@@ -386,7 +393,7 @@ export function SeriesDrilldown({
                     </li>
                   );
                 })}
-            {!episodesQuery.isLoading && episodes.length === 0 ? (
+            {!loadingEpisodes && episodes.length === 0 ? (
               <li className="text-muted-foreground px-2 py-8 text-center text-sm">
                 No playable episodes in this season.
               </li>

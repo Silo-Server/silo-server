@@ -47,7 +47,7 @@ type TranscodeOpts struct {
 	SourceVideoCodec     string
 	SourceVideoProfile   string
 	SourceVideoBitDepth  int
-	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
+	VideoBitstreamFilter string // validated copy-mode BSF: DV7ToHDR10BitstreamFilter
 	VideoSampleEntry     string // allowlisted copy-HLS sample entry: dvh1 or hvc1
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
@@ -152,9 +152,12 @@ type TranscodeOpts struct {
 	PrepareProgressSink PrepareProgressSink
 }
 
-// DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
-// copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
-const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
+// DV7ToHDR10BitstreamFilter turns a Dolby Vision stream into its plain HDR10
+// base layer during a copy-mode remux. dovi_rpu removes the Dolby Vision
+// configuration and RPUs. A single-track Profile 7 stream also interleaves its
+// enhancement layer as NAL unit type 63 in the same video stream, which stream
+// mapping cannot separate, so filter_units removes those units.
+const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1,filter_units=remove_types=63"
 
 // CopyFMP4RecipeVersion identifies the byte-affecting copy-video HLS recipe.
 // Remote starts attest it so rolling clusters never silently mix the old
@@ -742,6 +745,18 @@ func classifyToneMapPreflightError(err error) error {
 	return fmt.Errorf("tone-map source preflight failed: %w", err)
 }
 
+// hlsMuxMaxDelayMicros is the -max_delay, in microseconds, of every HLS
+// transcode. Jellyfin uses the same value.
+const hlsMuxMaxDelayMicros = 5_000_000
+
+// HLSMPEGTSTimestampOffset90k is how far, in 90 kHz ticks, ffmpeg's MPEG-TS
+// muxer shifts every PTS and DTS of an HLS MPEG-TS segment: twice
+// -max_delay, 10 s for hlsMuxMaxDelayMicros. With -copyts a segment's video
+// PTS is the source time plus this offset, so a WebVTT X-TIMESTAMP-MAP for
+// those segments must add it too or players show cues that much early.
+// fMP4 segments carry no such shift.
+const HLSMPEGTSTimestampOffset90k = 2 * hlsMuxMaxDelayMicros * 90_000 / 1_000_000
+
 // buildFFmpegArgs constructs the full ffmpeg argument list from TranscodeOpts.
 func buildFFmpegArgs(opts TranscodeOpts) []string {
 	opts = normalizeTranscodeOpts(opts)
@@ -851,7 +866,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	args = append(args,
 		"-max_muxing_queue_size", "2048",
-		"-max_delay", "5000000",
+		"-max_delay", strconv.Itoa(hlsMuxMaxDelayMicros),
 		"-f", "hls",
 		"-hls_time", fmt.Sprintf("%d", opts.SegmentDuration),
 		// Bound real playlists as well as synthetic ones. Segment files remain on

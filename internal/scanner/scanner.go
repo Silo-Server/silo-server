@@ -150,6 +150,8 @@ type Scanner struct {
 	// emptying trash hard-deletes its row. Missing files are hidden from
 	// clients immediately; the grace only delays losing per-file state so a
 	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
+	// Membership reconciliation also holds an orphaned item for as long, so a
+	// replacement file relinks to it (see catalog WithRemovalGrace).
 	fileRemovalGrace     time.Duration
 	markerFetcher        func(context.Context, string) *IntroCreditsMarkers
 	markerPrefix         markerPrefixCache
@@ -240,7 +242,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, artworkStore blobs
 		locationRepo:         NewObservedLocationRepository(fileRepo.Pool()),
 		groupLocationRepo:    NewGroupLocationRepository(fileRepo.Pool()),
 		folderRepo:           catalog.NewFolderRepository(fileRepo.Pool()),
-		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()),
+		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()).WithRemovalGrace(fileRemovalGrace),
 		episodeLibraryRepo:   catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
 		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
 		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),
@@ -794,7 +796,7 @@ func (s *Scanner) scanPaths(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1706,7 +1708,7 @@ func (s *Scanner) scanScope(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1967,16 +1969,18 @@ func (s *Scanner) markMissingExcludingProtected(
 			result.MissingSkippedProtected++
 			continue
 		}
-		// Only mark as missing if not already marked.
-		if existing.MissingSince == nil {
-			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
-					"path", existing.FilePath,
-					"error", err,
-				)
-				result.Errors++
-				continue
-			}
+		// A file already marked by an earlier scan is waiting out the removal
+		// grace period; it is not news to this scan, so it is not counted.
+		if existing.MissingSince != nil {
+			continue
+		}
+		if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+			slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
+				"path", existing.FilePath,
+				"error", err,
+			)
+			result.Errors++
+			continue
 		}
 		result.Missing++
 	}

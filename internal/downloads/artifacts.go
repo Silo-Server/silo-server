@@ -112,6 +112,8 @@ type ArtifactManager struct {
 	ffmpegLogs     playback.FFmpegLogSink
 	lastDiskSweep  time.Time
 	lastStaleSweep time.Time
+	// localAttempts cancels the attempts this replica runs, by artifact id.
+	localAttempts map[string]*localAttempt
 }
 
 // toneMapCapabilityProvider exposes the pooled executor inventory and local
@@ -293,53 +295,9 @@ func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, fo
 // were already frozen. Keeping discovery separate lets quota-serialized callers
 // avoid holding a database lock transaction across remote probes.
 func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
-	if target.ToneMapPolicy == "" {
-		target.ToneMapPolicy = tonemap.PolicyNone
-	}
-	hash := paramsHashWithToneMapRevision(paramsHashParams{
-		format: format, container: target.Container, codecVideo: target.CodecVideo, codecAudio: target.CodecAudio, resolution: target.Resolution,
-		audioTrackIndex: target.AudioTrackIndex, targetBitrateKbps: target.TargetBitrateKbps,
-		policy: target.ToneMapPolicy, mode: target.ToneMapMode, sourceKind: target.ToneMapSourceKind,
-		recipeVersion: target.ToneMapRecipeVersion, preflightRequired: target.ToneMapPreflightRequired, sourceRevision: target.ToneMapSourceRevision,
-	})
-	id, err := idgen.NextID()
+	a, err := m.newArtifact(file, format, target)
 	if err != nil {
 		return nil, err
-	}
-	a := &Artifact{
-		ID:                         id,
-		MediaFileID:                file.ID,
-		Format:                     format,
-		ParamsHash:                 hash,
-		Container:                  target.Container,
-		CodecVideo:                 target.CodecVideo,
-		CodecAudio:                 target.CodecAudio,
-		Resolution:                 target.Resolution,
-		AudioTrackIndex:            target.AudioTrackIndex,
-		TargetBitrateKbps:          target.TargetBitrateKbps,
-		ToneMapPolicy:              target.ToneMapPolicy,
-		ToneMapMode:                target.ToneMapMode,
-		ToneMapSourceKind:          target.ToneMapSourceKind,
-		ToneMapRecipeVersion:       target.ToneMapRecipeVersion,
-		ToneMapPreflightRequired:   target.ToneMapPreflightRequired,
-		ToneMapSourceRevision:      target.ToneMapSourceRevision.Encode(),
-		ToneMapDVConfigPresent:     target.ToneMapDVConfigPresent,
-		ToneMapDVBLCompatIDPresent: target.ToneMapDVBLCompatIDPresent,
-		ToneMapDVBLPresent:         target.ToneMapDVBLPresent,
-		ToneMapDVRPUPresent:        target.ToneMapDVRPUPresent,
-		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash),
-		MaxAttempts:                artifactMaxAttempts,
-	}
-	if playback.PreparedTracksAvailable(file) {
-		a.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
-	}
-	request := downloadprepare.NewRequest(a.ID, m.buildOpts(file, a))
-	if request.StereoDownmixBoostRequested() {
-		a.AudioRecipeVersion = request.AudioRecipeVersion
-	}
-	if artifactUsesExecutionFingerprint(a) {
-		a.ParamsHash = request.ExecutionFingerprint()
-		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash)
 	}
 	row, created, err := m.repo.EnsureQueued(ctx, a)
 	if err != nil {
@@ -387,6 +345,71 @@ func (m *ArtifactManager) ensureResolved(ctx context.Context, file *models.Media
 		m.triggerDrain()
 	}
 	return row, nil
+}
+
+// newArtifact builds the queue row a prepared file for target would use,
+// keyed so equal requests share one job.
+func (m *ArtifactManager) newArtifact(file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
+	if target.ToneMapPolicy == "" {
+		target.ToneMapPolicy = tonemap.PolicyNone
+	}
+	hash := paramsHashWithToneMapRevision(paramsHashParams{
+		format: format, container: target.Container, codecVideo: target.CodecVideo, codecAudio: target.CodecAudio, resolution: target.Resolution,
+		audioTrackIndex: target.AudioTrackIndex, targetBitrateKbps: target.TargetBitrateKbps,
+		policy: target.ToneMapPolicy, mode: target.ToneMapMode, sourceKind: target.ToneMapSourceKind,
+		recipeVersion: target.ToneMapRecipeVersion, preflightRequired: target.ToneMapPreflightRequired, sourceRevision: target.ToneMapSourceRevision,
+	})
+	id, err := idgen.NextID()
+	if err != nil {
+		return nil, err
+	}
+	a := &Artifact{
+		ID:                         id,
+		MediaFileID:                file.ID,
+		Format:                     format,
+		ParamsHash:                 hash,
+		Container:                  target.Container,
+		CodecVideo:                 target.CodecVideo,
+		CodecAudio:                 target.CodecAudio,
+		Resolution:                 target.Resolution,
+		AudioTrackIndex:            target.AudioTrackIndex,
+		TargetBitrateKbps:          target.TargetBitrateKbps,
+		ToneMapPolicy:              target.ToneMapPolicy,
+		ToneMapMode:                target.ToneMapMode,
+		ToneMapSourceKind:          target.ToneMapSourceKind,
+		ToneMapRecipeVersion:       target.ToneMapRecipeVersion,
+		ToneMapPreflightRequired:   target.ToneMapPreflightRequired,
+		ToneMapSourceRevision:      target.ToneMapSourceRevision.Encode(),
+		ToneMapDVConfigPresent:     target.ToneMapDVConfigPresent,
+		ToneMapDVBLCompatIDPresent: target.ToneMapDVBLCompatIDPresent,
+		ToneMapDVBLPresent:         target.ToneMapDVBLPresent,
+		ToneMapDVRPUPresent:        target.ToneMapDVRPUPresent,
+		OutputPath:                 artifactOutputPath(m.artifactDir(), file.ID, format, hash, id),
+		MaxAttempts:                artifactMaxAttempts,
+	}
+	if playback.PreparedTracksAvailable(file) {
+		a.TrackRecipeVersion = playback.PreparedTracksRecipeVersion
+	}
+	request := downloadprepare.NewRequest(a.ID, m.buildOpts(file, a))
+	if request.StereoDownmixBoostRequested() {
+		a.AudioRecipeVersion = request.AudioRecipeVersion
+	}
+	if artifactUsesExecutionFingerprint(a) {
+		a.ParamsHash = request.ExecutionFingerprint()
+		a.OutputPath = artifactOutputPath(m.artifactDir(), file.ID, format, a.ParamsHash, a.ID)
+	}
+	return a, nil
+}
+
+// readyArtifact reports whether the prepared file for target already exists,
+// without queueing a job when it does not.
+func (m *ArtifactManager) readyArtifact(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) bool {
+	a, err := m.newArtifact(file, format, target)
+	if err != nil {
+		return false
+	}
+	row, err := m.repo.GetByKey(ctx, a.MediaFileID, a.Format, a.ParamsHash)
+	return err == nil && artifactReady(row)
 }
 
 // resolveToneMapTarget freezes a safe, enabled, and currently validated
@@ -856,7 +879,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	defer cancelHB()
 	// heartbeatLoop cancels hbCtx if the lease is lost; PrepareFile runs on hbCtx
 	// so that cancellation aborts ffmpeg, ensuring we never keep writing the
-	// output path after another worker has taken the job.
+	// output path after another worker has taken the job. An administrator
+	// pause or cancel on this replica cancels it at once.
+	defer m.trackLocalAttempt(a.ID, cancelHB)()
 	go m.heartbeatLoop(hbCtx, cancelHB, a.ID)
 
 	file, err := m.fileRepo.GetByID(ctx, a.MediaFileID)
@@ -897,8 +922,9 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 			// recovery (here or on another node) reclaims it.
 			return
 		case hbCtx.Err() != nil:
-			// We lost the lease mid-encode; another worker now owns the job.
-			slog.WarnContext(ctx, "download artifact encode aborted; lease lost", "component", "downloads", "artifact_id", a.ID)
+			// We lost the lease mid-encode: another worker now owns the job, or
+			// an administrator paused or canceled it.
+			slog.WarnContext(ctx, "download artifact encode aborted; lease lost or job stopped", "component", "downloads", "artifact_id", a.ID)
 			return
 		default:
 			slog.WarnContext(ctx, "download artifact encode failed", "component", "downloads", "artifact_id", a.ID, "error", err)
@@ -943,6 +969,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	if !applied {
 		slog.WarnContext(ctx, "download artifact ready skipped; lease lost", "component", "downloads", "artifact_id", a.ID)
 		m.enqueueRemoteCleanup(ctx, a.ID, prepared, true)
+		m.removeCanceledLocalOutput(ctx, a.ID, prepared)
 		return
 	}
 	observation.Finish("success")

@@ -135,24 +135,16 @@ func (h *ItemsHandler) loadCompatItemsByContentIDsFallback(ctx context.Context, 
 	return listItems, nil
 }
 
-// narrowAccessToLibrary intersects the viewer's effective access policy with a
-// caller-supplied libraryID. Returns false when the libraryID falls outside an
-// existing AllowedLibraryIDs allowlist (caller should short-circuit with an
-// empty result). Mutates access.AllowedLibraryIDs in place to the single ID.
+// narrowAccessToLibrary limits the viewer's effective access policy to a
+// caller-supplied libraryID. Returns false when the viewer's library scope
+// excludes the library (caller should short-circuit with an empty result).
+// Mutates access.AllowedLibraryIDs in place to the single ID.
 func narrowAccessToLibrary(access *catalog.AccessFilter, libraryID int) bool {
-	if access.AllowedLibraryIDs != nil {
-		allowed := false
-		for _, id := range access.AllowedLibraryIDs {
-			if id == libraryID {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return false
-		}
+	scoped, none := access.LibraryScope([]int{libraryID})
+	if none {
+		return false
 	}
-	access.AllowedLibraryIDs = []int{libraryID}
+	access.AllowedLibraryIDs = scoped
 	return true
 }
 

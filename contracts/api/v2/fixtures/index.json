@@ -445,6 +445,110 @@
       "body_file": "admin_account_ips.json"
     },
     {
+      "name": "admin_account_profile_section_settings",
+      "operation_id": "getAdminUserProfileSectionSettings",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner/sections/settings",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/ProfileSectionSettingCollection",
+      "body_file": "admin_account_profile_section_settings.json"
+    },
+    {
+      "name": "admin_account_profile_sections",
+      "operation_id": "listAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/SectionOverrideCollection",
+      "body_file": "admin_account_profile_sections.json"
+    },
+    {
+      "name": "admin_account_profile_sections_not_found",
+      "operation_id": "listAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-elsewhere/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_account_profile_sections_not_found.json"
+    },
+    {
+      "name": "admin_account_profile_sections_replace",
+      "operation_id": "replaceAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"overrides\":[{\"id\":\"o-kid\",\"section_id\":\"s-continue\",\"position\":0,\"hidden\":true}]}"
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "admin_account_profile_sections_reset",
+      "operation_id": "resetAdminUserProfileSectionOverrides",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/profiles/p-kid/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
       "name": "admin_account_profiles",
       "operation_id": "listAdminUserProfiles",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -1090,7 +1194,7 @@
     {
       "name": "admin_download_preparations",
       "operation_id": "listAdminDownloadPreparations",
-      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, and a recent failure, with totals across every listed job.",
+      "scenario": "The preparation queue lists a running transcode with live progress, a queued remux, a paused transcode, and a recent failure, with totals across every listed job.",
       "request": {
         "method": "GET",
         "path": "/api/v2/admin/downloads/preparations?limit=10",
@@ -1758,6 +1862,89 @@
       "response_media_type": null,
       "schema": null,
       "body_file": null
+    },
+    {
+      "name": "admin_login_session_delete",
+      "operation_id": "deleteAdminUserLoginSession",
+      "scenario": "An acting admin revokes one session of the selected account.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/login-sessions/00000000-0000-0000-0000-000000000001",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
+    },
+    {
+      "name": "admin_login_session_forbidden",
+      "operation_id": "listAdminUserLoginSessions",
+      "scenario": "A non-admin cannot inspect another account's sessions.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_login_session_forbidden.json"
+    },
+    {
+      "name": "admin_login_session_list",
+      "operation_id": "listAdminUserLoginSessions",
+      "scenario": "An acting admin inspects a selected account's login sessions.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCollection",
+      "body_file": "admin_login_session_list.json"
+    },
+    {
+      "name": "admin_login_sessions_delete_all",
+      "operation_id": "deleteAdminUserLoginSessions",
+      "scenario": "An acting admin signs the selected account out everywhere and receives the live-session count.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/admin/users/7/login-sessions",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminLoginSessionsRevoked",
+      "body_file": "admin_login_sessions_delete_all.json"
     },
     {
       "name": "admin_marker_capabilities",
@@ -3616,6 +3803,47 @@
       "body_file": "authentication_required.json"
     },
     {
+      "name": "cancel_admin_download_preparations",
+      "operation_id": "cancelAdminDownloadPreparations",
+      "scenario": "Canceling removes unfinished and failed jobs; a job that already finished preparing is not found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-queued\",\"art-failed\",\"art-ready\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "cancel_admin_download_preparations.json"
+    },
+    {
+      "name": "cancel_admin_download_preparations_invalid_id",
+      "operation_id": "cancelAdminDownloadPreparations",
+      "scenario": "A job id outside the artifact id alphabet is rejected before any job is touched.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/cancel",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"../etc\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "cancel_admin_download_preparations_invalid_id.json"
+    },
+    {
       "name": "cancel_device_login_not_found",
       "operation_id": "cancelDeviceLogin",
       "scenario": "Canceling with an unknown device code.",
@@ -3921,27 +4149,48 @@
       "body_file": "clear_file_marker_segment_ok.json"
     },
     {
-      "name": "collection_group_stale",
+      "name": "collection_group_unsupported",
       "operation_id": "updateCollectionGroup",
-      "scenario": "A stale group edit leaves the resource unchanged and supplies the current validator.",
+      "scenario": "Personal collection groups are no longer supported; every group operation answers capability_unsupported.",
       "request": {
         "method": "PATCH",
         "path": "/api/v2/collections/groups/g1",
         "headers": {
           "Authorization": "Bearer tok-member",
-          "If-Match": "\"stale\"",
+          "If-Match": "*",
           "X-Profile-Id": "p-owner"
         },
         "body": "{\"name\":\"Winter\"}"
       },
-      "expected_status": 412,
+      "expected_status": 501,
       "response_headers": {
-        "Content-Type": "application/problem+json",
-        "ETag": "\"a398556adb45deecf5779ee6.25gpp42zguq5f\""
+        "Content-Type": "application/problem+json"
       },
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
-      "body_file": "collection_group_stale.json"
+      "body_file": "collection_group_unsupported.json"
+    },
+    {
+      "name": "collection_order_foreign_id",
+      "operation_id": "reorderCollections",
+      "scenario": "An order naming another profile's collection, even a shared one, is a validation failure at ordered_ids.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/v2/collections/order",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "If-Match": "*",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"ordered_ids\":[\"c2\",\"c1\"]}"
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "collection_order_foreign_id.json"
     },
     {
       "name": "collection_order_precondition_required",
@@ -4228,6 +4477,28 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
       "body_file": "create_collection_ok.json"
+    },
+    {
+      "name": "create_collection_with_description_ok",
+      "operation_id": "createCollection",
+      "scenario": "A manual collection created with its description.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/collections",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"name\":\"Rainy days\",\"description\":\"For wet afternoons\",\"collection_type\":\"manual\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "Location": "/api/v2/collections/c1"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalCollection",
+      "body_file": "create_collection_with_description_ok.json"
     },
     {
       "name": "create_library_ok",
@@ -5172,7 +5443,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\""
+        "ETag": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5195,7 +5466,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\""
+        "ETag": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5210,7 +5481,7 @@
         "path": "/api/v2/downloads/subscriptions/monitor",
         "headers": {
           "Authorization": "Bearer tok-member",
-          "If-Match": "\"7b39536ecc52eb9d09f0198d1fea5167e3267c15597aa4b6c62c138d5642a715\"",
+          "If-Match": "\"e899bde3b1d16fb7c1fe4d68f04a4295e6dd444b403289d4168dd6cddfa2fef0\"",
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         }
@@ -5230,7 +5501,7 @@
         "path": "/api/v2/downloads/subscriptions/monitor",
         "headers": {
           "Authorization": "Bearer tok-member",
-          "If-Match": "\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\"",
+          "If-Match": "\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\"",
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         },
@@ -5239,7 +5510,7 @@
       "expected_status": 200,
       "response_headers": {
         "Content-Type": "application/json",
-        "ETag": "\"7b39536ecc52eb9d09f0198d1fea5167e3267c15597aa4b6c62c138d5642a715\""
+        "ETag": "\"e899bde3b1d16fb7c1fe4d68f04a4295e6dd444b403289d4168dd6cddfa2fef0\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DownloadSubscription",
@@ -5257,7 +5528,7 @@
           "X-Profile-Id": "p-owner",
           "X-Silo-Device-Id": "device-one"
         },
-        "body": "{\"etag\":\"\\\"5c9ccf00919cd0d69b57d9600d87615c24ab8945ae94956412d8ba3ca0631e84\\\"\",\"subscription_id\":\"monitor\"}"
+        "body": "{\"etag\":\"\\\"0a6a05bce79d458041d0aa7a14760f4b4b3ad630434c670c390ba81e60815ecc\\\"\",\"subscription_id\":\"monitor\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -5716,6 +5987,27 @@
       "body_file": "get_account_password_capability_secondary_profile.json"
     },
     {
+      "name": "get_admin_collection_capabilities_ok",
+      "operation_id": "getAdminCollectionCapabilities",
+      "scenario": "Administrator collection features, including MDBList search and the time zone the answering node runs cron schedules in.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/collections/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"f9bfba671c81dbcc510b4d4cc41d4c6feb58ad9165a71786799d47524f7d7217\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCollectionCapabilityOutputBody",
+      "body_file": "get_admin_collection_capabilities_ok.json"
+    },
+    {
       "name": "get_admin_collection_ok",
       "operation_id": "getAdminCollection",
       "scenario": "Canonical administrator collection editor uses string library identifiers and a strong validator, without expiring artwork URLs.",
@@ -6079,6 +6371,28 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/CatalogSearchCapabilities",
       "body_file": "get_catalog_search_capabilities_ok.json"
+    },
+    {
+      "name": "get_collection_capabilities_ok",
+      "operation_id": "getCollectionCapabilities",
+      "scenario": "Personal collection features, including a description on create, MDBList search, the time zone the answering node runs cron schedules in, and preview posters.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/collections/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"d1ab2d090e59fc1b188200e07381aad6e929278904a8e25da475b7882cdf3815\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionCapabilities",
+      "body_file": "get_collection_capabilities_ok.json"
     },
     {
       "name": "get_collection_items_ok",
@@ -8222,6 +8536,63 @@
       "body_file": "list_account_identities_ok.json"
     },
     {
+      "name": "list_admin_collection_sections_ok",
+      "operation_id": "listAdminCollectionSections",
+      "scenario": "Rows that show a collection: Home rows first with a null library, including a starter-pack hero row, then library page rows, each with its page's row count.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/collections/c1/sections",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/CollectionAdminCollectionSection",
+      "body_file": "list_admin_collection_sections_ok.json"
+    },
+    {
+      "name": "list_admin_collection_template_bundles_ok",
+      "operation_id": "listAdminCollectionTemplateBundles",
+      "scenario": "Template bundles with a summary of each template in bundle order; a template that cannot sync until an administrator sets its source needs setup.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/collections/template-bundles",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/BundleCatalog",
+      "body_file": "list_admin_collection_template_bundles_ok.json"
+    },
+    {
+      "name": "list_admin_collections_ok",
+      "operation_id": "listAdminCollections",
+      "scenario": "Administrator collections with the number of Home rows and of all administrator page rows that show each one; a collection no row shows counts zero.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/collections?library_id=1",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCollectionList",
+      "body_file": "list_admin_collections_ok.json"
+    },
+    {
       "name": "list_admin_playback_history_ok",
       "operation_id": "listAdminPlaybackHistory",
       "scenario": "Administrator playback history page carries string IDs, instants, a nullable duration and a scoped cursor.",
@@ -8747,9 +9118,30 @@
       "body_file": "list_catalog_items_unknown_sort_field.json"
     },
     {
+      "name": "list_collections_contains_item_ok",
+      "operation_id": "listCollections",
+      "scenario": "Visible personal collections, each of the profile's own manual collections marked with whether it holds the title.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/collections?contains_item=movie-1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalCollectionCollection",
+      "body_file": "list_collections_contains_item_ok.json"
+    },
+    {
       "name": "list_collections_ok",
       "operation_id": "listCollections",
-      "scenario": "Visible personal collections and account groups.",
+      "scenario": "The acting profile's own collections, then another profile's shared collection; groups is always empty.",
       "request": {
         "method": "GET",
         "path": "/api/v2/collections",
@@ -10612,6 +11004,47 @@
       "body_file": "login_provider_null.json"
     },
     {
+      "name": "login_session_capabilities",
+      "operation_id": "getLoginSessionCapabilities",
+      "scenario": "An authenticated account discovers login-session management and recorded activity.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"199ed1b146458dcd278850dd6857e5640e7dbc8742e67275bdbaf314cac391bd\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCapabilities",
+      "body_file": "login_session_capabilities.json"
+    },
+    {
+      "name": "login_session_list",
+      "operation_id": "listSessions",
+      "scenario": "An account lists live login sessions, with explicit null activity where none is recorded.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/sessions",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/LoginSessionCollection",
+      "body_file": "login_session_list.json"
+    },
+    {
       "name": "logout_authentication_required",
       "operation_id": "logout",
       "scenario": "A logout without a credential.",
@@ -11359,6 +11792,26 @@
       "body_file": "password_reset_lookup.json"
     },
     {
+      "name": "pause_admin_download_preparations",
+      "operation_id": "pauseAdminDownloadPreparations",
+      "scenario": "Pausing reports one outcome per distinct job: a queued job pauses, a paused one is unchanged, a failed one cannot be paused, and an unknown one is not found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/pause",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-queued\",\"art-paused\",\"art-failed\",\"art-gone\",\"art-queued\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "pause_admin_download_preparations.json"
+    },
+    {
       "name": "payload_too_large",
       "operation_id": null,
       "scenario": "A JSON body over the operation's declared limit (256 bytes on this probe), refused before decoding.",
@@ -11844,6 +12297,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "precondition_required.json"
+    },
+    {
+      "name": "preview_collection_ok",
+      "operation_id": "previewCollection",
+      "scenario": "A smart query's first matches within the acting profile's access, each with its poster when it has one.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/collections/preview",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"query_definition\":{\"match\":\"all\",\"groups\":[]},\"limit\":2}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PersonalCollectionPreviewOutputBody",
+      "body_file": "preview_collection_ok.json"
     },
     {
       "name": "profile_verification_required",
@@ -12532,6 +13006,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/EffectiveSettingContextCollection",
       "body_file": "resolve_effective_settings_ok.json"
+    },
+    {
+      "name": "resume_admin_download_preparations",
+      "operation_id": "resumeAdminDownloadPreparations",
+      "scenario": "Resuming a paused job applies; a job that was never paused is unchanged.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/downloads/preparations/resume",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{\"ids\":[\"art-paused\",\"art-queued\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDownloadPreparationActionOutputBody",
+      "body_file": "resume_admin_download_preparations.json"
     },
     {
       "name": "retry_metadata_match_queue_ok",

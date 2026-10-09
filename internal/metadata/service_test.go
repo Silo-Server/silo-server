@@ -47,6 +47,9 @@ type fakeItemRepo struct {
 	// referenced reports whether something links to an item, for
 	// DeleteIfUnreferenced. Nil treats every item as unreferenced.
 	referenced func(contentID string) bool
+
+	// unmatchedIDs is what ListUnmatchedByFolderAndPathPrefix returns.
+	unmatchedIDs []string
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -180,7 +183,9 @@ func (r *fakeItemRepo) ReplacePeople(_ context.Context, _ string, _ []models.Ite
 }
 
 func (r *fakeItemRepo) ListUnmatchedByFolderAndPathPrefix(_ context.Context, _ int, _ string, _ int) ([]string, error) {
-	return nil, nil
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.unmatchedIDs...), nil
 }
 
 // TryClaimTrailersRefresh mirrors the SQL gate in *catalog.ItemRepository: the
@@ -448,13 +453,17 @@ func (r *fakeRefreshDebtRepo) MarkTargetSuccess(_ context.Context, targetType, c
 		delete(r.debts, key)
 		return nil
 	}
-	r.debts[key] = &models.MetadataRefreshDebt{
-		TargetType:    targetType,
-		ContentID:     contentID,
-		Priority:      priority,
-		ReasonMask:    reasonMask,
-		NextRefreshAt: nextRefreshAt,
+	debt := &models.MetadataRefreshDebt{TargetType: targetType, ContentID: contentID}
+	if existing, ok := r.debts[key]; ok {
+		// Mirror the repository's upsert: a success leaves attempt_count and
+		// last_attempt_at alone, so terminal give-up survives later syncs.
+		debt.AttemptCount = existing.AttemptCount
+		debt.LastAttemptAt = existing.LastAttemptAt
 	}
+	debt.Priority = priority
+	debt.ReasonMask = reasonMask
+	debt.NextRefreshAt = nextRefreshAt
+	r.debts[key] = debt
 	return nil
 }
 
@@ -1337,13 +1346,14 @@ func TestSyncRefreshDebtForItemKeepsFailedCurrentProviderID(t *testing.T) {
 	}
 }
 
-func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
+func TestShouldReanchorProviderContentIDRequiresManualRefreshOrCorrection(t *testing.T) {
 	const anchoredID = "movie-tmdb-111"
 	tests := []struct {
 		name      string
 		contentID string
 		isNew     bool
 		mode      RefreshMode
+		corrected bool
 		want      bool
 	}{
 		{
@@ -1351,8 +1361,16 @@ func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
 			contentID: anchoredID, mode: ModeScheduledRefresh,
 		},
 		{
-			name:      "identify",
+			name:      "identify confirming the match",
 			contentID: anchoredID, mode: ModeIdentify,
+		},
+		{
+			name:      "identify rejecting the live anchor",
+			contentID: anchoredID, mode: ModeIdentify, corrected: true, want: true,
+		},
+		{
+			name:      "scheduled refresh with a corrected identity",
+			contentID: anchoredID, mode: ModeScheduledRefresh, corrected: true,
 		},
 		{
 			name:      "manual refresh",
@@ -1369,7 +1387,7 @@ func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldReanchorProviderContentID(tt.contentID, tt.isNew, tt.mode); got != tt.want {
+			if got := shouldReanchorProviderContentID(tt.contentID, tt.isNew, tt.mode, tt.corrected); got != tt.want {
 				t.Fatalf("shouldReanchorProviderContentID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -2535,5 +2553,46 @@ func TestCreateOrFindSkeleton_AmbiguousScannedGroupCreatesAmbiguousItem(t *testi
 	}
 	if item.Status != "ambiguous" {
 		t.Fatalf("item.Status = %q, want ambiguous", item.Status)
+	}
+}
+
+func TestIdentityCorrectionRejectsLiveAnchor(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejected.add("tvdb", "73244")
+	stale := make(providerIDValueSet)
+	stale.add("tvdb", "73244")
+	corrected := map[string]string{"tvdb": "78107", "tmdb": "2316"}
+	if !identityCorrectionRejectsLiveAnchor("series-tvdb-73244", corrected, rejected) {
+		t.Error("a rejected live anchor should re-anchor")
+	}
+	if identityCorrectionRejectsLiveAnchor("series-tvdb-73244", corrected, rejected, stale) {
+		t.Error("a rejected anchor recorded stale should keep the id")
+	}
+	if identityCorrectionRejectsLiveAnchor("series-tvdb-78107", corrected, rejected) {
+		t.Error("an anchor the correction kept should keep the id")
+	}
+	if identityCorrectionRejectsLiveAnchor("146000000000000100", corrected, rejected) {
+		t.Error("a legacy id has no anchor to reject")
+	}
+}
+
+// A single-key choice rejects the stored IDs it doesn't restate, but when the
+// chosen title's providers return the anchor again the choice only added a
+// provider ID to the same title, so the item keeps its id.
+func TestIdentityCorrectionKeepsAnchorTheProvidersRestate(t *testing.T) {
+	rejected := make(providerIDValueSet)
+	rejected.add("tmdb", "555")
+	sameShow := map[string]string{"tvdb": "78107", "tmdb": "555"}
+	if identityCorrectionRejectsLiveAnchor("series-tmdb-555", sameShow, rejected) {
+		t.Error("an anchor the chosen title's providers restate should keep the id")
+	}
+
+	rejected = make(providerIDValueSet)
+	rejected.add("imdb", "tt0000100")
+	if identityCorrectionRejectsLiveAnchor("movie-imdb-tt0000100", map[string]string{"tmdb": "200", "imdb": "TT0000100"}, rejected) {
+		t.Error("an IMDb anchor restated in another case should keep the id")
+	}
+	if !identityCorrectionRejectsLiveAnchor("movie-imdb-tt0000100", map[string]string{"tmdb": "200"}, rejected) {
+		t.Error("an anchor the chosen title's providers don't return should re-anchor")
 	}
 }

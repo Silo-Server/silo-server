@@ -63,21 +63,23 @@ func TestStartDeviceLogin(t *testing.T) {
 	// A configured public URL wins over the address the device used, so a
 	// phone off the TV's network can still open the link.
 	pub := pilotDeps(nil, nil)
-	pub.ServerConnections.PublicURL = func() string { return "https://media.example.test/" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`,
+	publicURL := "https://media.example.test/"
+	pub.ServerConnections.PublicURL = func() string { return publicURL }
+	public := newTestHandler(t, pub)
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`,
 		map[string]string{"X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.168.1.20:8090"})
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri_complete":"https://media.example.test/activate?code=48217730"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// A public URL with a path keeps it.
-	pub.ServerConnections.PublicURL = func() string { return "https://Example.test/silo/" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`, nil)
+	publicURL = "https://Example.test/silo/"
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`, nil)
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"https://example.test/silo/activate"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// An unusable public URL falls back to the device's origin.
-	pub.ServerConnections.PublicURL = func() string { return "not a url" }
-	rec = do(t, newTestHandler(t, pub), http.MethodPost, "/api/v2/auth/device/start", `{}`,
+	publicURL = "not a url"
+	rec = do(t, public, http.MethodPost, "/api/v2/auth/device/start", `{}`,
 		map[string]string{"X-Forwarded-Proto": "http", "X-Forwarded-Host": "192.168.1.20:8090"})
 	if rec.Code != 201 || !contains(rec.Body.String(), `"verification_uri":"http://192.168.1.20:8090/activate"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())

@@ -14,7 +14,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
-	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -293,7 +292,6 @@ func TestClearDeviceSettings_KeepsRegistryRow(t *testing.T) {
 func householdDevicesHandler(t *testing.T) (*DeviceHandler, userstore.UserStore) {
 	t.Helper()
 	handler, store := newDevicesTestHandler(t)
-	handler.UserRepo = stubUserRepo{user: &models.User{ID: 1}}
 	handler.ProfileTokens = access.NewProfileTokenService("test-secret-value-at-least-32-chars", 0)
 	return handler, store
 }

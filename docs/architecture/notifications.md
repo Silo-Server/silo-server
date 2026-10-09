@@ -93,6 +93,21 @@ release event's episode key:
   in preferences can never match, so no delivery row is created and no
   channel — including webhooks — ever sees the event. Per-webhook reason
   filters can only narrow further, never re-enable.
+- Access is the other hard gate, checked when fanout runs. The candidate's
+  scope is resolved the way a catalog request resolves it, the event's
+  library must be in that scope, and the episode must pass the catalog's
+  visibility query: series library membership, content-rating ceiling and
+  advisory-age limit. Interest rows are recomputed when the profile's
+  relationship to the series changes and by the daily rebuild, and the
+  recompute checks libraries only, so a row can outlive a library
+  restriction for up to a day and a maturity limit indefinitely; this check
+  is what keeps the title off every channel for that profile. A candidate
+  whose profile no longer exists is skipped, and its notification cursor
+  does not move. If a scope cannot be resolved right now (a failed read, or
+  viewer preferences that could not be loaded), the batch rolls back and the
+  event is retried on the next run. Only candidates that would otherwise get
+  a delivery are resolved. A delivery already in an inbox is not re-checked
+  when access changes later.
 
 Multiple matching reasons produce one delivery with merged reason flags.
 Deliveries are deduplicated per `(profile, release event)` and, for
@@ -133,6 +148,16 @@ which only reach the requester, per `(profile_id, request_id, type)`. An
 operational delivery's webhook, web push and mobile push targets are the
 recipient profile's on the recipient's account. The per-webhook
 `notify_requests` flag gates the webhook channel for them.
+
+An operational delivery that names a catalog item (`request.fulfilled`,
+through `series_id`) is created only when the recipient can open that item,
+checked as fanout checks an episode. A requester or follower without access
+is skipped, and the request still counts as notified. A scope that cannot be
+resolved fails that recipient's dispatch and the request is retried; the
+other recipients are still told, and the retry skips every recipient that
+already has its delivery. The scope is resolved before the dispatch
+transaction opens, because the resolver reads through the connection pool. `request.approved` and `request.declined` name no catalog
+item; they repeat the title the requester submitted.
 
 Approval is the one transition whose two destinations disagree. Server
 channels see `request.approved` for every approval; the requester only gets a

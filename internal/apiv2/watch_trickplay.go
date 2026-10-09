@@ -50,9 +50,10 @@ func registerWatchTrickplay(reg *Registry) {
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/watch/{id}/trickplay", "getWatchTrickplay", "watch",
 			"Get the seek-bar previews of one of an item's files. Versions whose trickplay_available is true have them."),
-		Class:           ClassProfileScoped,
-		ProfileOptional: true,
-		ServiceBacked:   true,
+		Class:                ClassProfileScoped,
+		ProfileOptional:      true,
+		HouseholdProfileGate: true,
+		ServiceBacked:        true,
 	}, reg.getWatchTrickplay)
 }
 

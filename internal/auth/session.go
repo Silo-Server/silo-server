@@ -27,7 +27,7 @@ func IsSessionNotFound(err error) bool {
 }
 
 // sessionColumns is the list of columns returned by all session SELECT queries.
-const sessionColumns = `id, user_id, device_name, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since`
+const sessionColumns = `id, user_id, device_name, COALESCE(device_id, '') AS device_id, COALESCE(device_platform, '') AS device_platform, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, last_seen_at`
 
 // SessionRepository provides CRUD operations for the auth_sessions table.
 type SessionRepository struct {
@@ -46,6 +46,8 @@ func scanSession(row pgx.Row) (*models.AuthSession, error) {
 		&s.ID,
 		&s.UserID,
 		&s.DeviceName,
+		&s.DeviceID,
+		&s.DevicePlatform,
 		&s.IPAddress,
 		&s.CreatedAt,
 		&s.ExpiresAt,
@@ -54,6 +56,7 @@ func scanSession(row pgx.Row) (*models.AuthSession, error) {
 		&s.ImpersonationStartedAt,
 		&s.IdentityID,
 		&s.ProviderSince,
+		&s.LastSeenAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -73,6 +76,8 @@ func scanSessions(rows pgx.Rows) ([]*models.AuthSession, error) {
 			&s.ID,
 			&s.UserID,
 			&s.DeviceName,
+			&s.DeviceID,
+			&s.DevicePlatform,
 			&s.IPAddress,
 			&s.CreatedAt,
 			&s.ExpiresAt,
@@ -81,6 +86,7 @@ func scanSessions(rows pgx.Rows) ([]*models.AuthSession, error) {
 			&s.ImpersonationStartedAt,
 			&s.IdentityID,
 			&s.ProviderSince,
+			&s.LastSeenAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning session row: %w", err)
@@ -94,7 +100,8 @@ func scanSessions(rows pgx.Rows) ([]*models.AuthSession, error) {
 }
 
 // Create inserts a new auth session. If the session's ID is empty, a new UUID
-// is generated via crypto/rand (through github.com/google/uuid).
+// is generated via crypto/rand (through github.com/google/uuid). The device a
+// sign-in transport attached to ctx (WithClientDevice) is recorded on it.
 func (r *SessionRepository) Create(ctx context.Context, session models.AuthSession) error {
 	return r.createWithQuerier(ctx, r.pool, session)
 }
@@ -109,6 +116,7 @@ func (r *SessionRepository) createWithQuerier(
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
+	applyClientDevice(ctx, &session)
 
 	// A session opened through a provider identity is vouched for from now
 	// unless it continues an older chain (a device sign-in approved from a
@@ -119,8 +127,8 @@ func (r *SessionRepository) createWithQuerier(
 	}
 
 	query := `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''))`
 
 	// ip_address is a Postgres inet column; an empty string fails the
 	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
@@ -141,6 +149,8 @@ func (r *SessionRepository) createWithQuerier(
 		session.ImpersonationStartedAt,
 		session.IdentityID,
 		session.ProviderSince,
+		session.DeviceID,
+		session.DevicePlatform,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
@@ -262,6 +272,91 @@ func (r *SessionRepository) ActiveSessionRole(ctx context.Context, id string) (r
 		return "", false, fmt.Errorf("checking session validity: %w", err)
 	}
 	return role, true, nil
+}
+
+// UpdateLastSeen records actual request activity. The database predicate also
+// coalesces writes across API nodes and prevents an older observation from
+// replacing a newer one. It never extends or reactivates a session.
+func (r *SessionRepository) UpdateLastSeen(ctx context.Context, id string, observedAt time.Time) error {
+	_, err := r.pool.Exec(ctx, `UPDATE auth_sessions SET last_seen_at = $2
+		WHERE id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+		AND (last_seen_at IS NULL OR last_seen_at <= $2::timestamptz - INTERVAL '1 minute')`, id, observedAt)
+	return err
+}
+
+// RevokeAsAdmin locks the actor and target in the same order as ownership
+// transfers, so a transfer cannot race the owner-protection check. A nil
+// sessionID revokes all live login sessions held by or impersonated from the
+// target account and its Audiobookshelf- and Jellyfin-compatible sessions, and
+// withdraws its uncollected device sign-in approvals.
+func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID int, sessionID *string) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	rows, err := tx.Query(ctx, `SELECT id, role, enabled, is_owner FROM users
+		WHERE id = ANY($1) ORDER BY id FOR UPDATE`, []int{actorID, userID})
+	if err != nil {
+		return 0, err
+	}
+	var actor, target *models.User
+	for rows.Next() {
+		var user models.User
+		if err := rows.Scan(&user.ID, &user.Role, &user.Enabled, &user.IsOwner); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if user.ID == actorID {
+			actor = &user
+		}
+		if user.ID == userID {
+			target = &user
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if target == nil {
+		return 0, ErrNotFound
+	}
+	if actor == nil || actor.Role != models.RoleAdmin || !actor.Enabled {
+		return 0, ErrAdminProtected
+	}
+	if err := CheckOwnerTarget(OwnerActor{ID: actor.ID, IsOwner: actor.IsOwner}, target); err != nil {
+		return 0, err
+	}
+	query := `UPDATE auth_sessions SET revoked_at = NOW()
+		WHERE (user_id = $1 OR impersonator_user_id = $1)
+		AND revoked_at IS NULL AND expires_at > NOW()`
+	args := []any{userID}
+	if sessionID != nil {
+		query = `UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = $1 AND id = $2`
+		args = append(args, *sessionID)
+	}
+	tag, err := tx.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	if sessionID != nil && tag.RowsAffected() == 0 {
+		return 0, ErrSessionNotFound
+	}
+	if sessionID == nil {
+		if err := revokeAudiobookshelfSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+		if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+		if err := withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // ExtendExpiresAt pushes expires_at forward for an active session. The update

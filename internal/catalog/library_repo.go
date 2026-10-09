@@ -19,12 +19,31 @@ import (
 // junction table.
 type LibraryItemRepository struct {
 	pool *pgxpool.Pool
+	// removalGrace holds an orphaned item back from deletion while one of its
+	// files went missing within this window. See WithRemovalGrace.
+	removalGrace time.Duration
 }
 
 // NewLibraryItemRepository creates a new LibraryItemRepository backed by the
 // given pool.
 func NewLibraryItemRepository(pool *pgxpool.Pool) *LibraryItemRepository {
 	return &LibraryItemRepository{pool: pool}
+}
+
+// WithRemovalGrace returns a copy of the repository whose membership
+// reconciliation keeps an orphaned movie or series while any of its files was
+// marked missing within grace (the scanner's file removal grace). Its membership is
+// still removed, so the item is hidden at once, but a replacement file that
+// arrives in time (an arr upgrade deletes the old release before importing
+// the new one) relinks to the same item: collections, manual edits, artwork,
+// and the added date survive. A reconciliation after the grace has passed
+// deletes the item; until then the trash sweep keeps its file rows (see
+// scanner FileRepository.DeleteMissingByFolder). Zero keeps the immediate
+// delete.
+func (r *LibraryItemRepository) WithRemovalGrace(grace time.Duration) *LibraryItemRepository {
+	cp := *r
+	cp.removalGrace = max(grace, 0)
+	return &cp
 }
 
 // libraryItemColumns is the list of columns returned by all SELECT queries on
@@ -570,6 +589,13 @@ func (r *LibraryItemRepository) reconcileMemberships(ctx context.Context, folder
 			}
 		}
 
+		if len(orphanIDs) > 0 && r.removalGrace > 0 && !onlyFileless {
+			orphanIDs, err = excludeOrphansWithRecentlyMissingFiles(ctx, tx, orphanIDs, time.Now().UTC().Add(-r.removalGrace))
+			if err != nil {
+				return 0, 0, nil, err
+			}
+		}
+
 		if len(orphanIDs) > 0 {
 			var deletedContentIDs []string
 			deletedContentIDs, orphanedImageDirs, err = deleteOrphanedItemsAndImageDirs(ctx, tx, orphanIDs)
@@ -657,6 +683,34 @@ func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int, co
 	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
 		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+// excludeOrphansWithRecentlyMissingFiles returns the orphanIDs to delete now:
+// all but movies and series with a file marked missing at or after cutoff. A
+// held item keeps its file rows, so collectFolderFileOrphanIDs finds it again
+// on a later pass. Book items (ebooks, manga chapters, audiobooks) are never
+// held: their parent and chapter listings read child tables that only an
+// item delete clears, so a held item would stay listed.
+func excludeOrphansWithRecentlyMissingFiles(ctx context.Context, tx pgx.Tx, orphanIDs []string, cutoff time.Time) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM media_items mi
+			JOIN media_files mf ON mf.content_id = mi.content_id
+			WHERE mi.content_id = cid
+			  AND mi.type IN ('movie', 'series')
+			  AND mf.missing_since >= $2
+		)
+	`, orphanIDs, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans with recently missing files: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting orphans without recently missing files: %w", err)
 	}
 	return ids, nil
 }

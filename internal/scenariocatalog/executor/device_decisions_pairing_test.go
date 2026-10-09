@@ -320,7 +320,7 @@ func (e *Env) checkDeviceDecisionEffects(t *testing.T, request scenariocatalog.R
 				}
 				token, _ := doc["profile_token"].(string)
 				claims, err := e.profileTok.Validate(token)
-				if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true || old["approved_profile_id"] != profilePrimary {
+				if err != nil || claims.UserID != user.ID || claims.SessionID != access.SessionID || claims.ProfileID != profilePrimary || claims.PINRevision != e.currentPINRevision(user.ID, profilePrimary) || claims.PolicyRevision != currentPolicyRevision || doc["profile_id"] != profilePrimary || doc["temporary"] != true || old["approved_profile_id"] != profilePrimary {
 					t.Fatal("temporary profile authority invalid")
 				}
 				// The fixture is the current account's unlocked primary profile; this does

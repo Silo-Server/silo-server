@@ -226,6 +226,18 @@ func verdictFor(checkStatus string, failClosed bool) (recheckVerdict, error) {
 	}
 }
 
+// errAnswerNotApplied marks a provider answer this node received but could
+// not apply, where retrying would not help: its savepoint failed (a refusal
+// whose revocation did not commit, an active answer whose role sync did
+// not), its replacement refresh_state could not be encoded, encrypted or
+// stored (the provider may accept only that token now), or a refusal failed
+// to apply after the call. Refresh refuses the token (401) rather than
+// asking for a retry, which would only repeat the provider call. A refusal
+// whose savepoint rolled back stays on record as pending_refusal and an
+// unapplied active answer stays due, so the next check applies them. Other
+// store failures after an active or unsupported answer stay retryable.
+var errAnswerNotApplied = errors.New("the provider's answer could not be applied")
+
 // recheckOutcome is what one re-check transaction did, reported after
 // commit.
 type recheckOutcome struct {
@@ -285,6 +297,15 @@ func (r *ProviderRecheck) recheck(ctx context.Context, identity *LinkedIdentity,
 				"component", "auth", auditInstallationID, identity.InstallationID, auditUserID, identity.UserID)
 			return CheckStatusUnavailable, false, nil
 		}
+		if out.asked && isRefusal(out.status) && !errors.Is(err, errAnswerNotApplied) {
+			// The provider refused the account, but applying the refusal
+			// failed outside the savepoint (a lock wait, a write, the
+			// commit). The session ends either way; a retry would only
+			// delay it. Any other answer that failed here is retryable: its
+			// replacement state, if any, is already stored, so asking again
+			// presents the current token.
+			return "", false, fmt.Errorf("%w: %w", errAnswerNotApplied, err)
+		}
 		return "", false, err
 	}
 	for _, event := range out.audit {
@@ -297,7 +318,7 @@ func (r *ProviderRecheck) recheck(ctx context.Context, identity *LinkedIdentity,
 		r.resolver.onSessionsRevoked(ctx, out.userID)
 	}
 	if out.err != nil {
-		return "", false, out.err
+		return "", false, fmt.Errorf("%w: %w", errAnswerNotApplied, out.err)
 	}
 	if out.loadErr != nil {
 		return "", false, fmt.Errorf("%w: %w", errCheckerLoad, out.loadErr)
@@ -433,7 +454,9 @@ func (r *ProviderRecheck) recheckConn(ctx context.Context, identity *LinkedIdent
 	// in the answer transaction so a refusal clears it with revocation.
 	if replacement := account.GetRefreshState(); len(replacement.GetFields()) > 0 {
 		if err := r.resolver.storeRefreshState(ctx, conn, current.ID, replacement); err != nil {
-			return err
+			// The provider may accept only the token this lost, so asking
+			// again could not succeed.
+			return fmt.Errorf("%w: %w", errAnswerNotApplied, err)
 		}
 		out.stateStored = true
 	}
@@ -673,6 +696,11 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 				identity.ID, identity.UserID, DeviceLoginStatusDenied, DeviceLoginStatusApproved); err != nil {
 				return fmt.Errorf("withdrawing provider device sign-in approvals: %w", err)
 			}
+			// A Jellyfin-compatible session does not record the identity it
+			// signed in through, so every one the account holds ends.
+			if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{identity.UserID}); err != nil {
+				return err
+			}
 			out.revoked = true
 			out.audit = append(out.audit, auditEvent{"recheck_revoked", []any{
 				auditInstallationID, identity.InstallationID, auditUserID, identity.UserID, auditCheckStatus, checkStatus,
@@ -746,7 +774,11 @@ const scheduledRecheckBatch = 100
 // nothing for it (staleProviderAuth). An identity at an enabled primary
 // provider is also due while its account has a live login session opened
 // through a network identity: those sessions defer to it (primaryAuthorityOf),
-// but their refresh re-checks only the network identity.
+// but their refresh re-checks only the network identity. A network identity
+// of an account that keeps its local password is due without any credential
+// to bound, even after an unsupported answer (a plugin may gain checks): its
+// refusal also blocks that password (networkRefused), and its next active
+// answer lifts the block.
 //
 // At an installation that is no longer an enabled sign-in provider nobody
 // can be asked, so the pass only bounds the API keys and Audiobookshelf
@@ -759,12 +791,18 @@ var idleIdentityCondition = `
 		OR i.last_checked_at <= NOW() - make_interval(secs => $1)
 		OR (i.last_check_status = 'unavailable' AND i.last_checked_at <= NOW() - make_interval(secs => $2)))
 	AND EXISTS (SELECT 1 FROM users u WHERE u.id = i.user_id AND NOT u.break_glass
-		AND NOT (i.last_check_status = 'unsupported' AND u.local_password_login_enabled)
+		AND NOT (i.last_check_status = 'unsupported' AND u.local_password_login_enabled
+			AND NOT EXISTS (SELECT 1 FROM plugin_auth_bindings b WHERE b.plugin_installation_id = i.plugin_installation_id
+				AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `))
 		AND (EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
 				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled)
 			OR (NOT u.local_password_login_enabled
 				AND COALESCE(i.last_authenticated_at, i.linked_at) <= NOW() - make_interval(secs => $3))))
 	AND (EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = i.user_id)
+		OR (EXISTS (SELECT 1 FROM users u WHERE u.id = i.user_id AND u.local_password_login_enabled)
+			AND EXISTS (SELECT 1 FROM plugin_auth_bindings b JOIN plugin_installations pi ON pi.id = b.plugin_installation_id
+				WHERE b.plugin_installation_id = i.plugin_installation_id AND b.enabled AND pi.enabled
+					AND ` + plugins.AuthBindingIsNetworkSQL("b.plugin_installation_id", "b.capability_id") + `))
 		OR EXISTS (SELECT 1 FROM abs_sessions a WHERE a.user_id = i.user_id AND a.revoked_at IS NULL
 			AND (a.expires_at IS NULL OR a.expires_at > NOW()))
 		OR EXISTS (SELECT 1 FROM auth_sessions s WHERE s.identity_id = i.id AND s.revoked_at IS NULL AND s.expires_at > NOW()
@@ -955,8 +993,12 @@ func checkStatusOf(value pluginv1.CheckAccountStatus) string {
 	}
 }
 
-// recordIdentityCheck stamps the answer, which supersedes a pending
-// refusal. An active answer also counts as a provider authentication
+// recordIdentityCheck stamps the answer. An answer that decides nothing
+// (unavailable, unsupported) leaves a refusal on record, as the status or as
+// a pending refusal the next re-check applies: the person stays refused, for
+// networkRefused and primaryAuthorityOf, until the provider vouches again.
+// Any other answer supersedes a pending refusal.
+// An active answer also counts as a provider authentication
 // (last_authenticated_at) and refreshes what the provider says about the
 // person, keeping stored values the provider left empty.
 func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatus string, account *pluginv1.AuthenticateResponse) error {
@@ -965,16 +1007,19 @@ func recordIdentityCheck(ctx context.Context, db dbQuerier, id int64, checkStatu
 	}
 	if _, err := db.Exec(ctx, `
 		UPDATE plugin_auth_identities
-		SET last_checked_at = NOW(), last_check_status = $2,
+		SET last_checked_at = NOW(),
+			last_check_status = CASE WHEN $2 IN ('unavailable', 'unsupported') AND last_check_status = ANY($7)
+				THEN last_check_status ELSE $2 END,
 			last_authenticated_at = CASE WHEN $2 = 'active' THEN NOW() ELSE last_authenticated_at END,
 			issuer = COALESCE(NULLIF($3, ''), issuer),
 			username = COALESCE(NULLIF($4, ''), username),
 			email = COALESCE(NULLIF($5, ''), email),
 			display_name = COALESCE(NULLIF($6, ''), display_name),
-			pending_refusal = '', updated_at = NOW()
+			pending_refusal = CASE WHEN $2 IN ('unavailable', 'unsupported') THEN pending_refusal ELSE '' END,
+			updated_at = NOW()
 		WHERE id = $1`,
 		id, checkStatus, strings.TrimSpace(account.GetIssuer()), strings.TrimSpace(account.GetUsername()),
-		strings.TrimSpace(account.GetEmail()), strings.TrimSpace(account.GetDisplayName())); err != nil {
+		strings.TrimSpace(account.GetEmail()), strings.TrimSpace(account.GetDisplayName()), refusalStatuses); err != nil {
 		return fmt.Errorf("recording provider re-check: %w", err)
 	}
 	return nil
@@ -1002,10 +1047,10 @@ func (r *AccountResolver) storeRefreshState(ctx context.Context, db dbQuerier, i
 		}
 		raw, err := protojson.Marshal(state)
 		if err != nil {
-			return fmt.Errorf("encoding provider refresh state: %w", err)
+			return fmt.Errorf("%w: encoding provider refresh state: %w", errAnswerNotApplied, err)
 		}
 		if value, err = r.cipher.Encrypt(string(raw), refreshStateAAD(identityID)); err != nil {
-			return fmt.Errorf("encrypting provider refresh state: %w", err)
+			return fmt.Errorf("%w: encrypting provider refresh state: %w", errAnswerNotApplied, err)
 		}
 	}
 	if _, err := db.Exec(ctx, `UPDATE plugin_auth_identities SET refresh_state = $2, check_outcome_unknown = FALSE, updated_at = NOW() WHERE id = $1`,

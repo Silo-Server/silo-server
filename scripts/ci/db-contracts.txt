@@ -4,21 +4,36 @@
 
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
+./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
+./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
+./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
+./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
+
+# Series air-date sort keys advance when a known episode airs.
+./internal/catalog TestSeriesAirDatesFollowEpisodesAndCalendarDB
+
+# Section and Smart collection rule fields and operators compile to working SQL.
+./internal/catalog TestRuleFieldsFilterCatalogDB
 
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestEbookProgressEventsPostgres
+./internal/api/handlers TestRemoveHistoryHidesEpisodesWithoutLibraryFilePostgres
 ./internal/auth TestUserRepositoryUpdateAccessGroupIDDB
 ./internal/auth TestUserRepositoryUpdatePromotingToAdminClearsAccessGroupDB
 ./internal/auth TestUserRepositoryUpdateDemotingAdminAssignsDefaultAccessGroupDB
 ./internal/auth TestLoginIdentitySpaceDB
+./internal/auth TestLoginSessionActivityAndAdminRevocationDB
+./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
+./internal/jellycompat TestLoginAccountNameWithHashDB
+./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -45,9 +60,18 @@
 ./internal/catalog TestTryClaimTrailersRefresh
 ./internal/catalog TestReleaseTrailersRefreshClaim
 
+# The person name fallback never merges namesakes with different provider IDs.
+./internal/catalog TestPersonNameFallbackKeepsNamesakesApartPostgres
+
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Recommendation candidate scans stay within pgvector's hnsw.ef_search range.
+./internal/recommendations TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB
+
+# Image cache jobs run again for artwork the target no longer holds.
+./internal/metadata TestEnqueueRequeuesSucceededJobOnlyWhenAskedDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
 ./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
@@ -70,10 +94,19 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
+./internal/subtitles/subsync TestExternalTimingAndJobsPostgres
+./migrations TestSubtitleTimingFileReplacePostgres
 ./internal/notifications TestNotifyFulfilledDeliversOncePerAccountForSharedProfileID
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
+./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
+./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
+./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
+./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
+./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
+./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
+./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/requests TestEditorIntegrationsDatabase
 ./internal/requests TestClosingRequestForgetsFollowsDatabase
 
@@ -86,9 +119,27 @@
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
+./internal/downloads TestSubscriptionQualityPostgres
+./internal/downloads TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres
+./internal/downloads TestConcurrentPreparedMonitorSyncsShareFreeSlotsDB
+./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
+./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
+./internal/downloads TestPreparedReplacementQuotaAccountingDB
+./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestAttachPreparationsPostgres
+./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
+./internal/downloads TestPreparationControlsPauseResumeAndCancel
+./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
+
+# Login sessions record the device that signed in.
+./internal/auth TestLoginSessionRecordsReportedDeviceDB
+./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
+
+# Admin top-activity leaderboards count playback, not marked-watched rows.
+./internal/api/handlers TestAdminTopActivityCountsPlaybackNotMarks

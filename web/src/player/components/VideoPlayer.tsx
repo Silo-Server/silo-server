@@ -20,8 +20,10 @@ import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
-import { useStoredSubtitleSync } from "../hooks/useStoredSubtitleSync";
-import { storedSubtitleIdOf } from "../utils/storedSubtitleSync";
+import { useSubtitleSync } from "../hooks/useSubtitleSync";
+import { useSubtitleSyncFeedback } from "../hooks/useSubtitleSyncFeedback";
+import { syncKeyOf } from "../utils/subtitleSync";
+import { SubtitleSyncIndicator } from "./SubtitleSyncIndicator";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
@@ -559,33 +561,34 @@ export function VideoPlayer({
     };
   }, [activeFileId, sessionId]);
 
-  // -- Stored subtitle sync --
-  // A sync or timing reset changes what a stored track's unchanged URL serves.
-  // Each observed change bumps that subtitle's cue revision, which makes the
-  // subtitle hooks refetch the track instead of reusing cues already loaded.
-  const storedSubtitleIds = useMemo(
-    () => subtitleUrls.map(storedSubtitleIdOf).filter((id): id is string => id !== null),
+  // -- Subtitle sync --
+  // A sync or timing change alters what a stored or sidecar track's unchanged
+  // URL serves. Each observed change bumps that subtitle's cue revision, which
+  // makes the subtitle hooks refetch the track instead of reusing cues.
+  const subtitleSyncKeys = useMemo(
+    () => subtitleUrls.map(syncKeyOf).filter((key): key is string => key !== null),
     [subtitleUrls],
   );
-  const [storedCueRevisions, setStoredCueRevisions] = useState<Record<string, number>>({});
-  const bumpStoredCueRevision = useCallback((id: string) => {
-    setStoredCueRevisions((prev) => ({ ...prev, [id]: (prev[id] ?? 0) + 1 }));
+  const [syncCueRevisions, setSyncCueRevisions] = useState<Record<string, number>>({});
+  const bumpSyncCueRevision = useCallback((key: string) => {
+    setSyncCueRevisions((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
   }, []);
-  const storedSubtitleSync = useStoredSubtitleSync({
+  const subtitleSync = useSubtitleSync({
     playerConfig,
     mediaFileId: activeFileId ?? undefined,
     sessionId,
-    storedIds: storedSubtitleIds,
-    onTimingChanged: bumpStoredCueRevision,
+    syncKeys: subtitleSyncKeys,
+    onTimingChanged: bumpSyncCueRevision,
   });
-  const storedSubtitleTimingChanged = storedSubtitleSync.timingChanged;
-  const activeStoredSubtitleId = storedSubtitleIdOf(
+  const subtitleTimingChanged = subtitleSync.timingChanged;
+  const subtitleSyncUpdated = subtitleSync.syncUpdated;
+  const activeSyncKey = syncKeyOf(
     activeSubtitleIndex !== null
       ? subtitleUrls.find((track) => track.index === activeSubtitleIndex)
       : null,
   );
   const activeSubtitleCueRevision =
-    activeStoredSubtitleId !== null ? (storedCueRevisions[activeStoredSubtitleId] ?? 0) : 0;
+    activeSyncKey !== null ? (syncCueRevisions[activeSyncKey] ?? 0) : 0;
 
   const reportSubtitleFailure = useCallback((jobId: string, message?: string) => {
     if (reportedSubtitleFailureRef.current === jobId) return;
@@ -1511,11 +1514,19 @@ export function VideoPlayer({
           break;
         }
         case "subtitle_timing_changed": {
-          // A stored subtitle of this file was retimed. Its URL already serves
-          // the new timing; the sync hook reloads the track if it is on screen
+          // A subtitle of this file was retimed. Its URL already serves the
+          // new timing; the sync hook reloads the track if it is on screen
           // and refreshes the status the subtitle menu shows.
           if (event.payload.file_id === activeFileId) {
-            storedSubtitleTimingChanged(String(event.payload.subtitle_id));
+            subtitleTimingChanged(event.payload.sync_key);
+          }
+          break;
+        }
+        case "subtitle_sync_updated": {
+          // A sync job of this file's subtitle moved on: queued, a step of
+          // its progress, or how it ended.
+          if (event.payload.file_id === activeFileId) {
+            subtitleSyncUpdated(event.payload);
           }
           break;
         }
@@ -1636,7 +1647,8 @@ export function VideoPlayer({
       resumeFromTranslationPause,
       reportSubtitleFailure,
       sessionId,
-      storedSubtitleTimingChanged,
+      subtitleSyncUpdated,
+      subtitleTimingChanged,
       subtitleUrls,
     ],
   );
@@ -2748,6 +2760,14 @@ export function VideoPlayer({
     activeSubtitleCueRevision,
   );
   const subtitleLoadState = isASSActive ? assSubtitleState : textSubtitleState;
+  const subtitleSyncFeedback = useSubtitleSyncFeedback({
+    sync: subtitleSync,
+    tracks: subtitleUrls,
+    activeKey: activeSyncKey,
+    cueRevisions: syncCueRevisions,
+    loadState: subtitleLoadState,
+  });
+  const subtitleSyncNotice = isDetached ? null : subtitleSyncFeedback.notice;
 
   // -- Reconnect subtitle handover --
   // The session a lost connection left behind. When a reconnect has to start
@@ -3978,8 +3998,17 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
+      {subtitleSyncNotice && (
+        <SubtitleSyncIndicator
+          notice={subtitleSyncNotice}
+          onDismiss={subtitleSyncFeedback.dismiss}
+        />
+      )}
+
+      {/* The sync indicator already says the corrected track is loading. */}
       {!isDetached &&
         activeSubtitleIndex !== null &&
+        subtitleSyncNotice?.tone !== "progress" &&
         (subtitleLoadState === "loading" || subtitleLoadState === "error") && (
           <div
             role="status"
@@ -4104,7 +4133,7 @@ export function VideoPlayer({
           sessionId={sessionId}
           getSubtitleStartPosition={getSubtitleStartPosition}
           onSubtitleJobAccepted={handleSubtitleJobAccepted}
-          storedSubtitleSync={storedSubtitleSync}
+          subtitleSync={subtitleSync}
           audioTracks={audioTracks}
           activeAudioIndex={activeAudioIndex}
           onAudioSelect={onAudioSelect}

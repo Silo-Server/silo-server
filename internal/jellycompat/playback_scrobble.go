@@ -117,16 +117,22 @@ func compatScrobblePosition(playSession *PlaybackSession, upstreamSession *playb
 // session. An upstream session lives in one node's session manager, and only
 // that node sends its start or applies its reports, so a node-local lock
 // covers both single-node and multi-node deployments.
+//
+// Callers take the lock in the order they asked for it. A sync.Mutex lets a
+// caller that arrives just as the lock is released take it ahead of callers
+// already waiting, so a position-less Stopped report could stage its stop
+// before a progress report queued ahead of it applied that report's position.
 type compatScrobbleLocks struct {
 	mu    sync.Mutex
 	locks map[string]*compatScrobbleLock
 }
 
+// compatScrobbleLock is one held key's lock. The entry exists only while
+// someone owns the lock and is dropped when the last caller releases it.
 type compatScrobbleLock struct {
-	sync.Mutex
-	// holders counts the owner and waiters, so the entry is dropped once
-	// nobody needs it.
-	holders int
+	// waiters are the callers queued behind the owner, oldest first. Unlock
+	// hands the lock to the first by closing its channel.
+	waiters []chan struct{}
 }
 
 func (l *compatScrobbleLocks) lock(key string) (unlock func()) {
@@ -134,22 +140,36 @@ func (l *compatScrobbleLocks) lock(key string) (unlock func()) {
 	if l.locks == nil {
 		l.locks = make(map[string]*compatScrobbleLock)
 	}
-	entry := l.locks[key]
-	if entry == nil {
+	entry, held := l.locks[key]
+	var turn chan struct{}
+	if held {
+		turn = make(chan struct{})
+		entry.waiters = append(entry.waiters, turn)
+	} else {
 		entry = &compatScrobbleLock{}
 		l.locks[key] = entry
 	}
-	entry.holders++
 	l.mu.Unlock()
-	entry.Lock()
+	if turn != nil {
+		<-turn
+	}
+	released := false
 	return func() {
-		entry.Unlock()
 		l.mu.Lock()
-		entry.holders--
-		if entry.holders == 0 {
-			delete(l.locks, key)
+		defer l.mu.Unlock()
+		// A second release would drop or hand on a lock someone else now
+		// owns, so fail loudly as sync.Mutex does.
+		if released {
+			panic("jellycompat: scrobble lock released twice")
 		}
-		l.mu.Unlock()
+		released = true
+		if len(entry.waiters) == 0 {
+			delete(l.locks, key)
+			return
+		}
+		next := entry.waiters[0]
+		entry.waiters = entry.waiters[1:]
+		close(next)
 	}
 }
 

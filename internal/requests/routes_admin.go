@@ -323,6 +323,19 @@ func (s *Service) PreviewRoute(ctx context.Context, viewer Viewer, mediaType Med
 			tier.Reason = fmt.Sprintf("No server takes %s %s: the only one is marked 4K.", qualityLabel(q), mediaTypePlural(mediaType))
 		case !ok:
 			tier.Reason = "No rule sends " + qualityLabel(q) + " for this title."
+		case decision.Skip && q == Quality1080p:
+			tier.RouteID, tier.RouteName = decision.RouteID, decision.RouteName
+			tier.Reason = decision.RouteName + " sends no HD version"
+			if isStandardRouting(routes, mediaType) {
+				tier.Reason = "The only server is marked 4K, so there is no HD version"
+			}
+			// HD is skipped only because 4K goes out; a requester without 4K
+			// gets neither unless every request also asks for 4K.
+			if fc.settings.ForceDualQuality {
+				tier.Reason += "."
+			} else {
+				tier.Reason += "; requests from users without 4K fail."
+			}
 		case decision.Skip && isStandardRouting(routes, mediaType):
 			tier.RouteID, tier.RouteName = decision.RouteID, decision.RouteName
 			tier.Reason = "No server is marked 4K, so there is no 4K version."

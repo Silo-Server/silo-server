@@ -297,6 +297,12 @@ func (s providerIDValueSet) add(provider, providerID string) {
 	s[provider][providerID] = struct{}{}
 }
 
+func (s providerIDValueSet) has(provider, providerID string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	_, ok := s[provider][normalizeProviderIDComparisonValue(provider, providerID)]
+	return ok
+}
+
 func (s providerIDValueSet) remove(provider, providerID string) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	providerID = normalizeProviderIDComparisonValue(provider, providerID)
@@ -1289,12 +1295,53 @@ func applyProvider404sToAccumulator(accumulator *MetadataResult, provider404s *p
 	suppressProviderIDValues(accumulator.ProviderIDs, provider404s.dropped)
 }
 
+// shouldReanchorProviderContentID reports whether a provider-anchored item may
+// move to the anchor its current identity derives. A manual refresh may. So may
+// an Identify whose correction rejected the item's live anchor
+// (anchorRejected): that anchor names a different title, and leaving the item
+// on it would let that title merge into this item when it is scanned in.
+// Scheduled jobs, and an Identify that confirms or extends the match or only
+// replaces a dead anchor, keep the client-visible content_id.
 func shouldReanchorProviderContentID(
 	contentID string,
 	isNew bool,
 	mode RefreshMode,
+	anchorRejected bool,
 ) bool {
-	return !isNew && mode == ModeManualRefresh && contentid.IsProviderAnchored(contentID)
+	if isNew || !contentid.IsProviderAnchored(contentID) {
+		return false
+	}
+	return mode == ModeManualRefresh || (mode == ModeIdentify && anchorRejected)
+}
+
+// identityCorrectionRejectsLiveAnchor reports whether a correction rejected
+// the provider ID contentID is anchored on while that ID is not known to be
+// dead. A dead anchor (recorded stale, or 404 in this run) can't be claimed by
+// another title, so it is safe to keep. resolved holds the provider IDs this
+// run's providers returned for the chosen identity: when they restate the
+// anchor, the choice only added a provider ID to the same title (an admin
+// picking a show's TVDB candidate for an item anchored on its TMDB ID), so the
+// anchor stands.
+func identityCorrectionRejectsLiveAnchor(
+	contentID string,
+	resolved map[string]string,
+	rejected providerIDValueSet,
+	dead ...providerIDValueSet,
+) bool {
+	provider, providerID, ok := contentid.ProviderAnchor(contentID)
+	if !ok || !rejected.has(provider, providerID) {
+		return false
+	}
+	if value := strings.TrimSpace(resolved[provider]); value != "" &&
+		normalizeProviderIDComparisonValue(provider, value) == normalizeProviderIDComparisonValue(provider, providerID) {
+		return false
+	}
+	for _, set := range dead {
+		if set.has(provider, providerID) {
+			return false
+		}
+	}
+	return true
 }
 
 // ProcessWithProviders runs the pipeline with explicit providers (for testing).
@@ -1870,6 +1917,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		allImages = append(allImages, images...)
 	}
+	if !s.localArtworkUsable() {
+		allImages = withoutLocalImages(allImages)
+	}
 
 	// Phase 4a: Seasons — resolve with "season" content level.
 	var allSeasons []SeasonResult
@@ -1920,6 +1970,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				continue
+			}
+			if !s.localArtworkUsable() {
+				dropLocalSeasonArtwork(seasons)
 			}
 			accumulateSeasonResults(seasonResults, seasons)
 		}
@@ -1974,6 +2027,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						continue
+					}
+					if !s.localArtworkUsable() {
+						dropLocalEpisodeArtwork(episodes)
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
 				}
@@ -2358,6 +2414,12 @@ func (s *MetadataService) mergeAndPersist(
 	if req.enrichmentOnly && existingItem == nil {
 		return nil, fmt.Errorf("enrichment target %q no longer exists", contentID)
 	}
+	// Nor may an Identify: a concurrent Identify can move the item to its
+	// corrected id after this one loaded it, and writing on without the stored
+	// item would drop its field locks.
+	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
+		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
+	}
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.enrichmentOnly && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2406,12 +2468,14 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	// Re-anchor an already provider-anchored item whose corrected identity now
-	// derives a different anchor — the recovery path when an admin fixes a wrong
-	// <uniqueid> in an NFO. Manual refresh only: scheduled jobs and ModeIdentify
-	// must preserve the client-visible content_id even when an external ID is
-	// stale. Reuses the local-promotion machinery under the provider-dedup lock;
-	// a no-op when the derived anchor is unchanged.
-	if shouldReanchorProviderContentID(contentID, isNew, req.Mode) {
+	// derives a different anchor — the recovery path when an admin replaces a
+	// wrong match with Identify or fixes a wrong <uniqueid> in an NFO. See
+	// shouldReanchorProviderContentID for which modes may move the id. Reuses
+	// the local-promotion machinery under the provider-dedup lock; a no-op when
+	// the derived anchor is unchanged.
+	anchorRejected := identityCorrectionRejectsLiveAnchor(contentID, accumulator.ProviderIDs,
+		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
+	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
 		reanchored, err := s.reanchorContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
 		if err != nil {
@@ -2972,19 +3036,19 @@ func (s *MetadataService) refreshTarget(ctx context.Context, targetType, content
 	case RefreshTargetItem:
 		return s.refreshItemTarget(ctx, contentID, folderID, mode, incrementDebtAttempt)
 	case RefreshTargetSeason:
-		err := s.refreshSeasonTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshSeasonTarget(ctx, contentID, folderID, mode)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
 		}
-		return s.syncRefreshDebtForTarget(ctx, targetType, contentID)
+		return s.syncRefreshDebtForTargetOrDefer(ctx, targetType, contentID, seriesID)
 	case RefreshTargetEpisode:
-		err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
 		}
-		return s.syncRefreshDebtForTarget(ctx, targetType, contentID)
+		return s.syncRefreshDebtForTargetOrDefer(ctx, targetType, contentID, seriesID)
 	default:
 		return fmt.Errorf("unsupported metadata refresh target type %q", targetType)
 	}
@@ -3546,7 +3610,9 @@ func (s *MetadataService) recordRefreshTargetFailure(ctx context.Context, target
 			"content_id", contentID,
 			"refresh_error", refreshErr,
 			"error", err)
+		return
 	}
+	noteScheduledRefreshFailure(ctx, targetType, contentID)
 }
 
 func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID string) error {
@@ -3844,26 +3910,28 @@ func itemHasEpisodeMetadataDebt(item *models.MediaItem) bool {
 		item.EpisodeMetadataIncomplete
 }
 
-func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode) error {
+// refreshSeasonTarget refreshes one season and reports the series it belongs to.
+func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode) (string, error) {
 	if s == nil || s.seasonRepo == nil {
-		return ErrMetadataNotFound
+		return "", ErrMetadataNotFound
 	}
 	season, err := s.seasonRepo.GetByID(ctx, seasonID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode)
+	return season.SeriesID, s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode)
 }
 
-func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode) error {
+// refreshEpisodeTarget refreshes one episode and reports the series it belongs to.
+func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode) (string, error) {
 	if s == nil || s.episodeRepo == nil {
-		return ErrMetadataNotFound
+		return "", ErrMetadataNotFound
 	}
 	episode, err := s.episodeRepo.GetByID(ctx, episodeID)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode)
+	return episode.SeriesID, s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode)
 }
 
 func (s *MetadataService) refreshSeriesChildTarget(
@@ -3898,6 +3966,18 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	}
 
 	updated := false
+	// The link and debt passes cover the whole series, so a scheduled refresh
+	// batch runs them once per series instead of once per season or episode.
+	// They also run when a later language fails after an earlier one wrote
+	// rows, on a context detached from the refresh's own cancellation, since
+	// that failure may be the refresh's deadline.
+	defer func() {
+		if updated {
+			syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), seriesEpisodeSyncTimeout)
+			defer cancel()
+			s.syncSeriesEpisodeStateOrDefer(syncCtx, seriesID)
+		}
+	}()
 	childCtx, err := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
 	if err != nil {
 		return err
@@ -3926,8 +4006,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		s.persistSeasonsAndEpisodes(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode)
-		updated = true
+		if s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
+			updated = true
+		}
 	}
 	if !updated {
 		return ErrMetadataNotFound
@@ -4043,6 +4124,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
+		if !s.localArtworkUsable() {
+			dropLocalSeasonArtwork(seasons)
+		}
 		for _, season := range seasons {
 			if season.SeasonNumber != seasonNumber {
 				continue
@@ -4078,6 +4162,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			slog.WarnContext(ctx, "metadata: target episode provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
+		}
+		if !s.localArtworkUsable() {
+			dropLocalEpisodeArtwork(episodes)
 		}
 		for _, episode := range episodes {
 			if episode.SeasonNumber != seasonNumber {
@@ -4161,6 +4248,50 @@ func isRemoteImageSourcePath(path string) bool {
 // cache by the processor; they are never served directly.
 func isLocalImageSourcePath(path string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(path)), "file://")
+}
+
+// localArtworkUsable reports whether refreshes may select local sidecar
+// artwork. A file:// source is never served directly: only an image-cache job
+// copies it into artwork storage. With caching off (metadata.cache_images) or
+// unwired, a chosen local image would leave the slot empty instead of falling
+// back to provider artwork, so refreshes ignore local art altogether.
+func (s *MetadataService) localArtworkUsable() bool {
+	return s != nil && s.autoCacheImages.Load() && s.imageCacheJobs != nil
+}
+
+// withoutLocalImages returns images minus local sidecar candidates. It returns
+// images itself when none are local.
+func withoutLocalImages(images []RemoteImage) []RemoteImage {
+	if !slices.ContainsFunc(images, func(img RemoteImage) bool { return isLocalImageSourcePath(img.URL) }) {
+		return images
+	}
+	remote := make([]RemoteImage, 0, len(images))
+	for _, img := range images {
+		if !isLocalImageSourcePath(img.URL) {
+			remote = append(remote, img)
+		}
+	}
+	return remote
+}
+
+// dropLocalSeasonArtwork clears local sidecar posters so a later provider in
+// the chain can fill the slot.
+func dropLocalSeasonArtwork(seasons []SeasonResult) {
+	for i := range seasons {
+		if isLocalImageSourcePath(seasons[i].PosterPath) {
+			seasons[i].PosterPath = ""
+		}
+	}
+}
+
+// dropLocalEpisodeArtwork clears local sidecar stills so a later provider in
+// the chain can fill the slot.
+func dropLocalEpisodeArtwork(episodes []EpisodeResult) {
+	for i := range episodes {
+		if isLocalImageSourcePath(episodes[i].StillPath) {
+			episodes[i].StillPath = ""
+		}
+	}
 }
 
 // isCacheableImageSourcePath gates the image-cache enqueue paths: remote
@@ -4371,19 +4502,7 @@ func buildItemLocalizationRecord(
 	}
 	// Local sidecar art is language-neutral: it must not duplicate into every
 	// localization row, so local candidates only compete at the item level.
-	remoteImages := images
-	for _, img := range images {
-		if isLocalImageSourcePath(img.URL) {
-			remoteImages = make([]RemoteImage, 0, len(images))
-			for _, candidate := range images {
-				if !isLocalImageSourcePath(candidate.URL) {
-					remoteImages = append(remoteImages, candidate)
-				}
-			}
-			break
-		}
-	}
-	applyBestImages(locItem, remoteImages, mergeMode, preferredLanguage)
+	applyBestImages(locItem, withoutLocalImages(images), mergeMode, preferredLanguage)
 	prepareItemImagesForQueue(locItem, existingLocItem)
 
 	loc.PosterPath = locItem.PosterPath
@@ -4700,7 +4819,9 @@ func bulkUpsertWithFallback[T any](
 	return succeeded
 }
 
-// persistSeasonsAndEpisodes creates/updates seasons and episodes in the DB.
+// persistSeasonsAndEpisodes writes provider seasons and episodes for a whole
+// series refresh, then relinks the series' files and re-syncs its episode
+// debt straight away: the caller's own debt sync reads the result.
 func (s *MetadataService) persistSeasonsAndEpisodes(
 	ctx context.Context,
 	series *models.MediaItem,
@@ -4711,8 +4832,27 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	episodes []EpisodeResult,
 	mergeMode MergeMode,
 ) {
-	if series == nil || strings.TrimSpace(series.ContentID) == "" {
+	if !s.persistSeasonAndEpisodeRows(ctx, series, providerIDs, canonicalLanguage, language, seasons, episodes, mergeMode) {
 		return
+	}
+	s.syncSeriesEpisodeState(ctx, series.ContentID)
+}
+
+// persistSeasonAndEpisodeRows writes provider seasons and episodes and queues
+// their images without the series-wide link and debt passes. It reports false
+// when there is no series to write to.
+func (s *MetadataService) persistSeasonAndEpisodeRows(
+	ctx context.Context,
+	series *models.MediaItem,
+	providerIDs map[string]string,
+	canonicalLanguage string,
+	language string,
+	seasons []SeasonResult,
+	episodes []EpisodeResult,
+	mergeMode MergeMode,
+) bool {
+	if series == nil || strings.TrimSpace(series.ContentID) == "" {
+		return false
 	}
 	seriesID := series.ContentID
 	seasonIDs := make(map[int]string, len(seasons))
@@ -4748,6 +4888,9 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ContentType:       "series",
 			ImageType:         ImageCacheImagePoster,
 			SeasonNumber:      &seasonNumber,
+			// Seasons of a provider-anchored series keep their content ID
+			// when the series is rebuilt; see enqueueItemImages.
+			RequeueSucceeded: !isCachedImagePath(season.PosterPath),
 		})
 	}
 	addEpisodeImageJob := func(episode *models.Episode) {
@@ -4768,6 +4911,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ImageType:         ImageCacheImageStill,
 			SeasonNumber:      &seasonNumber,
 			EpisodeNumber:     &episodeNumber,
+			RequeueSucceeded:  !isCachedImagePath(episode.StillPath),
 		})
 	}
 	addSeasonLocalizationImageJob := func(season *models.Season, loc *models.SeasonLocalization) {
@@ -4787,6 +4931,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			ContentType:       "series",
 			ImageType:         ImageCacheImagePoster,
 			SeasonNumber:      &seasonNumber,
+			RequeueSucceeded:  !isCachedImagePath(loc.PosterPath),
 		})
 	}
 
@@ -5466,7 +5611,12 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	}
 
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
+	return true
+}
 
+// syncSeriesEpisodeState relinks a series' files to its episodes and re-syncs
+// the series' episode metadata debt. Both passes walk the whole series.
+func (s *MetadataService) syncSeriesEpisodeState(ctx context.Context, seriesID string) {
 	if err := s.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to ensure series episode links", "component", "metadata",
 			"series_id", seriesID, "error", err)
@@ -5922,9 +6072,12 @@ func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, series
 	}
 }
 
-func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context, seriesID string, now time.Time) {
+// refreshSeriesEpisodeMetadataState re-syncs the series' episode refresh debt
+// and incomplete flag. It reports false when it could not read the series'
+// debt or episodes; failures on single rows are logged and do not count.
+func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context, seriesID string, now time.Time) bool {
 	if s == nil || s.episodeRepo == nil {
-		return
+		return true
 	}
 
 	// Observe debt versions before reading completeness so a concurrent refresh's
@@ -5936,7 +6089,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		if err != nil {
 			slog.WarnContext(ctx, "metadata: failed to snapshot episode refresh debt", "component", "metadata",
 				"series_id", seriesID, "error", err)
-			return
+			return false
 		}
 	}
 
@@ -5944,12 +6097,24 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 	if err != nil {
 		slog.WarnContext(ctx, "metadata: failed to list series episodes for completeness check", "component", "metadata",
 			"series_id", seriesID, "error", err)
-		return
+		return false
 	}
 
+	// Episode targets that failed during a scheduled refresh batch keep the
+	// failure their own refresh recorded while they still have debt; a later
+	// target in the batch that completed one lets the sweep clear its row.
+	failedEpisodes := failedEpisodeDebtFromContext(ctx)
+	keptActionable := false
 	var completeEpisodeIDs []string
 	var actionableEpisodes []*models.Episode
 	for _, episode := range episodes {
+		if episode != nil {
+			if _, failed := failedEpisodes[strings.TrimSpace(episode.ContentID)]; failed &&
+				EpisodeHasActionableMetadataDebt(episode, now) {
+				keptActionable = true
+				continue
+			}
+		}
 		if !EpisodeHasActionableMetadataDebt(episode, now) {
 			if s.refreshDebtRepo != nil && episode != nil {
 				if id := strings.TrimSpace(episode.ContentID); id != "" {
@@ -5976,7 +6141,8 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 		}
 	}
 
-	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0, new(now))
+	s.updateEpisodeMetadataState(ctx, seriesID, len(actionableEpisodes) > 0 || keptActionable, new(now))
+	return true
 }
 
 func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, episode *models.Episode, now time.Time) error {
@@ -5991,7 +6157,10 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 	if err != nil {
 		return err
 	}
-	logRefreshDebtTerminal(RefreshTargetEpisode, episode.ContentID, reasonMask, attemptCount)
+	// No terminal notice here: this sweep re-syncs every incomplete episode in
+	// the series, and a success leaves attempt_count unchanged, so a row at the
+	// terminal count would be reported again on every sweep. The episode's own
+	// target sync reports the claim that took it there.
 	return s.refreshDebtRepo.MarkTargetSuccess(
 		ctx,
 		RefreshTargetEpisode,
@@ -7291,34 +7460,83 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 
 // mergeEpisodeIDPairs maps the source series' episode content ids onto the
 // target series' episodes by (season, episode) number, so episode-level user
-// state survives a series merge. Episodes with no counterpart on the target
-// are skipped: their state stays on ids that die with the source series, which
-// is today's behavior, and the next scan recreates the episodes on the target.
+// state survives a series merge. A source episode with no counterpart on the
+// target is paired with the id the target composes for it, when both series are
+// provider-anchored and the source episode is on its series' composition: the
+// source's composed id does not die with it, because the show the source
+// anchor names mints it again when it is scanned in, so its state moves to the
+// id the target's episode takes when a scan creates it. Other unpaired
+// episodes keep their state on ids that die with the source series.
 func mergeEpisodeIDPairs(ctx context.Context, tx pgx.Tx, fromContentID, toContentID string) ([]reattribute.IDPair, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT src.content_id, dest.content_id
+		SELECT src.content_id, src.season_number, src.episode_number, dest.content_id
 		FROM episodes src
-		JOIN episodes dest
+		LEFT JOIN episodes dest
 		  ON dest.series_id = $2
 		 AND dest.season_number = src.season_number
 		 AND dest.episode_number = src.episode_number
 		WHERE src.series_id = $1
-		  AND src.content_id <> dest.content_id
 	`, fromContentID, toContentID)
 	if err != nil {
 		return nil, fmt.Errorf("mapping episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
 	}
-	defer rows.Close()
-
-	var pairs []reattribute.IDPair
+	var pairs, composed []reattribute.IDPair
 	for rows.Next() {
-		var pair reattribute.IDPair
-		if err := rows.Scan(&pair.From, &pair.To); err != nil {
+		var sourceID string
+		var seasonNumber, episodeNumber int
+		var destID *string
+		if err := rows.Scan(&sourceID, &seasonNumber, &episodeNumber, &destID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scanning episode id pair: %w", err)
 		}
-		pairs = append(pairs, pair)
+		if destID != nil {
+			if *destID != sourceID {
+				pairs = append(pairs, reattribute.IDPair{From: sourceID, To: *destID})
+			}
+			continue
+		}
+		oldID, okOld := contentid.ForEpisode(fromContentID, seasonNumber, episodeNumber)
+		newID, okNew := contentid.ForEpisode(toContentID, seasonNumber, episodeNumber)
+		if okOld && okNew && sourceID == oldID && newID != sourceID {
+			composed = append(composed, reattribute.IDPair{From: sourceID, To: newID})
+		}
 	}
-	return pairs, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("mapping episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	if len(composed) == 0 {
+		return pairs, nil
+	}
+
+	// An id held by another series' episode is not this target's to give.
+	targets := make([]string, len(composed))
+	for i, pair := range composed {
+		targets[i] = pair.To
+	}
+	takenRows, err := tx.Query(ctx, `SELECT content_id FROM episodes WHERE content_id = ANY($1)`, targets)
+	if err != nil {
+		return nil, fmt.Errorf("checking composed episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	taken := make(map[string]struct{})
+	for takenRows.Next() {
+		var id string
+		if err := takenRows.Scan(&id); err != nil {
+			takenRows.Close()
+			return nil, fmt.Errorf("scanning composed episode id: %w", err)
+		}
+		taken[id] = struct{}{}
+	}
+	takenRows.Close()
+	if err := takenRows.Err(); err != nil {
+		return nil, fmt.Errorf("checking composed episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	for _, pair := range composed {
+		if _, ok := taken[pair.To]; !ok {
+			pairs = append(pairs, pair)
+		}
+	}
+	return pairs, nil
 }
 
 func rebindDeletableStatuses(allowMatchedSource bool) []string {
@@ -8022,6 +8240,12 @@ func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.Me
 			ProviderContentID: providerContentID,
 			ContentType:       imageCacheContentType(item.Type),
 			ImageType:         ImageTypeToString(field.imageType),
+			// An item rebuilt under the same content ID (a Complete Refresh,
+			// or removing and re-adding a local-only series) has no cached
+			// copy, but its earlier job for this source still reads
+			// succeeded. Without a requeue, local artwork stays blank and
+			// remote artwork stays uncached.
+			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
 	s.enqueueImageCacheJobs(ctx, "item", item.ContentID, inputs)
@@ -8034,8 +8258,11 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 	locItem := &models.MediaItem{
 		ContentID:          loc.ContentID,
 		Type:               item.Type,
+		PosterPath:         loc.PosterPath,
 		PosterSourcePath:   loc.PosterSourcePath,
+		BackdropPath:       loc.BackdropPath,
 		BackdropSourcePath: loc.BackdropSourcePath,
+		LogoPath:           loc.LogoPath,
 		LogoSourcePath:     loc.LogoSourcePath,
 	}
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
@@ -8055,6 +8282,9 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 			ProviderContentID: providerContentID,
 			ContentType:       imageCacheContentType(item.Type),
 			ImageType:         ImageTypeToString(field.imageType),
+			// Localization rows are deleted with their item, so a rebuild
+			// leaves them in the same state; see enqueueItemImages.
+			RequeueSucceeded: !isCachedImagePath(*field.path),
 		})
 	}
 	s.enqueueImageCacheJobs(ctx, "item localization", loc.ContentID, inputs)

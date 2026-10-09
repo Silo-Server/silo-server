@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,7 +17,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/netguard"
 )
 
 // Shared artwork helpers used by both the admin library_collections handler
@@ -29,8 +32,31 @@ const (
 
 	collectionImageMaxBytes = 10 << 20 // 10 MB
 
-	collectionImageCleanupTimeout = 30 * time.Second
+	collectionImageCleanupTimeout  = 30 * time.Second
+	collectionImageDownloadTimeout = 30 * time.Second
 )
+
+// errCollectionImageSourceNotAllowed is the one answer for an image URL on
+// the server's own network or in a blocked range. Every refused address gets
+// it unchanged, so the answer says nothing about what listens there.
+var errCollectionImageSourceNotAllowed = errors.New("the image URL must be a public internet address")
+
+// newCollectionImageClient returns the client collection artwork downloads
+// use. Its netguard transport checks every address it dials, redirect hops
+// included: public addresses only, or the server's local network too when
+// the request context carries netguard.WithPrivateAccess. See
+// docs/architecture/outbound-address-guard.md.
+func newCollectionImageClient() *http.Client {
+	return netguard.NewClient(collectionImageDownloadTimeout)
+}
+
+// adminCollectionImageContext marks an admin collection artwork download as
+// trusted with the server's local network. Only acting admins reach the
+// library collection artwork routes; like an image an admin applies to an
+// item, the URL may name a LAN host. netguard still refuses blocked addresses.
+func adminCollectionImageContext(ctx context.Context) context.Context {
+	return netguard.WithPrivateAccess(ctx)
+}
 
 // storeBundledCollectionPosterIfS3Configured stores a built-in collection
 // template poster in S3 when public asset storage is configured. Non-S3
@@ -88,8 +114,14 @@ func readCollectionImageMultipart(r *http.Request, fieldName string) ([]byte, er
 }
 
 // downloadCollectionImageURL fetches an image from an http(s) URL with size
-// limits.
+// limits. The address policy lives in client's netguard transport
+// (newCollectionImageClient), and ctx decides whether the local network is
+// allowed. An address the policy refuses fails with
+// errCollectionImageSourceNotAllowed.
 func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+	if client == nil {
+		return nil, errors.New("collection image downloads have no HTTP client")
+	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil {
 		return nil, fmt.Errorf("invalid URL: %w", err)
@@ -101,11 +133,11 @@ func downloadCollectionImageURL(ctx context.Context, client *http.Client, rawURL
 	if err != nil {
 		return nil, fmt.Errorf("building request: %w", err)
 	}
-	if client == nil {
-		client = http.DefaultClient
-	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, netguard.ErrPrivateDestination) || errors.Is(err, netguard.ErrBlockedDestination) {
+			return nil, errCollectionImageSourceNotAllowed
+		}
 		return nil, fmt.Errorf("downloading image: %w", err)
 	}
 	defer resp.Body.Close()
@@ -327,4 +359,109 @@ func removeCollectionImageVariants(
 		return fmt.Errorf("deleting collection variants: %w", err)
 	}
 	return nil
+}
+
+// collectionCollageComposer composes collection collages from title posters
+// and stores them under one artwork prefix (catalog.CollageGenerator). Each
+// collage is stored in the collection's collage directory with its key as the
+// revision, so every node that builds the same collage writes the same
+// objects.
+type collectionCollageComposer struct {
+	prefix     string
+	store      blobstore.Store
+	posters    itemPosterSigner
+	httpClient *http.Client
+}
+
+// NewPersonalCollectionCollageGenerator composes personal collection
+// collages and stores them beside their uploaded posters. It returns nil
+// when artwork storage or poster signing is not configured, which leaves
+// personal collections without collages. A nil httpClient uses
+// newCollectionImageClient.
+func NewPersonalCollectionCollageGenerator(store blobstore.Store, posters itemPosterSigner, httpClient *http.Client) catalog.CollageGenerator {
+	if store == nil || posters == nil {
+		return nil
+	}
+	if httpClient == nil {
+		httpClient = newCollectionImageClient()
+	}
+	return collectionCollageComposer{prefix: userCollectionImagePrefix, store: store, posters: posters, httpClient: httpClient}
+}
+
+// ComposeCollectionCollage fetches the source posters, composes them and
+// stores the result.
+func (c collectionCollageComposer) ComposeCollectionCollage(ctx context.Context, collectionID, key string, sources []string) (string, string, error) {
+	if len(sources) == 0 {
+		return "", "", collage.ErrNotEnoughImages
+	}
+
+	slog.InfoContext(ctx, "collage: generating poster", "component", "api", "collection_id", collectionID, "item_poster_count", len(sources))
+
+	// Resolve poster paths to fetchable URLs. The collage is stored under the
+	// key of all its sources, so a source that doesn't resolve or download
+	// fails the build rather than being left out. A later read retries it.
+	resolved := c.posters.PresignImageURLs(ctx, sources, "poster", "small")
+	imageData := make([][]byte, 0, len(sources))
+	for _, path := range sources {
+		imageURL := resolved[path]
+		if imageURL == "" {
+			return "", "", fmt.Errorf("collage source %q did not resolve", path)
+		}
+		data, err := c.fetchImage(ctx, imageURL)
+		if err != nil {
+			// A transport error names the presigned URL; keep it out of logs.
+			if urlErr, ok := errors.AsType[*url.Error](err); ok {
+				err = urlErr.Err
+			}
+			return "", "", fmt.Errorf("fetching collage source %q: %w", path, err)
+		}
+		imageData = append(imageData, data)
+	}
+
+	composited, err := collage.ComposePoster(imageData)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Process through the standard image pipeline (generates WebP variants + thumbhash).
+	s3Path, thumbhash, err := putCollectionImageVariants(ctx, c.store, collectionCollageDir(c.prefix, collectionID), key, collectionPosterWidths, composited)
+	if err != nil {
+		return "", "", fmt.Errorf("processing collage image: %w", err)
+	}
+	if want := c.CollectionCollagePath(collectionID, key); s3Path != want {
+		return "", "", fmt.Errorf("collage stored at %q, want %q", s3Path, want)
+	}
+
+	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
+	return s3Path, thumbhash, nil
+}
+
+// CollectionCollagePath returns the path ComposeCollectionCollage stores the
+// collection's collage key under.
+func (c collectionCollageComposer) CollectionCollagePath(collectionID, key string) string {
+	return artworkkey.Original(collectionCollageDir(c.prefix, collectionID), key, ".webp")
+}
+
+// fetchImage downloads an image from a resolved URL. The URL is a catalog
+// title's poster as the server resolved it, usually from its own artwork
+// storage, which may be on the local network; no request supplies it. The
+// fetch is therefore trusted with the local network, and netguard still
+// refuses blocked addresses.
+func (c collectionCollageComposer) fetchImage(ctx context.Context, imageURL string) ([]byte, error) {
+	if c.httpClient == nil {
+		return nil, errors.New("collage downloads have no HTTP client")
+	}
+	req, err := http.NewRequestWithContext(netguard.WithPrivateAccess(ctx), http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image fetch returned status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, collectionImageMaxBytes))
 }

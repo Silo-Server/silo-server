@@ -12,8 +12,9 @@ other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
 
 The optional `media_scope` parameter limits results to people credited on items
-in that scope. It accepts `video` (movies and series), `movie`, `series`, `episode`,
-`audiobook`, `ebook`, or `manga`. Omit it to search credits across all media scopes.
+in that scope. It accepts `video` (movies and series), `video_with_episodes` (movies,
+series, and episodes), `movie`, `series`, `episode`, `audiobook`, `ebook`, or `manga`.
+Omit it to search credits across all media scopes.
 Results require at least one credit visible to the viewer. Library restrictions, disabled libraries, rating
 limits, and excluded media types apply before the limit, including when the media
 scope is omitted. Every credit role participates, so directors match video searches
@@ -38,6 +39,17 @@ its existing alphabetical, unscoped search.
 as a view: when the person's metadata is incomplete or stale and no provider lookup
 ran recently, the server queues a background refresh.
 
+Person detail and `POST /api/v2/catalog/people/{id}/refresh` (`refreshPerson`)
+apply the same visibility rule as a v2 people search without `media_scope`: the
+viewer must be able to see at least one of the person's credits. Otherwise both
+answer `404`, exactly as for an unknown ID, so these routes do not return the
+name, biography, or photo of someone who appears only in titles the viewer cannot
+see. The v1 bridge routes `GET /api/v1/people/{id}` and
+`POST /api/v1/people/{id}/refresh`, and the Jellyfin-compatible `GET /Items/{id}`
+for a person, follow the same rule. The v1 bridge search `GET /api/v1/people?q=`
+lists only people the viewer can see this way and keeps its alphabetical order
+without exact-name ranking. The admin person routes are not filtered.
+
 Clients that warm a cache speculatively, such as web prefetching the cast of an
 open item, pass `prefetch=true`. A prefetch returns the same person but does not
 queue a refresh; missing metadata is left to the server's background sweep. Read
@@ -46,6 +58,58 @@ the person without `prefetch` when the user actually opens them.
 `GET /api/v2/catalog/search/capabilities` advertises `person_prefetch: true` when
 the server accepts the parameter. Check it first: `/api/v2` rejects unknown query
 parameters, so an older server answers a prefetch read with `422`.
+
+## Facet typeahead
+
+`GET /api/v2/catalog/filters/search` (`searchCatalogFacet`) searches the values of
+one facet in a scope. The scope parameters are the ones `getCatalogFilters` takes:
+`source`, `library_id`, `type` (media scope: `movie`, `series`, `episode`, and so
+on), and the rest. `library_ids` names several libraries, one `library_ids`
+parameter per id, and combines with `library_id`. Requested libraries are
+intersected with the viewer's allowed libraries and stripped of disabled ones,
+so the parameter can narrow a scope but never widen it; a scope left with no
+library answers no values. `library_ids` is refused with `source=section`.
+`getCatalogFilters` accepts it too.
+
+The answer carries two lists, each at most `limit` long.
+
+`matches` holds the values that start with `q`, ignoring case, in A to Z order,
+and is empty for an empty `q`. `has_more` is true when more values than `limit`
+start with `q`. This is the answer `matches` has always given, so a client that
+reads only `matches` sees no change.
+
+`values` is the ranked answer, each entry with `count`, the number of titles in
+the scope that carry the value. `values_has_more` is true when more values
+matched than `limit`. For `genre`, `studio`, `network`, `country`,
+`original_language`, and `content_rating`, a value matches when it starts with
+`q` or when any word in it does; words are split on any character that is not a
+letter or digit, so `bros` finds `Warner Bros. Pictures`. Values that start with
+`q` come first, then word matches. Within each group, values with more titles
+come first, then A to Z. An empty `q` returns the most common values. For
+`author`, `narrator`, and `series`, `values` holds the names in `matches`, and an
+empty `q` returns nothing.
+
+Matching ignores case, A to Z compares lowercased code points, and `%` and `_`
+in `q` match literally.
+
+The server answers the first six facets from an in-memory list of the scope's
+values, built with one query and kept for two minutes. The list is keyed by the
+scope's full SQL and arguments, so viewers with different library access,
+disabled libraries, or rating limits never share one. Each node keeps its own
+lists, so `count` and newly added values can lag catalog changes by up to two
+minutes. A node holds at most 500,000 values across all lists and drops the
+least recently used list first, and builds at most four lists at once. A scope
+with more distinct values than that is searched in SQL on every request, with
+the same matching and order.
+
+`GET /api/v2/catalog/search/capabilities` advertises `facet_value_search: true`
+when the server accepts `library_ids`, answers `values` and `values_has_more`,
+matches word starts in `values`, and returns common values for an empty `q`.
+
+`GET /api/v1/catalog/filters/search` is frozen and answers as it always has:
+names that start with `q`, read live from the database in `LOWER(name)` order
+under the database collation, with `%` and `_` in `q` acting as wildcards. It
+returns nothing for an empty `q`.
 
 ## Saved browse sort
 
@@ -98,11 +162,142 @@ Check it before saving a Watchlist or Favorites preference. The
 all, so it cannot be used to detect the personal-list kinds. The document supports
 `If-None-Match` and returns `304` when the caller's copy is current.
 
+`login_sharing: true` reports that a personal collection is either private to its
+creator or shared with every profile on the login, that `listCollections` includes other
+profiles' shared collections, and that only the creator changes or orders a collection. Show
+**Shared with me** and the single **Show to other profiles** switch only when it is true; see
+[the personal collections API](collections-api.md). `groups` is always false.
+
 The document's `import_sources` lists the sources a new imported collection can come
 from (`mdblist`, `tmdb`, `tmdb_list`); it is empty when `imports` is false. Check for
 `tmdb_list` before calling `importTMDBListCollection` (`POST /api/v2/collections/import/tmdb-list`),
 which follows a public TMDB list. The administrator capability document
 (`getAdminCollectionCapabilities`) carries the same field for `importAdminTMDBList`.
+
+Both collection capability documents, `getCollectionCapabilities` and
+`getAdminCollectionCapabilities`, also report:
+
+- `mdblist_search`: `true` when `searchMDBListLists` and `listTopMDBListLists` return
+  lists. It is `false` when the server has no MDBList API key; those operations then answer
+  `configured: false` with no lists. Importing a pasted MDBList link does not need the key.
+- `schedule_time_zone`: the time zone the answering node runs cron collection schedules in.
+  `utc_offset` is the current offset from UTC as `±hh:mm` (for example `-05:00`), daylight
+  saving time included. `abbreviation` is the current abbreviation the node's time zone
+  database reports (for example `CDT`; some zones report a numeric form such as `-03`).
+  `name` is the IANA zone name (for example `America/Chicago`): the zone the node's `TZ`
+  environment variable names, or `UTC` when `TZ` is empty or names no known zone. It is
+  omitted when the node uses its system default zone or a `TZ` file path. Each node reports its own zone, and the
+  offset changes with daylight saving time, so read it with the schedule rather than
+  storing it. A cron `sync_schedule` with a `TZ=` or `CRON_TZ=` prefix runs in the zone
+  the prefix names instead.
+
+`getCollectionCapabilities` also reports `sync_schedule_editable`, `true` when `updateCollection`
+accepts `sync_schedule`; see [Personal sync schedules](#personal-sync-schedules).
+
+`getCollectionCapabilities` also reports `contains_item`, `true` when `listCollections` accepts
+`contains_item`; see [Collections that hold a title](#collections-that-hold-a-title).
+
+`getAdminCollectionCapabilities` also reports `section_references`, `true` when
+`listAdminCollectionSections` is available and `listAdminCollections` items carry row counts; see
+[Rows that show a server collection](#rows-that-show-a-server-collection).
+
+## Personal collection descriptions
+
+`createCollection` (`POST /api/v2/collections`) accepts an optional `description`, stored
+with the new collection and returned as `description` on collection reads. Omitting it stores
+an empty description; `null` is a validation failure. Check `create_description` in the
+`getCollectionCapabilities` document before sending it: a server without that flag rejects the
+member as unknown, and an account whose user store does not keep descriptions (the SQLite
+store) reports `false` and answers a non-empty `description` with `501 capability_unsupported`.
+`updateCollection` changes the description of an existing collection.
+
+The frozen `/api/v1/collections` create ignores a `description` member, in a JSON body and in
+the multipart `data` field alike; the collection is created with an empty description.
+
+## Personal smart previews
+
+`previewCollection` (`POST /api/v2/collections/preview`) returns the first titles a smart query
+matches within the acting profile's access. Each item carries `poster_url`, a card-size poster URL,
+when the title has a poster, and omits the member when it has none. A missing `poster_url` alone
+does not show whether the server returns posters: check `preview_posters` in the
+`getCollectionCapabilities` document. The URL can be signed and expire, like other artwork URLs,
+so read a fresh preview rather than storing it.
+`previewAdminCollection` items carry the same field.
+
+The frozen `/api/v1/collections/preview` response is unchanged and carries no poster.
+
+## Personal collection imports
+
+A personal collection imported with `importMDBListCollection`, `importTMDBCollection`,
+`importTMDBListCollection`, or `importTraktCollection` holds only titles its owner profile
+can access: titles in the owner's allowed libraries that pass its rating limits. Those are
+the `max_content_rating` ceiling, with the server's `access.unrated_content` setting for
+unrated titles, and the `max_advisory_age` limit, with `require_advisory_age` (see
+[Advisory-age limit](#advisory-age-limit)). The owner's hidden-library preference does not count;
+it changes what the owner browses, not what the owner may access. Every sync applies this,
+whether it runs on import, through `syncCollection`, or on the collection's schedule.
+
+- The item limit fills with titles the owner can access. The sync checks every source entry
+  it reads before it applies the limit, so titles outside the owner's access never take a
+  slot. With an item limit set, the sync reads at most four times the limit from the source
+  (100 to 500 entries), so an owner with tight limits can get fewer titles than the limit
+  even when the full source list holds enough the owner can access.
+- `library_ids` keeps only titles in one of the listed libraries, and each title must still
+  be one the owner can access. Omit it to match against everything the owner can access.
+- The sync summary counts only titles the owner can access. `items_matched` counts the
+  titles kept, and so does the `item_count` the sync stores, which the import response
+  returns. An entry the owner cannot access, or one outside `library_ids`, counts in
+  `items_unmatched`, like an entry the catalog lacks, so the summary never reveals titles
+  outside the owner's access. Collection reads such as `getCollection` and `listCollections`
+  report `item_count` as the members the reading profile can see, so the owner's count there
+  leaves out titles in libraries the owner hides.
+- When the server cannot resolve the owner's access, the sync fails and the collection keeps
+  its existing members. The collection records `last_sync_status` `failed` and a
+  `last_sync_message` saying it was not updated, so a failed scheduled sync is visible too;
+  `syncCollection` answers with an error. An import in this state still creates the
+  collection, empty and with a failed first sync the caller can retry.
+
+Each viewer of a shared collection still sees only the titles that viewer can access.
+
+## Personal sync schedules
+
+`updateCollection` (`PATCH /api/v2/collections/{id}`) accepts `sync_schedule` on a synced list
+(a collection imported from MDBList, TMDB, or Trakt). The value is a cadence name, `daily`,
+`weekly`, or `monthly`, or `""` to stop scheduled syncs; `syncCollection` still syncs on demand.
+Cron expressions are a validation failure for every account, administrators included, and so is
+`sync_schedule` on a manual or smart collection or `null`. A cadence sets `next_sync_at` to the
+schedule's next run; `""` sets `sync_schedule` to `""` and `next_sync_at` to `null`. Only the
+collection's creator can change it, as with every other member. Check `sync_schedule_editable`
+in the `getCollectionCapabilities` document before sending it: a server without that flag rejects
+the member as unknown, and the flag is `false` when `imports` is.
+
+Collection reads carry `sync_cadence`, the cadence `sync_schedule` names: `daily`, `weekly`,
+`monthly`, `""` when the collection is not synced, or `custom` for a stored schedule no cadence
+name produces. Read it instead of matching cron expressions.
+
+A sync that is running when `sync_schedule` is saved, on any node, records its result but leaves
+the `next_sync_at` the save set, even when the save kept the same cadence, and the collection a
+sync or import returns shows what was stored. A scheduled sync runs on one node: it first moves
+`next_sync_at` past the minimum interval, which is when a failed sync retries; a successful sync
+replaces that with the schedule's next run unless the schedule was saved while it ran.
+
+The frozen `/api/v1/collections/{id}` update ignores a `sync_schedule` member, and `/api/v1`
+collection responses carry no `sync_cadence`.
+
+## Collections that hold a title
+
+`listCollections` (`GET /api/v2/collections`) accepts an optional `contains_item`, a title's
+content id. Each of the acting profile's own manual collections in the response then carries
+`contains`: `true` when the collection holds the title, `false` when it does not. No other
+collection carries the member: not a smart collection or synced list, and not a collection
+another profile shares with the acting profile. Without `contains_item`, no collection carries
+it. A title the acting profile cannot access, or one that does not exist, reports `false` on
+every collection, even a collection that still stores it. Check `contains_item` in the
+`getCollectionCapabilities` document before sending it: a server without that flag rejects the
+parameter as unknown.
+
+The frozen `/api/v1/collections` list ignores a `contains_item` parameter, and its collections
+carry no `contains`.
 
 ## Library-scoped version lists
 
@@ -120,6 +315,17 @@ without `library_id` is unaffected, and so is `getWatchDetail`, watch-together
 selection, and the Jellyfin compatibility surface: an item always plays from its
 full accessible version list. No client change is needed: the setting only
 changes what an existing `library_id` request returns.
+
+## Device-scoped playback answers
+
+`getCatalogItem` and `listCatalogItemVersions` accept the optional
+`X-Silo-Device-Id` header, as `getWatchState` does. The effective playback
+fields (`effective_audio_track_index`, `effective_audio_language`, and the item's
+`effective_subtitle_*` fields) resolve the acting profile's preferences for that
+device, so a device-scoped override wins over the profile value. Without the
+header they resolve the profile's preferences alone. Clients that set
+device overrides should send the header so the detail page matches what playback
+picks.
 
 ## Episode files
 
@@ -156,6 +362,13 @@ how the files were scanned: one scan per imported episode, as arr webhooks
 produce, groups the same way as one library scan. On the home row, the
 section's `total_count` is a lower bound: it exceeds `item_limit` when more
 cards exist. The catalog view reports the exact count.
+
+Replacing a title's file keeps its added date. A quality upgrade deletes the
+old release before importing the new one under a new name, so the title is
+briefly absent; if the replacement arrives within the server's file removal
+grace (24 hours by default), the title returns with its original added date
+and does not reappear at the top of recently added. See
+[missing files](architecture/missing-files.md).
 
 Recently-added section membership is shared only within the same library and
 access scope. Scan-complete events are coalesced into invalidations at most once
@@ -265,12 +478,76 @@ identity after any count or duration sort. Work grouping chooses the first
 accessible ebook/audiobook edition under the complete source order before applying
 the group cursor. A query cap limits source editions before grouping.
 
+### Rule fields and operators
+
+Catalog query rule groups, `custom_filter` sections, and Smart collections share
+one rule vocabulary (`queryFieldDefs` in `internal/catalog/query_definition.go`).
+Each rule is `{field, op, value}`; an operator a field does not list returns `422`,
+and so does a value of the wrong shape: a span not like `30d` or reaching back before
+PostgreSQL's earliest date (4714 BC), a non-numeric bound,
+a decade that is not a year from 10 on (decade 0 would catch every title with no
+year), a `title` value that is empty or not a string, or a
+`latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
+or an RFC 3339 time.
+
+| Operators | Fields | Value |
+| --- | --- | --- |
+| `contains`, `not_contains`, `is`, `is_not`, `begins_with`, `ends_with` | `title` | string, compared ignoring case; `%` and `_` match literally |
+| `is`, `is_not` | `decade` | the decade's first year (`1990` matches 1990 to 1999) |
+| `gt`, `gte`, `lt`, `lte`, `between` | `runtime` (minutes), `rating_imdb`, `rating_tmdb`, `rating_rt_critic`, `rating_rt_audience` | number, or `[min, max]` for `between` |
+| `gt`, `lt`, `between`, `in_last`, `not_in_last` | `added_at`, `release_date`, `latest_episode_added`, `last_air_date` | ISO date, `[from, to]`, or a span such as `30d` (`h`, `d`, `w`, `m` for months, `y`) |
+
+`not_in_last` keeps titles whose date falls before the span; a title without the
+date matches neither `in_last` nor `not_in_last`, and a title with no runtime
+matches no `runtime` bound. `latest_episode_added` and `last_air_date` describe a
+show's newest episode, so movies never match them. An episode row never matches
+`latest_episode_added`, and in the `episode` scope `last_air_date` is the
+episode's own air date. Rules on `rating_rt_critic` and `rating_rt_audience`
+still apply when an administrator hides that rating source, so a saved collection
+keeps its members; the web editor only stops offering those fields.
+
+The personalized `last_watched` field also takes `not_in_last`. It counts only
+finished plays: a title the profile never finished counts as finished long ago,
+and a show's last watched date is its most recently finished episode.
+
+`GET /api/v2/catalog/search/capabilities` advertises `extended_query_rules: true`
+when the server accepts `title`, `decade`, `runtime`, the TMDB and Rotten
+Tomatoes ratings, `latest_episode_added`, `last_air_date`, the partial title
+operators, and `not_in_last`. Older servers answer those rules with `422`, so the
+web rule editor offers them only while the flag is true. `/api/v1` keeps its frozen
+rule vocabulary: its catalog requests (including `POST /api/v1/catalog/query`) and
+its section and collection saves and previews refuse those fields and
+`not_in_last` with the errors they gave before.
+
 ### Search continuation
 
 Text searches with a nonempty `q` and the default `query` source accept explicit
 `relevance` sorting, including structured requests with rule groups. Other
 sources and saved collection definitions reject `relevance`; it describes a
 text query's ranking rather than a persistent collection order.
+
+### Search media scopes
+
+The `type` parameter of `GET /api/v2/catalog` and `POST /api/v2/catalog/query`
+names one media scope: `movie`, `series`, `episode`, `audiobook`, `ebook`,
+`manga`, or `video` (movies and series). `video` means the same thing in
+search, browse, filters, and smart collections.
+
+`video_with_episodes` is a search scope for clients that want everything
+watchable without books. With a nonempty `q` on the `query` source, it returns
+movies, series, and episodes, ranked together; audiobooks, ebooks, and manga are
+excluded. Without `q`, and on `getCatalogFilters` and `searchCatalogFacet`, it
+covers the same rows as `video`, because a browse lists catalog items and never
+mixes in episode rows (an unscoped browse has no episodes either). Other
+sources refuse it with `422` at `query.type` (`body.type` on the structured
+form), and saved collection definitions do not accept it. People search accepts
+the same value as `media_scope`, so a client can send one scope to both.
+
+`GET /api/v2/catalog/search/capabilities` advertises
+`video_with_episodes_scope: true` when the server accepts the scope. Older
+servers ignore an unrecognized `type`, which searches every media type, and
+reject it as a people `media_scope`. A client that hides books must check the
+flag and send `video` when it is absent.
 
 `GET /api/v2/catalog/search/capabilities` reports the selected provider and, for
 Meilisearch, `result_window_limit`, `session_ttl_seconds`, and
@@ -343,6 +620,59 @@ titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
 
+## Admin template list
+
+`listAdminCollectionTemplates` (`GET /api/v2/admin/collections/templates`) lists only the
+templates with an `mdblist`, `tmdb` or `tmdb_list` source, the set a single collection can be
+created from and the same set the personal template list (`listCollectionTemplates`) offers. `tmdb_discover` and
+`tmdb_collection` templates are left out because only a template bundle can apply them; read
+their summaries from the bundle list below. A category left with no templates is dropped; the
+rest keep their order. The response schema is unchanged.
+
+The route requires acting administrator access. The frozen `/api/v1/admin/collections/templates`
+response is unchanged and still lists every built-in template.
+
+## Template bundle summaries
+
+`listAdminCollectionTemplateBundles` (`GET /api/v2/admin/collections/template-bundles`) returns
+each bundle with `templates`, a summary of every template in `template_ids` order: `id`, `title`,
+`source`, `media_kind`, `featured`, `poster_path` (omitted when the template has no poster) and
+`needs_setup`. The list covers every source a bundle uses, including `tmdb_discover` and
+`tmdb_collection` templates, so a client can describe a bundle without the template catalog.
+Check `template_summaries` in the `getAdminCollectionCapabilities` document before relying on
+`templates`; a server without it returns bundles without summaries.
+
+`featured` is the pinned-first flag a collection created from the template starts with.
+`needs_setup` is true for a template whose collection is created empty and cannot sync until an
+administrator sets its source; today that is the `tmdb_franchise_placeholder` template, which has
+no TMDB collection ID. Applying the bundle still creates that collection.
+
+The route requires acting administrator access. The frozen
+`/api/v1/admin/collections/template-bundles` response is unchanged and carries no `templates`.
+
+## Rows that show a server collection
+
+`listAdminCollectionSections` (`GET /api/v2/admin/collections/{id}/sections`) lists the rows on
+the administrator Home and library pages that show a server collection. Each item carries the
+row's `id`, `scope` (`home` or `library`), `library_id` (the library whose page holds the row;
+`null` for Home), `section_type`, `title`, `featured` (the row is its page's hero banner),
+`enabled`, `position`, and `page_row_count`, the number of rows on that page. Home rows come
+first, then library pages by library, each in page order. Rows a template bundle generated as a
+hero are listed like any other row. An unknown collection answers `404`; a collection no row
+shows answers an empty `items` list.
+
+Each `listAdminCollections` item carries `home_row_count`, the number of turned-on Home rows that
+show the collection, and `row_count`, the number of Home and library page rows that show it,
+turned-off rows included. One count covers the whole list. Both are absent from
+`getAdminCollection` and every other response that returns one collection.
+
+The rows list includes turned-off rows. Both routes read the administrator page layouts only: rows a
+profile added to its own Home are not listed or counted. A collection that `row_count` reports as
+used cannot be deleted (`409`) until those rows stop showing it.
+
+Both routes require acting administrator access. The frozen `/api/v1/admin/collections` list is
+unchanged and carries no counts.
+
 ## Advisory age
 
 Movies and series may carry `advisory_age`, a recommended minimum viewer age from
@@ -395,8 +725,8 @@ book libraries, never carry an advisory age, so the limit never hides them.
   age, next to `total_movies` and `total_shows`.
 - Media-request discovery cannot apply the limit, because titles outside the
   library carry no advisory age.
-- Only a household manager (a server admin, or the primary profile) can set or
-  clear either field; a restricted profile cannot change its own limit.
+- Only a household manager (the account's primary profile, with its PIN verified
+  when it has one; on an admin account too) can set or clear either field; a restricted profile cannot change its own limit.
   Changing either bumps the account's access policy revision, the same as
   changing `max_content_rating`.
 - Detect support with `max_advisory_age_supported` and

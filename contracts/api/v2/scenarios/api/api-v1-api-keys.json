@@ -777,7 +777,7 @@
           "category": "status_headers",
           "description": "Creating a labelled key answers 201 with the key.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -898,7 +898,7 @@
           "category": "data_meaning",
           "description": "The key belongs to the caller, starts on the standard tier, unscoped.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1014,7 +1014,7 @@
           "category": "filtering",
           "description": "Valid scopes are normalized and stored.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1127,7 +1127,7 @@
           "category": "error",
           "description": "An unknown scope is 400.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1234,7 +1234,7 @@
           "category": "error",
           "description": "An empty label is 400.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1340,7 +1340,7 @@
           "category": "error",
           "description": "A non-JSON body is 400.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",
@@ -1741,7 +1741,7 @@
           "category": "field_presence_nullability",
           "description": "last_used_at is absent on a new key.",
           "principal": {
-            "class": "admin"
+            "class": "acting_admin"
           },
           "request": {
             "path": "/api/v1/api-keys/",

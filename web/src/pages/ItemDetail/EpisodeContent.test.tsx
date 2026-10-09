@@ -294,6 +294,18 @@ function countOccurrences(markup: string, fragment: string): number {
 }
 
 describe("EpisodeContent", () => {
+  it("disables collection membership without removing the item identity", () => {
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>,
+    );
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      contentId: "episode-1",
+      canAddToCollection: false,
+    });
+  });
+
   it.each([
     [{ trickplay: true, trickplay_supported: true }, true],
     [{ trickplay: true, trickplay_supported: false }, false],

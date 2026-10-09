@@ -36,7 +36,10 @@ reported date without making a new edit disappear behind a history tombstone.
 Positional updates require a playable item; marking a series or season played
 uses its child episodes. Parent reads and mutation responses derive `Played`,
 `PlayCount`, and `UnplayedItemCount` from those episodes while retaining the
-parent's favorite status; an empty parent remains unplayed. A combined
+parent's favorite status; an empty parent remains unplayed. As in Jellyfin,
+reads derive `PlayedPercentage` from the resume position, so a watched movie or
+episode with no resume point omits it, while a played series or season reports
+100. A combined
 played/favorite update commits the child progress and history together with the
 series or season's favorite status; a storage failure rolls back the entire
 update. Marking played or unplayed clears the resume position unless the request
@@ -187,7 +190,7 @@ request disables Primary images.
 | `GET /Shows/Upcoming` | Scoped episodes dated from yesterday in UTC onward, with paging. |
 | `GET /Items/{id}/ThemeMedia` | `ThemeSongsResult` and `ThemeVideosResult` envelopes after validating the owner. |
 | `GET /Items/{id}/ThemeSongs`, `/ThemeVideos` | Local theme songs for a visible owner; theme videos remain empty. |
-| `GET /Persons`, `/Persons/{name}` | People with credits in movies or series visible to the current profile. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library or movie/series `ParentId`; other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
+| `GET /Persons`, `/Persons/{name}` | People with a credit on a movie, series, or episode visible to the current profile, under the native person-detail rule: an episode credit counts when the profile can see the parent series. `/Persons` accepts Jellyfin 12's `StartIndex`, `NameStartsWith`, `NameLessThan`, and `NameStartsWithOrGreater` (lowercased name comparisons) and a library, movie, series, or episode `ParentId`; a series parent includes its episodes' guest stars, a library parent includes the guest stars of its series, and other parents match nobody. Pages without `SearchTerm` hold up to 100 people; searches stay capped at 20. Person photo tags are signed and appear only in responses that passed this visibility check. `GET /Items/{personId}/Images/Primary` accepts a matching signed `tag` without authentication, as Jellyfin Web sends image requests without credentials; otherwise the session must see a credit for the person. Either check runs before cached artwork is used. |
 
 `/Library/VirtualFolders` reports `LibraryOptions.EnableRealtimeMonitor` from
 Silo's configuration: `true` only while both the server-wide
@@ -221,6 +224,15 @@ Static direct-play requests without PlaybackInfo cannot transcode an over-limit
 source and receive `PlaybackUnavailable` instead. Negotiated limits are kept
 with the playback session, so policy edits affect only new sessions.
 Query `StartTimeTicks` is honored. Remux-only URLs use `static=false`.
+
+PlaybackInfo never offers a version whose file ffprobe rejected with no usable
+stream data recorded (the native API marks it unreadable). Files that have not
+been probed yet are still offered. When no version the request can use is
+readable, including a `MediaSourceId` that names an unreadable one,
+PlaybackInfo answers as Jellyfin does when nothing can play: `200` with an
+empty `MediaSources` list and `ErrorCode: "NoCompatibleStream"`, which Jellyfin
+Web shows as a playback error instead of trying to play. `GET /Items/{id}`
+still lists such a version, and `Static=true` direct play does not check it.
 
 Silo gives each version its own `MediaSources[i].Id`, while real Jellyfin reuses
 the item id. Some clients therefore send a media-source id where an item id
@@ -327,10 +339,11 @@ gain this Dolby Vision-preserving route. Original-file direct play is unchanged.
 When a client's `VideoRangeType` conditions reject a Dolby Vision stream with
 an HDR10 base layer (HEVC profile 7, or profile 8 with compatibility ID 1) but
 accept HDR10, `PlaybackInfo` offers an HLS remux that strips the Dolby Vision
-RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does. The client receives the
+RPUs with FFmpeg's `dovi_rpu` filter, as Jellyfin does, and removes a profile 7
+enhancement layer's NAL units with `filter_units`. The client receives the
 HDR10 base layer tagged `hvc1` with `VIDEO-RANGE=PQ`, without a re-encode or
 tone mapping. The strip runs only where the remux routing policy allows: on
-the API server when its FFmpeg has the filter (FFmpeg 7.1 or later), or on a
+the API server when its FFmpeg has both filters (FFmpeg 7.1 or later), or on a
 transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.
@@ -348,7 +361,14 @@ advertised as playable.
 | `GET /Playback/BitrateTest` | Returns the requested bounded byte count; default 102,400 bytes. |
 
 Text subtitles support `EndPositionTicks`, `CopyTimestamps`, and
-`AddVttTimeMap`. JSON track events apply the same clipping and timestamp
+`AddVttTimeMap`. The VTT time map follows the segment container of the play
+session's HLS route. MPEG-TS segments (encoded H.264, `remux-ts-v1`, and
+copied MPEG-2 video) carry the muxer's shift of twice `-max_delay` (10 s): with
+`CopyTimestamps=true` the map is `MPEGTS:900000`, as in Jellyfin, and otherwise
+the start position plus that shift. fMP4 segments (`remux-v1`, `remux-dv-v1`,
+`hevc-v1`, and other copied-video routes) keep the source clock, so the map is
+`MPEGTS:0` or the start position. Direct play and progressive remux have no
+HLS segments and get the same map as fMP4. JSON track events apply the same clipping and timestamp
 rebasing; an empty timing window returns `TrackEvents: []`. Raw ASS requests requiring conversion or time-window rewriting
 return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter

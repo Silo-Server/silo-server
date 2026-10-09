@@ -667,6 +667,33 @@ func normalizeLoadedConfig(cfg *config.Config) {
 	cfg.Playback.FFmpegPath = playback.ResolveFFmpegPath(cfg.Playback.FFmpegPath)
 }
 
+// applyBootstrapOverrides replaces the settings the process environment owns
+// in a config built from the database.
+func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
+	cfg.Server.Listen = bc.Listen
+	cfg.Server.Mode = bc.Mode
+	cfg.Database.URL = bc.DatabaseURL
+	cfg.JellyfinCompat.Listen = bc.JFListen
+	cfg.Redis = cfg.Redis.WithBootstrapURL(bc.RedisURL)
+}
+
+// addRedisBootstrapSettings records what REDIS_URL supplies to this process
+// in the maps the admin settings handlers read: the keys an admin cannot save
+// here and the values in effect. REDIS_URL names the database number too, so
+// redis.db is one of them and reports the number in use. With a value the
+// parser cannot read, a server that stays up has only the event bus connected,
+// to a bare address and on database 0.
+func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values map[string]string) {
+	if redisURL == "" {
+		return
+	}
+	configured["redis.url"] = true
+	values["redis.url"] = redisURL
+	configured[config.RedisDBSettingKey] = true
+	db, _ := (config.RedisConfig{URL: redisURL}).Database()
+	values[config.RedisDBSettingKey] = strconv.Itoa(db)
+}
+
 // main starts the Silo server or a requested maintenance command.
 func main() {
 	var storageAdmission *pglock.NodeAdmission
@@ -885,13 +912,7 @@ func main() {
 	normalizeLoadedConfig(cfg)
 
 	// Step 7: Apply bootstrap overrides
-	cfg.Server.Listen = bc.Listen
-	cfg.Server.Mode = bc.Mode
-	cfg.Database.URL = bc.DatabaseURL
-	cfg.JellyfinCompat.Listen = bc.JFListen
-	if bc.RedisURL != "" {
-		cfg.Redis.URL = bc.RedisURL
-	}
+	applyBootstrapOverrides(cfg, bc)
 
 	// Step 8: Recreate pool if max_connections differs from bootstrap default
 	if cfg.Database.MaxConnections != bootstrapDBCfg.MaxConnections {
@@ -1010,7 +1031,7 @@ func main() {
 		}()
 	}
 
-	eventBus := cache.NewEventBus(cfg.Redis.URL)
+	eventBus := cache.NewEventBus(cfg.Redis)
 	if err := eventBus.Subscribe(appCtx, cache.ChannelCatalog, func(event cache.Event) {
 		if event.Type == cache.EventScanComplete {
 			sections.InvalidateResolvedListCache()
@@ -1042,7 +1063,9 @@ func main() {
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
-		redisClient, err := cache.NewRedisClientForRole(cfg.Redis, "worker")
+		// Delivery writes run in the background with a short deadline. Honor it
+		// on the sockets too, so a stalled Redis cannot retain their connections.
+		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
 		if err != nil || redisClient == nil {
 			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
@@ -1209,10 +1232,7 @@ func main() {
 
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
-	if bc.RedisURL != "" {
-		bootstrapSensitiveConfigured["redis.url"] = true
-		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
-	}
+	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues)
 	if rawTrustedProxies := strings.TrimSpace(os.Getenv(clientip.EnvTrustedProxies)); rawTrustedProxies != "" {
 		normalizedTrustedProxies, normalizeErr := clientip.NormalizeCIDRList(rawTrustedProxies)
 		if normalizeErr != nil {
@@ -1250,10 +1270,13 @@ func main() {
 		shutdownWork = append(shutdownWork, done)
 	}
 	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
-	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
-		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
+	redisBootstrapAvailable := normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil
 
+	// The API routes connect the subtitle sync service to this hook; the
+	// Jellyfin routes share it, so a first play from either side syncs.
+	subtitlePlaySync := &subtitles.PlaySyncHook{}
 	deps := api.Dependencies{
+		SubtitlePlaySync:             subtitlePlaySync,
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,
@@ -2406,6 +2429,25 @@ func main() {
 
 	// Step 6: Create playback session manager and wire into dependencies.
 	sessionMgr := playback.NewSessionManager(6, 2) // defaults from plan: max_streams=6, max_transcodes=2
+	if apiRedisClient != nil {
+		// Proxy nodes record the media they serve, so a remote stream outlives a
+		// client that stopped reporting progress while it still pulls media. The
+		// idle sweep waits on this lookup, so it gets a client that gives up at
+		// the sweep's deadline.
+		deliveryRedisClient, deliveryRedisErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if deliveryRedisErr != nil {
+			slog.Warn("redis client init failed; node delivery will not keep playback sessions alive", "error", deliveryRedisErr)
+		} else if deliveryRedisClient != nil {
+			defer func() { _ = cache.CloseRedisClient(deliveryRedisClient) }()
+			sessionMgr.SetDeliveryActivityReader(func(ctx context.Context, sessions []playback.Session) (map[string]time.Time, error) {
+				ids := make([]string, len(sessions))
+				for i := range sessions {
+					ids[i] = sessions[i].ID
+				}
+				return nodesessions.RecentDeliveries(ctx, deliveryRedisClient, ids)
+			})
+		}
+	}
 	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
@@ -2674,6 +2716,11 @@ func main() {
 
 		deps.RateLimitMW = rateLimitMW
 	}
+	// Profile PIN lockout is a security limit, independent of request rate
+	// limiting: it counts in Redis whenever Redis is configured, so every node
+	// shares one budget per profile even with ratelimit.backend at its memory
+	// default, and is process-local only on a Redis-less deployment.
+	deps.ProfilePINAttempts = ratelimit.NewProfilePINAttemptLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -2760,8 +2807,23 @@ func main() {
 		deps.TrendingRefresher = trendingRefresher
 
 		if deps.UserStoreProvider != nil {
-			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, nil, slog.Default())
+			// Imports fill their item limit with titles their owner profile
+			// can access. Scheduled syncs start with the task manager below,
+			// so the owner resolver is wired here, not in the router.
+			var ownerScopes scopeResolver
+			if policySystem != nil {
+				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+			}
+			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
+			// Syncs refresh collages and start with the task manager below,
+			// before the router exists, so the collage service is shared from
+			// here; the router gives it its generator.
+			deps.PersonalCollectionCollages = catalog.NewPersonalCollectionCollages(deps.DB, nil)
+			userSync.Collages = deps.PersonalCollectionCollages
 			// Trakt fetchers are wired in router.go (they need settingsRepo);
 			// router.go propagates them onto userSync once configured.
 			userCollectionScheduler = usercollections.NewScheduler(deps.DB, userSync, slog.Default())
@@ -2856,6 +2918,7 @@ func main() {
 		if deps.FileRepo != nil {
 			taskMgr.Register(tasks.NewBackfillMatroskaTrackNumbersTask(deps.DB, scanner.NewMatroskaTrackBackfiller(deps.FileRepo)))
 		}
+		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
@@ -3248,12 +3311,13 @@ func main() {
 	var compatServer atomic.Pointer[jellycompat.Server]
 	dropCompatSessions := func(userID int) {
 		if compat := compatServer.Load(); compat != nil {
-			compat.SessionStore().DeleteByUserID(userID)
+			compat.SessionStore().EvictUser(userID)
 		}
 	}
-	// Every replica caches Jellyfin-compatible sessions in memory and serves a
-	// cached one without reading the database, so a revocation is announced on
-	// the admin channel for each replica to drop the account's sessions.
+	// The revoking transaction deletes the account's stored
+	// Jellyfin-compatible sessions, but every replica caches them in memory
+	// and serves a cached one without reading the database, so a revocation
+	// is announced on the admin channel for each replica to drop its copies.
 	if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
 		if event.Type != cache.EventUserSessionsRevoked {
 			return
@@ -3439,8 +3503,11 @@ func main() {
 			FrontendFS:           deps.FrontendFS,
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
-			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
-			SessionSyncer:   deps.SessionSyncer,
+			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:    deps.SessionSyncer,
+			SubtitlePlaySync: subtitlePlaySync,
+			// One PIN budget per profile across the native and Jellyfin logins.
+			ProfilePINAttempts: deps.ProfilePINAttempts,
 		}
 
 		// Wire direct dependencies when DB is available.

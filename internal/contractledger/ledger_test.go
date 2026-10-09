@@ -797,6 +797,7 @@ var guardedWithoutLegacyRow = map[string]string{
 	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
 	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
 	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1126,8 +1127,17 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"createShuffle":                        "V2-only shuffle playback (v1 is frozen). A replay after a lost response starts a second shuffle; the client never reads the first, which is deleted with other shuffles untouched for a week.",
+	"advanceShuffle":                       "V2-only shuffle playback, state-gated on from_content_id: it advances only while that item is current, so a replay after success changes nothing and returns the same shuffle.",
+	"skipShuffleItem":                      "V2-only shuffle playback, state-gated on next_content_id: it replaces the next item only while that item is next, so a replay after success changes nothing and returns the same shuffle.",
+	"deleteShuffle":                        "V2-only shuffle playback. It deletes the caller's shuffle by id and answers 204 when it is already gone, so a replay converges on the same state.",
+	"deleteAdminUserLoginSession":          "V2-only administrator revocation of one login session: v1 had no administrator login-session management. A replay preserves the original revocation timestamp and leaves the session revoked.",
+	"deleteAdminUserLoginSessions":         "V2-only administrator revocation of an account's active login sessions: v1 had no administrator login-session management. Repeating the request leaves the account signed out and reports how many currently active sessions were revoked.",
+	"createDirectDownloadLink":             "V2-only direct-download link (v1 is frozen): it authorizes one file for the caller's profile and signs a short-lived token without storing anything, so a replay mints an equivalent link.",
 	"syncStoredSubtitle":                   "V2-only subtitle sync (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that aligns the same bytes and reaches the same timing.",
 	"setStoredSubtitleTiming":              "V2-only stored subtitle timing correction, guarded by If-Match on the subtitle's revision; replaying the same timing after success answers 412 and changes nothing.",
+	"startSubtitleSync":                    "V2-only sync of a stored subtitle or a sidecar (v1 is frozen), coalescing on the subtitle's active job; a replay after it finished starts another job that reaches the same timing.",
+	"setSubtitleTiming":                    "V2-only timing correction of a stored subtitle or a sidecar, guarded by If-Match; replaying the same timing after success answers 412 and changes nothing.",
 	"deleteAccountIdentity":                "V2-only external sign-in (OIDC/LDAP) identity disconnect: v1 had no linked identities to manage. It deletes one identity of the caller's account by id, so a replay after success finds nothing and answers 404, leaving the same state.",
 	"createAdminUserIdentity":              "V2-only administrator link of an account to an external sign-in identity: v1 had no identity management. The identity key and the one-identity-per-provider rule are unique, so a replay is refused with 409 and cannot link twice.",
 	"deleteAdminUserIdentity":              "V2-only administrator unlink of an external sign-in identity: v1 had no identity management. A replay after success finds nothing and answers 404, leaving the same state.",
@@ -1158,6 +1168,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"completePasswordReset":                "V2-only public password reset completion (issue #1442): v1 had no reset links. Deleting the single-use link commits in the same transaction as the new password, so a replay finds no link and changes nothing.",
 	"requestPasswordReset":                 "V2-only self-service password reset request (issue #1443): v1 had no reset links. A replay inside the per-account cooldown changes nothing; after it, the replay replaces the link and sends another email, so it is non-retryable.",
 	"cancelAdminJob":                       "V2-only cancellation command for managed background jobs. The job state machine makes repeated requests converge on the same terminal cancellation state.",
+	"pauseAdminDownloadPreparations":       "V2-only pause of offline-download preparation jobs: v1 had no preparation controls. A replay finds the jobs already paused and reports unchanged, leaving the same state.",
+	"resumeAdminDownloadPreparations":      "V2-only resume of paused preparation jobs: v1 had no preparation controls. A replay finds the jobs no longer paused and reports unchanged, leaving the same state.",
+	"cancelAdminDownloadPreparations":      "V2-only cancellation of preparation jobs: v1 had no preparation controls. A replay finds the jobs gone and reports not_found; the waiting downloads were already failed by the first call.",
 	"createAdminStorageTransition":         "V2-only managed artwork storage transition. The active-transition constraint rejects concurrent or replayed starts instead of creating duplicate transition work.",
 	"createThemeSongPlayback":              "V2-only routed theme playback from issue #937; minting a bounded grant or worker token changes no persistent state and can be retried after reauthorization.",
 	"fallbackWatchTogetherSource":          "V2-only coordinated source fallback. The room selection revision and failed file identify one transition under the room lock; replay returns the current snapshot without another source change.",
@@ -1177,6 +1190,9 @@ var mutationWithoutLegacyRow = map[string]string{
 	"updateWatchTogetherRoomSelectionMode": "V2-only lobby mode switch: v1 fixes selection_mode at creation. Repeating the same mode is a no-op; the switch drops the staged item, which is the documented meaning of the value rather than a side effect of retrying.",
 	"regenerateAdminItemTrickplay":         "V2-only seek-bar preview regeneration: v1 had no trickplay. A replay while the files are queued or being made changes nothing, but a later replay makes the previews again, so it is non-retryable like redetectAdminItemMarkers.",
 	"queryWatchTogetherMemberState":        "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
+
+	"replaceAdminUserProfileSectionOverrides": "V2-only administrator edit of one profile's page layout: v1 could only change the caller's own profile. It runs the same full-replacement write as replaceProfileSectionOverrides, which is non-retryable because a save can start a trending refresh.",
+	"resetAdminUserProfileSectionOverrides":   "V2-only administrator reset of one profile's page layout: v1 reset only the caller's own profile or every profile at once. It runs the same delete as resetProfileSectionOverrides and is non-retryable like it.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

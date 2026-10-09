@@ -66,8 +66,7 @@ lint-changed:
 # an entry along with its fix, and never extend it to land a change. The Go
 # suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
 # its reason in the source, where whoever reads the test finds it.
-WEBTEST_KNOWN_FAILURES := \
-	--exclude src/pages/Catalog.test.tsx
+WEBTEST_KNOWN_FAILURES :=
 
 # The Go binary embeds the built frontend, so every Go build and test needs
 # web/dist to exist. Tests never serve it, so a placeholder is enough; `make
@@ -216,8 +215,9 @@ verify-route-inventory:
 # only changed lines. It is the one gocritic check the repo enables (see
 # .golangci.yml), and the tree passes it today, so this can gate CI while the
 # rest of `make lint` cannot.
+# Tests are excluded from this rule, so do not analyze their package variants.
 lint-router-recovery:
-	golangci-lint run --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
+	golangci-lint run --tests=false --enable-only gocritic --max-same-issues=0 --max-issues-per-linter=0 ./...
 MIGRATION_LEDGER := contracts/api/v2/migration.json
 
 # CI gives test-go ownership of these Go assertions and passes 0 to avoid

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "./settingsContract";

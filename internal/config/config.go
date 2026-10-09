@@ -203,10 +203,11 @@ type PlaybackConfig struct {
 
 // RedisConfig holds Redis connection settings.
 type RedisConfig struct {
-	URL               string   `yaml:"url"`
-	SentinelMaster    string   `yaml:"sentinel_master"`
-	SentinelAddresses []string `yaml:"sentinel_addresses"`
-	SentinelPassword  string   `yaml:"sentinel_password"`
+	// URL names one Redis server or a Sentinel deployment; see ParseRedisURL.
+	URL string `yaml:"url"`
+	// DB is the redis.db setting. When it is not empty it replaces the
+	// database number in URL; see Options.
+	DB string `yaml:"-"`
 }
 
 // RateLimitConfig holds rate limiting infrastructure settings.
@@ -595,11 +596,10 @@ func (c *Config) Validate() error {
 		errs = append(errs, "database.url is required for "+c.Server.Mode+" mode")
 	}
 
-	// Redis required for proxy and transcode modes (URL or Sentinel).
+	// Redis required for proxy and transcode modes.
 	needsRedis := c.Server.Mode == "proxy" || c.Server.Mode == "transcode"
-	hasRedis := c.Redis.URL != "" || (c.Redis.SentinelMaster != "" && len(c.Redis.SentinelAddresses) > 0)
-	if needsRedis && !hasRedis {
-		errs = append(errs, "redis.url or redis sentinel config is required for "+c.Server.Mode+" mode")
+	if needsRedis && c.Redis.URL == "" {
+		errs = append(errs, "redis.url is required for "+c.Server.Mode+" mode")
 	}
 
 	if len(errs) > 0 {

@@ -42,7 +42,7 @@ type TranslateDescription struct {
 type PeopleSearchInput struct {
 	Q          string `query:"q" maxLength:"200" doc:"Name prefix or fragment; empty lists the first people"`
 	Limit      int    `query:"limit" minimum:"1" maximum:"100" default:"20" doc:"Most people to answer"`
-	MediaScope string `query:"media_scope" enum:"video,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes"`
+	MediaScope string `query:"media_scope" enum:"video,video_with_episodes,movie,series,episode,audiobook,ebook,manga" doc:"Restrict people to accessible credits in this media scope; omitted searches all media scopes. video covers movies and series; video_with_episodes adds episodes (check getCatalogSearchCapabilities.video_with_episodes_scope first)"`
 }
 
 // PersonInput names one person.
@@ -402,12 +402,9 @@ func (reg *Registry) listPeople(ctx context.Context, in *PeopleSearchInput) (*Pe
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	if reg.deps.CatalogAccess == nil {
-		return nil, unavailable("catalog access")
-	}
-	filter, err := reg.deps.CatalogAccess.ContextAccessFilter(ctx, handlers.AccessFilterOptions{})
-	if err != nil {
-		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
 	}
 	people, err := svc.SearchPeopleScoped(ctx, in.Q, in.Limit, in.MediaScope, filter)
 	if err != nil {
@@ -432,7 +429,11 @@ func (reg *Registry) getPerson(ctx context.Context, in *PersonReadInput) (*Perso
 	if p != nil {
 		return nil, p
 	}
-	person, err := svc.Person(ctx, int64(id), !in.Prefetch)
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
+	}
+	person, err := svc.Person(ctx, int64(id), !in.Prefetch, filter)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -452,10 +453,28 @@ func (reg *Registry) refreshPerson(ctx context.Context, in *PersonInput) (*Perso
 	if p != nil {
 		return nil, p
 	}
-	if err := svc.RefreshPerson(ctx, userID, int64(id)); err != nil {
+	filter, p := reg.peopleAccessFilter(ctx)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.RefreshPerson(ctx, userID, int64(id), filter); err != nil {
 		return nil, catalogActionProblem(err)
 	}
 	return &PersonRefreshOutput{Body: PersonRefresh{Status: trailerStatusQueued, PersonID: in.ID}}, nil
+}
+
+// peopleAccessFilter resolves the viewer's catalog access for the people
+// operations: search lists, and detail and refresh admit, only people with a
+// credit the viewer can see.
+func (reg *Registry) peopleAccessFilter(ctx context.Context) (catalogpkg.AccessFilter, *Problem) {
+	if reg.deps.CatalogAccess == nil {
+		return catalogpkg.AccessFilter{}, unavailable("catalog access")
+	}
+	filter, err := reg.deps.CatalogAccess.ContextAccessFilter(ctx, handlers.AccessFilterOptions{})
+	if err != nil {
+		return catalogpkg.AccessFilter{}, NewProblem(TypeInternalError, "An unexpected error occurred.")
+	}
+	return filter, nil
 }
 
 func (reg *Registry) getLiteraryWork(ctx context.Context, in *LiteraryWorkInput) (*LiteraryWorkOutput, error) {

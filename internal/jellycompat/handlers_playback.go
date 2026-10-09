@@ -329,9 +329,15 @@ type PlaybackHandler struct {
 	// and node-affinity rule for free. The reconstruction recipe is carried in the
 	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
 	// round-trip a native stream token.
-	tm                     *playback.TranscodeManager
-	SubtitleRepo           subtitles.Repository  // optional; enables downloaded subtitles
-	SubtitleBlobs          subtitles.BlobStore   // optional; backs downloaded subtitle reads
+	tm            *playback.TranscodeManager
+	SubtitleRepo  subtitles.Repository // optional; enables downloaded subtitles
+	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
+	// as they are on disk.
+	ExternalTimings subtitles.ExternalTimingLookup
+	// PlaySync aligns a subtitle the first time a client is served it, when
+	// it was never synced; nil leaves that to a request.
+	PlaySync               subtitles.PlaySyncer
 	Trickplay              TrickplaySheets       // optional; serves seek-bar preview sheets
 	SettingsRepo           SettingsReader        // optional; reads watched threshold setting
 	SessionSyncer          PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
@@ -2240,9 +2246,16 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			req.MediaSourceID = pathMediaSourceID
 		}
 	}
+	unreadableSkipped := false
 	for _, version := range detail.Versions {
 		source := h.buildPlaybackSource(routeItemID, playSessionID, version, profile, req, allow4KTranscode, allowHEVCEncoding)
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
+			continue
+		}
+		// The native planner refuses a file ffprobe rejected (#1810); offering
+		// it here would hand the client a source that fails in its player.
+		if version.Unreadable {
+			unreadableSkipped = true
 			continue
 		}
 		source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, req, allow4KTranscode)
@@ -2363,6 +2376,18 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 	}
 
 	if len(sourceDTOs) == 0 {
+		if unreadableSkipped {
+			// Every version this request could use is unreadable. Answer as
+			// Jellyfin does when nothing can play, so the client says so.
+			slog.InfoContext(r.Context(), "jellycompat playback info found no readable media source", "component", "jellycompat",
+				"content_id", detail.ContentID,
+			)
+			writeJSON(w, http.StatusOK, playbackInfoResponseDTO{
+				MediaSources: []mediaSourceDTO{},
+				ErrorCode:    playbackErrorNoCompatibleStream,
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, "NotFound", "Media source not found")
 		return
 	}
