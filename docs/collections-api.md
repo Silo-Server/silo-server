@@ -65,6 +65,11 @@ own network (loopback, a private or link-local range, or a name that resolves to
 one reached through a redirect, fails the poster with one fixed error. See
 [Outbound address guard](architecture/outbound-address-guard.md#collection-artwork).
 
+`uploadCollectionPoster` answers `422 validation_failed` for a poster it cannot use and keeps the
+stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or PNG of up to 4
+megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
+other than `200`, or more than 10 MiB. Other processing failures stay `500`.
+
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.
 - `getCollection` and `updateCollection` carry no `poster_url` for any poster, uploaded,
