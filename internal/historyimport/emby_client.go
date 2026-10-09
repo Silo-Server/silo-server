@@ -223,14 +223,12 @@ func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth)
 	return c.fetchItems(ctx, auth, "Items", "IsFavorite", "Movie,Series,Season,Episode")
 }
 
-// FetchResumeMovies pages through the movies in the user's Continue Watching
-// row. Emby leaves out movies the user hid from it, which the IsResumable
-// filter still returns with unchanged user data. Episodes are left out on
-// purpose: the row shows one next-up episode per series, so a missing episode
-// doesn't mean a hidden one. The endpoint needs a type filter: without one Emby
-// 4.10 answers with no items.
-func (c *EmbyClient) FetchResumeMovies(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "Items/Resume", "", "Movie")
+// FetchResumeItems pages through the user's Continue Watching row. Emby leaves
+// out items the user hid from it, which the IsResumable filter still returns
+// with unchanged user data, and shows at most one episode per series. The
+// endpoint needs a type filter: without one Emby 4.10 answers with no items.
+func (c *EmbyClient) FetchResumeItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
+	return c.fetchItems(ctx, auth, "Items/Resume", "", "Movie,Episode")
 }
 
 // fetchItems pages through one of the user's item lists (endpoint is relative

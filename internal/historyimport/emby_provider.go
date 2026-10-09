@@ -124,34 +124,45 @@ func embyWatchedRecords(item embyItem, series embyItem) []Record {
 	return records
 }
 
-// hiddenFromResume returns the resumable movies the user hid from Emby's
-// Continue Watching. Hiding leaves a movie's user data unchanged and the
+// hiddenFromResume returns the resumable items the user hid from Emby's
+// Continue Watching. Hiding leaves an item's user data unchanged and the
 // IsResumable filter still returns it; only Emby's own resume list leaves it
-// out. Episodes are never reported: that list shows one next-up episode per
-// series, so it can't tell a hidden episode from a skipped one. On error
-// nothing is reported hidden.
+// out. That list shows one episode per series, so episodes are judged by
+// series: hiding an episode hides its whole series, and every resumable
+// episode of a series missing from the list is reported. On error nothing is
+// reported hidden.
 func (p *EmbyProvider) hiddenFromResume(ctx context.Context, resumable []embyItem) (map[string]bool, error) {
-	movies := slices.DeleteFunc(slices.Clone(resumable), func(item embyItem) bool {
-		return !strings.EqualFold(item.Type, "movie")
-	})
-	if len(movies) == 0 {
+	if len(resumable) == 0 {
 		return nil, nil
 	}
-	listed, err := p.client.FetchResumeMovies(ctx, p.auth)
+	listed, err := p.client.FetchResumeItems(ctx, p.auth)
 	if err != nil {
 		return nil, err
 	}
 	shown := make(map[string]bool, len(listed))
 	for _, item := range listed {
-		shown[item.ID] = true
+		shown[resumeListKey(item)] = true
 	}
 	hidden := make(map[string]bool)
-	for _, item := range movies {
-		if !shown[item.ID] {
+	for _, item := range resumable {
+		if key := resumeListKey(item); key != "" && !shown[key] {
 			hidden[item.ID] = true
 		}
 	}
 	return hidden, nil
+}
+
+// resumeListKey is the ID Emby's resume list represents an item by: a movie's
+// own ID, or an episode's series ID, since the list shows one episode per
+// series. Other items have no key.
+func resumeListKey(item embyItem) string {
+	switch {
+	case strings.EqualFold(item.Type, "movie"):
+		return item.ID
+	case strings.EqualFold(item.Type, "episode"):
+		return item.SeriesID
+	}
+	return ""
 }
 
 func (p *EmbyProvider) fetchSeriesMetadata(ctx context.Context, items []embyItem) (map[string]embyItem, error) {

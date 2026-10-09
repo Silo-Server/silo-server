@@ -26,6 +26,12 @@ establish media identity. Watch provider sync and webhook sync use the same matc
   episode, so those markers arrive as episode records. Season favorites are skipped because
   Silo has no season favorite.
 - Emby: played and resumable movies and episodes, plus favorite movies, shows, and episodes.
+  Hiding an item from Emby's Continue Watching leaves its user data unchanged; only
+  `GET /Users/{id}/Items/Resume` leaves it out. That list shows at most one episode per show,
+  and hiding an episode hides its show, so a resumable movie the list leaves out, and every
+  resumable episode of a show the list leaves out, keeps its imported position and gets a
+  Continue Watching dismissal tied to that position. A show Emby leaves out for its own
+  reasons, such as a later episode finished after a partly watched one, is dismissed too.
 - Plex: watched movies and episodes and On Deck progress; personal imports also add the
   account watchlist, and administrator imports read the account's play history.
 
