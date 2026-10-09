@@ -68,6 +68,9 @@ type queryCursorTerm struct {
 func setCursorTermKinds(terms []queryCursorTerm, field string) {
 	for i := range terms {
 		terms[i].kind = cursorKindText
+		if strings.HasSuffix(terms[i].expression, ".episode_season_number") || strings.HasSuffix(terms[i].expression, ".episode_number") {
+			terms[i].kind = cursorKindNumber
+		}
 		if !terms[i].descending {
 			terms[i].nullsLast = true
 		}
@@ -112,14 +115,14 @@ func cursorSeekSQL(terms []queryCursorTerm, after *QueryCursor, start int) (stri
 		return "", nil, nil
 	}
 	if len(after.Keys) != len(terms) {
-		return "", nil, fmt.Errorf("cursor key count does not match sort")
+		return "", nil, fmt.Errorf("%w: cursor key count does not match sort", ErrCatalogCursorChanged)
 	}
 	var arms, equal []string
 	var args []any
 	for i, term := range terms {
 		key := after.Keys[i]
 		if key.Kind != term.kind {
-			return "", nil, fmt.Errorf("cursor key %d has invalid kind", i)
+			return "", nil, fmt.Errorf("%w: cursor key %d has invalid kind", ErrCatalogCursorChanged, i)
 		}
 		expr := term.expression
 		comparison := "FALSE"
