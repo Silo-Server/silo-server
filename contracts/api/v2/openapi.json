@@ -130885,12 +130885,12 @@
             }
           },
           {
-            "description": "Name prefix or fragment; empty lists the first people",
+            "description": "Name to match: each word must start a word of the name, case-insensitively; empty lists the first people",
             "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
-              "description": "Name prefix or fragment; empty lists the first people",
+              "description": "Name to match: each word must start a word of the name, case-insensitively; empty lists the first people",
               "maxLength": 200,
               "type": "string"
             }

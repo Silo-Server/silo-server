@@ -6,8 +6,13 @@
 
 ## People search
 
-`GET /api/v2/catalog/people` (`listPeople`) accepts a name fragment in `q` and
-`limit` from 1 to 100 (default 20). Case-insensitive exact name matches come first;
+`GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and
+`limit` from 1 to 100 (default 20). Each whitespace-separated word of `q` must
+start a word of the person's name, case-insensitively and in any order. A word
+starts the name or follows a character that is not a letter or digit, so `hacks`
+matches "Lark Hackshaw" but not "Chad Thackston", and `luc` matches "Jean-Luc".
+A partial last word still matches, which keeps typeahead working. `%` and `_`
+are literal. Case-insensitive exact name matches come first;
 other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
 
