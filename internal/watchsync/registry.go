@@ -99,6 +99,7 @@ func (r *Registry) List() []ProviderSummary {
 		if configurable, ok := provider.(connectionConfigProvider); ok {
 			summary.ConnectionConfigSchema = configurable.ConnectionConfigSchema()
 		}
+		summary.ConnectionSettings = providerConnectionSettings(provider)
 		summaries = append(summaries, summary)
 	}
 	sort.Slice(summaries, func(i, j int) bool {

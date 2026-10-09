@@ -95,7 +95,7 @@ const connectionColumns = `
 	export_ratings_enabled, sync_dropped_enabled, last_inbound_sync_at,
 	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
 	last_watchlist_sync_at, last_scrobble_error_at, last_error,
-	rate_limited_until, sync_cursors, created_at, updated_at`
+	rate_limited_until, sync_cursors, connection_settings, created_at, updated_at`
 
 // syncRunColumns is the canonical select/returning column list for
 // watch_provider_sync_runs, in the exact order scanSyncRun reads.
@@ -314,13 +314,13 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
 			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
 			last_error, rate_limited_until, sync_cursors, import_ratings_enabled, export_ratings_enabled,
-			sync_dropped_enabled
+			sync_dropped_enabled, connection_settings
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			$15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31::jsonb,
-			$32, $33, $34
+			$32, $33, $34, $35::jsonb
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -375,6 +375,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.ImportRatingsEnabled,
 		conn.ExportRatingsEnabled,
 		conn.SyncDroppedEnabled,
+		encodeStoredConnectionSettings(conn.ConnectionSettings),
 	)
 	saved, err := r.scanConnection(row)
 	if err != nil {
@@ -1917,6 +1918,7 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	var conn Connection
 	var rawSyncCursors []byte
+	var rawConnectionSettings []byte
 	var rawPluginCredentials string
 	err := row.Scan(
 		&conn.ID,
@@ -1953,6 +1955,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.LastError,
 		&conn.RateLimitedUntil,
 		&rawSyncCursors,
+		&rawConnectionSettings,
 		&conn.CreatedAt,
 		&conn.UpdatedAt,
 	)
@@ -1971,6 +1974,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		return Connection{}, err
 	}
 	conn.SyncCursors = decodeSyncCursors(rawSyncCursors)
+	conn.ConnectionSettings = decodeStoredConnectionSettings(rawConnectionSettings)
 	return conn, nil
 }
 

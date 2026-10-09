@@ -67,6 +67,25 @@ Trakt collections and trending send profile tokens issued to the Trakt app, so
 they read the client ID from the Trakt plugin. They fall back to the legacy
 setting only when no Trakt plugin is configured.
 
+## Connection settings
+
+A plugin can declare connection settings in its watch-sync descriptor: preferences a
+profile changes on its connection at any time, such as whether Simkl logs rewatches.
+They differ from a capability's `config_schema`, which an API-key connection collects
+once when it is made and the host does not store.
+
+- The web settings page shows each `boolean` setting as a switch with the connection's
+  other sync options. The host skips a setting whose type it does not know.
+- Values live in `watch_provider_connections.connection_settings`, a JSON object of
+  setting key to the plugin contract's string encoding (`"true"` or `"false"`). Only
+  settings the profile changed are stored. An update merges its keys, and reconnecting
+  or refreshing tokens keeps them.
+- Every authenticated RPC carries the value of each declared setting, defaults
+  included, in `WatchSyncAuthenticatedContext.connection_settings`.
+- An update with an undeclared key or a value of the wrong type is rejected before
+  anything is stored. A stored value for a setting the plugin no longer declares stays
+  in the row but is not sent.
+
 ## Upgrade path
 
 Plugin auto-update installs a first-party plugin from the Silo repository when

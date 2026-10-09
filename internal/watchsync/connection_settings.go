@@ -11,6 +11,8 @@ import (
 // UpdateConnectionSettings locks the account/profile/provider row before
 // comparing its version or clearing provider-owned watchlist ordering. Only
 // preference columns change; tokens and sync state belong to other writers.
+// Provider connection settings in the update are merged into the stored ones;
+// the caller validates them against the provider's declared settings.
 // The cleanup callback may commit in a separate user store. If this transaction
 // later fails, ordering can already be cleared; callers must not promise replay
 // safety or atomic effects across the connection database and user store.
@@ -52,8 +54,9 @@ func (r *PostgresRepository) UpdateConnectionSettings(ctx context.Context, provi
  import_ratings_enabled=COALESCE($14,import_ratings_enabled),
  export_ratings_enabled=COALESCE($15,export_ratings_enabled),
  sync_dropped_enabled=COALESCE($16,sync_dropped_enabled),
+ connection_settings=connection_settings||$17::jsonb,
  updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
- WHERE id=$1 RETURNING `+connectionColumns, current.ID, update.ImportWatchedEnabled, update.ImportProgressEnabled, update.ExportWatchedEnabled, update.ExportUnwatchedEnabled, update.ImportFavoritesEnabled, update.ExportFavoritesEnabled, update.SyncFavoriteRemovalsEnabled, update.ImportWatchlistEnabled, update.ExportWatchlistEnabled, update.SyncWatchlistRemovalsEnabled, update.SyncWatchlistOrderEnabled, update.ScrobbleEnabled, update.ImportRatingsEnabled, update.ExportRatingsEnabled, update.SyncDroppedEnabled))
+ WHERE id=$1 RETURNING `+connectionColumns, current.ID, update.ImportWatchedEnabled, update.ImportProgressEnabled, update.ExportWatchedEnabled, update.ExportUnwatchedEnabled, update.ImportFavoritesEnabled, update.ExportFavoritesEnabled, update.SyncFavoriteRemovalsEnabled, update.ImportWatchlistEnabled, update.ExportWatchlistEnabled, update.SyncWatchlistRemovalsEnabled, update.SyncWatchlistOrderEnabled, update.ScrobbleEnabled, update.ImportRatingsEnabled, update.ExportRatingsEnabled, update.SyncDroppedEnabled, encodeConnectionSettingsPatch(update.ConnectionSettings)))
 	if err != nil {
 		return Connection{}, fmt.Errorf("update watch provider settings: %w", err)
 	}

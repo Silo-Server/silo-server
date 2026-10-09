@@ -2053,6 +2053,15 @@ update ignores the toggles. See
 dropped-show setting (`sync_dropped_enabled`) and `sync_dropped` capability are v2-only in
 the same way; see [dropped-shows.md](dropped-shows.md).
 
+Provider connection settings are v2-only in the same way. A plugin declares them in its
+watch-sync descriptor, and `GET /watch-providers` lists them per provider as
+`connection_settings` (key, label, description, `type`, `default_value`). The settings
+projection returns their values for the connection in `connection_settings`, defaults
+included, and PATCH accepts a partial `connection_settings` object whose keys are merged
+into the stored values. An undeclared key or a value of the wrong type fails with
+`validation_failed`. `boolean` is the only type so far; a client skips a setting whose
+type it does not know. See [watch-provider-plugins.md](watch-provider-plugins.md).
+
 ### Webhook connection management
 
 Eight v2 account operations manage webhook connections, secret rotation, external

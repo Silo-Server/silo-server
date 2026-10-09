@@ -890,6 +890,7 @@ func connectionKey(provider string, userID int, profileID string) string {
 
 func cloneConnectionForTest(conn Connection) Connection {
 	conn.SyncCursors = cloneStringMapForTest(conn.SyncCursors)
+	conn.ConnectionSettings = cloneStringMapForTest(conn.ConnectionSettings)
 	return conn
 }
 
@@ -4233,6 +4234,13 @@ func (r *serviceFakeRepo) UpdateConnectionSettings(ctx context.Context, provider
 	}
 	if update.ScrobbleEnabled != nil {
 		current.ScrobbleEnabled = *update.ScrobbleEnabled
+	}
+	if len(update.ConnectionSettings) > 0 {
+		merged := cloneStringMapForTest(current.ConnectionSettings)
+		for key, value := range update.ConnectionSettings {
+			merged[key] = encodeConnectionSettingValue(value)
+		}
+		current.ConnectionSettings = merged
 	}
 	return r.UpsertConnection(ctx, current)
 }

@@ -582,10 +582,32 @@ func (p *PluginProvider) authenticatedContext(ctx context.Context, conn Connecti
 		return nil, err
 	}
 	return &pluginv1.WatchSyncAuthenticatedContext{
-		CapabilityId:   p.capabilityID,
-		ProviderConfig: config,
-		Credentials:    credentialsFromConnection(conn),
+		CapabilityId:       p.capabilityID,
+		ProviderConfig:     config,
+		Credentials:        credentialsFromConnection(conn),
+		ConnectionSettings: encodedConnectionSettings(p.ConnectionSettings(), conn.ConnectionSettings),
 	}, nil
+}
+
+// ConnectionSettings returns the connection settings the plugin declares that
+// this server can show and store. A setting of a type the server does not
+// know is skipped, and the plugin uses its default for it.
+func (p *PluginProvider) ConnectionSettings() []ConnectionSetting {
+	var settings []ConnectionSetting
+	for _, declared := range p.descriptor.GetConnectionSettings() {
+		switch declared.GetType() {
+		case pluginv1.WatchSyncConnectionSettingType_WATCH_SYNC_CONNECTION_SETTING_TYPE_BOOLEAN:
+			defaultValue, _ := declared.GetDefaultValue().AsInterface().(bool)
+			settings = append(settings, ConnectionSetting{
+				Key:         declared.GetKey(),
+				Label:       declared.GetLabel(),
+				Description: declared.GetDescription(),
+				Type:        ConnectionSettingTypeBoolean,
+				Default:     defaultValue,
+			})
+		}
+	}
+	return settings
 }
 
 // authenticatedContextSecrets lists every secret an RPC carried to the

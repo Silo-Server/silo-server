@@ -343,3 +343,47 @@ func authorizedWatchProviderRequest(method string, path string) *http.Request {
 	ctx = middleware.SetProfileID(ctx, "profile-1")
 	return req.WithContext(ctx)
 }
+
+type updateCapturingWatchProviderService struct {
+	stubWatchProviderService
+	update watchsync.ConnectionUpdate
+}
+
+func (s *updateCapturingWatchProviderService) UpdateConnection(_ context.Context, _ int, _ string, _ string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
+	s.update = update
+	return watchsync.ConnectionStatus{
+		ConnectionSettings:      []watchsync.ConnectionSetting{{Key: "track_rewatches", Label: "Log rewatches", Type: watchsync.ConnectionSettingTypeBoolean}},
+		ConnectionSettingValues: map[string]any{"track_rewatches": true},
+	}, nil
+}
+
+// Provider connection settings exist only on /api/v2; the frozen v1 contract
+// neither lists, returns, nor changes them.
+func TestWatchProviderHandlerKeepsConnectionSettingsOutOfV1(t *testing.T) {
+	service := &updateCapturingWatchProviderService{stubWatchProviderService: stubWatchProviderService{providers: []watchsync.ProviderSummary{{
+		Key: "simkl", DisplayName: "Simkl",
+		ConnectionSettings: []watchsync.ConnectionSetting{{Key: "track_rewatches", Label: "Log rewatches", Type: watchsync.ConnectionSettingTypeBoolean}},
+	}}}}
+	handler := NewWatchProviderHandler(service)
+	list := httptest.NewRecorder()
+	handler.HandleListProviders(list, httptest.NewRequest(http.MethodGet, "/watch-providers/", nil))
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), "track_rewatches") {
+		t.Fatalf("v1 provider list = %d %s", list.Code, list.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/watch-providers/simkl/connection",
+		strings.NewReader(`{"scrobble_enabled":false,"connection_settings":{"track_rewatches":true}}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("provider", "simkl")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = middleware.SetClaims(ctx, &auth.Claims{UserID: 7})
+	ctx = middleware.SetProfileID(ctx, "profile-1")
+	rec := httptest.NewRecorder()
+	handler.HandleUpdateConnection(rec, req.WithContext(ctx))
+	if rec.Code != http.StatusOK || service.update.ConnectionSettings != nil || service.update.ScrobbleEnabled == nil {
+		t.Fatalf("v1 update = %d %s, passed %#v", rec.Code, rec.Body.String(), service.update)
+	}
+	if strings.Contains(rec.Body.String(), "track_rewatches") {
+		t.Fatalf("v1 update response exposes connection settings: %s", rec.Body.String())
+	}
+}

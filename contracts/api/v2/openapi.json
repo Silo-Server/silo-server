@@ -24072,6 +24072,11 @@
       "ConnectionUpdate": {
         "additionalProperties": false,
         "properties": {
+          "connection_settings": {
+            "additionalProperties": {},
+            "description": "Values for the provider's declared connection_settings, keyed by setting key: true or false for a boolean setting. Settings left out keep their current value.",
+            "type": "object"
+          },
           "export_favorites_enabled": {
             "type": "boolean"
           },
@@ -46854,6 +46859,38 @@
         ],
         "type": "object"
       },
+      "WatchProviderConnectionSetting": {
+        "additionalProperties": false,
+        "properties": {
+          "default_value": {
+            "description": "The value of a connection that has not changed the setting."
+          },
+          "description": {
+            "type": "string"
+          },
+          "key": {
+            "description": "The setting's key in connection_settings.",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "description": "The value type. boolean is a switch whose value is true or false. A client skips a setting whose type it does not know; the server keeps its value.",
+            "enum": [
+              "boolean"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "type",
+          "default_value"
+        ],
+        "type": "object"
+      },
       "WatchProviderDeviceAuth": {
         "additionalProperties": false,
         "properties": {
@@ -46912,6 +46949,11 @@
       "WatchProviderSettings": {
         "additionalProperties": false,
         "properties": {
+          "connection_settings": {
+            "additionalProperties": {},
+            "description": "The value of every setting in the provider's connection_settings, keyed by setting key: true or false for a boolean setting. A setting the profile has not changed has its default. Empty when the provider declares none.",
+            "type": "object"
+          },
           "export_favorites_enabled": {
             "type": "boolean"
           },
@@ -46976,7 +47018,8 @@
           "scrobble_enabled",
           "import_ratings_enabled",
           "export_ratings_enabled",
-          "sync_dropped_enabled"
+          "sync_dropped_enabled",
+          "connection_settings"
         ],
         "type": "object"
       },
@@ -46992,6 +47035,13 @@
             },
             "type": "array"
           },
+          "connection_settings": {
+            "description": "Settings a profile can change on its connection at any time, shown with the connection's other sync options. Their values are read and written through the connection's settings. Empty when the provider declares none.",
+            "items": {
+              "$ref": "#/components/schemas/WatchProviderConnectionSetting"
+            },
+            "type": "array"
+          },
           "display_name": {
             "type": "string"
           },
@@ -47002,7 +47052,8 @@
         "required": [
           "key",
           "display_name",
-          "capabilities"
+          "capabilities",
+          "connection_settings"
         ],
         "type": "object"
       },

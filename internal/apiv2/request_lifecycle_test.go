@@ -41,6 +41,10 @@ type fakeWatchLifecycle struct {
 	missingConnection     bool
 	credentialsConfigured bool
 	displayName           string
+	connectionSettings    []watchsync.ConnectionSetting
+	settingValues         map[string]any
+	lastUpdate            watchsync.ConnectionUpdate
+	updateErr             error
 	WatchProviderService
 	user         int
 	profile, key string
@@ -48,13 +52,19 @@ type fakeWatchLifecycle struct {
 	err          error
 }
 
-func (f *fakeWatchLifecycle) ListProviders() []watchsync.ProviderSummary { return nil }
+func (f *fakeWatchLifecycle) ListProviders() []watchsync.ProviderSummary {
+	if f.connectionSettings == nil {
+		return nil
+	}
+	return []watchsync.ProviderSummary{{Key: "simkl", DisplayName: "Simkl", ConnectionSettings: f.connectionSettings}}
+}
 func (f *fakeWatchLifecycle) GetConnectionStatus(_ context.Context, u int, p, key string) (watchsync.ConnectionStatus, error) {
 	f.user, f.profile, f.key = u, p, key
 	if f.version.ID == "" && !f.missingConnection {
 		f.version = watchsync.ConnectionVersion{ID: "connection-1", UpdatedAt: fixedTime()}
 	}
-	return watchsync.ConnectionStatus{Version: f.version, Provider: key, Connected: !f.missingConnection, CredentialsConfigured: f.credentialsConfigured, DisplayName: f.displayName}, f.err
+	return watchsync.ConnectionStatus{Version: f.version, Provider: key, Connected: !f.missingConnection, CredentialsConfigured: f.credentialsConfigured, DisplayName: f.displayName,
+		ConnectionSettings: f.connectionSettings, ConnectionSettingValues: f.settingValues}, f.err
 }
 func (f *fakeWatchLifecycle) PollDeviceAuth(_ context.Context, u int, p, key, id string) (watchsync.Connection, error) {
 	f.user, f.profile, f.key = u, p, key
@@ -220,6 +230,10 @@ func requestLifecycleFixtureCases() []fixtureCase {
 
 func (f *fakeWatchLifecycle) UpdateConnectionConditional(ctx context.Context, u int, p, key string, expected watchsync.ConnectionVersion, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
 	f.updateCalls++
+	f.lastUpdate = update
+	if f.updateErr != nil {
+		return watchsync.ConnectionStatus{}, f.updateErr
+	}
 	if f.staleUpdate {
 		f.version.UpdatedAt = f.version.UpdatedAt.Add(time.Microsecond)
 		return watchsync.ConnectionStatus{}, watchsync.ErrStaleConnection
@@ -289,10 +303,18 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(after.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 15 {
+	if len(fields) != 16 {
 		t.Fatalf("settings fields=%v", fields)
 	}
 	for key, value := range fields {
+		// connection_settings holds the values of the provider's declared
+		// connection settings: preferences too, not provider metadata.
+		if key == "connection_settings" {
+			if _, ok := value.(map[string]any); !ok {
+				t.Fatalf("connection_settings=%v, want an object", value)
+			}
+			continue
+		}
 		if _, ok := value.(bool); !ok {
 			t.Fatalf("non-preference field %s=%v", key, value)
 		}
@@ -307,7 +329,7 @@ func TestWatchProviderMetadataHasNoSettingsValidator(t *testing.T) {
 	if err := json.Unmarshal(patched.Body.Bytes(), &fields); err != nil {
 		t.Fatal(err)
 	}
-	if len(fields) != 15 {
+	if len(fields) != 16 {
 		t.Fatalf("PATCH returned metadata: %v", fields)
 	}
 }
@@ -326,4 +348,64 @@ func TestWatchProviderSettingsMissingConnection(t *testing.T) {
 
 func (f *fakeLifecycle) RequestCapabilityAllowed(context.Context, mediarequests.Viewer) (bool, error) {
 	return true, f.err
+}
+
+func TestWatchProviderConnectionSettings(t *testing.T) {
+	fake := &fakeWatchLifecycle{
+		connectionSettings: []watchsync.ConnectionSetting{{
+			Key: "track_rewatches", Label: "Log rewatches", Description: "Send repeat plays as rewatches.",
+			Type: watchsync.ConnectionSettingTypeBoolean, Default: false,
+		}},
+		settingValues: map[string]any{"track_rewatches": false},
+	}
+	h := lifecycleHandler(&fakeLifecycle{}, fake)
+
+	list := do(t, h, http.MethodGet, Prefix+"/watch-providers", "", requestOwner)
+	var providers struct {
+		Items []WatchProviderSummary `json:"items"`
+	}
+	if list.Code != 200 || json.Unmarshal(list.Body.Bytes(), &providers) != nil || len(providers.Items) != 1 {
+		t.Fatalf("list=%d %s", list.Code, list.Body.String())
+	}
+	declared := providers.Items[0].ConnectionSettings
+	if len(declared) != 1 || declared[0].Key != "track_rewatches" || declared[0].Type != "boolean" ||
+		declared[0].Label != "Log rewatches" || declared[0].DefaultValue != false {
+		t.Fatalf("declared settings = %#v", declared)
+	}
+
+	path := Prefix + "/watch-providers/simkl/connection"
+	get := do(t, h, http.MethodGet, path+"/settings", "", requestOwner)
+	var settings WatchProviderSettings
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &settings) != nil || settings.ConnectionSettings["track_rewatches"] != false {
+		t.Fatalf("settings GET=%d %s", get.Code, get.Body.String())
+	}
+
+	headers := maps.Clone(requestOwner)
+	headers["If-Match"] = get.Header().Get("ETag")
+	patch := do(t, h, http.MethodPatch, path, `{"connection_settings":{"track_rewatches":true}}`, headers)
+	if patch.Code != 200 || fake.lastUpdate.ConnectionSettings["track_rewatches"] != true {
+		t.Fatalf("PATCH=%d %s update=%#v", patch.Code, patch.Body.String(), fake.lastUpdate)
+	}
+
+	// A plugin upgrade that changes a default changes the representation
+	// without touching the connection row, so it must change the validator.
+	before := do(t, h, http.MethodGet, path+"/settings", "", requestOwner).Header().Get("ETag")
+	fake.settingValues = map[string]any{"track_rewatches": true}
+	after := do(t, h, http.MethodGet, path+"/settings", "", requestOwner).Header().Get("ETag")
+	if before == "" || after == before {
+		t.Fatalf("ETag unchanged after the resolved settings changed: %q", after)
+	}
+	headers["If-Match"] = before
+	updates := fake.updateCalls
+	requireProblem(t, do(t, h, http.MethodPatch, path, `{"scrobble_enabled":false}`, headers), TypePreconditionFailed)
+	if fake.updateCalls != updates {
+		t.Fatal("a validator from the old settings representation reached update")
+	}
+
+	fake.updateErr = watchsync.InvalidConnectionSettingError{Key: "other", Reason: "is not a setting of this provider"}
+	headers["If-Match"] = after
+	invalid := do(t, h, http.MethodPatch, path, `{"connection_settings":{"other":true}}`, headers)
+	if invalid.Code != http.StatusUnprocessableEntity || !strings.Contains(invalid.Body.String(), "validation_failed") {
+		t.Fatalf("invalid PATCH=%d %s", invalid.Code, invalid.Body.String())
+	}
 }

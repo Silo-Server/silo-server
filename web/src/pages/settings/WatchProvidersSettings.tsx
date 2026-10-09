@@ -29,6 +29,7 @@ import {
   WatchProviderAuthMethod,
   type DeviceAuthSession,
   type WatchProviderConnection,
+  type WatchProviderConnectionSetting,
   type WatchProviderSyncRun,
 } from "@/hooks/queries/watchProviders";
 import { Input } from "@/components/ui/input";
@@ -120,6 +121,16 @@ function ToggleRow({
       />
     </div>
   );
+}
+
+/** The connection's value for a boolean setting, or the setting's default when it has none. */
+function booleanSettingValue(
+  values: Record<string, unknown> | undefined,
+  setting: WatchProviderConnectionSetting,
+) {
+  const value = values?.[setting.key];
+  if (typeof value === "boolean") return value;
+  return setting.default_value === true;
 }
 
 function StatCell({ label, value }: { label: string; value: React.ReactNode }) {
@@ -377,7 +388,13 @@ function formatLastSync(connection: WatchProviderConnection, latestRun?: WatchPr
   return `Synced ${formatRelativeTime(new Date(newest).toISOString())}`;
 }
 
-function WatchProviderCard({ providerKey }: { providerKey: string }) {
+function WatchProviderCard({
+  providerKey,
+  connectionSettings = [],
+}: {
+  providerKey: string;
+  connectionSettings?: WatchProviderConnectionSetting[];
+}) {
   const { data: savedConnection, isLoading, isFetching } = useWatchProviderConnection(providerKey);
   const updateConnection = useUpdateWatchProviderConnection(providerKey);
   const startAuth = useStartWatchProviderDeviceAuth(providerKey);
@@ -396,7 +413,14 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
     updateConnection.error instanceof V2ProblemError && updateConnection.error.status === 412;
   const connection =
     savedConnection && settingsConflict
-      ? { ...savedConnection, ...updateConnection.variables }
+      ? {
+          ...savedConnection,
+          ...updateConnection.variables,
+          connection_settings: {
+            ...savedConnection.connection_settings,
+            ...updateConnection.variables?.connection_settings,
+          },
+        }
       : savedConnection;
 
   if (isLoading || !connection) {
@@ -842,6 +866,21 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
               disabled={isBusy}
               onChange={(checked) => updateConnection.mutate({ scrobble_enabled: checked })}
             />
+            {connectionSettings
+              .filter((setting) => setting.type === "boolean")
+              .map((setting) => (
+                <ToggleRow
+                  key={setting.key}
+                  id={`watch-provider-${providerKey}-setting-${setting.key}`}
+                  label={setting.label}
+                  description={setting.description ?? ""}
+                  checked={booleanSettingValue(connection.connection_settings, setting)}
+                  disabled={isBusy}
+                  onChange={(checked) =>
+                    updateConnection.mutate({ connection_settings: { [setting.key]: checked } })
+                  }
+                />
+              ))}
           </div>
         </div>
       ) : null}
@@ -883,7 +922,11 @@ export default function WatchProvidersSettings() {
         </section>
       ) : (
         providers.map((provider) => (
-          <WatchProviderCard key={provider.key} providerKey={provider.key} />
+          <WatchProviderCard
+            key={provider.key}
+            providerKey={provider.key}
+            connectionSettings={provider.connection_settings}
+          />
         ))
       )}
     </div>
