@@ -677,7 +677,10 @@ const maxPersonSearchWords = 8
 // letter or digit, so "luc" finds "Jean-Luc" and "brien" finds "O'Brien"; a
 // query word that opens with punctuation, like "'brien", carries its own
 // boundary. Each word also carries a substring ILIKE, which lets
-// idx_people_name_trgm narrow the rows the regex checks. An empty query adds
+// idx_people_name_trgm narrow the rows the regex checks. Both predicates leave
+// case folding to the database: ~* folds one character at a time and Go's
+// lowercasing ignores the collation, so either would drop matches ILIKE keeps
+// (a name spelled "GROẞ" for "groß", a Turkish dotted I). An empty query adds
 // no conditions.
 func personNameWordStartConditions(query string, args *[]any, argIdx *int) []string {
 	var conditions []string
@@ -697,8 +700,8 @@ func personNameWordStartConditions(query string, args *[]any, argIdx *int) []str
 		}
 		conditions = append(conditions,
 			fmt.Sprintf(`name ILIKE $%d ESCAPE '\'`, *argIdx),
-			fmt.Sprintf("name ~* $%d", *argIdx+1))
-		*args = append(*args, "%"+escapePrefixForLike(word)+"%", pattern)
+			fmt.Sprintf("LOWER(name) ~ LOWER($%d)", *argIdx+1))
+		*args = append(*args, "%"+escapeLikeLiteral(word)+"%", pattern)
 		*argIdx += 2
 	}
 	return conditions
