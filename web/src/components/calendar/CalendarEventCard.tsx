@@ -58,7 +58,10 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
               onError={() => setFailedUrl(event.poster_url ?? null)}
             />
           ) : (
-            !thumbhashUrl && <DefaultArtwork />
+            !thumbhashUrl && (
+              // Every calendar entry that isn't a movie belongs to a series.
+              <DefaultArtwork mediaType={event.type === "movie" ? "movie" : "episode"} />
+            )
           )}
           <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
           {event.badges.length > 0 && (

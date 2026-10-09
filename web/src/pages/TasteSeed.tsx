@@ -255,7 +255,7 @@ function TasteSeedCard({
             onError={() => setFailedUrl(item.poster_url ?? null)}
           />
         ) : (
-          !thumbhashUrl && <DefaultArtwork />
+          !thumbhashUrl && <DefaultArtwork mediaType={item.type} />
         )}
 
         {/* Dim overlay when unselected to make selected posters pop */}

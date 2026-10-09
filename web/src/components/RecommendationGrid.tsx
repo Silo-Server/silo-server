@@ -45,7 +45,7 @@ function RecommendationItemCard({ itemId, showCaption }: RecommendationItemCardP
                 className="h-full w-full object-cover transition-transform group-hover:scale-105"
               />
             ) : (
-              <DefaultArtwork />
+              <DefaultArtwork mediaType={item.type} />
             )}
           </div>
         </ViewTransitionLink>

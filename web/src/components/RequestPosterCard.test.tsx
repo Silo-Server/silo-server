@@ -49,7 +49,7 @@ describe("RequestPosterCard (discover variant)", () => {
     expect(card).toHaveClass("media-card", "group/card");
     // A missing poster shows the default artwork, as on library cards.
     const artwork = card?.querySelector(".media-card-image");
-    expect(artwork?.querySelector(".default-artwork")).not.toBeNull();
+    expect(artwork?.querySelector(".default-artwork .lucide-film")).not.toBeNull();
     expect(artwork?.querySelector("[style]")).toBeNull();
 
     for (const link of screen.getAllByRole("link", { name: /Test Movie/ })) {
@@ -137,6 +137,9 @@ describe("RequestPosterCard (discover variant)", () => {
 
     expect(movieMarkup).toContain(">Movie<");
     expect(seriesMarkup).toContain(">Series<");
+    // The default artwork's mark follows the type too.
+    expect(movieMarkup).toContain("lucide-film");
+    expect(seriesMarkup).toContain("lucide-tv");
   });
 
   it("marks a title already in the library as Available and links to it", () => {

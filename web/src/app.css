@@ -1517,13 +1517,17 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     transform: scale(1.06);
   }
 
-  /* Default artwork for a poster, cover or still with no image (DefaultArtwork).
-     The glows are sized from the box's longer side, so a poster and a still get
-     the same glow, only cropped. Keep in step with the Apple and Android
-     clients. Without container units only the base colour shows. */
+  /* Default artwork for a poster, cover or still with no image (DefaultArtwork):
+     a faint glow with a small type mark in the centre. The glows are sized from
+     the box's longer side, so a poster and a still get the same glow, only
+     cropped. Keep in step with the Apple and Android clients. Without container
+     units only the base colour and a 24px mark show. */
   .default-artwork {
     container-type: size;
-    background-color: #0b0c10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #16171c;
   }
   .default-artwork::before {
     --side: max(100cqw, 100cqh);
@@ -1531,22 +1535,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(rgb(8 9 12 / 0.35), rgb(8 9 12 / 0.35)),
       radial-gradient(
         circle calc(var(--side) * 0.5) at 70% 30%,
-        rgb(245 11 79 / 0.35),
+        rgb(245 11 79 / 0.112),
         rgb(245 11 79 / 0)
       ),
       radial-gradient(
         circle calc(var(--side) * 0.6) at 100% 100%,
-        rgb(253 116 3 / 0.45),
+        rgb(253 116 3 / 0.144),
         rgb(253 116 3 / 0)
       ),
       radial-gradient(
         circle calc(var(--side) * 0.75) at 0% 0%,
-        rgb(0 52 251 / 0.55),
+        rgb(0 52 251 / 0.176),
         rgb(0 52 251 / 0)
       );
+  }
+  /* Positioned after ::before in tree order, so it paints above the glow. */
+  .default-artwork-mark {
+    position: relative;
+    width: clamp(14px, 24cqw, 40px);
+    height: clamp(14px, 24cqw, 40px);
+    color: #fff;
+    opacity: 0.13;
   }
 
   /* ── Episode Row ─────────────────────────────────────────── */

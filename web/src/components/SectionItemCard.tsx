@@ -62,6 +62,7 @@ export default function SectionItemCard({
           <MediaCardArtwork
             src={item.poster_url}
             alt={item.title}
+            mediaType={item.type}
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             lazy

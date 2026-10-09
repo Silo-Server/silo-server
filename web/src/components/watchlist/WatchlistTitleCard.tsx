@@ -70,6 +70,7 @@ export default function WatchlistTitleCard({
           <MediaCardArtwork
             src={tmdbImageURL(title.poster_path)}
             alt={title.title}
+            mediaType={title.media_type}
             lazy
             dim={status.attention}
           >

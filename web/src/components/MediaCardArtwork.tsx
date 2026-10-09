@@ -31,6 +31,8 @@ const SCRIM_CLASS = {
 interface MediaCardArtworkProps {
   src?: string | null;
   alt: string;
+  /** The item's type, which picks the mark on the default artwork. */
+  mediaType?: string | null;
   thumbhash?: string | null;
   square?: boolean;
   lazy?: boolean;
@@ -49,6 +51,7 @@ interface MediaCardArtworkProps {
 export default function MediaCardArtwork({
   src,
   alt,
+  mediaType,
   thumbhash,
   square = false,
   lazy = false,
@@ -92,7 +95,7 @@ export default function MediaCardArtwork({
           }}
         />
       ) : (
-        !thumbhashUrl && <DefaultArtwork className={dimClass} />
+        !thumbhashUrl && <DefaultArtwork mediaType={mediaType} className={dimClass} />
       )}
       <div className={SCRIM_CLASS[scrim]} />
       {children}
