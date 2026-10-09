@@ -688,14 +688,14 @@ func personNameWordStartConditions(query string, args *[]any, argIdx *int) []str
 	var conditions []string
 	seen := map[string]bool{}
 	for _, word := range strings.Fields(query) {
-		key := strings.ToLower(word)
-		if seen[key] {
+		// Only identical words repeat: case pairs depend on the collation.
+		if seen[word] {
 			continue
 		}
 		if len(seen) == maxPersonSearchWords {
 			break
 		}
-		seen[key] = true
+		seen[word] = true
 		pattern := escapeRegexLiteral(word)
 		if first, _ := utf8.DecodeRuneInString(word); unicode.IsLetter(first) || unicode.IsDigit(first) {
 			pattern = "(^|[^[:alnum:]])" + pattern

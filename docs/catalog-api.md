@@ -13,8 +13,9 @@ starts the name or follows a character that is not a letter or digit, so `hacks`
 matches "Lark Hackshaw" but not "Chad Thackston", and `luc` matches "Jean-Luc".
 A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
-matches only from its start. Only the first eight distinct words count, and
-`%` and `_` are literal. Case-insensitive exact name matches come first;
+matches only from its start. Only the first eight distinct words count, and a
+repeated word counts once. `%` and `_` are literal. Case-insensitive exact name
+matches come first;
 other matches sort by name, with person ID breaking ties. Ranking happens before
 applying the limit.
 
