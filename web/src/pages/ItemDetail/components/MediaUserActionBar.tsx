@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { ItemDetail } from "@/api/types";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
-import { useDeleteRating, useSetRating } from "@/hooks/queries/ratings";
+import { useRatingChange } from "@/hooks/queries/ratings";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { getWatchedActionLabel } from "../watchedState";
 import ActionBar, { type ActionBarProps } from "./ActionBar";
@@ -34,8 +34,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
   const { mutate: toggleWatched, isPending: isUpdatingWatched } = useWatchedStateMutation(item);
   const { mutate: toggleFavorite } = useToggleFavorite(item.content_id);
   const { mutate: toggleWatchlist } = useToggleWatchlist(item.content_id);
-  const { mutate: setRating } = useSetRating(item.content_id);
-  const { mutate: deleteRating } = useDeleteRating(item.content_id);
+  const handleRatingChange = useRatingChange(item.content_id);
 
   const handleToggleWatched = useCallback(
     () => toggleWatched(!(item.user_data?.played ?? false)),
@@ -49,17 +48,6 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
     () => toggleWatchlist(inWatchlist),
     [inWatchlist, toggleWatchlist],
   );
-  const handleRatingChange = useCallback(
-    (rating: number | null) => {
-      if (rating === null) {
-        deleteRating();
-      } else {
-        setRating(rating);
-      }
-    },
-    [deleteRating, setRating],
-  );
-
   return (
     <ActionBar
       {...props}

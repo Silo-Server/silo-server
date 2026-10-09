@@ -35,6 +35,8 @@ const mocks = vi.hoisted(() => {
     useRating: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
+    setRatingMutate: vi.fn(),
+    deleteRatingMutate: vi.fn(),
     useAuth: vi.fn(),
     useDetailWatchTogether: vi.fn(() => ({ menu: undefined, sheet: null })),
   };
@@ -59,6 +61,10 @@ vi.mock("@/hooks/queries/ratings", () => ({
   useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
+  // The real hook is a thin dispatcher over these two mutations; the mock keeps
+  // that shape so a test can still assert which one a star press ran.
+  useRatingChange: () => (rating: number | null) =>
+    rating === null ? mocks.deleteRatingMutate() : mocks.setRatingMutate(rating),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({

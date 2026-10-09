@@ -449,6 +449,7 @@ type episodeResponse struct {
 	StillURL       string                  `json:"still_url,omitempty"`
 	StillThumbhash string                  `json:"still_thumbhash,omitempty"`
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
+	UserRating     *int                    `json:"user_rating,omitempty"`
 	Files          []episodeFileResponse   `json:"files,omitempty"`
 	OverlaySummary *models.OverlaySummary  `json:"overlay_summary,omitempty"`
 }
@@ -1279,6 +1280,7 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 	}
 	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
 	userData := h.listLeafUserData(ctx, v, episodeIDs)
+	ratings := h.listItemRatings(ctx, v, episodeIDs)
 
 	resp := make([]episodeResponse, 0, len(episodes))
 	stillPaths := make([]string, 0, len(episodes))
@@ -1300,6 +1302,10 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 		files := catalog.FilterMediaFilesByAccess(filesByEpisode[resp[i].ContentID], filter)
 		resp[i].Files = episodeFileResponses(files, filter)
 		resp[i].UserData = userData[resp[i].ContentID]
+		if rating, rated := ratings[resp[i].ContentID]; rated {
+			ratingCopy := rating
+			resp[i].UserRating = &ratingCopy
+		}
 		resp[i].OverlaySummary = overlays.BuildSummary(files)
 	}
 	return resp
@@ -1901,6 +1907,25 @@ func (h *ItemsHandler) listLeafUserData(ctx context.Context, v ItemViewer, conte
 		result[contentID] = leafUserDataFromProgress(&progressCopy)
 	}
 	return result
+}
+
+// listItemRatings batch-reads the viewer's own ratings for the items on screen,
+// so a list can show each row's stars without a request per row. An
+// unauthenticated or unrated read is an empty map, never an error: a missing
+// rating is ordinary, and it must not cost the caller its items.
+func (h *ItemsHandler) listItemRatings(ctx context.Context, v ItemViewer, contentIDs []string) map[string]int {
+	if h.ratingsRepo == nil || len(contentIDs) == 0 || v.ProfileID == "" {
+		return nil
+	}
+	userID := apimw.GetUserID(ctx)
+	if userID == 0 {
+		return nil
+	}
+	ratings, err := h.ratingsRepo.ListForItems(ctx, userID, v.ProfileID, contentIDs)
+	if err != nil {
+		return nil
+	}
+	return ratings
 }
 
 func leafUserDataFromProgress(progress *userstore.WatchProgress) *catalog.SeasonUserData {

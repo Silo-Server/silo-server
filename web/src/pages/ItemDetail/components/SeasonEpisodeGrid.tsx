@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Play } from "lucide-react";
+import { Play, Star } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
@@ -167,7 +167,20 @@ function SeasonEpisodeCard({
         <div className="text-muted-foreground mt-2 flex items-center gap-2 text-xs">
           <span>Episode {episode.episode_number}</span>
           {episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
-          {episode.user_data?.played && <WatchedCheckIndicator className="ml-auto" />}
+          {episode.user_rating != null && (
+            <span
+              className="ml-auto flex items-center gap-0.5 font-medium text-yellow-500"
+              title={`You rated this episode ${episode.user_rating} of 5`}
+            >
+              <Star size={12} className="fill-current" aria-hidden />
+              {episode.user_rating}
+            </span>
+          )}
+          {episode.user_data?.played && (
+            <WatchedCheckIndicator
+              className={episode.user_rating == null ? "ml-auto" : undefined}
+            />
+          )}
         </div>
         <p className="text-foreground truncate text-sm font-semibold">{episodeTitle}</p>
         <div className="mt-1.5 space-y-1">

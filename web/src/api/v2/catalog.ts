@@ -364,6 +364,7 @@ export function episodeFromV2(episode: EpisodeV2): EpisodeListItem {
     still_url: episode.still_url ?? "",
     still_thumbhash: episode.still_thumbhash ?? "",
     user_data: episode.user_data ? watchRollupFromV2(episode.user_data) : undefined,
+    user_rating: episode.user_rating ?? null,
     files: (episode.files ?? []).map(episodeFileFromV2),
     overlay_summary: episode.overlay_summary,
   };

@@ -118,6 +118,10 @@ vi.mock("@/hooks/queries/ratings", () => ({
   useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
+  // The real hook is a thin dispatcher over these two mutations; the mock keeps
+  // that shape so a test can still assert which one a star press ran.
+  useRatingChange: () => (rating: number | null) =>
+    rating === null ? mocks.deleteRatingMutate() : mocks.setRatingMutate(rating),
 }));
 
 vi.mock("@/hooks/queries/subtitles", () => ({
@@ -490,6 +494,39 @@ describe("EpisodeContent", () => {
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       restartHref: undefined,
     });
+  });
+
+  it("rates an episode from the same place as a movie", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem({ user_rating: 3 })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({ rating: 3 });
+
+    const onRatingChange = mocks.capturedActionBarProps.value?.onRatingChange as
+      | ((rating: number | null) => void)
+      | undefined;
+    expect(onRatingChange).toBeTypeOf("function");
+
+    onRatingChange?.(1);
+    onRatingChange?.(null);
+
+    expect(mocks.setRatingMutate).toHaveBeenCalledWith(1);
+    expect(mocks.deleteRatingMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unrated episode as having no rating", () => {
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>,
+    );
+
+    // null, not undefined or zero: the star picker shows "no rating" only for
+    // null, and zero would read as a real score.
+    expect(mocks.capturedActionBarProps.value?.rating).toBeNull();
   });
 
   it("passes marker re-detection only for admins", () => {

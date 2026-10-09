@@ -2019,12 +2019,52 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 	return nil
 }
 
+// EnsureAccessibleAllowingEpisodes is EnsureAccessible for callers that accept
+// an episode as a target in its own right, such as rating one.
+//
+// Episodes are not rows in media_items — they live in their own table and
+// hydrate through the series — so EnsureAccessible can never find one and
+// every caller that passes an episode ID sees "not found". Library membership
+// lives on the series anyway, so this resolves an episode to its parent series
+// and applies the identical predicates there. A movie or series ID has no
+// parent row and is checked exactly as before.
+func (r *ItemRepository) EnsureAccessibleAllowingEpisodes(ctx context.Context, contentID string, filter AccessFilter) error {
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return ErrItemNotFound
+	}
+
+	query, args := buildAccessibleSQL(contentID, filter, true)
+	var found int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&found); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrItemNotFound
+		}
+		return fmt.Errorf("checking item access: %w", err)
+	}
+	return nil
+}
+
 func buildEnsureAccessibleSQL(contentID string, filter AccessFilter) (string, []any) {
+	return buildAccessibleSQL(contentID, filter, false)
+}
+
+// buildAccessibleSQL builds the accessibility probe. resolveEpisodeParent makes
+// an episode ID match its parent series, which is the row that carries library
+// membership; without it an episode matches nothing, because episodes are not
+// rows in media_items.
+func buildAccessibleSQL(contentID string, filter AccessFilter, resolveEpisodeParent bool) (string, []any) {
 	var conditions []string
 	var args []any
 	argIdx := 1
 
-	conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
+	if resolveEpisodeParent {
+		// Resolve an episode to the series that carries its library
+		// membership; anything else matches on its own ID.
+		conditions = append(conditions, fmt.Sprintf(
+			"mi.content_id = COALESCE((SELECT e_parent.series_id FROM episodes e_parent WHERE e_parent.content_id = $%[1]d), $%[1]d)", argIdx))
+	} else {
+		conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
+	}
 	args = append(args, contentID)
 	argIdx++
 

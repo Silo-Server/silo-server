@@ -27556,6 +27556,16 @@
           },
           "user_data": {
             "$ref": "#/components/schemas/WatchRollup"
+          },
+          "user_rating": {
+            "description": "The acting profile's own rating of this episode, 1 to 5 stars",
+            "examples": [
+              4
+            ],
+            "format": "int64",
+            "maximum": 5,
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [

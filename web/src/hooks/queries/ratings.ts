@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { ItemDetail } from "@/api/types";
@@ -76,4 +77,24 @@ export function useDeleteRating(itemId: string) {
       return invalidateRatingSurfaceQueries(queryClient, itemId);
     },
   });
+}
+
+/**
+ * Turns a star picker's value into the right mutation: a number records it,
+ * null clears it. Every detail page rates through this, so clearing behaves
+ * the same whether the target is a movie, a series, a season or an episode.
+ */
+export function useRatingChange(itemId: string) {
+  const { mutate: setRating } = useSetRating(itemId);
+  const { mutate: deleteRating } = useDeleteRating(itemId);
+  return useCallback(
+    (rating: number | null) => {
+      if (rating === null) {
+        deleteRating();
+      } else {
+        setRating(rating);
+      }
+    },
+    [deleteRating, setRating],
+  );
 }

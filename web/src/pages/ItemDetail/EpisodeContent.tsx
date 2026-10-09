@@ -330,6 +330,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           actions={
             <WatchedActionBar
               compactMobile
+              rateable
               item={item}
               contentId={item.content_id}
               canAddToCollection={false}

@@ -19,6 +19,15 @@ type ratingsRepository interface {
 	Delete(ctx context.Context, userID int, profileID, mediaItemID string) error
 	List(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error)
 	ListPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error)
+	ListForItems(ctx context.Context, userID int, profileID string, itemIDs []string) (map[string]int, error)
+}
+
+// ratingItemRepository is the access check the ratings endpoints need. It is
+// narrower than personalDataItemRepository on purpose: rating accepts an
+// episode as a target in its own right, which favorites and history do not,
+// and an episode needs its parent series resolved before the library check.
+type ratingItemRepository interface {
+	EnsureAccessibleAllowingEpisodes(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 }
 
 // LocalRatingEventDispatcher sends a profile's rating changes to its watch
@@ -30,14 +39,14 @@ type LocalRatingEventDispatcher interface {
 // RatingsHandler handles user rating operations.
 type RatingsHandler struct {
 	ratingsRepo             ratingsRepository
-	itemRepo                personalDataItemRepository
+	itemRepo                ratingItemRepository
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
 	ratingDispatcher        LocalRatingEventDispatcher
 }
 
 // NewRatingsHandler creates a new RatingsHandler.
-func NewRatingsHandler(ratingsRepo ratingsRepository, itemRepo personalDataItemRepository) *RatingsHandler {
+func NewRatingsHandler(ratingsRepo ratingsRepository, itemRepo ratingItemRepository) *RatingsHandler {
 	return &RatingsHandler{ratingsRepo: ratingsRepo, itemRepo: itemRepo}
 }
 
@@ -129,7 +138,7 @@ func (h *RatingsHandler) HandleSetRating(w http.ResponseWriter, r *http.Request)
 // caller validates the range; an item outside the viewer's access is 404.
 // Setting the same rating twice converges, so a retried set is safe.
 func (h *RatingsHandler) SetRating(ctx context.Context, userID int, profileID, itemID string, access catalog.AccessFilter, rating int) error {
-	if err := h.itemRepo.EnsureAccessible(ctx, itemID, access); err != nil {
+	if err := h.itemRepo.EnsureAccessibleAllowingEpisodes(ctx, itemID, access); err != nil {
 		return apiError(http.StatusNotFound, "not_found", "Item not found")
 	}
 	if err := h.ratingsRepo.Set(ctx, userID, profileID, itemID, rating); err != nil {

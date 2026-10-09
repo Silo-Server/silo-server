@@ -92,6 +92,10 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
 vi.mock("@/hooks/queries/ratings", () => ({
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
+  // The real hook is a thin dispatcher over these two mutations; the mock keeps
+  // that shape so a test can still assert which one a star press ran.
+  useRatingChange: () => (rating: number | null) =>
+    rating === null ? mocks.deleteRatingMutate() : mocks.setRatingMutate(rating),
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
