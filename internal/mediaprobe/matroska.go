@@ -50,6 +50,10 @@ const (
 	maxSeekHeadSize    = 1 << 20
 	maxTracksSize      = 16 << 20
 	maxTopLevelVisited = 64
+	// maxTrackEntries is FFmpeg's default max_streams. FFprobe refuses a file
+	// with more TrackEntries, so none of them could match a probed stream, and
+	// the cap keeps a corrupt Tracks payload from decoding millions of entries.
+	maxTrackEntries = 1000
 )
 
 // ReadMatroskaTracks returns the TrackEntry list of a Matroska or WebM file.
@@ -139,7 +143,7 @@ func readMatroskaTracksElement(r io.ReaderAt, off, size int64) ([]MatroskaTrack,
 	}
 	var tracks []MatroskaTrack
 	ebmlChildren(data, func(id uint64, entry []byte) {
-		if id != mkvIDTrackEntry {
+		if id != mkvIDTrackEntry || len(tracks) > maxTrackEntries {
 			return
 		}
 		var track MatroskaTrack
@@ -155,6 +159,9 @@ func readMatroskaTracksElement(r io.ReaderAt, off, size int64) ([]MatroskaTrack,
 		})
 		tracks = append(tracks, track)
 	})
+	if len(tracks) > maxTrackEntries {
+		return nil, fmt.Errorf("mediaprobe: Matroska Tracks has more than %d entries", maxTrackEntries)
+	}
 	return tracks, nil
 }
 

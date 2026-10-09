@@ -131,3 +131,28 @@ func TestReadMatroskaTracksFromFFmpegFile(t *testing.T) {
 		t.Fatalf("tracks = %+v, want %+v", tracks, want)
 	}
 }
+
+// FFprobe refuses more than max_streams TrackEntries, so the reader does too
+// instead of decoding every entry a corrupt Tracks payload claims.
+func TestReadMatroskaTracksRefusesMoreEntriesThanFFmpeg(t *testing.T) {
+	for _, tc := range []struct {
+		entries int
+		wantErr bool
+	}{
+		{maxTrackEntries, false},
+		{maxTrackEntries + 1, true},
+	} {
+		entries := make([][]byte, tc.entries)
+		for i := range entries {
+			entries[i] = trackEntry(uint64(i+1), MatroskaTrackTypeSubtitle, "S_TEXT/UTF8")
+		}
+		file := append(ebmlHeader("matroska"), ebmlElement(mkvIDSegment, ebmlElement(mkvIDTracks, entries...))...)
+		tracks, err := readTracks(t, file)
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("%d entries: err = %v, wantErr %v", tc.entries, err, tc.wantErr)
+		}
+		if !tc.wantErr && len(tracks) != tc.entries {
+			t.Fatalf("%d entries: read %d tracks", tc.entries, len(tracks))
+		}
+	}
+}
