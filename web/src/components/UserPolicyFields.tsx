@@ -230,8 +230,8 @@ function BooleanPolicyRow({
   const id = useId();
   const selectValue = value === null ? INHERIT : value ? "allowed" : "blocked";
   return (
-    <div className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <div className="min-w-0">
+    <div className="border-border flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border px-3 py-2">
+      <div className="min-w-32 flex-1 break-words">
         <Label htmlFor={id}>{label}</Label>
         {description && <p className="text-muted-foreground text-xs">{description}</p>}
       </div>
@@ -240,7 +240,10 @@ function BooleanPolicyRow({
         onValueChange={(next) => onValueChange(next === INHERIT ? null : next === "allowed")}
         disabled={disabled}
       >
-        <SelectTrigger id={id} className="w-40 shrink-0">
+        <SelectTrigger
+          id={id}
+          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
