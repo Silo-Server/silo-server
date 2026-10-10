@@ -335,7 +335,7 @@ type UnsupportedFileGroup struct {
 // UnsupportedFileListInput is the listUnsupportedFiles query.
 type UnsupportedFileListInput struct {
 	LimitParam
-	Query  string `query:"q" doc:"Substring over directory path, file name, reason or library name"`
+	Query  string `query:"q" doc:"Substring over directory path, reason, library name, or a file name in file_names, which lists the first 100 names in a directory"`
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor"`
 }
 

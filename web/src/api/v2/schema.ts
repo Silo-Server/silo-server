@@ -106745,7 +106745,7 @@ export interface operations {
         cursor?: string;
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
-        /** @description Substring over directory path, file name, reason or library name */
+        /** @description Substring over directory path, reason, library name, or a file name in file_names, which lists the first 100 names in a directory */
         q?: string;
       };
       header?: {
