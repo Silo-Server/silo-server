@@ -108,6 +108,7 @@ GET /api/v2/images/capabilities
   "allowed": true,
   "param": "image_size",
   "season_list_artwork_param": "include_artwork",
+  "episode_still_provenance": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
     "poster": { "small": 300, "medium": 500, "large": 780 },
@@ -171,6 +172,17 @@ The images capability response advertises this option as
 season selectors; clients that render season posters should keep the default. See
 the [season-list contract](catalog-api.md#season-list-artwork) for the full
 response semantics.
+
+## Episode still provenance
+
+`"episode_still_provenance": true` means the server can say whether an episode
+image is the episode's own still: `poster_is_episode_still` and
+`backdrop_is_episode_still` on catalog cards and details, and
+`still_is_episode_still` on episode rows. Responses carry these fields only where
+the server knows the image's source; an absent field means unknown, even when the
+capability is true. Clients that hide unwatched episode stills use them to keep
+series and season artwork visible. See
+[episode spoiler protection](catalog-api.md#episode-spoiler-protection).
 
 ## Jellyfin compatibility
 

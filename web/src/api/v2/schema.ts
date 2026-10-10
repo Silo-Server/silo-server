@@ -23467,7 +23467,7 @@ export interface components {
       allowed: boolean;
       /** @enum {string} */
       delivery: "server" | "direct";
-      /** @description Episode cards, details, and rows distinguish stills from series and season artwork */
+      /** @description Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown */
       episode_still_provenance: boolean;
       /** Format: int64 */
       original_max_width_px: number;

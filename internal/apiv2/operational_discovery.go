@@ -21,7 +21,7 @@ type CompatConnectInfoOutput struct {
 
 type ImageCapabilities struct {
 	Capability
-	EpisodeStillProvenance bool                       `json:"episode_still_provenance" doc:"Episode cards, details, and rows distinguish stills from series and season artwork"`
+	EpisodeStillProvenance bool                       `json:"episode_still_provenance" doc:"Responses may carry poster_is_episode_still, backdrop_is_episode_still, and still_is_episode_still where the server knows whether an episode image is the episode's own still; an absent field means unknown"`
 	SeasonListArtworkParam string                     `json:"season_list_artwork_param" doc:"Season-list boolean query parameter; false omits poster URLs and thumbhashes"`
 	Param                  string                     `json:"param"`
 	Sizes                  []imagesize.Size           `json:"sizes"`
