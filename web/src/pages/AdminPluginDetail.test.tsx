@@ -345,6 +345,72 @@ describe("AdminPluginDetail", () => {
     expect(capturedSelects[0]?.disabled).toBe(true);
   });
 
+  it("marks a plugin installed without a catalog Unverified and offers no update policy", () => {
+    installationsQuery = query([
+      makeInstallation({
+        repository_id: null,
+        source_kind: "external",
+        repository_name: undefined,
+      }),
+    ]);
+    renderPage();
+
+    expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
+    expect(screen.getByText(/isn't linked to any of your catalogs/)).toBeInTheDocument();
+    expect(screen.getByText("Updated by upload")).toBeInTheDocument();
+    expect(capturedSelects).toHaveLength(0);
+  });
+
+  it("shows paused update checks for a hidden community plugin", () => {
+    installationsQuery = query([
+      makeInstallation({
+        source_kind: "approved_community",
+        repository_name: "Approved community",
+        updates_paused: true,
+        update_policy: "notify",
+      }),
+    ]);
+    renderPage();
+
+    expect(screen.getByText("Updates paused")).toBeInTheDocument();
+    expect(screen.getByText("Update checks are paused.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Turn them back on" })).toHaveAttribute(
+      "href",
+      "/admin/plugins?tab=catalog",
+    );
+    expect(screen.getByText(/“Ask before updating” setting/)).toBeInTheDocument();
+    expect(capturedSelects).toHaveLength(0);
+  });
+
+  it.each([
+    { name: "unverified", overrides: { repository_id: null, source_kind: "external" as const } },
+    {
+      name: "paused",
+      overrides: { source_kind: "approved_community" as const, updates_paused: true },
+    },
+  ])("does not offer an update recorded before updates stopped: $name", ({ overrides }) => {
+    installationsQuery = query([makeInstallation({ ...overrides, available_version: "0.2.0" })]);
+    renderPage();
+    expect(screen.queryByRole("menuitem", { name: "Update to 0.2.0" })).not.toBeInTheDocument();
+  });
+
+  it("does not show a catalog's repository on an Unverified plugin with the same ID", () => {
+    installationsQuery = query([
+      makeInstallation({
+        repository_id: null,
+        source_kind: "external",
+        repository_name: undefined,
+        presentation: undefined,
+      }),
+    ]);
+    catalogQuery = query([
+      makeCatalogEntry({ plugin_id: "silo.mdblist", repository_name: "Silo plugins" }),
+    ]);
+    renderPage();
+    expect(screen.queryByText("Silo plugins")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Unverified").length).toBeGreaterThan(0);
+  });
+
   it("uninstalls after confirmation and returns to the plugin list", () => {
     renderPage();
     fireEvent.click(screen.getByRole("menuitem", { name: "Uninstall..." }));

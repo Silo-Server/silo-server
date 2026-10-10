@@ -295,6 +295,32 @@ describe("AdminPlugins", () => {
     expect(markup).not.toContain("Alpha Metadata");
   });
 
+  it("finds a plugin installed without a catalog under the Unverified label it shows", () => {
+    useAdminPluginsMock.mockReturnValue({
+      repositories: [],
+      catalog: [],
+      catalogSettings: undefined,
+      isLoading: false,
+      installations: [
+        makeInstallation(1, "Alpha Metadata"),
+        {
+          ...makeInstallation(2, "Uploaded Metadata"),
+          repository_id: null,
+          source_kind: "external",
+        },
+      ],
+    });
+
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/admin/plugins?installed_q=unverified"]}>
+        <AdminPlugins />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Uploaded Metadata");
+    expect(markup).not.toContain("Alpha Metadata");
+  });
+
   it("groups the catalog by source and installs from a tile", () => {
     const external: PluginCatalogEntry = {
       ...makeCatalogEntry(3, { displayName: "Home Lab Tool" }),
