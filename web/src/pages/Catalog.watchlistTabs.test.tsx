@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   titlesTab: vi.fn(),
 }));
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: () => ({
     data: {

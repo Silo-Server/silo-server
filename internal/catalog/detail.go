@@ -524,6 +524,11 @@ type FileVersion struct {
 	// when it has none. The v2 watch and Jellyfin views carry it; the frozen
 	// v1 view does not.
 	Trickplay *TrickplayGrid `json:"-"`
+	// Unreadable is models.MediaFile.ProbeRejected: ffprobe rejected the file
+	// and nothing usable is recorded for it, so it cannot play until it is
+	// replaced. Jellyfin PlaybackInfo leaves such versions out. Neither the v1
+	// nor the v2 view carries the flag.
+	Unreadable bool `json:"-"`
 }
 
 // SetMarkers refreshes the marker projection without rebuilding file metadata.
@@ -2195,7 +2200,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		Crew:                       crewCredits,
 		Studios:                    item.Studios,
 		Networks:                   item.Networks,
-		Countries:                  item.Countries,
+		Countries:                  lang.UniqueCountries(item.Countries),
 		LockedFields:               item.LockedFields,
 		FirstAirDate:               item.FirstAirDate,
 		LastAirDate:                item.LastAirDate,
@@ -3898,6 +3903,7 @@ func (s *DetailService) buildPlaybackInfoWith(
 			Recap:                    versionRecap,
 			Preview:                  versionPreview,
 			MarkerSegments:           models.EffectiveMarkerSegments(f),
+			Unreadable:               f.ProbeRejected(),
 		})
 
 		for _, sub := range f.SubtitleTracks {

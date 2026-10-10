@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,7 +57,6 @@ type Result struct {
 	ScanDuration           time.Duration
 	MatchDuration          time.Duration
 	RetryDuration          time.Duration
-	Skipped                bool
 }
 
 type scopeMode string
@@ -77,10 +77,14 @@ const scopedDrainInterval = 2 * time.Second
 const scopedTVDrainSettleWindow = 11 * time.Second
 
 // runningClaim pairs a scope claim with an optional cancel function so that
-// running scans can be canceled from the outside (e.g. via admin API).
+// running and waiting scans can be canceled from the outside (e.g. via admin
+// API).
 type runningClaim struct {
 	scopeClaim
 	cancel context.CancelFunc
+	// done is closed when the claim leaves the executor: when its scan
+	// finishes, or when it stops waiting without scanning.
+	done chan struct{}
 }
 
 // Executor coordinates scan, scoped matching, retry, and completion events.
@@ -100,7 +104,10 @@ type Executor struct {
 	tvDrainSettleWindow time.Duration
 
 	mu      sync.Mutex
-	running []runningClaim
+	running []*runningClaim
+	// waiting holds claims blocked behind an overlapping claim, in arrival
+	// order, so CancelLibrary reaches them before they start scanning.
+	waiting []*runningClaim
 }
 
 // NewExecutor creates a new ingest executor.
@@ -162,11 +169,11 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		path:     cleanScopePath(rawPath),
 	}
 	matchScopes := scopeMatchPaths(folder, mode, claim.path)
-	if !e.begin(claim, cancel) {
-		cancel()
-		return &Result{Skipped: true}, nil
+	entry, err := e.begin(scanCtx, claim, cancel)
+	if err != nil {
+		return nil, err
 	}
-	defer e.finish(claim)
+	defer e.finish(entry)
 
 	var (
 		concurrentMatched       atomic.Int64
@@ -584,48 +591,133 @@ func (e *Executor) reconcileSkippedRoots(
 	return nil
 }
 
-func (e *Executor) begin(claim scopeClaim, cancel context.CancelFunc) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// begin records claim as running. When claim overlaps a scan already running
+// in this process, it waits for that scan to finish first rather than skipping:
+// the caller asked to observe the filesystem after its own signal, and the
+// running scan may already have walked past the change. Overlapping waiters
+// start in arrival order. While waiting the claim is registered for
+// CancelLibrary, and it returns ctx's error if ctx ends first. A waiter waits
+// only on running scans, which make progress independently, or on an older
+// waiter, so waits cannot form a cycle.
+func (e *Executor) begin(ctx context.Context, claim scopeClaim, cancel context.CancelFunc) (*runningClaim, error) {
+	entry := &runningClaim{scopeClaim: claim, cancel: cancel, done: make(chan struct{})}
 
+	e.mu.Lock()
+	blocker := e.blockerLocked(entry)
+	if blocker == nil {
+		e.running = append(e.running, entry)
+		e.mu.Unlock()
+		return entry, nil
+	}
+	e.waiting = append(e.waiting, entry)
+	e.mu.Unlock()
+
+	slog.InfoContext(ctx, "library ingest: waiting for overlapping scan to finish", "component", "libraryingest",
+		"folder_id", claim.folderID,
+		"mode", claim.mode,
+		"scope", claim.path,
+		"blocking_mode", blocker.mode,
+		"blocking_scope", blocker.path,
+	)
+	reportProgress(ctx, ProgressUpdate{
+		Phase:        "preparing",
+		Message:      "Waiting for an overlapping scan to finish",
+		CurrentScope: claim.path,
+	})
+
+	for {
+		select {
+		case <-ctx.Done():
+		case <-blocker.done:
+		}
+
+		e.mu.Lock()
+		// Re-check ctx under the lock: when the blocker finishes and ctx ends
+		// together, select may pick either, and a canceled waiter must not start.
+		if err := ctx.Err(); err != nil {
+			e.removeWaitingLocked(entry)
+			// Newer waiters may be blocked on this one; let them re-check.
+			close(entry.done)
+			e.mu.Unlock()
+			return nil, fmt.Errorf("wait for overlapping scan: %w", err)
+		}
+		blocker = e.blockerLocked(entry)
+		if blocker == nil {
+			// done stays open: newer waiters blocked on this claim keep waiting
+			// until its scan finishes.
+			e.removeWaitingLocked(entry)
+			e.running = append(e.running, entry)
+			e.mu.Unlock()
+			slog.InfoContext(ctx, "library ingest: overlapping scan finished, starting", "component", "libraryingest",
+				"folder_id", claim.folderID,
+				"mode", claim.mode,
+				"scope", claim.path,
+			)
+			return entry, nil
+		}
+		e.mu.Unlock()
+	}
+}
+
+// blockerLocked returns the claim entry has to wait for: a running claim that
+// overlaps it, or an overlapping claim that started waiting before it. e.mu
+// must be held.
+func (e *Executor) blockerLocked(entry *runningClaim) *runningClaim {
 	for _, running := range e.running {
-		if conflicts(running.scopeClaim, claim) {
-			return false
+		if conflicts(running.scopeClaim, entry.scopeClaim) {
+			return running
 		}
 	}
-
-	e.running = append(e.running, runningClaim{scopeClaim: claim, cancel: cancel})
-	return true
+	for _, waiting := range e.waiting {
+		if waiting == entry {
+			break
+		}
+		if conflicts(waiting.scopeClaim, entry.scopeClaim) {
+			return waiting
+		}
+	}
+	return nil
 }
 
-func (e *Executor) finish(claim scopeClaim) {
+// removeWaitingLocked drops entry from the waiting list. e.mu must be held.
+func (e *Executor) removeWaitingLocked(entry *runningClaim) {
+	if i := slices.Index(e.waiting, entry); i >= 0 {
+		e.waiting = slices.Delete(e.waiting, i, i+1)
+	}
+}
+
+// finish releases a running claim and wakes the waiters blocked on it.
+func (e *Executor) finish(entry *runningClaim) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for i, running := range e.running {
-		if running.scopeClaim == claim {
-			e.running = append(e.running[:i], e.running[i+1:]...)
-			return
-		}
+	if i := slices.Index(e.running, entry); i >= 0 {
+		e.running = slices.Delete(e.running, i, i+1)
 	}
+	close(entry.done)
 }
 
-// CancelLibrary cancels all running scans for the given library (folder ID).
-// Returns the number of scans that were canceled.
+// CancelLibrary cancels all running scans for the given library (folder ID),
+// including scans still waiting for an overlapping scan to finish. Returns the
+// number of scans that were canceled.
 func (e *Executor) CancelLibrary(folderID int) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	canceled := 0
-	for _, running := range e.running {
-		if running.folderID == folderID && running.cancel != nil {
-			running.cancel()
-			canceled++
+	for _, claims := range [][]*runningClaim{e.running, e.waiting} {
+		for _, claim := range claims {
+			if claim.folderID == folderID && claim.cancel != nil {
+				claim.cancel()
+				canceled++
+			}
 		}
 	}
 	return canceled
 }
 
+// conflicts reports whether two claims must not scan at the same time in one
+// process; the later claim waits for the earlier one (see begin).
 func conflicts(a, b scopeClaim) bool {
 	if a.folderID != b.folderID {
 		return false

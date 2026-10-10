@@ -1,1 +1,0 @@
-export { CollectionTemplateGallery } from "./CollectionTemplateGallery";

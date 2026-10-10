@@ -107,6 +107,18 @@ describe("AISettings", () => {
     Object.assign(values, DEFAULT_VALUES);
   });
 
+  it("keeps the save callback rejection at the Save button boundary", async () => {
+    dirtyCount = 1;
+    dirtyKeys = ["ai.chat_model"];
+    mocks.save.mockRejectedValue(new Error("412 precondition failed"));
+    render(<AISettings />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mocks.save).toHaveBeenCalledOnce();
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
   it("falls back to the legacy subtitle_ai values", async () => {
     const user = userEvent.setup();
     values["ai.base_url"] = "";

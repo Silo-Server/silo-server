@@ -147,6 +147,12 @@ const EMPTY_ROOT_WARNING_HINT =
 const LIBRARY_TABS = ["libraries", "autoscan"] as const;
 type LibraryTab = (typeof LIBRARY_TABS)[number];
 
+// Stable fallbacks while queries load. A fresh `[]` on every render re-ran the
+// effect that copies libraries into the reorder state, so the page re-rendered
+// until the query resolved.
+const NO_LIBRARIES: Library[] = [];
+const NO_ACTIVE_SCANS: ScanRun[] = [];
+
 export default function AdminLibraries() {
   useEventChannel("scans");
   // Autoscan used to be its own sidebar page even though it only ever
@@ -169,9 +175,9 @@ export default function AdminLibraries() {
     setSearchParams(next, { replace: true });
   }
 
-  const { data: libraries = [], isLoading } = useAdminLibraries();
+  const { data: libraries = NO_LIBRARIES, isLoading } = useAdminLibraries();
   const { data: libraryCapabilities } = useLibraryCapabilities();
-  const { data: activeScans = [] } = useActiveScans();
+  const { data: activeScans = NO_ACTIVE_SCANS } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
   const { data: trickplayLibraries } = useAdminTrickplayLibraries();
   const trickplayByLibraryId = useMemo(

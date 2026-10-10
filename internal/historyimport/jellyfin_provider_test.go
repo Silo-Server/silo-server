@@ -3,6 +3,7 @@ package historyimport
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,12 +140,116 @@ func TestJellyfinProviderFetch_FavoriteSeriesLookupFailureIsAWarning(t *testing.
 	}
 }
 
-// newJellyfinFetchServer serves /Items by filter (a filter absent from
-// byFilter answers 500), an empty /UserItems/Resume, and /Items?Ids= lookups
-// from byID (a nil byID answers 500).
+// Resume positions are secondary to the played history: a resume query that
+// fails or times out must not discard it.
+func TestJellyfinProviderFetch_ResumeFailureIsAWarning(t *testing.T) {
+	t.Parallel()
+
+	fetch := newJellyfinFetchHandler(t, map[string][]jellyfinItem{
+		"IsPlayed":   {{ID: "matrix", Type: "Movie", Name: "The Matrix", ProviderIDs: map[string]string{"Tmdb": "603"}, UserData: jellyfinUserData{Played: true}}},
+		"IsFavorite": {},
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/UserItems/Resume" {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		fetch.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	records, warnings, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(records) != 1 || records[0].ExternalID != "matrix" || !records[0].Played {
+		t.Fatalf("records = %+v, want the played movie", records)
+	}
+	if len(warnings) != 1 || warnings[0] != warnJellyfinResumeUnavailable {
+		t.Fatalf("warnings = %v, want only %q", warnings, warnJellyfinResumeUnavailable)
+	}
+}
+
+// Treating a resume failure as a warning must not hide a cancellation.
+func TestJellyfinProviderFetch_ResumeCancellationStopsTheRun(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(trustLoopback(context.Background()))
+	defer cancel()
+	fetch := newJellyfinFetchHandler(t, map[string][]jellyfinItem{
+		"IsPlayed":   {{ID: "matrix", Type: "Movie", Name: "The Matrix", UserData: jellyfinUserData{Played: true}}},
+		"IsFavorite": {},
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/UserItems/Resume" {
+			cancel()
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		fetch.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	records, _, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(ctx)
+	if err == nil {
+		t.Fatalf("Fetch returned %d records and no error, want the run to stop on cancellation", len(records))
+	}
+}
+
+// In-progress movies and episodes from /UserItems/Resume are imported with
+// their positions; other video types Jellyfin returns for MediaTypes=Video
+// are not.
+func TestJellyfinProviderFetch_ImportsResumePositions(t *testing.T) {
+	t.Parallel()
+
+	fetch := newJellyfinFetchHandler(t, map[string][]jellyfinItem{
+		"IsPlayed":   {},
+		"IsFavorite": {},
+	}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/UserItems/Resume" {
+			assertJellyfinAuthorization(t, r, "token-1")
+			if got := r.URL.Query().Get("MediaTypes"); got != "Video" {
+				t.Errorf("MediaTypes = %q, want Video", got)
+			}
+			items := []jellyfinItem{
+				{ID: "heat", Type: "Movie", Name: "Heat", ProviderIDs: map[string]string{"Tmdb": "949"}, RunTimeTicks: 100_000_000_000, UserData: jellyfinUserData{PlaybackPositionTicks: 36_000_000_000}},
+				{ID: "concert", Type: "MusicVideo", Name: "Concert", UserData: jellyfinUserData{PlaybackPositionTicks: 10_000_000}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(jellyfinItemsResponse{Items: items, TotalRecordCount: len(items)})
+			return
+		}
+		fetch.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	records, warnings, err := NewJellyfinProvider(newUnthrottledJellyfinClient(), jellyfinLocalAuth{BaseURL: server.URL, UserID: "user-1", AccessToken: "token-1"}).Fetch(trustLoopback(context.Background()))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v", warnings)
+	}
+	if len(records) != 1 || records[0].ExternalID != "heat" || records[0].Kind != KindMovie || records[0].PositionSeconds != 3600 {
+		t.Fatalf("records = %+v, want only Heat at 3600 seconds", records)
+	}
+}
+
+// newJellyfinFetchServer serves newJellyfinFetchHandler.
 func newJellyfinFetchServer(t *testing.T, byFilter map[string][]jellyfinItem, byID map[string]jellyfinItem) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(newJellyfinFetchHandler(t, byFilter, byID))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// newJellyfinFetchHandler serves /Items by filter (a filter absent from
+// byFilter answers 500), an empty /UserItems/Resume, and /Items?Ids= lookups
+// from byID (a nil byID answers 500).
+func newJellyfinFetchHandler(t *testing.T, byFilter map[string][]jellyfinItem, byID map[string]jellyfinItem) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assertJellyfinAuthorization(t, r, "token-1")
 		query := r.URL.Query()
 		var items []jellyfinItem
@@ -180,7 +285,21 @@ func newJellyfinFetchServer(t *testing.T, byFilter map[string][]jellyfinItem, by
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jellyfinItemsResponse{Items: items, TotalRecordCount: len(items)})
-	}))
-	t.Cleanup(server.Close)
-	return server
+	})
+}
+
+// A Jellyfin error body can echo the request's credentials in forms the text
+// redactor misses, so warning logs keep only the HTTP status.
+func TestJellyfinWarningLogErrorDropsResponseBody(t *testing.T) {
+	t.Parallel()
+
+	body := `{"Authorization":"MediaBrowser Client=\"watch-importer\", Token=\"secret-token-1\""}`
+	err := fmt.Errorf("fetching Jellyfin resumable items: %w", &jellyfinHTTPError{StatusCode: http.StatusBadGateway, Body: body})
+	if got := jellyfinWarningLogError(err); got != "jellyfin http 502" {
+		t.Fatalf("jellyfinWarningLogError = %q, want only the status", got)
+	}
+	err = fmt.Errorf("fetching Emby Items/Resume: %w", &embyHTTPError{StatusCode: http.StatusInternalServerError, Body: body})
+	if got := warningLogError("emby", err); got != "emby http 500" {
+		t.Fatalf("warningLogError(emby) = %q, want only the status", got)
+	}
 }

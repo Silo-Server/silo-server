@@ -43,7 +43,8 @@ The public operations spend the `password_reset` per-IP rate-limit budget; with
 expiry against `clock_timestamp()`, deletes the link, replaces the password,
 clears `password_change_required`, and revokes every login session the account
 owns or impersonates from, then commits. The same transaction revokes the
-account's Audiobookshelf-compatible sessions and denies any device sign-in it
+account's Audiobookshelf-compatible sessions, deletes its stored
+Jellyfin-compatible sessions, and denies any device sign-in it
 approved that the device has not collected yet, which would otherwise mint a
 fresh session afterwards. Personal API keys survive: the account created them on
 purpose, and revoking them would break its integrations, so the account or an

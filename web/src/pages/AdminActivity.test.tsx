@@ -1,9 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminSession } from "@/api/types";
-import type { AdminDownloadPreparationList } from "@/api/v2/adminDownloadPreparations";
-import { makePreparation, makePreparationList } from "@/test/downloadPreparations";
 import { activityMethodMeta } from "./adminActivityPresentation";
 
 const mocks = vi.hoisted(() => ({
@@ -13,22 +11,11 @@ const mocks = vi.hoisted(() => ({
   rows: true,
   next: vi.fn(),
   restart: vi.fn(),
-  preparations: undefined as AdminDownloadPreparationList | undefined,
-  preparationsRefetch: vi.fn(),
-  logParams: [] as unknown[],
 }));
 
 vi.mock("@/hooks/queries/admin/stats", () => ({
   useAdminSessions: () => ({ data: mocks.sessions, isLoading: false, refetch: mocks.refresh }),
   useAdminStats: () => ({ data: undefined, isLoading: false }),
-}));
-vi.mock("@/hooks/queries/admin/downloadPreparations", () => ({
-  useAdminDownloadPreparations: () => ({
-    data: mocks.preparations,
-    isLoading: false,
-    isError: false,
-    refetch: mocks.preparationsRefetch,
-  }),
 }));
 vi.mock("@/components/realtimeEventsContext", () => ({
   useRealtimeEvents: () => ({ connectionState: "live" }),
@@ -58,10 +45,7 @@ vi.mock("@/hooks/queries/admin/ips", () => ({
   }),
 }));
 vi.mock("@/hooks/queries/admin/logs", () => ({
-  useOperationalLogs: (params: unknown, enabled: boolean) => {
-    if (enabled) mocks.logParams.push(params);
-    return { data: { entries: [] }, isLoading: false, isFetching: false };
-  },
+  useOperationalLogs: () => ({ data: { entries: [] }, isLoading: false, isFetching: false }),
 }));
 vi.mock("@/components/AdminSessionActions", () => ({ AdminSessionActions: () => null }));
 
@@ -72,8 +56,6 @@ beforeEach(() => {
   mocks.sessions = [];
   mocks.error = false;
   mocks.rows = true;
-  mocks.preparations = undefined;
-  mocks.logParams = [];
 });
 afterEach(cleanup);
 
@@ -246,70 +228,20 @@ describe("IP lookup", () => {
   });
 });
 
-describe("download preparation tab", () => {
-  function renderActivity(path = "/admin/activity") {
+describe("old download preparation links", () => {
+  it("send the preparation view to the Downloads page", () => {
     render(
-      <MemoryRouter initialEntries={[path]}>
-        <AdminActivity />
+      <MemoryRouter initialEntries={["/admin/activity?view=preparations"]}>
+        <Routes>
+          <Route path="/admin/activity" element={<AdminActivity />} />
+          <Route path="/admin/downloads" element={<DownloadsProbe />} />
+        </Routes>
       </MemoryRouter>,
     );
-  }
-
-  it("filters by state and search text", () => {
-    mocks.preparations = makePreparationList([
-      makePreparation(),
-      makePreparation({
-        id: "art-q",
-        state: "queued",
-        progress: undefined,
-        media_title: "Queued One",
-      }),
-    ]);
-    renderActivity("/admin/activity?view=preparations");
-
-    fireEvent.click(screen.getByRole("button", { name: /Queued\s*1/ }));
-    expect(screen.getByText("Showing 1 of 2 jobs")).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Clear filters"));
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "alex's iphone" },
-    });
-    expect(screen.getByText("Showing 2 of 2 jobs")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Filter download preparation"), {
-      target: { value: "nothing matches" },
-    });
-    expect(screen.getByText("No jobs match your filters")).toBeInTheDocument();
-  });
-
-  it("expands job details with the FFmpeg console and log link", () => {
-    mocks.preparations = makePreparationList([makePreparation()]);
-    renderActivity("/admin/activity?view=preparations");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details for Example Movie" })[0]!);
-    expect(screen.getByText("All 2 tracks → stereo AAC")).toBeInTheDocument();
-    expect(screen.getByText("HDR → SDR (software)")).toBeInTheDocument();
-    expect(screen.getByText("25:00 of 1:40:00 (25%)")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View logs/ })).toHaveAttribute(
-      "href",
-      "/admin/logs?playback_session_id=download-prepare-art-1&component=ffmpeg",
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /FFmpeg/ }));
-    expect(mocks.logParams).toContainEqual({
-      playback_session_id: "download-prepare-art-1",
-      component: "ffmpeg",
-      limit: 12,
-    });
-    expect(screen.getByText(/No FFmpeg output for this job yet/)).toBeInTheDocument();
-  });
-
-  it("refreshes streams and preparations together", () => {
-    mocks.preparations = makePreparationList([]);
-    renderActivity("/admin/activity?view=preparations");
-    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }));
-    expect(mocks.refresh).toHaveBeenCalled();
-    expect(mocks.preparationsRefetch).toHaveBeenCalled();
-    expect(screen.getByText("No downloads being prepared")).toBeInTheDocument();
+    expect(screen.getByTestId("downloads")).toHaveTextContent("?tab=preparation");
   });
 });
+
+function DownloadsProbe() {
+  return <div data-testid="downloads">{useLocation().search}</div>;
+}

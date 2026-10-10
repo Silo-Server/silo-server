@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type { Profile } from "@/api/types";
 import { ProfileEditorDialog } from "@/components/profiles/ProfileEditorDialog";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
+import { pinLockoutMessage } from "@/components/profiles/pinLockout";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -68,7 +69,12 @@ export default function Profiles() {
         enterApp();
         return;
       }
-    } catch {
+    } catch (err) {
+      const lockout = pinLockoutMessage(err);
+      if (lockout) {
+        toast.error(`Profile created. ${lockout}`);
+        return;
+      }
       // fall through to the toast below
     }
 

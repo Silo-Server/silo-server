@@ -435,6 +435,14 @@ describe("how it was decided", () => {
     ).toBe("Everything else — decides 4K: none");
     expect(
       traceLine(
+        step({ is_fallback: true, route_name: "Everything else", hd: "skips", uhd: "sends" }),
+        0,
+        {},
+        ctx,
+      ),
+    ).toBe("Everything else — decides HD: none · decides 4K");
+    expect(
+      traceLine(
         step({ unmet_conditions: ["year_from", "year_to"] }),
         1,
         { year_from: 1980, year_to: 1989 },

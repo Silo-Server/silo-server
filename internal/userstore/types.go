@@ -15,6 +15,11 @@ type Profile struct {
 	// access.MaturityLimits.MaxAdvisoryAge); 0 means no limit and is stored
 	// as NULL.
 	MaxAdvisoryAge int
+	// PINRevision advances whenever this profile's PIN is set, changed or
+	// cleared. Profile verification tokens are bound to it, so a PIN change
+	// invalidates the profile's outstanding tokens while edits to any other
+	// field, or to another profile, leave them valid.
+	PINRevision int64
 	// RequireAdvisoryAge hides titles with no advisory age from the profile
 	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
 	// with a MaxAdvisoryAge limit.
@@ -227,7 +232,9 @@ type WatchlistEntry struct {
 	AddedAt     string
 }
 
-// Collection represents a user-created collection.
+// Collection represents a user-created collection. CreatorProfileID owns it:
+// only that profile changes it. IsShared shows it to every profile on the
+// login, including profiles added later; otherwise only its creator sees it.
 type Collection struct {
 	ID                         string
 	ProfileID                  string
@@ -236,7 +243,6 @@ type Collection struct {
 	Description                string
 	CollectionType             string
 	IsShared                   bool
-	AllowedProfileIDs          []string
 	QueryDefinition            string
 	SortConfig                 string
 	SourceURL                  string
@@ -255,6 +261,14 @@ type Collection struct {
 	GroupID                    *string
 	CreatedAt                  string
 	UpdatedAt                  string
+}
+
+// VisibleTo reports whether profileID, a profile on the collection's login,
+// may read the collection: it created it, or the collection is shared. Stores
+// only return collections of the login they serve, so this never crosses
+// logins.
+func (c *Collection) VisibleTo(profileID string) bool {
+	return c != nil && profileID != "" && (c.CreatorProfileID == profileID || c.IsShared)
 }
 
 type GroupSortMode string
@@ -286,7 +300,6 @@ type CreateCollectionInput struct {
 	Description                string
 	CollectionType             string
 	IsShared                   bool
-	AllowedProfileIDs          []string
 	QueryDefinition            string
 	SortConfig                 string
 	SourceURL                  string
@@ -300,17 +313,16 @@ type CreateCollectionInput struct {
 
 type UpdateCollectionInput struct {
 	// ExpectedRevision, when set, is atomically checked in the mutation transaction.
-	ExpectedRevision  *int64
-	ID                string
-	RequestProfileID  string
-	Name              *string
-	Description       *string
-	IsShared          *bool
-	AllowedProfileIDs *[]string
-	QueryDefinition   *string
-	SortConfig        *string
-	SourceURL         *string
-	SourceConfig      *string
+	ExpectedRevision *int64
+	ID               string
+	RequestProfileID string
+	Name             *string
+	Description      *string
+	IsShared         *bool
+	QueryDefinition  *string
+	SortConfig       *string
+	SourceURL        *string
+	SourceConfig     *string
 	// SourceConfigPatch atomically merges only present top-level source config members.
 	// Imported collections are supported only by the PostgreSQL store.
 	SourceConfigPatch          *string
@@ -332,6 +344,14 @@ type UpdateCollectionSyncStateInput struct {
 	ItemCount  int
 	LastSyncAt time.Time
 	NextSyncAt *time.Time
+	// ScheduleAtStart and NextSyncAtAtStart are the collection's sync_schedule
+	// and next_sync_at when the sync began. NextSyncAt is written only while
+	// the stored row still holds both, so a schedule edited during the sync,
+	// on any node, keeps the next_sync_at the edit wrote, even when the edit
+	// saved the same cadence again. The rest of the sync state is written
+	// either way.
+	ScheduleAtStart   *string
+	NextSyncAtAtStart *time.Time
 }
 
 type CollectionItemReplacement struct {

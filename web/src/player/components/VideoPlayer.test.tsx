@@ -51,6 +51,7 @@ const subtitleTimeline = vi.hoisted(() => ({
   streamGeneration: 0,
   cueRevision: 0,
   assCueRevision: 0,
+  setLoadState: null as null | ((state: string) => void),
 }));
 const toastError = vi.hoisted(() => vi.fn());
 const hlsJS = vi.hoisted(() => ({
@@ -82,6 +83,7 @@ vi.mock("../hooks/useSubtitleTracks", () => ({
     subtitleTimeline.liveCues = args[7] as Array<{ text: string }>;
     subtitleTimeline.liveKey = args[8] as string | null;
     subtitleTimeline.streamGeneration = args[9] as number;
+    subtitleTimeline.setLoadState = args[10] as (state: string) => void;
     subtitleTimeline.cueRevision = args[11] as number;
     return [];
   },
@@ -3138,21 +3140,71 @@ describe("VideoPlayer server-invalidated transport swap", () => {
   });
 });
 
-describe("VideoPlayer stored subtitle timing", () => {
+describe("VideoPlayer subtitle sync", () => {
+  const SIDECAR = "external-" + "e".repeat(64);
+  const sidecarTrack: PlayerSubtitleInfo = {
+    index: 0,
+    language: "en",
+    label: "Movie.en.srt",
+    source: "external",
+    codec: "srt",
+    sync_key: SIDECAR,
+    url: "/api/v1/stream/session-1/subtitles/0.vtt?file_id=7",
+  };
   const storedTrack: PlayerSubtitleInfo = {
     index: 2,
-    language: "en",
-    label: "English",
+    language: "fr",
+    label: "French",
     source: "downloaded",
     codec: "srt",
+    sync_key: "stored-31",
     url: "/api/v1/stream/session-1/subtitles/2.vtt?file_id=7&downloaded_subtitle_id=31",
   };
-  const timingChanged = (fileId: number, subtitleId: number): PlaybackRealtimeEventEnvelope => ({
+  const state = (key: string, overrides: Record<string, unknown> = {}) => ({
+    key,
+    media_file_id: "7",
+    source: key === SIDECAR ? "external" : "downloaded",
+    language: "en",
+    format: "srt",
+    label: "Movie.en.srt",
+    timing: { offset_ms: 0, scale: 1 },
+    ...overrides,
+  });
+  const timingChanged = (fileId: number, key: string): PlaybackRealtimeEventEnvelope => ({
     type: "event",
     session_id: "session-1",
     name: "subtitle_timing_changed",
-    payload: { session_id: "session-1", file_id: fileId, subtitle_id: subtitleId },
+    payload: { session_id: "session-1", file_id: fileId, sync_key: key },
   });
+  const syncUpdated = (
+    job: Record<string, unknown>,
+    timing = { offset_ms: 0, scale: 1 },
+  ): PlaybackRealtimeEventEnvelope => ({
+    type: "event",
+    session_id: "session-1",
+    name: "subtitle_sync_updated",
+    payload: {
+      session_id: "session-1",
+      file_id: 7,
+      sync_key: SIDECAR,
+      timing,
+      job: {
+        id: "80",
+        trigger: "manual",
+        confidence: null,
+        created_at: "2026-01-02T03:04:05.000Z",
+        finished_at: null,
+        status: "running",
+        ...job,
+      } as never,
+    },
+  });
+  const selectTrack = (index: number) =>
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        index,
+      ),
+    );
 
   beforeEach(() => {
     realtimeOptions.current = null;
@@ -3160,16 +3212,32 @@ describe("VideoPlayer stored subtitle timing", () => {
     playerV2Mock
       .mockReset()
       .mockImplementation(
-        async (_config: unknown, route: string, options: { path?: { id?: string } }) => {
-          const subtitle = { id: "31", media_file_id: "7", timing: { offset_ms: 0, scale: 1 } };
-          if (route === "GET /api/v2/subtitles/{media_file_id}") return { subtitles: [subtitle] };
-          if (route === "GET /api/v2/subtitles/stored/{id}/sync") {
+        async (_config: unknown, route: string, options: { path?: { key?: string } }) => {
+          if (route === "GET /api/v2/subtitles/sync/status") return { state: "available" };
+          if (route === "GET /api/v2/subtitles/{media_file_id}/sync") {
+            return { subtitles: [state(SIDECAR), state("stored-31")] };
+          }
+          if (route === "GET /api/v2/subtitles/{media_file_id}/sync/{key}") {
             return {
-              subtitle: {
-                ...subtitle,
-                id: options.path?.id,
+              subtitle: state(options.path?.key ?? SIDECAR, {
                 timing: { offset_ms: 1200, scale: 1 },
-              },
+              }),
+            };
+          }
+          if (route === "POST /api/v2/subtitles/{media_file_id}/sync/{key}") {
+            return {
+              subtitle: state(SIDECAR, {
+                sync: {
+                  id: "80",
+                  status: "pending",
+                  trigger: "manual",
+                  phase: "queued",
+                  progress: 0,
+                  confidence: null,
+                  created_at: "2026-01-02T03:04:05.000Z",
+                  finished_at: null,
+                },
+              }),
             };
           }
           return {};
@@ -3185,39 +3253,105 @@ describe("VideoPlayer stored subtitle timing", () => {
     vi.restoreAllMocks();
   });
 
-  it("refetches the active stored track when its timing changes on this file", async () => {
-    renderPlayer({ subtitleUrls: [storedTrack] });
-    act(() =>
-      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
-        2,
-      ),
-    );
+  it("refetches the active track when its timing changes on this file", async () => {
+    renderPlayer({ subtitleUrls: [sidecarTrack, storedTrack] });
+    selectTrack(0);
     await act(async () => {});
     expect(subtitleTimeline.cueRevision).toBe(0);
 
     // Another file's subtitle and an inactive subtitle leave the cues alone.
-    act(() => realtimeOptions.current?.onEvent?.(timingChanged(8, 31)));
-    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 99)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(8, SIDECAR)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, "stored-31")));
     await act(async () => {});
     expect(subtitleTimeline.cueRevision).toBe(0);
 
-    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, 31)));
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, SIDECAR)));
     await act(async () => {});
     expect(subtitleTimeline.cueRevision).toBe(1);
     expect(subtitleTimeline.assCueRevision).toBe(1);
     // The follow-up read refreshes the menu's status without a second reload.
     expect(playerV2Mock).toHaveBeenCalledWith(
       playerConfig,
-      "GET /api/v2/subtitles/stored/{id}/sync",
-      { path: { id: "31" } },
+      "GET /api/v2/subtitles/{media_file_id}/sync/{key}",
+      { path: { media_file_id: "7", key: SIDECAR } },
     );
     expect(subtitleTimeline.cueRevision).toBe(1);
     const sync = (
       controls.current as unknown as {
-        storedSubtitleSync: { entries: Record<string, { subtitle: { timing: unknown } }> };
+        subtitleSync: { entries: Record<string, { state: { timing: unknown } }> };
       }
-    ).storedSubtitleSync;
-    expect(sync.entries["31"]?.subtitle.timing).toEqual({ offset_ms: 1200, scale: 1 });
+    ).subtitleSync;
+    expect(sync.entries[SIDECAR]?.state.timing).toEqual({ offset_ms: 1200, scale: 1 });
+  });
+
+  it("shows a sync the viewer started from progress to the corrected cues", async () => {
+    renderPlayer({ subtitleUrls: [sidecarTrack, storedTrack] });
+    selectTrack(0);
+    await act(async () => {});
+    act(() => subtitleTimeline.setLoadState?.("ready"));
+
+    const sync = (
+      controls.current as unknown as { subtitleSync: { requestSync: (k: string) => Promise<void> } }
+    ).subtitleSync;
+    await act(async () => {
+      await sync.requestSync(SIDECAR);
+    });
+    const indicator = () => screen.getByTestId("subtitle-sync-indicator");
+    expect(indicator()).toHaveTextContent("Syncing English subtitles");
+    expect(indicator()).toHaveTextContent("Waiting to start…");
+
+    act(() =>
+      realtimeOptions.current?.onEvent?.(syncUpdated({ phase: "analyzing", progress: 0.5 })),
+    );
+    expect(indicator()).toHaveTextContent("Listening to the audio…");
+    expect(screen.getByRole("progressbar", { name: "Subtitle sync progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
+    );
+
+    act(() =>
+      realtimeOptions.current?.onEvent?.(
+        syncUpdated(
+          {
+            status: "synced",
+            result: { offset_ms: 2300, scale: 1 },
+            finished_at: "2026-01-02T03:05:05.000Z",
+          },
+          { offset_ms: 2300, scale: 1 },
+        ),
+      ),
+    );
+    await act(async () => {});
+    expect(indicator()).toHaveTextContent("Applying new timing…");
+    // The server follows the result with the timing event: one reload, and a
+    // read that finds the finished job.
+    const routes = playerV2Mock.getMockImplementation()!;
+    playerV2Mock.mockImplementation(async (config: unknown, route: string, options: unknown) =>
+      route === "GET /api/v2/subtitles/{media_file_id}/sync/{key}"
+        ? {
+            subtitle: state(SIDECAR, {
+              timing: { offset_ms: 2300, scale: 1 },
+              sync: {
+                id: "80",
+                status: "synced",
+                trigger: "manual",
+                confidence: 0.9,
+                result: { offset_ms: 2300, scale: 1 },
+                created_at: "2026-01-02T03:04:05.000Z",
+                finished_at: "2026-01-02T03:05:05.000Z",
+              },
+            }),
+          }
+        : routes(config, route, options),
+    );
+    act(() => realtimeOptions.current?.onEvent?.(timingChanged(7, SIDECAR)));
+    await act(async () => {});
+    expect(subtitleTimeline.cueRevision).toBe(1);
+
+    act(() => subtitleTimeline.setLoadState?.("loading"));
+    act(() => subtitleTimeline.setLoadState?.("ready"));
+    expect(indicator()).toHaveTextContent("Subtitles synced");
+    expect(indicator()).toHaveTextContent("+2.3 s");
   });
 });
 

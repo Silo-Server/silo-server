@@ -91,3 +91,112 @@ func TestAdminAutoscanSourceWriteWebhookAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// requiredConnectionTriggerer lists one capability whose descriptor requires a
+// connection, as the host's compatibility descriptor does for the
+// Sonarr/Radarr poller.
+func requiredConnectionTriggerer() *fakeAutoscanTriggerer {
+	return &fakeAutoscanTriggerer{available: []autoscan.AvailableScanSource{{
+		PluginID:     "silo.autoscan.arr",
+		CapabilityID: "arr",
+		Descriptor: autoscan.ScanSourceDescriptor{
+			DeliveryModes: []string{autoscan.DeliveryModePoll},
+			Connection:    autoscan.ConnectionRequired,
+		},
+	}}}
+}
+
+func TestAdminAutoscanSourceCreateRequiresDescriptorConnection(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in      AdminAutoscanSourceWrite
+		wantErr bool
+	}{
+		"enabled without connection": {
+			in:      AdminAutoscanSourceWrite{PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true},
+			wantErr: true,
+		},
+		"blank connection counts as none": {
+			in:      AdminAutoscanSourceWrite{PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true, ConnectionID: new("  ")},
+			wantErr: true,
+		},
+		"enabled with connection": {
+			in: AdminAutoscanSourceWrite{PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true, ConnectionID: new("connection")},
+		},
+		"disabled without connection": {
+			in: AdminAutoscanSourceWrite{PluginID: "silo.autoscan.arr", CapabilityID: "arr"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			store := &fakeAutoscanStore{createSourceFn: func(s autoscan.Source) (autoscan.Source, error) {
+				calls++
+				s.ID = "created"
+				return s, nil
+			}}
+			h := NewAutoscanHandler(store, requiredConnectionTriggerer())
+			_, err := h.CreateAdminAutoscanSource(t.Context(), tc.in)
+			if tc.wantErr {
+				if !errors.Is(err, ErrAdminAutoscanSourceConnectionRequired) || !errors.Is(err, ErrAdminAutoscanSourceWriteInvalid) || calls != 0 {
+					t.Fatalf("err = %v, writes = %d; want connection-required validation and no write", err, calls)
+				}
+				return
+			}
+			if err != nil || calls != 1 {
+				t.Fatalf("err = %v, writes = %d; want one write", err, calls)
+			}
+		})
+	}
+}
+
+// A source saved without a server before the rule existed must still load and
+// be editable: the edit that keeps it enabled has to supply a server, but it
+// can always be switched off.
+func TestAdminAutoscanSourceUpdateRequiresDescriptorConnection(t *testing.T) {
+	stored := autoscan.Source{ID: "existing", PluginID: "silo.autoscan.arr", CapabilityID: "arr", Enabled: true, DeliveryMode: autoscan.DeliveryModePoll}
+	for name, tc := range map[string]struct {
+		in      AdminAutoscanSourceWrite
+		svc     autoscanTriggerer
+		wantErr bool
+	}{
+		"kept enabled without connection": {
+			in:      AdminAutoscanSourceWrite{Enabled: true},
+			svc:     requiredConnectionTriggerer(),
+			wantErr: true,
+		},
+		"supplies a server": {
+			in:  AdminAutoscanSourceWrite{Enabled: true, ConnectionID: new("connection")},
+			svc: requiredConnectionTriggerer(),
+		},
+		"switched off without connection": {
+			in:  AdminAutoscanSourceWrite{Enabled: false},
+			svc: requiredConnectionTriggerer(),
+		},
+		"plugin no longer installed": {
+			in:  AdminAutoscanSourceWrite{Enabled: true},
+			svc: &fakeAutoscanTriggerer{},
+		},
+		"descriptor listing fails": {
+			in:  AdminAutoscanSourceWrite{Enabled: true},
+			svc: &fakeAutoscanTriggerer{availableErr: errors.New("installation store unavailable")},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			calls := 0
+			store := &fakeAutoscanStore{
+				getSourceFn:    func(string) (autoscan.Source, error) { return stored, nil },
+				updateSourceFn: func(s autoscan.Source) (autoscan.Source, error) { calls++; return s, nil },
+			}
+			h := NewAutoscanHandler(store, tc.svc)
+			_, err := h.UpdateAdminAutoscanSource(t.Context(), "existing", tc.in)
+			if tc.wantErr {
+				if !errors.Is(err, ErrAdminAutoscanSourceConnectionRequired) || calls != 0 {
+					t.Fatalf("err = %v, writes = %d; want connection-required validation and no write", err, calls)
+				}
+				return
+			}
+			if err != nil || calls != 1 {
+				t.Fatalf("err = %v, writes = %d; want one write", err, calls)
+			}
+		})
+	}
+}

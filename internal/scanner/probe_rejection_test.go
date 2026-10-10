@@ -57,6 +57,17 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 	if IsProbeRejection(ctx, media, nil) {
 		t.Fatal("nil error reported as a rejection")
 	}
+
+	// The shell and the dynamic loader exit 126 or 127 when ffprobe itself
+	// cannot start, such as a shared library it cannot map.
+	for _, code := range []int{126, 127} {
+		broken := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, broken, fmt.Sprintf("#!/bin/sh\necho 'ffprobe: error while loading shared libraries' >&2\nexit %d\n", code))
+		_, err = ProbeFile(ctx, broken, media)
+		if err == nil || IsProbeRejection(ctx, media, err) {
+			t.Fatalf("ffprobe that could not start (exit %d) = %v, want a non-rejection error", code, err)
+		}
+	}
 }
 
 // The files from issue #1791: real ffprobe refuses zero-byte, random-byte and

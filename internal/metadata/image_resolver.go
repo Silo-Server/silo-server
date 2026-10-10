@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"golang.org/x/sync/singleflight"
@@ -23,9 +26,14 @@ import (
 const (
 	resolvedURLCacheSafetyMargin = 5 * time.Minute
 	maxResolvedURLCacheTTL       = 24 * time.Hour
+	// storedArtworkTimeout bounds the stored artwork lookup in a shared batch,
+	// which no longer ends with the caller that started it.
+	storedArtworkTimeout = 30 * time.Second
 )
 
 // PluginImageResolverSource provides image URL resolution for a single plugin.
+// A shared batch calls it on a context with no deadline, so it must bound its
+// own calls; the plugin clients give each call pluginhost.DefaultMetadataTimeout.
 type PluginImageResolverSource interface {
 	ResolveImageURL(ctx context.Context, path string, variant string) (string, error)
 	ResolveImageURLs(ctx context.Context, paths []string, variant string) (map[string]string, error)
@@ -232,41 +240,79 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 	r.mu.RUnlock()
 
 	for pluginID, groupedEntries := range grouped {
+		if ctx.Err() != nil {
+			return result
+		}
 		entries := sortedResolveEntries(groupedEntries)
 		flightKey := resolvedImageBatchFlightKey(pluginID, variant, entries)
-		value, err, _ := r.group.Do(flightKey, func() (any, error) {
-			if pluginID == "" {
-				if artworkResolver == nil {
-					return map[string]catalog.ResolvedImageURL{}, nil
+		// Every caller asking for this batch shares the flight, so it runs
+		// detached from the caller that started it: that caller leaving must
+		// not empty the batch for the rest. Each caller still stops waiting
+		// when its own context ends. Results with a known expiry are cached
+		// inside the flight, so they are kept even when every caller has gone.
+		flight := r.group.DoChan(flightKey, func() (value any, err error) {
+			defer func() {
+				// The flight runs on its own goroutine, out of reach of the
+				// request's panic recovery.
+				if rec := recover(); rec != nil {
+					slog.ErrorContext(ctx, "image batch resolution panicked", "component", "metadata", "plugin_id", pluginID,
+						"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
+					value, err = map[string]catalog.ResolvedImageURL{}, nil
 				}
-				return r.resolveStoredBatch(ctx, artworkResolver, entries), nil
+			}()
+			resolved := r.resolveBatch(context.WithoutCancel(ctx), pluginID, entries, variant, artworkResolver, sourcesSnapshot[pluginID])
+			now := time.Now()
+			for path, resolvedURL := range resolved {
+				if ttl := cacheTTLForResolvedURL(resolvedURL, now); ttl > 0 {
+					r.urlCache.Set(resolvedImageCacheKey(variant, path), resolvedURL, ttl)
+				}
 			}
-			sources := sourcesSnapshot[pluginID]
-			if len(sources) == 0 {
-				slog.WarnContext(ctx, "no image resolver registered for scheme", "component", "metadata", "scheme", pluginID)
-				return map[string]catalog.ResolvedImageURL{}, nil
-			}
-			return r.resolvePluginBatchWithFallback(ctx, pluginID, sources, entries, variant), nil
+			return resolved, nil
 		})
-		if err != nil {
-			slog.ErrorContext(ctx, "image batch resolution failed", "component", "metadata", "plugin_id", pluginID, "error", err)
+		var outcome singleflight.Result
+		select {
+		case <-ctx.Done():
+			return result
+		case outcome = <-flight:
+		}
+		if outcome.Err != nil {
+			slog.ErrorContext(ctx, "image batch resolution failed", "component", "metadata", "plugin_id", pluginID, "error", outcome.Err)
 			continue
 		}
 
-		resolvedBatch, ok := value.(map[string]catalog.ResolvedImageURL)
+		resolvedBatch, ok := outcome.Val.(map[string]catalog.ResolvedImageURL)
 		if !ok {
 			continue
 		}
-		now := time.Now()
 		for path, resolvedURL := range resolvedBatch {
 			result[path] = resolvedURL
-			if ttl := cacheTTLForResolvedURL(resolvedURL, now); ttl > 0 {
-				r.urlCache.Set(resolvedImageCacheKey(variant, path), resolvedURL, ttl)
-			}
 		}
 	}
 
 	return result
+}
+
+func (r *PluginImageResolver) resolveBatch(
+	ctx context.Context,
+	pluginID string,
+	entries []resolveEntry,
+	variant string,
+	artworkResolver artworkurl.Resolver,
+	sources []pluginImageResolverSourceEntry,
+) map[string]catalog.ResolvedImageURL {
+	if pluginID == "" {
+		if artworkResolver == nil {
+			return map[string]catalog.ResolvedImageURL{}
+		}
+		storedCtx, cancel := context.WithTimeout(ctx, storedArtworkTimeout)
+		defer cancel()
+		return r.resolveStoredBatch(storedCtx, artworkResolver, entries)
+	}
+	if len(sources) == 0 {
+		slog.WarnContext(ctx, "no image resolver registered for scheme", "component", "metadata", "scheme", pluginID)
+		return map[string]catalog.ResolvedImageURL{}
+	}
+	return r.resolvePluginBatchWithFallback(ctx, pluginID, sources, entries, variant)
 }
 
 func (r *PluginImageResolver) resolvePluginBatchWithFallback(
@@ -283,6 +329,11 @@ func (r *PluginImageResolver) resolvePluginBatchWithFallback(
 		if len(remaining) == 0 {
 			break
 		}
+		// No deadline here on purpose. The batch's context has none, so the
+		// plugin client gives each call its own default once the plugin is
+		// running, and a hung source still leaves the next one its full time.
+		// A deadline here would also cover the plugin's launch and replace
+		// that default, cutting a slow cold start's call short.
 		resolvedBatch, err := r.resolvePluginBatch(ctx, source.source, remaining, variant)
 		if err != nil {
 			if status.Code(err) == codes.Unimplemented {

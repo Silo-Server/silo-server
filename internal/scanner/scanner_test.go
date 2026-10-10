@@ -184,6 +184,93 @@ func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testin
 	}
 }
 
+// TestScanStateUpdateReasons_SkipsProbeRepairForRejectedUnchangedFile covers a
+// file ffprobe rejected. Rescanning the same bytes must not run ffprobe and the
+// OSHash again, while changed bytes and unmarked rows still get the probe.
+func TestScanStateUpdateReasons_SkipsProbeRepairForRejectedUnchangedFile(t *testing.T) {
+	t.Parallel()
+
+	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
+	rejectedAt := modifiedAt.Add(time.Minute)
+	rejected := &scanStateFile{
+		ContentID:      "matched-content",
+		FileSize:       1_000,
+		FileModifiedAt: &modifiedAt,
+		ProbeFailedAt:  &rejectedAt,
+	}
+
+	reasons := scanStateUpdateReasons(rejected, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
+	if testStringSliceContains(reasons, "probe_repair") {
+		t.Fatalf("rejected unchanged file got reasons %#v, want no probe_repair", reasons)
+	}
+	if !shouldSkipStableConfirmedScanState(rejected, "matched", 1_000, modifiedAt, reasons, true) {
+		t.Fatal("expected a rejected unchanged file to use the stable scan-state skip")
+	}
+
+	changedAt := modifiedAt.Add(time.Hour)
+	reasons = scanStateUpdateReasons(rejected, 1_000, changedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
+	if !testStringSliceContains(reasons, "mtime_changed") || !testStringSliceContains(reasons, "probe_repair") {
+		t.Fatalf("rejected file with new bytes got reasons %#v, want mtime_changed and probe_repair", reasons)
+	}
+
+	unmarked := &scanStateFile{
+		ContentID:      "matched-content",
+		FileSize:       1_000,
+		FileModifiedAt: &modifiedAt,
+	}
+	reasons = scanStateUpdateReasons(unmarked, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
+	if !testStringSliceContains(reasons, "probe_repair") {
+		t.Fatalf("unprobed file got reasons %#v, want probe_repair", reasons)
+	}
+}
+
+// TestScanStateFromMediaFileCarriesProbeRejection covers the single-file scan,
+// which builds its scan state from the stored row rather than the folder query.
+func TestScanStateFromMediaFileCarriesProbeRejection(t *testing.T) {
+	t.Parallel()
+
+	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
+	rejectedAt := modifiedAt.Add(time.Minute)
+	state := scanStateFromMediaFile(&models.MediaFile{
+		ContentID:      "matched-content",
+		FileSize:       1_000,
+		FileModifiedAt: &modifiedAt,
+		ProbeFailedAt:  &rejectedAt,
+	})
+	if state.ProbeFailedAt == nil {
+		t.Fatal("scan state dropped probe_failed_at")
+	}
+	reasons := scanStateUpdateReasons(state, 1_000, modifiedAt, nil, false, fileRootAssignment{}, fileGroupAssignment{}, "movies", true)
+	if testStringSliceContains(reasons, "probe_repair") {
+		t.Fatalf("rejected unchanged file got reasons %#v, want no probe_repair", reasons)
+	}
+}
+
+// TestExtraFileUnchangedSkipsRejectedExtra covers an extra ffprobe rejected:
+// rescanning the same bytes must not probe it again, while new bytes must.
+func TestExtraFileUnchangedSkipsRejectedExtra(t *testing.T) {
+	t.Parallel()
+
+	modifiedAt := time.Now().UTC().Truncate(time.Microsecond)
+	rejectedAt := modifiedAt.Add(time.Minute)
+	rejected := &scanStateFile{
+		ExtraID:        "extra-1",
+		FileSize:       1_000,
+		FileModifiedAt: &modifiedAt,
+		ProbeFailedAt:  &rejectedAt,
+	}
+	if !extraFileUnchanged(rejected, "extra-1", 1_000, modifiedAt) {
+		t.Fatal("rejected unchanged extra would be probed again")
+	}
+	if extraFileUnchanged(rejected, "extra-1", 2_000, modifiedAt) {
+		t.Fatal("rejected extra with new bytes must be probed")
+	}
+	unprobed := &scanStateFile{ExtraID: "extra-1", FileSize: 1_000, FileModifiedAt: &modifiedAt}
+	if extraFileUnchanged(unprobed, "extra-1", 1_000, modifiedAt) {
+		t.Fatal("unprobed extra without a rejection must be probed")
+	}
+}
+
 func TestIdentityOnlyUpdateReasons(t *testing.T) {
 	t.Parallel()
 
@@ -211,23 +298,26 @@ func TestIdentityOnlyUpdateReasons(t *testing.T) {
 }
 
 func TestFailedProbeRepairPreservesExistingProbe(t *testing.T) {
-	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair"}, nil) {
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair"}, nil, false) {
 		t.Fatal("migration-triggered repair failure would overwrite existing probe metadata")
 	}
-	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "mtime_changed"}, nil) {
+	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "mtime_changed"}, nil, false) {
 		t.Fatal("changed source must not preserve stale probe metadata")
 	}
-	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "root_assignment_changed", "group_assignment_changed"}, nil) {
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "root_assignment_changed", "group_assignment_changed"}, nil, false) {
 		t.Fatal("identity-only changes must preserve probe metadata when repair probing fails")
 	}
-	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "size_changed", "root_assignment_changed"}, nil) {
+	if shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "size_changed", "root_assignment_changed"}, nil, false) {
 		t.Fatal("byte changes must not preserve stale probe metadata")
 	}
-	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_changed"}, nil) {
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_changed"}, nil, false) {
 		t.Fatal("subtitle-only changes must preserve probe metadata when repair probing fails")
 	}
-	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_missing", "group_assignment_changed"}, nil) {
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"probe_repair", "external_subtitle_missing", "group_assignment_changed"}, nil, false) {
 		t.Fatal("missing subtitle and identity changes must preserve probe metadata when repair probing fails")
+	}
+	if !shouldPreserveExistingProbeAfterProbeFailure([]string{"external_subtitle_changed"}, nil, true) {
+		t.Fatal("a standing rejection must preserve probe metadata like a failed repair")
 	}
 }
 

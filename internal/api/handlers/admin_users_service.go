@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -177,9 +178,14 @@ func (h *AdminHandler) CreateAdminAccount(ctx context.Context, input auth.Create
 	if err != nil {
 		return 0, err
 	}
+	audit, err := auditmutation.RecordUserMutation(ctx, tx, nil, user, true)
+	if err != nil {
+		return 0, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return 0, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 	h.invalidateStats(ctx, cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(user.ID))
 	return user.ID, nil
 }

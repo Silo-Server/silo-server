@@ -367,6 +367,64 @@ func TestRunSheetsFillsMissingSamples(t *testing.T) {
 	}
 }
 
+// TestRunSheetsRereadsSparseListAsWindow decodes one of four samples through
+// the list. When the HEVC decoder logged dropping keyframes as duplicates, as
+// it does for open-GOP keyframes after each jump, the attempt reads the
+// samples again as a keyframes-only window; otherwise, including for pictures
+// dropped as merely undecodable, the list's failure stands. A window whose
+// keyframes collide too fails rather than repeat the last one it kept.
+func TestRunSheetsRereadsSparseListAsWindow(t *testing.T) {
+	logDuplicates := func(log []string) []string {
+		return append(log, "[hevc @ 0x55d0] Duplicate POC in a sequence: 48.", "[hevc @ 0x55d0] Skipping invalid undecodable NALU: 21")
+	}
+	logUndecodable := func(log []string) []string {
+		return append(log, "[hevc @ 0x55d0] Skipping invalid undecodable NALU: 21")
+	}
+	keyframes := []fakeSheetFrame{timed(10, "4"), timed(20, "14"), timed(30, "24"), timed(40, "34")}
+	tests := map[string]struct {
+		editLog       func([]string) []string
+		window        []fakeSheetFrame
+		windowEditLog func([]string) []string
+		runs          int
+		want          Reason
+	}{
+		"duplicate keyframes":   {editLog: logDuplicates, window: keyframes, runs: 3},
+		"no drops logged":       {window: keyframes, runs: 2, want: ReasonEmpty},
+		"damaged pictures":      {editLog: logUndecodable, window: keyframes, runs: 2, want: ReasonEmpty},
+		"window empty too":      {editLog: logDuplicates, runs: 3, want: ReasonEmpty},
+		"window duplicates too": {editLog: logDuplicates, window: keyframes, windowEditLog: logDuplicates, runs: 3, want: ReasonEmpty},
+	}
+	for name, tt := range tests {
+		list := &fakeSheets{format: "matroska,webm", frames: []fakeSheetFrame{tagged(10, 5)}, editLog: tt.editLog}
+		window := &fakeSheets{format: "matroska,webm", frames: tt.window, packetEnd: 36, editLog: tt.windowEditLog}
+		var calls [][]string
+		runner := Runner{Exec: func(ctx context.Context, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+			calls = append(calls, args)
+			if slices.Contains(args, "concat") {
+				return list.exec(ctx, name, args, stdin, stdout, stderr)
+			}
+			return window.exec(ctx, name, args, stdin, stdout, stderr)
+		}}
+		result, err := runner.Run(t.Context(), sheetsRequest(secondsFrom(5, 10, 4), 2, 2))
+		if len(calls) != tt.runs || !slices.Contains(calls[1], "concat") || (tt.runs == 3 && !slices.Contains(calls[2], "framecrc")) {
+			t.Fatalf("%s: runs %q, want a probe, a list run, and %d more", name, calls, tt.runs-2)
+		}
+		if tt.want != "" {
+			failure, ok := errors.AsType[*Error](err)
+			if !ok || failure.Reason != tt.want || (tt.runs == 3 && !strings.Contains(err.Error(), "after the list run")) {
+				t.Fatalf("%s: error %v, want %s naming the list run", name, err, tt.want)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{10, 20, 30, 40}) || result.SheetFrames != (SheetFrames{Decoded: 4}) {
+			t.Fatalf("%s: cells %v, frames %+v; want every sample from the window", name, got, result.SheetFrames)
+		}
+	}
+}
+
 func TestRunSheetsReadsWindowsByTime(t *testing.T) {
 	seconds := []float64{1, 3, 5, 7}
 	// Keyframes at 0, 4, and 4.999 (just before the sample at 5) and 6.

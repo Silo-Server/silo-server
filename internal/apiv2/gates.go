@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -37,10 +38,14 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 		permission, _ := op.Metadata[metaPermission].(string)
 		demoRestricted, _ := op.Metadata[metaDemoRestricted].(bool)
 		profileOptional, _ := op.Metadata[metaProfileOptional].(bool)
+		household, _ := op.Metadata[metaHouseholdGate].(bool)
 		bucket, _ := op.Metadata[metaRateLimitBucket].(string)
-		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, bucket)
+		chain, missing := gateChain(deps, class, permission, demoRestricted, profileOptional, household, bucket)
 		if op.OperationID == notificationApplePushDisplayOperation {
 			chain, missing = notificationDisplayGateChain(deps)
+		}
+		if link, _ := op.Metadata[metaDirectDownloadLink].(bool); link && missing == "" {
+			chain = directDownloadGateChain(deps, chain)
 		}
 		r, w := humachi.Unwrap(ctx)
 		if missing != "" {
@@ -62,8 +67,12 @@ func classGate(deps Dependencies) func(huma.Context, func(huma.Context)) {
 // runs it for, so a PIN-locked or unknown profile is judged the same way on
 // both surfaces. An operation naming a rate-limit bucket runs v1's
 // per-endpoint limiter (AuthEndpointHandler) in the limiter's slot; see
-// rateLimiter. The second result names the first gate the wiring lacks.
-func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional bool, bucket string) ([]func(http.Handler) http.Handler, string) {
+// rateLimiter. An operation declaring the household profile gate runs it
+// right after viewer access, where v1 mounts HouseholdProfileGate, so a
+// request without X-Profile-Id on a household with a limited profile is
+// refused before any permission gate or handler sees it. The second result
+// names the first gate the wiring lacks.
+func gateChain(deps Dependencies, class Class, permission string, demoRestricted, profileOptional, household bool, bucket string) ([]func(http.Handler) http.Handler, string) {
 	if class == ClassPublic {
 		// A public operation with a named budget runs the per-endpoint
 		// limiter and nothing else; a missing limiter leaves it unlimited,
@@ -91,11 +100,16 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 	if deps.ViewerAccess == nil {
 		return nil, "viewer access"
 	}
+	if household && deps.HouseholdProfile == nil {
+		return nil, "household profile gate"
+	}
 	switch class {
 	case ClassProfileScoped:
 		chain = append(chain, deps.ViewerAccess.RequireViewerAccess)
 		if !profileOptional {
 			chain = append(chain, apimw.RequireProfile)
+		} else if household {
+			chain = append(chain, deps.HouseholdProfile)
 		}
 	case ClassActingAdmin:
 		if deps.ActingAdmin == nil {
@@ -107,9 +121,24 @@ func gateChain(deps Dependencies, class Class, permission string, demoRestricted
 		if gate == nil {
 			return nil, "permission " + permission
 		}
-		chain = append(chain, deps.ViewerAccess.RequireViewerAccess, gate)
+		chain = append(chain, deps.ViewerAccess.RequireViewerAccess)
+		if household {
+			chain = append(chain, deps.HouseholdProfile)
+		}
+		chain = append(chain, gate)
 	}
 	return chain, ""
+}
+
+// directDownloadGateChain swaps the account authentication at the head of a
+// direct-download route's chain for RequireDirectDownloadAuth, which accepts a
+// `dl` link token as well. Every later gate is unchanged: the link rewrites
+// X-Profile-Id to its own profile, so viewer access resolves that profile's
+// limits and the household gate passes on a named profile.
+func directDownloadGateChain(deps Dependencies, chain []func(http.Handler) http.Handler) []func(http.Handler) http.Handler {
+	out := slices.Clone(chain)
+	out[0] = deps.Auth.RequireDirectDownloadAuth
+	return out
 }
 
 // rateLimiter is the limiter a gated operation runs: the per-endpoint budget
@@ -210,8 +239,8 @@ func (d *denialWriter) Write(p []byte) (int, error) {
 // code, and on the reason the gate recorded where one code covers denials v2
 // must tell apart (internal/api/middleware, Reason* constants, pinned by
 // TestDenialCodesAreStable there). A human message is never parsed.
-// Retry-After is carried over; the legacy X-RateLimit-* fields are not part of
-// v2 and are dropped.
+// Retry-After is carried over on 429 and 503; the legacy X-RateLimit-* fields
+// are not part of v2 and are dropped.
 func (d *denialWriter) problem() *Problem {
 	var legacy struct {
 		Error   string `json:"error"`
@@ -242,6 +271,20 @@ func (d *denialWriter) problem() *Problem {
 			p = p.WithHeader("Retry-After", ra)
 		} else {
 			p = p.WithRetryAfter(1)
+		}
+	case apimw.CodeServiceUnavailable:
+		// The credential could not be checked (the session store did not
+		// answer), or the viewer's access policy ran out of time. Not a 401
+		// or 403: the client keeps its session and retries.
+		detail := "The sign-in could not be checked right now; retry after the Retry-After delay."
+		if d.reason == apimw.ReasonViewerAccessUnavailable {
+			detail = "The viewer's access could not be resolved right now; retry after the Retry-After delay."
+		}
+		p = NewProblem(TypeDependencyUnavailable, detail)
+		if ra := d.header.Get("Retry-After"); ra != "" {
+			p = p.WithHeader("Retry-After", ra)
+		} else {
+			p = p.WithRetryAfter(apimw.CredentialCheckRetryAfterSeconds)
 		}
 	case legacyBadRequestCode:
 		p = badRequestProblem(d.reason)

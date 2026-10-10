@@ -144,6 +144,18 @@ func TestWatchProviderConnectAPIKeyRejectedCredential(t *testing.T) {
 	}
 }
 
+// Connection config the host or the plugin rejects is a client problem, and
+// the safe message tells the user what to fix.
+func TestWatchProviderConnectAPIKeyRejectedConnectionInput(t *testing.T) {
+	w := &fakeWatchLifecycle{err: watchsync.InvalidConnectionInputError{Message: "Scrob server URL must be an absolute http or https URL"}}
+	h := lifecycleHandler(&fakeLifecycle{}, w)
+	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/plugin:5:scrob/auth/api-key", `{"api_key":"key"}`, requestOwner)
+	requireProblem(t, rec, TypeValidationFailed)
+	if !strings.Contains(rec.Body.String(), `"detail":"Scrob server URL must be an absolute http or https URL"`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
 func TestRequestLifecycleViewerAndCancel(t *testing.T) {
 	r := &fakeLifecycle{}
 	h := lifecycleHandler(r, &fakeWatchLifecycle{})

@@ -5,8 +5,13 @@ package middleware
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -22,7 +27,9 @@ const claimsKey contextKey = "claims"
 // SessionValidator checks a login session on every access-token request.
 // ActiveSessionRole reports whether the session is still active (not revoked
 // or expired) and the current role of the account it belongs to, in one
-// lookup; auth.SessionRepository implements it.
+// lookup; auth.SessionRepository implements it. It answers active=false with
+// no error for a missing, revoked or expired session; an error means the
+// session could not be checked, and the caller must not treat it as ended.
 type SessionValidator interface {
 	ActiveSessionRole(ctx context.Context, sessionID string) (role string, active bool, err error)
 }
@@ -32,13 +39,17 @@ type TokenValidator interface {
 	ValidateToken(tokenStr string) (*auth.Claims, error)
 }
 
-// APIKeyValidator looks up an API key by its full key string.
+// APIKeyValidator looks up an API key by its full key string. An unknown key
+// is auth.ErrAPIKeyNotFound; any other error means the key could not be
+// checked.
 type APIKeyValidator interface {
 	GetByKey(ctx context.Context, key string) (*models.APIKey, error)
 	UpdateLastUsed(ctx context.Context, id int64) error
 }
 
-// APIKeyUserLoader loads a user by ID for API key authentication.
+// APIKeyUserLoader loads a user by ID for API key authentication. A missing
+// account is an error matching auth.IsNotFound; any other error means the
+// account could not be checked.
 type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
@@ -50,18 +61,21 @@ type AuthMiddleware struct {
 	apiKeyValidator  APIKeyValidator  // nil if API keys not configured
 	apiKeyUserLoader APIKeyUserLoader // nil if API keys not configured
 
-	apiKeyLastUsed *auth.APIKeyLastUsedTracker
+	apiKeyLastUsed  *auth.APIKeyLastUsedTracker
+	sessionLastSeen *auth.SessionLastSeenTracker
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware with the given token validator
 // and session validator.
 func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidator, akul APIKeyUserLoader) *AuthMiddleware {
+	updater, _ := sv.(auth.SessionLastSeenUpdater)
 	return &AuthMiddleware{
 		tokenValidator:   tv,
 		sessionValidator: sv,
 		apiKeyValidator:  akv,
 		apiKeyUserLoader: akul,
 		apiKeyLastUsed:   auth.NewAPIKeyLastUsedTracker(akv, nil),
+		sessionLastSeen:  auth.NewSessionLastSeenTracker(updater, nil),
 	}
 }
 
@@ -76,6 +90,11 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 // role in the access token, so a token minted before an admin changed the
 // account's role is refused with ReasonTokenRefreshRequired: the session
 // stays valid, and a refresh issues a token carrying the new role.
+//
+// A lookup that fails (the database is unreachable or times out) judges
+// nothing about the credential, so it is answered with a retryable 503
+// (writeCredentialCheckUnavailable), never a 401 that tells the client its
+// sign-in is gone.
 func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := extractBearerToken(r)
@@ -94,12 +113,20 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 
 			apiKey, err := am.apiKeyValidator.GetByKey(r.Context(), token)
+			if err != nil && !errors.Is(err, auth.ErrAPIKeyNotFound) {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
 			if err != nil || apiKey == nil || apiKey.UserID <= 0 || am.apiKeyUserLoader == nil {
 				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
 			}
 
 			user, err := am.apiKeyUserLoader.GetByID(r.Context(), apiKey.UserID)
+			if err != nil && !auth.IsNotFound(err) {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
 			if err != nil || user == nil || user.ID <= 0 {
 				writeUnauthorized(w, "Invalid API key", ReasonInvalidCredential)
 				return
@@ -140,7 +167,11 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 
 			role, active, err := am.sessionValidator.ActiveSessionRole(r.Context(), claims.SessionID)
-			if err != nil || !active {
+			if err != nil {
+				writeCredentialCheckUnavailable(w, r, err)
+				return
+			}
+			if !active {
 				writeUnauthorized(w, "Session is no longer valid", ReasonSessionInvalid)
 				return
 			}
@@ -148,6 +179,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
 			}
+			am.sessionLastSeen.Touch(claims.SessionID)
 		}
 
 		// Populate activity log context if present (set by activitylog middleware upstream)
@@ -210,19 +242,31 @@ func RequireAdmin(next http.Handler) http.Handler {
 // the profile does not exist or belongs to a different account.
 type PrimaryProfileChecker func(ctx context.Context, userID int, profileID string) (isPrimary bool, found bool, err error)
 
+// HouseholdProfileRequirement reports whether the household on userID's
+// account requires a declared profile: some profile on it has a PIN or an
+// access limit (access.HouseholdRequiresProfile). It decides whether an admin
+// request that declares no profile may exercise admin powers.
+type HouseholdProfileRequirement func(ctx context.Context, userID int) (bool, error)
+
 // RequireActingAdmin enforces the admin role plus the household policy that
 // admin powers are only exercised through the account's primary profile.
 // When the request declares an active profile (X-Profile-Id) that belongs to
-// the admin account but is not the primary profile, the request is refused;
-// requests with no declared profile keep working (clients that haven't
-// selected a profile yet). With a nil checker it behaves exactly like
-// RequireAdmin.
+// the admin account but is not the primary profile, the request is refused.
+// A request with no declared profile keeps working (clients that haven't
+// selected a profile yet) only while the household has no PIN-protected or
+// access-limited profile; otherwise a device signed into the account could
+// regain admin powers, and mint credentials that skip profile PINs, by
+// omitting the header. API keys keep their profile-less access. A nil
+// checkPrimary disables the declared-profile policy, and a nil
+// requiresProfile the profile-less one; with both nil it behaves exactly
+// like RequireAdmin.
 //
 // Note this enforces the declared profile, not an authenticated one: all
 // profiles on an account share the login session, so this is a policy
 // boundary for well-behaved clients, not a defense against the account
-// holder themselves.
-func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) http.Handler {
+// holder themselves. The viewer gate that runs before it on the admin route
+// groups verifies a PIN-locked declared profile's X-Profile-Token.
+func RequireActingAdmin(checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims := GetClaims(r.Context())
@@ -236,7 +280,7 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) h
 				return
 			}
 
-			allowed, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
+			allowed, err := actingAdminAllowed(r, claims, checkPrimary, requiresProfile)
 			if err != nil {
 				writeInternalError(w, "Failed to verify active profile")
 				return
@@ -252,24 +296,39 @@ func RequireActingAdmin(checkPrimary PrimaryProfileChecker) func(http.Handler) h
 }
 
 // actingAdminAllowed reports whether an admin request may exercise admin
-// powers given the profile it declares. Allowed when no checker is
-// configured, no profile is declared, or the declared profile is the
+// powers given the profile it declares. With no declared profile it is
+// allowed unless profileLessAdminRefused says otherwise. With one, it is
+// allowed when no checker is configured or the declared profile is the
 // account's primary profile. A declared profile that cannot be resolved to
 // one of the caller's profiles fails closed: otherwise a non-primary session
 // could regain admin powers by sending a bogus X-Profile-Id.
-func actingAdminAllowed(r *http.Request, userID int, checkPrimary PrimaryProfileChecker) (bool, error) {
+func actingAdminAllowed(r *http.Request, claims *auth.Claims, checkPrimary PrimaryProfileChecker, requiresProfile HouseholdProfileRequirement) (bool, error) {
+	profileID := declaredProfileID(r)
+	if profileID == "" {
+		refused, err := profileLessAdminRefused(r.Context(), claims, requiresProfile)
+		return !refused, err
+	}
 	if checkPrimary == nil {
 		return true, nil
 	}
-	profileID := declaredProfileID(r)
-	if profileID == "" {
-		return true, nil
-	}
-	isPrimary, found, err := checkPrimary(r.Context(), userID, profileID)
+	isPrimary, found, err := checkPrimary(r.Context(), claims.UserID, profileID)
 	if err != nil {
 		return false, err
 	}
 	return found && isPrimary, nil
+}
+
+// profileLessAdminRefused reports whether an admin request that declares no
+// profile must be refused admin powers: its household has a PIN-protected or
+// access-limited profile. API keys are exempt (a key is an account credential
+// that skips profile PINs by design, bounded by its own scopes), and a nil
+// requirement disables the check. A lookup error is returned so the caller
+// fails closed.
+func profileLessAdminRefused(ctx context.Context, claims *auth.Claims, requiresProfile HouseholdProfileRequirement) (bool, error) {
+	if requiresProfile == nil || claims == nil || claims.TokenType == auth.TokenTypeAPIKey {
+		return false, nil
+	}
+	return requiresProfile(ctx, claims.UserID)
 }
 
 // declaredProfileID returns the active profile the request declares: the
@@ -396,6 +455,10 @@ const (
 	// ReasonItemIDRequired: an item-scoped permission gate found no {id} path
 	// parameter on the route it was mounted on.
 	ReasonItemIDRequired = "item_id_required"
+	// ReasonViewerAccessUnavailable: the viewer's access policy ran out of
+	// time, so the request was refused without a decision (a 503
+	// service_unavailable, like a credential that could not be checked).
+	ReasonViewerAccessUnavailable = "viewer_access_unavailable"
 )
 
 // writeUnauthorized writes a 401 JSON error response. reason is one of the
@@ -423,6 +486,32 @@ func writePasswordChangeRequired(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(errorResponse{
 		Error:   CodePasswordChangeRequired,
 		Message: "Choose a new password to continue",
+	})
+}
+
+// CodeServiceUnavailable is the error code of a request whose credential
+// could not be checked because the store holding login sessions, API keys or
+// accounts did not answer. The credential was not judged: the client keeps
+// its session and retries after Retry-After. internal/apiv2 renders it as the
+// dependency_unavailable problem type. Add, never rename.
+const CodeServiceUnavailable = "service_unavailable"
+
+// CredentialCheckRetryAfterSeconds is the Retry-After a failed credential
+// check carries (auth.SessionCheckRetryAfterSeconds).
+const CredentialCheckRetryAfterSeconds = auth.SessionCheckRetryAfterSeconds
+
+// writeCredentialCheckUnavailable writes the 503 for a credential check that
+// failed in the store rather than refusing the credential.
+func writeCredentialCheckUnavailable(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() == nil {
+		slog.WarnContext(r.Context(), "credential check failed; answering 503", "component", "auth", "error", logredact.SanitizeText(err.Error()))
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(CredentialCheckRetryAfterSeconds))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error:   CodeServiceUnavailable,
+		Message: "Sign-in could not be checked right now; try again shortly",
 	})
 }
 

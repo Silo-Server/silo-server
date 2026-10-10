@@ -29,7 +29,26 @@ const (
 	CephFSTVPathsKey    = "tv_flat_paths"
 	// CephFSExclusionsKey holds newline-separated path fragments to ignore.
 	CephFSExclusionsKey = "exclusions"
+
+	// arrPluginID and arrCapabilityID identify the first-party Sonarr/Radarr
+	// polling plugin. It reads import history from the bound server, so it
+	// cannot poll without a connection.
+	arrPluginID     = "silo.autoscan.arr"
+	arrCapabilityID = "arr"
 )
+
+// arrCompatibilityDescriptor is the setup contract the Sonarr/Radarr polling
+// plugin would declare in its own manifest. Without it the host default
+// (connection optional) let operators save a source with no server, and every
+// poll then failed inside the plugin.
+func arrCompatibilityDescriptor() ScanSourceDescriptor {
+	return ScanSourceDescriptor{
+		DeliveryModes:   []string{DeliveryModePoll},
+		Connection:      ConnectionRequired,
+		ConnectionKinds: []string{ConnectionKindSonarr, ConnectionKindRadarr},
+		Summary:         "Poll Sonarr or Radarr import history for new and renamed files.",
+	}
+}
 
 // defaultCephFSExclusions are the ignore patterns the admin UI used to seed by
 // hand. They cover partial downloads and NAS bookkeeping directories that would
@@ -136,8 +155,11 @@ func compatibilityDescriptor(pluginID, capabilityID string) (ScanSourceDescripto
 	// Both must match. Capability ids are chosen by plugin authors and are not
 	// unique across plugins, so an OR here would hand CephFS's path/exclusion
 	// form to any unrelated plugin that happened to name a capability "cephfs".
-	if pluginID == cephFSPluginID && capabilityID == cephFSCapabilityID {
+	switch {
+	case pluginID == cephFSPluginID && capabilityID == cephFSCapabilityID:
 		return cephFSCompatibilityDescriptor(), true
+	case pluginID == arrPluginID && capabilityID == arrCapabilityID:
+		return arrCompatibilityDescriptor(), true
 	}
 	return ScanSourceDescriptor{}, false
 }

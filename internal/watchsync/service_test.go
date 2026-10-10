@@ -53,6 +53,9 @@ type serviceFakeRepo struct {
 	ratingStates           []RatingSyncState
 	droppedStates          []DroppedSyncState
 	listMedia              map[string]LocalFavorite
+	mediaTitles            map[string]MediaTitles
+	mediaTitlesRelease     chan struct{} // when set, title lookups stall until it closes
+	mediaTitleLookups      [][]string
 	scrobbleConnections    []Connection
 	scrobbleSessions       []ScrobbleSession
 	pendingReconciliations []ScrobbleSession
@@ -743,6 +746,32 @@ func (r *serviceFakeRepo) GetListMediaItems(_ context.Context, mediaItemIDs []st
 	return result, nil
 }
 
+func (r *serviceFakeRepo) GetMediaTitles(ctx context.Context, mediaItemIDs []string) (map[string]MediaTitles, error) {
+	r.scrobbleMu.Lock()
+	r.mediaTitleLookups = append(r.mediaTitleLookups, append([]string(nil), mediaItemIDs...))
+	r.scrobbleMu.Unlock()
+	if r.mediaTitlesRelease != nil {
+		select {
+		case <-r.mediaTitlesRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	result := make(map[string]MediaTitles, len(mediaItemIDs))
+	for _, id := range mediaItemIDs {
+		if titles, ok := r.mediaTitles[id]; ok {
+			result[id] = titles
+		}
+	}
+	return result, nil
+}
+
+func (r *serviceFakeRepo) mediaTitleLookupCount() int {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	return len(r.mediaTitleLookups)
+}
+
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {
 	conns := make([]Connection, 0, len(r.scrobbleConnections))
 	for _, conn := range r.scrobbleConnections {
@@ -824,7 +853,10 @@ func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackS
 	return nil
 }
 
-func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
+func (r *serviceFakeRepo) UpdateScrobbleSession(ctx context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
@@ -2711,6 +2743,156 @@ func TestServiceCompletedScrobblePersistsAndSatisfiesHistoryExport(t *testing.T)
 	}
 }
 
+// Playback events reach a plugin with the catalog's titles, so a provider can
+// create a title it has never seen (#2196). An episode whose identity fell back
+// to a movie gets none, or the plugin would see a movie named after it.
+func TestServiceSendsCatalogTitlesWithPluginScrobbles(t *testing.T) {
+	episode := ScrobbleEvent{
+		MediaItemID: testEpisodeMediaID, Kind: historyimport.KindEpisode,
+		SeriesTMDBID: "1396", SeasonNumber: 1, EpisodeNumber: 1,
+	}
+	unresolved := ScrobbleEvent{MediaItemID: testEpisodeMediaID, Kind: historyimport.KindMovie}
+	for _, tc := range []struct {
+		name  string
+		event ScrobbleEvent
+		want  []any
+	}{
+		{"episode", episode, []any{"Pilot", int32(2008), "Breaking Bad", int32(2008)}},
+		{"episode resolved as movie", unresolved, []any{"", int32(0), "", int32(0)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			repo.mediaTitles = map[string]MediaTitles{testEpisodeMediaID: {
+				Kind: historyimport.KindEpisode, Title: "Pilot", Year: 2008, SeriesTitle: "Breaking Bad", SeriesYear: 2008,
+			}}
+			repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: testPluginProviderKey, UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+			client := &fakeWatchSyncPluginClient{applyStatus: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED}
+			reg := NewRegistry()
+			if err := reg.Register(testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods:      []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+				ScrobblePlayback: true, MaxBatchSize: 25,
+			})); err != nil {
+				t.Fatal(err)
+			}
+			event := tc.event
+			event.PlaybackSessionID, event.UserID, event.ProfileID, event.OccurredAt = testPlaybackSessionID, 7, "profile-1", time.Now().UTC()
+			if err := NewService(repo, reg).ScrobbleStopConfirmed(context.Background(), event); err != nil {
+				t.Fatal(err)
+			}
+			media := client.applyRequest.GetEvents()[0].GetMedia()
+			got := []any{media.GetTitle(), media.GetYear(), media.GetSeriesTitle(), media.GetSeriesYear()}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("title, year, series title, series year = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A stalled title lookup must not use up the caller's deadline: the session
+// write and enqueue happen first, and the event still reaches the provider.
+func TestServiceScrobbleTitleLookupDoesNotHoldCallerDeadline(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "1917", Year: 2019}}
+	release := make(chan struct{})
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	events := make(chan ScrobbleEvent, 1)
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{stopEvents: events}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := NewService(repo, reg).ScrobbleStop(ctx, ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1",
+		MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie,
+	}); err != nil {
+		t.Fatalf("ScrobbleStop = %v", err)
+	}
+	<-ctx.Done()
+	close(release)
+	select {
+	case event := <-events:
+		if event.Title != "1917" || event.Year != 2019 {
+			t.Fatalf("stop event title, year = %q, %d", event.Title, event.Year)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("stop was never dispatched")
+	}
+}
+
+// A confirmed stop has a deadline of its own; a stalled title lookup gets only
+// part of it, and the stop goes out with IDs alone rather than failing.
+func TestServiceConfirmedStopSendsIDsWhenTitleLookupStalls(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "1917", Year: 2019}}
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	events := make(chan ScrobbleEvent, 1)
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{stopEvents: events}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := NewService(repo, reg).ScrobbleStopConfirmed(ctx, ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1",
+		MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie,
+	}); err != nil {
+		t.Fatalf("ScrobbleStopConfirmed = %v", err)
+	}
+	if event := <-events; event.MediaItemID != testMovieMediaID || event.Title != "" {
+		t.Fatalf("stop event = %+v, want IDs without titles", event)
+	}
+}
+
+type recordingWatchedExporter struct {
+	watchedImportExportStub
+	exported *[]LocalPlay
+	ctxErrs  *[]error
+}
+
+func (p recordingWatchedExporter) ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error) {
+	*p.exported = append(*p.exported, plays...)
+	if p.ctxErrs != nil {
+		*p.ctxErrs = append(*p.ctxErrs, ctx.Err())
+	}
+	return p.watchedImportExportStub.ExportHistory(ctx, cfg, conn, plays)
+}
+
+// Watched exports carry the catalog's titles too; history rows store only IDs.
+func TestServiceExportWatchedSendsCatalogTitles(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID: testWatchHistoryID, ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+		WatchedAt: "2026-05-04T12:00:00Z", DurationSeconds: 7200, Completed: true,
+		Source:   userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "16996"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "17 Again", Year: 2009}}
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	var exported []LocalPlay
+	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, nil}
+	if _, err := service.ExportWatched(context.Background(), Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 1 || exported[0].Title != "17 Again" || exported[0].Year != 2009 {
+		t.Fatalf("exported plays = %+v", exported)
+	}
+}
+
 func TestServiceCompletedScrobbleDurablyRetriesSatisfiedPersistenceWithoutResendingStop(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.markSatisfiedErr = errors.New("database unavailable")
@@ -3400,6 +3582,110 @@ func TestServiceSweepOpenScrobblesRetriesProviderStop(t *testing.T) {
 	}
 	if !foundClosed {
 		t.Fatalf("scrobble updates = %+v, want successful stop to mark session closed", updates)
+	}
+}
+
+// A sync near its deadline gives the title lookup only part of the time left,
+// so the provider call that follows still has a live context.
+func TestServiceExportWatchedKeepsDeadlineForProviderWhenTitlesStall(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID: testWatchHistoryID, ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+		WatchedAt: "2026-05-04T12:00:00Z", DurationSeconds: 7200, Completed: true,
+		Source:   userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{StableType: "movie", ProviderIDs: map[string]string{"tmdb": "16996"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	repo := newServiceFakeRepo()
+	repo.mediaTitles = map[string]MediaTitles{testMovieMediaID: {Kind: historyimport.KindMovie, Title: "17 Again", Year: 2009}}
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	var exported []LocalPlay
+	var ctxErrs []error
+	exporter := recordingWatchedExporter{watchedImportExportStub{key: "simkl", source: userstore.WatchHistorySourceSimkl}, &exported, &ctxErrs}
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	if _, err := service.ExportWatched(ctx, Connection{ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1"}, ServerConfig{}, exporter); err != nil {
+		t.Fatal(err)
+	}
+	if len(ctxErrs) != 1 || ctxErrs[0] != nil || len(exported) != 1 || exported[0].Title != "" {
+		t.Fatalf("export context errors = %v, plays = %+v; want one live call with IDs alone", ctxErrs, exported)
+	}
+}
+
+// The sweep resends stops for every open session after a restart; it loads
+// their titles in one lookup rather than one per session.
+func TestServiceSweepOpenScrobblesLoadsTitlesOnce(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.connections[connectionKey("trakt", 7, "profile-1")] = Connection{
+		ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", AccessToken: testAccessToken, ScrobbleEnabled: true,
+	}
+	repo.mediaTitles = map[string]MediaTitles{
+		"movie-a": {Kind: historyimport.KindMovie, Title: "1917", Year: 2019},
+		"movie-b": {Kind: historyimport.KindMovie, Title: "2 Guns", Year: 2013},
+	}
+	repo.scrobbleSessions = []ScrobbleSession{
+		{PlaybackSessionID: "playback-a", ConnectionID: "conn-1", MediaItemID: "movie-a", Kind: "movie", TMDBID: "530915"},
+		{PlaybackSessionID: "playback-b", ConnectionID: "conn-1", MediaItemID: "movie-b", Kind: "movie", TMDBID: "136400"},
+	}
+	provider := scrobblerStub{stopEvents: make(chan ScrobbleEvent, 2)}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewService(repo, reg).SweepOpenScrobbles(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for range 2 {
+		event := <-provider.stopEvents
+		got[event.MediaItemID] = event.Title
+	}
+	if got["movie-a"] != "1917" || got["movie-b"] != "2 Guns" {
+		t.Fatalf("stop titles = %v", got)
+	}
+	if len(repo.mediaTitleLookups) != 1 || len(repo.mediaTitleLookups[0]) != 2 {
+		t.Fatalf("title lookups = %v, want one lookup for both sessions", repo.mediaTitleLookups)
+	}
+}
+
+// Lookups for events waiting in one ordered queue run side by side, so a slow
+// catalog delays the queue by one timeout rather than one per event.
+func TestServiceScrobbleTitleLookupsStartBeforeTheirQueueTurn(t *testing.T) {
+	repo := newServiceFakeRepo()
+	release := make(chan struct{})
+	defer close(release)
+	repo.mediaTitlesRelease = release
+	repo.scrobbleConnections = []Connection{{ID: "conn-1", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true}}
+	reg := NewRegistry()
+	if err := reg.Register(scrobblerStub{}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1", MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie}
+	if err := service.ScrobbleStart(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ScrobblePause(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	// Well before one lookup can time out and free the queue for the next.
+	deadline := time.Now().Add(mediaTitleLookupTimeout / 2)
+	for repo.mediaTitleLookupCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("title lookups in flight = %d, want both queued events looking up", repo.mediaTitleLookupCount())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

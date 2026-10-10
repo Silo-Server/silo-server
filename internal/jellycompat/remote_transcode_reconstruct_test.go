@@ -982,7 +982,7 @@ func TestStartRemoteToneMapReportsConfirmedExecutorAndFallback(t *testing.T) {
 					}
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusAccepted)
-					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+					_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 				default:
 					w.WriteHeader(http.StatusNotFound)
 				}
@@ -1051,7 +1051,7 @@ func TestStartRemoteVideoToolboxToneMapUsesResolutionAwareBitrate(t *testing.T) 
 				w.WriteHeader(http.StatusUnprocessableEntity)
 				return
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -1124,7 +1124,7 @@ func TestStartRemoteToneMapTimeoutFallsBackToSoftwareAfterCleanup(t *testing.T) 
 			if !cleaned.Load() {
 				t.Error("software retry started before the indeterminate hardware session was cleaned up")
 			}
-			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode})
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{HWAccel: request.HWAccel, ToneMapMode: request.ToneMapMode, ThrottleSeconds: request.ThrottleSeconds})
 		case r.Method == http.MethodDelete && r.URL.Path == "/transcode/upstream-1":
 			cleaned.Store(true)
 			w.WriteHeader(http.StatusNoContent)

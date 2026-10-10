@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -675,7 +676,8 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 		settingValue string
 		wantAllowed  bool
 	}{
-		{name: "disabled by default", wantAllowed: false},
+		{name: "enabled by default", wantAllowed: true},
+		{name: "explicitly disabled", settingValue: "false", wantAllowed: false},
 		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
 	}
 
@@ -687,7 +689,7 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 				authJWTSecretSetting:             "secret",
 			}
 			if tt.settingValue != "" {
-				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+				settings[config.ChapterThumbnailSoftwareToneMapSettingKey] = tt.settingValue
 			}
 			service := &Service{
 				settings:           testSettingsReader{values: settings},

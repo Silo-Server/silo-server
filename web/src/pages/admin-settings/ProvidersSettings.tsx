@@ -47,11 +47,11 @@ import {
 import { useRestartKeys, type RestartKeyMatcher } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { sortSubtitleProviders } from "@/lib/subtitleProviders";
+import { SaveBar } from "@/components/SaveBar";
 
 import { FieldGroup } from "./FieldGroup";
 import { MarkerProviderTiles } from "./MarkerProviderTiles";
 import { SettingField, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
 import { useAdminNodes } from "@/hooks/queries/admin/nodes";
 import {
   SUBTITLE_SYNC_EXECUTION_DEFAULT,
@@ -661,9 +661,9 @@ export default function ProvidersSettings() {
 
       <FieldGroup label="Subtitle sync" dirty={SUBTITLE_SYNC_KEYS.some((key) => form.isDirty(key))}>
         <SettingField
-          label="Sync new subtitles automatically"
+          label="Sync subtitles automatically"
           type="toggle"
-          description="Aligns downloaded and uploaded subtitles to the video's audio. Fixes subtitles cut for a different release."
+          description="Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release."
           dirty={form.isDirty("subtitles.auto_sync")}
           value={form.getValue("subtitles.auto_sync") || "true"}
           onChange={(v) => form.setValue("subtitles.auto_sync", v)}

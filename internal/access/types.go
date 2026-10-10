@@ -7,6 +7,14 @@ type Scope struct {
 	AllowedLibraryIDs   []int
 	DisabledLibraryIDs  []int // libraries whose membership globally hides an item
 	LibrariesRestricted bool
+	// HiddenLibraryIDs are the libraries a restricted scope left out of
+	// AllowedLibraryIDs only because the profile hid them
+	// (ui.disabled_library_ids). They grant nothing; the library list that
+	// lets the profile show them again reads them. Nil when unrestricted,
+	// where the hidden libraries travel in DisabledLibraryIDs instead. Kept
+	// out of the access fingerprint: a hide or show already changes
+	// AllowedLibraryIDs.
+	HiddenLibraryIDs []int `json:"-"`
 	// MaturityLimits are the profile's maturity restrictions, embedded so a
 	// Scope copies them into a catalog filter as one value. JSON flattens the
 	// embedded fields, so the access fingerprints that hash a Scope (socket
@@ -112,12 +120,25 @@ type ResolveInput struct {
 	ProfileID           string
 	ProfileToken        string
 	SkipPINVerification bool
+	// ContentAccessOnly resolves what the profile may access, leaving out
+	// the libraries it hides from its own browsing (ui.disabled_library_ids).
+	// Reading another profile's shared personal collection uses it: the
+	// owner's browsing preference does not limit what the collection shows.
+	ContentAccessOnly bool
 }
 
 // ProfileTokenClaims are the claims embedded in a verified profile token.
 type ProfileTokenClaims struct {
-	UserID         int
-	SessionID      string
-	ProfileID      string
+	UserID    int
+	SessionID string
+	ProfileID string
+	// PINRevision is the profile's userstore.Profile.PINRevision when its PIN
+	// was verified. A token is accepted only while it still matches, so
+	// changing the profile's PIN invalidates it and nothing else does.
+	PINRevision int64
+	// PolicyRevision is the account's access_policy_revision at mint time.
+	// Validation ignores it; it is still written so a node running a release
+	// from before PINRevision, which compares this claim, accepts the token
+	// during a rolling deploy. It can be dropped once no such node remains.
 	PolicyRevision int64
 }

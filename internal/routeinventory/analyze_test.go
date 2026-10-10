@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -230,53 +231,53 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 	cases := []struct {
 		fixture string
 		cfg     func(string) Config
-		want    string
+		want    []string
 	}{
-		{fixture: "unreachable_helper", want: "never reached from a declared listener entry point"},
-		{fixture: "escaping_router", want: "cannot follow"},
-		{fixture: "loop_registration", want: "does not model"},
-		{fixture: "dynamic_pattern", want: "must be a string literal"},
-		{fixture: "stray_router", want: "outside the inventoried listeners"},
+		{fixture: "unreachable_helper", want: []string{"never reached from a declared listener entry point"}},
+		{fixture: "escaping_router", want: []string{"cannot follow"}},
+		{fixture: "loop_registration", want: []string{"does not model"}},
+		{fixture: "dynamic_pattern", want: []string{"must be a string literal"}},
+		{fixture: "stray_router", want: []string{"outside the inventoried listeners"}},
 		// chi.NewMux is a router constructor too: a stray listener built with
 		// it has to fail the same way one built with chi.NewRouter does.
-		{fixture: "stray_mux", want: "chi.NewMux() constructed in Handler outside the inventoried listeners"},
+		{fixture: "stray_mux", want: []string{"chi.NewMux() constructed in Handler outside the inventoried listeners"}},
 		// A router derived from the listener's router and bound to a name is
 		// one the walk did not model; a method call on it is refused.
-		{fixture: "derived_router_bound", want: "r.With(mw), which the route inventory does not model"},
+		{fixture: "derived_router_bound", want: []string{"r.With(mw), which the route inventory does not model"}},
 		// A second router in the entry point is attached somewhere the walk
 		// cannot prove, so its rows would claim the wrong paths. The variants
 		// below are the same defect in the binding forms a walk that matched
 		// only `name := chi.NewRouter()` did not recognize.
-		{fixture: "second_router", want: "a second chi router is constructed"},
-		{fixture: "second_router_var", want: "a second chi router is constructed"},
-		{fixture: "second_router_multi", want: "a second chi router is constructed"},
+		{fixture: "second_router", want: []string{"a second chi router is constructed"}},
+		{fixture: "second_router_var", want: []string{"a second chi router is constructed"}},
+		{fixture: "second_router_multi", want: []string{"a second chi router is constructed"}},
 		// A package-level router reaches the entry point as a value the walk
 		// never bound.
-		{fixture: "package_scope_router", want: "was never bound by the route inventory's walk"},
+		{fixture: "package_scope_router", want: []string{"was never bound by the route inventory's walk"}},
 		// An entry point that hands its router out as a router lets a caller
 		// keep registering after the walk is over.
-		{fixture: "entry_returns_router", want: "must return exactly one http.Handler"},
+		{fixture: "entry_returns_router", want: []string{"must return exactly one http.Handler"}},
 		// A closure or immediately invoked function passed where a handler or
 		// middleware goes can capture the router and register on it. Each
 		// argument position is leak-checked like a handler argument.
-		{fixture: "hidden_notfound_iife", want: `router value "r" escapes`},
-		{fixture: "hidden_notfound_closure", want: `router value "r" escapes`},
-		{fixture: "hidden_use_closure", want: `router value "r" escapes`},
-		{fixture: "hidden_use_factory", want: `router value "r" escapes`},
-		{fixture: "hidden_with_iife", want: `router value "r" escapes`},
-		{fixture: "hidden_methodnotallowed_iife", want: `router value "r" escapes`},
-		{fixture: "hidden_readonly_iife", want: `router value "r" escapes`},
+		{fixture: "hidden_notfound_iife", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_notfound_closure", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_use_closure", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_use_factory", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_with_iife", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_methodnotallowed_iife", want: []string{`router value "r" escapes`}},
+		{fixture: "hidden_readonly_iife", want: []string{`router value "r" escapes`}},
 		// The sealing invariant (seal.go): the entry function returns a sealed
 		// type built from the unexported constructor, and nothing else reaches
 		// either.
-		{fixture: "seal_missing", want: "does not seal its router"},
-		{fixture: "seal_embedded", want: "embeds http.Handler"},
-		{fixture: "seal_exported_field", want: "has exported field H"},
-		{fixture: "seal_router_field", want: "holds a router in field h"},
-		{fixture: "seal_extra_method", want: "must have exactly one method, ServeHTTP"},
-		{fixture: "seal_field_read", want: "is read outside its ServeHTTP"},
-		{fixture: "seal_ctor_called_elsewhere", want: "is called outside the sealing entry function"},
-		{fixture: "seal_ctor_value", want: "is referenced as a value"},
+		{fixture: "seal_missing", want: []string{"does not seal its router"}},
+		{fixture: "seal_embedded", want: []string{"embeds http.Handler"}},
+		{fixture: "seal_exported_field", want: []string{"has exported field H"}},
+		{fixture: "seal_router_field", want: []string{"holds a router in field h"}},
+		{fixture: "seal_extra_method", want: []string{"must have exactly one method, ServeHTTP"}},
+		{fixture: "seal_field_read", want: []string{"is read outside its ServeHTTP"}},
+		{fixture: "seal_ctor_called_elsewhere", want: []string{"is called outside the sealing entry function"}},
+		{fixture: "seal_ctor_value", want: []string{"is referenced as a value"}},
 		{
 			fixture: "seal_ctor_exported",
 			cfg: func(name string) Config {
@@ -284,69 +285,67 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 				cfg.Listeners[0].Constructor = "NewInner"
 				return cfg
 			},
-			want: "constructor NewInner is exported",
+			want: []string{"constructor NewInner is exported"},
 		},
-		{fixture: "exported_router_return", want: "listener.Sub is exported and returns chi.Router"},
+		{fixture: "exported_router_return", want: []string{"listener.Sub is exported and returns chi.Router"}},
 		// Recovering a router from a value after the entry function returned.
 		// Sealing makes each of these fail at runtime; the sweep refuses them
 		// so a router that is not a listener cannot be recovered either.
-		{fixture: "recover_alias", want: "type-asserts to main.routerAlias, which is a chi router by its method set"},
-		{fixture: "recover_defined", want: "type-asserts to main.routerDefined, which is a chi router by its method set"},
-		{fixture: "recover_embedded", want: "type-asserts to main.routerEmbedded, which is a chi router by its method set"},
-		{fixture: "recover_structural", want: "type-asserts to interface{Get(string, http.HandlerFunc)}, which is a chi router"},
-		{fixture: "recover_switch_default", want: "switches on chi.Router"},
-		{fixture: "recover_generic", want: "as is instantiated with chi.Router"},
-		{fixture: "recover_reflect", want: "reflect.Value.MethodByName"},
+		{fixture: "recover_alias", want: []string{"type-asserts to main.routerAlias, which is a chi router by its method set"}},
+		{fixture: "recover_defined", want: []string{"type-asserts to main.routerDefined, which is a chi router by its method set"}},
+		{fixture: "recover_embedded", want: []string{"type-asserts to main.routerEmbedded, which is a chi router by its method set"}},
+		{fixture: "recover_structural", want: []string{"type-asserts to interface{Get(string, http.HandlerFunc)}, which is a chi router"}},
+		{fixture: "recover_switch_default", want: []string{"switches on chi.Router"}},
+		{fixture: "recover_generic", want: []string{"as is instantiated with chi.Router"}},
+		{fixture: "recover_reflect", want: []string{"reflect.Value.MethodByName"}},
 		// reflect.NewAt over Value.UnsafePointer rebuilds a pointer to the
 		// router behind the sealed field and Method(i) calls Get on it: no
 		// unsafe import, no assertion, no MethodByName. Every step is refused.
-		{fixture: "recover_newat", want: "reflect.NewAt rebuilds a typed pointer"},
-		{fixture: "recover_newat", want: "reflect.Value.UnsafePointer exposes the address"},
-		{fixture: "recover_newat", want: "reflect.Value.Method can call a registration method by index"},
-		{fixture: "recover_newat", want: "reflect.Value.NumMethod enumerates"},
-		{fixture: "recover_newat", want: "reflect.Type.Method yields"},
+		{fixture: "recover_newat", want: []string{
+			"reflect.NewAt rebuilds a typed pointer", "reflect.Value.UnsafePointer exposes the address",
+			"reflect.Value.Method can call a registration method by index", "reflect.Value.NumMethod enumerates", "reflect.Type.Method yields",
+		}},
 		// An audited package may not import unsafe at all.
-		{fixture: "unsafe_import", want: "listener/peek.go:5: listener/peek.go imports unsafe in an audited package"},
+		{fixture: "unsafe_import", want: []string{"listener/peek.go:5: listener/peek.go imports unsafe in an audited package"}},
 		// A helper pair split by build constraint registers in one build and
 		// not the other; the generator refuses the audited package rather
 		// than report whichever half its own build context selected.
-		{fixture: "tagged_helper", want: "build-constrained registration source is not analyzable"},
-		{fixture: "tagged_helper", want: "listener/arch_"},
-		{fixture: "recover_ptr_alias", want: "type-asserts to *main.muxAlias, which is a chi router by its method set"},
-		{fixture: "recover_switch_alias", want: "switches on main.routerAlias, which is a chi router by its method set"},
+		{fixture: "tagged_helper", want: []string{"build-constrained registration source is not analyzable", "listener/arch_"}},
+		{fixture: "recover_ptr_alias", want: []string{"type-asserts to *main.muxAlias, which is a chi router by its method set"}},
+		{fixture: "recover_switch_alias", want: []string{"switches on main.routerAlias, which is a chi router by its method set"}},
 		// The root constructor asserting its delegated API handler to a
 		// structural interface: the walk refuses the value it produces. No
 		// package in the fixture imports chi; the registration signatures come
 		// from the router packages themselves, so the shape is still known.
-		{fixture: "recover_param_structural", cfg: rootOnlyFixtureConfig, want: "apiRouter.(interface"},
+		{fixture: "recover_param_structural", cfg: rootOnlyFixtureConfig, want: []string{"apiRouter.(interface"}},
 		// A method-aware ServeMux pattern means more than the row it spells.
 		{
 			fixture: "servemux_method",
 			cfg:     rootOnlyFixtureConfig,
-			want:    "method-aware ServeMux pattern",
+			want:    []string{"method-aware ServeMux pattern"},
 		},
 		// A tracked router handed in as a handler is a mount in disguise.
-		{fixture: "router_as_handler", want: "does not model"},
+		{fixture: "router_as_handler", want: []string{"does not model"}},
 		// The mux of a root listener escapes into a helper.
-		{fixture: "servemux_escape", cfg: rootOnlyFixtureConfig, want: "does not model"},
+		{fixture: "servemux_escape", cfg: rootOnlyFixtureConfig, want: []string{"does not model"}},
 		// A ServeMux built without http.NewServeMux() is a working router the
 		// walk never bound: the root listener's own rows would vanish.
-		{fixture: "servemux_new", cfg: rootOnlyFixtureConfig, want: "built by literal or new()"},
-		{fixture: "servemux_literal", cfg: rootOnlyFixtureConfig, want: "built by literal or new()"},
-		{fixture: "second_mux_new", want: "built by literal or new()"},
-		{fixture: "chi_mux_literal", want: "built by literal or new()"},
+		{fixture: "servemux_new", cfg: rootOnlyFixtureConfig, want: []string{"built by literal or new()"}},
+		{fixture: "servemux_literal", cfg: rootOnlyFixtureConfig, want: []string{"built by literal or new()"}},
+		{fixture: "second_mux_new", want: []string{"built by literal or new()"}},
+		{fixture: "chi_mux_literal", want: []string{"built by literal or new()"}},
 		// A zero http.ServeMux at package scope is live with no constructor.
-		{fixture: "package_scope_servemux_var", want: "declared with http.ServeMux at package scope"},
+		{fixture: "package_scope_servemux_var", want: []string{"declared with http.ServeMux at package scope"}},
 		// A constructor reached through a function value builds a router
 		// nothing recognizes as a construction. Inside an entry point the walk
 		// refuses the binding; elsewhere the sweep refuses the reference.
-		{fixture: "ctor_value_local", want: "produced by ctor(), which the route inventory does not model"},
-		{fixture: "ctor_value_package", want: "is used as a function value rather than called"},
+		{fixture: "ctor_value_local", want: []string{"produced by ctor(), which the route inventory does not model"}},
+		{fixture: "ctor_value_package", want: []string{"is used as a function value rather than called"}},
 		// Everything that would serve http.DefaultServeMux.
-		{fixture: "default_servemux", want: "refers to http.DefaultServeMux"},
-		{fixture: "pprof_import", want: "imports net/http/pprof"},
-		{fixture: "listen_nil", want: "serves a nil handler"},
-		{fixture: "server_no_handler", want: "built without a Handler"},
+		{fixture: "default_servemux", want: []string{"refers to http.DefaultServeMux"}},
+		{fixture: "pprof_import", want: []string{"imports net/http/pprof"}},
+		{fixture: "listen_nil", want: []string{"serves a nil handler"}},
+		{fixture: "server_no_handler", want: []string{"built without a Handler"}},
 		// An exclusion covers one function, not the file it lives in.
 		{
 			fixture: "excluded_construct",
@@ -359,7 +358,7 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 				}}
 				return cfg
 			},
-			want: "constructed in NewSneaky outside the inventoried listeners",
+			want: []string{"constructed in NewSneaky outside the inventoried listeners"},
 		},
 	}
 	for _, tc := range cases {
@@ -372,8 +371,10 @@ func TestAnalyzeRefusesHiddenRegistration(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected a failure, got an inventory with %d routes", len(inv.Routes))
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.want)
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q, want it to mention %q", err.Error(), want)
+				}
 			}
 		})
 	}
@@ -430,6 +431,23 @@ func TestClassifyAuthReportsUnknownMiddleware(t *testing.T) {
 		if !contains(traits, want) {
 			t.Errorf("traits = %v, want %q", traits, want)
 		}
+	}
+}
+
+// The v1 household gate narrows a profile-optional viewer read; it must not
+// be mistaken for RequireProfile, which would mark the route profile_required.
+func TestClassifyAuthHouseholdProfileGate(t *testing.T) {
+	class, traits := classifyAuth([]string{
+		"authMiddleware.RequireAuth",
+		"viewerAccessMiddleware.RequireViewerAccess [when viewerAccessMiddleware != nil]",
+		"householdProfileGate",
+	})
+	if class != "profile_scoped" {
+		t.Errorf("class = %q, want profile_scoped", class)
+	}
+	want := []string{"authenticated", "household_profile_gate", "viewer_access"}
+	if !reflect.DeepEqual(traits, want) {
+		t.Errorf("traits = %v, want %v", traits, want)
 	}
 }
 

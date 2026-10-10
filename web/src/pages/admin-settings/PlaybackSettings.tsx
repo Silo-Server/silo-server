@@ -23,7 +23,7 @@ import { PathSettingField } from "@/components/settings/PathSettingField";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingField";
-import { SaveBar } from "./SaveBar";
+import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -146,7 +146,7 @@ function routePreview(execution: string, egress: string, workload: ExecutionWork
 // bytes (egress). The kind decides the choices offered and the value the server
 // applies while the row has never been set.
 const ROUTING_KINDS = {
-  execution: { options: executionOptions, serverDefault: "prefer_worker" },
+  execution: { options: executionOptions, serverDefault: "prefer_transcode" },
   egress: { options: egressOptions, serverDefault: "prefer_proxy" },
 };
 
@@ -305,7 +305,7 @@ export default function PlaybackSettings() {
       setConfirmRemake(true);
       return;
     }
-    void form.save();
+    return form.save();
   };
   const chapterExecution =
     form.getValue("playback.chapter_thumbnail_execution") || IMAGE_EXECUTION_DEFAULT;
@@ -518,7 +518,7 @@ export default function PlaybackSettings() {
               label="Enable Hardware HDR Tone Mapping"
               type="toggle"
               hint="Allows validated local or remote GPU executors to convert HDR video to SDR when transcoding."
-              value={form.getValue("playback.transcode_hardware_tone_map_enabled") || "false"}
+              value={form.getValue("playback.transcode_hardware_tone_map_enabled")}
               onChange={(v) => form.setValue("playback.transcode_hardware_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_hardware_tone_map_enabled")}
             />
@@ -526,7 +526,7 @@ export default function PlaybackSettings() {
               label="Enable Software HDR Tone Mapping"
               type="toggle"
               hint="Allows the CPU to convert HDR video to SDR when transcoding. This can be very CPU-intensive."
-              value={form.getValue("playback.transcode_software_tone_map_enabled") || "false"}
+              value={form.getValue("playback.transcode_software_tone_map_enabled")}
               onChange={(v) => form.setValue("playback.transcode_software_tone_map_enabled", v)}
               restartRequired={restartKeys.has("playback.transcode_software_tone_map_enabled")}
             />
@@ -596,9 +596,7 @@ export default function PlaybackSettings() {
               label="Software HDR tone mapping"
               type="toggle"
               description="Slow, but works without graphics hardware."
-              value={
-                form.getValue("playback.chapter_thumbnail_software_tone_map_enabled") || "false"
-              }
+              value={form.getValue("playback.chapter_thumbnail_software_tone_map_enabled")}
               onChange={(v) =>
                 form.setValue("playback.chapter_thumbnail_software_tone_map_enabled", v)
               }
@@ -775,7 +773,9 @@ export default function PlaybackSettings() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void form.save()}>Save</AlertDialogAction>
+            <AlertDialogAction onClick={() => void form.save().catch(() => {})}>
+              Save
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

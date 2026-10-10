@@ -1522,8 +1522,7 @@ func (r *FileRepository) UpsertMarkers(ctx context.Context, fileID int, update M
 }
 
 // ClearMarkers nulls the given segment kinds (intro|credits|recap|preview) for
-// a file, including their provenance columns. Used by the admin manual-marker
-// API to remove a marker so detection/online fetch can repopulate it. Returns
+// a file, retaining manual provenance to prevent automatic rediscovery. Returns
 // whether a row was updated.
 func (r *FileRepository) ClearMarkers(ctx context.Context, fileID int, segments []string) (bool, error) {
 	return r.upsertAndClearMarkers(ctx, fileID, nil, segments)
@@ -1762,16 +1761,16 @@ func (r *FileRepository) upsertAndClearMarkers(ctx context.Context, fileID int, 
 		changed.preview = changed.preview || applied.preview
 	}
 	if clearFlags.intro {
-		changed.intro = clearSegmentState(&state.intro) || changed.intro
+		changed.intro = clearManualSegmentState(&state.intro, mutationAt) || changed.intro
 	}
 	if clearFlags.credits {
-		changed.credits = clearSegmentState(&state.credits) || changed.credits
+		changed.credits = clearManualSegmentState(&state.credits, mutationAt) || changed.credits
 	}
 	if clearFlags.recap {
-		changed.recap = clearSegmentState(&state.recap) || changed.recap
+		changed.recap = clearManualSegmentState(&state.recap, mutationAt) || changed.recap
 	}
 	if clearFlags.preview {
-		changed.preview = clearSegmentState(&state.preview) || changed.preview
+		changed.preview = clearManualSegmentState(&state.preview, mutationAt) || changed.preview
 	}
 	if !changed.any() {
 		if err := tx.Commit(ctx); err != nil {
@@ -2026,6 +2025,16 @@ func clearSegmentState(state *segmentState) bool {
 	state.confidence = nil
 	state.algorithm = nil
 	state.detectedAt = nil
+	return true
+}
+
+func clearManualSegmentState(state *segmentState, mutationAt time.Time) bool {
+	source, algorithm, confidence := models.MarkerSourceManual, "manual:v1", 1.0
+	next := segmentState{source: &source, algorithm: &algorithm, confidence: &confidence, detectedAt: &mutationAt}
+	if segmentEqual(*state, next) {
+		return false
+	}
+	*state = next
 	return true
 }
 
@@ -3035,6 +3044,11 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // reappears within the window restores without re-probing or re-matching.
 // A zero grace deletes all missing-marked rows immediately.
 //
+// Rows of an item that still exists without any library membership are kept
+// whatever their age: membership reconciliation runs first and deletes every
+// orphan it may, so such an item is held (catalog WithRemovalGrace) or
+// protected, and its orphan check on a later pass needs these rows to find it.
+//
 // Rows whose file_path lies at or under one of protectedRoots are never
 // deleted, no matter how long they have been missing: an unreachable library
 // root (dead drive, lost mount) is temporarily offline, not removed, so its
@@ -3043,7 +3057,15 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
+	query := `DELETE FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NOT NULL
+		  AND mf.missing_since < $2
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_items mi
+			WHERE mi.content_id = mf.content_id
+			  AND NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)
+		  )`
 	args := []any{folderID, cutoff}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
@@ -3238,17 +3260,26 @@ func (r *FileRepository) GetByFolder(ctx context.Context, folderID int) ([]*mode
 // GetByFolderAndPathPrefix returns all files for a folder that live under a
 // subtree path.
 func (r *FileRepository) GetByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*models.MediaFile, error) {
-	query := `SELECT ` + fileColumns + ` FROM media_files
-		WHERE media_folder_id = $1
-		  AND (file_path = $2 OR file_path LIKE $3 ESCAPE '\')
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, folderID, pathPrefix, pathPrefixLike(pathPrefix))
+	query, args := folderPathPrefixQuery(fileColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying files by folder and path prefix: %w", err)
 	}
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// folderPathPrefixQuery selects columns for the files of a folder at or under
+// pathPrefix. The range bounds let the (media_folder_id, file_path
+// text_pattern_ops) index narrow the subtree even under a generic plan, which
+// a parameterized LIKE cannot do.
+func folderPathPrefixQuery(columns string, folderID int, pathPrefix string) (string, []any) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
+	query := `SELECT ` + columns + ` FROM media_files
+		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
+		ORDER BY file_path ASC`
+	return query, append([]any{folderID}, args...)
 }
 
 // ListByGroupKey returns all present media files in a logical content group.
@@ -3434,17 +3465,25 @@ func (r *FileRepository) FindParentContentIDForStem(ctx context.Context, folderI
 
 // FindUnambiguousParentContentIDForDir returns the single content id owning
 // the primary files under dir, or "" when the directory holds no matched
-// content or more than one distinct item (ambiguous — caller defers).
-func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string) (string, error) {
+// content or more than one distinct item (ambiguous — caller defers). Rows
+// marked missing still count: dropping them could leave a sibling as the sole
+// owner and bind the extra to the wrong item. Rows at excludePaths are
+// ignored: they are extras still carrying a primary link from before they
+// were classified.
+func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string, excludePaths []string) (string, error) {
+	if excludePaths == nil {
+		excludePaths = []string{}
+	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT COALESCE(e.series_id, mf.content_id) AS parent_id
 		FROM media_files mf
 		LEFT JOIN episodes e ON e.content_id = mf.episode_id
 		WHERE mf.media_folder_id = $1
 		  AND mf.file_path LIKE $2 ESCAPE '\'
+		  AND mf.file_path <> ALL($3::text[])
 		  AND mf.extra_id IS NULL
 		  AND (mf.content_id IS NOT NULL OR mf.episode_id IS NOT NULL)
-		LIMIT 2`, folderID, pathPrefixLike(dir))
+		LIMIT 2`, folderID, pathPrefixLike(dir), excludePaths)
 	if err != nil {
 		return "", fmt.Errorf("finding parent by dir: %w", err)
 	}

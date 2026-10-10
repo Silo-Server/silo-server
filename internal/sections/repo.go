@@ -296,6 +296,90 @@ func (r *Repository) CountLibraryCollectionReferences(ctx context.Context, colle
 	return count, nil
 }
 
+// LibraryCollectionReference is an admin Home or library page row that shows
+// a library collection. PageRowCount is the number of rows, turned off ones
+// included, on the page that holds it.
+type LibraryCollectionReference struct {
+	PageSection
+	PageRowCount int
+}
+
+// LibraryCollectionReferenceCount counts the admin page rows that show one
+// library collection. Home counts the turned-on rows on the Home page, the
+// ones viewers see. Total counts every row on Home and library pages, turned
+// off ones included, because each of them blocks a delete.
+type LibraryCollectionReferenceCount struct {
+	Home  int
+	Total int
+}
+
+// ListLibraryCollectionReferences lists the admin page rows whose config
+// points at the given library collection: Home rows first, then library pages
+// by library, each in page order. It reads page_sections only, so rows a
+// profile added to its own Home are not listed.
+func (r *Repository) ListLibraryCollectionReferences(ctx context.Context, collectionID string) ([]LibraryCollectionReference, error) {
+	rows, err := r.query(ctx).Query(ctx, `
+		SELECT s.id, s.scope, s.library_id, s.position, s.section_type, s.title, s.featured,
+			s.item_limit, s.config, s.enabled, s.created_at, s.updated_at,
+			(SELECT COUNT(*) FROM page_sections p
+			 WHERE p.scope = s.scope AND p.library_id IS NOT DISTINCT FROM s.library_id)
+		FROM page_sections s
+		WHERE s.config->>'library_collection_id' = $1
+		ORDER BY s.scope <> 'home', s.library_id, s.position, s.id`, collectionID)
+	if err != nil {
+		return nil, fmt.Errorf("listing library collection section references: %w", err)
+	}
+	defer rows.Close()
+	out := []LibraryCollectionReference{}
+	for rows.Next() {
+		var ref LibraryCollectionReference
+		s := &ref.PageSection
+		if err := rows.Scan(
+			&s.ID, &s.Scope, &s.LibraryID, &s.Position, &s.SectionType, &s.Title,
+			&s.Featured, &s.ItemLimit, &s.Config, &s.Enabled, &s.CreatedAt, &s.UpdatedAt,
+			&ref.PageRowCount,
+		); err != nil {
+			return nil, fmt.Errorf("scanning library collection section reference: %w", err)
+		}
+		out = append(out, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing library collection section references: %w", err)
+	}
+	return out, nil
+}
+
+// CountLibraryCollectionReferencesByID counts, in one query, the admin page
+// rows that show each of the given library collections. A collection no row
+// shows has no entry.
+func (r *Repository) CountLibraryCollectionReferencesByID(ctx context.Context, collectionIDs []string) (map[string]LibraryCollectionReferenceCount, error) {
+	out := make(map[string]LibraryCollectionReferenceCount)
+	if len(collectionIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.query(ctx).Query(ctx, `
+		SELECT config->>'library_collection_id', COUNT(*) FILTER (WHERE scope = 'home' AND enabled), COUNT(*)
+		FROM page_sections
+		WHERE config->>'library_collection_id' = ANY($1::text[])
+		GROUP BY 1`, collectionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("counting library collection section references: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var count LibraryCollectionReferenceCount
+		if err := rows.Scan(&id, &count.Home, &count.Total); err != nil {
+			return nil, fmt.Errorf("scanning library collection section reference count: %w", err)
+		}
+		out[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("counting library collection section references: %w", err)
+	}
+	return out, nil
+}
+
 // Reorder updates positions for multiple sections in a transaction.
 func (r *Repository) reorder(ctx context.Context, entries []ReorderEntry) error {
 	tx := sectionTransaction(ctx)

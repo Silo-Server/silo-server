@@ -1,11 +1,62 @@
 package metadata
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func TestBuildMetadataRefreshAttemptBucketsPreservesLabelsAndCounts(t *testing.T) {
+	counts := [metadataRefreshAttemptBucketCount]int{11, 22, 33, 44, 55}
+	wantLabels := [metadataRefreshAttemptBucketCount]string{"0", "1", "2-3", "4-7", "8+"}
+
+	buckets := buildMetadataRefreshAttemptBuckets(counts)
+	if len(buckets) != metadataRefreshAttemptBucketCount {
+		t.Fatalf("bucket count = %d, want %d", len(buckets), metadataRefreshAttemptBucketCount)
+	}
+	for i, bucket := range buckets {
+		if bucket.Label != wantLabels[i] {
+			t.Errorf("bucket %d label = %q, want %q", i, bucket.Label, wantLabels[i])
+		}
+		if bucket.Count != counts[i] {
+			t.Errorf("bucket %d count = %d, want %d", i, bucket.Count, counts[i])
+		}
+	}
+}
+
+func TestMetadataRefreshAttemptBucketCountsSQLUsesOneAggregateScan(t *testing.T) {
+	sql := strings.Join(strings.Fields(metadataRefreshAttemptBucketCountsSQL), " ")
+	if got := strings.Count(sql, "FROM metadata_refresh_debt"); got != 1 {
+		t.Fatalf("metadata_refresh_debt scan count = %d, want 1: %s", got, sql)
+	}
+	if strings.Contains(strings.ToUpper(sql), "UNION") {
+		t.Fatalf("attempt bucket query must not use UNION: %s", sql)
+	}
+	if got := strings.Count(sql, "COUNT(*) FILTER"); got != metadataRefreshAttemptBucketCount {
+		t.Fatalf("filtered aggregate count = %d, want %d: %s", got, metadataRefreshAttemptBucketCount, sql)
+	}
+
+	previousFilterIndex := -1
+	for _, filter := range []string{
+		"attempt_count = 0",
+		"attempt_count = 1",
+		"attempt_count BETWEEN 2 AND 3",
+		"attempt_count BETWEEN 4 AND 7",
+		"attempt_count >= 8",
+	} {
+		filterIndex := strings.Index(sql, filter)
+		if filterIndex == -1 {
+			t.Errorf("attempt bucket query missing filter %q: %s", filter, sql)
+			continue
+		}
+		if filterIndex <= previousFilterIndex {
+			t.Errorf("attempt bucket filter %q is out of label order: %s", filter, sql)
+		}
+		previousFilterIndex = filterIndex
+	}
+}
 
 func TestRefreshDebtReasonsForItem(t *testing.T) {
 	item := &models.MediaItem{

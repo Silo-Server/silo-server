@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -154,8 +155,20 @@ func (h PlaybackRequestHeaders) clientInfo() playback.ClientInfo {
 	return info.Normalized()
 }
 
+// PlaybackDeviceHeaders declare the client's device on a playback start. A
+// successful start records it in the profile's device registry, as a settings
+// read does; they do not change the playback device X-Device-ID names.
+// Unlike the settings operations they carry no length limits: an over-long
+// value is clamped when recorded, and must never refuse playback.
+type PlaybackDeviceHeaders struct {
+	SiloDeviceID       string `header:"X-Silo-Device-Id" doc:"The client's stable device identifier; a successful start records it in the profile's device registry (first 128 characters)" example:"iphone-1"`
+	SiloDeviceName     string `header:"X-Silo-Device-Name" doc:"Optional display name recorded on the device registry (first 120 characters)" example:"Living room"`
+	SiloDevicePlatform string `header:"X-Silo-Device-Platform" doc:"Optional platform recorded on the device registry (first 40 characters)" example:"iOS"`
+}
+
 type PlaybackStartInput struct {
 	PlaybackRequestHeaders
+	PlaybackDeviceHeaders
 	Body PlaybackStartBody
 }
 type PlaybackCapabilitiesOutput struct {
@@ -344,6 +357,7 @@ func registerPlayback(reg *Registry) {
 		if _, err := validationRequest.NormalizeAndValidate(); err != nil {
 			return nil, validationProblem("body", "invalid", err.Error())
 		}
+		caller.DeclaredDevice = handlers.NewDeviceMetadata(in.SiloDeviceID, in.SiloDeviceName, in.SiloDevicePlatform)
 		response, err := reg.deps.Playback.StartPlaybackV2(ctx, caller, request)
 		if err != nil {
 			return nil, playbackProblem(err)
@@ -481,7 +495,23 @@ func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 		p := in.PlaybackPlan
 		stream := p.Stream
 		stream.URL = playbackV2MediaURL(stream.URL)
-		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: p.AvailableQualities, DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy}
+		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy}
+	}
+	return out
+}
+
+// sourceQualityDisplayName is the v2 display name of the source quality entry.
+const sourceQualityDisplayName = "Original"
+
+// playbackQualities names the source entry "Original" on v2, so clients that
+// show display_name do not fall back to the wire label "original". The shared
+// plan keeps it unnamed: v1 serializes that plan and is frozen.
+func playbackQualities(in []playback.AvailableQualityV3) []playback.AvailableQualityV3 {
+	out := slices.Clone(in)
+	for i := range out {
+		if out[i].PreservesSource && out[i].DisplayName == "" {
+			out[i].DisplayName = sourceQualityDisplayName
+		}
 	}
 	return out
 }

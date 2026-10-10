@@ -61,7 +61,7 @@ func TestWorkerRegistryMatchesOwningInventory(t *testing.T) {
 }
 
 func TestWorkerStatusSchemasMatchRealListeners(t *testing.T) {
-	generated, err := GenerateOpenAPI()
+	generated, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestWorkerChapterExtractionProtocol(t *testing.T) {
 	if op.Path != "/chapter-thumbnails/extract" || op.RetrySafety != "non_retryable" || op.Responses["200"].Content["image/jpeg"] == nil {
 		t.Fatal("missing retained JPEG extraction protocol")
 	}
-	generated, err := GenerateOpenAPI()
+	generated, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestWorkerArtifactConditionalProtocol(t *testing.T) {
 }
 
 func TestWorkerFontBundleUsesOwningWireSchema(t *testing.T) {
-	generated, err := GenerateOpenAPI()
+	generated, err := generatedOpenAPIBytes()
 	if err != nil {
 		t.Fatal(err)
 	}

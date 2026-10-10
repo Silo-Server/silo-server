@@ -44,7 +44,22 @@ func (r *EpisodeLibraryRepository) RemoveStaleEpisodeMemberships(ctx context.Con
 
 // reconcileFolderMembership limits removal to episodeIDs when it is non-nil;
 // the exported methods decide which of the two a caller gets.
+//
+// Metadata and match writers update the same series rows concurrently, so
+// Postgres can pick this transaction as a deadlock victim. It rolls the whole
+// transaction back, and a rerun recomputes membership from the current rows,
+// so a deadlock is retried rather than failing the scan.
 func (r *EpisodeLibraryRepository) reconcileFolderMembership(ctx context.Context, folderID int, episodeIDs []string, restore bool) (int, error) {
+	var removed int
+	err := retryOnDeadlock(ctx, func() error {
+		var err error
+		removed, err = r.reconcileFolderMembershipOnce(ctx, folderID, episodeIDs, restore)
+		return err
+	})
+	return removed, err
+}
+
+func (r *EpisodeLibraryRepository) reconcileFolderMembershipOnce(ctx context.Context, folderID int, episodeIDs []string, restore bool) (int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("beginning episode membership reconciliation transaction: %w", err)

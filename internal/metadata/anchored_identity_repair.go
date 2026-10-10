@@ -181,7 +181,9 @@ func (s *MetadataService) ensureAnchoredIdentityRepairTargetEpisodeLinks(
 	contentID string,
 ) error {
 	if err := s.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
-		queueErr := s.RequestStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
+		// The refresh retries the relink, so it is queued even for parked
+		// episode debt.
+		queueErr := s.queueStaleMetadataRefresh(ctx, RefreshTargetItem, contentID)
 		slog.WarnContext(ctx, "metadata: anchored repair episode relink failed", "component", "metadata",
 			"content_id", contentID,
 			"error", err,
