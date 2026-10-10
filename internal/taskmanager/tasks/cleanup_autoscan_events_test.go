@@ -96,7 +96,6 @@ func TestAutoscanEventCleanupTaskRejectsUnusableRetention(t *testing.T) {
 		{"zero", &fakeSettingsStore{values: map[string]string{autoscan.SettingKeyEventsRetentionDays: "0"}}},
 		{"negative", &fakeSettingsStore{values: map[string]string{autoscan.SettingKeyEventsRetentionDays: "-5"}}},
 		{"garbage", &fakeSettingsStore{values: map[string]string{autoscan.SettingKeyEventsRetentionDays: "soon"}}},
-		{"unreadable", &fakeSettingsStore{getErr: errors.New("settings unavailable")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pruner := &fakeAutoscanEventPruner{}
@@ -109,6 +108,38 @@ func TestAutoscanEventCleanupTaskRejectsUnusableRetention(t *testing.T) {
 				t.Fatalf("cutoff = %v, want the default retention window", pruner.cutoff)
 			}
 		})
+	}
+}
+
+func TestAutoscanEventCleanupTaskCapsRetentionAboveMaximum(t *testing.T) {
+	store := &fakeSettingsStore{values: map[string]string{autoscan.SettingKeyEventsRetentionDays: "200000000"}}
+	pruner := &fakeAutoscanEventPruner{}
+	before := time.Now().UTC().AddDate(0, 0, -autoscan.MaxEventsRetentionDays)
+	if err := NewAutoscanEventCleanupTask(pruner, store).Execute(context.Background(), &taskHistoryCleanupProgress{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	after := time.Now().UTC().AddDate(0, 0, -autoscan.MaxEventsRetentionDays)
+	if pruner.cutoff.Before(before) || pruner.cutoff.After(after) {
+		t.Fatalf("cutoff = %v, want the %d day maximum", pruner.cutoff, autoscan.MaxEventsRetentionDays)
+	}
+}
+
+// A failed settings read must not fall back to the default: an admin who
+// chose a longer window would lose history that cannot be restored.
+func TestAutoscanEventCleanupTaskSkipsWhenRetentionUnreadable(t *testing.T) {
+	wantErr := errors.New("settings unavailable")
+	pruner := &fakeAutoscanEventPruner{}
+	progress := &taskHistoryCleanupProgress{}
+
+	err := NewAutoscanEventCleanupTask(pruner, &fakeSettingsStore{getErr: wantErr}).Execute(context.Background(), progress)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Execute error = %v, want %v", err, wantErr)
+	}
+	if pruner.calls != 0 {
+		t.Fatalf("pruner calls = %d, want none", pruner.calls)
+	}
+	if got := progress.reports[len(progress.reports)-1]; !strings.Contains(got, "skipped") {
+		t.Fatalf("last progress report = %q", got)
 	}
 }
 
