@@ -416,3 +416,43 @@ func TestFilesystemDeletePrefixStopsOnCancellation(t *testing.T) {
 		t.Fatalf("prefix directory left behind: %v", err)
 	}
 }
+
+// TestFilesystemDeletePrefixDoesNotFollowSwappedDirectory replaces a
+// directory with a symlink to another key's directory between the Lstat and
+// the descent, as a concurrent writer could, and checks that the other key's
+// file survives.
+func TestFilesystemDeletePrefixDoesNotFollowSwappedDirectory(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, key := range []string{"item/h0/image.jpg", "other/h1/image.jpg"} {
+		if err = s.Put(ctx, key, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(s.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	info, err := root.Lstat("item/h0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(filepath.Join(s.root, "item", "h0"), filepath.Join(s.root, "item", "moved")); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(filepath.Join("..", "other", "h1"), filepath.Join(s.root, "item", "h0")); err != nil {
+		t.Fatal(err)
+	}
+
+	n := 0
+	if err = deleteChildren(ctx, root, "item/h0", info, &n); err == nil || n != 0 {
+		t.Fatalf("descent through swapped directory = %d, %v; want 0 and an error", n, err)
+	}
+	if _, err = os.Stat(filepath.Join(s.root, "other", "h1", "image.jpg")); err != nil {
+		t.Fatalf("file outside the prefix was removed: %v", err)
+	}
+}
