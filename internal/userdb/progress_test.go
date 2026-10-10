@@ -124,7 +124,11 @@ func TestAddHistoryIfMissingStoresWholeSeconds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := InitSchema(db); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
