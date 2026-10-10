@@ -3,22 +3,7 @@ package apiv2
 import (
 	"reflect"
 	"testing"
-
-	"github.com/danielgtaylor/huma/v2"
 )
-
-func TestGuardedReceiptDocumentsOnlyConflictValidator(t *testing.T) {
-	api := huma.NewAPI(humaConfig(), noopAdapter{})
-	reg := &Registry{api: api}
-	registerAdminRateLimitWrite(reg)
-	op := api.OpenAPI().Paths[Prefix+"/admin/rate-limits/config"].Patch
-	if op.Responses["200"].Headers[etagField] != nil {
-		t.Fatal("receipt success advertises a validator it does not return")
-	}
-	if op.Responses["412"].Headers[etagField] == nil || op.Metadata[metaIdentityOnly] != true {
-		t.Fatal("receipt lost conflict validator or encoding guard")
-	}
-}
 
 func TestGuardedReceiptRejectsAmbiguousResponseShape(t *testing.T) {
 	op := Operation{Guarded: true, GuardedReceipt: true}

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, Navigate, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
@@ -75,6 +75,7 @@ function routeSortValue(session: AdminSession): string {
 
 export default function AdminActivity() {
   const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
+  const [searchParams] = useSearchParams();
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
   const error = undefined;
@@ -235,6 +236,10 @@ export default function AdminActivity() {
     });
   }, []);
 
+  // Download preparation moved to the Downloads page; keep old links working.
+  if (searchParams.get("view") === "preparations") {
+    return <Navigate to="/admin/downloads?tab=preparation" replace />;
+  }
   if (isLoading) return <div className="text-muted-foreground p-8">Loading activity...</div>;
 
   return (

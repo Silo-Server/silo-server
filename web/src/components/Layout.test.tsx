@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { catalogKeys } from "@/hooks/queries/keys";
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { catalogKeys } from "@/hooks/queries/keys";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "./sidebarItemNavigation";
 
 const mocks = vi.hoisted(() => ({
@@ -268,6 +268,31 @@ describe("Layout sidebar collapse", () => {
   });
 });
 
+describe("Layout request routes", () => {
+  // The padded shell wraps the page in one gutter div; unpadded pages render
+  // straight into <main>.
+  const isShellPadded = () =>
+    screen.getByRole("main").firstElementChild?.classList.contains("px-(--page-gutter)") ?? false;
+
+  it.each([
+    ["/requests", false, false],
+    ["/requests/browse/studio/a24", false, false],
+    ["/requests/browse/genre/drama", false, false],
+    ["/requests/movie/603", false, true],
+    ["/requests/series/1399", false, true],
+    ["/title/movie/603", false, true],
+    ["/title/series/1399", false, true],
+    ["/collections", true, false],
+  ])("renders %s with shell padding %s and a collapsed sidebar %s", (path, padded, collapsed) => {
+    setRoute(path, "requests");
+    renderLayout();
+
+    expect(isShellPadded()).toBe(padded);
+    expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
+    expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ml-16" : "lg:ml-[260px]");
+  });
+});
+
 describe("Layout item navigation", () => {
   it("declines interception on an item route, for a non-item href, and below lg", () => {
     const view = renderLayout();
@@ -481,24 +506,6 @@ describe("Layout detail reveal", () => {
 
     screen.getByTestId("sidebar-surface").setAttribute("data-collapsed", "true");
     act(() => vi.advanceTimersByTime(50));
-
-    expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
-  });
-
-  it("reveals by the deadline while hover expansion holds the surface open", () => {
-    const view = renderLayout();
-    setRoute("/item/movie-1", "item");
-    act(() =>
-      view.rerender(
-        <MemoryRouter>
-          <Layout>
-            <Harness />
-          </Layout>
-        </MemoryRouter>,
-      ),
-    );
-
-    act(() => vi.advanceTimersByTime(SIDEBAR_DETAILS_REVEAL_DEADLINE_MS));
 
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });

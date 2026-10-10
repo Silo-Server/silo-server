@@ -1,3 +1,7 @@
+// TODO: this file redefines document, which is not configurable in VM contexts,
+// so it runs on the threads pool (THREADS_TESTS in vite.config.ts). Make it VM-
+// safe and drop it from that list.
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {

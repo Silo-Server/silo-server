@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,8 +85,25 @@ func updateServerSettingsAtomically(
 	store ServerSettingsStore,
 	update func(current map[string]string) (map[string]string, error),
 ) error {
+	return updateServerSettingsInTransaction(ctx, store, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+func updateServerSettingsInTransaction(
+	ctx context.Context,
+	store ServerSettingsStore,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if updater, ok := store.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return updater.UpdateAtomicInTransaction(ctx, update)
+	}
 	if updater, ok := store.(serverSettingsAtomicUpdater); ok {
-		return updater.UpdateAtomic(ctx, update)
+		return updater.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return update(current, nil)
+		})
 	}
 	return errors.New("settings store does not support atomic updates")
 }
@@ -122,6 +138,7 @@ type ImpersonationService interface {
 type AdminHandler struct {
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
+	loginSessions      adminLoginSessionStore
 	SessionsLoader     *PlaybackSessionsLoader
 	storeProv          userstore.UserStoreProvider
 	accountProvisioner *auth.AccountProvisioner
@@ -154,6 +171,12 @@ type AdminHandler struct {
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
 	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
+	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
+	// Deleting an account drops its entries through the users foreign key,
+	// which can leave such titles behind. Nil skips the sweep.
+	WatchlistTitlesSweeper interface {
+		SweepOrphanTitles(ctx context.Context) error
+	}
 	// logLevelCounts caches the 24h error/warning tallies served on
 	// /admin/server/status. The dashboard polls that route every 15s, and the
 	// counts are only ever read as a rough signal, so re-counting per request
@@ -169,13 +192,17 @@ func NewAdminHandler(
 	pool *pgxpool.Pool,
 	storeProv userstore.UserStoreProvider,
 ) *AdminHandler {
-	return &AdminHandler{
+	h := &AdminHandler{
 		userRepo:           userRepo,
 		pool:               pool,
 		storeProv:          storeProv,
 		accountProvisioner: auth.NewAccountProvisioner(userRepo, storeProv),
 		logLevelCounts:     cache.NewTTLCache[adminLogLevelCounts](),
 	}
+	if pool != nil {
+		h.loginSessions = auth.NewSessionRepository(pool)
+	}
+	return h
 }
 
 // --- Request/Response types ---
@@ -333,6 +360,9 @@ type AdminUserView struct {
 	PasswordLogin          bool `json:"-"`
 	PasswordChangeRequired bool `json:"-"`
 	IsOwner                bool `json:"-"`
+	// BreakGlass is v2-only: the account keeps local password sign-in when
+	// the server turns it off.
+	BreakGlass bool `json:"-"`
 }
 
 // EffectivePolicyView is the resolved policy block on admin user responses.
@@ -421,6 +451,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 		PasswordLogin:              u.LocalPasswordLoginEnabled && u.PasswordHash != "",
 		PasswordChangeRequired:     u.PasswordChangeRequired,
 		IsOwner:                    u.IsOwner,
+		BreakGlass:                 u.BreakGlass,
 		EffectivePolicy: EffectivePolicyView{
 			LibraryIDs:                 effective.LibraryIDs,
 			MaxPlaybackQuality:         effective.MaxPlaybackQuality,
@@ -998,6 +1029,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		AccessGroupID:            req.AccessGroupID.Optional(),
 	}
 
+	enableLocalLoginWithPassword(&updateInput)
+
 	// As in v2, the Owner rules run against the target account locked in the
 	// transaction that updates it and revokes its sign-ins.
 	repo, ok := h.userRepo.(adminAccountRepository)
@@ -1011,7 +1044,7 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	revoked := false
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, &updateInput, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerUpdate(actor, current, updateInput); err != nil {
 			return false, ownerError(err)
 		}
@@ -1019,6 +1052,12 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		// target may have been promoted since rejectScopedAPIKeyUpdate read it.
 		if actorIsScopedAPIKey(r.Context()) && current.Role == roleAdmin && (updateInput.Password != nil || updateInput.Role != nil) {
 			return false, apiError(http.StatusForbidden, "insufficient_scope", "A scoped API key may not change the password or role of an admin account")
+		}
+		// The frozen v1 route keeps the break-glass invariant v2 enforces:
+		// with local password sign-in off, the last usable break-glass admin
+		// cannot be demoted or disabled.
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, &updateInput); err != nil {
+			return false, breakGlassError(err)
 		}
 		revoked = updateRequiresSessionRevocation(current, updateInput)
 		return revoked, nil
@@ -1075,9 +1114,12 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	}
 	// As for updates, the Owner rules run against the target account locked
 	// in the transaction that deletes it and revokes its sign-ins.
-	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, _ pgx.Tx) (bool, error) {
+	_, err = repo.MutateAdminAccount(r.Context(), id, -1, nil, func(current *models.User, tx pgx.Tx) (bool, error) {
 		if err := auth.CheckOwnerDelete(actor, current); err != nil {
 			return false, ownerError(err)
+		}
+		if err := auth.EnsureBreakGlassAfterAdminChange(r.Context(), tx, current, nil); err != nil {
+			return false, breakGlassError(err)
 		}
 		return true, nil
 	})
@@ -1096,9 +1138,24 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(r.Context(), id)
 	}
+	h.sweepWatchlistTitles(r.Context(), id)
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(id))
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// sweepWatchlistTitles removes the watchlist titles a deleted account's
+// entries were the last to reference. The account is already gone, so a
+// failure is logged and the next delete's sweep picks the titles up.
+func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
+	if h.WatchlistTitlesSweeper == nil {
+		return
+	}
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := h.WatchlistTitlesSweeper.SweepOrphanTitles(sweepCtx); err != nil {
+		slog.WarnContext(ctx, "watchlist title sweep failed after account delete", "component", "api", "user_id", userID, "error", err)
+	}
 }
 
 // HandleImpersonateUser handles POST /admin/users/{id}/impersonate.
@@ -1138,6 +1195,10 @@ func (h *AdminHandler) HandleImpersonateUser(w http.ResponseWriter, r *http.Requ
 		}
 		if errors.Is(err, auth.ErrAlreadyImpersonating) {
 			writeError(w, http.StatusConflict, "already_impersonating", "An impersonation session is already active")
+			return
+		}
+		if errors.Is(err, auth.ErrSessionRevoked) {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
 			return
 		}
 		if errors.Is(err, auth.ErrImpersonationNotAllowed) {
@@ -1330,15 +1391,24 @@ func (h *AdminHandler) HandleListUserProfiles(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
+// the current account to compare against: any credential or enabled change
+// might sign the user out.
 func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 	return input.Password != nil ||
-		input.Role != nil ||
-		input.Enabled != nil ||
-		input.Permissions != nil ||
-		input.MaxPlaybackQuality.Set ||
-		input.AccessGroupID.Set
+		input.Enabled != nil
 }
 
+// updateRequiresSessionRevocation reports whether an account update signs the
+// user out everywhere: a new password or an enabled change.
+//
+// Policy changes (permissions, playback-quality override, access group) do
+// not; they bump access_policy_revision, every request resolves the current
+// policy, and connected realtime sockets tell their clients to refresh. A role
+// change does not either: RequireAuth refuses access tokens minted under the
+// old role with token_refresh_required, and a refresh issues the new role.
+// The impersonation sessions a demoted admin started end in the same
+// transaction (auth.UserRepository.MutateAdminAccount).
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
 	if input.Password != nil {
 		return true
@@ -1346,53 +1416,10 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 	if current == nil {
 		return updateMayRequireSessionRevocation(input)
 	}
-	if input.Role != nil && *input.Role != current.Role {
-		return true
-	}
 	if input.Enabled != nil && *input.Enabled != current.Enabled {
 		return true
 	}
-	if input.Permissions != nil && !slices.Equal(*input.Permissions, current.Permissions) {
-		return true
-	}
-	if input.MaxPlaybackQuality.Set && !qualityOverrideEqual(input.MaxPlaybackQuality.Value, current.MaxPlaybackQuality) {
-		return true
-	}
-	if input.AccessGroupID.Set && !accessGroupIDEqual(input.AccessGroupID.Value, current.AccessGroupID) {
-		return true
-	}
 	return false
-}
-
-func qualityOverrideEqual(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return access.NormalizePlaybackQuality(*a) == access.NormalizePlaybackQuality(*b)
-}
-
-func accessGroupIDEqual(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
-	if h.pool == nil {
-		return nil
-	}
-	sessionRepo := auth.NewSessionRepository(h.pool)
-	if err := sessionRepo.RevokeAllByUser(ctx, userID); err != nil {
-		return err
-	}
-	if err := sessionRepo.RevokeAllByImpersonator(ctx, userID); err != nil {
-		return err
-	}
-	if h.OnUserSessionsRevoked != nil {
-		h.OnUserSessionsRevoked(ctx, userID)
-	}
-	return nil
 }
 
 // HandleListUnmatched handles GET /admin/unmatched.
@@ -1660,6 +1687,8 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 var machineManagedSettingKeys = map[string]bool{
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
+	config.MediaImageSweepCheckpointKey:         true,
+	config.ChapterThumbnailOriginalsCleanupKey:  true,
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
 	config.StorageTransitionTargetKey:           true,
@@ -2443,7 +2472,50 @@ func (h *AdminHandler) activeAdminSettings(stored map[string]string) map[string]
 }
 
 func (h *AdminHandler) effectiveAdminSettings(stored map[string]string) map[string]string {
-	return config.EffectiveAdminSettings(h.activeAdminSettings(stored))
+	effective := config.EffectiveAdminSettings(h.activeAdminSettings(stored))
+	// An empty redis.db leaves the database number to redis.url, so the value
+	// in effect is the number in that URL.
+	if effective[config.RedisDBSettingKey] == "" {
+		if db, ok := redisURLDatabase(effective); ok {
+			effective[config.RedisDBSettingKey] = db
+		}
+	}
+	return effective
+}
+
+// redisURLDatabase returns the database number in the redis.url of values. It
+// reports false when there is no URL or the URL cannot be parsed.
+func redisURLDatabase(values map[string]string) (string, bool) {
+	db, ok := config.RedisConfig{URL: values["redis.url"]}.Database()
+	if !ok {
+		return "", false
+	}
+	return strconv.Itoa(db), true
+}
+
+// redisDBRow returns what a save of redis.db stores, given the settings the
+// save leaves in effect. The row holds a number only while it differs from
+// the one redis.url names: nothing without a URL, and nothing for the number
+// the URL already names. What is stored then never depends on earlier saves.
+func redisDBRow(active map[string]string, value string) string {
+	if strings.TrimSpace(active["redis.url"]) == "" {
+		return ""
+	}
+	if urlDB, _ := redisURLDatabase(active); urlDB == value {
+		return ""
+	}
+	return value
+}
+
+// environmentRefusesSave reports whether the process environment supplies key,
+// so a save of it would have no effect here. Clearing redis.db is the
+// exception: REDIS_URL keeps a server up whose saved number it cannot start
+// with, and the clear is how that number is removed.
+func (h *AdminHandler) environmentRefusesSave(key, value string) bool {
+	if !h.BootstrapSensitiveConfigured[key] {
+		return false
+	}
+	return key != config.RedisDBSettingKey || strings.TrimSpace(value) != ""
 }
 
 func shouldPersistAdminSetting(stored map[string]string, key, normalized string, effectiveChanged bool) bool {
@@ -2455,6 +2527,24 @@ func shouldPersistAdminSetting(stored map[string]string, key, normalized string,
 	// runtime default. Non-default values still need a row, while clearing an
 	// already-absent override is a storage no-op.
 	return normalized != "" && effectiveChanged
+}
+
+// checkLocalLoginSetting refuses turning local password sign-in off while no
+// break-glass admin could still sign in with a password. It runs inside the
+// settings mutation, which holds the settings lock that break-glass changes
+// also take.
+func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, before, after map[string]string) error {
+	key := config.AuthLocalPasswordLoginSettingKey
+	if before[key] == after[key] {
+		return nil
+	}
+	if tx != nil {
+		return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, tx, before[key], after[key]))
+	}
+	if h.pool == nil {
+		return ErrAdminSettingsUnavailable
+	}
+	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
 }
 
 // HandleUpdateSettings handles PUT /admin/settings. Every requested value is
@@ -2512,7 +2602,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if machineManagedSettingKeys[key] {
 			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
 		}
-		if h.BootstrapSensitiveConfigured[key] {
+		if h.environmentRefusesSave(key, req.Values[key]) {
 			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
 		}
 		keys = append(keys, key)
@@ -2536,8 +2626,8 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2549,6 +2639,14 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			for key, value := range normalized {
 				prospective[key] = value
 			}
+			rows := normalized
+			if value, ok := normalized[config.RedisDBSettingKey]; ok {
+				// The same batch can replace redis.url, so the row is decided
+				// against the URL the batch leaves in place.
+				rows = maps.Clone(normalized)
+				rows[config.RedisDBSettingKey] = redisDBRow(h.activeAdminSettings(prospective), value)
+				prospective[config.RedisDBSettingKey] = rows[config.RedisDBSettingKey]
+			}
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
@@ -2558,6 +2656,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			activeProspective := h.activeAdminSettings(prospective)
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			// Cross-field checks run against the complete prospective state, so a
 			// value the batch clears is gone even when the store still has it and
 			// the current process is still running on it.
@@ -2569,9 +2671,12 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			}
 			writes := make(map[string]string, len(normalized))
 			effectiveChanges = make(map[string]bool, len(normalized))
-			for key, value := range normalized {
+			for key, value := range rows {
 				effectiveChanged := before[key] != after[key]
-				if shouldPersistAdminSetting(stored, key, value, effectiveChanged) {
+				// redisDBRow has decided what the redis.db row holds, so a number
+				// is stored even when the number in effect stays the same.
+				needsRow := effectiveChanged || key == config.RedisDBSettingKey
+				if shouldPersistAdminSetting(stored, key, value, needsRow) {
 					writes[key] = value
 				}
 				if effectiveChanged {
@@ -2645,7 +2750,9 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "bad_request", key+" is managed internally")
 		return
 	}
-	if h.BootstrapSensitiveConfigured[key] {
+	// Whether the environment refuses redis.db depends on the value, which
+	// UpdateAdminSetting checks once the body is read.
+	if key != config.RedisDBSettingKey && h.BootstrapSensitiveConfigured[key] {
 		writeError(w, http.StatusBadRequest, "managed_by_environment", key+" is managed by an environment variable")
 		return
 	}
@@ -2680,7 +2787,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 	if machineManagedSettingKeys[key] {
 		return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
 	}
-	if h.BootstrapSensitiveConfigured[key] {
+	if h.environmentRefusesSave(key, value) {
 		return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
 	}
 	if strings.HasPrefix(key, "ratelimit.") {
@@ -2897,8 +3004,8 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		validationCode   string
 	)
 	var preconditionErr error
-	err := updateServerSettingsAtomically(ctx, h.SettingsRepo,
-		func(stored map[string]string) (map[string]string, error) {
+	err := updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
 					preconditionErr = err
@@ -2907,7 +3014,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			}
 
 			prospective := maps.Clone(stored)
-			prospective[key] = req.Value
+			row := req.Value
+			if key == config.RedisDBSettingKey {
+				row = redisDBRow(h.activeAdminSettings(stored), req.Value)
+			}
+			prospective[key] = row
 			if artworkStorageLocked(stored) {
 				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
@@ -2951,9 +3062,13 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
+			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
 			effectiveChanged = before[key] != after[key]
-			if shouldPersistAdminSetting(stored, key, req.Value, effectiveChanged) {
-				return map[string]string{key: req.Value}, nil
+			if shouldPersistAdminSetting(stored, key, row, effectiveChanged) {
+				return map[string]string{key: row}, nil
 			}
 			return nil, nil
 		})

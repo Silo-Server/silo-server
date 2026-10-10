@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
 import {
   SettingField,
   SettingFieldRow,
@@ -18,7 +19,7 @@ import {
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
 
-const REDIS_KEYS = ["redis.url"];
+const REDIS_KEYS = ["redis.url", "redis.db"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
@@ -108,7 +109,7 @@ function Backend({
   status,
   open,
   onToggle,
-  editable = true,
+  readOnly = false,
   children,
 }: {
   title: string;
@@ -118,8 +119,8 @@ function Backend({
   status?: ReactNode;
   open: boolean;
   onToggle: () => void;
-  /** False when the value is owned by the environment and cannot be edited here. */
-  editable?: boolean;
+  /** Show the environment-owned values for inspection without offering edits. */
+  readOnly?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -136,19 +137,11 @@ function Backend({
           ))
         }
       >
-        {editable ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={onToggle}
-            aria-expanded={open}
-          >
-            {open ? "Hide" : configured ? "Edit" : "Set up"}
-          </Button>
-        ) : null}
+        <Button type="button" variant="secondary" size="sm" onClick={onToggle} aria-expanded={open}>
+          {open ? "Hide" : readOnly ? "View" : configured ? "Edit" : "Set up"}
+        </Button>
       </SettingFieldRow>
-      {open && editable ? <div className="setup-backend-fields">{children}</div> : null}
+      {open ? <div className="setup-backend-fields">{children}</div> : null}
     </>
   );
 }
@@ -421,15 +414,28 @@ export function StorageStep() {
           }
           open={open.redis}
           onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
-          editable={!redisManaged}
+          readOnly={redisManaged}
         >
           <SettingField
             label="Connection URL"
             type="password"
             hint="redis://localhost:6379"
             value={form.getValue("redis.url")}
-            onChange={(v) => form.setValue("redis.url", v)}
+            onChange={(v) => stageRedisUrl(form, v)}
             sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
+            disabled={redisManaged}
+          />
+          <SettingField
+            label="Database number"
+            type="number"
+            description={
+              redisManaged
+                ? "Set by REDIS_URL"
+                : "Replaces the number in the URL. Installs sharing one Redis each need their own."
+            }
+            value={form.getValue("redis.db")}
+            onChange={(v) => form.setValue("redis.db", v)}
+            disabled={redisManaged}
           />
           <ConnectionCheckAction
             onClick={redisCheck.run}

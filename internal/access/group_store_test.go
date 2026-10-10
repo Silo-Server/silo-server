@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -454,41 +453,25 @@ func TestGroupStoreDeleteMovingMembersDB(t *testing.T) {
 		revisions[id] = revision
 	}
 
-	// A failing callback rolls the whole delete back.
-	boom := errors.New("revoke failed")
-	if _, err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}, func(context.Context, pgx.Tx, []int) error {
-		return boom
-	}); !errors.Is(err, boom) {
-		t.Fatalf("DeleteMovingMembers(failing callback) error = %v, want %v", err, boom)
+	// Moved members keep their sign-ins; the revision bump alone carries the
+	// policy change.
+	sessionID := "delete-moving-" + suffix
+	if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, device_name, expires_at) VALUES ($1, $2, 'test', now() + interval '1 day')`, sessionID, first); err != nil {
+		t.Fatalf("insert member session: %v", err)
 	}
-	if _, err := store.Get(ctx, group.ID); err != nil {
-		t.Fatalf("group gone after a rolled-back delete: %v", err)
-	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM auth_sessions WHERE id = $1`, sessionID) })
 
-	var seen []int
-	moved, err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}, func(_ context.Context, tx pgx.Tx, userIDs []int) error {
-		seen = append(seen, userIDs...)
-		// The callback runs inside the delete's transaction, after the move.
-		var groupID int64
-		if err := tx.QueryRow(ctx, `SELECT access_group_id FROM users WHERE id = $1`, userIDs[0]).Scan(&groupID); err != nil {
-			return err
-		}
-		if groupID != seedID {
-			return fmt.Errorf("callback saw group %d, want the default %d", groupID, seedID)
-		}
-		return nil
-	})
-	if err != nil {
+	if err := store.DeleteMovingMembers(ctx, group.ID, GroupPrecondition{Any: true}); err != nil {
 		t.Fatalf("DeleteMovingMembers() error: %v", err)
 	}
-	slices.Sort(moved)
-	slices.Sort(seen)
-	want := []int{first, second}
-	slices.Sort(want)
-	if !slices.Equal(moved, want) || !slices.Equal(seen, want) {
-		t.Fatalf("moved=%v callback=%v, want %v", moved, seen, want)
+	var revokedAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT revoked_at FROM auth_sessions WHERE id = $1`, sessionID).Scan(&revokedAt); err != nil {
+		t.Fatalf("load member session: %v", err)
 	}
-	for _, id := range want {
+	if revokedAt != nil {
+		t.Fatalf("moved member's session revoked at %v, want it kept", revokedAt)
+	}
+	for _, id := range []int{first, second} {
 		var (
 			groupID  *int64
 			revision int64

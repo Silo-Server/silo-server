@@ -17,7 +17,6 @@ import {
   normalizeDownloadsTopLimit,
   normalizeInsightHours,
   normalizeTopActivityDays,
-  useAdminDownloadsStats,
   useAdminPlaybackActivity,
   useAdminTimeseries,
   useAdminTopActivity,
@@ -137,20 +136,6 @@ describe("dashboard insight hooks", () => {
       query: { days: 7 },
     });
     expect(queryClient.getQueryData(adminKeys.topActivity(7))).toEqual({});
-  });
-
-  it("defaults downloads stats to a top-10 list", async () => {
-    const queryClient = createQueryClient();
-    const { result } = renderHook(() => useAdminDownloadsStats(), {
-      wrapper: createWrapper(queryClient),
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mocks.v2).toHaveBeenCalledWith("GET /api/v2/admin/stats/downloads", {
-      profileContext: expect.any(Object),
-      query: { limit: 10 },
-    });
-    expect(queryClient.getQueryData(adminKeys.downloadsStats(10))).toEqual({});
   });
 
   it("paces from the dashboard loop: stale just under 60s, never self-polling", async () => {

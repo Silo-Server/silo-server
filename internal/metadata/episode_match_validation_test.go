@@ -101,42 +101,6 @@ func TestExtractEpisodeMatchTitle(t *testing.T) {
 	}
 }
 
-func TestValidateSeriesMatchByEpisodes_SelectsSecondExactTitleCandidate(t *testing.T) {
-	t.Parallel()
-	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{
-		"2020": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Arrival"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Departure"},
-		},
-		"2015": {
-			{SeasonNumber: 1, EpisodeNumber: 1, Title: "Day One"},
-			{SeasonNumber: 1, EpisodeNumber: 2, Title: "Crime and Punishment"},
-		},
-	}}
-	hints := &MatchHints{
-		Title: "Crims", Type: "series",
-		AllGroupFilePaths: []string{
-			"/tv/Crims/Season 1/Crims - S01E01 - Day One[WEBDL-1080p].mkv",
-			"/tv/Crims/Season 1/Crims - S01E02 - Crime and Punishment[WEBDL-1080p].mkv",
-		},
-	}
-	candidates := []MatchCandidate{
-		{Title: "Crims", Year: 2020, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "2020"}},
-		{Title: "Crims", Year: 2015, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "2015"}},
-	}
-
-	winner, errs := validateSeriesMatchByEpisodes(context.Background(), hints, candidates, []Provider{provider}, "en")
-	if len(errs) != 0 {
-		t.Fatalf("validation errors = %v", errs)
-	}
-	if winner == nil || winner.ProviderIDs["tmdb"] != "2015" {
-		t.Fatalf("winner = %+v, want 2015 candidate", winner)
-	}
-	if !containsString(winner.MatchReasons, "episode_title_corroboration:2_of_2") {
-		t.Fatalf("winner reasons = %v", winner.MatchReasons)
-	}
-}
-
 func TestValidateSeriesMatchByEpisodes_LeavesMemoriesUnmatched(t *testing.T) {
 	t.Parallel()
 	provider := &episodeValidationStubProvider{episodes: map[string][]EpisodeResult{

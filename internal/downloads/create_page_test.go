@@ -108,6 +108,7 @@ func TestDownloadCreatePagesPostgres(t *testing.T) {
 	}
 	// Native file selection binds the requested catalog identity before policy
 	// or artifact admission, even if the supplied file itself exists.
+	access.err = nil
 	files.single = &models.MediaFile{ID: 42, ContentID: "other"}
 	if _, err := svc.Create(t.Context(), 1, CreateRequest{ContentID: "series", FileID: 42, StrictIdentity: true}, catalog.AccessFilter{}); !errors.Is(err, catalog.ErrItemNotFound) {
 		t.Fatal(err)

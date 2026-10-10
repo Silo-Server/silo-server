@@ -76,8 +76,10 @@ func TestWebhookDeliveryIngestsAndAccepts(t *testing.T) {
 	if in.Changes[0].SourcePath != "/data/tv/Show/Season 01/e01.mkv" {
 		t.Fatalf("change path = %q", in.Changes[0].SourcePath)
 	}
-	if len(store.touchedSources) != 1 || store.touchedSources[0] != "src-1" {
-		t.Fatalf("touched = %+v, want src-1", store.touchedSources)
+	// IngestChanges stamps last_received_at in the statement that durably
+	// accepts the delivery, so the handler must not stamp it a second time.
+	if len(store.touchedSources) != 0 {
+		t.Fatalf("handler must leave the stamp to durable acceptance, touched = %+v", store.touchedSources)
 	}
 }
 
@@ -132,6 +134,42 @@ func TestWebhookDeliveryUnknownEventTypeIsAcceptedNoOp(t *testing.T) {
 	if len(svc.ingested) != 0 {
 		t.Fatalf("unknown event must not ingest, got %+v", svc.ingested)
 	}
+	if len(store.touchedSources) != 1 {
+		t.Fatalf("a delivery to an enabled source must stamp last_received_at, touched = %+v", store.touchedSources)
+	}
+}
+
+// The setup instructions tell the operator to press Test in Sonarr/Radarr, and
+// that can happen before the source or Autoscan is switched on. The wiring
+// check must still show up as a delivery.
+func TestWebhookDeliveryTestEventStampsWhileDisabled(t *testing.T) {
+	for name, tc := range map[string]struct {
+		sourceEnabled   bool
+		settingsEnabled bool
+	}{
+		"source disabled":   {sourceEnabled: false, settingsEnabled: true},
+		"autoscan disabled": {sourceEnabled: true, settingsEnabled: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := webhookStore(webhookSource(tc.sourceEnabled), tc.settingsEnabled)
+			svc := &fakeAutoscanTriggerer{}
+			h := NewAutoscanHandler(store, svc)
+
+			rec := httptest.NewRecorder()
+			h.HandleWebhookDelivery(rec, newWebhookDeliveryRequest(testWebhookToken,
+				`{"eventType": "Test", "series": {"path": "C:\\testpath"}}`))
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202", rec.Code)
+			}
+			if len(svc.ingested) != 0 {
+				t.Fatalf("test event must not ingest, got %+v", svc.ingested)
+			}
+			if len(store.touchedSources) != 1 || store.touchedSources[0] != "src-1" {
+				t.Fatalf("test event must stamp last_received_at while disabled, touched = %+v", store.touchedSources)
+			}
+		})
+	}
 }
 
 func TestWebhookDeliveryDisabledSourceIsAcceptedNoOp(t *testing.T) {
@@ -156,8 +194,9 @@ func TestWebhookDeliveryDisabledSourceIsAcceptedNoOp(t *testing.T) {
 			if len(svc.ingested) != 0 {
 				t.Fatalf("disabled state must not ingest, got %+v", svc.ingested)
 			}
-			if len(store.touchedSources) != 1 {
-				t.Fatalf("valid delivery must stamp last_received_at even while disabled")
+			// The delivery is dropped, so "Last delivery" must not claim it.
+			if len(store.touchedSources) != 0 {
+				t.Fatalf("dropped delivery must not stamp last_received_at, touched = %+v", store.touchedSources)
 			}
 		})
 	}
@@ -205,6 +244,9 @@ func TestWebhookDeliveryDurableAcceptanceFailureIs500(t *testing.T) {
 	}
 	if store.webhookErrs["src-1"] == "" {
 		t.Fatal("ingest failure must be recorded on the endpoint")
+	}
+	if len(store.touchedSources) != 0 {
+		t.Fatalf("a delivery answered with 500 must not stamp last_received_at, touched = %+v", store.touchedSources)
 	}
 }
 

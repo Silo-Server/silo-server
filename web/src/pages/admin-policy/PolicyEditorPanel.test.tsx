@@ -143,27 +143,6 @@ describe("PolicyEditorPanel", () => {
     expect(screen.getByText(/3:3/)).toBeInTheDocument();
   });
 
-  it("keeps a dirty draft and shows a notice when a newer version goes live elsewhere", async () => {
-    const { client } = renderWithPolicyProviders(
-      <PolicyEditorPanel documentId="1" domains={["scope"]} />,
-    );
-
-    expect(await screen.findByText("Scope limits")).toBeInTheDocument();
-    await waitFor(() => expect(regoTextarea().value).toContain("bad if"));
-
-    const myDraft = "package silo_custom.scope\n\nmy_edit if {\n  input\n}\n";
-    fireEvent.change(regoTextarea(), { target: { value: myDraft } });
-
-    // Another admin activates v3 — surfaced here as a background query update.
-    act(() => {
-      client.setQueryData(adminKeys.policyDocument("1"), documentWithLiveV3());
-    });
-
-    // The dirty draft is preserved rather than silently reseeded.
-    expect(regoTextarea().value).toBe(myDraft);
-    expect(await screen.findByText(/The saved policy changed/)).toBeInTheDocument();
-  });
-
   it("adopts the newer live version when the load button is clicked", async () => {
     const { client } = renderWithPolicyProviders(
       <PolicyEditorPanel documentId="1" domains={["scope"]} />,
@@ -177,6 +156,9 @@ describe("PolicyEditorPanel", () => {
     act(() => {
       client.setQueryData(adminKeys.policyDocument("1"), documentWithLiveV3());
     });
+
+    expect(regoTextarea().value).toBe(myDraft);
+    expect(await screen.findByText(/The saved policy changed/)).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /load saved source/i }));
 

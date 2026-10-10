@@ -38,6 +38,9 @@ type healthResponse struct {
 	// Build is the node's own build identity, carried opaquely for the same
 	// reason as the sample: it is display data for the nodes dashboard.
 	Build json.RawMessage `json:"build"`
+	// Artifacts is the node's measurement of its prepared-download directory,
+	// carried opaquely like the sample; the downloads package reads it.
+	Artifacts json.RawMessage `json:"artifacts"`
 	// NetworkAccess is the node's report about the network access provider
 	// plugins running beside it, keyed by provider slug. Unlike the sample it
 	// is decoded here, because stream URL selection routes on it: an overlay
@@ -129,7 +132,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	attribution := trimJSONNull(hr.Attribution)
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
-	if system == nil && gpu == nil && attribution == nil && build == nil {
+	artifacts := trimJSONNull(hr.Artifacts)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
 		return nil
 	}
 	payload := struct {
@@ -138,7 +142,8 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 		Attribution json.RawMessage `json:"attribution,omitempty"`
 		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
 		Build       json.RawMessage `json:"build,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build}
+		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil
@@ -819,28 +824,6 @@ func (d capabilityDrift) regressed() bool {
 // text column echoed to every admin listing nodes is not the place to trust
 // them.
 const maxCapabilityDriftNoteBytes = 512
-
-// persistedNote renders this refetch's regression for the
-// stream_nodes.capability_drift column, or nil when this refetch lost nothing.
-// nil is not by itself a reason to clear a note the node already carries — see
-// resolveDriftNote, which owns that decision.
-func (d capabilityDrift) persistedNote() *string {
-	if !d.regressed() {
-		return nil
-	}
-	parts := make([]string, 0, 3)
-	if len(d.lostBackends) > 0 {
-		parts = append(parts, "verified hardware backends lost: "+strings.Join(d.lostBackends, ", "))
-	}
-	if len(d.lostDevices) > 0 {
-		parts = append(parts, "render devices gone: "+strings.Join(d.lostDevices, ", "))
-	}
-	if d.previousResolved != d.resolved {
-		parts = append(parts, "resolved backend "+d.previousResolved+" -> "+d.resolved)
-	}
-	note := truncateDriftNote(strings.Join(parts, "; "))
-	return &note
-}
 
 // truncateDriftNote bounds a note to maxCapabilityDriftNoteBytes without ever
 // cutting a rune in half.

@@ -109,7 +109,7 @@ type RecipeDefinition struct {
 	Presets          []RecipePreset `json:"presets" doc:"Empty, never null"`
 	AvoidDuplicates  bool           `json:"avoid_duplicates" example:"true"`
 	SupportsRotation bool           `json:"supports_rotation" example:"false"`
-	AdminOnly        bool           `json:"admin_only" example:"false"`
+	AdminOnly        bool           `json:"admin_only" doc:"Only an admin may add a new section of this recipe; a profile keeps and changes the ones it already has" example:"false"`
 }
 
 // RecipeCategory is one gallery category with its recipes.
@@ -163,9 +163,6 @@ const (
 	opListSectionRecipes          = "listSectionRecipes"
 	opListSectionRecipeCandidates = "listSectionRecipeCandidates"
 )
-
-// homeOperationIDs is every operation the catalog-home section registers.
-var homeOperationIDs = []string{opGetCalendar, opDismissHomeItem, opUndismissHomeItem, opGetHomeLayout, opListHomeSections, opGetHomeSectionItems, opListSectionRecipes, opListSectionRecipeCandidates}
 
 func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/calendar", opGetCalendar, "home",
@@ -384,8 +381,9 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 		return nil, serviceProblem(err)
 	}
 	out := SectionCollection{Sections: make([]Section, 0, len(view.Sections))}
+	sel := reg.ratingSelection(ctx)
 	for _, s := range view.Sections {
-		out.Sections = append(out.Sections, sectionOf(s))
+		out.Sections = append(out.Sections, sectionOf(s, sel))
 	}
 	return &SectionCollectionOutput{Body: out}, nil
 }
@@ -402,7 +400,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	return &SectionOutput{Body: sectionOf(view)}, nil
+	return &SectionOutput{Body: sectionOf(view, reg.ratingSelection(ctx))}, nil
 }
 
 // recipeDefaultConfigOf decodes a recipe's raw config document; anything that is

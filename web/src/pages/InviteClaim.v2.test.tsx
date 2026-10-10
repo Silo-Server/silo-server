@@ -17,7 +17,24 @@ const invitation = {
   expires_at: "2026-10-01T00:00:00.000Z",
   show_tour: false,
   acceptance_available: true,
+  email_required: false,
+  note: "",
 };
+const linkInvitation = { ...invitation, email: "", email_required: true, note: "For Sam" };
+function emailProblem(type: string, status: number, errors?: unknown[]) {
+  return new Response(
+    JSON.stringify({
+      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+      title: type,
+      status,
+      errors,
+    }),
+    { status, headers: { "Content-Type": "application/problem+json" } },
+  );
+}
+function posts() {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+}
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -81,8 +98,10 @@ afterEach(() => {
 it("installs the nested v2 session and continues household setup", async () => {
   mount();
   await fill();
+  expect(screen.getByLabelText("Email")).toBeDisabled();
   send();
   await screen.findByText("Household setup");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({ password: "password123" });
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({
       access_token: accepted.tokens.access_token,
@@ -116,6 +135,25 @@ it("does not refresh or replay a 401 accept and requires explicit reload before 
   await screen.findByLabelText("Email");
   expect(screen.getByRole("button", { name: "Create account" })).not.toBeDisabled();
   expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/auth/refresh"))).toBe(false);
+});
+it("explains a refusal because password sign-in is off instead of offering recovery", async () => {
+  submit = async () =>
+    new Response(
+      JSON.stringify({
+        type: "https://siloserver.org/docs/api/v2/problems/local_login_disabled",
+        title: "Local password sign-in is turned off",
+        status: 403,
+      }),
+      { status: 403, headers: { "Content-Type": "application/problem+json" } },
+    );
+  mount();
+  await fill();
+  send();
+  await screen.findByText(/Password sign-in is turned off on this server/);
+  expect(screen.getByText(/Ask Admin to add you/)).toBeTruthy();
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Create account" })).toBeDisabled();
+  expect(auth.completeLogin).not.toHaveBeenCalled();
 });
 it("does not confuse a storage failure with an unavailable invitation", async () => {
   lookup = async () => problem(500);
@@ -176,4 +214,64 @@ it("rejects a submit when credentials arrived before auth context rerender", asy
   send();
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
   expect(auth.completeLogin).not.toHaveBeenCalled();
+});
+it("asks for an address on a link invitation and sends it with the password", async () => {
+  lookup = async () => json(linkInvitation);
+  mount();
+  const email = await screen.findByLabelText("Email");
+  expect(email).not.toBeDisabled();
+  expect(screen.getByText("Note from Admin")).toBeInTheDocument();
+  expect(screen.getByText("For Sam")).toBeInTheDocument();
+  await fill();
+  send();
+  expect(
+    screen.getByText("Enter a valid email address, like name@example.com"),
+  ).toBeInTheDocument();
+  expect(posts()).toHaveLength(0);
+  fireEvent.change(email, { target: { value: "sam@example.test" } });
+  send();
+  await screen.findByText("Household setup");
+  expect(JSON.parse(String(posts()[0]![1]!.body))).toEqual({
+    email: "sam@example.test",
+    password: "password123",
+  });
+});
+it("keeps a link invitation usable when the address already has an account", async () => {
+  lookup = async () => json(linkInvitation);
+  submit = async () => emailProblem("conflict", 409);
+  mount();
+  await fill();
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "taken@example.test" } });
+  send();
+  await screen.findByText(/An account already uses this email address/);
+  expect(screen.queryByText(/We could not confirm the result/)).toBeNull();
+  submit = async () =>
+    emailProblem("validation_failed", 422, [
+      { location: "body.email", code: "invalid", detail: "x" },
+    ]);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "other@example.test" } });
+  send();
+  await screen.findByText("Enter a valid email address, like name@example.com");
+  expect(posts()).toHaveLength(2);
+  expect(auth.completeLogin).not.toHaveBeenCalled();
+});
+
+it("keeps a link invitation in the browser on Android", async () => {
+  const agent = vi
+    .spyOn(navigator, "userAgent", "get")
+    .mockReturnValue(
+      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0 Mobile Safari/537.36",
+    );
+  try {
+    mount();
+    await screen.findByLabelText("Password", { exact: true });
+    expect(screen.getByRole("link", { name: /Open in the Silo app/ })).toBeInTheDocument();
+    cleanup();
+    lookup = async () => json(linkInvitation);
+    mount();
+    expect(await screen.findByLabelText("Email")).not.toBeDisabled();
+    expect(screen.queryByRole("link", { name: /Open in the Silo app/ })).toBeNull();
+  } finally {
+    agent.mockRestore();
+  }
 });

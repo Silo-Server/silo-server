@@ -157,3 +157,50 @@ func TestAdminPlaybackHistoryPageDB(t *testing.T) {
 		}
 	})
 }
+
+// TestAdminPlaybackHistoryWindowAndSeriesDB proves the ended_after window is
+// inclusive and an episode attempt carries its series title and placement
+// while a movie attempt carries none.
+func TestAdminPlaybackHistoryWindowAndSeriesDB(t *testing.T) {
+	s := seedPlaybackHistoryAccount(t)
+	ctx := t.Context()
+	series, episode := "series-"+s.suffix, "episode-"+s.suffix
+	if _, err := s.pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'series','Synthetic Series')`, series); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series)
+	})
+	if _, err := s.pool.Exec(ctx, `INSERT INTO episodes(content_id,series_id,season_number,episode_number,title) VALUES($1,$2,2,4,'Synthetic Episode')`, episode, series); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = s.pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id=$1`, episode) })
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	ep := s.insert(t, "episode", s.account, "p-1", episode, base, 30, false)
+	gone := s.insert(t, "gone", s.account, "p-1", "movie-gone-"+s.suffix, base.Add(-2*time.Hour), 30, true)
+	h := &AdminHandler{pool: s.pool}
+	list := func(after time.Time) []AdminPlaybackHistoryRow {
+		t.Helper()
+		page, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{UserID: s.account, EndedAfter: &after}, nil, 200)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page.Items
+	}
+	if rows := list(base.Add(-time.Hour)); len(rows) != 1 || rows[0].SessionID != ep {
+		t.Fatalf("window after the older attempt: %+v", rows)
+	}
+	rows := list(base.Add(-2 * time.Hour))
+	if len(rows) != 2 || rows[0].SessionID != ep || rows[1].SessionID != gone {
+		t.Fatalf("inclusive window start: %+v", rows)
+	}
+	if r := rows[0]; r.MediaType != "episode" || r.MediaTitle != "Synthetic Episode" || r.SeriesTitle != "Synthetic Series" || r.SeasonNumber == nil || *r.SeasonNumber != 2 || r.EpisodeNumber == nil || *r.EpisodeNumber != 4 {
+		t.Fatalf("episode placement: %+v", r)
+	}
+	if r := rows[1]; r.SeriesTitle != "" || r.SeasonNumber != nil || r.EpisodeNumber != nil {
+		t.Fatalf("non-episode placement: %+v", r)
+	}
+	if rows := list(base.Add(time.Millisecond)); len(rows) != 0 {
+		t.Fatalf("window after every attempt: %+v", rows)
+	}
+}

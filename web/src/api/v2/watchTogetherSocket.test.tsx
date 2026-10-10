@@ -82,17 +82,11 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-it("captures original proof and authority without authentication replay", async () => {
-  const fetch = vi.fn().mockImplementation(async () => ticket());
-  vi.stubGlobal("fetch", fetch);
-  await mintRoomSocketTicket("room", "original-proof");
-  expect(fetch).toHaveBeenCalledTimes(1);
-  expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/rooms/room/ws-ticket");
-  const headers = new Headers(fetch.mock.calls[0]![1].headers);
-  expect(headers.get("X-Room-Token")).toBe("original-proof");
-  expect(headers.get("X-Profile-Token")).toBe("pin-A");
-});
-it.each([401, 403, 409, 422, 500])("single sends ticket refusal %s", async (status) => {
+
+it.each([401, 500])("single sends ticket refusal %s", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   await expect(mintRoomSocketTicket("room", "proof")).rejects.toThrow();
@@ -113,6 +107,12 @@ it("mounted socket uses no URL credentials and rebinds replaced same-profile PIN
     useWatchTogetherRoomConnection({ roomId: "room", roomToken: "room-proof" }),
   );
   await waitFor(() => expect(RoomSocket.all.length).toBe(1));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls[0]![0]).toBe("/api/v2/watch-together/rooms/room/ws-ticket");
+  expect(fetch.mock.calls[0]![1].method).toBe("POST");
+  const originalHeaders = new Headers(fetch.mock.calls[0]![1].headers);
+  expect(originalHeaders.get("X-Room-Token")).toBe("room-proof");
+  expect(originalHeaders.get("X-Profile-Token")).toBe("pin-A");
   const old = RoomSocket.all[0]!;
   expect(new URL(old.url).pathname).toBe("/api/v2/watch-together/rooms/room/ws");
   expect(new URL(old.url).search).toBe("");

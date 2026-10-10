@@ -23,6 +23,22 @@ func (a PluginRequestRouterAdapter) RequestRouterClient(ctx context.Context, ins
 	return a.Svc.RequestRouterClient(ctx, installationID, capabilityID)
 }
 
+// RouterFeatures reads the optional request_router.v1 features the
+// capability's stored manifest declares, without launching the plugin.
+func (a PluginRequestRouterAdapter) RouterFeatures(ctx context.Context, installationID int, capabilityID string) (mediarequests.RouterFeatures, error) {
+	if a.Svc == nil {
+		return mediarequests.RouterFeatures{}, errors.New("request router plugin service is not configured")
+	}
+	descriptor, err := a.Svc.RequestRouterDescriptor(ctx, installationID, capabilityID)
+	if err != nil {
+		return mediarequests.RouterFeatures{}, err
+	}
+	return mediarequests.RouterFeatures{
+		SupportsSeasons:         descriptor.GetSupportsSeasons(),
+		ReportsDownloadProgress: descriptor.GetReportsDownloadProgress(),
+	}, nil
+}
+
 // AttachRequestRouter wires the plugin-backed router provider onto a requests
 // service. Both the HTTP handler and the reconcile task call this so the wiring
 // lives in one place. With either dependency absent (e.g. a build without the

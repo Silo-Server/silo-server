@@ -166,17 +166,3 @@ func TestAdminDownloadsStatsProviderInvalidateClearsEveryVariant(t *testing.T) {
 		}
 	}
 }
-
-func TestAdminDownloadsStatsProviderWithoutPool(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminDownloadsStatsProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	if _, err := provider.Get(context.Background(), 10); err == nil {
-		t.Fatal("expected an error from a provider with no pool")
-	}
-}

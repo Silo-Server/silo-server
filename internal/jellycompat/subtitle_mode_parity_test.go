@@ -34,7 +34,8 @@ func TestCompatSubtitleModeMappingRoundTrips(t *testing.T) {
 	}
 }
 
-// Cases follow Jellyfin 12.1 MediaStreamSelector.GetDefaultSubtitleStreamIndex.
+// Cases follow Jellyfin 12.1 MediaStreamSelector.GetDefaultSubtitleStreamIndex,
+// except that Silo prefers embedded tracks over external ones.
 func TestCompatDefaultSubtitleStreamIndexMatchesJellyfin(t *testing.T) {
 	english := compatSubtitleCandidate{Index: 2, Language: "eng"}
 	englishForced := compatSubtitleCandidate{Index: 3, Language: "eng", Forced: true}
@@ -42,6 +43,8 @@ func TestCompatDefaultSubtitleStreamIndexMatchesJellyfin(t *testing.T) {
 	french := compatSubtitleCandidate{Index: 5, Language: "fre"}
 	frenchDefault := compatSubtitleCandidate{Index: 6, Language: "fre", Default: true}
 	germanExternal := compatSubtitleCandidate{Index: 7, Language: "de", External: true}
+	englishExternal := compatSubtitleCandidate{Index: 11, Language: "eng", External: true}
+	englishForcedExternal := compatSubtitleCandidate{Index: 12, Language: "eng", Forced: true, External: true}
 
 	cases := []struct {
 		name       string
@@ -52,7 +55,11 @@ func TestCompatDefaultSubtitleStreamIndexMatchesJellyfin(t *testing.T) {
 		want       int // -1 means none
 	}{
 		{"None never selects", []compatSubtitleCandidate{frenchDefault}, nil, compatSubtitleNone, "", -1},
-		{"Default prefers external over default", []compatSubtitleCandidate{frenchDefault, germanExternal}, []string{"en"}, compatSubtitleDefault, "", 7},
+		{"Default prefers the embedded default over external", []compatSubtitleCandidate{germanExternal, frenchDefault}, []string{"en"}, compatSubtitleDefault, "", 6},
+		{"Default shows external when nothing embedded is flagged", []compatSubtitleCandidate{english, germanExternal}, []string{"en"}, compatSubtitleDefault, "", 7},
+		{"Always prefers embedded over external", []compatSubtitleCandidate{englishExternal, english}, []string{"en"}, compatSubtitleAlways, "en", 2},
+		{"Always prefers a full external track over embedded forced", []compatSubtitleCandidate{englishForced, englishExternal}, []string{"en"}, compatSubtitleAlways, "en", 11},
+		{"OnlyForced prefers embedded forced over external forced", []compatSubtitleCandidate{englishForcedExternal, englishForced}, []string{"en"}, compatSubtitleOnlyForced, "", 3},
 		{"Default ignores unflagged tracks", []compatSubtitleCandidate{english, french}, []string{"en"}, compatSubtitleDefault, "", -1},
 		{"Default takes forced when nothing else is flagged", []compatSubtitleCandidate{english, englishForced}, []string{"en"}, compatSubtitleDefault, "", 3},
 		{"Smart subtitles foreign audio", []compatSubtitleCandidate{french, english, englishForced}, []string{"en"}, compatSubtitleSmart, "ja", 2},

@@ -269,6 +269,7 @@ describe("ContinueWatchingCard", () => {
               rating_tmdb: null,
               rating_rt_critic: null,
               rating_rt_audience: null,
+              ratings: [],
               imdb_id: "",
               tmdb_id: "",
               tvdb_id: "",
@@ -309,47 +310,6 @@ describe("ContinueWatchingCard", () => {
     expect(markup).toContain("More actions");
     expect(markup).toContain('aria-label="Mark Watched"');
     expect(markup).toContain("lucide-eye-off");
-  });
-
-  it("links the poster to the item page and reserves playback for the play button", () => {
-    const queryClient = new QueryClient();
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <ContinueWatchingCard
-            sectionItem={{
-              content_id: "movie-001",
-              type: "movie",
-              title: "Apex",
-              year: 2024,
-              genres: [],
-              status: "matched",
-              rating_imdb: 6.5,
-              overview: "Movie overview",
-              item_source: "continue_watching",
-              position_seconds: 600,
-              duration_seconds: 7200,
-              progress_updated_at: "2026-03-07T00:00:00Z",
-              poster_url: "/movie-poster.jpg",
-              poster_thumbhash: "",
-              backdrop_url: "/movie-backdrop.jpg",
-              backdrop_thumbhash: "",
-              logo_url: "",
-            }}
-            quickActionMode="both"
-          />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    // The poster link renders first and must navigate to the item page; the
-    // watch href is reserved for the explicit play button.
-    const posterLinkIndex = markup.indexOf('href="/item/movie-001"');
-    const playLinkIndex = markup.indexOf('href="/watch/movie-001"');
-    expect(posterLinkIndex).toBeGreaterThan(-1);
-    expect(playLinkIndex).toBeGreaterThan(-1);
-    expect(posterLinkIndex).toBeLessThan(playLinkIndex);
-    expect(markup).toContain('aria-label="Play Apex"');
   });
 
   it("routes audiobook continue cards to the audiobook detail player", () => {
@@ -402,6 +362,10 @@ describe("ContinueWatchingCard", () => {
 
   it("always points the artwork at the item detail page", () => {
     expect(renderCard()).toHaveAttribute("href", "/item/movie-001");
+    expect(screen.getByRole("link", { name: "Play Apex" })).toHaveAttribute(
+      "href",
+      "/watch/movie-001",
+    );
     // The caption also reaches the detail page.
     expect(screen.getByText("Apex").closest("a")).toHaveAttribute("href", "/item/movie-001");
   });

@@ -90,6 +90,7 @@ func TestRequiredDeviceStartLookupAcceptance(t *testing.T) {
 						before := snapshot()
 						start := time.Now().UTC()
 						var openings []response
+						lookupsOpened := 0
 						count := max(request.Repeat, 1)
 						request.Repeat = 1
 						for i := range count {
@@ -115,6 +116,15 @@ func TestRequiredDeviceStartLookupAcceptance(t *testing.T) {
 							if resp.Status == 201 {
 								openings = append(openings, resp)
 							}
+							// A v2 lookup of a pending request marks it opened.
+							if transport == "v2" && strings.HasPrefix(s.ID, "device_lookup.") && resp.Status == 200 {
+								var body struct {
+									Status string `json:"status"`
+								}
+								if json.Unmarshal(resp.Raw, &body) == nil && body.Status == "pending" {
+									lookupsOpened++
+								}
+							}
 						}
 						end := time.Now().UTC()
 						after := snapshot()
@@ -132,7 +142,11 @@ func TestRequiredDeviceStartLookupAcceptance(t *testing.T) {
 						if len(openings) != expectedCreated {
 							t.Errorf("opened %d want%d", len(openings), expectedCreated)
 						}
-						assertDeviceOpenings(t, s, transport, server.URL, openings, before["device_login_requests"], after["device_login_requests"], start, end)
+						if lookupsOpened > 0 {
+							assertDeviceRequestsOpened(t, before["device_login_requests"], after["device_login_requests"], 1)
+						} else {
+							assertDeviceOpenings(t, s, transport, server.URL, openings, before["device_login_requests"], after["device_login_requests"], start, end)
+						}
 						created += len(openings)
 						for table, want := range before {
 							if table == "device_login_requests" {
@@ -163,6 +177,8 @@ func TestRequiredDeviceStartLookupAcceptance(t *testing.T) {
 
 // Match every inserted row to one actual response. No raw device/browser/user
 // secret is stored, no account/profile/login token is minted by start or lookup.
+// The frozen v1 start links by browser token and lasts ten minutes; v2 links by
+// user code and lasts fifteen, and never returns the browser code it stores.
 func assertDeviceOpenings(t *testing.T, s scenariocatalog.Scenario, transport, base string, responses []response, before, after json.RawMessage, start, end time.Time) {
 	t.Helper()
 	var old, rows []map[string]any
@@ -229,9 +245,30 @@ func assertDeviceOpenings(t *testing.T, s scenariocatalog.Scenario, transport, b
 		if err != nil {
 			t.Fatal(err)
 		}
-		browser := complete.Query().Get("token")
-		if !regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`).MatchString(device) || !regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`).MatchString(browser) || device == browser {
-			t.Error("invalid/distinct secret shape")
+		r, ok := added[hashDevice(device)]
+		if !ok {
+			t.Fatal("response lacks newly committed device")
+		}
+		delete(added, hashDevice(device))
+		secret := regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+		if !secret.MatchString(device) {
+			t.Error("invalid device secret shape")
+		}
+		lifetime := 10 * time.Minute
+		var browserHash string
+		if transport == "v1" {
+			browser := complete.Query().Get("token")
+			if !secret.MatchString(browser) || device == browser {
+				t.Error("invalid/distinct secret shape")
+			}
+			browserHash = hashDevice(browser)
+		} else {
+			// The stored browser hash covers a code v2 never returns.
+			lifetime = 15 * time.Minute
+			browserHash, _ = r["browser_code_hash"].(string)
+			if complete.Query().Get("code") != strings.ReplaceAll(user, "-", "") || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(browserHash) || browserHash == hashDevice(device) || browserHash == r["user_code_hash"] {
+				t.Error("v2 verification link or browser hash shape")
+			}
 		}
 		if !regexp.MustCompile(`^[A-Z0-9]{4}-[A-Z0-9]{4}$`).MatchString(user) || !regexp.MustCompile(`^(blue|busy|calm|cozy|fast|gold|kind|soft|tall|tame|tiny|warm) (barn|bell|cart|coop|corn|cow|duck|goat|hay|hen|lamb|milk|oats|pail|pond|pony|rake|shed|silo|wool)$`).MatchString(match) {
 			t.Error("user/match code shape")
@@ -239,14 +276,9 @@ func assertDeviceOpenings(t *testing.T, s scenariocatalog.Scenario, transport, b
 		if stringField("verification_uri") != base+"/activate" || complete.Scheme+"://"+complete.Host+complete.Path != base+"/activate" || len(complete.Query()) != 1 {
 			t.Error("verification authority mismatch")
 		}
-		if body["expires_in"] != float64(600) || body["interval"] != float64(3) || body["device_name"] != request.DeviceName || body["device_platform"] != request.DevicePlatform || body["client_purpose"] != request.ClientPurpose || body["temporary"] != request.Temporary {
+		if body["expires_in"] != lifetime.Seconds() || body["interval"] != float64(3) || body["device_name"] != request.DeviceName || body["device_platform"] != request.DevicePlatform || body["client_purpose"] != request.ClientPurpose || body["temporary"] != request.Temporary {
 			t.Error("start response defaults/identity")
 		}
-		r, ok := added[hashDevice(device)]
-		if !ok {
-			t.Fatal("response lacks newly committed device")
-		}
-		delete(added, hashDevice(device))
 		id, err := uuid.Parse(fmt.Sprint(r["id"]))
 		if err != nil || id.Version() != 4 {
 			t.Error("new request ID is not UUID4")
@@ -256,8 +288,8 @@ func assertDeviceOpenings(t *testing.T, s scenariocatalog.Scenario, transport, b
 			t.Error("creation outside application bounds")
 		}
 		expiry, err := time.Parse(time.RFC3339Nano, fmt.Sprint(r["expires_at"]))
-		if err != nil || expiry.Sub(created) != 10*time.Minute {
-			t.Error("expiry not600seconds from creation")
+		if err != nil || expiry.Sub(created) != lifetime {
+			t.Errorf("expiry not %v from creation", lifetime)
 		}
 		wire, err := time.Parse(time.RFC3339Nano, stringField("expires_at"))
 		precision := time.Second
@@ -267,7 +299,7 @@ func assertDeviceOpenings(t *testing.T, s scenariocatalog.Scenario, transport, b
 		if err != nil || !wire.Equal(expiry.Truncate(precision)) {
 			t.Error("expiry projection differs")
 		}
-		want := map[string]any{"id": r["id"], "device_code_hash": hashDevice(device), "browser_code_hash": hashDevice(browser), "user_code_hash": hashDevice(strings.ReplaceAll(user, "-", "")), "match_code": match, "device_name": request.DeviceName, "device_platform": request.DevicePlatform, "ip_address": "127.0.0.1", "requested_user_agent": "silo-scenario-executor/1", "status": "pending", "client_purpose": request.ClientPurpose, "temporary": request.Temporary, "expires_at": r["expires_at"], "created_at": r["created_at"], "updated_at": r["created_at"], "approved_by_user_id": nil, "approved_profile_id": nil, "auth_session_id": nil, "approved_at": nil, "denied_at": nil, "consumed_at": nil}
+		want := map[string]any{"id": r["id"], "device_code_hash": hashDevice(device), "browser_code_hash": browserHash, "user_code_hash": hashDevice(strings.ReplaceAll(user, "-", "")), "match_code": match, "device_name": request.DeviceName, "device_platform": request.DevicePlatform, "ip_address": "127.0.0.1", "requested_user_agent": "silo-scenario-executor/1", "status": "pending", "client_purpose": request.ClientPurpose, "temporary": request.Temporary, "expires_at": r["expires_at"], "created_at": r["created_at"], "updated_at": r["created_at"], "approved_by_user_id": nil, "approved_profile_id": nil, "auth_session_id": nil, "approved_at": nil, "denied_at": nil, "consumed_at": nil, "opened_at": nil, "canceled_at": nil, "approved_identity_id": nil, "approved_provider_since": nil}
 		if !reflect.DeepEqual(want, r) {
 			t.Error("new device full row/hash/defaults differ")
 		}

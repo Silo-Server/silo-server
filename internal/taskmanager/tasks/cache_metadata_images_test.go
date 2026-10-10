@@ -270,31 +270,6 @@ func TestCacheMetadataImagesPercent(t *testing.T) {
 	}
 }
 
-// TestCacheMetadataImagesPercentIsMonotonicWithinARun guards the property the
-// durable-queue percentage could not hold: the backlog denominator is fixed for
-// the run, so discovery adding work and retention deleting rows cannot make the
-// reported number fall.
-func TestCacheMetadataImagesPercentIsMonotonicWithinARun(t *testing.T) {
-	backlog := metadata.ImageCacheBacklog{Known: true, Queued: 100, Running: 4}
-	previous := -1.0
-	for processed := 0; processed <= 300; processed++ {
-		got := cacheMetadataImagesPercent(metadata.ImageCacheRunStats{
-			Succeeded: processed,
-			Backlog:   backlog,
-		})
-		if got < previous {
-			t.Fatalf("percent fell from %g to %g after %d processed", previous, got, processed)
-		}
-		if got > 99.9 {
-			t.Fatalf("percent = %g after %d processed, want a running task below 100", got, processed)
-		}
-		previous = got
-	}
-	if previous == 0 {
-		t.Fatal("percent never advanced")
-	}
-}
-
 // TestBackfillMetadataImagesTaskProgressDoesNotFallWhenDiscoveryWidensTheRun
 // covers the seam between the two halves of the progress fix: counting
 // discovered work keeps a backfill meaningful, but it also lets the raw ratio

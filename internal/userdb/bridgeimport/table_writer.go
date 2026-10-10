@@ -52,6 +52,11 @@ func importTable(ctx context.Context, source *sql.Tx, target pgx.Tx, userID int,
 	for _, column := range selected {
 		targetColumns = append(targetColumns, column.Name)
 	}
+	convert, extraColumns, extraValues, err := tableConversion(ctx, source, mapping.Source, selected)
+	if err != nil {
+		return TableVerification{}, err
+	}
+	targetColumns = append(targetColumns, extraColumns...)
 	digest := sha256.New()
 	var count int64
 	batch := make([][]any, 0, 256)
@@ -95,9 +100,16 @@ func importTable(ctx context.Context, source *sql.Tx, target pgx.Tx, userID int,
 				values = append(values, value)
 			}
 		}
+		if convert != nil {
+			if err := convert(values[1:]); err != nil {
+				return TableVerification{}, fmt.Errorf("unsupported value in %s", mapping.Source)
+			}
+		}
+		// The digest covers the converted values, which the target must hold.
 		if err := hashProjectedRow(ctx, target, digest, mapping.Source, selected, values[1:]); err != nil {
 			return TableVerification{}, err
 		}
+		values = append(values, extraValues...)
 		if mapping.Source == sourceCollectionRevisions || mapping.Source == sourceOrderRevision {
 			if err := rebaseWitness(ctx, target, userID, mapping, values[1:]); err != nil {
 				return TableVerification{}, err
@@ -128,6 +140,70 @@ func importTable(ctx context.Context, source *sql.Tx, target pgx.Tx, userID int,
 		return TableVerification{}, fmt.Errorf("semantic verification failed in %s", mapping.Source)
 	}
 	return expected, nil
+}
+
+// tableConversion returns how a source table's rows change on import: a
+// conversion of the selected values, applied before the row digest, and
+// target-only columns with constant values, written but not digested.
+func tableConversion(ctx context.Context, source *sql.Tx, table string, selected []SourceColumn) (func([]any) error, []string, []any, error) {
+	if table != sourceCollections {
+		return nil, nil, nil, nil
+	}
+	convert, err := collectionSharingRule(ctx, source, selected)
+	// Imported collections are native: listed and read by native routes.
+	return convert, []string{"native"}, []any{true}, err
+}
+
+// collectionSharingRule applies #1615 to imported collections: is_shared
+// now shows a collection to every profile on the login, so a shared
+// collection stays shared only when its allow list names every source
+// profile, its creator implied. Shared with fewer profiles, it is imported
+// private, so no profile gains access its owner withheld.
+func collectionSharingRule(ctx context.Context, source *sql.Tx, selected []SourceColumn) (func([]any) error, error) {
+	idIndex, sharedIndex := -1, -1
+	for i, column := range selected {
+		switch column.Name {
+		case "id":
+			idIndex = i
+		case "is_shared":
+			sharedIndex = i
+		}
+	}
+	if idIndex < 0 || sharedIndex < 0 {
+		return nil, errors.New("collection columns are incomplete")
+	}
+	rows, err := source.QueryContext(ctx, `SELECT c.id FROM personal_collections c
+		WHERE NOT EXISTS (
+		  SELECT 1 FROM profiles p
+		   WHERE p.id <> c.creator_profile_id
+		     AND NOT EXISTS (SELECT 1 FROM personal_collection_profiles v WHERE v.collection_id = c.id AND v.profile_id = p.id))`)
+	if err != nil {
+		return nil, importFailure(ctx, "cannot read source collection audiences")
+	}
+	defer rows.Close() //nolint:errcheck
+	wholeLogin := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, importFailure(ctx, "cannot read source collection audiences")
+		}
+		wholeLogin[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, importFailure(ctx, "cannot read source collection audiences")
+	}
+	return func(values []any) error {
+		shared, ok := values[sharedIndex].(bool)
+		if !ok {
+			return nil // NULL stays NULL; the target refuses it as before.
+		}
+		id, ok := values[idIndex].(string)
+		if !ok {
+			return errors.New("invalid collection id")
+		}
+		values[sharedIndex] = shared && wholeLogin[id]
+		return nil
+	}, nil
 }
 
 func remappedColumn(table, column string) bool {

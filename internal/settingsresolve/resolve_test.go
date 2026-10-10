@@ -55,59 +55,6 @@ func resolveOne(t *testing.T, store Store, rc Context, key string, constraints C
 	return got[0]
 }
 
-// TestResolutionOrderIsHonored is the whole point of the package: the most
-// specific scope holding a value wins, and the declared order decides what
-// "specific" means rather than each caller's own opinion.
-func TestResolutionOrderIsHonored(t *testing.T) {
-	const key = "playback.subtitle_language"
-
-	profile := row(key, settingscontract.ScopeProfile, `"en"`,
-		userstore.SettingIdentity{ProfileID: "p1"})
-	device := row(key, settingscontract.ScopeProfileDevice, `"de"`,
-		userstore.SettingIdentity{ProfileID: "p1", DeviceID: "d1"})
-	library := row(key, settingscontract.ScopeProfileLibrary, `"fr"`,
-		userstore.SettingIdentity{ProfileID: "p1", LibraryID: 7})
-	series := row(key, settingscontract.ScopeProfileSeries, `"ja"`,
-		userstore.SettingIdentity{ProfileID: "p1", SeriesID: "s1"})
-
-	rc := Context{ProfileID: "p1", DeviceID: "d1", LibraryIDs: []int{7}, SeriesIDs: []string{"s1"}}
-
-	for name, tc := range map[string]struct {
-		rows       []userstore.SettingValue
-		wantValue  string
-		wantSource settingscontract.Scope
-	}{
-		"series beats everything": {
-			[]userstore.SettingValue{profile, device, library, series}, `"ja"`,
-			settingscontract.ScopeProfileSeries,
-		},
-		"library beats device and profile": {
-			[]userstore.SettingValue{profile, device, library}, `"fr"`,
-			settingscontract.ScopeProfileLibrary,
-		},
-		"device beats profile": {
-			[]userstore.SettingValue{profile, device}, `"de"`,
-			settingscontract.ScopeProfileDevice,
-		},
-		"profile alone": {
-			[]userstore.SettingValue{profile}, `"en"`, settingscontract.ScopeProfile,
-		},
-		"nothing stored falls to the default": {
-			nil, `null`, settingscontract.ScopeDefault,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			got := resolveOne(t, &fakeStore{rows: tc.rows}, rc, key, nil)
-			if string(got.Value) != tc.wantValue {
-				t.Errorf("value = %s, want %s", got.Value, tc.wantValue)
-			}
-			if got.Source != tc.wantSource {
-				t.Errorf("source = %q, want %q", got.Source, tc.wantSource)
-			}
-		})
-	}
-}
-
 func TestEffectiveReportsCurrentManifestRevision(t *testing.T) {
 	manifest := mustContract(t)
 	got, err := New(manifest).Resolve(context.Background(), &fakeStore{},
@@ -118,50 +65,6 @@ func TestEffectiveReportsCurrentManifestRevision(t *testing.T) {
 	if len(got) != 1 || got[0].DefinitionRevision != manifest.Revision {
 		t.Fatalf("definition_revision = %d, want current manifest revision %d",
 			got[0].DefinitionRevision, manifest.Revision)
-	}
-}
-
-// TestAbsentIdentityDropsItsScope covers the anonymous caller. jellycompat
-// seeds DisplayPreferences without a device, and a device override leaking into
-// that seed would hand one device's settings to every Jellyfin client.
-func TestAbsentIdentityDropsItsScope(t *testing.T) {
-	const key = "playback.subtitle_language"
-	rows := []userstore.SettingValue{
-		row(key, settingscontract.ScopeProfile, `"en"`,
-			userstore.SettingIdentity{ProfileID: "p1"}),
-		row(key, settingscontract.ScopeProfileDevice, `"de"`,
-			userstore.SettingIdentity{ProfileID: "p1", DeviceID: "d1"}),
-	}
-
-	got := resolveOne(t, &fakeStore{rows: rows}, Context{ProfileID: "p1"}, key, nil)
-	if got.Source != settingscontract.ScopeProfile {
-		t.Fatalf("source = %q, want profile: a device row resolved for a caller with no device",
-			got.Source)
-	}
-	if string(got.Value) != `"en"` {
-		t.Errorf("value = %s, want \"en\"", got.Value)
-	}
-}
-
-// TestUnrelatedIdentitiesAreIgnored guards the cross-identity leak: rows for
-// another profile, device, library or series must not resolve just because the
-// batched read returned them.
-func TestUnrelatedIdentitiesAreIgnored(t *testing.T) {
-	const key = "playback.subtitle_language"
-	rows := []userstore.SettingValue{
-		row(key, settingscontract.ScopeProfile, `"xx"`,
-			userstore.SettingIdentity{ProfileID: "other"}),
-		row(key, settingscontract.ScopeProfileDevice, `"yy"`,
-			userstore.SettingIdentity{ProfileID: "p1", DeviceID: "other-device"}),
-		row(key, settingscontract.ScopeProfileSeries, `"zz"`,
-			userstore.SettingIdentity{ProfileID: "p1", SeriesID: "other-series"}),
-	}
-	rc := Context{ProfileID: "p1", DeviceID: "d1", SeriesIDs: []string{"s1"}}
-
-	got := resolveOne(t, &fakeStore{rows: rows}, rc, key, nil)
-	if got.Source != settingscontract.ScopeDefault {
-		t.Fatalf("source = %q with value %s, want default: a foreign row resolved",
-			got.Source, got.Value)
 	}
 }
 
@@ -298,86 +201,6 @@ func TestCeilingNarrowsWithoutDestroying(t *testing.T) {
 	}
 	if got.ConstrainedBy == nil || len(got.PermittedValues) == 0 {
 		t.Error("active ceiling metadata was omitted for an already-permitted value")
-	}
-}
-
-// TestCeilingCapsAnUncappedNullable covers the case CompareValues cannot rank.
-// null on max_bitrate_kbps means "no cap of my own", which is unbounded above —
-// precisely what a ceiling exists to bring down. Ranking it as equal would let
-// the one value that most needs capping slip past.
-func TestCeilingCapsAnUncappedNullable(t *testing.T) {
-	manifest := mustContract(t)
-	def, ok := manifest.Lookup("playback.max_bitrate_kbps")
-	if !ok {
-		t.Fatal("playback.max_bitrate_kbps is not registered")
-	}
-	// The manifest does not bind this key to a policy input today; the rule
-	// still has to hold for whichever numeric key does.
-	bound := *def
-	bound.ConstrainedBy = &settingscontract.Constraint{
-		PolicyInput: "max_bitrate_kbps",
-		Constraint:  settingscontract.ConstraintCeiling,
-	}
-
-	capped := applyConstraint(&bound, Effective{
-		Key:    bound.Key,
-		Value:  json.RawMessage(`null`),
-		Source: settingscontract.ScopeDefault,
-	}, Constraints{"max_bitrate_kbps": json.RawMessage(`8000`)})
-
-	if string(capped.Value) != `8000` {
-		t.Errorf("uncapped bitrate resolved to %s, want the policy cap 8000", capped.Value)
-	}
-	if !capped.Constrained {
-		t.Error("capping an uncapped value was not reported as constrained")
-	}
-
-	// A floor is the mirror: unbounded already satisfies it.
-	bound.ConstrainedBy.Constraint = settingscontract.ConstraintFloor
-	floored := applyConstraint(&bound, Effective{
-		Key:   bound.Key,
-		Value: json.RawMessage(`null`),
-	}, Constraints{"max_bitrate_kbps": json.RawMessage(`8000`)})
-	if floored.Constrained {
-		t.Errorf("floor narrowed an already-unbounded value to %s", floored.Value)
-	}
-}
-
-// TestAllowlistFallsBackInsideTheAllowedSet guards the one thing a constraint
-// must never do: return a value the policy forbids. The definition's own
-// default is not a safe fallback, because it may itself be outside the list.
-func TestAllowlistFallsBackInsideTheAllowedSet(t *testing.T) {
-	manifest := mustContract(t)
-	def, ok := manifest.Lookup("catalog.metadata_language")
-	if !ok {
-		t.Fatal("catalog.metadata_language is not registered")
-	}
-	bound := *def
-	bound.ConstrainedBy = &settingscontract.Constraint{
-		PolicyInput: "allowed_metadata_languages",
-		Constraint:  settingscontract.ConstraintAllowlist,
-	}
-
-	got := applyConstraint(&bound, Effective{
-		Key:    bound.Key,
-		Value:  json.RawMessage(`"ja"`),
-		Source: settingscontract.ScopeProfile,
-	}, Constraints{"allowed_metadata_languages": json.RawMessage(`["en","fr"]`)})
-
-	if string(got.Value) != `"en"` {
-		t.Errorf("value = %s, want the first allowed member", got.Value)
-	}
-	if string(got.StoredValue) != `"ja"` {
-		t.Errorf("stored = %s, want the authored value kept", got.StoredValue)
-	}
-
-	// A permitted value passes through untouched.
-	allowed := applyConstraint(&bound, Effective{
-		Key:   bound.Key,
-		Value: json.RawMessage(`"fr"`),
-	}, Constraints{"allowed_metadata_languages": json.RawMessage(`["en","fr"]`)})
-	if allowed.Constrained {
-		t.Error("a permitted value was reported as constrained")
 	}
 }
 

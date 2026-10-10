@@ -3,7 +3,11 @@ import type { QueryDefinition } from "@/api/types";
 import type { FilterConfig } from "@/api/types";
 import FilterRuleEditor from "@/components/FilterRuleEditor";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
-import { normalizeQuerySortForScope, type QuerySortRelevanceScope } from "@/lib/querySortOptions";
+import {
+  normalizeQuerySortForScope,
+  querySortScopeForMediaScope,
+  type QuerySortRelevanceScope,
+} from "@/lib/querySortOptions";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -59,19 +63,15 @@ export default function CollectionRulesEditor({
               <Select
                 value={value.media_scope ?? "all"}
                 onValueChange={(next) => {
-                  const nextRelevanceScope =
-                    next === "all" ? "all" : (next as QuerySortRelevanceScope);
                   const nextSort = normalizeQuerySortForScope(value.sort, {
                     includePersonalized: allowPersonalizedSorts,
-                    relevanceScope: nextRelevanceScope,
+                    relevanceScope: querySortScopeForMediaScope(next),
                   });
 
                   onChange({
                     ...value,
                     media_scope:
-                      next === "all"
-                        ? undefined
-                        : (next as "movie" | "series" | "episode" | "audiobook" | "ebook"),
+                      next === "all" ? undefined : (next as QueryDefinition["media_scope"]),
                     sort: nextSort,
                   });
                 }}
@@ -82,11 +82,13 @@ export default function CollectionRulesEditor({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Media</SelectItem>
+                  <SelectItem value="video">Movies & Series</SelectItem>
                   <SelectItem value="movie">Movies</SelectItem>
                   <SelectItem value="series">Series</SelectItem>
                   <SelectItem value="episode">Episodes</SelectItem>
                   <SelectItem value="audiobook">Audiobooks</SelectItem>
                   <SelectItem value="ebook">Ebooks</SelectItem>
+                  <SelectItem value="manga">Manga</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -113,6 +115,7 @@ export default function CollectionRulesEditor({
           allowPersonalizedSorts={allowPersonalizedSorts}
           sortRelevanceScope={sortRelevanceScope}
           mediaScope={value.media_scope ?? "all"}
+          valueScope={{ libraryIds: value.library_ids, mediaScope: value.media_scope }}
           onChange={(next) =>
             onChange({
               ...value,

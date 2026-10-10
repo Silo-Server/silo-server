@@ -6,7 +6,7 @@ import (
 )
 
 func registerAdminAutoscanTrigger(reg *Registry) {
-	op := humaOp("POST", Prefix+"/admin/autoscan/trigger", "triggerAdminAutoscan", "admin-autoscan", "Reserve and start the autoscan poll task on this process. Returns a process task snapshot, not durable dispatch or scan completion. Enabled settings and per-source intervals still apply; inspect activity for per-source outcomes. No automatic replay.")
+	op := humaOp("POST", Prefix+"/admin/autoscan/trigger", "triggerAdminAutoscan", "admin-autoscan", "Reserve and start the autoscan poll task on this process. Returns a process task snapshot, not durable dispatch or scan completion. Polls every enabled polling source immediately, except a source already being polled, ignoring per-source and default poll intervals. Does nothing (still 200) while Autoscan is disabled; webhook sources are not polled. Inspect activity for per-source outcomes. No automatic replay.")
 	op.Errors = []int{http.StatusConflict}
 	Register(reg, Operation{
 		Operation: op,

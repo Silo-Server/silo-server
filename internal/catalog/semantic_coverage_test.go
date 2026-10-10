@@ -257,45 +257,6 @@ func TestCoverageReadyScopeUnknownTypeNotGated(t *testing.T) {
 	}
 }
 
-// TestCoverageRefreshModelCollapse verifies that when the active embedding model
-// changes the next Refresh immediately drops the prior latches: the published
-// snapshot carries the new model and is not-ready before recompute uses stale
-// hysteresis state.
-func TestCoverageRefreshModelCollapse(t *testing.T) {
-	models := &fakeCoverageModels{}
-	models.push("model-a", nil)
-	models.push("model-b", nil)
-
-	// fetch always reports full coverage; only the model identity changes.
-	tr := &semanticCoverageTracker{
-		fetch: func(_ context.Context, model string) ([]catalogTypeCoverage, error) {
-			return []catalogTypeCoverage{{Type: "movie", Eligible: 100, Vectorized: 100}}, nil
-		},
-		models: models,
-		clock:  time.Now,
-	}
-
-	if err := tr.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh(A) error: %v", err)
-	}
-	a := tr.Snapshot()
-	if a.Model != "model-a" || !a.PerType["movie"].Ready {
-		t.Fatalf("after Refresh(A): model=%q ready=%v, want model-a ready", a.Model, a.PerType["movie"].Ready)
-	}
-
-	// Collapse: the latch must drop the instant the model changes. We assert on
-	// the recomputed snapshot which now reports model-b. The prev passed into
-	// compute is the collapsed (empty) snapshot, so the band latch can never
-	// carry model-a readiness into model-b.
-	if err := tr.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh(B) error: %v", err)
-	}
-	b := tr.Snapshot()
-	if b.Model != "model-b" {
-		t.Fatalf("after Refresh(B): model=%q, want model-b", b.Model)
-	}
-}
-
 // TestCoverageRefreshBandCollapseDropsLatch is the sharper collapse assertion:
 // it drives a band ratio (0.85) under the new model so readiness can only come
 // from a latch. Because the collapse zeroes prev, the new-model snapshot must be

@@ -47,7 +47,7 @@ func adminAccountsDB(t *testing.T) *UserRepository {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL); CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL); CREATE TRIGGER api_key_configuration_revision BEFORE INSERT OR UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION public.advance_api_key_configuration_revision(); CREATE TABLE password_reset_tokens (LIKE public.password_reset_tokens INCLUDING ALL); CREATE TABLE invitations (LIKE public.invitations INCLUDING ALL)`)
+	_, err = pool.Exec(t.Context(), `CREATE TABLE access_groups (LIKE public.access_groups INCLUDING ALL); CREATE TABLE users (LIKE public.users INCLUDING ALL EXCLUDING IDENTITY); ALTER TABLE users DROP COLUMN IF EXISTS admin_revision; CREATE SEQUENCE test_user_ids; ALTER TABLE users ALTER COLUMN id SET DEFAULT nextval('test_user_ids'); CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL); CREATE TABLE abs_sessions (LIKE public.abs_sessions INCLUDING ALL); CREATE TABLE jellycompat_sessions (LIKE public.jellycompat_sessions INCLUDING ALL); CREATE TABLE device_login_requests (LIKE public.device_login_requests INCLUDING ALL); CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL); CREATE TRIGGER api_key_configuration_revision BEFORE INSERT OR UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION public.advance_api_key_configuration_revision(); CREATE TABLE password_reset_tokens (LIKE public.password_reset_tokens INCLUDING ALL); CREATE TABLE invitations (LIKE public.invitations INCLUDING ALL)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +67,29 @@ func testAdminAccount(t *testing.T, r *UserRepository) *models.User {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// insertJellyfinSession stores one Jellyfin-compatible session for the
+// account and returns its token.
+func insertJellyfinSession(t *testing.T, db *pgxpool.Pool, userID int) string {
+	t.Helper()
+	token := uuid.NewString()
+	if _, err := db.Exec(t.Context(), `INSERT INTO jellycompat_sessions(token, username, account_username, profile_id, profile_name, pseudo_user_id,
+		streamapp_user_id, streamapp_access_token, streamapp_refresh_token, streamapp_token_expiry, expires_at)
+		VALUES ($1, 'jf', 'jf', 'primary', 'jf', $2, $3, 'access', 'refresh', now() + interval '1 hour', now() + interval '1 day')`,
+		token, uuid.New(), userID); err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func jellyfinSessionExists(t *testing.T, db *pgxpool.Pool, token string) bool {
+	t.Helper()
+	var exists bool
+	if err := db.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM jellycompat_sessions WHERE token = $1)`, token).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	return exists
 }
 
 func TestAdminUserPageExactIdentityPostgres(t *testing.T) {
@@ -106,6 +129,7 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 	if _, err := r.pool.Exec(t.Context(), `INSERT INTO abs_sessions(user_id, token_hash, device_id) VALUES ($1, 'abs-token', 'abs-device')`, u.ID); err != nil {
 		t.Fatal(err)
 	}
+	jellyfin, otherJellyfin := insertJellyfinSession(t, r.pool, u.ID), insertJellyfinSession(t, r.pool, other.ID)
 	before, err := r.GetAdminSnapshot(t.Context(), u.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -142,6 +166,9 @@ func TestAdminAccountMutationAtomicGuardAndSessionRevocation(t *testing.T) {
 	var liveABS int
 	if err := r.pool.QueryRow(t.Context(), `SELECT count(*) FROM abs_sessions WHERE user_id = $1 AND revoked_at IS NULL`, u.ID).Scan(&liveABS); err != nil || liveABS != 0 {
 		t.Fatalf("%d Audiobookshelf sessions survived (%v)", liveABS, err)
+	}
+	if jellyfinSessionExists(t, r.pool, jellyfin) || !jellyfinSessionExists(t, r.pool, otherJellyfin) {
+		t.Fatal("a password change must delete only the account's own Jellyfin-compatible sessions")
 	}
 	fresh := uuid.NewString()
 	if err := NewSessionRepository(r.pool).Create(t.Context(), models.AuthSession{ID: fresh, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -188,5 +215,133 @@ func TestAdminAccountMutationRollbackAndDelete(t *testing.T) {
 	}
 	if valid, err := NewSessionRepository(r.pool).IsValid(t.Context(), session); err != nil || valid {
 		t.Fatalf("impersonation survived deletion: %v %v", valid, err)
+	}
+}
+
+// Signing an account out deletes its Jellyfin-compatible sessions in the
+// transaction that revokes its login sessions. When that delete fails, the
+// disable and the admin sign-out return the error and change nothing, so the
+// caller never reports success while the Jellyfin session keeps working.
+func TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	ctx := t.Context()
+	sessions := NewSessionRepository(r.pool)
+	admin, err := r.Create(ctx, models.CreateUserInput{Username: uuid.NewString(), Email: uuid.NewString() + "@example.test", Password: "original-password", Role: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := testAdminAccount(t, r)
+	login := uuid.NewString()
+	if err := sessions.Create(ctx, models.AuthSession{ID: login, UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	jellyfin := insertJellyfinSession(t, r.pool, u.ID)
+	// The function and trigger land in this test's own schema.
+	if _, err := r.pool.Exec(ctx, `CREATE FUNCTION refuse_jellycompat_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'delete refused'; END $$;
+		CREATE TRIGGER refuse_jellycompat_delete BEFORE DELETE ON jellycompat_sessions FOR EACH ROW EXECUTE FUNCTION refuse_jellycompat_delete()`); err != nil {
+		t.Fatal(err)
+	}
+	unchanged := func(step string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "delete refused") {
+			t.Fatalf("%s: error = %v, want the refused delete", step, err)
+		}
+		account, err := r.GetByID(ctx, u.ID)
+		if err != nil || !account.Enabled {
+			t.Fatalf("%s: account changed: %+v %v", step, account, err)
+		}
+		if valid, err := sessions.IsValid(ctx, login); err != nil || !valid {
+			t.Fatalf("%s: login session revoked: %v %v", step, valid, err)
+		}
+		if !jellyfinSessionExists(t, r.pool, jellyfin) {
+			t.Fatalf("%s: Jellyfin-compatible session deleted", step)
+		}
+	}
+
+	_, err = r.MutateAdminAccount(ctx, u.ID, -1, &models.UpdateUserInput{Enabled: new(false)}, func(*models.User, pgx.Tx) (bool, error) { return true, nil })
+	unchanged("disable", err)
+	_, err = sessions.RevokeAsAdmin(ctx, admin.ID, u.ID, nil)
+	unchanged("sign out everywhere", err)
+
+	if _, err := r.pool.Exec(ctx, `DROP TRIGGER refuse_jellycompat_delete ON jellycompat_sessions`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := sessions.RevokeAsAdmin(ctx, admin.ID, u.ID, nil); err != nil || n != 1 {
+		t.Fatalf("retried sign out everywhere = %d, %v", n, err)
+	}
+	if jellyfinSessionExists(t, r.pool, jellyfin) {
+		t.Fatal("Jellyfin-compatible session survived the retried sign-out")
+	}
+}
+
+// A role change keeps the account's own sessions, which then report the new
+// role so access tokens minted under the old one must be refreshed, and ends
+// every impersonation session the account started or that views as it.
+func TestAdminAccountRoleChangeKeepsSessionsAndEndsImpersonationPostgres(t *testing.T) {
+	r := adminAccountsDB(t)
+	sessions := NewSessionRepository(r.pool)
+	admin := testAdminAccount(t, r)
+	if err := r.Update(t.Context(), admin.ID, models.UpdateUserInput{Role: new(models.RoleAdmin)}); err != nil {
+		t.Fatal(err)
+	}
+	viewed := testAdminAccount(t, r)
+	promoted := testAdminAccount(t, r)
+	bystander := testAdminAccount(t, r)
+	own, startedByAdmin, viewingPromoted, unrelated := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, s := range []models.AuthSession{
+		{ID: own, UserID: admin.ID, ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: startedByAdmin, UserID: viewed.ID, ImpersonatorUserID: new(admin.ID), ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: viewingPromoted, UserID: promoted.ID, ImpersonatorUserID: new(admin.ID), ExpiresAt: time.Now().Add(time.Hour)},
+		{ID: unrelated, UserID: viewed.ID, ImpersonatorUserID: new(bystander.ID), ExpiresAt: time.Now().Add(time.Hour)},
+	} {
+		if err := sessions.Create(t.Context(), s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	activeRole := func(id string) (string, bool) {
+		t.Helper()
+		role, active, err := sessions.ActiveSessionRole(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return role, active
+	}
+	if role, active := activeRole(own); !active || role != models.RoleAdmin {
+		t.Fatalf("own session before demotion: role %q active %v", role, active)
+	}
+
+	// The handlers' rule no longer asks MutateAdminAccount to sign out.
+	if _, err := r.MutateAdminAccount(t.Context(), admin.ID, -1, &models.UpdateUserInput{Role: new(models.RoleUser)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if role, active := activeRole(own); !active || role != models.RoleUser {
+		t.Fatalf("own session after demotion: role %q active %v, want it kept with role user", role, active)
+	}
+	if _, active := activeRole(startedByAdmin); active {
+		t.Fatal("the demoted admin's impersonation session survived")
+	}
+	if _, active := activeRole(unrelated); !active {
+		t.Fatal("another admin's impersonation session was ended")
+	}
+
+	// viewingPromoted was started by the now-demoted admin and is already
+	// gone; a fresh session viewing as the account shows promotion ends it.
+	viewingBeforePromotion := uuid.NewString()
+	if err := sessions.Create(t.Context(), models.AuthSession{ID: viewingBeforePromotion, UserID: promoted.ID, ImpersonatorUserID: new(bystander.ID), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.MutateAdminAccount(t.Context(), promoted.ID, -1, &models.UpdateUserInput{Role: new(models.RoleAdmin)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := activeRole(viewingBeforePromotion); active {
+		t.Fatal("an impersonation session viewing as the promoted account survived")
+	}
+
+	// Resending the current role changes nothing.
+	if _, err := r.MutateAdminAccount(t.Context(), bystander.ID, -1, &models.UpdateUserInput{Role: new(models.RoleUser)}, func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := activeRole(unrelated); !active {
+		t.Fatal("an unchanged role ended impersonation sessions")
 	}
 }

@@ -38,12 +38,11 @@ type PlaybackCaller struct {
 	DeviceID, DeviceName, Platform                        string
 	UserAgent, RemoteAddr                                 string
 	ClientName, ClientVersion, ClientBuild, ClientChannel string
-	// SiloClientName is the X-Silo-Client product name the v2 listener labels
-	// its request metrics with. The first-party apps send it, not the
-	// X-Client-Name the playback operations declare, so a route event falls
-	// back to it to name its client in playback_route_events and in
-	// silo_playback_first_frame_seconds.
-	SiloClientName string
+	// DeclaredDevice is the device the client declared in its
+	// X-Silo-Device-* headers. A successful start registers it in the
+	// profile's device registry. It is separate from DeviceID, the playback
+	// device named by the v2 X-Device-ID header.
+	DeclaredDevice DeviceMetadata
 }
 
 // PlaybackCapabilitiesView is the v2 capabilities body. State is always
@@ -186,7 +185,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1")
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1")
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -324,6 +323,9 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")
 	}
 	response, err := h.startPlaybackApplicationV3(playbackCallerRequest(ctx, caller), body)
+	if err == nil && response.Outcome == playback.OutcomePlayableV3 {
+		h.recordStartingDevice(ctx, caller.UserID, caller.ProfileID, caller.DeclaredDevice)
+	}
 	return withNativeServerFeaturesV3(response), err
 }
 
@@ -739,7 +741,7 @@ func (h *PlaybackHandler) ReportRouteEventV2(ctx context.Context, caller Playbac
 		return playbackOperationError(http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: firstNonEmptyValue(caller.ClientName, caller.SiloClientName), ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
+	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: event, EventID: command.EventID, UserID: caller.UserID, ProfileID: caller.ProfileID, ClientName: caller.ClientName, ClientVersion: caller.ClientVersion, ClientBuild: caller.ClientBuild, ClientChannel: caller.ClientChannel, ClientModel: event.Diagnostics["device_model"]})
 	return nil
 }
 

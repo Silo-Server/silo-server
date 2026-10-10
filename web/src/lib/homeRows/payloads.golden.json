@@ -1,0 +1,1255 @@
+{
+  "adminCreate": {
+    "critically_acclaimed/ca_imdb/home": {
+      "scope": "home",
+      "section_type": "critically_acclaimed",
+      "title": "Critically Acclaimed",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "min_score": 8
+      },
+      "enabled": true
+    },
+    "critically_acclaimed/ca_imdb/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "critically_acclaimed",
+      "title": "Critically Acclaimed",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "min_score": 8
+      },
+      "enabled": true
+    },
+    "forgotten_favorites/ff_default/home": {
+      "scope": "home",
+      "section_type": "forgotten_favorites",
+      "title": "Forgotten Favorites",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 365
+      },
+      "enabled": true
+    },
+    "forgotten_favorites/ff_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "forgotten_favorites",
+      "title": "Forgotten Favorites",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 365
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_4k/home": {
+      "scope": "home",
+      "section_type": "format_showcase",
+      "title": "4K Showcase",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "4k"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_4k/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "format_showcase",
+      "title": "4K Showcase",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "4k"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_4k_recent/home": {
+      "scope": "home",
+      "section_type": "format_showcase",
+      "title": "New in 4K",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "4k",
+        "sort": "recent"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_4k_recent/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "format_showcase",
+      "title": "New in 4K",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "4k",
+        "sort": "recent"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_dv/home": {
+      "scope": "home",
+      "section_type": "format_showcase",
+      "title": "Dolby Vision Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "dolby_vision"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_dv/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "format_showcase",
+      "title": "Dolby Vision Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "dolby_vision"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_hdr/home": {
+      "scope": "home",
+      "section_type": "format_showcase",
+      "title": "HDR Highlights",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "hdr"
+      },
+      "enabled": true
+    },
+    "format_showcase/fs_hdr/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "format_showcase",
+      "title": "HDR Highlights",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "format": "hdr"
+      },
+      "enabled": true
+    },
+    "hidden_gems/hidden_gems_default/home": {
+      "scope": "home",
+      "section_type": "hidden_gems",
+      "title": "Hidden Gems",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "max_play_count": 2,
+        "min_rating": 7.5
+      },
+      "enabled": true
+    },
+    "hidden_gems/hidden_gems_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "hidden_gems",
+      "title": "Hidden Gems",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "max_play_count": 2,
+        "min_rating": 7.5
+      },
+      "enabled": true
+    },
+    "anniversaries/anniversaries_default/home": {
+      "scope": "home",
+      "section_type": "anniversaries",
+      "title": "Anniversaries",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "milestone_years": 5
+      },
+      "enabled": true
+    },
+    "anniversaries/anniversaries_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "anniversaries",
+      "title": "Anniversaries",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "milestone_years": 5
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_director_auto/home": {
+      "scope": "home",
+      "section_type": "editorial_spotlight",
+      "title": "Director Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "director"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_director_auto/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "editorial_spotlight",
+      "title": "Director Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "director"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_actor/home": {
+      "scope": "home",
+      "section_type": "editorial_spotlight",
+      "title": "Actor Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "actor"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_actor/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "editorial_spotlight",
+      "title": "Actor Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "actor"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_studio/home": {
+      "scope": "home",
+      "section_type": "editorial_spotlight",
+      "title": "Studio Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "studio"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_studio/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "editorial_spotlight",
+      "title": "Studio Spotlight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "auto_rotate": true,
+        "rotation_cadence": "weekly",
+        "subject_type": "studio"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_era_80s/home": {
+      "scope": "home",
+      "section_type": "editorial_spotlight",
+      "title": "The 80s",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "subject": "1980s",
+        "subject_type": "era"
+      },
+      "enabled": true
+    },
+    "editorial_spotlight/es_era_80s/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "editorial_spotlight",
+      "title": "The 80s",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "subject": "1980s",
+        "subject_type": "era"
+      },
+      "enabled": true
+    },
+    "genre_roulette/genre_roulette_weekly/home": {
+      "scope": "home",
+      "section_type": "genre_roulette",
+      "title": "Genre Roulette",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "rotation_cadence": "weekly"
+      },
+      "enabled": true
+    },
+    "genre_roulette/genre_roulette_weekly/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "genre_roulette",
+      "title": "Genre Roulette",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "rotation_cadence": "weekly"
+      },
+      "enabled": true
+    },
+    "admin_curated_list/acl_blank/home": {
+      "scope": "home",
+      "section_type": "admin_curated_list",
+      "title": "Editor's Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "item_ids": []
+      },
+      "enabled": true
+    },
+    "admin_curated_list/acl_blank/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "admin_curated_list",
+      "title": "Editor's Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "item_ids": []
+      },
+      "enabled": true
+    },
+    "collection/collection_pick/home": {
+      "scope": "home",
+      "section_type": "collection",
+      "title": "Collection",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_collection_id": ""
+      },
+      "enabled": true
+    },
+    "collection/collection_pick/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "collection",
+      "title": "Collection",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_collection_id": ""
+      },
+      "enabled": true
+    },
+    "continue_watching/continue_watching_default/home": {
+      "scope": "home",
+      "section_type": "continue_watching",
+      "title": "Continue Watching",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "continue_type": "watching"
+      },
+      "enabled": true
+    },
+    "continue_watching/continue_watching_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "continue_watching",
+      "title": "Continue Watching",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "continue_type": "watching"
+      },
+      "enabled": true
+    },
+    "continue_watching/continue_listening_default/home": {
+      "scope": "home",
+      "section_type": "continue_watching",
+      "title": "Continue Listening",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "continue_type": "listening"
+      },
+      "enabled": true
+    },
+    "continue_watching/continue_listening_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "continue_watching",
+      "title": "Continue Listening",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "continue_type": "listening"
+      },
+      "enabled": true
+    },
+    "favorites/favorites_default/home": {
+      "scope": "home",
+      "section_type": "favorites",
+      "title": "Favorites",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "favorites/favorites_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "favorites",
+      "title": "Favorites",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "next_in_series/next_in_series_default/home": {
+      "scope": "home",
+      "section_type": "next_in_series",
+      "title": "Next in Series",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "next_in_series/next_in_series_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "next_in_series",
+      "title": "Next in Series",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "next_up/next_up_default/home": {
+      "scope": "home",
+      "section_type": "next_up",
+      "title": "On Deck",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "next_up/next_up_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "next_up",
+      "title": "On Deck",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "random/random_default/home": {
+      "scope": "home",
+      "section_type": "random",
+      "title": "Surprise Me",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "random/random_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "random",
+      "title": "Surprise Me",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "recently_added/recently_added_default/home": {
+      "scope": "home",
+      "section_type": "recently_added",
+      "title": "Recently Added",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "recently_added/recently_added_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "recently_added",
+      "title": "Recently Added",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "recently_released/recently_released_default/home": {
+      "scope": "home",
+      "section_type": "recently_released",
+      "title": "New Releases",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "recently_released/recently_released_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "recently_released",
+      "title": "New Releases",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "watchlist/watchlist_default/home": {
+      "scope": "home",
+      "section_type": "watchlist",
+      "title": "Watchlist",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "watchlist/watchlist_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "watchlist",
+      "title": "Watchlist",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "mood_collection/mood_feel_good/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Feel-Good Comedies",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "feel_good"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_feel_good/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Feel-Good Comedies",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "feel_good"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_mind_bending/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Mind-Bending Sci-Fi",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "mind_bending"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_mind_bending/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Mind-Bending Sci-Fi",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "mind_bending"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_comfort/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Comfort Rewatches",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "comfort"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_comfort/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Comfort Rewatches",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "comfort"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_edge_of_seat/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Edge of Your Seat",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "edge_of_seat"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_edge_of_seat/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Edge of Your Seat",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "edge_of_seat"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_tearjerker/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Tearjerkers",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "tearjerker"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_tearjerker/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Tearjerkers",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "tearjerker"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_quiet_sunday/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Quiet Sunday Cinema",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "quiet_sunday"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_quiet_sunday/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Quiet Sunday Cinema",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "quiet_sunday"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_date_night/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "Date Night",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "date_night"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_date_night/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "Date Night",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "date_night"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_after_midnight/home": {
+      "scope": "home",
+      "section_type": "mood_collection",
+      "title": "After Midnight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "after_midnight"
+      },
+      "enabled": true
+    },
+    "mood_collection/mood_after_midnight/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "mood_collection",
+      "title": "After Midnight",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "mood": "after_midnight"
+      },
+      "enabled": true
+    },
+    "short_watches/short_watches_default/home": {
+      "scope": "home",
+      "section_type": "short_watches",
+      "title": "Short & Sweet",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "max_minutes": 95
+      },
+      "enabled": true
+    },
+    "short_watches/short_watches_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "short_watches",
+      "title": "Short & Sweet",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "max_minutes": 95
+      },
+      "enabled": true
+    },
+    "because_you_watched/bcw_auto/home": {
+      "scope": "home",
+      "section_type": "because_you_watched",
+      "title": "Because You Watched",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "anchor_item_id": ""
+      },
+      "enabled": true
+    },
+    "because_you_watched/bcw_auto/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "because_you_watched",
+      "title": "Because You Watched",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "anchor_item_id": ""
+      },
+      "enabled": true
+    },
+    "recommended_for_you/for_you/home": {
+      "scope": "home",
+      "section_type": "recommended_for_you",
+      "title": "Recommended For You",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "recommended_for_you/for_you/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "recommended_for_you",
+      "title": "Recommended For You",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "returning_shows/returning_shows_default/home": {
+      "scope": "home",
+      "section_type": "returning_shows",
+      "title": "Returning Shows",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 30
+      },
+      "enabled": true
+    },
+    "returning_shows/returning_shows_default/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "returning_shows",
+      "title": "Returning Shows",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 30
+      },
+      "enabled": true
+    },
+    "similar_users_liked/similar/home": {
+      "scope": "home",
+      "section_type": "similar_users_liked",
+      "title": "Profiles Like You Enjoyed",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "similar_users_liked/similar/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "similar_users_liked",
+      "title": "Profiles Like You Enjoyed",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "taste_match/taste_top/home": {
+      "scope": "home",
+      "section_type": "taste_match",
+      "title": "Top Picks Today",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "taste_match/taste_top/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "taste_match",
+      "title": "Top Picks Today",
+      "featured": false,
+      "item_limit": 20,
+      "config": {},
+      "enabled": true
+    },
+    "seasonal_themed/se_auto/home": {
+      "scope": "home",
+      "section_type": "seasonal_themed",
+      "title": "Seasonal Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "enabled_themes": [
+          "halloween",
+          "christmas",
+          "valentines",
+          "st_patricks",
+          "thanksgiving",
+          "summer_blockbuster",
+          "saturday_morning"
+        ]
+      },
+      "enabled": true
+    },
+    "seasonal_themed/se_auto/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "seasonal_themed",
+      "title": "Seasonal Picks",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "enabled_themes": [
+          "halloween",
+          "christmas",
+          "valentines",
+          "st_patricks",
+          "thanksgiving",
+          "summer_blockbuster",
+          "saturday_morning"
+        ]
+      },
+      "enabled": true
+    },
+    "seasonal_themed/se_family_movie_night/home": {
+      "scope": "home",
+      "section_type": "seasonal_themed",
+      "title": "Family Movie Night",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "enabled_themes": [
+          "family_movie_night"
+        ]
+      },
+      "enabled": true
+    },
+    "seasonal_themed/se_family_movie_night/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "seasonal_themed",
+      "title": "Family Movie Night",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "enabled_themes": [
+          "family_movie_night"
+        ]
+      },
+      "enabled": true
+    },
+    "most_watched/mw_week/home": {
+      "scope": "home",
+      "section_type": "most_watched",
+      "title": "Most Watched This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "week"
+      },
+      "enabled": true
+    },
+    "most_watched/mw_week/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "most_watched",
+      "title": "Most Watched This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "week"
+      },
+      "enabled": true
+    },
+    "most_watched/mw_month/home": {
+      "scope": "home",
+      "section_type": "most_watched",
+      "title": "Most Watched This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "month"
+      },
+      "enabled": true
+    },
+    "most_watched/mw_month/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "most_watched",
+      "title": "Most Watched This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "month"
+      },
+      "enabled": true
+    },
+    "new_to_library/ntl_30/home": {
+      "scope": "home",
+      "section_type": "new_to_library",
+      "title": "New to Library This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 30
+      },
+      "enabled": true
+    },
+    "new_to_library/ntl_30/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "new_to_library",
+      "title": "New to Library This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "lookback_days": 30
+      },
+      "enabled": true
+    },
+    "profile_activity_feed/pa_household/home": {
+      "scope": "home",
+      "section_type": "profile_activity_feed",
+      "title": "What Others Just Watched",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "profile_id": ""
+      },
+      "enabled": true
+    },
+    "profile_activity_feed/pa_household/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "profile_activity_feed",
+      "title": "What Others Just Watched",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "profile_id": ""
+      },
+      "enabled": true
+    },
+    "trending_discover/tdisc_tmdb_day/home": {
+      "scope": "home",
+      "section_type": "trending_discover",
+      "title": "TMDB Trending Today",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "source": "tmdb",
+        "window": "day"
+      },
+      "enabled": true
+    },
+    "trending_discover/tdisc_tmdb_day/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "trending_discover",
+      "title": "TMDB Trending Today",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "source": "tmdb",
+        "window": "day"
+      },
+      "enabled": true
+    },
+    "trending_discover/tdisc_tmdb_week/home": {
+      "scope": "home",
+      "section_type": "trending_discover",
+      "title": "TMDB Trending This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "source": "tmdb",
+        "window": "week"
+      },
+      "enabled": true
+    },
+    "trending_discover/tdisc_tmdb_week/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "trending_discover",
+      "title": "TMDB Trending This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "source": "tmdb",
+        "window": "week"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_24h/home": {
+      "scope": "home",
+      "section_type": "trending_on_server",
+      "title": "Trending Now (24h)",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "24h"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_24h/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "trending_on_server",
+      "title": "Trending Now (24h)",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "24h"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_7d/home": {
+      "scope": "home",
+      "section_type": "trending_on_server",
+      "title": "Trending This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "7d"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_7d/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "trending_on_server",
+      "title": "Trending This Week",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "7d"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_30d/home": {
+      "scope": "home",
+      "section_type": "trending_on_server",
+      "title": "Trending This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "30d"
+      },
+      "enabled": true
+    },
+    "trending_on_server/tr_30d/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "trending_on_server",
+      "title": "Trending This Month",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "window": "30d"
+      },
+      "enabled": true
+    },
+    "collection/picked/home": {
+      "scope": "home",
+      "section_type": "collection",
+      "title": "Studio Ghibli",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_collection_id": "lib-1"
+      },
+      "enabled": true
+    },
+    "custom_filter/rules/home": {
+      "scope": "home",
+      "section_type": "custom_filter",
+      "title": "90s Horror",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_ids": [
+          1
+        ],
+        "media_scope": "movie",
+        "match": "any",
+        "groups": [
+          {
+            "match": "all",
+            "rules": [
+              {
+                "field": "genre",
+                "op": "contains",
+                "value": "Horror"
+              },
+              {
+                "field": "year",
+                "op": "between",
+                "value": [
+                  1990,
+                  1999
+                ]
+              }
+            ]
+          },
+          {
+            "match": "any",
+            "rules": [
+              {
+                "field": "rating_imdb",
+                "op": "gte",
+                "value": 7.5
+              }
+            ]
+          }
+        ],
+        "sort": {
+          "field": "rating_imdb",
+          "order": "desc"
+        }
+      },
+      "enabled": true
+    },
+    "collection/picked/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "collection",
+      "title": "Studio Ghibli",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_collection_id": "lib-1"
+      },
+      "enabled": true
+    },
+    "custom_filter/rules/library": {
+      "scope": "library",
+      "library_id": "7",
+      "section_type": "custom_filter",
+      "title": "90s Horror",
+      "featured": false,
+      "item_limit": 20,
+      "config": {
+        "library_ids": [
+          1
+        ],
+        "media_scope": "movie",
+        "match": "any",
+        "groups": [
+          {
+            "match": "all",
+            "rules": [
+              {
+                "field": "genre",
+                "op": "contains",
+                "value": "Horror"
+              },
+              {
+                "field": "year",
+                "op": "between",
+                "value": [
+                  1990,
+                  1999
+                ]
+              }
+            ]
+          },
+          {
+            "match": "any",
+            "rules": [
+              {
+                "field": "rating_imdb",
+                "op": "gte",
+                "value": 7.5
+              }
+            ]
+          }
+        ],
+        "sort": {
+          "field": "rating_imdb",
+          "order": "desc"
+        }
+      },
+      "enabled": true
+    }
+  }
+}
