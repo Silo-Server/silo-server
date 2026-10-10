@@ -669,6 +669,10 @@ type WatchDetail struct {
 	EffectiveVersionHDR             *bool                             `json:"effective_version_hdr,omitempty"`
 	EffectiveVersionCodecVideo      *string                           `json:"effective_version_codec_video,omitempty"`
 	EffectiveVersionEditionKey      *string                           `json:"effective_version_edition_key,omitempty"`
+	PosterURL                       string                            `json:"poster_url,omitempty"`
+	PosterThumbhash                 string                            `json:"poster_thumbhash,omitempty"`
+	BackdropURL                     string                            `json:"backdrop_url,omitempty"`
+	BackdropThumbhash               string                            `json:"backdrop_thumbhash,omitempty"`
 }
 
 func (d ItemDetail) MarshalJSON() ([]byte, error) {
@@ -3199,6 +3203,10 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 			item.ContentID,
 		)
 		detail.Year = item.Year
+		detail.PosterThumbhash = item.PosterThumbhash
+		detail.BackdropThumbhash = item.BackdropThumbhash
+		detail.PosterURL = s.PresignImageURL(ctx, item.PosterPath, "poster", string(filter.ImageSize))
+		detail.BackdropURL = s.PresignImageURL(ctx, item.BackdropPath, "backdrop", string(filter.ImageSize))
 		s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToWatchDetail(detail)
 		return detail, nil
 	case !errors.Is(err, ErrItemNotFound):
@@ -3269,6 +3277,9 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 	}
 
+	detail.PosterThumbhash = episode.StillThumbhash
+	detail.PosterURL = s.PresignImageURL(ctx, episode.StillPath, "still", string(filter.ImageSize))
+
 	if seriesErr == nil && series != nil {
 		series, err = s.LocalizeItemModel(ctx, series, localizationFilter)
 		if err != nil {
@@ -3276,6 +3287,8 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 		detail.SeriesTitle = series.Title
 		detail.Year = series.Year
+		detail.BackdropThumbhash = series.BackdropThumbhash
+		detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSize))
 	}
 
 	return detail, nil
@@ -3337,6 +3350,10 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 			detail.SeriesTitle = parent.Title
 		}
 		detail.Year = parent.Year
+		detail.PosterThumbhash = parent.PosterThumbhash
+		detail.BackdropThumbhash = parent.BackdropThumbhash
+		detail.PosterURL = s.PresignImageURL(ctx, parent.PosterPath, "poster", string(filter.ImageSize))
+		detail.BackdropURL = s.PresignImageURL(ctx, parent.BackdropPath, "backdrop", string(filter.ImageSize))
 	}
 	return detail, nil
 }

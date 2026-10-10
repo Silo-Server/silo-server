@@ -47454,6 +47454,13 @@
       "WatchDetail": {
         "additionalProperties": false,
         "properties": {
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "The item's backdrop, or an episode's series backdrop, sized by image_size",
+            "type": "string"
+          },
           "content_id": {
             "examples": [
               "movie:heat-1995"
@@ -47506,6 +47513,13 @@
               "$ref": "#/components/schemas/WatchPlaybackVariant"
             },
             "type": "array"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "The item's poster, or an episode's still, sized by image_size; for system media controls",
+            "type": "string"
           },
           "preview": {
             "$ref": "#/components/schemas/WatchMarker"

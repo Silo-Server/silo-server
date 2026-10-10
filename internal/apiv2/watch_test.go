@@ -46,6 +46,8 @@ func (f *fakeWatch) WatchDetail(_ context.Context, userID int, profileID, conten
 		detail := &catalogpkg.WatchDetail{
 			ContentID: contentID, Type: "movie", Title: "Heat", Year: 1995,
 			EffectiveSubtitleLanguage: "eng", HasEffectiveSubtitleLang: true,
+			PosterURL: "/api/images/poster/heat.jpg?size=medium", PosterThumbhash: "poster-hash",
+			BackdropURL: "/api/images/backdrop/heat.jpg?size=medium", BackdropThumbhash: "backdrop-hash",
 			Versions: []catalogpkg.FileVersion{{
 				FileID: 42, Resolution: "1080p", CodecVideo: "h264", CodecAudio: "eac3", Container: "mkv", FileSize: 1024, Duration: 10200, Bitrate: 8000000,
 				AddedAt:     time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
@@ -100,6 +102,11 @@ func TestGetWatchState(t *testing.T) {
 	}
 	if body["content_id"] != "movie:heat-1995" || body["effective_subtitle_language"] != "eng" || body["effective_subtitle_mode"] != nil {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	// The artwork system media controls show (#803).
+	if body["poster_url"] != "/api/images/poster/heat.jpg?size=medium" || body["poster_thumbhash"] != "poster-hash" ||
+		body["backdrop_url"] != "/api/images/backdrop/heat.jpg?size=medium" || body["backdrop_thumbhash"] != "backdrop-hash" {
+		t.Fatalf("artwork in body = %s", rec.Body.String())
 	}
 	versions := body["versions"].([]any)
 	v := versions[0].(map[string]any)

@@ -92,5 +92,9 @@
     "played": false,
     "last_file_id": "3"
   },
-  "effective_subtitle_language": "eng"
+  "effective_subtitle_language": "eng",
+  "poster_url": "/api/images/poster/heat.jpg?size=medium",
+  "poster_thumbhash": "poster-hash",
+  "backdrop_url": "/api/images/backdrop/heat.jpg?size=medium",
+  "backdrop_thumbhash": "backdrop-hash"
 }

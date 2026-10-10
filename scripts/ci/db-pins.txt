@@ -53,6 +53,10 @@
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
 
+# Watch detail artwork: movies, episodes and extras carry the poster and
+# backdrop clients publish to system media controls (#803).
+./internal/catalog TestGetWatchDetailArtwork
+
 # Detail and versions: localization and folder reads per detail build, and the
 # versions endpoint issuing fewer queries than full detail with no image work.
 ./internal/catalog TestBuildMediaItemDetailSharesLocalization
