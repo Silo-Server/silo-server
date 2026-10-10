@@ -16,4 +16,25 @@ describe("PolicyLimitFields", () => {
     expect(html).toContain("min-w-40");
     expect(html).not.toMatch(/class="(?:[^"]*\s)?w-40[\s"]/);
   });
+
+  it("caps inherited policy selects at the row width and wraps the label inside it", () => {
+    const html = renderToStaticMarkup(
+      <PolicyLimitFields
+        state={policyStateFromUser(null)}
+        onChange={() => {}}
+        source="server"
+        effective={{ transcode_allowed: false }}
+      />,
+    );
+
+    const triggers = [...html.matchAll(/class="([^"]*\bmin-w-40\b[^"]*)"/g)].map((m) => m[1] ?? "");
+    expect(triggers).toHaveLength(2);
+    for (const classes of triggers) {
+      expect(classes.split(" ")).toEqual(
+        expect.arrayContaining(["max-w-full", "whitespace-normal", "data-[size=default]:h-auto"]),
+      );
+      expect(classes).not.toContain("whitespace-nowrap");
+      expect(classes).not.toContain("data-[size=default]:h-9");
+    }
+  });
 });
