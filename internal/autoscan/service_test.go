@@ -24,6 +24,8 @@ type fakeStore struct {
 	staleAdvance   bool              // reject advances as if an admin reset the marker
 	recorded       map[string]string // source ID -> error message
 	failures       []PollFailure     // every error write, with the rows the poll read
+	staleError     bool              // skip error writes as if an admin reset the source
+	getConnErr     error
 	createdEvents  []EventCreate
 	events         []EventFinish
 	createEventErr error
@@ -46,6 +48,9 @@ func (f *fakeStore) GetSource(_ context.Context, id string) (Source, error) {
 	return Source{}, ErrNotFound
 }
 func (f *fakeStore) GetConnection(context.Context, string) (Connection, error) {
+	if f.getConnErr != nil {
+		return Connection{}, f.getConnErr
+	}
 	return f.connection, nil
 }
 func (f *fakeStore) AdvanceMarker(_ context.Context, adv MarkerAdvance) (bool, error) {
@@ -61,6 +66,9 @@ func (f *fakeStore) AdvanceMarker(_ context.Context, adv MarkerAdvance) (bool, e
 }
 func (f *fakeStore) RecordError(_ context.Context, failure PollFailure) (bool, error) {
 	f.failures = append(f.failures, failure)
+	if f.staleError {
+		return false, nil
+	}
 	if f.recorded == nil {
 		f.recorded = map[string]string{}
 	}
@@ -1155,6 +1163,85 @@ func TestPollOnceRecordsAFailureAgainstTheRowsThePollRead(t *testing.T) {
 	}
 	if len(store.events) != 1 || store.events[0].Status != EventStatusError || store.events[0].ErrorMessage != failure.Message {
 		t.Fatalf("events = %+v, want the error on the poll's event", store.events)
+	}
+}
+
+// When an admin reset the source while the poll ran, the error stays off the
+// source, and the poll's event says so and still holds the marker.
+func TestPollOnceNotesAnErrorItCouldNotStore(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"),
+			Marker: strptr("m0"), Enabled: true,
+		}},
+		connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
+		staleError: true,
+	}
+	prov := &fakeProvider{err: errors.New("dial tcp: i/o timeout")}
+	svc := NewService(store, prov, passthroughConnRes{}, nil, &recordingQueuer{}, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if _, ok := store.recorded["s1"]; ok {
+		t.Fatal("the error was stored on the source")
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError || event.MarkerAfter != "m0" {
+		t.Fatalf("event = %+v, want an error holding marker m0", event)
+	}
+	if want := "dial tcp: i/o timeout; " + errorNotStoredMessage; event.ErrorMessage != want {
+		t.Fatalf("event message = %q, want %q", event.ErrorMessage, want)
+	}
+}
+
+type failingConnRes struct{}
+
+func (failingConnRes) Resolve(context.Context, Connection) (ResolvedConnection, error) {
+	return ResolvedConnection{}, errors.New("linked Requests integration is unavailable")
+}
+
+// A poll that fails resolving its connection compares the connection row when
+// it read one, and only the source's own columns when the lookup itself failed.
+func TestPollOnceResolveFailureCarriesTheRowItRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		getConnErr error
+		wantRow    bool
+	}{
+		"credentials failed after the row was read": {wantRow: true},
+		"the row lookup failed":                     {getConnErr: errors.New("connection refused")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := &fakeStore{
+				settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600},
+				sources: []Source{{
+					ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+				}},
+				connection: Connection{ID: "c1", Kind: "sonarr", BaseURL: "http://sonarr.invalid"},
+				getConnErr: tc.getConnErr,
+			}
+			prov := &fakeProvider{}
+			svc := NewService(store, prov, failingConnRes{}, nil, &recordingQueuer{}, allowSuppressor{}, nil)
+			if err := svc.PollOnce(context.Background()); err != nil {
+				t.Fatalf("PollOnce: %v", err)
+			}
+			if prov.calls != 0 {
+				t.Fatalf("plugin polled %d times after the connection failed", prov.calls)
+			}
+			if len(store.failures) != 1 {
+				t.Fatalf("error writes = %d, want 1", len(store.failures))
+			}
+			got := store.failures[0].Connection
+			if tc.wantRow && (got == nil || got.ID != "c1") {
+				t.Fatalf("failure connection = %+v, want the row the poll read", got)
+			}
+			if !tc.wantRow && got != nil {
+				t.Fatalf("failure connection = %+v, want none after the lookup failed", got)
+			}
+		})
 	}
 }
 

@@ -628,11 +628,15 @@ func (r *Repository) AdvanceMarker(ctx context.Context, adv MarkerAdvance) (bool
 // it polled: the same marker, connection binding and source_config, and, when
 // conn is given, the same connection upstream. It reports whether it wrote.
 // $1-$4 in the statement are the snapshot, so set's own arguments start at $5.
+// A given conn must be the source's bound connection.
 //
 // The connection row is read FOR SHARE first, so a concurrent connection
 // update either commits before the check or waits for this write and then
 // resets it, matching UpdateConnection's lock order.
 func (r *Repository) writeIfPollStateHolds(ctx context.Context, src Source, conn *Connection, set string, args ...any) (bool, error) {
+	if conn != nil && (src.ConnectionID == nil || conn.ID != *src.ConnectionID) {
+		return false, fmt.Errorf("source %s: the poll's connection row does not match its binding", src.ID)
+	}
 	sourceConfig, err := sourceConfigSnapshot(src.SourceConfig)
 	if err != nil {
 		return false, err
@@ -726,9 +730,10 @@ func truncateUTF8(s string, maxBytes int) string {
 type PollFailure struct {
 	// Source is the source row the poll used.
 	Source Source
-	// Connection is the connection row the poll read, or nil when it failed
-	// before reading one. Without it only the source's own columns are
-	// compared.
+	// Connection is the connection row the poll read. It is nil when there is
+	// none to compare: the source has no connection, the poll failed before
+	// reading it, or the caller is a webhook delivery, which doesn't read it.
+	// Without it only the source's own columns are compared.
 	Connection *Connection
 	Message    string
 }
@@ -743,12 +748,8 @@ type PollFailure struct {
 // poll of the new upstream. RecordError then writes nothing and returns false;
 // the caller still records the error on the poll's own event.
 func (r *Repository) RecordError(ctx context.Context, failure PollFailure) (bool, error) {
-	conn := failure.Connection
-	if conn != nil && (failure.Source.ConnectionID == nil || conn.ID != *failure.Source.ConnectionID) {
-		return false, fmt.Errorf("record autoscan error: source %s: the poll's connection row does not match its binding", failure.Source.ID)
-	}
 	msg := truncateUTF8(failure.Message, maxLastErrorLen)
-	wrote, err := r.writeIfPollStateHolds(ctx, failure.Source, conn,
+	wrote, err := r.writeIfPollStateHolds(ctx, failure.Source, failure.Connection,
 		`last_error = $5, last_run_at = now(), updated_at = now()`, msg)
 	if err != nil {
 		return false, fmt.Errorf("record autoscan error: %w", err)

@@ -30,6 +30,12 @@ func TestRecordErrorSkipsStalePoll(t *testing.T) {
 			},
 			wantRecord: true,
 		},
+		"api key rotation still records the error": {
+			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
+				editConnection(ctx, t, repo, *src.ConnectionID, func(c *Connection) { c.APIKeyRef = "rotated-key" })
+			},
+			wantRecord: true,
+		},
 		"source config change drops the error": {
 			edit: func(ctx context.Context, t *testing.T, repo *Repository, src Source, _ Connection) {
 				src.SourceConfig = map[string]string{"scope": "movies"}
@@ -101,6 +107,9 @@ func TestRecordErrorSkipsStalePoll(t *testing.T) {
 					t.Fatal("last_run_at not stamped by the error")
 				}
 				return
+			}
+			if afterEdit.Marker != nil {
+				t.Fatalf("edit left marker %q, want the reset", *afterEdit.Marker)
 			}
 			if got.LastError != nil {
 				t.Fatalf("stale poll wrote last_error %q over the reset", *got.LastError)

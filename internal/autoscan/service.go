@@ -279,30 +279,40 @@ func (s *Service) poll(ctx context.Context, ignoreIntervals bool) error {
 // who sees it on the source row and in poll activity.
 const missingConnectionMessage = "No server selected. Edit the source and choose a server."
 
-// failPoll records a poll that ended before the provider returned changes: the
-// source's last_error and the event both carry the failure's message, and the
-// marker is held so the next poll re-reads the same window.
+// failPoll records a poll that ended before the provider returned changes. The
+// event carries the failure's message, and so does the source's last_error
+// unless an admin edit reset the source while the poll ran. The marker is held
+// so the next poll re-reads the same window.
 func (s *Service) failPoll(ctx context.Context, failure PollFailure, eventID int64, marker string) {
-	s.recordPollError(ctx, failure)
+	msg := failure.Message
+	if s.recordPollError(ctx, failure) {
+		msg += "; " + errorNotStoredMessage
+	}
 	s.finishEvent(ctx, eventID, EventFinish{
 		Status:       EventStatusError,
-		ErrorMessage: failure.Message,
+		ErrorMessage: msg,
 		MarkerAfter:  marker,
 	})
 }
 
-// recordPollError stores a failed poll's error on its source. When an admin
-// edit reset the source while the poll ran, the error belongs to the old
-// upstream and only the poll's event keeps it.
-func (s *Service) recordPollError(ctx context.Context, failure PollFailure) {
+// errorNotStoredMessage notes on a poll event that the source changed while
+// the poll ran, so its error was kept off the source.
+const errorNotStoredMessage = "source changed during the poll; its error was not stored on the source"
+
+// recordPollError stores a failed poll's error on its source, and reports
+// whether it skipped the write because an admin edit reset the source while
+// the poll ran. Such an error belongs to the old upstream, so only the poll's
+// event keeps it.
+func (s *Service) recordPollError(ctx context.Context, failure PollFailure) (sourceChanged bool) {
 	recorded, err := s.store.RecordError(ctx, failure)
 	if err != nil {
 		slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", failure.Source.ID, "err", err)
-		return
+		return false
 	}
 	if !recorded {
 		slog.DebugContext(ctx, "autoscan: source changed during poll; not storing its error", "component", "autoscan", "source_id", failure.Source.ID)
 	}
+	return !recorded
 }
 
 // sourceIdentity is the (plugin, capability) pair a source is created against.
@@ -345,7 +355,8 @@ type consumeOptions struct {
 	NextMarker    string // poll: the provider's next marker
 	AdvanceMarker bool   // poll: true; webhook: false
 	// Connection is the connection row the poll read from (nil when the
-	// source has none); the marker advance is conditional on it.
+	// source has none); the marker advance, and recording an error on the
+	// source, are conditional on it.
 	Connection *Connection
 }
 
@@ -442,7 +453,9 @@ func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes 
 		if opts.AdvanceMarker {
 			msg += " — holding marker to retry"
 		}
-		s.recordPollError(ctx, PollFailure{Source: src, Connection: opts.Connection, Message: msg})
+		if s.recordPollError(ctx, PollFailure{Source: src, Connection: opts.Connection, Message: msg}) {
+			msg += "; " + errorNotStoredMessage
+		}
 		result.Status = EventStatusError
 		finish(EventFinish{
 			Status:          EventStatusError,
