@@ -482,12 +482,8 @@ func TestDurableCompatPlaybackStorePutNegotiatedReplacesAcrossInstances(t *testi
 	}
 }
 
-// M5: an empty compat token must never trigger a DB scan — FindByRoute returns
-// the in-memory result only. With a non-nil pool but no live DB, a scan attempt
-// would block/error on the pool; instead the empty-token path returns cleanly
-// from cache. We assert: (a) a cached empty-token route resolves, and (b) a
-// cache-miss empty-token lookup returns false without consulting the DB. The
-// nil-pool variant proves the early return independent of any pool.
+// M5: an empty compat token resolves cached routes and never acquires a
+// database connection, including when no cached route matches.
 func TestDurableCompatPlaybackStore_EmptyTokenFindByRouteNoDBScan(t *testing.T) {
 	store := NewDurableCompatPlaybackStore(nil, time.Hour, nil)
 	store.Put(PlaybackSession{ID: "ps-empty", CompatToken: "", RouteItemID: "route-x"})
@@ -501,16 +497,20 @@ func TestDurableCompatPlaybackStore_EmptyTokenFindByRouteNoDBScan(t *testing.T) 
 		t.Fatal("empty-token FindByRoute should not resolve an unknown route")
 	}
 
-	// loadByCompatToken must early-return for an empty token even with a non-nil
-	// pool, so it can never issue a full-table query. Use a closed pool so any
-	// query attempt would error; reaching the early return means no query ran.
+	// The dedicated live pool exposes database work independently of whether a
+	// query would return any rows.
 	if dsn := os.Getenv("SILO_TEST_DATABASE_URL"); dsn != "" {
 		pool := newCompatTestPool(t)
 		s := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
-		// Should be a no-op (no panic, no scan); cache stays empty.
-		s.loadByCompatToken("")
+		before := pool.Stat().AcquireCount()
+		if err := s.loadByCompatToken(""); err != nil {
+			t.Fatalf("empty-token load: %v", err)
+		}
 		if _, _, ok := s.FindByRoute("", "anything"); ok {
 			t.Fatal("empty-token FindByRoute resolved unexpectedly against DB")
+		}
+		if got := pool.Stat().AcquireCount(); got != before {
+			t.Fatalf("empty-token lookup acquired %d database connections", got-before)
 		}
 	}
 }
@@ -529,6 +529,11 @@ func TestDurableCompatPlaybackStore_UpdateAtomicNoLostField(t *testing.T) {
 	seed := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	seed.Put(PlaybackSession{ID: id, CompatToken: "tok", UserID: "u1"})
 
+	writerB := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	if cached, ok := writerB.Get(id); !ok || cached.TranscodeStarted {
+		t.Fatalf("writerB must cache the original row before writerA updates: %+v, %v", cached, ok)
+	}
+
 	// Writer A (its own cache) sets TranscodeStarted.
 	writerA := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	if err := writerA.Update(id, func(s *PlaybackSession) error {
@@ -541,7 +546,6 @@ func TestDurableCompatPlaybackStore_UpdateAtomicNoLostField(t *testing.T) {
 	// Writer B started before A committed (its cache lacks A's field) sets a
 	// different field. Its DB step re-reads A's committed row FOR UPDATE and
 	// merges UpstreamPlayMethod on top, so A's TranscodeStarted survives.
-	writerB := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
 	if err := writerB.Update(id, func(s *PlaybackSession) error {
 		s.UpstreamPlayMethod = "Transcode"
 		return nil

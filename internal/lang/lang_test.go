@@ -33,6 +33,14 @@ func TestPrimaryLanguage(t *testing.T) {
 	}
 }
 
+func TestISO6392(t *testing.T) {
+	for in, want := range map[string]string{"en": "eng", "eng": "eng", "pt-BR": "por", "zh-Hant": "zho", "fr": "fra", "fil": "fil", "": "", "und": "", "x-private": "", "unknown": ""} {
+		if got := ISO6392(in); got != want {
+			t.Errorf("ISO6392(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestCanonical(t *testing.T) {
 	cases := []struct {
 		in, want string
@@ -111,6 +119,8 @@ func TestCanonicalCountries(t *testing.T) {
 		{[]string{}, []string{}},
 		{[]string{"us", "GBR", "", "  jp  ", "ZZ"}, []string{"US", "GB", "JP", "ZZ"}},
 		{[]string{"  ", ""}, []string{}},
+		// Spellings that canonicalize to the same code collapse to the first.
+		{[]string{"US", "usa", "GB", "us"}, []string{"US", "GB"}},
 	}
 	for _, tc := range cases {
 		got := CanonicalCountries(tc.in)
@@ -126,6 +136,27 @@ func TestCanonicalCountries(t *testing.T) {
 			if got[i] != tc.want[i] {
 				t.Errorf("CanonicalCountries(%v)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
 			}
+		}
+	}
+}
+
+func TestUniqueCountries(t *testing.T) {
+	cases := []struct {
+		in   []string
+		want []string
+	}{
+		{nil, nil},
+		{[]string{}, []string{}},
+		{[]string{"US"}, []string{"US"}},
+		{[]string{"US", "US"}, []string{"US"}},
+		{[]string{"ES", "AR", "ES", "AR"}, []string{"ES", "AR"}},
+		// No canonicalization: hand-entered values are kept as written.
+		{[]string{"United States", "US", "United States"}, []string{"United States", "US"}},
+	}
+	for _, tc := range cases {
+		got := UniqueCountries(tc.in)
+		if (got == nil) != (tc.want == nil) || !slices.Equal(got, tc.want) {
+			t.Errorf("UniqueCountries(%v) = %#v, want %#v", tc.in, got, tc.want)
 		}
 	}
 }

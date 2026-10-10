@@ -8,7 +8,7 @@ import (
 )
 
 // Reason classifies why sampling failed. Each failed attempt records how it
-// ended (canceled, timeout, start, exit, args, empty, unsupported,
+// ended (canceled, timeout, start, exit, args, empty, output, unsupported,
 // capabilities); Classify reads a failed run and names its cause (canceled,
 // timeout, invalid_data, killed, unsupported, capabilities, no_stream,
 // failed), which tells a caller whether trying again can help.
@@ -27,8 +27,12 @@ const (
 	// ReasonArgs means the attempt could not be turned into arguments.
 	ReasonArgs Reason = "args"
 	// ReasonEmpty means ffmpeg succeeded without writing the image asked for,
-	// as when the frame time lies past the end of the video.
+	// as when the frame time lies past the end of the video, or without
+	// decoding enough of the samples a sheet asked for.
 	ReasonEmpty Reason = "empty"
+	// ReasonOutput means ffmpeg's output did not match its log, so its
+	// frames could not be placed.
+	ReasonOutput Reason = "output"
 )
 
 // Run causes, from Classify. ReasonCanceled and ReasonTimeout are causes too.

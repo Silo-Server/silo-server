@@ -1,9 +1,12 @@
 import { useRef } from "react";
-import { useImageLoaded } from "@/hooks/useImageLoaded";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import MediaCardArtwork, {
+  MEDIA_CARD_CAPTION_CLASS,
+  MEDIA_CARD_META_CLASS,
+  MEDIA_CARD_TITLE_CLASS,
+} from "@/components/MediaCardArtwork";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
-import { decodeThumbhash } from "@/lib/thumbhash";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
@@ -32,8 +35,6 @@ export default function SectionItemCard({
   overlayPrefs = null,
   quickActionMode = "none",
 }: SectionItemCardProps) {
-  const { loaded, onLoad, onError } = useImageLoaded(item.poster_url);
-  const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
@@ -53,38 +54,21 @@ export default function SectionItemCard({
   return (
     <div ref={cardRef} className="media-card media-card-longpress group/card">
       <div className="group/media relative">
-        <ViewTransitionLink to={itemHref} className="block overflow-hidden rounded-xl">
-          <div
-            className={`media-card-image relative ${
-              item.type === "audiobook" ? "aspect-square" : "aspect-[2/3]"
-            }`}
-            style={
-              thumbhashUrl
-                ? {
-                    backgroundImage: `url(${thumbhashUrl})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }
-                : undefined
-            }
+        <ViewTransitionLink
+          to={itemHref}
+          aria-label={displayTitle}
+          className="block overflow-hidden rounded-xl"
+        >
+          <MediaCardArtwork
+            src={item.poster_url}
+            alt={item.title}
+            mediaType={item.type}
+            thumbhash={item.poster_thumbhash}
+            square={item.type === "audiobook"}
+            lazy
           >
-            {item.poster_url ? (
-              <img
-                src={item.poster_url}
-                alt={item.title}
-                className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-                loading="lazy"
-                onLoad={onLoad}
-                onError={onError}
-              />
-            ) : (
-              <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">
-                <span className="line-clamp-3 font-medium">{item.title || "No Poster"}</span>
-              </div>
-            )}
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/55 to-transparent opacity-90" />
             {item.status === "ambiguous" && (
-              <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
+              <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
                 Ambiguous
               </span>
             )}
@@ -96,7 +80,7 @@ export default function SectionItemCard({
                 {upcomingEvent.badges.map((badge) => (
                   <span
                     key={badge}
-                    className={`rounded-full border px-2 py-0.5 text-[10px] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
+                    className={`rounded-full border px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide uppercase backdrop-blur-sm ${upcomingBadgeClass(
                       badge,
                     )}`}
                   >
@@ -105,7 +89,7 @@ export default function SectionItemCard({
                 ))}
               </div>
             )}
-          </div>
+          </MediaCardArtwork>
         </ViewTransitionLink>
         {item.play_content_id ? (
           <CardPlayOverlay
@@ -127,21 +111,18 @@ export default function SectionItemCard({
         />
       </div>
       {showCaption ? (
-        <div className="px-1 pt-3">
-          <ViewTransitionLink
-            to={headingHref}
-            className="block truncate text-[14px] font-semibold tracking-tight hover:underline"
-          >
+        <div className={MEDIA_CARD_CAPTION_CLASS}>
+          <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
             {displayTitle}
           </ViewTransitionLink>
           {showMetadata && upcomingEvent ? (
             <ViewTransitionLink to={itemHref} className="block hover:underline">
               {subtitle && (
-                <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+                <div className="text-muted-foreground mt-1 truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
                   {subtitle}
                 </div>
               )}
-              <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] font-medium">
+              <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[0.6875rem] font-medium">
                 <span className="text-foreground shrink-0">{airDateLabel}</span>
                 {airTimeLabel && (
                   <span className="text-muted-foreground min-w-0 truncate">{airTimeLabel}</span>
@@ -151,28 +132,22 @@ export default function SectionItemCard({
           ) : showMetadata && episodeLabels ? (
             <ViewTransitionLink to={itemHref} className="block hover:underline">
               {episodeLabels.episodeTitle ? (
-                <div className="text-muted-foreground mt-1 truncate text-[12px] font-medium">
+                <div className="text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
                   {episodeLabels.episodeTitle}
                 </div>
               ) : null}
-              <div className="text-muted-foreground mt-1 text-[11px] font-medium tracking-[0.14em] uppercase">
+              <div className="text-muted-foreground mt-1 text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
                 {episodeLabels.episodeCode}
               </div>
             </ViewTransitionLink>
           ) : showMetadata && item.item_source === "next_in_series" && item.series_title ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
-            >
+            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
               {[item.badges?.find((badge) => badge.startsWith("Book ")), item.series_title]
                 .filter(Boolean)
                 .join(" · ")}
             </ViewTransitionLink>
           ) : showMetadata ? (
-            <ViewTransitionLink
-              to={itemHref}
-              className="text-muted-foreground mt-1 block truncate text-[11px] font-medium tracking-[0.14em] uppercase hover:underline"
-            >
+            <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
               {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}
             </ViewTransitionLink>
           ) : null}

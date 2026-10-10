@@ -27,9 +27,9 @@ func (r *SubscriptionRepository) CreateOrGet(ctx context.Context, sub *Subscript
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx, `INSERT INTO download_subscriptions
- (id,user_id,profile_id,device_id,series_id,mode,season_numbers,target_season,delete_watched,max_storage_bytes,active,created_at,updated_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,now(),now())
- ON CONFLICT(user_id,profile_id,device_id,series_id) DO NOTHING`, sub.ID, sub.UserID, sub.ProfileID, sub.DeviceID, sub.SeriesID, sub.Mode, intsToInt32s(sub.SeasonNumbers), int32Ptr(sub.TargetSeason), sub.DeleteWatched, sub.MaxStorageBytes)
+ (id,user_id,profile_id,device_id,series_id,mode,season_numbers,target_season,delete_watched,max_storage_bytes,quality,active,created_at,updated_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,now(),now())
+ ON CONFLICT(user_id,profile_id,device_id,series_id) DO NOTHING`, sub.ID, sub.UserID, sub.ProfileID, sub.DeviceID, sub.SeriesID, sub.Mode, intsToInt32s(sub.SeasonNumbers), int32Ptr(sub.TargetSeason), sub.DeleteWatched, sub.MaxStorageBytes, SubscriptionQuality(sub.Quality))
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +59,8 @@ func (s *Service) UpdateSubscriptionMonitor(ctx context.Context, userID int, pro
 	if profileID == "" || deviceID == "" {
 		return nil, ErrProfileRequired
 	}
-	if _, _, err := s.downloadConfigForUser(ctx, userID, deviceID); err != nil {
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, deviceID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -72,6 +73,20 @@ func (s *Service) UpdateSubscriptionMonitor(ctx context.Context, userID int, pro
 	}
 	if err := check(current); err != nil {
 		return nil, err
+	}
+	// A quality is checked against the account's transcode permission only
+	// when it changes, so a client echoing the stored quality can still edit
+	// other options after that permission is revoked.
+	if patch.Quality != nil {
+		if normalizeQuality(*patch.Quality) == SubscriptionQuality(current.Quality) {
+			patch.Quality = nil
+		} else {
+			quality, err := s.validateMonitorQuality(ctx, *patch.Quality, user, cfg, deviceID)
+			if err != nil {
+				return nil, err
+			}
+			patch.Quality = &quality
+		}
 	}
 	candidate := *current
 	if _, err := s.applySubscriptionPatch(ctx, &candidate, patch); err != nil {
@@ -89,6 +104,7 @@ func (s *Service) UpdateSubscriptionMonitor(ctx context.Context, userID int, pro
 		locked.TargetSeason = candidate.TargetSeason
 		locked.DeleteWatched = candidate.DeleteWatched
 		locked.MaxStorageBytes = candidate.MaxStorageBytes
+		locked.Quality = candidate.Quality
 		locked.Active = candidate.Active
 		return nil
 	})
@@ -122,7 +138,7 @@ func (r *SubscriptionRepository) Mutate(ctx context.Context, userID int, profile
 	if remove {
 		_, err = tx.Exec(ctx, `DELETE FROM download_subscriptions WHERE id=$1`, id)
 	} else {
-		row, err = scanSubscription(tx.QueryRow(ctx, `UPDATE download_subscriptions SET mode=$2,season_numbers=$3,target_season=$4,delete_watched=$5,max_storage_bytes=$6,active=$7,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING `+subscriptionColumns, id, row.Mode, intsToInt32s(row.SeasonNumbers), int32Ptr(row.TargetSeason), row.DeleteWatched, row.MaxStorageBytes, row.Active))
+		row, err = scanSubscription(tx.QueryRow(ctx, `UPDATE download_subscriptions SET mode=$2,season_numbers=$3,target_season=$4,delete_watched=$5,max_storage_bytes=$6,active=$7,quality=$8,updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1 RETURNING `+subscriptionColumns, id, row.Mode, intsToInt32s(row.SeasonNumbers), int32Ptr(row.TargetSeason), row.DeleteWatched, row.MaxStorageBytes, row.Active, SubscriptionQuality(row.Quality)))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mutating subscription: %w", err)

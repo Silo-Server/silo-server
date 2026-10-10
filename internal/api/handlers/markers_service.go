@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -94,6 +95,9 @@ func markerServiceError(err error) error {
 // applyManualMarkers is shared by the legacy adapter and the typed service.
 // Validate every segment before the one atomic writer call.
 func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.MediaFile, changes MarkerChanges) (FileMarkersView, error) {
+	if err := h.ensureMarkerEditable(ctx, file); err != nil {
+		return FileMarkersView{}, err
+	}
 	if h.Writer == nil {
 		return FileMarkersView{}, apiError(http.StatusServiceUnavailable, "unavailable", "Marker writing is not configured")
 	}
@@ -137,4 +141,21 @@ func (h *MarkersHandler) applyManualMarkers(ctx context.Context, file *models.Me
 	}
 	h.maybeContribute(refreshed, sets)
 	return fileMarkers(refreshed), nil
+}
+
+func (h *MarkersHandler) ensureMarkerEditable(ctx context.Context, file *models.MediaFile) error {
+	if h.Libraries == nil {
+		return apiError(http.StatusServiceUnavailable, "unavailable", "Marker library access is not configured")
+	}
+	library, err := h.Libraries.GetByID(ctx, file.MediaFolderID)
+	if err != nil {
+		return markerServiceError(err)
+	}
+	if library == nil {
+		return apiError(http.StatusNotFound, "not_found", "Media library not found")
+	}
+	if !librarykind.IsMovie(library.Type) && !librarykind.IsTV(library.Type) && !librarykind.IsMixed(library.Type) {
+		return apiError(http.StatusUnprocessableEntity, "validation_failed", "Markers can only be edited in Movie and Series libraries")
+	}
+	return nil
 }

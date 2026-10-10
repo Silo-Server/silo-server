@@ -300,11 +300,13 @@ func TestAdminHistorySourceCallFailuresKeepTheirStatus(t *testing.T) {
 			f.plexErr = errors.New("plex: authentication response had no token")
 		}, TypeDependencyUnavailable},
 	}
+	f := fixtureAdminHistoryImports()
+	h := adminHistoryHandler(f)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := fixtureAdminHistoryImports()
+			*f = *fixtureAdminHistoryImports()
 			c.fail(f)
-			r := do(t, adminHistoryHandler(f), c.method, c.path, c.body, actingRequestAdmin)
+			r := do(t, h, c.method, c.path, c.body, actingRequestAdmin)
 			requireProblem(t, r, c.problem)
 			if strings.Contains(r.Body.String(), "private-password") {
 				t.Fatal("credential echoed", r.Body.String())

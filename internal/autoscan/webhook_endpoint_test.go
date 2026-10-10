@@ -3,43 +3,16 @@ package autoscan
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Silo-Server/silo-server/internal/secret"
+	"time"
 )
 
 // newWebhookDBTest connects to SILO_TEST_DATABASE_URL (skipping when unset or
 // unmigrated) and returns a repository plus a fresh webhook-mode source row.
 func newWebhookDBTest(t *testing.T) (context.Context, *Repository, Source) {
 	t.Helper()
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("connect test database: %v", err)
-	}
-	t.Cleanup(pool.Close)
-
-	var tableName *string
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.autoscan_webhook_endpoints')::text`).Scan(&tableName); err != nil {
-		t.Fatalf("check autoscan_webhook_endpoints table: %v", err)
-	}
-	if tableName == nil || *tableName == "" {
-		t.Skip("test database has not applied the autoscan webhook intake migration")
-	}
-
-	cipher, err := secret.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatalf("new cipher: %v", err)
-	}
-	repo := NewRepository(pool, cipher)
+	ctx, repo := newRepositoryDBTest(t, "autoscan_webhook_endpoints")
 
 	src, err := repo.CreateSource(ctx, Source{
 		PluginID:     BuiltinArrWebhookPluginID,
@@ -207,16 +180,38 @@ func TestWebhookDeliveryDurableRetryLifecycle(t *testing.T) {
 		t.Skip("test database has not applied the autoscan webhook delivery queue migration")
 	}
 
+	if _, _, err := repo.CreateWebhookEndpoint(ctx, src.ID); err != nil {
+		t.Fatalf("create endpoint: %v", err)
+	}
+	// The receiving node's clock runs an hour ahead of the database. The
+	// endpoint stamp must still come from the database clock.
 	delivery, err := repo.CreateWebhookDelivery(ctx, ChangeIngest{
 		SourceID:          src.ID,
 		ProviderEventType: "Download",
 		Changes:           []Change{{SourcePath: "/data/movie.mkv", Scope: ChangeScopeFile}},
+		ReceivedAt:        time.Now().Add(time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("create delivery: %v", err)
 	}
 	if delivery.ID == 0 || delivery.AttemptCount != 1 || delivery.LockedBy == "" {
 		t.Fatalf("created delivery = %+v", delivery)
+	}
+	// Durable acceptance stamps "Last delivery" in the same statement, before
+	// inline processing, so an error recorded while processing stays newer
+	// and the admin row still shows it.
+	if err := repo.RecordWebhookError(ctx, src.ID, "resolve failed"); err != nil {
+		t.Fatalf("record error: %v", err)
+	}
+	endpoint, err := repo.GetWebhookEndpoint(ctx, src.ID)
+	if err != nil {
+		t.Fatalf("get endpoint: %v", err)
+	}
+	if endpoint.LastReceivedAt == nil || endpoint.LastErrorAt == nil {
+		t.Fatalf("accepted delivery must stamp last_received_at: %+v", endpoint)
+	}
+	if endpoint.LastErrorAt.Before(*endpoint.LastReceivedAt) {
+		t.Fatalf("error at %v must not be older than the delivery stamp %v", endpoint.LastErrorAt, endpoint.LastReceivedAt)
 	}
 	if err := repo.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, 0, "temporary"); err != nil {
 		t.Fatalf("schedule retry: %v", err)

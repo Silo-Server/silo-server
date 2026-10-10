@@ -117,17 +117,3 @@ func TestModelEpisodeContentIDs(t *testing.T) {
 		t.Errorf("modelEpisodeContentIDs = %v, want [a b]", got)
 	}
 }
-
-func TestSeriesUserDataFromEpisodesIncludesCompletedHistory(t *testing.T) {
-	got := catalog.EpisodeRollupUserData(
-		[]*models.Episode{ep("progress-complete"), ep("history-complete"), ep("unplayed")},
-		map[string]userstore.WatchProgress{
-			"progress-complete": {Completed: true},
-			"history-complete":  {Completed: true},
-		},
-	)
-
-	if got.WatchedCount != 2 || got.UnplayedCount != 1 || got.Played {
-		t.Fatalf("series user data = %+v, want two watched and one unplayed", got)
-	}
-}

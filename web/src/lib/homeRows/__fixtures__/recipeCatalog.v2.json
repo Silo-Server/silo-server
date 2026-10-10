@@ -1,0 +1,818 @@
+{
+  "categories": [
+    {
+      "category": "custom",
+      "recipes": [
+        {
+          "type": "custom_filter",
+          "category": "custom",
+          "presets": [],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "discovery",
+      "recipes": [
+        {
+          "type": "critically_acclaimed",
+          "category": "discovery",
+          "presets": [
+            {
+              "key": "ca_imdb",
+              "display_name": "Critically Acclaimed",
+              "icon": "🏆",
+              "description_short": "Rated 8.0+ on TMDB with 500+ votes.",
+              "description_long": "",
+              "default_params": {
+                "min_score": 8
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "forgotten_favorites",
+          "category": "discovery",
+          "presets": [
+            {
+              "key": "ff_default",
+              "display_name": "Forgotten Favorites",
+              "icon": "🕰️",
+              "description_short": "Rated 7.0+ on TMDB with 100+ votes, and not watched in the past year.",
+              "description_long": "",
+              "default_params": {
+                "lookback_days": 365
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "format_showcase",
+          "category": "discovery",
+          "presets": [
+            {
+              "key": "fs_4k",
+              "display_name": "4K Showcase",
+              "icon": "🎥",
+              "description_short": "Titles available in 4K UHD.",
+              "description_long": "",
+              "default_params": {
+                "format": "4k"
+              }
+            },
+            {
+              "key": "fs_4k_recent",
+              "display_name": "New in 4K",
+              "icon": "🎥",
+              "description_short": "Recently added 4K UHD titles.",
+              "description_long": "",
+              "default_params": {
+                "format": "4k",
+                "sort": "recent"
+              }
+            },
+            {
+              "key": "fs_dv",
+              "display_name": "Dolby Vision Picks",
+              "icon": "🌈",
+              "description_short": "Dolby Vision titles.",
+              "description_long": "",
+              "default_params": {
+                "format": "dolby_vision"
+              }
+            },
+            {
+              "key": "fs_hdr",
+              "display_name": "HDR Highlights",
+              "icon": "✨",
+              "description_short": "HDR-mastered titles.",
+              "description_long": "",
+              "default_params": {
+                "format": "hdr"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "hidden_gems",
+          "category": "discovery",
+          "presets": [
+            {
+              "key": "hidden_gems_default",
+              "display_name": "Hidden Gems",
+              "icon": "💎",
+              "description_short": "Rated 7.5+ on TMDB with 100+ votes, and watched twice or less.",
+              "description_long": "",
+              "default_params": {
+                "max_play_count": 2,
+                "min_rating": 7.5
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "editorial",
+      "recipes": [
+        {
+          "type": "anniversaries",
+          "category": "editorial",
+          "presets": [
+            {
+              "key": "anniversaries_default",
+              "display_name": "Anniversaries",
+              "icon": "🎂",
+              "description_short": "Titles celebrating a milestone release anniversary this month.",
+              "description_long": "",
+              "default_params": {
+                "milestone_years": 5
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "editorial_spotlight",
+          "category": "editorial",
+          "presets": [
+            {
+              "key": "es_director_auto",
+              "display_name": "Director Spotlight",
+              "icon": "🎬",
+              "description_short": "Weekly spotlight on a director in your library.",
+              "description_long": "",
+              "default_params": {
+                "auto_rotate": true,
+                "rotation_cadence": "weekly",
+                "subject_type": "director"
+              }
+            },
+            {
+              "key": "es_actor",
+              "display_name": "Actor Spotlight",
+              "icon": "🌟",
+              "description_short": "Weekly spotlight on an actor in your library.",
+              "description_long": "",
+              "default_params": {
+                "auto_rotate": true,
+                "rotation_cadence": "weekly",
+                "subject_type": "actor"
+              }
+            },
+            {
+              "key": "es_studio",
+              "display_name": "Studio Spotlight",
+              "icon": "🏛️",
+              "description_short": "Weekly spotlight on a studio in your library.",
+              "description_long": "",
+              "default_params": {
+                "auto_rotate": true,
+                "rotation_cadence": "weekly",
+                "subject_type": "studio"
+              }
+            },
+            {
+              "key": "es_era_80s",
+              "display_name": "The 80s",
+              "icon": "📼",
+              "description_short": "Films from the 1980s.",
+              "description_long": "",
+              "default_params": {
+                "subject": "1980s",
+                "subject_type": "era"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": true,
+          "admin_only": false
+        },
+        {
+          "type": "genre_roulette",
+          "category": "editorial",
+          "presets": [
+            {
+              "key": "genre_roulette_weekly",
+              "display_name": "Genre Roulette",
+              "icon": "🎰",
+              "description_short": "A different genre every week, rated 6.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "rotation_cadence": "weekly"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": true,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "hand_picked",
+      "recipes": [
+        {
+          "type": "admin_curated_list",
+          "category": "hand_picked",
+          "presets": [
+            {
+              "key": "acl_blank",
+              "display_name": "Editor's Picks",
+              "icon": "✏️",
+              "description_short": "Admin-curated, item-by-item ordered list.",
+              "description_long": "",
+              "default_params": {
+                "item_ids": []
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": true
+        },
+        {
+          "type": "collection",
+          "category": "hand_picked",
+          "presets": [
+            {
+              "key": "collection_pick",
+              "display_name": "Collection",
+              "icon": "📁",
+              "description_short": "Show items from a library or curated collection.",
+              "description_long": "",
+              "default_params": {
+                "library_collection_id": ""
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "library_staples",
+      "recipes": [
+        {
+          "type": "continue_watching",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "continue_watching_default",
+              "display_name": "Continue Watching",
+              "icon": "▶️",
+              "description_short": "Pick up movies and episodes where you left off.",
+              "description_long": "",
+              "default_params": {
+                "continue_type": "watching"
+              }
+            },
+            {
+              "key": "continue_listening_default",
+              "display_name": "Continue Listening",
+              "icon": "🎧",
+              "description_short": "Pick up audiobooks where you left off.",
+              "description_long": "",
+              "default_params": {
+                "continue_type": "listening"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "favorites",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "favorites_default",
+              "display_name": "Favorites",
+              "icon": "⭐",
+              "description_short": "Your favorites.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "next_in_series",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "next_in_series_default",
+              "display_name": "Next in Series",
+              "icon": "📚",
+              "description_short": "The next audiobook in series you've finished.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "next_up",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "next_up_default",
+              "display_name": "On Deck",
+              "icon": "📺",
+              "description_short": "Next episodes ready to watch.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "random",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "random_default",
+              "display_name": "Surprise Me",
+              "icon": "🎲",
+              "description_short": "A random selection from your library.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "recently_added",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "recently_added_default",
+              "display_name": "Recently Added",
+              "icon": "🆕",
+              "description_short": "Latest additions to your library.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "recently_released",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "recently_released_default",
+              "display_name": "New Releases",
+              "icon": "🎬",
+              "description_short": "Recently released titles.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "watchlist",
+          "category": "library_staples",
+          "presets": [
+            {
+              "key": "watchlist_default",
+              "display_name": "Watchlist",
+              "icon": "🔖",
+              "description_short": "Items you've saved to watch.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "mood",
+      "recipes": [
+        {
+          "type": "mood_collection",
+          "category": "mood",
+          "presets": [
+            {
+              "key": "mood_feel_good",
+              "display_name": "Feel-Good Comedies",
+              "icon": "😄",
+              "description_short": "Comedy or Family, rated 6.5+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "feel_good"
+              }
+            },
+            {
+              "key": "mood_mind_bending",
+              "display_name": "Mind-Bending Sci-Fi",
+              "icon": "🌀",
+              "description_short": "Science Fiction or Mystery, rated 7.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "mind_bending"
+              }
+            },
+            {
+              "key": "mood_comfort",
+              "display_name": "Comfort Rewatches",
+              "icon": "🛋️",
+              "description_short": "Comedy, Romance or Family, rated 6.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "comfort"
+              }
+            },
+            {
+              "key": "mood_edge_of_seat",
+              "display_name": "Edge of Your Seat",
+              "icon": "😬",
+              "description_short": "Thriller or Action, rated 6.5+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "edge_of_seat"
+              }
+            },
+            {
+              "key": "mood_tearjerker",
+              "display_name": "Tearjerkers",
+              "icon": "😢",
+              "description_short": "Drama or Romance, rated 7.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "tearjerker"
+              }
+            },
+            {
+              "key": "mood_quiet_sunday",
+              "display_name": "Quiet Sunday Cinema",
+              "icon": "☕",
+              "description_short": "Drama or Documentary, rated 7.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "quiet_sunday"
+              }
+            },
+            {
+              "key": "mood_date_night",
+              "display_name": "Date Night",
+              "icon": "💕",
+              "description_short": "Romance or Comedy, rated 6.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "date_night"
+              }
+            },
+            {
+              "key": "mood_after_midnight",
+              "display_name": "After Midnight",
+              "icon": "🌙",
+              "description_short": "Horror or Thriller, rated 6.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "mood": "after_midnight"
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "short_watches",
+          "category": "mood",
+          "presets": [
+            {
+              "key": "short_watches_default",
+              "display_name": "Short & Sweet",
+              "icon": "⏱️",
+              "description_short": "Movies of 95 minutes or less, rated 6.0+ on TMDB with 100+ votes.",
+              "description_long": "",
+              "default_params": {
+                "max_minutes": 95
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "personalized",
+      "recipes": [
+        {
+          "type": "because_you_watched",
+          "category": "personalized",
+          "presets": [
+            {
+              "key": "bcw_auto",
+              "display_name": "Because You Watched",
+              "icon": "📺",
+              "description_short": "Picks based on your most recent watch.",
+              "description_long": "",
+              "default_params": {
+                "anchor_item_id": ""
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": true,
+          "admin_only": false
+        },
+        {
+          "type": "recommended_for_you",
+          "category": "personalized",
+          "presets": [
+            {
+              "key": "for_you",
+              "display_name": "Recommended For You",
+              "icon": "⭐",
+              "description_short": "Per-profile picks from the recommendation engine.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "returning_shows",
+          "category": "personalized",
+          "presets": [
+            {
+              "key": "returning_shows_default",
+              "display_name": "Returning Shows",
+              "icon": "🔁",
+              "description_short": "Shows you've watched with a brand-new season in your library.",
+              "description_long": "",
+              "default_params": {
+                "lookback_days": 30
+              }
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "similar_users_liked",
+          "category": "personalized",
+          "presets": [
+            {
+              "key": "similar",
+              "display_name": "Profiles Like You Enjoyed",
+              "icon": "👥",
+              "description_short": "What similar profiles are loving.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "taste_match",
+          "category": "personalized",
+          "presets": [
+            {
+              "key": "taste_top",
+              "display_name": "Top Picks Today",
+              "icon": "🎯",
+              "description_short": "Best matches for your strongest taste — set a genre to narrow it.",
+              "description_long": "",
+              "default_params": {}
+            }
+          ],
+          "avoid_duplicates": true,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "seasonal",
+      "recipes": [
+        {
+          "type": "seasonal_themed",
+          "category": "seasonal",
+          "presets": [
+            {
+              "key": "se_auto",
+              "display_name": "Seasonal Picks",
+              "icon": "🗓️",
+              "description_short": "Cycles automatically — Halloween in October, Christmas in December, etc.",
+              "description_long": "One section that swaps in different theme picks based on the calendar. Toggle which holidays this profile celebrates from the Add section dialog.",
+              "default_params": {
+                "enabled_themes": [
+                  "halloween",
+                  "christmas",
+                  "valentines",
+                  "st_patricks",
+                  "thanksgiving",
+                  "summer_blockbuster",
+                  "saturday_morning"
+                ]
+              }
+            },
+            {
+              "key": "se_family_movie_night",
+              "display_name": "Family Movie Night",
+              "icon": "🍿",
+              "description_short": "Family picks on Friday and Saturday evenings.",
+              "description_long": "",
+              "default_params": {
+                "enabled_themes": [
+                  "family_movie_night"
+                ]
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    },
+    {
+      "category": "social",
+      "recipes": [
+        {
+          "type": "most_watched",
+          "category": "social",
+          "presets": [
+            {
+              "key": "mw_week",
+              "display_name": "Most Watched This Week",
+              "icon": "🏆",
+              "description_short": "Top plays in the last 7 days.",
+              "description_long": "",
+              "default_params": {
+                "window": "week"
+              }
+            },
+            {
+              "key": "mw_month",
+              "display_name": "Most Watched This Month",
+              "icon": "🏆",
+              "description_short": "Top plays in the last 30 days.",
+              "description_long": "",
+              "default_params": {
+                "window": "month"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "new_to_library",
+          "category": "social",
+          "presets": [
+            {
+              "key": "ntl_30",
+              "display_name": "New to Library This Month",
+              "icon": "🆕",
+              "description_short": "Added in the last 30 days.",
+              "description_long": "",
+              "default_params": {
+                "lookback_days": 30
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "profile_activity_feed",
+          "category": "social",
+          "presets": [
+            {
+              "key": "pa_household",
+              "display_name": "What Others Just Watched",
+              "icon": "👪",
+              "description_short": "Recent watches across all other profiles.",
+              "description_long": "",
+              "default_params": {
+                "profile_id": ""
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "trending_discover",
+          "category": "social",
+          "presets": [
+            {
+              "key": "tdisc_tmdb_day",
+              "display_name": "TMDB Trending Today",
+              "icon": "🔥",
+              "description_short": "Today's trending movies & shows from TMDB, matched to your library.",
+              "description_long": "",
+              "default_params": {
+                "source": "tmdb",
+                "window": "day"
+              }
+            },
+            {
+              "key": "tdisc_tmdb_week",
+              "display_name": "TMDB Trending This Week",
+              "icon": "🔥",
+              "description_short": "This week's trending movies & shows from TMDB, matched to your library.",
+              "description_long": "",
+              "default_params": {
+                "source": "tmdb",
+                "window": "week"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        },
+        {
+          "type": "trending_on_server",
+          "category": "social",
+          "presets": [
+            {
+              "key": "tr_24h",
+              "display_name": "Trending Now (24h)",
+              "icon": "📈",
+              "description_short": "Most-played in the last day.",
+              "description_long": "",
+              "default_params": {
+                "window": "24h"
+              }
+            },
+            {
+              "key": "tr_7d",
+              "display_name": "Trending This Week",
+              "icon": "📈",
+              "description_short": "Most-played in the last week.",
+              "description_long": "",
+              "default_params": {
+                "window": "7d"
+              }
+            },
+            {
+              "key": "tr_30d",
+              "display_name": "Trending This Month",
+              "icon": "📈",
+              "description_short": "Most-played in the last month.",
+              "description_long": "",
+              "default_params": {
+                "window": "30d"
+              }
+            }
+          ],
+          "avoid_duplicates": false,
+          "supports_rotation": false,
+          "admin_only": false
+        }
+      ]
+    }
+  ]
+}

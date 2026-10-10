@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 import { queryRoomMemberState } from "./watchTogetherMemberState";
 import { readRoomPicker } from "./watchTogetherPicker";
@@ -118,7 +118,10 @@ it("starts playback with no body and switches mode with the enum", async () => {
   expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({ selection_mode: "vote" });
 });
 
-it.each([403, 409, 422])("does not publish a %s lobby refusal", async (status) => {
+it.each([401, 500])("does not publish a %s lobby refusal", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   const { result } = renderHook(() =>

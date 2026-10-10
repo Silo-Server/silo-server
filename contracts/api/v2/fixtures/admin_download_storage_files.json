@@ -1,0 +1,61 @@
+{
+  "items": [
+    {
+      "id": "art-dune",
+      "state": "cached",
+      "format": "transcode",
+      "location": "node:9",
+      "location_name": "node-gpu-1",
+      "media_file_id": "42",
+      "library_id": "3",
+      "content_id": "movie:dune-2",
+      "title": "Dune: Part Two",
+      "media_type": "movie",
+      "year": 2024,
+      "container": "mp4",
+      "video_codec": "hevc",
+      "audio_codec": "aac",
+      "resolution": "1080p",
+      "bitrate_kbps": 10000,
+      "bytes": 14200000000,
+      "created_at": "2026-10-05T09:30:00.000Z",
+      "last_used_at": "2026-10-06T07:30:00.000Z",
+      "expires_at": "2026-10-09T07:30:00.000Z",
+      "waiting": 0,
+      "downloading": 0,
+      "finished": 3,
+      "stale_waiting": 0
+    },
+    {
+      "id": "art-oppenheimer",
+      "state": "in_use",
+      "format": "transcode",
+      "location": "node:9",
+      "location_name": "node-gpu-1",
+      "media_file_id": "51",
+      "content_id": "movie:oppenheimer",
+      "title": "Oppenheimer",
+      "media_type": "movie",
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "resolution": "1080p",
+      "bitrate_kbps": 8000,
+      "bytes": 11800000000,
+      "created_at": "2026-09-18T09:30:00.000Z",
+      "last_used_at": "2026-09-19T09:30:00.000Z",
+      "waiting": 1,
+      "downloading": 0,
+      "finished": 0,
+      "stale_waiting": 1,
+      "oldest_waiting": {
+        "device_name": "Pixel 8",
+        "username": "maya",
+        "last_seen_at": "2026-09-19T09:30:00.000Z"
+      }
+    }
+  ],
+  "page": {
+    "has_more": false
+  }
+}

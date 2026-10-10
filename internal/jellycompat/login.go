@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -32,6 +33,10 @@ type LoginResolver struct {
 	sessions       *SessionStore
 	tokenGenerator func() string
 	now            func() time.Time
+	// pinAttempts is the native API's profile PIN limiter, so password#pin
+	// guesses here count against the same per-profile budget. Nil allows
+	// every attempt.
+	pinAttempts *ratelimit.AttemptLimiter
 }
 
 // NewLoginResolver creates a new login resolver using direct auth service.
@@ -51,14 +56,23 @@ func NewLoginResolver(authService *auth.Service, storeProvider userstore.UserSto
 	}
 }
 
+// WithPINAttempts sets the per-profile PIN attempt limiter and returns r.
+func (r *LoginResolver) WithPINAttempts(l *ratelimit.AttemptLimiter) *LoginResolver {
+	r.pinAttempts = l
+	return r
+}
+
 // Resolve authenticates the account and profile, returning a compat session.
 //
 // PIN-protected profiles are supported via the password#pin convention:
 // the user appends their profile PIN after a '#' in the password field.
 // The resolver tries the full password first, then falls back to splitting
-// at the last '#' if authentication fails and a '#' is present.
+// at the last '#' if the password was wrong and a '#' is present. The
+// convention applies to local accounts only: a name that signs in with a
+// directory (LDAP) gets exactly one attempt with the password as typed, so
+// a PIN never reaches the directory and a failed bind is never doubled.
 func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password, userAgent, remoteIP string) (*Session, error) {
-	accountUsername, requestedProfile, hasExplicitProfile, err := parseProfileLogin(combinedUsername)
+	accountUsername, requestedProfile, hasExplicitProfile, err := r.parseLogin(ctx, combinedUsername)
 	if err != nil {
 		return nil, err
 	}
@@ -67,17 +81,11 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 	basePw, pinCandidate := splitPasswordPIN(password)
 	// CompatLogin refuses a temporary password: Jellyfin clients cannot run the
 	// password change it requires.
-	tokenPair, user, err := r.authService.CompatLogin(ctx, accountUsername, password, userAgent, remoteIP)
-	if err != nil && basePw != "" && !errors.Is(err, auth.ErrPasswordChangeRequired) {
-		// Full password failed and there's a # — try the base portion.
-		tokenPair, user, err = r.authService.CompatLogin(ctx, accountUsername, basePw, userAgent, remoteIP)
-		if err != nil {
-			return nil, mapAuthError(err)
-		}
-		// basePw succeeded; pinCandidate holds the extracted PIN.
-	} else if err != nil {
+	tokenPair, user, usedFallback, err := r.authService.CompatLoginWithLocalFallback(ctx, accountUsername, password, basePw, userAgent, remoteIP)
+	if err != nil {
 		return nil, mapAuthError(err)
-	} else {
+	}
+	if !usedFallback {
 		// Full password succeeded — no PIN was split out.
 		pinCandidate = ""
 	}
@@ -111,6 +119,12 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		if pinCandidate == "" {
 			return nil, fmt.Errorf("%w: use password#pin format to access PIN-protected profiles", ErrProfileHasPIN)
 		}
+		// A locked profile fails like a wrong PIN: Jellyfin clients have no
+		// lockout response, so only the message says why.
+		attemptKey := ratelimit.ProfilePINKey(user.ID, profile.ID)
+		if _, ok := r.pinAttempts.Reserve(ctx, attemptKey); !ok {
+			return nil, fmt.Errorf("%w: too many incorrect PINs for profile %s; try again later", ErrInvalidPIN, profile.Name)
+		}
 		valid, verifyErr := store.VerifyPIN(ctx, profile.ID, pinCandidate)
 		if verifyErr != nil {
 			return nil, fmt.Errorf("verifying profile PIN: %w", verifyErr)
@@ -118,6 +132,7 @@ func (r *LoginResolver) Resolve(ctx context.Context, combinedUsername, password,
 		if !valid {
 			return nil, fmt.Errorf("%w: incorrect PIN for profile %s", ErrInvalidPIN, profile.Name)
 		}
+		r.pinAttempts.Reset(ctx, attemptKey)
 	}
 
 	now := r.now()
@@ -149,6 +164,42 @@ func splitPasswordPIN(password string) (basePw, pin string) {
 		return "", ""
 	}
 	return password[:idx], password[idx+1:]
+}
+
+// parseLogin reads username#profile. When no account has the name before
+// the last '#' and that name would not go to the directory, but the whole
+// name is an account, such as one named after an old Discord name like
+// "name#1234", the whole name is the account and no profile is named. A name
+// the directory may still provision keeps the split, so a local account can
+// never block a directory user's first sign-in.
+func (r *LoginResolver) parseLogin(ctx context.Context, combinedUsername string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
+	accountUsername, profileName, hasExplicitProfile, err = parseProfileLogin(combinedUsername)
+	if err != nil || !hasExplicitProfile {
+		return accountUsername, profileName, hasExplicitProfile, err
+	}
+	splitExists, err := r.authService.HasLoginName(ctx, accountUsername)
+	if err != nil {
+		return "", "", false, err
+	}
+	if splitExists {
+		return accountUsername, profileName, true, nil
+	}
+	usesDirectory, err := r.authService.PasswordLoginUsesDirectory(ctx, accountUsername)
+	if err != nil {
+		return "", "", false, err
+	}
+	if usesDirectory {
+		return accountUsername, profileName, true, nil
+	}
+	whole := strings.TrimSpace(combinedUsername)
+	wholeExists, err := r.authService.HasLoginName(ctx, whole)
+	if err != nil {
+		return "", "", false, err
+	}
+	if wholeExists {
+		return whole, "", false, nil
+	}
+	return accountUsername, profileName, true, nil
 }
 
 func parseProfileLogin(username string) (accountUsername string, profileName string, hasExplicitProfile bool, err error) {
@@ -229,15 +280,31 @@ func selectNamedProfile(profileName string, profiles []upstreamProfile) (upstrea
 	}
 }
 
+// Jellyfin's answer to a refused sign-in: the error code, and the message
+// of a plain credentials failure.
+const (
+	loginErrorCode            = "InvalidUsernameOrPassword"
+	invalidCredentialsMessage = "Invalid username or password"
+)
+
 func mapLoginError(err error) (int, string, string) {
 	if httpErr, ok := err.(*HTTPError); ok {
-		if httpErr.StatusCode == http.StatusUnauthorized {
-			return http.StatusUnauthorized, "InvalidUsernameOrPassword", "Invalid username or password"
+		switch httpErr.StatusCode {
+		case http.StatusUnauthorized:
+			// mapAuthError words every 401: a sign-in policy refusal names
+			// its reason, anything else is a plain credentials failure.
+			message := httpErr.Message
+			if message == "" {
+				message = invalidCredentialsMessage
+			}
+			return http.StatusUnauthorized, loginErrorCode, message
+		case http.StatusServiceUnavailable:
+			return http.StatusServiceUnavailable, "ServiceUnavailable", httpErr.Error()
 		}
 		return http.StatusBadGateway, "UpstreamError", httpErr.Error()
 	}
 	if errors.Is(err, ErrProfileRequired) || errors.Is(err, ErrProfileNotFound) || errors.Is(err, ErrProfileAmbiguous) || errors.Is(err, ErrProfileHasPIN) || errors.Is(err, ErrInvalidPIN) || errors.Is(err, auth.ErrPasswordChangeRequired) {
-		return http.StatusUnauthorized, "InvalidUsernameOrPassword", err.Error()
+		return http.StatusUnauthorized, loginErrorCode, err.Error()
 	}
 	return http.StatusInternalServerError, "ServerError", "Unexpected login failure"
 }
@@ -251,10 +318,20 @@ func mapAuthError(err error) error {
 		// Kept as the sentinel, like the PIN errors, so the client sees why.
 		return fmt.Errorf("%w: sign in to Silo to replace your temporary password", err)
 	}
+	switch {
+	case errors.Is(err, auth.ErrProviderUnavailable):
+		return &HTTPError{StatusCode: http.StatusServiceUnavailable, Message: "The sign-in provider is unavailable"}
+	case errors.Is(err, auth.ErrLocalLoginDisabled), errors.Is(err, auth.ErrNotPermitted),
+		errors.Is(err, auth.ErrEmailInUse), errors.Is(err, auth.ErrIdentityLinkedElsewhere),
+		errors.Is(err, auth.ErrProviderPasswordExpired):
+		// Refusals of the server's sign-in policy look like any failed
+		// sign-in to a Jellyfin client; the reason goes in the message.
+		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: err.Error()}
+	}
 	// auth.Service returns plain errors for bad credentials
 	errMsg := err.Error()
 	if strings.Contains(errMsg, "invalid credentials") || strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "disabled") {
-		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: "Invalid username or password"}
+		return &HTTPError{StatusCode: http.StatusUnauthorized, Message: invalidCredentialsMessage}
 	}
 	return err
 }

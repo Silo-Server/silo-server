@@ -113,10 +113,35 @@ const (
 	// node that approves theme files as progressive AAC inputs.
 	TransportFeatureThemeAudioEgressV1    = "theme_audio_egress_v1"
 	TransportFeatureThemeAudioExecutionV1 = "theme_audio_execution_v1"
+	// A transcode node that executes the multi-track prepared-download layout
+	// (PreparedTracksRecipeVersion).
+	TransportFeaturePreparedTracksV1 = "prepared_tracks_v1"
+	// A transcode node that makes trickplay sheets (POST /trickplay/extract).
+	TransportFeatureTrickplayExtractV1 = "trickplay_extract_v1"
 )
 
 // Degradation warning codes reported by playback plans.
-const DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
+const (
+	DegradationWarningHDRToneMappedV3 = "hdr_tone_mapped"
+	// A carried-over audio selection is not on the effective file, so the plan
+	// plays the file's default audio track instead of refusing to start.
+	DegradationWarningAudioTrackUnavailableV3 = "audio_track_unavailable"
+	// A carried-over subtitle selection has no equivalent on the effective
+	// file, so the plan starts with subtitles off instead of refusing to start.
+	DegradationWarningSubtitleTrackUnavailableV3 = "subtitle_track_unavailable"
+)
+
+// AudioTrackUnavailableWarningV3 reports an audio selection that fell back to
+// the file's default track.
+func AudioTrackUnavailableWarningV3() DegradationWarningV3 {
+	return DegradationWarningV3{Code: DegradationWarningAudioTrackUnavailableV3, Message: "The selected audio track is not on this file; playing its default instead."}
+}
+
+// SubtitleTrackUnavailableWarningV3 reports a subtitle selection that was
+// dropped because the effective file has no equivalent track.
+func SubtitleTrackUnavailableWarningV3() DegradationWarningV3 {
+	return DegradationWarningV3{Code: DegradationWarningSubtitleTrackUnavailableV3, Message: "The selected subtitle track is not on this file; starting without it."}
+}
 
 // ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
 // capability and decision responses. A fresh slice prevents callers from
@@ -248,6 +273,10 @@ const (
 	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
+	// TransformationServerDV7HDR10RecipeVersionV3 2 also removes the Profile 7
+	// enhancement-layer NAL units (see DV7ToHDR10BitstreamFilter), so an
+	// executor still on version 1 cannot claim the corrected output.
+	TransformationServerDV7HDR10RecipeVersionV3 = "2"
 )
 
 // Transformation executors: who runs the transformation. A "server"
@@ -284,6 +313,16 @@ const (
 	TerminalHDRTranscodeUnsupportedV3    = "hdr_transcode_unsupported"
 	TerminalDVConversionUnsupportedV3    = "dv_conversion_unsupported"
 )
+
+// TerminalSourceUnreadableV3 reports that ffprobe rejected the effective file
+// (zero-byte, corrupt, truncated) and no stream metadata exists for it. Unlike
+// source_metadata_incomplete, which covers a file that has not been probed
+// yet, retrying cannot help until the file is replaced and rescanned.
+const TerminalSourceUnreadableV3 = "source_unreadable"
+
+// TerminalSourceUnreadableMessageV3 is the planner message for
+// TerminalSourceUnreadableV3.
+const TerminalSourceUnreadableMessageV3 = "The source file could not be read; it appears to be empty or damaged."
 
 // TerminalBitratePolicyUnavailableV3 reports that no route fits the
 // administrator's local or remote per-stream bitrate limit for this version.
@@ -510,20 +549,25 @@ type DeliverySubtitleCapabilitiesV3 struct {
 }
 
 type DeliveryCapabilityV3 struct {
-	Enabled                bool                           `json:"enabled"`
-	SupportedOnDevice      bool                           `json:"supported_on_device"`
-	FailureReason          string                         `json:"failure_reason,omitempty"`
-	Containers             []string                       `json:"containers"`
-	VideoCodecs            []string                       `json:"video_codecs"`
-	AudioDecodeCodecs      []string                       `json:"audio_decode_codecs"`
-	AudioPassthroughCodecs []string                       `json:"audio_passthrough_codecs"`
-	MaxChannels            *int                           `json:"max_channels,omitempty"`
-	HDRDetails             *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
-	Subtitles              DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
-	Features               []string                       `json:"features"`
-	AuthHeaderRefresh      bool                           `json:"auth_header_refresh"`
-	ValidatedClaims        []string                       `json:"validated_claims"`
-	Transformations        []TransformationV3             `json:"transformations"`
+	Enabled                bool     `json:"enabled"`
+	SupportedOnDevice      bool     `json:"supported_on_device"`
+	FailureReason          string   `json:"failure_reason,omitempty"`
+	Containers             []string `json:"containers"`
+	VideoCodecs            []string `json:"video_codecs"`
+	AudioDecodeCodecs      []string `json:"audio_decode_codecs"`
+	AudioPassthroughCodecs []string `json:"audio_passthrough_codecs"`
+	// MaxChannels caps the channel count of the audio stream this class
+	// delivers: the most channels the client can play from it. A client whose
+	// player downmixes surround itself omits it. A source track above it is
+	// converted to AAC within the ceiling, on a video-copy remux when the
+	// video can be copied. Zero or less means unset.
+	MaxChannels       *int                           `json:"max_channels,omitempty"`
+	HDRDetails        *HDRCapabilitiesV3             `json:"hdr_details,omitempty"`
+	Subtitles         DeliverySubtitleCapabilitiesV3 `json:"subtitles"`
+	Features          []string                       `json:"features"`
+	AuthHeaderRefresh bool                           `json:"auth_header_refresh"`
+	ValidatedClaims   []string                       `json:"validated_claims"`
+	Transformations   []TransformationV3             `json:"transformations"`
 }
 
 // ClientPlaybackContextV3 carries the client's execution context. Feature

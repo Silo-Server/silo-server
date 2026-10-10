@@ -4,23 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-func TestInstallationIsBuiltin(t *testing.T) {
-	if (&Installation{Kind: KindBuiltin}).IsBuiltin() != true {
-		t.Error("kind=builtin must report IsBuiltin")
-	}
-	if (&Installation{Kind: KindPlugin}).IsBuiltin() {
-		t.Error("kind=plugin must not report IsBuiltin")
-	}
-	if (&Installation{}).IsBuiltin() {
-		t.Error("zero-value kind must not report IsBuiltin")
-	}
-}
 
 // The reserved builtin plugin id must be rejected at install time so a
 // malicious or accidental catalog entry cannot hijack the reserved row.
@@ -108,4 +97,45 @@ func seedBuiltinTestInstallation(t *testing.T, pool *pgxpool.Pool, pluginID stri
 		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
 	})
 	return id
+}
+
+// Replacing a package records where the new one came from, and InstalledFromSiloRepository
+// follows it: a package uploaded over a Silo catalog install is no longer Silo-managed.
+func TestInstallationStoreUpdateRecordsReplacementSourceDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := context.Background()
+	var siloRepository int
+	if err := pool.QueryRow(ctx, `SELECT id FROM plugin_repositories WHERE source_kind = 'silo' ORDER BY id LIMIT 1`).Scan(&siloRepository); err != nil {
+		t.Skipf("no Silo-managed repository row: %v", err)
+	}
+	store := NewInstallationStore(pool)
+	pluginID := "test.source." + strconv.FormatInt(time.Now().UnixNano(), 36)
+	installation, err := store.Create(ctx, CreateInstallationInput{
+		RepositoryID: siloRepository,
+		PluginID:     pluginID,
+		Version:      "1.0.0",
+		InstallPath:  "/nonexistent/plugin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, installation.ID) }()
+	service := &Service{repositories: NewRepositoryStore(pool)}
+	if managed, err := service.InstalledFromSiloRepository(ctx, installation); err != nil || !managed {
+		t.Fatalf("catalog install: managed = %t, err = %v", managed, err)
+	}
+
+	if err := store.Update(ctx, installation.ID, UpdateInstallationInput{SetRepository: true}); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := store.GetByID(ctx, installation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.RepositoryID != nil {
+		t.Fatalf("repository after upload replace = %d, want none", *replaced.RepositoryID)
+	}
+	if managed, err := service.InstalledFromSiloRepository(ctx, replaced); err != nil || managed {
+		t.Fatalf("uploaded replacement: managed = %t, err = %v", managed, err)
+	}
 }

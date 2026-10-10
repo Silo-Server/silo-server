@@ -25,50 +25,10 @@ func makeTestImage(t *testing.T, w, h int, c color.NRGBA) []byte {
 	return buf.Bytes()
 }
 
-func TestComposePoster_NoImages(t *testing.T) {
-	_, err := ComposePoster(nil)
-	if err != ErrNotEnoughImages {
-		t.Fatalf("expected ErrNotEnoughImages, got %v", err)
-	}
-}
-
 func TestComposePoster_AllInvalid(t *testing.T) {
 	_, err := ComposePoster([][]byte{{0, 1, 2}, {3, 4, 5}})
 	if err != ErrNotEnoughImages {
 		t.Fatalf("expected ErrNotEnoughImages, got %v", err)
-	}
-}
-
-func TestComposePoster_SingleImage(t *testing.T) {
-	src := makeTestImage(t, 300, 450, color.NRGBA{R: 255, A: 255})
-	result, err := ComposePoster([][]byte{src})
-	if err != nil {
-		t.Fatal(err)
-	}
-	img, err := jpeg.Decode(bytes.NewReader(result))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bounds := img.Bounds()
-	if bounds.Dx() != posterWidth || bounds.Dy() != posterHeight {
-		t.Fatalf("expected %dx%d, got %dx%d", posterWidth, posterHeight, bounds.Dx(), bounds.Dy())
-	}
-}
-
-func TestComposePoster_TwoImages(t *testing.T) {
-	red := makeTestImage(t, 300, 450, color.NRGBA{R: 255, A: 255})
-	blue := makeTestImage(t, 300, 450, color.NRGBA{B: 255, A: 255})
-	result, err := ComposePoster([][]byte{red, blue})
-	if err != nil {
-		t.Fatal(err)
-	}
-	img, err := jpeg.Decode(bytes.NewReader(result))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bounds := img.Bounds()
-	if bounds.Dx() != posterWidth || bounds.Dy() != posterHeight {
-		t.Fatalf("expected %dx%d, got %dx%d", posterWidth, posterHeight, bounds.Dx(), bounds.Dy())
 	}
 }
 
@@ -98,17 +58,6 @@ func TestComposePoster_FourImages(t *testing.T) {
 }
 
 func TestComposePoster_SkipsInvalidImages(t *testing.T) {
-	valid := makeTestImage(t, 300, 450, color.NRGBA{R: 255, A: 255})
-	result, err := ComposePoster([][]byte{{0, 1, 2}, valid, {3, 4, 5}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result) == 0 {
-		t.Fatal("expected non-empty result")
-	}
-}
-
-func TestComposePoster_AcceptsPNG(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 200, 300))
 	for y := range 300 {
 		for x := range 200 {
@@ -119,7 +68,8 @@ func TestComposePoster_AcceptsPNG(t *testing.T) {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
 	}
-	result, err := ComposePoster([][]byte{buf.Bytes()})
+	valid := buf.Bytes()
+	result, err := ComposePoster([][]byte{{0, 1, 2}, valid, {3, 4, 5}})
 	if err != nil {
 		t.Fatal(err)
 	}

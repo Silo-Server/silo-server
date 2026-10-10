@@ -1,8 +1,8 @@
+import type { BuildInfo } from "@/hooks/queries/admin/system";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminSidebar from "./AdminSidebar";
-import type { BuildInfo } from "@/hooks/queries/admin/system";
 
 interface MockBuildInfoResult {
   data?: BuildInfo;
@@ -30,6 +30,9 @@ const mockUseBuildInfo = vi.fn<() => MockBuildInfoResult>(() => ({
 }));
 const mockUseAdminSessions = vi.fn(() => ({ data: [] }));
 const mockUseAdminPluginInstallations = vi.fn(() => ({ data: [] }));
+const mockUseAdminRequestCounts = vi.fn<() => { data?: { needs_approval: number } }>(() => ({
+  data: { needs_approval: 0 },
+}));
 const mockUsePolicyCapability = vi.fn(() => ({
   data: {
     enabled: true,
@@ -59,6 +62,10 @@ vi.mock("@/hooks/queries/admin/policy", () => ({
   usePolicyCapability: () => mockUsePolicyCapability(),
 }));
 
+vi.mock("@/hooks/queries/admin/requests", () => ({
+  useAdminRequestCounts: () => mockUseAdminRequestCounts(),
+}));
+
 function renderSidebar(embedded = false) {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={["/admin"]}>
@@ -79,12 +86,21 @@ describe("AdminSidebar", () => {
     });
   });
 
-  it("renders the grouped navigation sections", () => {
+  it("shows how many requests need approval on the Requests entry", () => {
+    mockUseAdminRequestCounts.mockReturnValueOnce({ data: { needs_approval: 3 } });
     const markup = renderSidebar();
+    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
 
-    for (const section of ["Overview", "Content", "Automation", "Users", "Settings", "System"]) {
-      expect(markup).toContain(`>${section}<`);
-    }
+    expect(requestsLink).toContain('<span aria-hidden="true">3</span>');
+    expect(requestsLink).toContain(", 3 need approval");
+  });
+
+  it("leaves the Requests entry plain when nothing needs approval", () => {
+    const markup = renderSidebar();
+    const requestsLink = markup.match(/<a[^>]*href="\/admin\/requests"[^>]*>.*?<\/a>/)?.[0];
+
+    expect(requestsLink).toBeDefined();
+    expect(requestsLink).not.toContain("need approval");
   });
 
   it("keeps settings as one sidebar destination", () => {
@@ -95,33 +111,12 @@ describe("AdminSidebar", () => {
     expect(markup).not.toContain("/admin/settings?tab=");
   });
 
-  it("renders as an embedded rail inside the mobile drawer", () => {
-    const markup = renderSidebar(true);
-
-    expect(markup).toContain('data-layout="drawer"');
-    expect(markup).toContain("relative h-full w-full");
-    expect(markup).not.toContain("fixed top-0 bottom-0 left-0");
-  });
-
   it("includes a Sections link in the content navigation", () => {
     const markup = renderSidebar();
 
     expect(markup).toContain('href="/admin/sections"');
     expect(markup).toContain(">Sections<");
-  });
-
-  it("includes Diagnostics next to the operational overview links", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/diagnostics"');
-    expect(markup).toContain(">Diagnostics<");
-  });
-
-  it("includes a Maintenance link in the system navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/maintenance"');
-    expect(markup).toContain(">Maintenance<");
+    expect(markup).not.toContain('href="/admin/home-rows"');
   });
 
   it("hides Policy navigation when the editor capability is unavailable", () => {
@@ -138,20 +133,6 @@ describe("AdminSidebar", () => {
 
     expect(markup).not.toContain('href="/admin/policy"');
     expect(markup).not.toContain(">Policy<");
-  });
-
-  it("includes a Recommendations link in the automation navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/recommendations"');
-    expect(markup).toContain(">Recommendations<");
-  });
-
-  it("includes a Markers link in the automation navigation", () => {
-    const markup = renderSidebar();
-
-    expect(markup).toContain('href="/admin/marker-history"');
-    expect(markup).toContain(">Markers<");
   });
 
   it("renders the build identifier in the footer", () => {

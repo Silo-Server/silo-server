@@ -10,9 +10,12 @@ var (
 	ErrQuotaExceeded    = errors.New("request quota exceeded")
 	ErrAlreadyAvailable = errors.New("media is already available")
 	ErrAlreadyRequested = errors.New("media is already requested")
-	ErrNotFound         = errors.New("request not found")
-	ErrForbidden        = errors.New("request forbidden")
-	ErrInvalidState     = errors.New("invalid request state")
+	// ErrNotRequested answers a follow for a title nobody has an active
+	// request for; the viewer should request it instead.
+	ErrNotRequested = errors.New("media has no active request")
+	ErrNotFound     = errors.New("request not found")
+	ErrForbidden    = errors.New("request forbidden")
+	ErrInvalidState = errors.New("invalid request state")
 	// ErrIntegrationUnreachable reports that the configured request integration
 	// (its plugin, or the service behind it) could not be reached. It is a
 	// dependency failure, not a bug in the request, so the API layer answers an

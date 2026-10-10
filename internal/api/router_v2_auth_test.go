@@ -24,7 +24,8 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Configure the real repositories against an unavailable target so the
-	// API-key lookup takes its failure path without requiring a database.
+	// API-key lookup fails without requiring a database. A lookup that fails
+	// judges nothing about the key, so it is a retryable 503, not a 401.
 	pool, err := pgxpool.New(t.Context(), "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
 	if err != nil {
 		t.Fatal(err)
@@ -46,15 +47,16 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	for _, tc := range []struct {
-		name    string
-		header  string
-		legacy  string
-		problem apiv2.ProblemType
+		name        string
+		header      string
+		legacyError string
+		legacy      string
+		problem     apiv2.ProblemType
 	}{
-		{"missing credential", "", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
-		{"malformed header", "Basic invalid", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
-		{"invalid JWT", "Bearer invalid", "Invalid or expired token", apiv2.TypeInvalidToken},
-		{"failed API key lookup", "Bearer sa_missing", "Invalid API key", apiv2.TypeInvalidToken},
+		{"missing credential", "", "unauthorized", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
+		{"malformed header", "Basic invalid", "unauthorized", "Missing or malformed authorization header", apiv2.TypeAuthenticationRequired},
+		{"invalid JWT", "Bearer invalid", "unauthorized", "Invalid or expired token", apiv2.TypeInvalidToken},
+		{"failed API key lookup", "Bearer sa_missing", "service_unavailable", "Sign-in could not be checked right now; try again shortly", apiv2.TypeDependencyUnavailable},
 	} {
 		for _, path := range []string{"/api/v1/auth/me", "/api/v2/account/me"} {
 			t.Run(tc.name+path, func(t *testing.T) {
@@ -73,8 +75,11 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if response.StatusCode != http.StatusUnauthorized {
+				if response.StatusCode != tc.problem.Status {
 					t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+				}
+				if tc.problem.Status == http.StatusServiceUnavailable && response.Header.Get("Retry-After") == "" {
+					t.Fatalf("503 without Retry-After: headers = %v", response.Header)
 				}
 				var fields map[string]json.RawMessage
 				if err := json.Unmarshal(body, &fields); err != nil {
@@ -85,7 +90,7 @@ func TestRouterAuthDenialEnvelopes(t *testing.T) {
 					if err := json.Unmarshal(body, &legacy); err != nil {
 						t.Fatal(err)
 					}
-					if response.Header.Get("Content-Type") != "application/json" || len(fields) != 2 || legacy.Error != "unauthorized" || legacy.Message != tc.legacy {
+					if response.Header.Get("Content-Type") != "application/json" || len(fields) != 2 || legacy.Error != tc.legacyError || legacy.Message != tc.legacy {
 						t.Fatalf("legacy denial changed: headers = %v, body = %s", response.Header, body)
 					}
 					return

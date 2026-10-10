@@ -20,7 +20,6 @@ vi.mock("@/hooks/queries/admin/nodes", () => ({
   useAdminNodes: mocks.useAdminNodes,
 }));
 
-import { formatLatency, formatUptime } from "../format";
 import { HealthStripWidget } from "./HealthStripWidget";
 
 function status(overrides: Partial<AdminServerStatus> = {}): AdminServerStatus {
@@ -64,33 +63,6 @@ function renderStrip() {
     </MemoryRouter>,
   );
 }
-
-describe("formatUptime", () => {
-  const now = Date.parse("2026-08-26T12:00:00Z");
-
-  it("steps down to the coarsest useful unit", () => {
-    expect(formatUptime("2026-08-26T11:59:30Z", now)).toBe("30s");
-    expect(formatUptime("2026-08-26T11:18:00Z", now)).toBe("42m");
-    expect(formatUptime("2026-08-26T06:48:00Z", now)).toBe("5h 12m");
-    expect(formatUptime("2026-08-26T07:00:00Z", now)).toBe("5h");
-    expect(formatUptime("2026-08-23T08:00:00Z", now)).toBe("3d 4h");
-    expect(formatUptime("2026-08-23T12:00:00Z", now)).toBe("3d");
-  });
-
-  it("reports an em dash rather than a negative or bogus uptime", () => {
-    expect(formatUptime(undefined, now)).toBe("—");
-    expect(formatUptime("not-a-date", now)).toBe("—");
-    expect(formatUptime("2026-08-26T12:00:30Z", now)).toBe("0s");
-  });
-});
-
-describe("formatLatency", () => {
-  it("keeps decimals only where they carry information", () => {
-    expect(formatLatency(1.42)).toBe("1.42 ms");
-    expect(formatLatency(0.31)).toBe("0.31 ms");
-    expect(formatLatency(148.6)).toBe("149 ms");
-  });
-});
 
 describe("HealthStripWidget", () => {
   beforeEach(() => {

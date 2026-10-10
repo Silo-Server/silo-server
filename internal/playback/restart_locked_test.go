@@ -18,7 +18,7 @@ func newFakeFFmpegSession(t *testing.T) *TranscodeSession {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-ffmpeg.sh")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 	return &TranscodeSession{

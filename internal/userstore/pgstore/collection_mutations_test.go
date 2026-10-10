@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -24,7 +25,7 @@ func TestCollectionCASConcurrentPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	for _, operation := range []string{"update", "delete", "items", "collections", "group_update", "group_delete", "groups"} {
+	for _, operation := range []string{"update", "delete", "items", "collections"} {
 		t.Run(operation, func(t *testing.T) {
 			ctx := t.Context()
 			var uid int
@@ -46,15 +47,11 @@ func TestCollectionCASConcurrentPostgres(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			g, err := s.CreateCollectionGroup(ctx, "group", "group", "manual")
-			if err != nil {
-				t.Fatal(err)
-			}
 			revision, err := s.CollectionRevision(ctx, c.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if operation == "collections" || operation == "group_update" || operation == "group_delete" || operation == "groups" {
+			if operation == "collections" {
 				revision, err = s.CollectionOrderRevision(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -70,14 +67,9 @@ func TestCollectionCASConcurrentPostgres(t *testing.T) {
 				case "items":
 					return store.ReorderCollectionItemsIfRevision(ctx, c.ID, []string{"b", "a"}, revision)
 				case "collections":
-					return store.ReorderCollectionsIfRevision(ctx, "owner", nil, []string{c.ID}, revision)
-				case "group_update":
-					_, err := store.UpdateCollectionGroupIfRevision(ctx, g.ID, new("updated"), nil, nil, revision)
-					return err
-				case "group_delete":
-					return store.DeleteCollectionGroupIfRevision(ctx, g.ID, revision)
+					return store.ReorderCollectionsIfRevision(ctx, "owner", []string{c.ID}, revision)
 				default:
-					return store.ReorderCollectionGroupsIfRevision(ctx, []string{g.ID}, revision)
+					panic("unknown collection operation: " + operation)
 				}
 			}
 			start := make(chan struct{})
@@ -132,43 +124,60 @@ func TestCollectionCASOrderScopePostgres(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM user_collection_order_revisions WHERE user_id=$1`, uid)
 	}()
 	store := newStore(pool, uid)
-	visible, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "visible"})
-	if err != nil {
-		t.Fatal(err)
+	create := func(creator, name string, shared bool) *userstore.Collection {
+		t.Helper()
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: creator, Name: name, IsShared: shared})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
 	}
-	hidden, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "other", Name: "hidden"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	group, err := store.CreateCollectionGroup(ctx, "group", "group", "manual")
-	if err != nil {
-		t.Fatal(err)
+	first := create("owner", "first", false)
+	second := create("owner", "second", true)
+	theirShared := create("other", "their shared", true)
+	theirPrivate := create("other", "their private", false)
+	// Each profile's new collections append to its own order.
+	for _, c := range []struct {
+		got  *userstore.Collection
+		want int
+	}{{first, 0}, {second, 1}, {theirShared, 0}, {theirPrivate, 1}} {
+		if c.got.SortOrder != c.want {
+			t.Fatalf("%s sort_order = %d, want %d", c.got.Name, c.got.SortOrder, c.want)
+		}
 	}
 	version, err := store.CollectionOrderRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Even a current account version does not authorize moving an invisible
-	// collection or moving rows between the requested group and another group.
-	for _, groupID := range []*string{nil, &group.ID} {
-		err := store.ReorderCollectionsIfRevision(ctx, "owner", groupID, []string{hidden.ID, visible.ID}, version)
-		if err == nil {
-			t.Fatal("reordered outside profile/group scope")
+	// Even a current account version does not let a profile move another
+	// profile's collection, whether that collection is shared with it or not.
+	for _, ids := range [][]string{
+		{theirShared.ID, second.ID, first.ID},
+		{theirPrivate.ID, second.ID, first.ID},
+		{theirShared.ID},
+	} {
+		err := store.ReorderCollectionsIfRevision(ctx, "owner", ids, version)
+		if !errors.Is(err, collectionutil.ErrOrderedIDsMismatch) {
+			t.Fatalf("reorder %v = %v, want ErrOrderedIDsMismatch", ids, err)
 		}
 		after, err := store.CollectionOrderRevision(ctx)
 		if err != nil || after != version {
 			t.Fatalf("failed reorder changed aggregate: %d -> %d (%v)", version, after, err)
 		}
 	}
-	got, err := store.GetCollection(ctx, hidden.ID)
-	if err != nil {
-		t.Fatal(err)
+	// The #1616 repro: reordering one profile's collections leaves every
+	// other profile's order alone.
+	if err := store.ReorderCollectionsIfRevision(ctx, "owner", []string{second.ID, first.ID}, version); err != nil {
+		t.Fatalf("own permutation rejected: %v", err)
 	}
-	if got.GroupID != nil || got.SortOrder != hidden.SortOrder {
-		t.Fatalf("hidden collection mutated: %+v", got)
-	}
-	if err := store.ReorderCollectionsIfRevision(ctx, "owner", nil, []string{visible.ID}, version); err != nil {
-		t.Fatalf("correct visible permutation rejected: %v", err)
+	for id, want := range map[string]int{second.ID: 0, first.ID: 1, theirShared.ID: 0, theirPrivate.ID: 1} {
+		got, err := store.GetCollection(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.SortOrder != want {
+			t.Fatalf("%s sort_order after reorder = %d, want %d", got.Name, got.SortOrder, want)
+		}
 	}
 }
 

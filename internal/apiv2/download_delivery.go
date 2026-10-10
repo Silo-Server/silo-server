@@ -72,6 +72,12 @@ func registerDownloadDelivery(reg *Registry) {
 			op.Responses["412"] = &huma.Response{Description: "File precondition failed.", Headers: headers}
 			op.Responses["416"] = &huma.Response{Description: "Range not satisfiable.", Content: map[string]*huma.MediaType{"text/plain": {Schema: &huma.Schema{Type: huma.TypeString}}}, Headers: headers}
 		}
+		if route.kind == "subtitle" {
+			// Downloaded subtitles revalidate: a stored timing correction can
+			// change their bytes (ETag carries the subtitle revision).
+			op.Parameters = append(op.Parameters, &huma.Param{Name: "If-None-Match", In: "header", Schema: &huma.Schema{Type: huma.TypeString}})
+			op.Responses["304"] = &huma.Response{Description: "Representation not modified.", Headers: headers}
+		}
 		if route.proxy {
 			op.Responses["307"] = &huma.Response{Description: "Authorized temporary proxy location; preserve the original method and range headers.", Headers: headers}
 			if route.method == http.MethodGet {
@@ -105,7 +111,7 @@ func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Reques
 	// written rather than before the first read, so that failure still gets
 	// its problem response. Files keep ReadFrom for sendfile; ServeContent
 	// writes their header before copying anyway.
-	asset := struct{ http.ResponseWriter }{writer}
+	asset := assetResponseWriter{writer}
 	var err error
 	switch kind {
 	case "file":
@@ -125,3 +131,10 @@ func (reg *Registry) serveDownloadDelivery(w http.ResponseWriter, r *http.Reques
 	}
 	writeProblem(w, r, downloadProblem(err))
 }
+
+// assetResponseWriter hides ReadFrom from artwork and subtitle copies (see
+// serveDownloadDelivery) while keeping Unwrap, so response controllers can
+// still reach the connection for rolling write deadlines.
+type assetResponseWriter struct{ http.ResponseWriter }
+
+func (w assetResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

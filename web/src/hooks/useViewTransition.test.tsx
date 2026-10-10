@@ -87,7 +87,7 @@ describe("useViewTransitionNavigate", () => {
   });
 
   it("leaves an explicit replace alone", async () => {
-    render(<Harness to="/item/episode" options={{ replace: false }} />);
+    render(<Harness to="/item/episode" options={{ replace: false }} at="/item/episode" />);
     await go();
 
     expect(mocks.navigate).toHaveBeenCalledWith("/item/episode", {

@@ -24,6 +24,7 @@ type DownloadSubscription struct {
 	TargetSeason    *int    `json:"target_season,omitempty"`
 	DeleteWatched   bool    `json:"delete_watched"`
 	MaxStorageBytes int64   `json:"max_storage_bytes"`
+	Quality         string  `json:"quality" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps" doc:"Quality the monitor registers episodes in."`
 	Active          bool    `json:"active"`
 	CreatedAt       Instant `json:"created_at"`
 	UpdatedAt       Instant `json:"updated_at"`
@@ -53,7 +54,7 @@ func downloadSubscriptionOf(row *downloads.Subscription) DownloadSubscription {
 	// precision. Millisecond wire timestamps alone cannot distinguish rapid edits.
 	encoded, _ := json.Marshal(row)
 	tag := fmt.Sprintf(`"%x"`, sha256.Sum256(encoded))
-	return DownloadSubscription{ID: ID(row.ID), SeriesID: row.SeriesID, Mode: row.Mode, SeasonNumbers: append([]int{}, row.SeasonNumbers...), TargetSeason: row.TargetSeason, DeleteWatched: row.DeleteWatched, MaxStorageBytes: row.MaxStorageBytes, Active: row.Active, CreatedAt: NewInstant(row.CreatedAt), UpdatedAt: NewInstant(row.UpdatedAt), ETag: tag}
+	return DownloadSubscription{ID: ID(row.ID), SeriesID: row.SeriesID, Mode: row.Mode, SeasonNumbers: append([]int{}, row.SeasonNumbers...), TargetSeason: row.TargetSeason, DeleteWatched: row.DeleteWatched, MaxStorageBytes: row.MaxStorageBytes, Quality: downloads.SubscriptionQuality(row.Quality), Active: row.Active, CreatedAt: NewInstant(row.CreatedAt), UpdatedAt: NewInstant(row.UpdatedAt), ETag: tag}
 }
 
 func registerDownloadSubscriptions(reg *Registry) {

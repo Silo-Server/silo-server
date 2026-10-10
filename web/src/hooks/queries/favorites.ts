@@ -9,6 +9,10 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
+import {
+  PERSONAL_STATE_WRITE_TIMEOUT_MS,
+  personalStateMutationOptions,
+} from "./personalStateWrites";
 
 export function useFavorites() {
   return useQuery({
@@ -39,10 +43,17 @@ export function useToggleFavorite(itemId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...personalStateMutationOptions,
     mutationFn: (currentlyFavorite: boolean) =>
       currentlyFavorite
-        ? v2("DELETE /api/v2/favorites/{item_id}", { path: { item_id: itemId } })
-        : v2("PUT /api/v2/favorites/{item_id}", { path: { item_id: itemId } }),
+        ? v2("DELETE /api/v2/favorites/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          })
+        : v2("PUT /api/v2/favorites/{item_id}", {
+            path: { item_id: itemId },
+            timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+          }),
     onMutate: async (currentlyFavorite: boolean) => {
       await cancelItemDetailQueries(queryClient, itemId);
       updateCatalogItemDetail(queryClient, itemId, (detail) => ({

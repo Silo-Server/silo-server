@@ -129,8 +129,14 @@ Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
 history-import admin/session tokens and temporary server-list credentials,
 subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
-(`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`), and
-the ABS signing key. Plugin runtime configuration is encrypted as one opaque
+(`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`),
+the ABS signing key, and an external sign-in plugin's per-identity refresh
+state (`plugin_auth_identities.refresh_state`, AAD
+`plugin_auth_identities:refresh_state:<id>`; an OIDC refresh token, see
+[external-sign-in.md](external-sign-in.md#provider-re-check)). After a
+`SECRET_KEY` change that state no longer decrypts: it is sent as none, the
+OIDC plugin answers `UNSUPPORTED`, and those identities' sessions fall back to
+the absolute session age until the person signs in again. Plugin runtime configuration is encrypted as one opaque
 row-bound envelope rather than by manifest field. Consequently, runtime code
 must use `RuntimeConfigStore`; database JSON-member queries and indexes are not
 supported for `plugin_runtime_configs.config_value`.
@@ -143,5 +149,5 @@ Deliberately **not** encrypted (tracked as follow-ups):
   `api_keys.api_key`, `webhook_sync_connections.webhook_secret`,
   `jellycompat_sessions.token`, and `watch_together_rooms.join_token`.
 Excluded (not a gap): `plex_sync_connections.*` is a dead table (zero Go
-references); `oauth_completions.token_ciphertext` is already AES-GCM;
+references); `oauth_completions.token_ciphertext` is no longer written (a completion code opens its session at redemption and stores no tokens), and `oauth_pending_links.payload` is already AES-GCM;
 `users.password_hash` and the `*_hash` columns are already hashed.

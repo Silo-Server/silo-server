@@ -19,6 +19,8 @@ type fakeLifecycle struct {
 	viewer     mediarequests.Viewer
 	id, reason string
 	err        error
+	// requestsDisabled turns requests off for the server.
+	requestsDisabled bool
 }
 
 func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, reason string) (*mediarequests.Request, error) {
@@ -29,7 +31,7 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 }
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
-	return mediarequests.FeatureStatus{RequestsEnabled: true, RatingRestrictionsEnforced: true}, f.err
+	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true}, f.err
 }
 
 type fakeWatchLifecycle struct {
@@ -139,6 +141,18 @@ func TestWatchProviderConnectAPIKeyRejectedCredential(t *testing.T) {
 	requireProblem(t, rec, TypeValidationFailed)
 	if strings.Contains(rec.Body.String(), "wrong-key") {
 		t.Fatal("supplied credential echoed back")
+	}
+}
+
+// Connection config the host or the plugin rejects is a client problem, and
+// the safe message tells the user what to fix.
+func TestWatchProviderConnectAPIKeyRejectedConnectionInput(t *testing.T) {
+	w := &fakeWatchLifecycle{err: watchsync.InvalidConnectionInputError{Message: "Scrob server URL must be an absolute http or https URL"}}
+	h := lifecycleHandler(&fakeLifecycle{}, w)
+	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/plugin:5:scrob/auth/api-key", `{"api_key":"key"}`, requestOwner)
+	requireProblem(t, rec, TypeValidationFailed)
+	if !strings.Contains(rec.Body.String(), `"detail":"Scrob server URL must be an absolute http or https URL"`) {
+		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
 

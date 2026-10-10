@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -36,6 +37,8 @@ type AdminLogsSocketCapabilitiesOutput struct {
 }
 
 type AdminLogsSocketCapabilitiesOutputBody struct {
+	AuditChangeDetails bool     `json:"audit_change_details"`
+	AuditActions       []string `json:"audit_actions"`
 	Capability
 	Available bool   `json:"available"`
 	Protocol  string `json:"protocol"`
@@ -45,6 +48,7 @@ type AdminLogsSocketCapabilitiesOutputBody struct {
 
 const (
 	adminLogsSocketCacheControl = "no-store"
+	adminLogsActorIDPattern     = "^[1-9][0-9]*$"
 	adminLogsQuerySessionID     = "session_id"
 	adminLogsQueryPlaybackID    = "playback_session_id"
 	adminLogsQueryRequestID     = "request_id"
@@ -61,6 +65,11 @@ func registerAdminLogsSocket(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, root+"/ws/capabilities", "getAdminLogsSocketCapabilities", "admin-observability", "Discover whether the administrator log stream handshake is served."), Class: ClassActingAdmin, ServiceBacked: true}, func(ctx context.Context, _ *CapabilityInput) (*AdminLogsSocketCapabilitiesOutput, error) {
 		out := &AdminLogsSocketCapabilitiesOutput{CacheControl: adminLogsSocketCacheControl}
 		out.Body.Streams = []string{}
+		out.Body.AuditChangeDetails = reg.deps.AdminAuditLogs != nil
+		out.Body.AuditActions = []string{}
+		if out.Body.AuditChangeDetails {
+			out.Body.AuditActions = auditmutation.Actions()
+		}
 		out.Body.Allowed = new(capabilityLoginAllowed(ctx))
 		out.Body.Available = reg.deps.AdminLogsSocket != nil && reg.deps.AdminLogsSocket.Available()
 		if out.Body.Available {
@@ -98,6 +107,10 @@ func registerAdminLogsSocket(reg *Registry) {
 	responses := socketResponses([]string{"400", "401", "403", "503"}, "Handshake refused.", "Administrator log stream established.", adminLogsHandshakeHeaderDoc)
 	raw := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: root + "/ws", OperationID: "connectAdminLogsSocket", Tags: []string{"admin-observability"}, Summary: "Connect the administrator log stream using a single-use session-bound credential in Sec-WebSocket-Protocol. Frames are the bridge's snapshot, append and error messages.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}
 	raw.Parameters = []*huma.Param{
+		{Name: "action", In: discordLinkQuery, Schema: &huma.Schema{Type: huma.TypeString, MaxLength: new(64)}, Description: "audit: domain action filter."},
+		{Name: "actor_user_id", In: discordLinkQuery, Schema: &huma.Schema{Type: huma.TypeString, Pattern: adminLogsActorIDPattern, MaxLength: new(20)}, Description: "audit: acting account, including an impersonator."},
+		{Name: "target_type", In: discordLinkQuery, Schema: &huma.Schema{Type: huma.TypeString, MaxLength: new(64)}, Description: "audit: affected entity type."},
+		{Name: "target_id", In: discordLinkQuery, Schema: &huma.Schema{Type: huma.TypeString, MaxLength: new(64)}, Description: "audit: affected entity identifier."},
 		{Name: eventsProtocolHeader, In: paramInHeader, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Offer silo.admin-logs.v2 followed by silo.ticket.<single-use-ticket>."},
 		{Name: eventsOriginHeader, In: paramInHeader, Schema: &huma.Schema{Type: huma.TypeString}, Description: socketOriginHeaderDoc},
 		{Name: "stream", In: discordLinkQuery, Required: true, Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"app", "audit"}}, Description: "Which log stream to snapshot and follow."},

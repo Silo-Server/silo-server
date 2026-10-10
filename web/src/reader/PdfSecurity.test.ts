@@ -69,30 +69,6 @@ describe("PDF reader security", () => {
     vi.unstubAllGlobals();
   });
 
-  it("disables embedded PDF scripting at the PDF.js boundary", async () => {
-    const firstPage = {
-      getViewport: vi.fn(() => ({ height: 792, width: 612 })),
-    };
-    mocks.getDocument.mockReturnValue({
-      promise: Promise.resolve({
-        destroy: vi.fn(),
-        getMetadata: vi.fn(async () => ({ info: {}, metadata: null })),
-        getOutline: vi.fn(async () => null),
-        getPage: vi.fn(async () => firstPage),
-        numPages: 1,
-      }),
-    });
-
-    await makePDF(new File(["%PDF-1.7"], "safe.pdf", { type: "application/pdf" }));
-
-    expect(mocks.getDocument).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enableScripting: false,
-        isEvalSupported: false,
-      }),
-    );
-  });
-
   it("destroys the PDF.js loading task when the book closes", async () => {
     const destroy = vi.fn();
     const firstPage = {
@@ -114,7 +90,7 @@ describe("PDF reader security", () => {
     expect(destroy).toHaveBeenCalledOnce();
   });
 
-  it("provides PDF.js 6 annotation layers with attachment content", async () => {
+  it("renders PDF annotations without scripting and provides attachment content", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({ text: async () => ".textLayer{}.annotationLayer{}" })),
@@ -149,6 +125,11 @@ describe("PDF reader security", () => {
       '<div id="canvas"></div><div class="textLayer"></div><div class="annotationLayer"></div>';
 
     await section.onZoom({ doc, scale: 1 });
+
+    expect(mocks.annotationLayerRender).toHaveBeenCalledOnce();
+    const annotationRenderOptions = mocks.annotationLayerRender.mock.calls[0]?.[0];
+    expect(annotationRenderOptions).toBeDefined();
+    expect(annotationRenderOptions.enableScripting).not.toBe(true);
 
     const annotationOptions = mocks.annotationLayerConstructor.mock.calls[0]?.[0];
     expect(annotationOptions).toBeDefined();

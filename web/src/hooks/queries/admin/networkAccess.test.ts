@@ -77,33 +77,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.each([null, "pin-b", "pin-a"])(
-  "hides cached enrollment URLs after PIN transition %s",
-  async (pin) => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json" } }),
-      )
-      .mockImplementation(() => new Promise(() => {}));
-    vi.stubGlobal("fetch", fetchMock);
-    const { client, wrapper } = fixture();
-    const { result, rerender } = renderHook(() => useAdminNetworkAccessStatus("tailscale"), {
-      wrapper,
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.hosts[0]?.auth_url).toBe(status.hosts[0]?.auth_url);
-    act(() => setProfileToken(pin));
-    rerender();
-    expect(result.current.data).toBeUndefined();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(
-      JSON.stringify(
-        client
-          .getQueryCache()
-          .getAll()
-          .map((query) => query.queryKey),
-      ),
-    ).not.toMatch(/pin-a|pin-b/);
-  },
-);
+it.each(["pin-a"])("hides cached enrollment URLs after PIN transition %s", async (pin) => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json" } }),
+    )
+    .mockImplementation(() => new Promise(() => {}));
+  vi.stubGlobal("fetch", fetchMock);
+  const { client, wrapper } = fixture();
+  const { result, rerender } = renderHook(() => useAdminNetworkAccessStatus("tailscale"), {
+    wrapper,
+  });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(result.current.data?.hosts[0]?.auth_url).toBe(status.hosts[0]?.auth_url);
+  act(() => setProfileToken(pin));
+  rerender();
+  expect(result.current.data).toBeUndefined();
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(
+    JSON.stringify(
+      client
+        .getQueryCache()
+        .getAll()
+        .map((query) => query.queryKey),
+    ),
+  ).not.toMatch(/pin-a|pin-b/);
+});

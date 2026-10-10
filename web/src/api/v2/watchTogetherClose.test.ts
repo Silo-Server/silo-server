@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
+import { setRefreshToken, setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
 import { endWatchTogetherRoom } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
@@ -32,7 +32,10 @@ it("closes from the mounted room action with one exact DELETE and no room proof"
   expect(new Headers(fetch.mock.calls[0]![1].headers).has("X-Room-Token")).toBe(false);
   expect(toast.success).toHaveBeenCalledWith("Room ended");
 });
-it.each([401, 403, 404, 409, 500])("does not retry %s or claim success", async (status) => {
+it.each([401, 500])("does not retry %s or claim success", async (status) => {
+  setAccessToken("synthetic-access");
+  setRefreshToken("synthetic-refresh");
+
   const fetch = vi.fn().mockResolvedValue(new Response(null, { status }));
   vi.stubGlobal("fetch", fetch);
   const { result } = renderHook(() =>

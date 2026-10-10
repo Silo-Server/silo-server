@@ -58,7 +58,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	bridge.Post("/api/v1/webhook-sync/webhooks/{secret}", app.HandleWebhook)
 	var payload bytes.Buffer
 	form := multipart.NewWriter(&payload)
-	if err := form.WriteField("payload", `{"event":"media.play","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
+	if err := form.WriteField("payload", `{"event":"media.resume","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
 		t.Fatal(err)
 	}
 	if err := form.Close(); err != nil {
@@ -133,7 +133,8 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	}
 	// Exact body boundary is accepted; one byte over is rejected before parsing.
 	for _, delta := range []int{0, 1} {
-		body := `{}` + strings.Repeat(" ", int(webhookDeliveryLimit)-2+delta)
+		ignored := `{"notification_type":"Generic"}`
+		body := ignored + strings.Repeat(" ", int(webhookDeliveryLimit)-len(ignored)+delta)
 		req = httptest.NewRequest(http.MethodPost, Prefix+"/webhook-sync/webhooks/receiver-secret", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec = httptest.NewRecorder()
@@ -152,7 +153,7 @@ func TestWebhookReceiverRealDeliveryDB(t *testing.T) {
 	}
 	var diskBody bytes.Buffer
 	diskForm := multipart.NewWriter(&diskBody)
-	if err := diskForm.WriteField("payload", `{"event":"media.play","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
+	if err := diskForm.WriteField("payload", `{"event":"media.resume","Account":{"id":1},"Metadata":{"ratingKey":"1","type":"movie"}}`); err != nil {
 		t.Fatal(err)
 	}
 	part, err := diskForm.CreateFormFile("thumb", "test.bin")

@@ -84,6 +84,7 @@ func registerSubtitleAIReads(reg *Registry) {
 		return Operation{Operation: humaOp(http.MethodGet, Prefix+path, id, "subtitles", "Read authorized subtitle AI state."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}
 	}
 	list := op("/subtitles/ai/jobs", "listSubtitleAIJobs")
+	list.HouseholdProfileGate = true
 	list.Description = "Read up to 50 recent jobs for one accessible media file. This is a bounded recent-activity view, not a complete job history."
 	Register(reg, list, func(ctx context.Context, in *SubtitleAIJobsInput) (*SubtitleAIJobsOutput, error) {
 		id, p := in.MediaFileID.positive("query.media_file_id")
@@ -105,7 +106,9 @@ func registerSubtitleAIReads(reg *Registry) {
 		}
 		return out, nil
 	})
-	Register(reg, op("/subtitles/ai/jobs/{job_id}", "getSubtitleAIJob"), func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
+	job := op("/subtitles/ai/jobs/{job_id}", "getSubtitleAIJob")
+	job.HouseholdProfileGate = true
+	Register(reg, job, func(ctx context.Context, in *SubtitleAIJobInput) (*SubtitleAIJobOutput, error) {
 		id, idProblem := in.JobID.positive64("path.job_id")
 		if idProblem != nil {
 			return nil, validationProblem("path.job_id", "invalid", "Expected a positive job identifier.")

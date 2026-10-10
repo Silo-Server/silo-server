@@ -1086,7 +1086,7 @@
         {
           "id": "overrides_put.user_added_gate",
           "category": "authorization",
-          "description": "A non-admin adding a custom (admin-only recipe) section while the server setting is off is 403 custom_disabled.",
+          "description": "A non-admin adding a new Editor's picks (admin-only recipe) section is 403 custom_disabled.",
           "principal": {
             "class": "profile"
           },
@@ -1344,7 +1344,7 @@
         {
           "id": "overrides_put.user_added_allowed",
           "category": "authorization",
-          "description": "With sections.allow_profile_custom_sections on, the same request is accepted.",
+          "description": "A non-admin may always add a rule row (custom_filter); a stored false sections.allow_profile_custom_sections is ignored.",
           "principal": {
             "class": "profile"
           },
@@ -1354,10 +1354,20 @@
               "overrides": [
                 {
                   "is_user_added": true,
-                  "user_section_type": "admin_curated_list",
+                  "user_section_type": "custom_filter",
                   "user_config": {
-                    "item_ids": [
-                      "x"
+                    "match": "all",
+                    "groups": [
+                      {
+                        "match": "all",
+                        "rules": [
+                          {
+                            "field": "genre",
+                            "op": "contains",
+                            "value": "Drama"
+                          }
+                        ]
+                      }
                     ]
                   }
                 }
@@ -1369,7 +1379,7 @@
             "body_kind": "empty"
           },
           "settings": {
-            "sections.allow_profile_custom_sections": "true"
+            "sections.allow_profile_custom_sections": "false"
           },
           "fresh_state": true,
           "v2_expectation": {
@@ -1384,10 +1394,20 @@
                 "overrides": [
                   {
                     "is_user_added": true,
-                    "user_section_type": "admin_curated_list",
+                    "user_section_type": "custom_filter",
                     "user_config": {
-                      "item_ids": [
-                        "x"
+                      "match": "all",
+                      "groups": [
+                        {
+                          "match": "all",
+                          "rules": [
+                            {
+                              "field": "genre",
+                              "op": "contains",
+                              "value": "Drama"
+                            }
+                          ]
+                        }
                       ]
                     }
                   }
@@ -1450,14 +1470,24 @@
                     {
                       "pointer": "/items/0/user_section_type",
                       "op": "equals",
-                      "value": "admin_curated_list"
+                      "value": "custom_filter"
                     },
                     {
                       "pointer": "/items/0/user_config",
                       "op": "equals",
                       "value": {
-                        "item_ids": [
-                          "x"
+                        "match": "all",
+                        "groups": [
+                          {
+                            "match": "all",
+                            "rules": [
+                              {
+                                "field": "genre",
+                                "op": "contains",
+                                "value": "Drama"
+                              }
+                            ]
+                          }
                         ]
                       }
                     }
@@ -1568,7 +1598,7 @@
         {
           "id": "overrides_put.admin_bypass",
           "category": "authorization",
-          "description": "An admin bypasses the custom-section gate.",
+          "description": "An admin may add a new Editor's picks (admin-only recipe) section.",
           "principal": {
             "class": "acting_admin"
           },
@@ -6347,7 +6377,7 @@
         {
           "id": "section_flags.ok",
           "category": "status_headers",
-          "description": "Exposes the custom-sections server flag to any profile: 200 JSON.",
+          "description": "Exposes the rule-row flag, always true, to any profile: 200 JSON.",
           "principal": {
             "class": "profile"
           },
@@ -6375,7 +6405,7 @@
           },
           "v2_expectation": {
             "kind": "same",
-            "summary": "The fixture server flag retains its boolean meaning and exact response fields.",
+            "summary": "The flag is always true; v2 keeps the field, deprecated, with the same response fields.",
             "recorded_in": "internal/apiv2/profile_sections.go",
             "operation_id": "getProfileSectionFlags",
             "method": "GET",
@@ -6402,7 +6432,7 @@
                 {
                   "pointer": "/allow_profile_custom_sections",
                   "op": "equals",
-                  "value": false
+                  "value": true
                 }
               ]
             }
@@ -6411,7 +6441,7 @@
         {
           "id": "section_flags.off",
           "category": "data_meaning",
-          "description": "Unset means false.",
+          "description": "Profiles may always add rule rows: with nothing stored the flag is true.",
           "principal": {
             "class": "profile"
           },
@@ -6424,13 +6454,13 @@
               {
                 "pointer": "/allow_profile_custom_sections",
                 "op": "equals",
-                "value": false
+                "value": true
               }
             ]
           },
           "v2_expectation": {
             "kind": "same",
-            "summary": "The fixture server flag retains its boolean meaning and exact response fields.",
+            "summary": "The flag is always true; v2 keeps the field, deprecated, with the same response fields.",
             "recorded_in": "internal/apiv2/profile_sections.go",
             "operation_id": "getProfileSectionFlags",
             "method": "GET",
@@ -6457,7 +6487,7 @@
                 {
                   "pointer": "/allow_profile_custom_sections",
                   "op": "equals",
-                  "value": false
+                  "value": true
                 }
               ]
             }
@@ -6466,7 +6496,7 @@
         {
           "id": "section_flags.on",
           "category": "data_meaning",
-          "description": "The string true turns it on.",
+          "description": "A stored false is ignored: the flag stays true.",
           "principal": {
             "class": "profile"
           },
@@ -6484,11 +6514,11 @@
             ]
           },
           "settings": {
-            "sections.allow_profile_custom_sections": "true"
+            "sections.allow_profile_custom_sections": "false"
           },
           "v2_expectation": {
             "kind": "same",
-            "summary": "The fixture server flag retains its boolean meaning and exact response fields.",
+            "summary": "The flag is always true; v2 keeps the field, deprecated, with the same response fields.",
             "recorded_in": "internal/apiv2/profile_sections.go",
             "operation_id": "getProfileSectionFlags",
             "method": "GET",
@@ -6543,7 +6573,7 @@
           },
           "v2_expectation": {
             "kind": "same",
-            "summary": "The fixture server flag retains its boolean meaning and exact response fields.",
+            "summary": "The flag is always true; v2 keeps the field, deprecated, with the same response fields.",
             "recorded_in": "internal/apiv2/profile_sections.go",
             "operation_id": "getProfileSectionFlags",
             "method": "GET",
@@ -6570,7 +6600,7 @@
                 {
                   "pointer": "/allow_profile_custom_sections",
                   "op": "equals",
-                  "value": false
+                  "value": true
                 }
               ]
             }

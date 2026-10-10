@@ -300,13 +300,13 @@ func TestItemRepo_Search_CountSQL_OmitsLimitOffsetOrderBy(t *testing.T) {
 	for _, query := range []string{"avatar", "the matrix reloaded"} {
 		t.Run(query, func(t *testing.T) {
 			_, countSQL, _ := repo.buildSearchSQL(query, []string{"movie"}, 20, 0, AccessFilter{})
-			if !strings.Contains(countSQL, "WITH scored AS") {
-				t.Fatalf("countSQL must include scored CTE; got:\n%s", countSQL)
+			if !strings.Contains(countSQL, "title_candidates AS MATERIALIZED") {
+				t.Fatalf("countSQL must include unranked candidates; got:\n%s", countSQL)
 			}
-			if !strings.Contains(countSQL, "title_scored AS MATERIALIZED") {
-				t.Fatalf("countSQL must include title candidate CTE; got:\n%s", countSQL)
+			if strings.Contains(countSQL, "title_prefix_rank") || strings.Contains(countSQL, "phrase_rank") {
+				t.Fatalf("countSQL must omit title relevance scoring; got:\n%s", countSQL)
 			}
-			if !strings.Contains(countSQL, "NOT EXISTS (SELECT 1 FROM title_scored)") {
+			if !strings.Contains(countSQL, "NOT EXISTS (SELECT 1 FROM title_candidates)") {
 				t.Fatalf("countSQL must gate overview fallback on title existence; got:\n%s", countSQL)
 			}
 			if !strings.Contains(countSQL, "SELECT COUNT(*)") {

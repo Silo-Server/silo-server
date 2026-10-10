@@ -14,11 +14,22 @@ type iconSessionService struct {
 	icon string
 }
 
-func (s iconSessionService) ListProviders() []auth.LoginProviderInfo {
-	return []auth.LoginProviderInfo{{ID: "provider", IconURL: s.icon, InstallationID: 3}}
+func (s iconSessionService) DiscoverProviders(context.Context) (auth.ProviderDiscovery, error) {
+	return auth.ProviderDiscovery{Providers: []auth.LoginProviderInfo{{ID: "provider", IconURL: s.icon, InstallationID: 3}}}, nil
 }
 func TestAuthProviderIconProjection(t *testing.T) {
 	const icon = "/api/v2/plugin-content/plugins/3/assets/brand%20icon.svg?size=2#logo"
+	deps := pilotDeps(nil, nil)
+	service := &iconSessionService{fakeSessionService: new(fakeSessionService)}
+	deps.Sessions = service
+	deps.PluginContent = &contentFixture{}
+	var lookup AuthProviderIconPublic
+	deps.AuthProviderIconPublic = func(ctx context.Context, id int, route string) (bool, error) {
+		return lookup(ctx, id, route)
+	}
+	h := NewHandler(deps)
+	deps.AuthProviderIconPublic = nil
+	withoutLookup := NewHandler(deps)
 	for _, tc := range []struct {
 		name, icon, want string
 		public           bool
@@ -41,13 +52,10 @@ func TestAuthProviderIconProjection(t *testing.T) {
 		{name: "invalid escape", icon: "/api/v2/plugin-content/plugins/3/assets/%zz"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			deps := pilotDeps(nil, nil)
-			service := iconSessionService{new(fakeSessionService), tc.icon}
-			deps.Sessions = service
-			deps.PluginContent = &contentFixture{}
+			service.icon = tc.icon
 			calls := 0
 			if !tc.missing {
-				deps.AuthProviderIconPublic = func(_ context.Context, id int, route string) (bool, error) {
+				lookup = func(_ context.Context, id int, route string) (bool, error) {
 					calls++
 					if id != 3 || route != "/assets/brand icon.svg" {
 						t.Fatalf("lookup %d %s", id, route)
@@ -55,7 +63,11 @@ func TestAuthProviderIconProjection(t *testing.T) {
 					return tc.public, tc.err
 				}
 			}
-			rec := do(t, NewHandler(deps), "GET", Prefix+"/auth/providers", "", nil)
+			handler := h
+			if tc.missing {
+				handler = withoutLookup
+			}
+			rec := do(t, handler, "GET", Prefix+"/auth/providers", "", nil)
 			var out AuthProviderCollectionOutput
 			if err := json.Unmarshal(rec.Body.Bytes(), &out.Body); err != nil {
 				t.Fatal(err)
@@ -66,7 +78,7 @@ func TestAuthProviderIconProjection(t *testing.T) {
 			if (calls > 0) != tc.lookup {
 				t.Fatalf("lookup calls=%d", calls)
 			}
-			if service.ListProviders()[0].IconURL != tc.icon {
+			if discovery, _ := service.DiscoverProviders(context.Background()); discovery.Providers[0].IconURL != tc.icon {
 				t.Fatal("shared provider metadata changed")
 			}
 		})

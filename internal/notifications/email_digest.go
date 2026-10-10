@@ -23,6 +23,7 @@ type emailChannel struct {
 	deliveries *DeliveryRepository
 	settings   *Settings
 	sender     mail.Sender
+	brand      *mail.BrandLoader
 	// profileName resolves a display name for the email copy; best-effort
 	// (empty on any failure). Set by NewSystem after construction.
 	profileName func(ctx context.Context, userID int, profileID string) string
@@ -101,6 +102,7 @@ func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mo
 
 	baseURL := c.settings.EmailExternalURL(ctx)
 	opts := emailComposeOptions{
+		Brand:          c.brand.Load(ctx),
 		BaseURL:        baseURL,
 		UnsubscribeURL: emailUnsubscribeURL(baseURL, unsubscribeToken),
 	}
@@ -114,6 +116,7 @@ func (c *emailChannel) send(ctx context.Context, tx pgx.Tx, profileID string, mo
 		Subject:  content.Subject,
 		TextBody: content.Text,
 		HTMLBody: content.HTML,
+		Inline:   opts.Brand.InlineImages(),
 	}
 	if opts.UnsubscribeURL != "" {
 		// RFC 8058 one-click unsubscribe; the POST target is the same URL.

@@ -36,11 +36,13 @@ export function StreamBitrateLimitInput({
   label,
   value,
   onValueChange,
+  disabled = false,
 }: {
   id: string;
   label: string;
   value: number | null;
   onValueChange: (kbps: number | null) => void;
+  disabled?: boolean;
 }) {
   const [choice, setChoice] = useState(() => choiceFor(value));
   const [draft, setDraft] = useState(() =>
@@ -74,7 +76,7 @@ export function StreamBitrateLimitInput({
   return (
     <div className="space-y-1">
       <div className="flex gap-2">
-        <Select value={choice} onValueChange={handleChoiceChange} required>
+        <Select value={choice} onValueChange={handleChoiceChange} required disabled={disabled}>
           <SelectTrigger id={id} className={custom ? "w-32 shrink-0" : "w-full"}>
             <SelectValue placeholder="Choose a limit" />
           </SelectTrigger>

@@ -33,25 +33,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends libvips-dev && 
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY internal/compat/zishang520-webtransport-go/ internal/compat/zishang520-webtransport-go/
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-COPY web/embed.go web/embed.go
-COPY --from=frontend_dist / web/dist
-COPY cmd/ cmd/
+RUN go mod download
 COPY internal/ internal/
 COPY migrations/ migrations/
 # The settings contract is a Go package (contracts/settings/v1) that embeds the
 # manifest, so the binary carries the exact bytes it was built from. It lives
 # outside internal/ because clients vendor these files.
 COPY contracts/ contracts/
+RUN --network=none go build ./internal/... ./migrations/... ./contracts/...
+COPY cmd/ cmd/
+COPY web/embed.go web/embed.go
+COPY --from=frontend_dist / web/dist
+RUN --network=none go build -o /silo ./cmd/silo/
 ARG BUILD_REVISION
 ARG BUILD_DIRTY=false
 ARG BUILD_NUMBER
 ARG BUILD_DATE
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go build \
+RUN --network=none go build \
     -ldflags "-X github.com/Silo-Server/silo-server/internal/buildinfo.revisionOverride=${BUILD_REVISION} -X github.com/Silo-Server/silo-server/internal/buildinfo.dirtyOverride=${BUILD_DIRTY} -X github.com/Silo-Server/silo-server/internal/buildinfo.buildNumberOverride=${BUILD_NUMBER} -X github.com/Silo-Server/silo-server/internal/buildinfo.builtAtOverride=${BUILD_DATE}" \
     -o /silo ./cmd/silo/
 
@@ -96,6 +94,12 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
+# Silo runs database migrations before its HTTP listener starts, and an
+# upgrade on a large library can migrate for many minutes. The start period
+# covers the default 20-minute migration budget (SILO_MIGRATE_TIMEOUT) so a
+# migrating server is not reported unhealthy and restarted mid-migration; the
+# first passing check still marks it healthy at once. A deployment that raises
+# SILO_MIGRATE_TIMEOUT should raise the start period to match.
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20m --retries=3 \
     CMD curl -f http://localhost:${PORT:-8080}/api/v1/health || exit 1
 ENTRYPOINT ["silo"]

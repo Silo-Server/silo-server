@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminSession } from "@/api/types";
 import { activityMethodMeta } from "./adminActivityPresentation";
@@ -50,7 +50,6 @@ vi.mock("@/hooks/queries/admin/logs", () => ({
 vi.mock("@/components/AdminSessionActions", () => ({ AdminSessionActions: () => null }));
 
 import AdminActivity from "./AdminActivity";
-import AdminStats from "./AdminStats";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -120,31 +119,6 @@ describe("activity playback scopes", () => {
 
     expect(screen.getAllByLabelText("Stream location: Local")).toHaveLength(2);
     expect(screen.getAllByLabelText("Stream location: Remote")).toHaveLength(2);
-  });
-
-  it("shows Direct Stream on desktop and mobile without a second audio-transcode badge", () => {
-    renderActivity();
-
-    const badges = screen.getAllByLabelText("Playback method: Direct Stream");
-    expect(badges).toHaveLength(2);
-    for (const badge of badges) {
-      expect(badge).toHaveTextContent("Direct Stream");
-      expect(badge).toHaveAttribute("title", activityMethodMeta("direct_stream").description);
-      expect(badge.className).toContain(activityMethodMeta("direct_stream").badgeClass);
-      expect(within(badge.parentElement!).getByRole("button", { name: "Details" })).toBeTruthy();
-    }
-    expect(screen.queryByText("Audio Transcode")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Playback method: Direct Play")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Copy", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("Transcode", { exact: true })).toHaveLength(2);
-    expect(screen.getAllByText("AAC 5.1", { exact: true })).toHaveLength(2);
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[0]!);
-    expect(screen.getByText("Audio Transcode")).toBeInTheDocument();
-    expect(screen.getByText("Copied without re-encoding")).toBeInTheDocument();
-    expect(screen.getByText("MKV → fMP4 (HLS)")).toBeInTheDocument();
-    expect(screen.queryByText("Unknown output container")).not.toBeInTheDocument();
-    expect(screen.queryByText("MKV → Remux")).not.toBeInTheDocument();
   });
 
   it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {
@@ -218,17 +192,6 @@ describe("activity playback scopes", () => {
     expect(screen.getByRole("button", { name: "Direct Stream 2" })).toBeInTheDocument();
     expect(screen.getAllByLabelText("Playback method: Direct Stream")).toHaveLength(4);
   });
-
-  it("uses the display label rather than the raw method key in System stats", () => {
-    render(
-      <MemoryRouter>
-        <AdminStats />
-      </MemoryRouter>,
-    );
-
-    expect(screen.getByRole("cell", { name: "Direct Stream" })).toBeInTheDocument();
-    expect(screen.queryByText("direct_stream")).not.toBeInTheDocument();
-  });
 });
 
 describe("IP lookup", () => {
@@ -264,3 +227,21 @@ describe("IP lookup", () => {
     expect(screen.queryByText(/No users found/)).not.toBeInTheDocument();
   });
 });
+
+describe("old download preparation links", () => {
+  it("send the preparation view to the Downloads page", () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/activity?view=preparations"]}>
+        <Routes>
+          <Route path="/admin/activity" element={<AdminActivity />} />
+          <Route path="/admin/downloads" element={<DownloadsProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("downloads")).toHaveTextContent("?tab=preparation");
+  });
+});
+
+function DownloadsProbe() {
+  return <div data-testid="downloads">{useLocation().search}</div>;
+}

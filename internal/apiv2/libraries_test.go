@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -50,7 +49,7 @@ func libraryFixture(id int, name string) handlers.LibraryView {
 	code := "empty_root"
 	return handlers.LibraryView{
 		ID: id, Paths: []string{"/media/" + strings.ToLower(name)}, Type: "movies", Name: name, Enabled: true,
-		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrailerKinds: []string{"trailer"}, RealtimeMonitoring: true, SortOrder: id - 1,
+		MetadataLanguage: "en", ChapterThumbnailsSupported: true, TrickplaySupported: true, TrailerKinds: []string{"trailer"}, RealtimeMonitoring: true, SortOrder: id - 1,
 		PosterURL: "https://s3.example.test/poster.jpg", LastScannedAt: ptr(fixedTime()),
 		ScanWarningCode: &code, ScanWarningMessage: ptr("Root is empty"), ScanWarningAt: &warnAt,
 	}
@@ -767,16 +766,6 @@ func TestListUnmatchedItems(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items?limit=2&q=x&cursor="+first.Page.NextCursor, "", bearer(adminToken)), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items?offset=1", "", bearer(adminToken)), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/libraries/unmatched-items", "", bearer(memberToken)), TypePermissionDenied)
-}
-
-// TestAdminJobOfInstants pins the optional-instant rendering the job
-// resource shares with every operation that queues work.
-func TestAdminJobOfInstants(t *testing.T) {
-	started := fixedTime().Add(time.Minute)
-	job := adminJobOf(&models.AdminJob{ID: "j", StartedAt: &started, RequestedAt: fixedTime()})
-	if job.StartedAt == nil || job.StartedAt.String() != "2026-01-02T03:05:05.678Z" || job.FinishedAt != nil || job.RefreshResult != nil {
-		t.Fatalf("job = %+v", job)
-	}
 }
 
 func TestDiagnosticsSearchAndSkippedPagination(t *testing.T) {
