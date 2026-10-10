@@ -68,10 +68,11 @@ func TestEpisodeHasActionableMetadataDebt(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "recent provider TBD episode missing still",
+			name: "recent provider TBD episode",
 			ep: &models.Episode{
 				Title:          "TBD",
 				TmdbID:         "3812334",
+				StillPath:      "s3://still.jpg",
 				AirDate:        &recent,
 				MetadataSource: "provider",
 			},

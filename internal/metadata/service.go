@@ -3565,10 +3565,11 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 	}
 	reasonMask := int64(0)
 	now := time.Now().UTC()
+	var actionable []*models.Episode
 	for _, episode := range episodes {
 		if EpisodeHasActionableMetadataDebt(episode, now) {
 			reasonMask = RefreshDebtReasonEpisodeIncomplete
-			break
+			actionable = append(actionable, episode)
 		}
 	}
 	if reasonMask == 0 {
@@ -3585,7 +3586,7 @@ func (s *MetadataService) syncRefreshDebtForSeason(ctx context.Context, seasonID
 		seasonID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, actionable...),
 	)
 }
 
@@ -3619,7 +3620,7 @@ func (s *MetadataService) syncRefreshDebtForEpisode(ctx context.Context, episode
 		episodeID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now, episode),
 	)
 }
 
@@ -5936,7 +5937,7 @@ func (s *MetadataService) syncVisibleEpisodeRefreshDebt(ctx context.Context, epi
 		episode.ContentID,
 		effectiveRefreshDebtPriority(reasonMask, attemptCount),
 		reasonMask,
-		nextRefreshAtForDebt(reasonMask, attemptCount, now.UTC()),
+		nextRefreshAtForEpisodeDebt(reasonMask, attemptCount, now.UTC(), episode),
 	)
 }
 
