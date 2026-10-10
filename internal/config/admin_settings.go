@@ -438,6 +438,8 @@ var adminSettingDefaults = map[string]string{
 	"taskmanager.history_retention_days": "30",
 	"taskmanager.history_keep_per_task":  "1000",
 
+	"autoscan.events_retention_days": "30",
+
 	// Off: server addresses non-admin users supply for history import and
 	// webhook sync must be on the public internet (historyimport).
 	"media_servers.allow_private_destinations": "false",
@@ -727,7 +729,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 25000)
 	case "catalog.search.meilisearch.rebuild_task_queue_depth":
 		return normalizeAdminInt(key, value, 1, 16)
-	case "taskmanager.history_retention_days":
+	case "taskmanager.history_retention_days", "autoscan.events_retention_days":
 		return normalizeAdminInt(key, value, 1, 3650)
 	case "taskmanager.history_keep_per_task":
 		return normalizeAdminInt(key, value, 1, math.MaxInt32)

@@ -2613,6 +2613,17 @@ characters in them are stored as U+FFFD. `q` also matches the reported and
 rewritten paths in the change log. Nested `scan_runs` carry the same optional
 `result` as the scan history.
 
+Events are not kept forever. The `cleanup_autoscan_events` step of the daily
+`database_maintenance` task deletes finished events that completed more than
+`autoscan.events_retention_days` ago (server setting, default 30, accepted range
+1..3650). Running events, and events with a scan run still accepted or running,
+are kept. A scan run whose event was pruned stays in the scan history but loses
+the fields it took from the event: `autoscan_event_id`, `source_id`, `plugin_id`,
+`capability_id`, `event_status` and `event_completed_at`. The Activity panel then
+labels it Autoscan instead of the source, and scan search no longer matches it by
+source, capability or event status. The status `latest_event_at` is absent once
+every event is gone.
+
 The Activity panel keeps polling and numbered pages through at most100 cursor
 reads per requested page. Captured authority/PIN cache identity, stale-response
 checks and no previous-page placeholders isolate authority transitions. Unsupported

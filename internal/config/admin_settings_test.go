@@ -281,6 +281,8 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "opslog.capture_level", value: "chatty"},
 		{key: "s3.metadata_presign_expiry", value: "0s"},
 		{key: "recommendations.embeddings_job_timeout", value: "soon"},
+		{key: "autoscan.events_retention_days", value: "0"},
+		{key: "autoscan.events_retention_days", value: "3651"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {
