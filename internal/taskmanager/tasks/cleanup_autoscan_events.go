@@ -64,7 +64,12 @@ func (t *AutoscanEventCleanupTask) Execute(ctx context.Context, progress taskman
 		return nil
 	}
 	progress.Report(0, "Pruning autoscan events")
-	days := autoscan.LoadEventsRetentionDays(ctx, t.store)
+	days, err := autoscan.LoadEventsRetentionDays(ctx, t.store)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan event cleanup skipped; retention setting unreadable", "component", "taskmanager", "task", t.Key(), "error", err)
+		progress.Report(100, "Autoscan event cleanup skipped: the retention setting could not be read")
+		return err
+	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
 	result, err := t.pruner.PruneEvents(ctx, cutoff, autoscanEventCleanupBatchSize, autoscanEventCleanupMaxBatches)
 	if data, marshalErr := json.Marshal(result); marshalErr == nil {

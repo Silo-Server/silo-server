@@ -8,13 +8,14 @@ import (
 	"time"
 )
 
-// Server setting key and default for autoscan event retention. Every poll of
-// every enabled source and every webhook delivery writes an autoscan_events
-// row, so without a bound the Activity history grows for as long as autoscan
-// runs.
+// Server setting key, default and upper bound for autoscan event retention.
+// Every poll of every enabled source and every webhook delivery writes an
+// autoscan_events row, so without a bound the Activity history grows for as
+// long as autoscan runs. The admin settings API accepts 1..MaxEventsRetentionDays.
 const (
 	SettingKeyEventsRetentionDays = "autoscan.events_retention_days"
 	DefaultEventsRetentionDays    = 30
+	MaxEventsRetentionDays        = 3650
 )
 
 // SettingsStore is satisfied by *catalog.ServerSettingsRepo.
@@ -22,22 +23,25 @@ type SettingsStore interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-// LoadEventsRetentionDays reads the retention window, falling back to the
-// default when the setting is missing, unreadable, or below one day: a zero
-// or negative window would delete every finished event on the next run.
-func LoadEventsRetentionDays(ctx context.Context, store SettingsStore) int {
+// LoadEventsRetentionDays reads the retention window. A missing value, or one
+// below one day, uses the default: a zero or negative window would delete
+// every finished event. A value above the maximum, which only a direct
+// database write can store, is capped so the cutoff stays a real date. A
+// failed read is returned rather than replaced by the default, because a
+// shorter window than the admin chose would delete history for good.
+func LoadEventsRetentionDays(ctx context.Context, store SettingsStore) (int, error) {
 	if store == nil {
-		return DefaultEventsRetentionDays
+		return DefaultEventsRetentionDays, nil
 	}
 	raw, err := store.Get(ctx, SettingKeyEventsRetentionDays)
 	if err != nil {
-		return DefaultEventsRetentionDays
+		return 0, fmt.Errorf("read %s: %w", SettingKeyEventsRetentionDays, err)
 	}
 	days, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || days < 1 {
-		return DefaultEventsRetentionDays
+		return DefaultEventsRetentionDays, nil
 	}
-	return days
+	return min(days, MaxEventsRetentionDays), nil
 }
 
 // EventPruneResult describes one bounded autoscan event cleanup run. It is
@@ -50,12 +54,21 @@ type EventPruneResult struct {
 // prunableEventsSQL selects finished events that completed before $1, oldest
 // first, from idx_autoscan_events_completed. Running events are skipped: their
 // completed_at holds the start time until they finish, and deleting one would
-// fail its FinishEvent and let a second poll of the source start.
+// fail its FinishEvent and let a second poll of the source start. Events with
+// a scan run still accepted or running are skipped too: follow-up runs inherit
+// their event, so a busy scope can keep an old event in use, and clearing the
+// link under a run that is finishing would race its follow-up insert.
 const prunableEventsSQL = `
 	SELECT id
 	FROM autoscan_events
 	WHERE completed_at < $1
 	  AND status <> $2
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM scan_runs sr
+		WHERE sr.autoscan_event_id = autoscan_events.id
+		  AND sr.status IN ('accepted', 'running')
+	  )
 	ORDER BY completed_at`
 
 // PruneEvents deletes finished autoscan events that completed before cutoff,

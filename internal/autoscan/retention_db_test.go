@@ -39,10 +39,15 @@ func TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB(t *testing.T) {
 		return id
 	}
 
-	oldSuccess := finished(src.ID, old, EventStatusSuccess)
+	// Old events are written newest first, so deleting in table order instead
+	// of oldest first would pick the wrong ones.
+	oldSourceless := finished("", old.Add(3*time.Hour), EventStatusSuccess) // as for a deleted source
+	oldUnresolved := finished(src.ID, old.Add(2*time.Hour), EventStatusUnresolved)
 	finished(src.ID, old.Add(time.Hour), EventStatusError)
-	finished(src.ID, old.Add(2*time.Hour), EventStatusUnresolved)
-	finished("", old.Add(3*time.Hour), EventStatusSuccess) // sourceless, as for a deleted source
+	oldSuccess := finished(src.ID, old, EventStatusSuccess)
+	// The oldest event still has a queued follow-up scan run, which inherits
+	// its event; it stays until that run ends.
+	followUpEvent := finished(src.ID, old.Add(-time.Hour), EventStatusSuccess)
 	afterCutoff := finished(src.ID, cutoff.AddDate(0, 0, 1), EventStatusSuccess)
 	current := finished(src.ID, time.Now(), EventStatusSuccess)
 	// A running event's completed_at holds its start time until it finishes;
@@ -50,65 +55,78 @@ func TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB(t *testing.T) {
 	oldRunning := create(src.ID, old)
 
 	runID := fmt.Sprintf("01PRUNEDEVENTRUN0000%06d", folderID%1000000)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO scan_runs (id, media_folder_id, mode, path, trigger, status, result_payload, autoscan_event_id)
-		VALUES ($1, $2, 'subtree', '/movies/A', 'autoscan', 'completed', '{"new":1}'::jsonb, $3)`,
-		runID, folderID, oldSuccess,
-	); err != nil {
-		t.Fatalf("seed scan run: %v", err)
+	followUpRunID := fmt.Sprintf("01PRUNEDFOLLOWUP0000%06d", folderID%1000000)
+	for _, run := range []struct {
+		id, path, status string
+		eventID          int64
+	}{
+		{runID, "/movies/A", "completed", oldSuccess},
+		{followUpRunID, "/movies/B", "accepted", followUpEvent},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO scan_runs (id, media_folder_id, mode, path, trigger, status, result_payload, autoscan_event_id)
+			VALUES ($1, $2, 'subtree', $3, 'autoscan', $4, '{"new":1}'::jsonb, $5)`,
+			run.id, folderID, run.path, run.status, run.eventID,
+		); err != nil {
+			t.Fatalf("seed scan run %s: %v", run.id, err)
+		}
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM scan_runs WHERE id = $1`, runID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM scan_runs WHERE id = ANY($1)`, []string{runID, followUpRunID})
 	})
 
-	// Four finished events predate the cutoff. One batch of two leaves two.
-	result, err := repo.PruneEvents(ctx, cutoff, 2, 1)
-	if err != nil {
-		t.Fatalf("first prune: %v", err)
+	wantRemaining := func(label string, want ...int64) {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT id FROM autoscan_events WHERE id = ANY($1) ORDER BY id`, ids)
+		if err != nil {
+			t.Fatalf("%s: read remaining events: %v", label, err)
+		}
+		defer rows.Close()
+		var got []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				t.Fatalf("%s: scan remaining event: %v", label, err)
+			}
+			got = append(got, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("%s: read remaining events: %v", label, err)
+		}
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s: remaining events = %v, want %v", label, got, want)
+		}
 	}
-	if result.Deleted != 2 || !result.LimitReached {
-		t.Fatalf("first prune = %+v, want 2 deleted with the limit reached", result)
+	prune := func(label string, batchSize, maxBatches int, wantDeleted int64, wantLimit bool) {
+		t.Helper()
+		result, err := repo.PruneEvents(ctx, cutoff, batchSize, maxBatches)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if result.Deleted != wantDeleted || result.LimitReached != wantLimit {
+			t.Fatalf("%s = %+v, want %d deleted, limit reached %v", label, result, wantDeleted, wantLimit)
+		}
 	}
+
+	// Four old events can go now. One batch of two takes the two oldest.
+	prune("first prune", 2, 1, 2, true)
+	wantRemaining("after the first batch", oldSourceless, oldUnresolved, followUpEvent, afterCutoff, current, oldRunning)
 	// The next batch empties the backlog exactly as the budget runs out, which
 	// is not a truncated run.
-	result, err = repo.PruneEvents(ctx, cutoff, 2, 1)
-	if err != nil {
-		t.Fatalf("second prune: %v", err)
-	}
-	if result.Deleted != 2 || result.LimitReached {
-		t.Fatalf("second prune = %+v, want 2 deleted without the limit", result)
-	}
-	result, err = repo.PruneEvents(ctx, cutoff, 2, 10)
-	if err != nil {
-		t.Fatalf("third prune: %v", err)
-	}
-	if result.Deleted != 0 || result.LimitReached {
-		t.Fatalf("third prune = %+v, want nothing left", result)
-	}
+	prune("second prune", 2, 1, 2, false)
+	prune("third prune", 2, 10, 0, false)
+	wantRemaining("while the follow-up is queued", followUpEvent, afterCutoff, current, oldRunning)
 
-	rows, err := pool.Query(ctx, `SELECT id FROM autoscan_events WHERE id = ANY($1) ORDER BY id`, ids)
-	if err != nil {
-		t.Fatalf("read remaining events: %v", err)
+	// Once the follow-up run ends, its event goes too.
+	if _, err := pool.Exec(ctx, `UPDATE scan_runs SET status = 'completed' WHERE id = $1`, followUpRunID); err != nil {
+		t.Fatalf("complete follow-up run: %v", err)
 	}
-	var remaining []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			t.Fatalf("scan remaining event: %v", err)
-		}
-		remaining = append(remaining, id)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read remaining events: %v", err)
-	}
-	want := []int64{afterCutoff, current, oldRunning}
-	slices.Sort(want)
-	if !slices.Equal(remaining, want) {
-		t.Fatalf("remaining events = %v, want %v (after cutoff, current, running)", remaining, want)
-	}
+	prune("prune after the follow-up", 2, 10, 1, false)
+	wantRemaining("after the follow-up ended", afterCutoff, current, oldRunning)
 
 	// The Activity reads still work: the source's history lists what is left,
-	// and the scan run of a pruned event stays, without its event link.
+	// and the scan runs of pruned events stay, without their event link.
 	events, err := repo.ListEvents(ctx, EventListFilter{SourceID: src.ID})
 	if err != nil {
 		t.Fatalf("list events: %v", err)
@@ -116,11 +134,13 @@ func TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("listed events = %d, want 3", len(events))
 	}
-	scans, err := repo.ListAutoscanScans(ctx, ScanListFilter{Search: runID})
-	if err != nil {
-		t.Fatalf("list scans: %v", err)
-	}
-	if len(scans) != 1 || scans[0].AutoscanEventID != nil || scans[0].EventStatus != "" || scans[0].Result == nil || scans[0].Result.New != 1 {
-		t.Fatalf("scan of a pruned event = %+v, want the run with no event link", scans)
+	for _, id := range []string{runID, followUpRunID} {
+		scans, err := repo.ListAutoscanScans(ctx, ScanListFilter{Search: id})
+		if err != nil {
+			t.Fatalf("list scans: %v", err)
+		}
+		if len(scans) != 1 || scans[0].AutoscanEventID != nil || scans[0].EventStatus != "" || scans[0].Result == nil || scans[0].Result.New != 1 {
+			t.Fatalf("scan %s of a pruned event = %+v, want the run with no event link", id, scans)
+		}
 	}
 }
