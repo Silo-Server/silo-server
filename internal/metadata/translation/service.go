@@ -106,8 +106,10 @@ func (s *Service) Enabled() bool { return s.config().Ready() }
 // reaper that keeps doing so. Call once at startup.
 func (s *Service) Recover() { s.runner.Recover() }
 
-// Enqueue validates and queues a job, returning immediately. If an identical
-// job is already pending or running, that job is returned instead of a new one.
+// Enqueue validates and queues a job, returning immediately. If a pending or
+// running job already covers the request (same target and language, same or
+// wider scope, and forced whenever the request is), that job is returned
+// instead of a new one.
 func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	if !s.config().Ready() {
 		return nil, ErrNotConfigured
@@ -129,12 +131,33 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 	}
 	req.TargetLanguage = target
 
-	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, s.config().ChatModel)
-	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, key); err != nil {
+	model := s.config().ChatModel
+	if req.TargetKind == TargetEpisode {
+		// An episode has no children.
+		req.IncludeChildren = false
+	}
+	if req.TargetKind == TargetItem && req.IncludeChildren {
+		// Only a series has children; normalizing keeps a movie request
+		// with and without the flag on one job.
+		if item, err := s.content.ItemText(ctx, req.ContentID); err == nil && item != nil && item.Type != "series" {
+			req.IncludeChildren = false
+		}
+	}
+	// A job a previous release queued carries the old key format; reuse it
+	// when its stored flags cover this request.
+	if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, legacyIdempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model)); err != nil {
 		return nil, err
-	} else if existing != nil {
+	} else if existing != nil && existing.covers(req) {
 		return existing, nil
 	}
+	for _, covering := range coveringKeys(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force) {
+		if existing, err := s.repo.GetActiveJobByIdempotencyKey(ctx, covering); err != nil {
+			return nil, err
+		} else if existing != nil {
+			return existing, nil
+		}
+	}
+	key := idempotencyKey(req.TargetKind, req.ContentID, req.TargetLanguage, model, req.IncludeChildren, req.Force)
 
 	job := &Job{
 		TargetKind:      req.TargetKind,
@@ -142,7 +165,7 @@ func (s *Service) Enqueue(ctx context.Context, req JobRequest) (*Job, error) {
 		IncludeChildren: req.IncludeChildren,
 		TargetLanguage:  req.TargetLanguage,
 		Engine:          "openai",
-		Model:           s.config().ChatModel,
+		Model:           model,
 		Status:          jobrunner.StatusPending,
 		ProgressMessage: "Queued",
 		Force:           req.Force,

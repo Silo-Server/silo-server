@@ -460,6 +460,46 @@ func TestEnqueueDeduplicatesActiveJobs(t *testing.T) {
 	<-sem // release so cleanup can proceed
 }
 
+func TestEnqueueDedupeRespectsScopeAndForce(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{} // keep every job queued
+	t.Cleanup(func() { <-sem })
+	cfg := Config{Enabled: true, Configured: true, ChatModel: "test-model"}
+	svc := NewService(ctx, cfg, repo, content, locs, chat.fn, sem, nil)
+	enqueue := func(children, force bool) *Job {
+		t.Helper()
+		job, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr", IncludeChildren: children, Force: force})
+		if err != nil {
+			t.Fatalf("Enqueue(children=%t, force=%t): %v", children, force, err)
+		}
+		return job
+	}
+
+	plain := enqueue(true, false)
+	// An admin re-translate must not be swallowed by a running plain job: the
+	// plain job skips fields that already have a value.
+	forced := enqueue(true, true)
+	if forced.ID == plain.ID || !forced.Force {
+		t.Fatalf("forced request reused job %+v, want a new forced job", forced)
+	}
+	// Narrower or unforced requests are covered by what is already running.
+	if got := enqueue(false, false); got.ID != plain.ID && got.ID != forced.ID {
+		t.Errorf("item-only request created job %d, want an existing covering job", got.ID)
+	}
+	if got := enqueue(false, true); got.ID != forced.ID {
+		t.Errorf("forced item-only request got job %d, want forced job %d", got.ID, forced.ID)
+	}
+	if got := enqueue(true, false); got.ID != plain.ID {
+		t.Errorf("repeat plain request got job %d, want %d", got.ID, plain.ID)
+	}
+	if len(repo.jobs) != 2 {
+		t.Errorf("jobs = %d, want 2", len(repo.jobs))
+	}
+}
+
 func TestAutoEnqueueSkipsWhenNothingMissing(t *testing.T) {
 	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
 	content.missing = 0
@@ -584,5 +624,91 @@ func TestRequestOnViewUsesRequestedTargetKind(t *testing.T) {
 	}
 	if !sawSeason || !sawEpisode {
 		t.Fatalf("missing target-kind writes: %+v", writes)
+	}
+}
+
+// An active job from the previous key format is reused when it covers the
+// request, so a rolling deploy does not start duplicate work.
+func TestEnqueueReusesALegacyKeyJobThatCoversTheRequest(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{}
+	t.Cleanup(func() { <-sem })
+	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	legacy := &Job{TargetKind: TargetItem, ContentID: "series1", TargetLanguage: "fr", IncludeChildren: true,
+		Status: jobrunner.StatusRunning, IdempotencyKey: legacyIdempotencyKey(TargetItem, "series1", "fr", "test-model")}
+	if err := repo.InsertJob(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr", IncludeChildren: true})
+	if err != nil || got.ID != legacy.ID {
+		t.Fatalf("plain request got %+v (%v), want legacy job %d", got, err, legacy.ID)
+	}
+	forced, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr", IncludeChildren: true, Force: true})
+	if err != nil || forced.ID == legacy.ID {
+		t.Fatalf("forced request got %+v (%v), want a new job", forced, err)
+	}
+}
+
+// For a movie the children flag means nothing, so requests with and without
+// it share one job.
+func TestEnqueueTreatsMovieChildrenFlagAsTheSameJob(t *testing.T) {
+	repo, locs, chat := newFakeRepo(), &fakeLocs{}, &upperChat{}
+	content := &fakeContent{item: &ItemText{ContentID: "movie1", Type: "movie", Title: "M", Overview: "An overview."}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{}
+	t.Cleanup(func() { <-sem })
+	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	first, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "movie1", TargetLanguage: "fr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "movie1", TargetLanguage: "fr", IncludeChildren: true})
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("movie request with children got %+v (%v), want job %d", second, err, first.ID)
+	}
+}
+
+func TestEnqueueTreatsEpisodeChildrenFlagAsTheSameJob(t *testing.T) {
+	repo, locs, chat := newFakeRepo(), &fakeLocs{}, &upperChat{}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{}
+	t.Cleanup(func() { <-sem })
+	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, &fakeContent{}, locs, chat.fn, sem, nil)
+	first, err := svc.Enqueue(context.Background(), JobRequest{TargetKind: TargetEpisode, ContentID: "ep1", TargetLanguage: "fr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.Enqueue(context.Background(), JobRequest{TargetKind: TargetEpisode, ContentID: "ep1", TargetLanguage: "fr", IncludeChildren: true})
+	if err != nil || second.ID != first.ID {
+		t.Fatalf("episode request with children got %+v (%v), want job %d", second, err, first.ID)
+	}
+}
+
+// A series-only on-view job must not swallow a later full-series request.
+func TestEnqueueStartsAFullSeriesJobWhileASeriesOnlyJobRuns(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{} // keep every job queued
+	t.Cleanup(func() { <-sem })
+	svc := NewService(ctx, Config{Enabled: true, Configured: true, ChatModel: "test-model"}, repo, content, locs, chat.fn, sem, nil)
+	narrow, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := svc.Enqueue(context.Background(), JobRequest{ContentID: "series1", TargetLanguage: "fr", IncludeChildren: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.ID == narrow.ID || !full.IncludeChildren {
+		t.Fatalf("full-series request got %+v, want a new job with children", full)
 	}
 }
