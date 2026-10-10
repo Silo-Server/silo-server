@@ -409,13 +409,13 @@ func (s *Service) persistField(ctx context.Context, job *Job, f field, text stri
 	switch f.kind {
 	case TargetItem:
 		if f.isTagline {
-			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text, job.Force)
+			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text)
 		}
-		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil, job.Force)
+		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil)
 	case TargetSeason:
-		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text)
 	case TargetEpisode:
-		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text, job.Force)
+		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text)
 	default:
 		return fmt.Errorf("unknown field kind %q", f.kind)
 	}
@@ -510,22 +510,26 @@ func (s *Service) parentMeta(ctx context.Context, job *Job, seriesID string) (jo
 	return meta, nil
 }
 
+// Localization provenance values of overview_source and tagline_source.
+const (
+	sourceManual = "manual"
+	sourceAI     = "ai"
+)
+
 // translatableField reports whether a field with base text and an existing
 // localized value/source should be translated. Empty base text never
-// translates; filled localizations are skipped unless force; manual values
-// are skipped even with force (the SQL layer guards them too — skipping here
-// saves the model call).
+// translates, and a manual field never does, even when empty: the repository
+// keeps manual values, so the model call would be wasted. Otherwise an empty
+// localized value translates, and a filled one only when an earlier AI
+// translation wrote it and the job is forced.
 func translatableField(baseText, locValue, locSource string, force bool) bool {
-	if strings.TrimSpace(baseText) == "" {
+	if strings.TrimSpace(baseText) == "" || locSource == sourceManual {
 		return false
 	}
-	if locSource == "manual" {
-		return false
+	if locValue == "" {
+		return true
 	}
-	if locValue != "" && !force {
-		return false
-	}
-	return true
+	return force && locSource == sourceAI
 }
 
 func (s *Service) itemFields(ctx context.Context, job *Job, item *ItemText) ([]field, error) {

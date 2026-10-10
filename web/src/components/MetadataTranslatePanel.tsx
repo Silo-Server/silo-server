@@ -94,8 +94,8 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
         <span className="text-sm font-medium">Translate with AI</span>
       </div>
       <p className="text-muted-foreground text-xs">
-        {description} into the chosen language. Translations are served to libraries using that
-        metadata language; provider data replaces them when it becomes available.
+        {description} into the chosen language. Descriptions a provider or a person already supplied
+        in that language are kept, and provider data replaces AI text when it becomes available.
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
@@ -120,7 +120,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
         <div className="flex h-9 items-center gap-2">
           <Switch id="translate-force" checked={force} onCheckedChange={setForce} disabled={busy} />
           <Label htmlFor="translate-force" className="text-xs">
-            Re-translate existing
+            Re-translate AI text
           </Label>
         </div>
         <Button type="button" size="sm" onClick={start} disabled={busy}>

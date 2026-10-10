@@ -18723,6 +18723,7 @@ export interface components {
       title: string;
     };
     AdminTranslateMetadataInputBody: {
+      /** @description Also replace text an earlier AI translation wrote. Provider and manual text is never replaced. */
       force?: boolean;
       /** @description Defaults true for item targets; ignored for season and episode targets. */
       include_children?: boolean | null;
@@ -25006,6 +25007,7 @@ export interface components {
       fields_done: number;
       /** Format: int64 */
       fields_total: number;
+      /** @description The job also replaces earlier AI text; provider and manual text is never replaced */
       force: boolean;
       /**
        * @description Opaque identifier

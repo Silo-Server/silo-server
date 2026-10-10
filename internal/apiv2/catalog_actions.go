@@ -123,7 +123,7 @@ type MetadataTranslationJob struct {
 	ProgressMessage string  `json:"progress_message"`
 	FieldsDone      int     `json:"fields_done"`
 	FieldsTotal     int     `json:"fields_total"`
-	Force           bool    `json:"force"`
+	Force           bool    `json:"force" doc:"The job also replaces earlier AI text; provider and manual text is never replaced"`
 	ErrorMessage    string  `json:"error_message,omitempty"`
 	CreatedAt       Instant `json:"created_at"`
 	UpdatedAt       Instant `json:"updated_at"`

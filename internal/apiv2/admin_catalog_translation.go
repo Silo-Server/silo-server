@@ -20,7 +20,7 @@ type AdminTranslateMetadataInput struct {
 	Body struct {
 		TargetLanguage  string `json:"target_language" minLength:"1" maxLength:"16"`
 		IncludeChildren *bool  `json:"include_children,omitempty" nullable:"true" doc:"Defaults true for item targets; ignored for season and episode targets."`
-		Force           bool   `json:"force,omitempty"`
+		Force           bool   `json:"force,omitempty" doc:"Also replace text an earlier AI translation wrote. Provider and manual text is never replaced."`
 	}
 }
 type AdminTranslationItemInput struct {
