@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
 import type { RequestDownload } from "@/api/types";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RequestDownloadProgress } from "./RequestDownloadProgress";
 
 const download = (overrides: Partial<RequestDownload> = {}): RequestDownload => ({
@@ -20,16 +20,6 @@ describe("RequestDownloadProgress", () => {
     vi.setSystemTime(new Date("2026-01-02T03:04:05Z"));
   });
   afterEach(() => vi.useRealTimers());
-
-  it("draws a bar at the percentage over the label", () => {
-    render(<RequestDownloadProgress download={download()} />);
-
-    expect(screen.getByRole("progressbar", { name: "Download progress" })).toHaveAttribute(
-      "aria-valuenow",
-      "43",
-    );
-    expect(screen.getByText("Downloading · 43% · about 12 min left")).toBeInTheDocument();
-  });
 
   it("shows only the label while the size is unknown, or the phase is new", () => {
     const { rerender } = render(
@@ -52,6 +42,11 @@ describe("RequestDownloadProgress", () => {
     vi.setSystemTime(new Date("2026-01-02T03:04:05Z"));
     render(<RequestDownloadProgress download={download()} />);
     expect(screen.getByText("Downloading · 43% · about 12 min left")).toBeInTheDocument();
+
+    expect(screen.getByRole("progressbar", { name: "Download progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "43",
+    );
 
     act(() => vi.advanceTimersByTime(5 * 60_000));
     expect(screen.getByText("Downloading · 43% · about 7 min left")).toBeInTheDocument();

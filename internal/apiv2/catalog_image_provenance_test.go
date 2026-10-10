@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 )
 
 func TestV2ImageProvenancePreservesFalse(t *testing.T) {
-	card := catalogItemOfSection(handlers.SectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(true)})
-	listing := catalogItemOfListing(handlers.CollectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(false)})
+	card := catalogItemOfSection(handlers.SectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(true)}, ratingsources.Selection{})
+	listing := catalogItemOfListing(handlers.CollectionItemView{Type: "episode", PosterIsEpisodeStill: new(false), BackdropIsEpisodeStill: new(false)}, ratingsources.Selection{})
 	rows := episodesOf([]handlers.EpisodeView{{StillIsEpisodeStill: new(false)}})
 	for _, tc := range []struct {
 		view any

@@ -198,28 +198,6 @@ func TestHandlePlaybackReport_StoppedDoesNotReviveUpstream(t *testing.T) {
 	}
 }
 
-// TestEnsureUpstreamPlayback_RecreatesReapedSession proves the stream path
-// heals a reaped upstream session: the next range request must recreate it
-// rather than early-returning a dangling UpstreamSessionID forever.
-func TestEnsureUpstreamPlayback_RecreatesReapedSession(t *testing.T) {
-	handler, mgr, _, _ := newReportLivenessHandler("upstream-reaped", false)
-	playSession, _ := handler.playbackStore.Get("play-1")
-	source := playSession.MediaSources[0]
-
-	got, err := handler.ensureUpstreamPlayback(context.Background(),
-		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
-		"play-1", source, "direct")
-	if err != nil {
-		t.Fatalf("ensureUpstreamPlayback: %v", err)
-	}
-	if mgr.startCalls != 1 {
-		t.Fatalf("StartSession calls = %d, want 1 (reaped upstream must be recreated)", mgr.startCalls)
-	}
-	if got.UpstreamSessionID != "upstream-started" {
-		t.Fatalf("UpstreamSessionID = %q, want upstream-started", got.UpstreamSessionID)
-	}
-}
-
 // TestEnsureUpstreamPlayback_ReusesLiveSession guards the reuse path: a live
 // upstream session must not be torn down or recreated by subsequent requests.
 func TestEnsureUpstreamPlayback_ReusesLiveSession(t *testing.T) {

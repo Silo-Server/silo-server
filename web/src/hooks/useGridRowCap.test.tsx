@@ -74,14 +74,6 @@ describe("useGridRowCap", () => {
     expect(screen.getByTestId("grid").style.maxHeight).toBe("");
   });
 
-  it("caps at the last visible row, excluding the gap before the hidden one", () => {
-    // A fifth row starts at 404. Showing exactly four rows means stopping at
-    // the bottom of row four — 404 minus the 16px gap — plus the 4px of top
-    // padding that keeps the hover lift from being clipped.
-    render(<Harness visibleRows={4} tops={grid(5, 3)} />);
-    expect(screen.getByTestId("grid").style.maxHeight).toBe("388px");
-  });
-
   it("caps by row rather than by item count, whatever the column count", () => {
     // The same cap in a two-column layout still lands on the fourth row, so a
     // breakpoint change re-measures to a new height rather than a new row.

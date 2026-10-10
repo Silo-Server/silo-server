@@ -183,20 +183,6 @@ export function useAdminHistoryImportRuns(sourceId?: number, enabled = true) {
     isFetchingNextPage: query.isFetchingNextPage,
   };
 }
-export function useAdminHistoryImportRun(id: string | undefined) {
-  const queryClient = useQueryClient();
-  const key = [...adminKeys.historyImportAdminRun(id), adminImportScope()];
-  return useQuery({
-    queryKey: key,
-    queryFn: () => getAdminImportRun(id!, queryClient.getQueryData<AdminImportRun>(key)?.location),
-    enabled: !!id,
-    retry: false,
-    refetchInterval: (query) =>
-      query.state.status !== "error" && query.state.data && importRunActive(query.state.data)
-        ? (query.state.data.retryAfterMs ?? 5000)
-        : false,
-  });
-}
 
 export function useCancelAdminRun() {
   const queryClient = useQueryClient();

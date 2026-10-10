@@ -3,7 +3,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail, Season } from "@/api/types";
+import type { CrewMember, ItemDetail, Season } from "@/api/types";
+import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
 import SeriesContent from "./SeriesContent";
 
 const mocks = vi.hoisted(() => {
@@ -19,6 +20,8 @@ const mocks = vi.hoisted(() => {
       },
     },
     useAuth: vi.fn(),
+    useIsActingAdmin: vi.fn(),
+    useLibraryCapabilities: vi.fn(),
     useIsFavorite: vi.fn(),
     useToggleFavorite: vi.fn(),
     useIsInWatchlist: vi.fn(),
@@ -35,6 +38,9 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+vi.mock("@/hooks/queries/shuffles", () => ({
+  useStartShuffle: () => ({ startShuffle: vi.fn(), isStarting: false }),
+}));
 vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
   useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
 }));
@@ -45,6 +51,10 @@ vi.mock("@/hooks/useOnViewTranslation", () => ({
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
   useOptionalAuth: mocks.useAuth,
+}));
+
+vi.mock("@/hooks/useIsActingAdmin", () => ({
+  useIsActingAdmin: mocks.useIsActingAdmin,
 }));
 
 vi.mock("@/hooks/queries/favorites", () => ({
@@ -60,6 +70,10 @@ vi.mock("@/hooks/queries/watchlist", () => ({
 vi.mock("@/hooks/queries/items", () => ({
   useRefreshItemMetadata: mocks.useRefreshItemMetadata,
   useWatchedStateMutation: mocks.useWatchedStateMutation,
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useLibraryCapabilities: mocks.useLibraryCapabilities,
 }));
 
 vi.mock("@/hooks/queries/episodes", () => ({
@@ -81,10 +95,6 @@ vi.mock("@/hooks/queries/ratings", () => ({
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
-  default: () => <div />,
-}));
-
-vi.mock("@/components/CrewList", () => ({
   default: () => <div />,
 }));
 
@@ -146,6 +156,7 @@ function makeSeriesItem(
     rating_tmdb: null,
     rating_rt_critic: null,
     rating_rt_audience: null,
+    ratings: [],
     imdb_id: "",
     tmdb_id: "",
     tvdb_id: "",
@@ -183,6 +194,9 @@ describe("SeriesContent", () => {
     mocks.setRatingMutate.mockReset();
     mocks.deleteRatingMutate.mockReset();
     mocks.useAuth.mockReturnValue({ user: null });
+    mocks.useIsActingAdmin.mockReturnValue(false);
+    mocks.useLibraryCapabilities.mockReset();
+    mocks.useLibraryCapabilities.mockReturnValue({ data: undefined });
     mocks.useIsFavorite.mockReturnValue({ data: false });
     mocks.useToggleFavorite.mockReturnValue({ mutate: vi.fn() });
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
@@ -198,35 +212,24 @@ describe("SeriesContent", () => {
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
   });
 
-  it.each([false, true])(
-    "only reserves empty season navigation while loading (%s)",
-    (isLoading) => {
-      mocks.useSeasons.mockReturnValue({ data: { seasons: [] }, isLoading });
-      const markup = renderToStaticMarkup(
-        <QueryClientProvider client={new QueryClient()}>
-          <MemoryRouter>
-            <SeriesContent item={makeSeriesItem()} />
-          </MemoryRouter>
-        </QueryClientProvider>,
-      );
-      expect(markup.includes("series-detail-navigation")).toBe(isLoading);
-      expect(markup.includes('role="region" aria-label="Seasons and episodes"')).toBe(isLoading);
-    },
-  );
-
-  it("passes rating state and change handler to ActionBar", () => {
+  it.each([
+    [{ trickplay: true, trickplay_supported: true }, true],
+    [{ trickplay: true, trickplay_supported: false }, false],
+    [{ trickplay: true }, false],
+    [{ trickplay: false }, false],
+    [undefined, false],
+  ])("offers series seek-preview administration with capability %o: %s", (data, offered) => {
+    mocks.useIsActingAdmin.mockReturnValue(true);
+    mocks.useLibraryCapabilities.mockReturnValue({ data });
     renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter initialEntries={["/item/series-1"]}>
+        <MemoryRouter>
           <SeriesContent item={makeSeriesItem()} />
         </MemoryRouter>
       </QueryClientProvider>,
     );
-
-    expect(mocks.capturedActionBarProps.value).toMatchObject({
-      rating: 4,
-    });
-    expect(mocks.capturedActionBarProps.value?.onRatingChange).toBeTypeOf("function");
+    expect(mocks.capturedActionBarProps.value?.canManageTrickplay).toBe(offered);
+    expect(mocks.useLibraryCapabilities).toHaveBeenLastCalledWith(true);
   });
 
   it("sets and clears ratings through the existing mutations", () => {
@@ -237,6 +240,8 @@ describe("SeriesContent", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
+
+    expect(mocks.capturedActionBarProps.value?.rating).toBe(4);
 
     const onRatingChange = mocks.capturedActionBarProps.value?.onRatingChange as
       | ((rating: number | null) => void)
@@ -249,5 +254,35 @@ describe("SeriesContent", () => {
 
     expect(mocks.setRatingMutate).toHaveBeenCalledWith(5);
     expect(mocks.deleteRatingMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists every creator in the Crew section, past the two the hero line shows", () => {
+    const creators: CrewMember[] = [
+      { name: "Creator One", job: "Creator", person_id: "creator-1" },
+      { name: "Creator Two", job: "Creator", person_id: "creator-2" },
+      { name: "Creator Three", job: "Creator", person_id: "creator-3" },
+    ];
+    const crew: CrewMember[] = [
+      ...creators,
+      { name: "Series Director", job: "Director", person_id: "director-1" },
+    ];
+
+    // DetailHero and HeroCrewLine are mocked, so these names can only come
+    // from the Crew section.
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/series-1"]}>
+          <SeriesContent item={makeSeriesItem({ crew })} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(markup).toContain(">Creators</dt>");
+    for (const creator of creators) {
+      expect(markup).toContain(`href="${buildPersonCatalogHref(creator.person_id)}"`);
+      expect(markup).toContain(creator.name);
+    }
+    expect(markup).toContain(">Directors</dt>");
+    expect(markup.indexOf(">Creators</dt>")).toBeLessThan(markup.indexOf(">Directors</dt>"));
   });
 });

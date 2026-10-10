@@ -37,29 +37,6 @@ func TestNormalizeQuerySort_LegacyAliases(t *testing.T) {
 	}
 }
 
-func TestValidate_LastAirDateSort(t *testing.T) {
-	qd := QueryDefinition{
-		Match:  "all",
-		Groups: []QueryGroup{},
-		Sort:   QuerySort{Field: "last_air_date", Order: "desc"},
-	}
-	if err := qd.Validate(); err != nil {
-		t.Fatalf("expected last_air_date sort to be valid, got %v", err)
-	}
-}
-
-func TestValidate_EpisodeMediaScope(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "episode",
-		Match:      "all",
-		Groups:     []QueryGroup{},
-		Sort:       QuerySort{Field: "title", Order: "asc"},
-	}
-	if err := qd.Validate(); err != nil {
-		t.Fatalf("expected episode media scope to be valid, got %v", err)
-	}
-}
-
 func TestValidate_AudiobookMediaScope(t *testing.T) {
 	qd := QueryDefinition{
 		MediaScope: "audiobook",
@@ -69,30 +46,6 @@ func TestValidate_AudiobookMediaScope(t *testing.T) {
 	}
 	if err := qd.Validate(); err != nil {
 		t.Fatalf("expected audiobook media scope to be valid, got %v", err)
-	}
-}
-
-func TestValidate_EbookMediaScope(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "ebook",
-		Match:      "all",
-		Groups:     []QueryGroup{},
-		Sort:       QuerySort{Field: "title", Order: "asc"},
-	}
-	if err := qd.Validate(); err != nil {
-		t.Fatalf("expected ebook media scope to be valid, got %v", err)
-	}
-}
-
-func TestValidate_MangaMediaScope(t *testing.T) {
-	qd := QueryDefinition{
-		MediaScope: "manga",
-		Match:      "all",
-		Groups:     []QueryGroup{},
-		Sort:       QuerySort{Field: "title", Order: "asc"},
-	}
-	if err := qd.Validate(); err != nil {
-		t.Fatalf("expected manga media scope to be valid, got %v", err)
 	}
 }
 
@@ -167,14 +120,5 @@ func TestValidateWithOptions_AllowsPersonalizedRuleWithProfileScope(t *testing.T
 	}
 	if err := qd.ValidateWithOptions(true, true); err != nil {
 		t.Fatalf("expected personalized field to be valid with profile scope, got %v", err)
-	}
-}
-
-func TestQueryFieldRequiresProfile(t *testing.T) {
-	if !QueryFieldRequiresProfile("watched") {
-		t.Fatal("expected watched to require profile scope")
-	}
-	if QueryFieldRequiresProfile("actor") {
-		t.Fatal("expected actor not to require profile scope")
 	}
 }

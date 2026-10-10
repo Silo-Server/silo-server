@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import listSectionRecipeCandidatesOk from "../../../contracts/api/v2/fixtures/list_section_recipe_candidates_ok.json";
 import listSectionRecipesOk from "../../../contracts/api/v2/fixtures/list_section_recipes_ok.json";
-import { fetchRecipeCatalog, fetchCandidates, previewSection } from "./recipes";
+import { fetchRecipeCatalog, previewSection } from "./recipes";
 
 beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockReset();
@@ -23,23 +22,6 @@ describe("recipes API client", () => {
       genres: ["comedy"],
       mood: "cozy",
     });
-  });
-
-  it("fetchCandidates returns candidate list", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(listSectionRecipeCandidatesOk), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const candidates = await fetchCandidates("custom_filter");
-    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
-      "/api/v2/sections/recipes/custom_filter/candidates",
-    );
-    expect(candidates[0]!.value).toBe("action");
-    expect(candidates[0]!.subtitle).toBe("12 titles");
-    expect(candidates[1]!.subtitle).toBeUndefined();
   });
 
   it("previewSection uses v2 and adapts preview IDs and artwork for cards", async () => {

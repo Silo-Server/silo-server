@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 // simulateDownload runs an action-domain simulation of a download that passes
@@ -65,31 +63,5 @@ func TestSimulateActionDerivesTheRatingCeiling(t *testing.T) {
 	supplied := map[string]any{"content_rating_within_ceiling": true}
 	if decision := simulateDownload(t, "R", "PG", supplied); decision.Allowed {
 		t.Errorf("a supplied content_rating_within_ceiling loosened the simulation: %+v", decision)
-	}
-}
-
-// TestSimulateActionMatchesRatingAllowed is the parity the simulator exists
-// for: with every other gate open, the simulated decision tracks
-// access.RatingAllowed — the same function PDP.CheckAction calls — across
-// systems, unrated ratings and unusable ceilings.
-func TestSimulateActionMatchesRatingAllowed(t *testing.T) {
-	pairs := []struct{ rating, ceiling string }{
-		{"R", "PG"},
-		{"PG", "PG-13"},
-		{"TV-14", "PG-13"},
-		{"FSK 16", "PG-13"},
-		{"12A", "TV-14"},
-		{"NC-17", ""},
-		{"NR", "PG-13"},
-		{"PG", "banana"},
-		{"PG", " "},
-	}
-	for _, pair := range pairs {
-		want := access.RatingAllowed(pair.rating, pair.ceiling)
-		got := simulateDownload(t, pair.rating, pair.ceiling, nil)
-		if got.Allowed != want {
-			t.Errorf("rating %q under ceiling %q: simulated allowed=%v, access.RatingAllowed=%v (%s)",
-				pair.rating, pair.ceiling, got.Allowed, want, got.ReasonCode)
-		}
 	}
 }

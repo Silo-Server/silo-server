@@ -3,7 +3,7 @@ import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import type { Season } from "@/api/types";
 import { usePrefetchCatalogSeason } from "@/hooks/queries/catalogRead";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
-import { formatSeasonMeta, getSeasonDisplayTitle } from "./itemDetailLayout";
+import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from "./itemDetailLayout";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 
@@ -93,12 +93,12 @@ export default function SeasonCarousel({ seasons }: SeasonCarouselProps) {
 
               {/* Info — always the same height */}
               <ViewTransitionLink to={`/item/${season.content_id}`} className="block px-0.5 pt-2.5">
-                <div className="truncate text-[13px] font-semibold">
+                <div className="truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>
                 <div className="text-muted-foreground text-xs">
                   {hasProgress
-                    ? `${userData.watched_count} of ${season.episode_count} episodes`
+                    ? formatSeasonProgress(season, userData.watched_count)
                     : formatSeasonMeta(season)}
                 </div>
               </ViewTransitionLink>

@@ -1,0 +1,11 @@
+{
+  "requests_enabled": true,
+  "allowed": true,
+  "unlimited": false,
+  "used": 12,
+  "max_requests": 20,
+  "window_days": 30,
+  "window_start": "2025-12-03T03:04:05.678Z",
+  "remaining": 8,
+  "auto_approve": false
+}

@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -183,9 +184,15 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.SessionSyncer = deps.SessionSyncer
 	playbackHandler.WatchScrobbler = deps.WatchScrobbler
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
+	playbackHandler.Trickplay = deps.Trickplay
+	playbackHandler.PlaySync = deps.SubtitlePlaySync
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
+		// The PostgreSQL repository also stores sidecar timing corrections.
+		if timings, ok := subtitleRepo.(subtitles.ExternalTimingLookup); ok {
+			playbackHandler.ExternalTimings = timings
+		}
 	}
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	imagesHandler.collections = itemsHandler.collections
@@ -271,6 +278,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
+			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
+			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
 			r.Get("/UserItems/Resume", itemsHandler.HandleResume)
@@ -385,13 +394,14 @@ const (
 )
 
 // skipCompatActivityLog leaves out routes that a single page view or playback
-// fetches many times over: artwork, the bundled jellyfin-web assets, and HLS
-// variant playlists and segments. The PlaybackInfo and master playlist requests
+// fetches many times over: artwork, the bundled jellyfin-web assets, trickplay
+// sheets, and HLS variant playlists and segments. The PlaybackInfo and master playlist requests
 // that start playback are still recorded, as native stream starts are.
 func skipCompatActivityLog(pattern string) bool {
 	switch pattern {
 	case compatItemImageRoute, compatItemImageIndexRoute, compatUserImageRoute,
-		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute:
+		compatUserImageQueryRoute, compatArtworkRoute, compatWebAssetsRoute,
+		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
 	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
@@ -420,6 +430,8 @@ func skipCompatMediaCompression(r *http.Request) bool {
 		p[3] == compatHLSPathSegment && p[4] != "" && p[5] != "":
 		return p[5] != hlsManifest && strings.Contains(p[5], ".")
 	case len(p) == 3 && p[0] == "Items" && p[1] != "" && p[2] == "Download":
+		return true
+	case len(p) == 5 && p[0] == videosSegment && p[1] != "" && p[2] == "Trickplay" && strings.HasSuffix(p[4], ".jpg"):
 		return true
 	default:
 		return false
@@ -539,7 +551,12 @@ func withDefaults(deps Dependencies) Dependencies {
 
 	// Build LoginResolver from auth service if not provided
 	if deps.LoginResolver == nil && deps.AuthService != nil && deps.UserStoreProvider != nil && deps.SessionStore != nil {
-		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now)
+		pinAttempts := deps.ProfilePINAttempts
+		if pinAttempts == nil {
+			pinAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.ProfilePINPolicy)
+		}
+		deps.LoginResolver = NewLoginResolver(deps.AuthService, deps.UserStoreProvider, deps.SessionStore, deps.TokenGenerator, deps.Now).
+			WithPINAttempts(pinAttempts)
 	}
 
 	if deps.Authenticator == nil && deps.SessionStore != nil {

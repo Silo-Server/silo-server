@@ -16,6 +16,7 @@ import {
   useRefreshItemMetadata,
 } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
@@ -77,6 +78,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // An API node without redetect-markers (rolling deploy, rollback) keeps the
   // older intro-only re-detection.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
   const setSubtitlePreference = useSetSubtitlePreference();
@@ -255,10 +259,6 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     siblingSeason?.seasonNumber ?? -1,
   );
 
-  const ratingImdb = item.rating_imdb;
-  const ratingTmdb = item.rating_tmdb;
-  const effectiveRating = ratingImdb ?? ratingTmdb;
-
   // Sibling episodes now come from the season collection, not the current episode ID.
   const { data: episodesData, isLoading: siblingsLoading } = useSeasonEpisodes(
     siblingSeason?.seriesId,
@@ -330,13 +330,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               <QualityBadges summary={selectedMediaSummary} />
             </div>
           }
-          scoreRow={
-            <ScoreRow
-              ratingImdb={effectiveRating}
-              ratingRtCritic={item.rating_rt_critic}
-              ratingRtAudience={item.rating_rt_audience}
-            />
-          }
+          scoreRow={<ScoreRow ratings={item.ratings} />}
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
@@ -348,6 +342,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               compactMobile
               item={item}
               contentId={item.content_id}
+              canAddToCollection={false}
               watchTogether={watchTogether.menu}
               playHref={
                 item.versions && item.versions.length > 0 ? `/watch/${item.content_id}` : undefined
@@ -401,6 +396,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onShowMediaInfo={
                 canCurateMetadata && (item.versions?.length ?? 0) > 0

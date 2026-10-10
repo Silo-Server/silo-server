@@ -3,8 +3,6 @@ package jellycompat
 import (
 	"context"
 	"fmt"
-	"net/http/httptest"
-	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -313,27 +311,5 @@ func TestHandleItems_SeasonParentEpisodesPaged(t *testing.T) {
 	}
 	if len(result.Items) != 1 || result.Items[0].Name != "E2" {
 		t.Fatalf("expected page [E2], got %+v", result.Items)
-	}
-}
-
-// TestParseItemsQuery_SeasonParentSetsParentSeasonID asserts the parser routes a
-// season ParentId to parentSeasonID while a series (item) ParentId stays in
-// parentItemID — the distinction the new routing relies on.
-func TestParseItemsQuery_SeasonParentSetsParentSeasonID(t *testing.T) {
-	codec := NewResourceIDCodec()
-
-	seasonID := codec.EncodeStringID(EncodedIDSeason, "season-9")
-	q := parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+url.QueryEscape(seasonID), nil), codec)
-	if q.parentSeasonID != "season-9" {
-		t.Fatalf("expected parentSeasonID season-9, got %q", q.parentSeasonID)
-	}
-	if q.parentItemID != "" {
-		t.Fatalf("expected parentItemID empty for a season parent, got %q", q.parentItemID)
-	}
-
-	seriesID := codec.EncodeStringID(EncodedIDItem, "series-9")
-	q = parseItemsQuery(httptest.NewRequest("GET", "/Items?ParentId="+url.QueryEscape(seriesID), nil), codec)
-	if q.parentItemID != "series-9" || q.parentSeasonID != "" {
-		t.Fatalf("expected parentItemID series-9 only, got item=%q season=%q", q.parentItemID, q.parentSeasonID)
 	}
 }

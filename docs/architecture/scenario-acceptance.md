@@ -557,7 +557,10 @@ is exercised.
 `make test-scenario-api-key-create-refusals` requires six original cases:
 `keys_create.bad_scope`, `keys_create.missing_label`, `keys_create.malformed`,
 `keys_create.member_forbidden`, `keys_create.demo` and `keys_create.no_token`.
-The three input cases run as the admin, because only server admins create keys;
+The three input cases run as the admin's primary profile (`acting_admin`), because
+only server admins create keys and, since the critical v1 bridge fix recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock), only through the primary
+profile;
 `member_forbidden` records that a regular account is refused with 403 on both
 transports. V2 explicitly records validation 422, malformed JSON 400, demo and
 non-admin 403, and unauthenticated 401 Problem Details. Twelve real-router
@@ -571,7 +574,8 @@ These six frozen pairs remain separate from NEW acceptance.
 
 `make test-scenario-api-key-creations` requires `keys_create.ok`,
 `keys_create.meaning`, `keys_create.scoped` and `keys_create.shape`, all as the
-admin. V2 records string IDs, UTC-millisecond timestamps and creation-only
+admin's primary profile (`acting_admin`; before the critical v1 bridge fix they ran
+without a declared profile, which the fixture's PIN-locked admin profile now refuses). V2 records string IDs, UTC-millisecond timestamps and creation-only
 secret disclosure. Eight real
 transport requests reseed independently and compare 16 full-table snapshots:
 exactly one new admin-owned row must match the returned ID, credential, label,
@@ -761,10 +765,15 @@ deployment is exercised.
 `device_lookup.by_code`, `device_lookup.meaning` and `device_lookup.shape`.
 Original public requests, database requirements and assertions remain unchanged.
 V2 preserves code normalization, masked address and device metadata, with an
-explicit temporary boolean and empty user_code on token lookup. Eight
-transport requests reseed independently; 16 combined snapshots cover complete
-users, profiles, API-key, settings, login-session and device-request tables
-(96 observations), with every row unchanged. Required DSN, pre-setup scratch/API-key
+explicit temporary boolean and empty user_code on token lookup, and adds
+requested_at, server_id and server_name. The executor seeds the server identity
+with the fixture, so reporting server_id is not a settings write. A v2 lookup of
+a pending request writes opened_at and extends expires_at: the fixture request
+gains opened_at (updated_at matches it) and an expiry at least five minutes past
+it, and no other column changes. Eight transport requests reseed independently;
+16 combined snapshots cover complete users, profiles, API-key, settings,
+login-session and device-request tables (96 observations). V1 leaves every row
+unchanged; v2 changes only the looked-up request. Required DSN, pre-setup scratch/API-key
 occupancy and fixed-selector gates fail closed. No start, approval, poll, token
 collection or enrollment is exercised. These four frozen pairs remain separate
 from NEW acceptance.
@@ -773,8 +782,9 @@ from NEW acceptance.
 
 `make test-scenario-device-lookup-errors` requires `device_lookup.expired`,
 `device_lookup.not_found` and `device_lookup.no_params`. Original public/database
-requests and assertions remain unchanged. V2 preserves expired status with 200,
-uses a 404 Problem for unknown tokens, and rejects missing parameters with a
+requests and assertions remain unchanged. V2 preserves expired status with 200
+(adding requested_at, server_id and server_name, without marking the request
+opened), uses a 404 Problem for unknown tokens, and rejects missing parameters with a
 422 validation Problem instead of legacy 404. Six transport requests reseed
 independently; 12 combined snapshots cover complete users, profiles, API-key,
 settings, login-session and device-request tables (72 observations), with every
@@ -1144,7 +1154,8 @@ guards run before setup. No successful creation, send or other cohort runs.
 `device_poll.denied` and `device_poll.expired`. Original requests, public
 principals, database requirements and 200 assertions remain unchanged. V2
 reports the same state and three-second polling interval with empty profile
-fields, temporary=false and no tokens or session expiry. Six real-router
+fields, temporary=false, opened=false and no tokens or session expiry; a pending
+poll also returns the request's current expires_at. Six real-router
 requests reseed independently; twelve combined full snapshots compare users,
 profiles, API keys, settings, login sessions and device requests (72 table
 observations), with no exemptions. Required DSN, pre-constructor occupancy and
@@ -1363,7 +1374,11 @@ scratch/API-key guards remain mandatory; prior negative guard evidence is reused
 
 `make test-scenario-admin-invitation-lifecycle` selects eighteen original
 administrator invitation cases: six list reads/refusals, five creates, three
-resends and four revokes. Original oracles and settings are preserved. V2 lists
+resends and four revokes. `adm_inv_list.admin_no_profile` expects `403` on both
+transports since the critical v1 bridge fix recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock): the fixture admin household
+has a PIN-locked profile, so a session that declares no profile loses the acting-admin
+grant. Original oracles and settings are preserved. V2 lists
 use items/page, IDs are strings, resend creation returns 201, and delivery is
 explicitly not_configured. The scoped-key list case is excluded because its
 asynchronous usage write requires a separate observation boundary.
@@ -1452,7 +1467,11 @@ cleanup remain mandatory; prior negative guard evidence may be reused.
 
 `make test-scenario-household-create` selects all sixteen original profile-create
 cases, including default/PIN/preset creation, administrator secondary-profile
-creation, household authorization, validation and sequential profile-limit refusal.
+refusal, household authorization, validation and sequential profile-limit refusal.
+`profiles_create.admin_any_profile` changed with the critical v1 bridge fix recorded in
+[v1 scope](v1-scope.md#breaking-removals-taken-before-lock): both transports now refuse
+the admin's non-primary profile with `403` (v2 `permission_denied`). Creation through an
+admin account's primary profile is covered by the handler unit tests, not by this packet.
 Original requests and assertions remain fixed. V2 uses canonical fields, string
 library IDs, no-store and validation Problems; the original unknown-library v1
 500 remains a database rejection, paired with explicit v2 422 validation.
@@ -1485,8 +1504,8 @@ issue credentials once, insert exactly one session, and consume exactly its
 request. The next poll returns consumed without credentials or stored changes.
 Signed access/refresh tokens bind the member account, role and new session with
 exact token kinds and lifetimes. Temporary polling additionally validates the
-signed profile proof against the current account policy revision and the actual
-unlocked primary profile. Its session expiry is capped at 24 hours; wire expiry
+signed profile proof against the current account policy revision, the profile's
+PIN revision and the actual unlocked primary profile. Its session expiry is capped at 24 hours; wire expiry
 must equal the stored expiry at v1 second or v2 millisecond precision.
 
 V2 nests credentials under `tokens`, uses string account IDs, supplies explicit
@@ -1744,7 +1763,8 @@ tables. A collecting poll must add exactly one login session and move exactly on
 fixture request from approved to consumed, bound to that session; the two-poll
 `consumed.r1` sequence verifies the first collection and the credential-free second
 poll separately. Remote approval must carry the member's unlocked primary profile, a
-profile token bound to account, session, profile and policy revision, and a stored
+profile token bound to account, session, profile and PIN revision (and carrying the account's
+policy revision for older nodes), and a stored
 session expiry capped at 24 hours; the wire instant equals that expiry truncated to
 seconds on v1 and milliseconds on v2. V2 projects nested tokens, string account IDs,
 always-present profile fields, no-store and problem errors; v1 oracles, requirements

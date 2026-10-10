@@ -42,9 +42,9 @@ value no longer scans the table.
 ## Invariants
 
 1. **No catalog IDs are stored.** None of the three tables stores a
-   `content_id`, and no column uses a name from the `silo_rename_content_id`
+   `content_id`, and no column uses a name from the `silo_rename_content_ids`
    sweep list (`media_item_id`, `content_id`, `item_id`, `series_id`, … in
-   `migrations/sql/20260614120000_content_id_online_reid.sql`). Re-anchoring,
+   `migrations/sql/20261004211822_add_bulk_content_id_rename.sql`). Re-anchoring,
    merging and deleting catalog items never touch these tables. Keep it that way
    when adding columns.
 2. **The title row is locked first.** Every write that can delete a

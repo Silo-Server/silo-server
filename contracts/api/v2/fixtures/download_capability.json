@@ -1,5 +1,5 @@
 {
-  "revision": "474cf00fccb2a52176a6f8c658872d5f62a0213ff0f4b8862a01aac94a91c379",
+  "revision": "95cac6df062e1009b5f74361932ca337f332db043d8ab1c989e92bf8126b17c4",
   "state": "available",
   "allowed": true,
   "bounded_creation": true,
@@ -36,5 +36,11 @@
   "transcode_user_allowed": true,
   "season_download": false,
   "series_monitoring": false,
-  "monitoring_modes": []
+  "monitoring_modes": [],
+  "bulk_quality": true,
+  "monitor_quality": true,
+  "preparation_progress": true,
+  "direct_download_links": false,
+  "prepare_again": true,
+  "revoked_removes_local": true
 }

@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
+import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
@@ -54,6 +55,11 @@ export default function MovieContent({
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
+  const { search } = useLocation();
+  // Follow the item to its new content ID, keeping the query string (such as
+  // ?libraryId=) so the page keeps its library scope.
+  const followReplacedItem = (contentID: string) =>
+    navigate({ pathname: `/item/${contentID}`, search }, { replace: true });
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
   const isAdmin = useIsActingAdmin();
@@ -70,6 +76,9 @@ export default function MovieContent({
   // Movies have no re-detect action on an API node without redetect-markers
   // or movie credits.
   const markerCapabilities = useAdminMarkerCapabilities(isAdmin);
+  const capabilities = useLibraryCapabilities(isAdmin).data;
+  const canManageTrickplay =
+    capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMovieCredits =
     markerCapabilities.data?.redetect_markers === true &&
     markerCapabilities.data?.movie_credits === true;
@@ -258,13 +267,7 @@ export default function MovieContent({
               <QualityBadges summary={selectedMediaSummary} />
             </div>
           }
-          scoreRow={
-            <ScoreRow
-              ratingImdb={item.rating_imdb}
-              ratingRtCritic={item.rating_rt_critic}
-              ratingRtAudience={item.rating_rt_audience}
-            />
-          }
+          scoreRow={<ScoreRow ratings={item.ratings} />}
           overview={item.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
@@ -302,8 +305,7 @@ export default function MovieContent({
                       refreshMetadataMutation.mutate({
                         item,
                         mode,
-                        onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                        onReplaced: followReplacedItem,
                       })
                   : undefined
               }
@@ -318,6 +320,7 @@ export default function MovieContent({
               isAdmin={isAdmin}
               canCurateMetadata={canCurateMetadata}
               canEditMarkers={canEditMarkers}
+              canManageTrickplay={canManageTrickplay}
               onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
               onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
               onSplitItem={
@@ -368,6 +371,7 @@ export default function MovieContent({
               item={item}
               open={matchOpen}
               onOpenChange={setMatchOpen}
+              onReplaced={followReplacedItem}
             />
           )}
           {canCurateMetadata && (

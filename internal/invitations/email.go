@@ -18,7 +18,7 @@ type emailContent struct {
 
 // composeInvitationEmail renders the invitation message. inviterName and
 // note are admin-controlled but escaped anyway; claimURL is server-built.
-func composeInvitationEmail(inviterName, serverName, email, claimURL, note string, expiresAt time.Time, now time.Time) emailContent {
+func composeInvitationEmail(brand mail.Brand, inviterName, serverName, email, claimURL, note string, expiresAt time.Time, now time.Time) emailContent {
 	inviter := strings.TrimSpace(inviterName)
 	if inviter == "" {
 		inviter = "An admin"
@@ -49,7 +49,7 @@ func composeInvitationEmail(inviterName, serverName, email, claimURL, note strin
 			mail.EmailColorBorder + `;font:italic 400 14px/1.6 ` + mail.EmailFont +
 			`;color:` + mail.EmailColorMuted + `;">&ldquo;` + html.EscapeString(note) + `&rdquo;</p>`)
 	}
-	body.WriteString(mail.EmailButton("Set your password", claimURL))
+	body.WriteString(mail.EmailButton(brand, "Set your password", claimURL))
 	body.WriteString(mail.EmailFacts(
 		mail.EmailFact{Label: "Sign in with", ValueHTML: html.EscapeString(email), Mono: true},
 		mail.EmailFact{Label: "Link expires", ValueHTML: html.EscapeString(expiry)},
@@ -60,6 +60,7 @@ func composeInvitationEmail(inviterName, serverName, email, claimURL, note strin
 		Subject: fmt.Sprintf("%s invited you to %s", inviter, product),
 		Text:    text.String(),
 		HTML: mail.RenderLayout(mail.LayoutOptions{
+			Brand:      brand,
 			Preheader:  fmt.Sprintf("Choose a password and you're in — the link expires %s.", expiry),
 			Title:      "You've been invited",
 			BodyHTML:   body.String(),

@@ -12,6 +12,17 @@ import { sortSubtitlesBySource } from "../utils/subtitleSort";
 import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import { isTranslatableSource } from "./subtitleTranslateRequest";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
+import type { SubtitleSync, SubtitleSyncEntry } from "../hooks/useSubtitleSync";
+import {
+  describeTiming,
+  isIdentityTiming,
+  isSyncInProgress,
+  syncFailureMessage,
+  syncKeyOf,
+  syncPhaseLabel,
+  syncProgressPercent,
+  syncStatusLabel,
+} from "../utils/subtitleSync";
 
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];
@@ -27,6 +38,8 @@ interface SubtitleMenuProps {
   sessionId?: string;
   getSubtitleStartPosition?: () => number;
   audioTracks?: PlayerAudioTrack[];
+  /** Timing and sync state of the file's syncable tracks (stored and sidecar files). */
+  subtitleSync?: SubtitleSync;
 }
 
 const DELAY_STEP_MS = 100;
@@ -58,6 +71,7 @@ export function SubtitleMenu({
   sessionId,
   getSubtitleStartPosition,
   audioTracks,
+  subtitleSync,
 }: SubtitleMenuProps) {
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -127,6 +141,14 @@ export function SubtitleMenu({
 
   const delayDisabled = activeIndex === null;
 
+  const syncEntryOf = (track: PlayerSubtitleInfo | null | undefined) => {
+    const key = syncKeyOf(track);
+    return key ? subtitleSync?.entries[key] : undefined;
+  };
+  const activeSyncEntry = syncEntryOf(
+    activeIndex !== null ? tracks.find((track) => track.index === activeIndex) : null,
+  );
+
   const handleSelect = useCallback(
     (index: number | null) => {
       onSelect(index);
@@ -194,7 +216,11 @@ export function SubtitleMenu({
         type="button"
         className="player-utility-btn"
         data-active={activeIndex !== null ? "true" : "false"}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          // Opening re-reads sync state so a job that finished meanwhile shows.
+          if (!open) subtitleSync?.reload();
+          setOpen((v) => !v);
+        }}
         aria-label={activeIndex !== null ? "Disable captions" : "Enable captions"}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -243,6 +269,8 @@ export function SubtitleMenu({
                 track.label !== languageName &&
                 !isSubtitleFormatLabel(track.label, track.codec);
               const itemIdx = ++menuItemIndex;
+              const syncEntry = syncEntryOf(track);
+              const syncLabel = syncEntry ? syncStatusLabel(syncEntry.state) : null;
 
               return (
                 <button
@@ -280,6 +308,14 @@ export function SubtitleMenu({
                         title={track.label}
                       >
                         {track.label}
+                      </span>
+                    )}
+                    {syncLabel && (
+                      <span
+                        className="mt-0.5 block w-full truncate text-xs text-white/50"
+                        data-testid="subtitle-sync-status"
+                      >
+                        {syncLabel}
                       </span>
                     )}
                   </span>
@@ -324,6 +360,9 @@ export function SubtitleMenu({
               </div>
             </div>
           </div>
+          {subtitleSync && activeSyncEntry && (
+            <TimingControls sync={subtitleSync} entry={activeSyncEntry} />
+          )}
           <div className="shrink-0 border-t border-white/10 py-1">
             {mediaFileId && playerConfig && (
               <button
@@ -392,8 +431,9 @@ export function SubtitleMenu({
             isOpen={searchOpen}
             onlineSearchEnabled={onlineSearchEnabled}
             onClose={() => setSearchOpen(false)}
-            onSubtitleDownloaded={() => {
+            onSubtitleDownloaded={(subtitle) => {
               setSearchOpen(false);
+              if (subtitle) subtitleSync?.remember(subtitle);
               onRefreshSubtitles?.();
             }}
           />,
@@ -415,6 +455,123 @@ export function SubtitleMenu({
           onSubtitleJobAccepted={onSubtitleJobAccepted}
           onClose={() => setTranslateOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+const TIMING_BUTTON_CLASS =
+  "rounded px-2 py-1 text-xs text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40";
+
+/**
+ * "Sync to audio" and "Reset timing" for the selected track, stored or a file
+ * next to the media, with a running sync's progress and the last result.
+ * Anyone who can play the file may retime it; a refusal (demo mode) replaces
+ * the actions with a short explanation.
+ */
+function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSyncEntry }) {
+  const key = entry.state.key;
+  const job = entry.state.sync;
+  const inProgress = isSyncInProgress(job?.status);
+  const percent = syncProgressPercent(job);
+  const canSync = sync.syncAvailable && !entry.unsupported;
+  const canReset = !isIdentityTiming(entry.state.timing);
+  if (!entry.forbidden && !canSync && !canReset && !entry.error) return null;
+
+  let result: { text: string; warning?: boolean } | null = null;
+  if (!inProgress && !entry.error) {
+    switch (job?.status) {
+      case "synced":
+        if (!isIdentityTiming(entry.state.timing)) {
+          result = { text: `Synced to the audio: ${describeTiming(entry.state.timing)}` };
+        }
+        break;
+      case "already_synced":
+        result = { text: "Already matches the audio." };
+        break;
+      case "no_match":
+        result = {
+          text: "Doesn't match this video's audio; probably for another release.",
+          warning: true,
+        };
+        break;
+      case "failed":
+        result = { text: syncFailureMessage(job.failure), warning: true };
+        break;
+    }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-white/10 px-3 py-2" data-testid="subtitle-timing">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs tracking-wide text-white/50 uppercase">Timing</span>
+        {!entry.forbidden && (
+          <div className="flex items-center gap-1">
+            {canSync && (
+              <button
+                type="button"
+                className={TIMING_BUTTON_CLASS}
+                disabled={entry.busy || inProgress}
+                onClick={() => void sync.requestSync(key)}
+              >
+                {inProgress ? "Syncing…" : "Sync to audio"}
+              </button>
+            )}
+            {canReset && (
+              <button
+                type="button"
+                className={TIMING_BUTTON_CLASS}
+                disabled={entry.busy || inProgress}
+                onClick={() => void sync.resetTiming(key)}
+              >
+                Reset timing
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {inProgress && (
+        <div className="mt-2 flex flex-col gap-1">
+          <span
+            role="progressbar"
+            aria-label="Subtitle sync progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent ?? 0}
+            className="h-1 overflow-hidden rounded-full bg-white/15"
+          >
+            <span
+              className="block h-full rounded-full bg-white/80 transition-[width] duration-500"
+              style={{ width: `${percent ?? 0}%` }}
+            />
+          </span>
+          <span className="flex justify-between text-xs text-white/50">
+            <span>{syncPhaseLabel(job)}</span>
+            <span className="tabular-nums">{percent ?? 0}%</span>
+          </span>
+        </div>
+      )}
+      {result && (
+        <p className={`mt-1 text-xs ${result.warning ? "text-amber-200/80" : "text-white/50"}`}>
+          {result.text}
+        </p>
+      )}
+      {!entry.forbidden && canSync && !inProgress && !result && (
+        <p className="mt-1 text-xs text-white/40">
+          {entry.state.source === "external"
+            ? "Matches the timing to the audio for everyone. The file itself isn't changed."
+            : "Matches the timing to the audio for everyone watching."}
+        </p>
+      )}
+      {entry.forbidden && (
+        <p className="mt-1 text-xs text-white/50">
+          This server doesn&apos;t allow changing subtitle timing.
+        </p>
+      )}
+      {entry.error && (
+        <p role="alert" className="mt-1 text-xs text-red-300">
+          {entry.error}
+        </p>
       )}
     </div>
   );

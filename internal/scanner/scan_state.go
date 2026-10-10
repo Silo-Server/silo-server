@@ -276,11 +276,8 @@ func (r *FileRepository) GetScanStateByFolder(ctx context.Context, folderID int)
 // GetScanStateByFolderAndPathPrefix returns lightweight scan-state rows for a
 // folder subtree.
 func (r *FileRepository) GetScanStateByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]*scanStateFile, error) {
-	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
-	query := `SELECT ` + scanStateColumns + ` FROM media_files
-		WHERE media_folder_id = $1 AND (` + strings.Join(clauses, " OR ") + `)
-		ORDER BY file_path ASC`
-	rows, err := r.pool.Query(ctx, query, append([]any{folderID}, args...)...)
+	query, args := folderPathPrefixQuery(scanStateColumns, folderID, pathPrefix)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying scan state by folder and path prefix: %w", err)
 	}

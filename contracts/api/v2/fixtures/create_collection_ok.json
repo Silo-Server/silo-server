@@ -6,13 +6,13 @@
   "description": "",
   "collection_type": "manual",
   "is_shared": false,
-  "allowed_profile_ids": [],
   "query_definition": {},
   "sort_config": {},
   "sort_order": 0,
   "group_id": null,
   "source_url": "",
   "sync_schedule": "",
+  "sync_cadence": "",
   "next_sync_at": null,
   "last_sync_at": null,
   "last_sync_status": "",
@@ -21,6 +21,7 @@
   "include_in_server_collections": false,
   "poster_url": "",
   "poster_thumbhash": "",
+  "poster_is_collage": false,
   "created_at": "2026-01-02T03:04:05.678Z",
   "updated_at": "2026-01-02T03:04:05.678Z"
 }

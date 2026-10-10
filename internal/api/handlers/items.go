@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -218,6 +220,15 @@ func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchPr
 	h.catalogResolver.WithSearchProvider(provider)
 }
 
+// SetPersonalCollectionAccess limits the catalog's reads of another
+// profile's shared personal collection to its owner's access.
+func (h *ItemsHandler) SetPersonalCollectionAccess(owners catalog.PersonalCollectionAccess) {
+	if h == nil || h.catalogResolver == nil || owners == nil {
+		return
+	}
+	h.catalogResolver.WithPersonalCollectionAccess(owners)
+}
+
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
 	h.localWatchDispatcher = dispatcher
 }
@@ -312,9 +323,10 @@ type itemListResponse struct {
 	Studios       []string `json:"studios,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	ContentRating string   `json:"content_rating,omitempty"`
-	// AdvisoryAge and AdvisorySource carry the item's advisory to the
-	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
-	// the Go struct only, and apiv2 emits them under its own names.
+	// AdvisoryAge, AdvisorySource, and LogoURL carry the item's advisory and
+	// logo to the v2 card renderer. json:"-" because /api/v1 is frozen: the
+	// fields exist on the Go struct only, and apiv2 emits them under its own
+	// names.
 	AdvisoryAge            *int     `json:"-"`
 	AdvisorySource         string   `json:"-"`
 	Status                 string   `json:"status"`
@@ -333,6 +345,7 @@ type itemListResponse struct {
 	PosterThumbhash        string                      `json:"poster_thumbhash,omitempty"`
 	BackdropURL            string                      `json:"backdrop_url,omitempty"`
 	BackdropThumbhash      string                      `json:"backdrop_thumbhash,omitempty"`
+	LogoURL                string                      `json:"-"`
 	ReleaseDate            *string                     `json:"release_date,omitempty"`
 	LastAirDate            *string                     `json:"last_air_date,omitempty"`
 	AddedAt                *time.Time                  `json:"added_at,omitempty"`
@@ -362,6 +375,7 @@ type sortMetricsResponse struct {
 type itemListImageURLs struct {
 	posterURL   string
 	backdropURL string
+	logoURL     string
 }
 
 // browseResponse is the paginated response for the /items endpoint.
@@ -419,6 +433,9 @@ type episodeFileResponse struct {
 	AudioChannels int    `json:"audio_channels,omitempty"`
 	Container     string `json:"container,omitempty"`
 	FileSize      int64  `json:"file_size"`
+	// Unreadable feeds the v2 episode file; /api/v1 is frozen, so it stays off
+	// that wire.
+	Unreadable bool `json:"-"`
 }
 
 // episodeResponse is the shape of an episode in API responses.
@@ -837,7 +854,7 @@ func (h *ItemsHandler) listPlayableTargets(ctx context.Context, v ItemViewer, it
 // playableTargetInputForItem builds the resolver input for one displayed card.
 // Response rows find their own target with playableTargetKeyForItem, which
 // keys off the same fields — including the anchor hint, so a series that
-// appears on two recently-added scan-run event cards resolves each card
+// appears on two recently-added arrival event cards resolves each card
 // separately instead of both taking the first card's answer.
 func playableTargetInputForItem(item *models.MediaItem) catalog.PlayableTargetInput {
 	return catalog.PlayableTargetInput{
@@ -855,11 +872,17 @@ func playableTargetKeyForItem(item *models.MediaItem) string {
 }
 
 func (h *ItemsHandler) resolvePlayableTargetInputs(ctx context.Context, v ItemViewer, inputs []catalog.PlayableTargetInput, libraryIDs []int, filter catalog.AccessFilter) map[string]string {
+	return catalog.PlayableTargetIDs(h.resolvePlayableTargets(ctx, v, inputs, libraryIDs, filter))
+}
+
+// resolvePlayableTargets is resolvePlayableTargetInputs with each target's
+// season attached.
+func (h *ItemsHandler) resolvePlayableTargets(ctx context.Context, v ItemViewer, inputs []catalog.PlayableTargetInput, libraryIDs []int, filter catalog.AccessFilter) map[string]catalog.PlayableTarget {
 	if h == nil || h.playableTargets == nil || len(inputs) == 0 {
-		return map[string]string{}
+		return map[string]catalog.PlayableTarget{}
 	}
 	store, _, _ := h.viewerUserStore(ctx, v.ProfileID)
-	targets, err := h.playableTargets.Resolve(ctx, catalog.PlayableTargetQuery{
+	targets, err := h.playableTargets.ResolveTargets(ctx, catalog.PlayableTargetQuery{
 		UserID:        apimw.GetUserID(ctx),
 		ProfileID:     v.ProfileID,
 		LibraryIDs:    libraryIDs,
@@ -869,7 +892,7 @@ func (h *ItemsHandler) resolvePlayableTargetInputs(ctx context.Context, v ItemVi
 	})
 	if err != nil {
 		slog.WarnContext(ctx, "resolving playable poster targets", "component", "api", "error", err)
-		return map[string]string{}
+		return map[string]catalog.PlayableTarget{}
 	}
 	return targets
 }
@@ -1034,6 +1057,7 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 	pending := make([]pendingImages, 0, len(items))
 	paths := make([]string, 0, len(items)*2)
 	seenPaths := make(map[string]struct{}, len(items)*2)
+	logoPaths := make(map[string]string, len(items))
 	addPath := func(path string) {
 		if path == "" || path == "-" {
 			return
@@ -1057,13 +1081,66 @@ func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*model
 		pending = append(pending, images)
 		addPath(images.posterPath)
 		addPath(images.backdropPath)
+		logoPaths[item.ContentID] = item.LogoPath
 	}
 
 	resolved := h.detailSvc.PresignURLsWithExpiry(ctx, paths, requestVariantHint("card", size))
+	logoURLs := signListingLogos(ctx, h.detailSvc, logoPaths, size)
 	for _, images := range pending {
 		urls[images.contentID] = itemListImageURLs{
 			posterURL:   resolved[images.posterPath].URL,
 			backdropURL: resolved[images.backdropPath].URL,
+			logoURL:     logoURLs[images.contentID],
+		}
+	}
+	return urls
+}
+
+// localizedLogoPaths maps each item's content ID to the logo path the
+// viewer's presentation language picks, the one item detail shows. A logo is a
+// wordmark with text in it, so the stored default can be the wrong language.
+// When localization fails the stored paths stand.
+func localizedLogoPaths(ctx context.Context, svc *catalog.DetailService, items []*models.MediaItem, filter catalog.AccessFilter) map[string]string {
+	if svc != nil {
+		if localized, err := svc.LocalizeItemModels(ctx, items, filter); err == nil && len(localized) == len(items) {
+			items = localized
+		}
+	}
+	paths := make(map[string]string, len(items))
+	for _, item := range items {
+		if item != nil && item.LogoPath != "" {
+			paths[item.ContentID] = item.LogoPath
+		}
+	}
+	return paths
+}
+
+// signListingLogos resolves listing-card logos in one batch. logoPaths maps a
+// card's content ID to the logo path it shows, which the caller localizes for
+// the viewer; the result is keyed the same way and omits cards with no logo.
+//
+// Logos resolve at item detail's size and plugin hint rather than the card
+// hint the card's poster uses: a logo is the wordmark the title's page draws,
+// and a card that shows a different file makes it change on open.
+func signListingLogos(ctx context.Context, svc *catalog.DetailService, logoPaths map[string]string, size imagesize.Size) map[string]string {
+	urls := make(map[string]string, len(logoPaths))
+	if svc == nil || len(logoPaths) == 0 {
+		return urls
+	}
+	sized := make(map[string]string, len(logoPaths))
+	seen := make(map[string]struct{}, len(logoPaths))
+	for contentID, path := range logoPaths {
+		if path == "" || path == "-" {
+			continue
+		}
+		path = sizedLogoPath(path, size)
+		sized[contentID] = path
+		seen[path] = struct{}{}
+	}
+	resolved := svc.PresignURLsWithExpiry(ctx, slices.Sorted(maps.Keys(seen)), requestVariantHint("featured", size))
+	for contentID, path := range sized {
+		if url := resolved[path].URL; url != "" {
+			urls[contentID] = url
 		}
 	}
 	return urls
@@ -1274,6 +1351,7 @@ func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter
 			AudioChannels: f.AudioChannels,
 			Container:     f.Container,
 			FileSize:      f.FileSize,
+			Unreadable:    f.ProbeRejected(),
 		})
 	}
 	return resp
@@ -1324,8 +1402,21 @@ func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*mo
 
 func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string]*models.OverlaySummary {
 	summaries := make(map[string]*models.OverlaySummary, len(items))
-	if h.fileRepo == nil || len(items) == 0 {
+	if len(items) == 0 {
 		return summaries
+	}
+	if h.itemRepo != nil {
+		ids := make([]string, 0, len(items))
+		for _, item := range items {
+			if item != nil && item.ContentID != "" {
+				ids = append(ids, item.ContentID)
+			}
+		}
+		summaries, err := h.itemRepo.ListOverlaySummaries(ctx, ids, filter)
+		if err == nil {
+			return summaries
+		}
+		slog.WarnContext(ctx, "listing poster overlay summaries", "component", "api", "error", err)
 	}
 
 	groupedFiles := h.listBrowseItemOverlayFiles(ctx, items, filter)

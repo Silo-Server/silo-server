@@ -25,7 +25,7 @@ describe("buildSettingsOverview health tiles", () => {
     const model = buildSettingsOverview({});
 
     expect(model.tiles).toHaveLength(5);
-    expect(model.cards).toHaveLength(14);
+    expect(model.cards).toHaveLength(15);
     expect(tile({}, "storage").stateText).toBe("Not set up");
     expect(card({}, "general")).toEqual({ id: "general" });
   });
@@ -282,25 +282,6 @@ describe("buildSettingsOverview health tiles", () => {
 });
 
 describe("buildSettingsOverview groups", () => {
-  it("emits one card per settings page id", () => {
-    expect(buildSettingsOverview({}).cards.map((entry) => entry.id)).toEqual([
-      "general",
-      "infrastructure",
-      "appearance",
-      "security",
-      "library",
-      "playback",
-      "downloads",
-      "requests",
-      "providers",
-      "watch-sync",
-      "ai",
-      "notifications",
-      "compatibility",
-      "network-access",
-    ]);
-  });
-
   it("keeps the group manifest aligned with the overview ids", () => {
     expect(buildSettingsOverview({}).cards.map((entry) => entry.id)).toEqual(
       ADMIN_SETTINGS_NAV.map((item) => item.id),

@@ -202,6 +202,30 @@ func (r *PostgresRepository) GetServerSetting(ctx context.Context, key string) (
 	return out, nil
 }
 
+// SetServerSetting stores a plain, non-secret server setting.
+func (r *PostgresRepository) SetServerSetting(ctx context.Context, key, value string) error {
+	if _, err := r.pool.Exec(ctx,
+		`INSERT INTO server_settings (key, value) VALUES ($1, $2)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+		key, value,
+	); err != nil {
+		return fmt.Errorf("server_settings set %q: %w", key, err)
+	}
+	return nil
+}
+
+// HasConnections reports whether any profile is connected to providerKey.
+func (r *PostgresRepository) HasConnections(ctx context.Context, providerKey string) (bool, error) {
+	var exists bool
+	if err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM watch_provider_connections WHERE provider = $1)`,
+		providerKey,
+	).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check %s watch provider connections: %w", providerKey, err)
+	}
+	return exists, nil
+}
+
 func (r *PostgresRepository) UpsertAuthSession(
 	ctx context.Context,
 	session DeviceAuthSession,
@@ -276,7 +300,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt watch refresh token: %w", err)
 	}
-	pluginCredentials, err := r.pluginCredentialsForConnection(conn)
+	pluginCredentials, err := r.encodePluginCredentials(conn)
 	if err != nil {
 		return Connection{}, err
 	}
@@ -1213,6 +1237,44 @@ func (r *PostgresRepository) GetListMediaItems(ctx context.Context, mediaItemIDs
 	return result, nil
 }
 
+// GetMediaTitles loads the display titles of movies, series and episodes by
+// media item id; see MediaTitles. Unknown ids are absent from the result.
+func (r *PostgresRepository) GetMediaTitles(ctx context.Context, mediaItemIDs []string) (map[string]MediaTitles, error) {
+	result := make(map[string]MediaTitles, len(mediaItemIDs))
+	if len(mediaItemIDs) == 0 {
+		return result, nil
+	}
+	// An id in both tables is read as the episode, so one row comes back per id.
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.content_id, m.type, m.title, COALESCE(m.year, 0), '', 0
+		FROM media_items m
+		WHERE m.content_id = ANY($1)
+			AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.content_id = m.content_id)
+		UNION ALL
+		SELECT e.content_id, 'episode', COALESCE(e.title, ''), COALESCE(s.year, 0),
+			COALESCE(s.title, ''), COALESCE(s.year, 0)
+		FROM episodes e
+		LEFT JOIN media_items s ON s.content_id = e.series_id
+		WHERE e.content_id = ANY($1)
+	`, mediaItemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get media titles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var titles MediaTitles
+		if err := rows.Scan(&id, &titles.Kind, &titles.Title, &titles.Year, &titles.SeriesTitle, &titles.SeriesYear); err != nil {
+			return nil, fmt.Errorf("scan media titles: %w", err)
+		}
+		result[id] = titles
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate media titles: %w", err)
+	}
+	return result, nil
+}
+
 const mediaDurationQuery = `
 		SELECT COALESCE(MAX(duration), 0)
 		FROM media_files
@@ -1959,16 +2021,10 @@ type storedPluginCredentials struct {
 	SecretAttributes map[string]string `json:"secret_attributes,omitempty"`
 }
 
-func (r *PostgresRepository) pluginCredentialsForConnection(conn Connection) (string, error) {
-	if !strings.HasPrefix(conn.Provider, providerSourcePlugin+":") {
-		// Built-in providers have legacy token writers that update the dedicated
-		// token columns directly. Keeping a second authoritative bundle for them
-		// would let that bundle become stale and overwrite freshly rotated tokens.
-		return "", nil
-	}
-	return r.encodePluginCredentials(conn)
-}
-
+// encodePluginCredentials encodes the authoritative credential bundle every
+// connection stores next to the dedicated token columns. A row written by a
+// former built-in provider has only the columns; decodePluginCredentials leaves
+// them in place when the bundle is empty, and the next write adds the bundle.
 func (r *PostgresRepository) encodePluginCredentials(conn Connection) (string, error) {
 	payload, err := json.Marshal(storedPluginCredentials{
 		AccessToken:      conn.AccessToken,

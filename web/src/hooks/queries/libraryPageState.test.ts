@@ -2,28 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  parseLibraryPageStatePreference,
-  updateLibraryPageStatePreference,
-} from "./libraryPageState";
+import { parseLibraryPageStatePreference } from "./libraryPageState";
 
 describe("library page state preference helpers", () => {
-  it("parses valid preferences from the canonical object value", () => {
-    expect(
-      parseLibraryPageStatePreference({
-        version: 1,
-        libraries: {
-          "7": { search: "tab=library&sort=year" },
-        },
-      }),
-    ).toEqual({
-      version: 1,
-      libraries: {
-        "7": { search: "tab=library&sort=year" },
-      },
-    });
-  });
-
   it("still parses the legacy JSON-string encoding", () => {
     expect(
       parseLibraryPageStatePreference(
@@ -66,27 +47,6 @@ describe("library page state preference helpers", () => {
       version: 1,
       libraries: {
         "9": { search: "tab=collections" },
-      },
-    });
-  });
-
-  it("updates per-library entries", () => {
-    const next = updateLibraryPageStatePreference(
-      {
-        version: 1,
-        libraries: {
-          "1": { search: "tab=collections" },
-        },
-      },
-      7,
-      "tab=library&sort=year",
-    );
-
-    expect(next).toEqual({
-      version: 1,
-      libraries: {
-        "1": { search: "tab=collections" },
-        "7": { search: "tab=library&sort=year" },
       },
     });
   });

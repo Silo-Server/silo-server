@@ -128,8 +128,6 @@ const (
 	opDeleteWatchlistTitle = "deleteWatchlistTitle"
 )
 
-var watchlistTitleOperationIDs = []string{opListWatchlistTitles, opAddWatchlistTitle, opDeleteWatchlistTitle}
-
 func registerWatchlistTitles(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 

@@ -411,6 +411,9 @@ func watchProviderProblem(err error) *Problem {
 	if watchsync.IsInvalidCredentialError(err) {
 		return NewProblem(TypeValidationFailed, "The watch provider rejected the supplied credential.")
 	}
+	if invalid, ok := errors.AsType[watchsync.InvalidConnectionInputError](err); ok {
+		return NewProblem(TypeValidationFailed, invalid.Message)
+	}
 	if watchsync.IsRetryableProviderError(err) {
 		return NewProblem(TypeDependencyUnavailable, "The watch provider is temporarily unavailable.")
 	}
@@ -599,8 +602,6 @@ func watchProviderSyncRunOf(s watchsync.SyncRun) WatchProviderSyncRun {
 		CreatedAt:                NewInstant(s.CreatedAt),
 	}
 }
-
-var requestLifecycleOperationIDs = []string{"getRequestStatus", "cancelRequest", "listWatchProviders", opGetWatchProviderConnection, opGetWatchProviderSettings, opUpdateWatchProviderConnection, "deleteWatchProviderConnection", "startWatchProviderDeviceAuth", "pollWatchProviderDeviceAuth", "connectWatchProviderAPIKey", "triggerWatchProviderSync", "listWatchProviderSyncRuns"}
 
 // WatchProviderSummary shares configuration forms with plugin administration.
 type WatchProviderSummary struct {

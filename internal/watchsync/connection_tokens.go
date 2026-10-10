@@ -38,7 +38,7 @@ func (r *PostgresRepository) UpdateConnectionTokens(ctx context.Context, expecte
 	if err != nil {
 		return Connection{}, fmt.Errorf("encrypt refreshed watch refresh token: %w", err)
 	}
-	pluginCredentials, err := r.pluginCredentialsForConnection(current)
+	pluginCredentials, err := r.encodePluginCredentials(current)
 	if err != nil {
 		return Connection{}, err
 	}

@@ -1,8 +1,11 @@
 package markers
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +65,10 @@ func (s *populationRecorder) Cooldown(_ context.Context, provider, _ string, unt
 func (s *populationRecorder) Cached(context.Context, int, string) (map[string]Result, error) {
 	return s.cached, nil
 }
-func (s *populationRecorder) Candidates(context.Context, map[string]string, int, int, bool) ([]int, error) {
+func (s *populationRecorder) CooldownEnd(context.Context, map[string]string) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (s *populationRecorder) Candidates(context.Context, map[string]string) ([]int, error) {
 	return nil, nil
 }
 
@@ -127,9 +133,28 @@ func TestPopulationRequiresCompletedSetup(t *testing.T) {
 	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { t.Fatal("request before setup completion"); return Result{}, nil }}
 	service, store := populationFixture(t, OnlineStorageStored, provider)
 	service.opts.Settings.(populationSettings)["setup.completed"] = "false"
-	_, changed, err := service.Populate(t.Context(), &models.MediaFile{ID: 1})
-	if err != nil || changed || store.claimed != 0 {
-		t.Fatalf("before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+	var logs bytes.Buffer
+	service.opts.Registry.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	// With online lookups switched off, finishing the wizard would not start
+	// them, so the notice must not suggest it.
+	service.opts.Settings.(populationSettings)[SettingMode] = "local"
+	if _, _, err := service.Refresh(t.Context(), &models.MediaFile{ID: 1}); err != nil || logs.Len() != 0 {
+		t.Fatalf("local mode before setup: err=%v logs=%q", err, logs.String())
+	}
+	service.opts.Settings.(populationSettings)[SettingMode] = "online"
+	for range 2 {
+		_, changed, err := service.Populate(t.Context(), &models.MediaFile{ID: 1})
+		if err != nil || changed || store.claimed != 0 {
+			t.Fatalf("before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+		}
+		if _, changed, err := service.Refresh(t.Context(), &models.MediaFile{ID: 1}); err != nil || changed || store.claimed != 0 {
+			t.Fatalf("refresh before setup: changed=%v err=%v claims=%d", changed, err, store.claimed)
+		}
+	}
+	// The skip is otherwise silent: playback and admin refresh report a
+	// queued lookup that never reaches a provider.
+	if got := strings.Count(logs.String(), "paused until the setup wizard is finished"); got != 1 {
+		t.Fatalf("setup wait logged %d times, want once:\n%s", got, logs.String())
 	}
 }
 
@@ -184,6 +209,38 @@ func TestPopulationQuotaPreservesCachedPreferredProvider(t *testing.T) {
 	}
 	if store.completions["preferred"].Outcome != "limited" || store.completions["fallback"].Result == nil {
 		t.Fatalf("incorrect request states: %+v", store.completions)
+	}
+}
+
+// Recent releases keep short retries while crowd-sourced markers arrive;
+// older ones follow the long durations a quota-limited sync needs.
+func TestPopulationStoredFreshnessFollowsReleaseDate(t *testing.T) {
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		name     string
+		markers  []Marker
+		released time.Duration
+		want     time.Duration
+	}{
+		{"recent miss", nil, -2 * day, markerRecentMissTTL},
+		{"recent hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -2 * day, markerRecentPositiveTTL},
+		{"old miss", nil, -365 * day, markerMissTTL},
+		{"old hit", []Marker{{Kind: MarkerKindIntro, End: 30 * time.Second}}, -365 * day, markerPositiveTTL},
+		{"upcoming miss", nil, 2 * day, markerRecentMissTTL},
+		{"far future miss", nil, 90 * day, markerMissTTL},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{Markers: tc.markers}, nil }}
+			service, store := populationFixture(t, OnlineStorageStored, provider)
+			service.opts.Resolver = populationResolver{ExternalIDs{Kind: ItemKindMovie, TmdbID: "42", Released: time.Now().Add(tc.released)}}
+			service.opts.Write = func(context.Context, *models.MediaFile, Result) (bool, error) { return true, nil }
+			if _, _, err := service.Populate(t.Context(), &models.MediaFile{ID: 1, Duration: 1000}); err != nil {
+				t.Fatal(err)
+			}
+			if got := time.Until(store.completions["provider"].RetryAt); got < tc.want-time.Minute || got > tc.want {
+				t.Fatalf("result fresh for %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

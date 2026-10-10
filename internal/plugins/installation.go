@@ -90,6 +90,10 @@ type UpdateInstallationInput struct {
 	Capabilities     []Capability
 	// Restart durably requests a new process on every resident host.
 	Restart bool
+	// SetRepository records RepositoryID as where the installed package now
+	// comes from. A nil RepositoryID clears it, as for an uploaded package.
+	SetRepository bool
+	RepositoryID  *int
 }
 
 type InstallationStore struct {
@@ -336,6 +340,11 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	}
 	if input.Restart {
 		setClauses = append(setClauses, "runtime_generation = runtime_generation + 1")
+	}
+	if input.SetRepository {
+		setClauses = append(setClauses, fmt.Sprintf("repository_id = $%d", argIndex))
+		args = append(args, input.RepositoryID)
+		argIndex++
 	}
 
 	if len(setClauses) > 0 {

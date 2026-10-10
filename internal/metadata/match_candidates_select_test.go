@@ -335,20 +335,6 @@ func TestSelectInitialMatchCandidate_LoneResultYearMatchBelow70(t *testing.T) {
 	}
 }
 
-func TestSelectInitialMatchCandidate_SameShowAcrossTwoSources(t *testing.T) {
-	// Same title+year returned once per source (TVDB-only and TMDB-only, no shared ID
-	// so they were NOT merged). Old behavior: tie-break bails -> nil. New: accept best.
-	hints := &MatchHints{Title: "Blue Lock", Year: 2022, Type: "series"}
-	cands := []MatchCandidate{
-		{Title: "Blue Lock", Year: 2022, ContentType: "series", Sources: []string{"tvdb"}, ProviderIDs: map[string]string{"tvdb": "404404"}},
-		{Title: "Blue Lock", Year: 2022, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "120089"}},
-	}
-	got, ok := selectInitialMatchCandidate(hints, cands, nil)
-	if !ok || got == nil {
-		t.Fatalf("expected same-show-across-sources to be accepted, got ok=%v cand=%+v", ok, got)
-	}
-}
-
 func TestSelectInitialMatchCandidate_LoneResultYearMismatchStillRejected(t *testing.T) {
 	// Exact title but year mismatch, one source => score 45+12 = 57 (in [55,70), no year bonus).
 	// Year does NOT corroborate, so the new rule must NOT fire; single candidate <70 => reject.

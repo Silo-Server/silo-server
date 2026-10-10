@@ -3,7 +3,8 @@
     {
       "id": "s-continue",
       "section_type": "continue_watching",
-      "title": "Continue Watching",
+      "title": "Keep watching",
+      "default_title": "Continue Watching",
       "featured": false,
       "item_limit": 20,
       "hidden": true,
@@ -15,6 +16,7 @@
       "id": "u-gems",
       "section_type": "hidden_gems",
       "title": "Hidden gems",
+      "default_title": "",
       "featured": false,
       "item_limit": 12,
       "hidden": false,

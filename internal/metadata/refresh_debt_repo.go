@@ -20,7 +20,9 @@ const metadataRefreshDebtColumns = `target_type, content_id, priority, reason_ma
 const metadataRefreshDebtReturningColumns = `d.target_type, d.content_id, d.priority, d.reason_mask, d.next_refresh_at,
 	d.claimed_at, d.lease_expires_at, d.last_attempt_at, d.last_success_at, d.attempt_count, d.last_error, d.updated_at`
 
-const metadataRefreshDebtLeaseDuration = 15 * time.Minute
+// RefreshDebtLeaseDuration is how long a claim on a due refresh debt row lasts.
+// A row whose lease expires unsettled can be claimed again by any node.
+const RefreshDebtLeaseDuration = 15 * time.Minute
 
 const metadataRefreshDebtEnabledAccessPredicate = `(
 		(d.target_type = 'item' AND EXISTS (
@@ -241,13 +243,45 @@ func (r *RefreshDebtRepository) ClaimDue(ctx context.Context, limit int) ([]*mod
 		FROM due
 		WHERE d.target_type = due.target_type
 		  AND d.content_id = due.content_id
-		RETURNING `+metadataRefreshDebtReturningColumns, limit, intervalLiteral(metadataRefreshDebtLeaseDuration))
+		RETURNING `+metadataRefreshDebtReturningColumns, limit, intervalLiteral(RefreshDebtLeaseDuration))
 	if err != nil {
 		return nil, fmt.Errorf("claiming due metadata refresh debt: %w", err)
 	}
 	defer rows.Close()
 
 	return scanRefreshDebts(rows)
+}
+
+// RenewClaims extends the leases of rows still held by the claims described by
+// targetTypes, contentIDs, and claimedAts (parallel slices, as ClaimDue
+// returned them). A row that was settled, deleted, or claimed again since keeps
+// its state, so a renewal never takes over another claim.
+func (r *RefreshDebtRepository) RenewClaims(ctx context.Context, targetTypes, contentIDs []string, claimedAts []time.Time) error {
+	if len(targetTypes) != len(contentIDs) || len(targetTypes) != len(claimedAts) {
+		return fmt.Errorf("renewing metadata refresh debt claims: mismatched target lists")
+	}
+	if len(targetTypes) == 0 {
+		return nil
+	}
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	claimed := make([]time.Time, len(claimedAts))
+	for i, at := range claimedAts {
+		claimed[i] = at.UTC()
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE metadata_refresh_debt d
+		SET lease_expires_at = NOW() + $4::interval
+		FROM unnest($1::text[], $2::text[], $3::timestamptz[]) AS held(target_type, content_id, claimed_at)
+		WHERE d.target_type = held.target_type
+		  AND d.content_id = held.content_id
+		  AND d.claimed_at = held.claimed_at
+	`, targetTypes, contentIDs, claimed, intervalLiteral(RefreshDebtLeaseDuration))
+	if err != nil {
+		return fmt.Errorf("renewing metadata refresh debt claims: %w", err)
+	}
+	return nil
 }
 
 func (r *RefreshDebtRepository) PruneDisabledLibraryDebt(ctx context.Context) error {

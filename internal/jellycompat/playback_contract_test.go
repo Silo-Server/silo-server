@@ -202,10 +202,129 @@ func TestSubtitleTimingRequestTransformsOutput(t *testing.T) {
 	route.URLParams.Add("routeStartPositionTicks", "20000000")
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 	rr := httptest.NewRecorder()
-	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n\n00:00:07.000 --> 00:00:08.000\nlast\n"))
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n\n00:00:07.000 --> 00:00:08.000\nlast\n"), playback.HLSMPEGTSTimestampOffset90k)
 	body := rr.Body.String()
-	if rr.Code != 200 || !strings.Contains(body, "MPEGTS:180000") || !strings.Contains(body, "00:00:00.000 --> 00:00:01.000") || !strings.Contains(body, "00:00:01.500 --> 00:00:02.000") || strings.Contains(body, "last") {
+	// 2 s start plus the MPEG-TS muxer's 10 s shift, in 90 kHz ticks.
+	if rr.Code != 200 || !strings.Contains(body, "MPEGTS:1080000") || !strings.Contains(body, "00:00:00.000 --> 00:00:01.000") || !strings.Contains(body, "00:00:01.500 --> 00:00:02.000") || strings.Contains(body, "last") {
 		t.Fatalf("status=%d body=%s", rr.Code, body)
+	}
+}
+
+// Copied timestamps keep cues on the source clock, so the map only carries
+// the 10 s the MPEG-TS muxer adds to every HLS segment PTS (2 x -max_delay
+// 5000000). Jellyfin writes the same MPEGTS:900000.
+func TestSubtitleTimeMapMatchesMPEGTSMuxerShiftWithCopiedTimestamps(t *testing.T) {
+	r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&CopyTimestamps=true&AddVttTimeMap=true", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("routeFormat", "vtt")
+	route.URLParams.Add("routeStartPositionTicks", "20000000")
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+	rr := httptest.NewRecorder()
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n"), playback.HLSMPEGTSTimestampOffset90k)
+	body := rr.Body.String()
+	if rr.Code != 200 || !strings.Contains(body, "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:900000\n") || !strings.Contains(body, "00:00:02.000 --> 00:00:03.000") || !strings.Contains(body, "00:00:03.500 --> 00:00:04.000") {
+		t.Fatalf("status=%d body=%s", rr.Code, body)
+	}
+}
+
+// fMP4 segments keep the source clock in tfdt, so their map carries no
+// muxer shift: MPEGTS:0 with copied timestamps and the start otherwise.
+func TestSubtitleTimeMapHasNoShiftForFMP4Segments(t *testing.T) {
+	for _, tc := range []struct {
+		copyTimestamps bool
+		want           string
+	}{
+		{copyTimestamps: true, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:0\n"},
+		{copyTimestamps: false, want: "X-TIMESTAMP-MAP=LOCAL:00:00:00.000,MPEGTS:180000\n"},
+	} {
+		t.Run(strconv.FormatBool(tc.copyTimestamps), func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/subtitle?EndPositionTicks=40000000&AddVttTimeMap=true&CopyTimestamps="+strconv.FormatBool(tc.copyTimestamps), nil)
+			route := chi.NewRouteContext()
+			route.URLParams.Add("routeFormat", "vtt")
+			route.URLParams.Add("routeStartPositionTicks", "20000000")
+			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+			rr := httptest.NewRecorder()
+			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"), 0)
+			if body := rr.Body.String(); rr.Code != 200 || !strings.Contains(body, tc.want) {
+				t.Fatalf("status=%d body=%s, want %q", rr.Code, body, tc.want)
+			}
+		})
+	}
+}
+
+// The subtitle route reads the segment container from the play session's
+// source: MPEG-TS sessions get the muxer shift, fMP4 sessions do not. Direct
+// play and progressive remux have no HLS segments, so they get no shift either.
+func TestHandleSubtitleStreamTimeMapFollowsSegmentContainer(t *testing.T) {
+	subtitlePath := filepath.Join(t.TempDir(), "movie.en.vtt")
+	if err := os.WriteFile(subtitlePath, []byte("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		videoCodec string
+		playMethod string
+		source     PlaybackMediaSource
+		notHLS     bool
+		want       string
+	}{
+		{name: "h264 transcode", videoCodec: "h264", source: PlaybackMediaSource{}, want: "MPEGTS:900000"},
+		{name: "remux-ts-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, HLSRemuxMPEGTS: true}, want: "MPEGTS:900000"},
+		{name: "mpeg2 copy", videoCodec: "mpeg2video", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:900000"},
+		{name: "remux-v1", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true}, want: "MPEGTS:0"},
+		{name: "copy video with audio transcode", videoCodec: "h264", source: PlaybackMediaSource{HLSRemux: true, TranscodeAudio: true}, want: "MPEGTS:0"},
+		{name: "remux-dv-v1", videoCodec: "hevc", source: PlaybackMediaSource{HLSRemux: true, DVStripToHDR10: true}, want: "MPEGTS:0"},
+		{name: "hevc-v1", videoCodec: "h264", source: PlaybackMediaSource{TargetVideoCodec: "hevc"}, want: "MPEGTS:0"},
+		{name: "started h264 transcode", videoCodec: "h264", playMethod: "transcode", want: "MPEGTS:900000"},
+		{name: "direct play", videoCodec: "h264", playMethod: "direct", want: "MPEGTS:0"},
+		{name: "progressive remux", videoCodec: "h264", playMethod: "remux", want: "MPEGTS:0"},
+		{name: "not started without transcoding", videoCodec: "h264", notHLS: true, want: "MPEGTS:0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := &models.MediaFile{
+				ID: 42, FilePath: "/media/movie.mkv", CodecVideo: tc.videoCodec,
+				ExternalSubtitles: []models.ExternalSubtitle{{Path: subtitlePath, Language: "eng", Format: "vtt"}},
+			}
+			source := tc.source
+			source.ID, source.FileID, source.SupportsTranscoding = "source-42", file.ID, !tc.notHLS
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1", UpstreamPlayMethod: tc.playMethod, MediaSources: []PlaybackMediaSource{source}})
+			handler := &PlaybackHandler{playbackStore: store, fileResolver: testCompatFileResolver{file: file}}
+
+			request := httptest.NewRequest("GET", "/subtitle?PlaySessionId=play-1&CopyTimestamps=true&AddVttTimeMap=true", nil)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("routeItemId", "item-1")
+			routeCtx.URLParams.Add("routeMediaSourceId", source.ID)
+			routeCtx.URLParams.Add("routeIndex", strconv.Itoa(externalSubtitleRouteIndex(file, 0)))
+			routeCtx.URLParams.Add("routeFormat", "vtt")
+			ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 7})
+			recorder := httptest.NewRecorder()
+
+			handler.HandleSubtitleStream(recorder, request.WithContext(ctx))
+
+			want := "X-TIMESTAMP-MAP=LOCAL:00:00:00.000," + tc.want + "\n"
+			if body := recorder.Body.String(); recorder.Code != 200 || !strings.Contains(body, want) {
+				t.Fatalf("status=%d body=%q, want %q", recorder.Code, body, want)
+			}
+		})
+	}
+}
+
+func TestSubtitleDeliveryMarksLTRAuthoredText(t *testing.T) {
+	const srt = "1\n00:00:01,000 --> 00:00:02,000\nماذا حدث للتو؟ -\n\n" +
+		"2\n00:00:03,000 --> 00:00:04,000\n...لأنه بالنسبة إليهم\n\n" +
+		"3\n00:00:05,000 --> 00:00:06,000\nلقد انفجر -\n"
+	for _, format := range []string{"srt", "vtt"} {
+		r := httptest.NewRequest("GET", "/subtitle", nil)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("routeFormat", format)
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
+		rr := httptest.NewRecorder()
+		(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte(srt), 0)
+		if body := rr.Body.String(); rr.Code != 200 || strings.Count(body, "\u200e") != 3 || !strings.Contains(body, "\u200eلقد انفجر -") {
+			t.Fatalf("%s: status=%d body=%q", format, rr.Code, body)
+		}
 	}
 }
 
@@ -224,27 +343,6 @@ func TestBitmapSubtitleInventoryAndUnsupportedBurnIn(t *testing.T) {
 	applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "hdmv_pgs_subtitle", Method: "Encode"}}}, false)
 	if source.SupportsDirectPlay || source.SupportsTranscoding {
 		t.Fatalf("unsupported burn-in=%+v", source)
-	}
-}
-
-func TestRemoteTranscodeRetainsNegotiatedCeilings(t *testing.T) {
-	var received transcodenode.TranscodeStartRequest
-	node := fakeTranscodeNode(t, &received)
-	h, _, store := newRemoteTranscodeHandler(t, node.URL, &stubRecipeNodeStore{})
-	source := testRemoteTranscodeSource()
-	source.TargetBitrateKbps = 3608
-	source.TargetResolution = "720p"
-	source.TargetAudioChannels = 1
-	store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
-	if err := h.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}, 0, node.URL); err != nil {
-		t.Fatal(err)
-	}
-	if received.TargetBitrateKbps != 3608 || received.TargetResolution != "720p" || received.TargetAudioChannels != 1 {
-		t.Fatalf("request=%+v", received)
-	}
-	persisted, ok := store.Get("play-1")
-	if !ok || persisted.Recipe == nil || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetAudioChannels != 1 {
-		t.Fatalf("persisted=%+v", persisted)
 	}
 }
 
@@ -305,11 +403,11 @@ func TestEmbeddedSubtitleBurnInLocalAndRemoteRecipe(t *testing.T) {
 	if err := remote.startRemoteTranscode(t.Context(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {
 		t.Fatal(err)
 	}
-	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" {
+	if !received.SubtitleBurnIn || received.SubtitleCodec != "hdmv_pgs_subtitle" || received.SubtitleTrackIndex != 0 || received.TargetResolution != "720p" || received.TargetBitrateKbps != 3608 || received.TargetAudioChannels != 1 {
 		t.Fatalf("remote=%+v", received)
 	}
 	persisted, _ := remoteStore.Get("play-1")
-	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" {
+	if persisted.Recipe == nil || !persisted.Recipe.SubtitleBurnIn || persisted.Recipe.SubtitleCodec != "hdmv_pgs_subtitle" || persisted.Recipe.TargetResolution != "720p" || persisted.Recipe.TargetBitrateKbps != 3608 || persisted.Recipe.TargetAudioChannels != 1 {
 		t.Fatalf("recipe=%+v", persisted.Recipe)
 	}
 }
@@ -323,7 +421,7 @@ func TestJSONSubtitleTimingWindow(t *testing.T) {
 			route.URLParams.Add("routeStartPositionTicks", "20000000")
 			r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 			rr := httptest.NewRecorder()
-			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n\n00:00:07.000 --> 00:00:08.000\nlast\n"))
+			(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n\n00:00:03.500 --> 00:00:06.000\nsecond\n\n00:00:07.000 --> 00:00:08.000\nlast\n"), 0)
 			var response struct {
 				TrackEvents []struct {
 					Text                                 string
@@ -352,7 +450,7 @@ func TestWindowedSRTSubtitleKeepsAlignmentTag(t *testing.T) {
 	route.URLParams.Add("routeFormat", "srt")
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 	rr := httptest.NewRecorder()
-	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nEarly\n\n2\n00:00:05,000 --> 00:00:06,000\n{\\an8}Later top\n"))
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nEarly\n\n2\n00:00:05,000 --> 00:00:06,000\n{\\an8}Later top\n"), 0)
 	if want := "1\n00:00:02,000 --> 00:00:03,000\n{\\an8}Later top\n\n"; rr.Code != 200 || rr.Body.String() != want {
 		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
 	}
@@ -366,7 +464,7 @@ func TestWindowedSRTSubtitleKeepsArrowCueText(t *testing.T) {
 	route.URLParams.Add("routeFormat", "srt")
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 	rr := httptest.NewRecorder()
-	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nMeet at 10:30. --> go now\n"))
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "srt", []byte("1\n00:00:01,000 --> 00:00:02,000\nMeet at 10:30. --> go now\n"), 0)
 	if want := "1\n00:00:00,500 --> 00:00:01,500\nMeet at 10:30. --> go now\n\n"; rr.Code != 200 || rr.Body.String() != want {
 		t.Fatalf("status=%d body=%q, want %q", rr.Code, rr.Body.String(), want)
 	}
@@ -378,7 +476,7 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 	route.URLParams.Add("routeFormat", "js")
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, route))
 	rr := httptest.NewRecorder()
-	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"))
+	(&PlaybackHandler{}).deliverSubtitle(rr, r, "vtt", []byte("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nfirst\n"), 0)
 	if rr.Code != 200 || strings.TrimSpace(rr.Body.String()) != `{"TrackEvents":[]}` {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}

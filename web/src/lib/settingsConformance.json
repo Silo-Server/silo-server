@@ -1065,6 +1065,28 @@
         {"key": "ui.theme_music_enabled", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
       ],
       "expected": [{"key": "ui.theme_music_enabled", "value": false, "source": "profile_device"}]
+    },
+    {
+      "name": "title_art_follows_each_device",
+      "description": "With no profile value, every device follows its own choice; a device that never chose shows title art.",
+      "keys": ["ui.title_art"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "living-room", "value": true}
+      ],
+      "expected": [{"key": "ui.title_art", "value": false, "source": "profile_device"}]
+    },
+    {
+      "name": "title_art_profile_value_applies_to_all_devices",
+      "description": "A profile value is the apply-to-all-devices choice, so it wins over the device's own value instead of being the fallback.",
+      "keys": ["ui.title_art"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [
+        {"key": "ui.title_art", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false}
+      ],
+      "expected": [{"key": "ui.title_art", "value": true, "source": "profile"}]
     }
   ]
 }

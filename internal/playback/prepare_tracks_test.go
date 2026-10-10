@@ -79,6 +79,9 @@ func TestPlanPreparedTracksEncodesCodecsMP4CannotCarry(t *testing.T) {
 	}
 	plan := PlanPreparedTracks(file, "copy", -1)
 	want := []string{"aac", "aac", "aac", "copy"}
+	if len(plan.Audio) != len(want) {
+		t.Fatalf("audio track count = %d, want %d", len(plan.Audio), len(want))
+	}
 	for i, track := range plan.Audio {
 		if track.Codec != want[i] {
 			t.Fatalf("track %d codec = %q, want %q (plan %+v)", i, track.Codec, want[i], plan.Audio)

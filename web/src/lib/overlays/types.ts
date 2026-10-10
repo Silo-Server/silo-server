@@ -149,6 +149,9 @@ export interface OverlayDef {
   // Settings manifest revision whose card-overlays schema first accepts this
   // id. Absent means every revision does.
   introducedInManifest?: number;
+  // The rating source a rating badge shows, for a rating an administrator can
+  // hide. Settings offer the badge only while getRatingsCapability lists it.
+  ratingSource?: string;
   getValue: (data: OverlayData) => string | null;
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
   // Accent by data, used when the viewer has not picked an accent for the
@@ -185,8 +188,7 @@ export type OverlayIconId =
   | "hdr"
   | "dolby-vision"
   | "atmos"
-  | "av1"
-  | "tomato";
+  | "av1";
 
 // Wordmark icons render their text as the mark itself (defined in icons.tsx).
 // When a badge's label says the same thing, the renderer suppresses the label

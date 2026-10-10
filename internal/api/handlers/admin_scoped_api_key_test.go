@@ -30,6 +30,8 @@ type scopedKeyUserRepo struct {
 	promoteBeforeMutate bool
 	// updateErr, when set, is what Update returns.
 	updateErr error
+	// revoked records whether the last mutation asked to sign the account out.
+	revoked bool
 }
 
 func (r *scopedKeyUserRepo) List(context.Context) ([]*models.User, error) {
@@ -65,9 +67,11 @@ func (r *scopedKeyUserRepo) MutateAdminAccount(ctx context.Context, id int, _ in
 	if r.promoteBeforeMutate {
 		current.Role = models.RoleAdmin
 	}
-	if _, err := validate(current, nil); err != nil {
+	revoke, err := validate(current, nil)
+	if err != nil {
 		return auth.AdminUserSnapshot{User: current}, err
 	}
+	r.revoked = revoke
 	if input == nil {
 		r.deleted = true
 		return auth.AdminUserSnapshot{User: current}, nil

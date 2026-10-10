@@ -51,6 +51,7 @@ export const itemKeys = {
     ["items", "detail", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
+  watchTrickplay: (id: string, fileId: number) => ["items", "watchTrickplay", id, fileId] as const,
   markers: (id: string) => ["items", "markers", id] as const,
   browse: (params: BrowseParams) => ["items", "browse", params] as const,
   infiniteBrowse: (params: InfiniteBrowseParams) => ["items", "infiniteBrowse", params] as const,
@@ -112,16 +113,22 @@ export const historyKeys = {
   list: () => ["history", "list"] as const,
 };
 
+export const shuffleKeys = {
+  all: ["shuffles"] as const,
+  detail: (shuffleId: string) => ["shuffles", shuffleId] as const,
+};
+
 export const collectionKeys = {
   all: ["collections"] as const,
   list: () => ["collections", "list"] as const,
   server: () => ["collections", "server"] as const,
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
+  /** The list, each own manual collection marked with whether it holds the title. */
+  containing: (contentId: string) => ["collections", "containing", contentId] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
   mdblistSearch: (query: string) => ["collections", "mdblist", "search", query] as const,
-  mdblistTop: () => ["collections", "mdblist", "top"] as const,
 };
 
 export const requestKeys = {
@@ -247,6 +254,7 @@ export const notificationKeys = {
 export const historyImportKeys = {
   all: ["history-imports"] as const,
   sources: () => ["history-imports", "sources"] as const,
+  capability: () => ["history-imports", "capability"] as const,
   runs: (limit = 10) => ["history-imports", "runs", limit] as const,
   run: (id?: string) => ["history-imports", "run", id] as const,
   plexCheck: (sessionId?: string) => ["history-imports", "plex-check", sessionId] as const,
@@ -285,6 +293,8 @@ export const sectionKeys = {
     ["sections", "library", libraryId, "items", sectionId] as const,
   adminList: (scope: string, libraryId?: number) =>
     ["sections", "admin", scope, libraryId] as const,
+  /** Mutation key on every admin row write, so the Home rows list can wait for them. */
+  adminWrite: () => ["sections", "admin-write"] as const,
   profileOverrides: (scope: string, libraryId?: string) =>
     ["sections", "profile", scope, libraryId] as const,
   profileOverridesRaw: (scope: string, libraryId?: string) =>
@@ -345,6 +355,8 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  // Outside users(): saving an account does not change the server defaults.
+  policyDefaults: () => ["admin", "policyDefaults"] as const,
   accessGroups: () => ["admin", "accessGroups"] as const,
   accessGroup: (id: number) => ["admin", "accessGroups", id] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
@@ -364,6 +376,8 @@ export const adminKeys = {
   libraries: () => ["admin", "libraries"] as const,
   libraryRealtimeMonitoring: () => ["admin", "libraries", "realtimeMonitoring"] as const,
   libraryCapabilities: () => ["admin", "libraries", "capabilities"] as const,
+  trickplayLibraries: () => ["admin", "trickplay", "libraries"] as const,
+  itemTrickplay: (itemId: string) => ["admin", "trickplay", "items", itemId] as const,
   libraryRoots: (libraryId?: number, state?: string, search?: string) =>
     ["admin", "libraries", "roots", libraryId ?? "all", state ?? "all", search ?? ""] as const,
   libraryMatchQueueStatuses: () => ["admin", "libraries", "metadataMatchQueue"] as const,
@@ -376,15 +390,23 @@ export const adminKeys = {
   catalogImportSources: () => ["admin", "catalog", "importSources"] as const,
   localImportSources: () => ["admin", "catalog", "localImportSources"] as const,
   collections: (libraryId?: number) => ["admin", "collections", libraryId] as const,
+  /** The admin Home and library page rows that show a server collection. */
+  collectionRows: (collectionId: string) => ["admin", "collections", "rows", collectionId] as const,
   collectionGroups: (libraryId?: number) => ["admin", "collectionGroups", libraryId] as const,
   collectionTemplates: () => ["admin", "collections", "templates"] as const,
   collectionTemplateBundles: () => ["admin", "collections", "templateBundles"] as const,
+  // Outside "collections": refreshing the admin collections after a write
+  // doesn't re-run a dry run; Starter packs checks its pack again itself.
+  starterPackDryRun: (packId: string, body: unknown) =>
+    ["admin", "starterPackDryRun", packId, body] as const,
   libraryProviders: (id: number) => ["admin", "libraries", id, "providers"] as const,
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
+  downloadPreparations: () => ["admin", "downloadPreparations"] as const,
+  downloadStorage: () => ["admin", "downloadStorage"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
@@ -499,6 +521,8 @@ export const adminKeys = {
   taskHistory: (key: string) => ["admin", "tasks", key, "history"] as const,
   taskMetrics: (key: string) => ["admin", "tasks", key, "metrics"] as const,
   markerCapabilities: () => ["admin", "markerCapabilities"] as const,
+  ratingSources: () => ["admin", "ratingSources"] as const,
+  ratingSourceCapabilities: () => ["admin", "ratingSourceCapabilities"] as const,
   markerProviders: () => ["admin", "markerProviders"] as const,
   markerProvider: (provider: string) => ["admin", "markerProviders", provider] as const,
   markerProviderValidation: (provider: string) =>

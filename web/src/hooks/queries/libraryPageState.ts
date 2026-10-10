@@ -110,7 +110,7 @@ export function parseLibraryPageStatePreference(raw: unknown): LibraryPageStateP
   return { version: 1, libraries };
 }
 
-export function updateLibraryPageStatePreference(
+function updateLibraryPageStatePreference(
   preference: LibraryPageStatePreference,
   libraryId: number,
   search: string,

@@ -120,3 +120,37 @@ func TestProbeTransformationRegistryV3RequiresBothVersion4AudioFilterGraphs(t *t
 	}
 	t.Fatal("audio_to_aac was not advertised with the complete version 4 toolchain")
 }
+
+// server_dv7_to_hdr10 recipe 2 removes Profile 7 enhancement-layer NAL units
+// with filter_units as well as the RPUs with dovi_rpu, so an FFmpeg missing
+// either filter cannot advertise it.
+func TestProbeTransformationRegistryV3DV7RecipeNeedsDoviRPUAndFilterUnits(t *testing.T) {
+	for _, test := range []struct {
+		name, bsfs string
+		want       bool
+	}{
+		{"both filters", "echo dovi_rpu; echo filter_units", true},
+		{"dovi_rpu only", "echo dovi_rpu", false},
+		{"filter_units only", "echo filter_units", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			script := "#!/bin/sh\ncase \"$2\" in\n-bsfs) " + test.bsfs + " ;;\n-encoders) echo ' A....D aac AAC' ;;\nesac\n"
+			if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			registry := ProbeTransformationRegistryV3(context.Background(), ffmpeg)
+			if got := registry.Available(TransformationServerDV7HDR10V3); got != test.want {
+				t.Fatalf("server_dv7_to_hdr10 available = %v, want %v", got, test.want)
+			}
+			if !test.want {
+				return
+			}
+			for _, transformation := range registry.Advertised() {
+				if transformation.Name == TransformationServerDV7HDR10V3 && transformation.RecipeVersion != "2" {
+					t.Fatalf("server_dv7_to_hdr10 recipe version = %q, want 2", transformation.RecipeVersion)
+				}
+			}
+		})
+	}
+}

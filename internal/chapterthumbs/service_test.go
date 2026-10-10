@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -43,50 +44,6 @@ func TestChapterCaptureTime(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestBuildFrameExtractArgs(t *testing.T) {
-	firstAttemptArgs := func(t *testing.T, hwAccel string) []string {
-		t.Helper()
-		var args []string
-		_, _, err := ExtractFrame(context.Background(), FrameExtractOptions{
-			InputPath:   "/media/movie.mkv",
-			SeekSeconds: 42.5,
-			HWAccel:     hwAccel,
-			HWDevice:    "/dev/dri/renderD128",
-			RunFunc: func(_ context.Context, _ string, got []string) ([]byte, error) {
-				if args == nil {
-					args = append([]string(nil), got...)
-				}
-				return []byte("frame"), nil
-			},
-		})
-		if err != nil {
-			t.Fatalf("ExtractFrame() error = %v", err)
-		}
-		return args
-	}
-
-	t.Run("qsv uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "qsv")
-		if !slices.Contains(args, "-init_hw_device") || !slices.Contains(args, "qsv=qs@va") {
-			t.Fatalf("qsv args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("vaapi uses hardware flags when render device exists", func(t *testing.T) {
-		args := firstAttemptArgs(t, "vaapi")
-		if !slices.Contains(args, "-hwaccel") || !slices.Contains(args, "vaapi") {
-			t.Fatalf("vaapi args missing hardware setup: %#v", args)
-		}
-	})
-
-	t.Run("unsupported hw accel does not masquerade as hardware extraction", func(t *testing.T) {
-		args := firstAttemptArgs(t, "nvenc")
-		if slices.Contains(args, "-hwaccel") || slices.Contains(args, "-init_hw_device") {
-			t.Fatalf("nvenc args use hardware setup: %#v", args)
-		}
-	})
 }
 
 func TestQueueFileIDsDedupes(t *testing.T) {
@@ -145,6 +102,7 @@ func TestQueuePriorityPromotesExistingFile(t *testing.T) {
 type testFileRepo struct {
 	file           *models.MediaFile
 	updateCalls    int
+	missingSuffix  string
 	failureUpdates []struct {
 		retryAfter   time.Time
 		failureCount int
@@ -168,8 +126,21 @@ func (r *testFileRepo) GetByID(_ context.Context, id int) (*models.MediaFile, er
 	return r.cloneFile(), nil
 }
 
-func (r *testFileRepo) ListMissingChapterThumbnails(context.Context, int) ([]*models.MediaFile, error) {
+func (r *testFileRepo) TryLockChapterThumbnails(ctx context.Context, _ int) (context.Context, func(), bool, error) {
+	return ctx, func() {}, true, nil
+}
+
+func (r *testFileRepo) ListMissingChapterThumbnails(_ context.Context, _ int, currentSuffix string) ([]*models.MediaFile, error) {
+	r.missingSuffix = currentSuffix
 	return nil, nil
+}
+
+func (r *testFileRepo) ListChapterThumbnailsAtOtherWidths(context.Context, int, string, int, bool) ([]*models.MediaFile, time.Time, error) {
+	return nil, time.Time{}, nil
+}
+
+func (r *testFileRepo) ChapterThumbnailLibraryKey(context.Context) (string, error) {
+	return "test-libraries", nil
 }
 
 func (r *testFileRepo) UpdateChapterThumbnailState(
@@ -669,7 +640,7 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 			authJWTSecretSetting:             "secret",
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor:    remote,
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -705,7 +676,8 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 		settingValue string
 		wantAllowed  bool
 	}{
-		{name: "disabled by default", wantAllowed: false},
+		{name: "enabled by default", wantAllowed: true},
+		{name: "explicitly disabled", settingValue: "false", wantAllowed: false},
 		{name: "explicitly enabled", settingValue: "true", wantAllowed: true},
 	}
 
@@ -717,12 +689,12 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 				authJWTSecretSetting:             "secret",
 			}
 			if tt.settingValue != "" {
-				settings[chapterThumbnailSoftwareToneMapSetting] = tt.settingValue
+				settings[config.ChapterThumbnailSoftwareToneMapSettingKey] = tt.settingValue
 			}
 			service := &Service{
 				settings:           testSettingsReader{values: settings},
 				transcodePool:      &nodepool.TranscodePool{},
-				remoteReservations: make(map[string]int),
+				remoteReservations: &nodepool.Reservations{},
 				remoteExtractor:    remote,
 			}
 			service.transcodePool.SetNodes([]*nodepool.Node{{
@@ -761,7 +733,7 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 			authJWTSecretSetting:             "secret",
 		}},
 		transcodePool:      &nodepool.TranscodePool{},
-		remoteReservations: make(map[string]int),
+		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor: &testRemoteFrameExtractor{
 			reason: chapterThumbnailNodeUnavailableReason,
 			err:    errors.New("node unavailable"),
@@ -802,9 +774,9 @@ func TestExtractFrameRequiresRemoteCapacityWhenConfigured(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 		runFFmpegFrameExtractFunc: func(context.Context, string, []string) ([]byte, error) {
 			t.Fatalf("local extractor should not run in transcode_nodes_only mode")
@@ -839,9 +811,9 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 			authJWTSecretSetting:                "secret",
 		}},
 		transcodePool: &nodepool.TranscodePool{},
-		remoteReservations: map[string]int{
+		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
-		},
+		}),
 		remoteExtractor: &testRemoteFrameExtractor{},
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{

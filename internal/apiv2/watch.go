@@ -93,6 +93,7 @@ type WatchFileVersion struct {
 	Recap                    *WatchMarker         `json:"recap,omitempty"`
 	Preview                  *WatchMarker         `json:"preview,omitempty"`
 	MarkerSegments           []MarkerOccurrence   `json:"marker_segments" doc:"All effective marker occurrences for this file in source-time order; empty, never null"`
+	TrickplayAvailable       bool                 `json:"trickplay_available" doc:"Whether seek-bar previews are published for this file; read them with getWatchTrickplay"`
 }
 
 // WatchVideoTrack is one video stream of a file as the scanner probed it.
@@ -253,9 +254,11 @@ func registerWatch(reg *Registry) {
 		Class: ClassProfileScoped,
 		// Profile scoped without a required header, as v1 GET /watch/{id}:
 		// the catalog answer needs only the account's access; the profile,
-		// when declared, adds its progress and preferences.
-		ProfileOptional: true,
-		ServiceBacked:   true,
+		// when declared, adds its progress and preferences. A household
+		// with a limited profile must name one.
+		ProfileOptional:      true,
+		HouseholdProfileGate: true,
+		ServiceBacked:        true,
 	}, reg.getWatchState)
 
 	mark := humaOp(http.MethodPost, Prefix+"/watched/{id}", "markWatched", "watch",
@@ -309,14 +312,19 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 	}
 	detail, err := reg.deps.Watch.WatchDetail(ctx, claims.UserID, profileFrom(ctx), string(in.ID), filter)
 	if err != nil {
-		var apiErr *handlers.APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "invalid_watch_target" {
-			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: locationPathID, Code: codeInvalid, Detail: apiErr.Message})
-		}
-		return nil, serviceProblem(err)
+		return nil, watchDetailProblem(err)
 	}
 	return &WatchDetailOutput{Body: watchDetailOf(detail)}, nil
+}
+
+// watchDetailProblem maps a watch detail error to its problem: a target that
+// is not directly playable fails validation of the path.
+func watchDetailProblem(err error) error {
+	if apiErr, ok := errors.AsType[*handlers.APIError](err); ok && apiErr.Code == "invalid_watch_target" {
+		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
+			WithErrors(ProblemError{Location: locationPathID, Code: codeInvalid, Detail: apiErr.Message})
+	}
+	return serviceProblem(err)
 }
 
 // setWatched runs the same command as v1 POST/DELETE /watched/{id}.
@@ -421,6 +429,7 @@ func watchVersionOf(v catalogpkg.FileVersion) WatchFileVersion {
 		Recap:                    watchMarkerOf(v.Recap),
 		Preview:                  watchMarkerOf(v.Preview),
 		MarkerSegments:           markerOccurrences(v.EffectiveMarkerSegments()),
+		TrickplayAvailable:       v.Trickplay != nil,
 	}
 	for _, t := range v.VideoTracks {
 		out.VideoTracks = append(out.VideoTracks, watchVideoTrackOf(t))
