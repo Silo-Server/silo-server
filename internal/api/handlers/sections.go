@@ -413,6 +413,10 @@ type sectionItemResponse struct {
 	ItemSource        string                 `json:"item_source,omitempty"`
 	UserState         *itemUserStateResponse `json:"user_state,omitempty"`
 	UpcomingEvent     *upcomingEventResponse `json:"upcoming_event,omitempty"`
+	// PendingTranslationLanguage and MachineTranslatedFields reach the v2
+	// card only; v1 is frozen.
+	PendingTranslationLanguage string   `json:"-"`
+	MachineTranslatedFields    []string `json:"-"`
 }
 
 type resolvedSectionResponse struct {
@@ -1457,6 +1461,9 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	} else {
 		wg.Go(func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
+	localizedItems := map[string]*models.MediaItem{}
+	pendingTranslations := map[string]string{}
+	wg.Go(func() { localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, viewerAccess) })
 	wg.Go(func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, size) })
 	wg.Go(func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	wg.Go(func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
@@ -1492,7 +1499,13 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 				meta.SeriesTitle = value.SeriesTitle
 			}
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
-			items = append(items, h.toSectionItemResponse(s.SectionType, item, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)]))
+			card := item
+			if localized := localizedItems[item.ContentID]; localized != nil {
+				card = localized
+			}
+			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
+			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
+			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{
 			ID:          s.ID,
@@ -1731,6 +1744,8 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		BackdropThumbhash: item.BackdropThumbhash,
 		OverlaySummary:    overlaySummary,
 		UserState:         userState,
+
+		MachineTranslatedFields: item.MachineTranslatedFields,
 	}
 	if meta != nil {
 		if meta.SeriesID != nil {
@@ -1758,6 +1773,29 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 	resp.LogoURL = imageURLs.logoURL
 
 	return resp
+}
+
+// localizeSectionItems localizes every distinct section card for the viewer
+// in one batch. Section items are shared across profiles (the resolved-list
+// cache is process-global), so localized clones are kept per request and
+// never written back. A failure keeps the base text: localization must not
+// fail Home.
+func (h *SectionHandler) localizeSectionItems(ctx context.Context, items []*models.MediaItem, viewerAccess catalog.AccessFilter) (map[string]*models.MediaItem, map[string]string) {
+	localizedByID := map[string]*models.MediaItem{}
+	if h == nil || h.DetailSvc == nil || len(items) == 0 {
+		return localizedByID, map[string]string{}
+	}
+	localized, pending, err := h.DetailSvc.LocalizeSectionItems(ctx, items, withProfileMetadataLanguage(ctx, viewerAccess))
+	if err != nil {
+		slog.WarnContext(ctx, "localizing section items", "component", "api", "error", err)
+		return localizedByID, map[string]string{}
+	}
+	for _, item := range localized {
+		if item != nil {
+			localizedByID[item.ContentID] = item
+		}
+	}
+	return localizedByID, pending
 }
 
 // sizedSectionBackdropPath applies the request's image size to a section

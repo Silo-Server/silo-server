@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => {
     useWatchedStateMutation: vi.fn(),
     useSeasons: vi.fn(),
     useItemEpisodes: vi.fn(),
+    useOnViewTranslation: vi.fn(),
     useSimilarItems: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
@@ -45,7 +47,7 @@ vi.mock("@/pages/watchtogether/DetailWatchTogether", () => ({
   useDetailWatchTogether: () => ({ menu: undefined, sheet: null }),
 }));
 vi.mock("@/hooks/useOnViewTranslation", () => ({
-  useOnViewTranslation: () => ({ translating: false, onTranslate: undefined }),
+  useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -210,6 +212,27 @@ describe("SeriesContent", () => {
     mocks.useSimilarItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useSetRating.mockReturnValue({ mutate: mocks.setRatingMutate });
     mocks.useDeleteRating.mockReturnValue({ mutate: mocks.deleteRatingMutate });
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
+  });
+
+  it("offers the season's translation for the inline episode list in button mode", () => {
+    const translateSeason = vi.fn();
+    mocks.useOnViewTranslation.mockImplementation((target?: { content_id: string }) => ({
+      translating: false,
+      onTranslate: target?.content_id === makeSeason().content_id ? translateSeason : undefined,
+    }));
+    mocks.useItemEpisodes.mockReturnValue({
+      data: { episodes: [{ content_id: "episode-1", pending_translation_language: "de" }] },
+    });
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <SeriesContent item={makeSeriesItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Translate episodes" }));
+    expect(translateSeason).toHaveBeenCalledTimes(1);
   });
 
   it.each([

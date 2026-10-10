@@ -60,9 +60,13 @@ type CatalogItem struct {
 	SortMetrics       *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`
 	UserState         *CatalogItemUserState     `json:"user_state,omitempty" doc:"The viewer's flags; absent without a profile"`
 	UpcomingEvent     *CatalogItemUpcomingEvent `json:"upcoming_event,omitempty"`
-	WorkID            string                    `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
-	WorkTitle         string                    `json:"work_title,omitempty"`
-	WorkFormats       []CatalogWorkFormat       `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	// PendingTranslationLanguage and MachineTranslatedFields are set on
+	// detail documents and section cards; other listings leave them absent.
+	PendingTranslationLanguage string              `json:"pending_translation_language,omitempty" doc:"This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view."`
+	MachineTranslatedFields    []string            `json:"machine_translated_fields,omitempty" enum:"overview,tagline" doc:"Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were"`
+	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
+	WorkTitle                  string              `json:"work_title,omitempty"`
+	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
 }
 
 // CatalogItemOverlay is the technical summary a card overlays.
@@ -161,6 +165,7 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds, ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt),
 		PosterURL: v.PosterURL, PosterThumbhash: v.PosterThumbhash, BackdropURL: v.BackdropURL, BackdropThumbhash: v.BackdropThumbhash, LogoURL: v.LogoURL,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Badges: v.Badges, ItemSource: v.ItemSource, UserState: catalogUserStateOf(v.UserState),
+		PendingTranslationLanguage: v.PendingTranslationLanguage, MachineTranslatedFields: v.MachineTranslatedFields,
 	}
 	if e := v.UpcomingEvent; e != nil {
 		item.UpcomingEvent = &CatalogItemUpcomingEvent{Type: e.Type, AirDate: e.AirDate, AirTime: e.AirTime, EpisodeTitle: e.EpisodeTitle,

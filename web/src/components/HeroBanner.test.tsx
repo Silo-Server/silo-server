@@ -1,5 +1,5 @@
 import type { SectionItem } from "@/api/types";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -20,6 +20,18 @@ const playbackMocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useAmbientColor", () => ({
   useAmbientColor: () => undefined,
+}));
+
+const translationMocks = vi.hoisted(() => ({
+  hook: vi.fn(),
+  state: { translating: false, onTranslate: undefined as undefined | (() => void) },
+}));
+
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: (...args: unknown[]) => {
+    translationMocks.hook(...args);
+    return translationMocks.state;
+  },
 }));
 
 vi.mock("@/lib/thumbhash", () => ({
@@ -702,5 +714,70 @@ describe("HeroBanner", () => {
     await userEvent.click(screen.getByRole("link", { name: /pause/i }));
 
     expect(playbackMocks.toggleActivePlayback).toHaveBeenCalledTimes(1);
+  });
+
+  describe("on-view translation", () => {
+    afterEach(() => {
+      translationMocks.hook.mockClear();
+      translationMocks.state = { translating: false, onTranslate: undefined };
+    });
+
+    it("translates only the visible slide and refreshes the hero's items", async () => {
+      const refresh = vi.fn();
+      const visible = movieSlide({ content_id: "movie-1", pending_translation_language: "de" });
+      render(
+        <MemoryRouter>
+          <HeroBanner
+            items={[visible, movieSlide({ content_id: "movie-2" })]}
+            onRefreshItems={refresh}
+          />
+        </MemoryRouter>,
+      );
+      await waitFor(() =>
+        expect(translationMocks.hook).toHaveBeenLastCalledWith(visible, { onPoll: refresh }),
+      );
+    });
+
+    it("pulses the description while it translates", async () => {
+      translationMocks.state = { translating: true, onTranslate: undefined };
+      render(
+        <MemoryRouter>
+          <HeroBanner items={[movieSlide({ overview: "Source text" })]} />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText("Translating…")).toBeInTheDocument();
+      expect(screen.getByText("Source text")).toHaveClass("animate-pulse");
+    });
+
+    it("offers the translate action in button mode", async () => {
+      const onTranslate = vi.fn();
+      translationMocks.state = { translating: false, onTranslate };
+      render(
+        <MemoryRouter>
+          <HeroBanner items={[movieSlide()]} />
+        </MemoryRouter>,
+      );
+      await userEvent.click(await screen.findByRole("button", { name: "Translate" }));
+      expect(onTranslate).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not label a provider overview when only the tagline is AI", async () => {
+      render(
+        <MemoryRouter>
+          <HeroBanner items={[movieSlide({ machine_translated_fields: ["tagline"] })]} />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(translationMocks.hook).toHaveBeenCalled());
+      expect(screen.queryByText("Translated by AI")).not.toBeInTheDocument();
+    });
+
+    it("labels a machine-translated description", async () => {
+      render(
+        <MemoryRouter>
+          <HeroBanner items={[movieSlide({ machine_translated_fields: ["overview"] })]} />
+        </MemoryRouter>,
+      );
+      expect(await screen.findByText("Translated by AI")).toBeInTheDocument();
+    });
   });
 });

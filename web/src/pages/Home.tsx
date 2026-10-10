@@ -214,6 +214,22 @@ export default function Home() {
     failedIds,
   });
 
+  // Refetches one section in place through the regular loader, keeping its
+  // current items on screen; the Featured hero uses it while an on-view
+  // translation runs.
+  const refreshSection = (sectionId: string) => {
+    void queryClient
+      .invalidateQueries({ queryKey: sectionKeys.homeItems(sectionId), refetchType: "none" })
+      .then(() =>
+        setCompletedIds((prev) => {
+          if (!prev.has(sectionId)) return prev;
+          const next = new Set(prev);
+          next.delete(sectionId);
+          return next;
+        }),
+      );
+  };
+
   const retrySection = (sectionId: string) => {
     queryClient.removeQueries({ queryKey: sectionKeys.homeItems(sectionId) });
     setFailedIds((prev) => {
@@ -229,7 +245,7 @@ export default function Home() {
       return next;
     });
   };
-  const heroSlot = renderHeroSlot(viewModel.hero, retrySection);
+  const heroSlot = renderHeroSlot(viewModel.hero, retrySection, refreshSection);
   const hasHeroSlot = heroSlot !== null;
   const rowPlaceholderHeight = carouselIntrinsicHeight(cardPresentation.poster_size);
   let readyRowIndex = 0;
@@ -445,11 +461,21 @@ function setsHaveSameEntries<T>(left: Set<T>, right: Set<T>): boolean {
   return true;
 }
 
-function renderHeroSlot(hero: HomeSectionSlot | null, retrySection: (sectionId: string) => void) {
+function renderHeroSlot(
+  hero: HomeSectionSlot | null,
+  retrySection: (sectionId: string) => void,
+  refreshSection: (sectionId: string) => void,
+) {
   if (!hero) return null;
 
   if (hero.state === "ready" && hero.section) {
-    return <HeroBanner items={hero.section.items} maxSlides={hero.layout.item_limit} />;
+    return (
+      <HeroBanner
+        items={hero.section.items}
+        maxSlides={hero.layout.item_limit}
+        onRefreshItems={() => refreshSection(hero.layout.id)}
+      />
+    );
   }
 
   if (hero.state === "error") {

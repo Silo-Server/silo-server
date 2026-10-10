@@ -35,7 +35,9 @@ type TargetKind string
 const (
 	// TargetItem covers a movie or series; for series, IncludeChildren expands
 	// the job to every season and episode overview.
-	TargetItem    TargetKind = "item"
+	TargetItem TargetKind = "item"
+	// TargetSeason covers one season; IncludeChildren adds the overviews of
+	// that season's episodes.
 	TargetSeason  TargetKind = "season"
 	TargetEpisode TargetKind = "episode"
 )
@@ -114,6 +116,9 @@ type ChildText struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	Overview      string
+	// DefaultLanguage is the language Overview is written in; a child already
+	// in the target language is never sent for translation.
+	DefaultLanguage string
 }
 
 // ContentReader loads the base-row text a job translates. Implementations
@@ -122,6 +127,8 @@ type ContentReader interface {
 	ItemText(ctx context.Context, contentID string) (*ItemText, error)
 	SeasonTexts(ctx context.Context, seriesID string) ([]ChildText, error)
 	EpisodeTexts(ctx context.Context, seriesID string) ([]ChildText, error)
+	// SeasonEpisodeTexts loads one season's episodes.
+	SeasonEpisodeTexts(ctx context.Context, seasonContentID string) ([]ChildText, error)
 	// SeasonByID / EpisodeByID also return the parent series content ID.
 	SeasonByID(ctx context.Context, contentID string) (*ChildText, string, error)
 	EpisodeByID(ctx context.Context, contentID string) (*ChildText, string, error)

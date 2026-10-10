@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Languages } from "lucide-react";
+import MachineTranslatedLabel from "./MachineTranslatedLabel";
 
 interface DetailOverviewProps {
   overview: string;
@@ -8,6 +9,8 @@ interface DetailOverviewProps {
   clamp?: boolean;
   translating?: boolean;
   onTranslate?: () => void;
+  /** The shown text was machine-translated by AI; label it as such. */
+  machineTranslated?: boolean;
 }
 
 export default function DetailOverview({
@@ -16,6 +19,7 @@ export default function DetailOverview({
   clamp = false,
   translating = false,
   onTranslate,
+  machineTranslated = false,
 }: DetailOverviewProps) {
   const textRef = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -63,6 +67,7 @@ export default function DetailOverview({
             Translating…
           </span>
         )}
+        {!translating && machineTranslated && <MachineTranslatedLabel className="mt-1" />}
         {!translating && onTranslate && (
           <button
             type="button"

@@ -131,6 +131,21 @@ func (c *fakeContent) SeasonTexts(context.Context, string) ([]ChildText, error) 
 func (c *fakeContent) EpisodeTexts(context.Context, string) ([]ChildText, error) {
 	return c.episodes, nil
 }
+func (c *fakeContent) SeasonEpisodeTexts(_ context.Context, seasonID string) ([]ChildText, error) {
+	number := -1
+	for _, season := range c.seasons {
+		if season.ContentID == seasonID {
+			number = season.SeasonNumber
+		}
+	}
+	var out []ChildText
+	for _, episode := range c.episodes {
+		if episode.SeasonNumber == number {
+			out = append(out, episode)
+		}
+	}
+	return out, nil
+}
 func (c *fakeContent) SeasonByID(context.Context, string) (*ChildText, string, error) {
 	if len(c.seasons) == 0 {
 		return nil, "", nil
@@ -150,6 +165,7 @@ func (c *fakeContent) CountMissingFields(context.Context, string, string) (int, 
 type aiWrite struct {
 	kind      TargetKind
 	contentID string
+	language  string
 	overview  string
 	tagline   string
 	force     bool
@@ -182,13 +198,13 @@ func (l *fakeLocs) EpisodeLocalizations(context.Context, []string, string) (map[
 	return l.episodeLocs, nil
 }
 
-func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, _ string, overview, tagline *string, force bool) error {
+func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, overview, tagline *string, force bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	w := aiWrite{kind: TargetItem, contentID: contentID, force: force}
+	w := aiWrite{kind: TargetItem, contentID: contentID, language: language, force: force}
 	if overview != nil {
 		w.overview = *overview
 	}
@@ -199,23 +215,23 @@ func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, _ string, overview
 	return nil
 }
 
-func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, _ string, overview string, force bool) error {
+func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string, overview string, force bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	l.writes = append(l.writes, aiWrite{kind: TargetSeason, contentID: contentID, overview: overview, force: force})
+	l.writes = append(l.writes, aiWrite{kind: TargetSeason, contentID: contentID, language: language, overview: overview, force: force})
 	return nil
 }
 
-func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, _ string, overview string, force bool) error {
+func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, language string, overview string, force bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
 		return fmt.Errorf("boom")
 	}
-	l.writes = append(l.writes, aiWrite{kind: TargetEpisode, contentID: contentID, overview: overview, force: force})
+	l.writes = append(l.writes, aiWrite{kind: TargetEpisode, contentID: contentID, language: language, overview: overview, force: force})
 	return nil
 }
 
@@ -552,6 +568,8 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 
 func TestRequestOnViewUsesRequestedTargetKind(t *testing.T) {
 	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	// An episode of another season must stay out of a season job.
+	content.episodes = append(content.episodes, ChildText{ContentID: "ep3", SeasonNumber: 2, EpisodeNumber: 1, Overview: "Other season."})
 	svc := testService(t, repo, content, locs, chat)
 
 	seasonJob, err := svc.RequestOnView(context.Background(), TargetSeason, "sea1", "fr", nil)
@@ -559,30 +577,65 @@ func TestRequestOnViewUsesRequestedTargetKind(t *testing.T) {
 		t.Fatalf("RequestOnView season: %v", err)
 	}
 	waitDone(t, repo)
-	if final := repo.job(seasonJob.ID); final.TargetKind != TargetSeason || final.IncludeChildren {
-		t.Fatalf("season job = %+v, want target season without children", final)
+	if final := repo.job(seasonJob.ID); final.TargetKind != TargetSeason || !final.IncludeChildren || final.FieldsDone != 3 {
+		t.Fatalf("season job = %+v, want target season with its 2 episodes (3 fields)", final)
 	}
 
-	episodeJob, err := svc.RequestOnView(context.Background(), TargetEpisode, "ep1", "fr", nil)
+	episodeJob, err := svc.RequestOnView(context.Background(), TargetEpisode, "ep1", "de", nil)
 	if err != nil {
 		t.Fatalf("RequestOnView episode: %v", err)
 	}
 	waitDone(t, repo)
-	if final := repo.job(episodeJob.ID); final.TargetKind != TargetEpisode || final.IncludeChildren {
+	if final := repo.job(episodeJob.ID); final.TargetKind != TargetEpisode || final.IncludeChildren || final.FieldsDone != 1 {
 		t.Fatalf("episode job = %+v, want target episode without children", final)
 	}
 
-	writes := locs.allWrites()
-	var sawSeason, sawEpisode bool
-	for _, write := range writes {
-		if write.kind == TargetSeason && write.contentID == "sea1" && write.overview == "SEASON ONE." {
-			sawSeason = true
-		}
-		if write.kind == TargetEpisode && write.contentID == "ep1" && write.overview == "PILOT EPISODE." {
-			sawEpisode = true
+	// A series page translates only the series' own description.
+	seriesJob, err := svc.RequestOnView(context.Background(), TargetItem, "series1", "it", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView series: %v", err)
+	}
+	waitDone(t, repo)
+	if final := repo.job(seriesJob.ID); final.IncludeChildren || final.FieldsDone != 2 {
+		t.Fatalf("series job = %+v, want overview and tagline only", final)
+	}
+
+	written := map[string]bool{}
+	for _, write := range locs.allWrites() {
+		written[string(write.kind)+":"+write.contentID+":"+write.language] = true
+	}
+	for _, want := range []string{"season:sea1:fr", "episode:ep1:fr", "episode:ep2:fr", "episode:ep1:de", "item:series1:it"} {
+		if !written[want] {
+			t.Errorf("missing write %s; got %v", want, written)
 		}
 	}
-	if !sawSeason || !sawEpisode {
-		t.Fatalf("missing target-kind writes: %+v", writes)
+	for _, unwanted := range []string{"episode:ep3:fr", "season:sea1:it", "episode:ep1:it"} {
+		if written[unwanted] {
+			t.Errorf("unexpected write %s", unwanted)
+		}
+	}
+}
+
+// A season job never sends an episode that is already in the target language,
+// such as a French-source episode in a season otherwise in English. The match
+// is the catalog's (whole tag), so a fr-CA episode is still translated to fr.
+func TestSeasonJobSkipsEpisodesAlreadyInTheTargetLanguage(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	content.episodes[1].DefaultLanguage = "FR"
+	content.episodes[0].DefaultLanguage = "fr-CA"
+	svc := testService(t, repo, content, locs, chat)
+
+	job, err := svc.RequestOnView(context.Background(), TargetSeason, "sea1", "fr", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView: %v", err)
+	}
+	waitDone(t, repo)
+	if final := repo.job(job.ID); final.FieldsDone != 2 {
+		t.Fatalf("fields = %d, want the season and the fr-CA ep1 only", final.FieldsDone)
+	}
+	for _, write := range locs.allWrites() {
+		if write.contentID == "ep2" {
+			t.Fatalf("translated an episode already in French: %+v", write)
+		}
 	}
 }

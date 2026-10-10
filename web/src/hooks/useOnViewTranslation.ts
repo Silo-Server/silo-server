@@ -10,6 +10,12 @@ import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 const TRANSLATE_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 2_000;
 
+/** What the hook needs from a page: a detail document, or a season's episode list. */
+export type OnViewTranslationTarget = Pick<
+  ItemDetail,
+  "content_id" | "pending_translation_language" | "series_id" | "season_number"
+>;
+
 /**
  * Viewer-facing on-demand description translation for the detail page.
  *
@@ -22,7 +28,18 @@ const POLL_INTERVAL_MS = 2_000;
  * Completion is observed as the flag clearing on refetch — the job's first
  * batch translates the item's own overview, so this lands in seconds.
  */
-export function useOnViewTranslation(item: ItemDetail | undefined) {
+export interface OnViewTranslationOptions {
+  /**
+   * Called on every poll tick while a translation runs, for surfaces whose
+   * data does not live under the catalog item keys (Home sections).
+   */
+  onPoll?: () => void;
+}
+
+export function useOnViewTranslation(
+  item: OnViewTranslationTarget | undefined,
+  { onPoll }: OnViewTranslationOptions = {},
+) {
   const queryClient = useQueryClient();
   const { data: status } = useMetadataAIStatus();
   const mode = status?.on_view ?? "off";
@@ -31,57 +48,69 @@ export function useOnViewTranslation(item: ItemDetail | undefined) {
   const pendingLanguage = item?.pending_translation_language ?? "";
   const seriesId = item?.series_id;
   const seasonNumber = item?.season_number;
+  const key = contentId && pendingLanguage ? `${contentId}\u0000${pendingLanguage}` : "";
 
-  const [translating, setTranslating] = useState(false);
-  // Tracks which item+language we already fired for, so auto mode triggers
-  // once per view rather than re-firing on every refetch while polling.
-  const firedForRef = useRef("");
+  // Translations in flight, keyed by item and language. A surface that
+  // switches items (the Featured hero rotating its slides) shows each item's
+  // own progress and keeps polling for an earlier slide's job.
+  const [running, setRunning] = useState<ReadonlyMap<string, RunningTranslation>>(new Map());
+  const translating = key !== "" && running.has(key);
+  // Item+language pairs already requested, so auto mode triggers once per
+  // view rather than re-firing on every refetch while polling.
+  const firedRef = useRef(new Set<string>());
+  const onPollRef = useRef(onPoll);
+  useEffect(() => {
+    onPollRef.current = onPoll;
+  });
 
   const trigger = useCallback(() => {
-    if (!contentId || !pendingLanguage) return;
-    const key = `${contentId}:${pendingLanguage}`;
-    if (firedForRef.current === key) return;
-    firedForRef.current = key;
-    setTranslating(true);
+    if (!key || firedRef.current.has(key)) return;
+    firedRef.current.add(key);
+    setRunning((current) => new Map(current).set(key, { contentId, startedAt: Date.now() }));
     v2("POST /api/v2/catalog/items/{id}/translate-description", {
       path: { id: contentId },
       body: { target_language: pendingLanguage },
     }).catch(() => {
-      setTranslating(false);
+      setRunning((current) => withoutEntries(current, (entryKey) => entryKey === key));
     });
-  }, [contentId, pendingLanguage]);
+  }, [contentId, key, pendingLanguage]);
 
   // Auto mode: translate on view.
   useEffect(() => {
     if (mode === "auto" && pendingLanguage) trigger();
   }, [mode, pendingLanguage, trigger]);
 
-  // While translating, poll the detail; the localized overview replaces the
-  // text and clears the pending flag, which ends the shimmer below.
+  // While translating, poll; the localized overview replaces the text and
+  // clears the pending flag, which ends the shimmer below.
   useEffect(() => {
-    if (!translating || !contentId) return;
-    const startedAt = Date.now();
+    if (running.size === 0) return;
     const timer = setInterval(() => {
-      if (Date.now() - startedAt > TRANSLATE_TIMEOUT_MS) {
-        setTranslating(false);
-        return;
+      const now = Date.now();
+      if ([...running.values()].some((entry) => now - entry.startedAt > TRANSLATE_TIMEOUT_MS)) {
+        setRunning((current) =>
+          withoutEntries(current, (_, entry) => now - entry.startedAt > TRANSLATE_TIMEOUT_MS),
+        );
       }
       // Prefix invalidation covers the per-library detail key variants
       // (["catalog", "items", id, "detail", <libraryId|"default">]).
-      void queryClient.invalidateQueries({ queryKey: ["catalog", "items", contentId] });
+      for (const id of new Set([...running.values()].map((entry) => entry.contentId))) {
+        void queryClient.invalidateQueries({ queryKey: ["catalog", "items", id] });
+      }
       if (seriesId && typeof seasonNumber === "number") {
         void queryClient.invalidateQueries({
           queryKey: ["catalog", "series", seriesId, "seasons", seasonNumber],
         });
       }
+      onPollRef.current?.();
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [translating, contentId, queryClient, seasonNumber, seriesId]);
+  }, [running, queryClient, seasonNumber, seriesId]);
 
-  // The refetched detail no longer reports a missing language: done.
+  // The refetched item no longer reports a missing language: done.
   useEffect(() => {
-    if (translating && !pendingLanguage) setTranslating(false);
-  }, [translating, pendingLanguage]);
+    if (!contentId || pendingLanguage) return;
+    setRunning((current) => withoutEntries(current, (_, entry) => entry.contentId === contentId));
+  }, [contentId, pendingLanguage]);
 
   return {
     /** Pulse the description text. */
@@ -89,4 +118,18 @@ export function useOnViewTranslation(item: ItemDetail | undefined) {
     /** Render the explicit translate chip (button mode only). */
     onTranslate: mode === "button" && pendingLanguage && !translating ? trigger : undefined,
   };
+}
+
+interface RunningTranslation {
+  contentId: string;
+  startedAt: number;
+}
+
+/** The map without matching entries, or the same map when nothing matches. */
+function withoutEntries(
+  current: ReadonlyMap<string, RunningTranslation>,
+  drop: (key: string, entry: RunningTranslation) => boolean,
+): ReadonlyMap<string, RunningTranslation> {
+  const next = new Map([...current].filter(([key, entry]) => !drop(key, entry)));
+  return next.size === current.size ? current : next;
 }

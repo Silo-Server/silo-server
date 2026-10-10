@@ -985,3 +985,34 @@ issue #937. They need V2 discovery and fixtures, settings, playback, and lifecyc
 support before enabling it. Provider downloads, theme videos, uploads, remote
 URLs, and HLS theme transcoding are outside this local-file capability. No V1
 route or V1 item-detail shape changes.
+
+## Description translation
+
+Silo can translate descriptions with an AI model into a profile's metadata
+language (`metadata_ai` settings). Localized text reaches clients through the
+ordinary localized fields; these members describe it:
+
+- `machine_translated_fields` on the item detail, season rows and episode rows
+  lists the localized fields whose text an AI translation wrote: `overview`
+  and, on items, `tagline`. It is absent when no shown field was
+  machine-translated, and it is never set for provider or manually entered
+  text. Clients label exactly the fields it names; an AI `tagline` alone says
+  nothing about the overview. The frozen v1 JSON does not carry it.
+- `pending_translation_language` on the item detail is this profile's
+  metadata language when the item's description is not available in it yet.
+  `POST /api/v2/catalog/items/{id}/translate-description` with that value as
+  `target_language` queues the translation; `GET
+  /api/v2/capabilities/metadata-ai` reports whether the server translates on
+  view automatically (`auto`), offers it as an action (`button`), or not at
+  all (`off`).
+- On-view translation covers what the page shows: a movie or series its own
+  overview and tagline, a season its overview and its episodes' overviews, an
+  episode itself. A season's `pending_translation_language` is therefore also
+  set while any of its episodes lacks the language, and v2 episode rows carry
+  their own `pending_translation_language`, so a client that lists episodes
+  inline (a single-season series) can translate that season. Children whose
+  source text is already in the target language are skipped.
+- Home and library section cards are localized per profile and carry the
+  same `pending_translation_language` and `machine_translated_fields` members
+  as the detail document. The web Featured hero uses them to translate the
+  slide on screen; other cards only display them.

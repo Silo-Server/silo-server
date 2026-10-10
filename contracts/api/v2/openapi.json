@@ -21796,6 +21796,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -21821,6 +21832,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view.",
             "type": "string"
           },
           "play_content_id": {
@@ -22177,6 +22192,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga": {
             "$ref": "#/components/schemas/MangaDetailExtension"
           },
@@ -22211,7 +22237,7 @@
             "type": "string"
           },
           "pending_translation_language": {
-            "description": "A translation of the overview is queued for this language",
+            "description": "This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view.",
             "type": "string"
           },
           "play_content_id": {
@@ -28798,10 +28824,24 @@
           "imdb_id": {
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "overlay_summary": {
             "$ref": "#/components/schemas/CatalogItemOverlay"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "This profile's metadata language when the episode's description is not available in it yet; translating the episode's season fills it",
             "type": "string"
           },
           "runtime": {
@@ -29693,6 +29733,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -29718,6 +29769,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view.",
             "type": "string"
           },
           "play_content_id": {
@@ -42497,6 +42552,16 @@
           "is_specials": {
             "type": "boolean"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI; absent when none were",
+            "items": {
+              "enum": [
+                "overview"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "overview": {
             "type": "string"
           },
@@ -49580,6 +49645,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -49605,6 +49681,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view.",
             "type": "string"
           },
           "play_content_id": {
@@ -49916,6 +49996,17 @@
             "description": "Presigned, short-lived",
             "type": "string"
           },
+          "machine_translated_fields": {
+            "description": "Localized fields whose text was machine-translated by AI rather than supplied by a metadata provider or a person; absent when none were",
+            "items": {
+              "enum": [
+                "overview",
+                "tagline"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "manga_chapter_count": {
             "format": "int64",
             "type": "integer"
@@ -49941,6 +50032,10 @@
             "description": "Technical badges of the best file"
           },
           "overview": {
+            "type": "string"
+          },
+          "pending_translation_language": {
+            "description": "This profile's metadata language when the descriptions this item's page shows are not available in it yet: the item's own overview, or for a season its overview or any of its episodes' overviews. Echo it to translateCatalogItemDescription to translate on view.",
             "type": "string"
           },
           "play_content_id": {
@@ -133880,7 +133975,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job.",
+        "summary": "Queue a translation of the descriptions a page shows into the language its detail document reported missing: a movie's or series' own overview and tagline, a season's overview and its episodes' overviews, or one episode. Answers 202 with the job.",
         "tags": [
           "catalog"
         ],

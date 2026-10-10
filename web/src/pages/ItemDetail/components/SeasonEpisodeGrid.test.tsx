@@ -83,4 +83,29 @@ describe("SeasonEpisodeGrid", () => {
     expect(card).not.toBeNull();
     expect(card).toHaveTextContent("Damaged file");
   });
+
+  it("marks episodes whose overview was machine-translated", () => {
+    const episode = (id: string, number: number, fields?: string[]) => ({
+      content_id: id,
+      season_number: 1,
+      episode_number: number,
+      title: `Episode title ${number}`,
+      overview: `Overview ${number}`,
+      air_date: null,
+      runtime: 0,
+      still_url: "",
+      still_thumbhash: "",
+      files: [],
+      machine_translated_fields: fields,
+    });
+    render(
+      <MemoryRouter>
+        <SeasonEpisodeGrid
+          isLoading={false}
+          episodes={[episode("ep-1", 1, ["overview"]), episode("ep-2", 2)]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getAllByText("Translated by AI")).toHaveLength(1);
+  });
 });

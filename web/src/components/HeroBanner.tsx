@@ -1,9 +1,23 @@
-import { memo, useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  type MouseEvent,
+} from "react";
 import { Link } from "react-router";
 import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-react";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { HeroOverviewText } from "./HeroOverviewText";
+
+// On-view translation for the visible slide loads after the hero itself, so
+// it stays out of the launch bundle; the plain overview shows meanwhile.
+const HeroOverview = lazy(() => import("./HeroOverview"));
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -38,6 +52,11 @@ interface HeroBannerProps {
    * param so the watch/item routes can scope back to the right library.
    */
   libraryId?: number;
+  /**
+   * Refetches the items while an on-view translation of the shown slide runs,
+   * so the translated description replaces the original in place.
+   */
+  onRefreshItems?: () => void;
 }
 
 /**
@@ -145,6 +164,7 @@ export default function HeroBanner({
   bleed = false,
   reserveHeaderSpace = false,
   libraryId,
+  onRefreshItems,
 }: HeroBannerProps) {
   const slides = useMemo(() => items.slice(0, maxSlides), [items, maxSlides]);
   const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
@@ -321,9 +341,15 @@ export default function HeroBanner({
               </div>
             )}
             {current.overview && (
-              <p className="text-foreground/72 mb-7 line-clamp-2 max-w-2xl text-sm leading-7 sm:line-clamp-none sm:text-base">
-                {current.overview}
-              </p>
+              <Suspense
+                fallback={
+                  <div className="mb-7 max-w-2xl">
+                    <HeroOverviewText overview={current.overview} />
+                  </div>
+                }
+              >
+                <HeroOverview item={current} onRefreshItems={onRefreshItems} />
+              </Suspense>
             )}
             <div className="flex flex-wrap items-center gap-3">
               <Link
