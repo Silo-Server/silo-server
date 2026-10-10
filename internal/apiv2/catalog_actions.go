@@ -35,7 +35,7 @@ type TranslateDescriptionInput struct {
 
 // TranslateDescription names the language the viewer wants.
 type TranslateDescription struct {
-	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the wanted language, as the detail document's pending_translation_language reported it" example:"de"`
+	TargetLanguage string `json:"target_language" minLength:"1" maxLength:"16" doc:"BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language." example:"de"`
 }
 
 // PeopleSearchInput is the listPeople query.
@@ -271,7 +271,7 @@ func registerCatalogActions(reg *Registry) {
 	translate := humaOp(http.MethodPost, Prefix+"/catalog/items/{id}/translate-description", "translateCatalogItemDescription", "catalog",
 		"Queue a translation of the item's descriptions into the language the detail document reported missing; answers 202 with the job.")
 	translate.DefaultStatus = http.StatusAccepted
-	translate.Errors = []int{http.StatusConflict}
+	translate.Errors = []int{http.StatusConflict, http.StatusTooManyRequests}
 	translateOperation := viewerOperation(translate)
 	translateOperation.RetrySafety = RetrySafetyCoalescing
 	Register(reg, translateOperation, reg.translateCatalogItemDescription)

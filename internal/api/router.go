@@ -3824,6 +3824,17 @@ func newChiRouter(deps Dependencies) chi.Router {
 						metadataAIHandler.ItemAccess = itemRepo
 						metadataAIHandler.SeasonLookup = seasonRepo
 						metadataAIHandler.EpisodeLookup = episodeRepo
+						if detailSvc != nil {
+							metadataAIHandler.Pending = detailSvc
+						}
+						metadataAIHandler.ItemLibraries = itemRepo
+						// Same shared-limiter rule as trailer refresh: one
+						// per-account budget across instances on Redis, a
+						// private in-memory one when rate limiting is off.
+						metadataAIHandler.Limiter = deps.RateLimitMW.SharedLimiter()
+						if metadataAIHandler.Limiter == nil {
+							metadataAIHandler.Limiter = ratelimit.NewMemoryLimiter()
+						}
 						r.With(householdProfileGate).Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {

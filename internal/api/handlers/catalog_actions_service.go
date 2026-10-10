@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -181,6 +183,30 @@ func (h *MetadataAIHandler) TranslateOnView(ctx context.Context, filter catalog.
 			return nil, apiError(http.StatusNotFound, policyErrorNotFound, "Item not found")
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+	}
+	// The account budget comes first, so a refused request cannot fan out
+	// into the pending-language reads below without spending it.
+	if h.Limiter != nil && requestedBy != nil {
+		result := h.onViewAllow(ctx, *requestedBy)
+		if !result.Allowed {
+			limited := apiError(http.StatusTooManyRequests, "rate_limited", "Too many translation requests")
+			if result.RetryAfter > 0 {
+				limited.RetryAfter = int(math.Ceil(result.RetryAfter.Seconds()))
+			}
+			return nil, limited
+		}
+	}
+	if h.Pending != nil {
+		// Only the language this viewer's detail page reports missing may be
+		// queued; anything else would let any profile spend the provider
+		// budget on languages nobody reads.
+		pending := h.viewerPendingLanguage(ctx, target, filter, targetLanguage)
+		if pending == "" {
+			return nil, fieldError("target_language", "This item has nothing to translate for this profile")
+		}
+		if !strings.EqualFold(strings.TrimSpace(targetLanguage), pending) {
+			return nil, fieldError("target_language", "target_language must be this profile's metadata language ("+pending+")")
+		}
 	}
 	job, err := h.service.RequestOnView(ctx, target.kind, contentID, targetLanguage, requestedBy)
 	if err != nil {

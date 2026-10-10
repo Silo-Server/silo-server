@@ -30283,7 +30283,7 @@ export interface components {
     };
     TranslateDescription: {
       /**
-       * @description BCP 47 tag of the wanted language, as the detail document's pending_translation_language reported it
+       * @description BCP 47 tag of the wanted language, exactly as this profile's detail document reported it in pending_translation_language. Any other language, or a target with nothing left to translate, is refused with 422 at body.target_language.
        * @example de
        */
       target_language: string;

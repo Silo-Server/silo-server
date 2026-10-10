@@ -2705,3 +2705,22 @@ func (r *ItemRepository) LookupExternalIDs(
 func pathPrefixLike(pathPrefix string) string {
 	return pathscope.PrefixLike(pathPrefix)
 }
+
+// LibraryIDsForItem returns the libraries a media item belongs to, in ID order.
+func (r *ItemRepository) LibraryIDsForItem(ctx context.Context, contentID string) ([]int, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT media_folder_id FROM media_item_libraries WHERE content_id = $1 ORDER BY media_folder_id`, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing item libraries: %w", err)
+	}
+	defer rows.Close()
+	var ids []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning item library: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
