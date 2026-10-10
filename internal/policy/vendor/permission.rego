@@ -24,7 +24,10 @@ acting_admin_decision(i) := allow if {
 } else := deny("primary profile required", "primary_profile_required")
 
 marker_edit_decision(i) := allow if {
-	effective_permission_allowed(i, "marker_edit")
+	acting_admin_allowed(i)
+} else := allow if {
+	user_enabled(i)
+	assigned_permission(i, "marker_edit")
 } else := deny("user disabled", "user_disabled") if {
 	not user_enabled(i)
 } else := deny("marker edit permission required", "marker_edit_permission_required")
@@ -40,15 +43,6 @@ metadata_curation_decision(i) := allow if {
 } else := deny("metadata curation permission required", "metadata_curation_permission_required") if {
 	not assigned_permission(i, "metadata_curation")
 } else := deny("item is outside user libraries", "item_outside_user_libraries")
-
-effective_permission_allowed(i, permission) if {
-	user_enabled(i)
-	assignable_permission(permission)
-	admin_role(i)
-} else if {
-	user_enabled(i)
-	assigned_permission(i, permission)
-}
 
 acting_admin_allowed(i) if {
 	user_enabled(i)
@@ -72,9 +66,6 @@ target_libraries_allowed(i) if {
 		has_value(user_library_ids(i), id)
 	}
 }
-
-assignable_permission("marker_edit")
-assignable_permission("metadata_curation")
 
 assigned_permission(i, permission) if {
 	some idx

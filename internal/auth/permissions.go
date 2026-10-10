@@ -2,10 +2,11 @@ package auth
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
-	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/access"
 )
 
 type Permission string
@@ -18,15 +19,6 @@ const (
 var assignablePermissions = map[Permission]struct{}{
 	PermissionMarkerEdit:       {},
 	PermissionMetadataCuration: {},
-}
-
-func assignablePermissionList() []string {
-	out := make([]string, 0, len(assignablePermissions))
-	for permission := range assignablePermissions {
-		out = append(out, string(permission))
-	}
-	sort.Strings(out)
-	return out
 }
 
 func isAssignablePermission(permission Permission) bool {
@@ -64,38 +56,21 @@ func DefaultUserPermissions() []string {
 	return []string{string(PermissionMarkerEdit)}
 }
 
-func HasAssignedPermission(user *models.User, permission Permission) bool {
-	if user == nil {
-		return false
-	}
-	for _, value := range user.Permissions {
-		if value == string(permission) {
-			return true
+// PolicyPermissions reports the account's permissions after the access-group
+// mask: the resolved policy's permission list, which the route gates pass to
+// the policy PDP, restricted to assignable permissions. An admin's role grant
+// is not added: it applies only while the admin acts through the primary
+// profile, which clients resolve per profile, so an admin reports its
+// explicitly assigned permissions (admins are never masked by a group).
+// Whether the account is enabled is not considered; the caller decides what a
+// disabled account sees.
+func PolicyPermissions(effective access.EffectiveUserPolicy) []string {
+	out := make([]string, 0, len(effective.Permissions))
+	for _, value := range effective.Permissions {
+		if isAssignablePermission(Permission(value)) && !slices.Contains(out, value) {
+			out = append(out, value)
 		}
 	}
-	return false
-}
-
-func HasEffectivePermission(user *models.User, permission Permission) bool {
-	if user == nil || !user.Enabled {
-		return false
-	}
-	if user.Role == "admin" {
-		return isAssignablePermission(permission)
-	}
-	return HasAssignedPermission(user, permission)
-}
-
-func EffectivePermissions(user *models.User) []string {
-	if user == nil || !user.Enabled {
-		return []string{}
-	}
-	if user.Role == "admin" {
-		return assignablePermissionList()
-	}
-	permissions, err := NormalizePermissions(user.Permissions)
-	if err != nil {
-		return []string{}
-	}
-	return permissions
+	sort.Strings(out)
+	return out
 }

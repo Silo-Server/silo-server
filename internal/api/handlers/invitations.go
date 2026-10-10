@@ -102,7 +102,7 @@ func (h *InvitationHandler) HandleAcceptInvitation(w http.ResponseWriter, r *htt
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, effectiveDownloadAllowed(r.Context(), user, h.accessGroups), nil))
+	writeJSON(w, http.StatusCreated, buildLoginResponse(pair, user, effectiveAccountPolicy(r.Context(), user, h.accessGroups), nil))
 }
 
 // InvitationAcceptanceView distinguishes committed account creation from the
@@ -119,7 +119,7 @@ func (h *InvitationHandler) AcceptInvitation(ctx context.Context, token, email, 
 	}
 	view := InvitationAcceptanceView{Username: user.Username}
 	if err == nil {
-		view.Tokens = &TokenPairView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn, User: buildUserResponse(user, effectiveDownloadAllowed(ctx, user, h.accessGroups), nil, nil)}
+		view.Tokens = &TokenPairView{AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, ExpiresIn: pair.ExpiresIn, User: buildUserResponse(user, effectiveAccountPolicy(ctx, user, h.accessGroups), nil, nil)}
 	}
 	return view, err
 }

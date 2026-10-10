@@ -208,30 +208,6 @@ func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
 	}
 }
 
-// The marker_edit decision reads no household fact, so a failing household
-// lookup must not turn a profile-less admin's marker write into a 500 that the
-// legacy gate would have let through.
-func TestPolicyMarkerEditMiddlewareSkipsHouseholdLookup(t *testing.T) {
-	admin := &models.User{ID: 7, Role: "admin", Enabled: true}
-	household := func(context.Context, int) (bool, error) {
-		t.Fatal("marker edit must not look up the household")
-		return false, errors.New("unreachable")
-	}
-	rec := captureMarkerEditResponse(
-		NewPolicyPermissionMiddleware(
-			fakePermissionUserLoader{user: admin},
-			nil,
-			nil,
-			household,
-			newMiddlewarePolicyPDP(t),
-		),
-		adminClaims(),
-	)
-	if rec.code != http.StatusNoContent {
-		t.Fatalf("status = %d body = %s, want %d", rec.code, rec.body, http.StatusNoContent)
-	}
-}
-
 func TestPolicyMarkerEditMiddlewareAppliesGroupPermissionMask(t *testing.T) {
 	groupID := int64(3)
 	user := &models.User{

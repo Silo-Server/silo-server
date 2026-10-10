@@ -249,9 +249,9 @@ func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.H
 			return
 		}
 
-		// marker_edit reads no household fact (its admin grant is not an
-		// acting-admin decision, #1911), so skip that lookup.
-		facts, err := resolveActingAdminFacts(r, claims, m.checkPrimary, nil)
+		// The admin grant for marker_edit is an acting-admin decision (#1911),
+		// so the policy needs the same profile and household facts.
+		facts, err := m.actingAdminFacts(r, claims)
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
 			return
