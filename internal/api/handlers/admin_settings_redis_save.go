@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // errRedisSettingsMoved refuses a save whose Redis connection another save
@@ -59,7 +60,22 @@ func (h *AdminHandler) changedRedisConnection(stored, prospective map[string]str
 		return config.RedisConfig{}, false
 	}
 	current, _ := h.savedRedisConnection(stored)
-	return next, next != current
+	return next, !sameRedisConnection(next, current)
+}
+
+// sameRedisConnection reports whether a and b reach the same Redis on the same
+// database number. A redis.db row can name the number the URL already names,
+// so the number is compared as the clients read it.
+func sameRedisConnection(a, b config.RedisConfig) bool {
+	if a.URL != b.URL {
+		return false
+	}
+	dbA, okA := a.Database()
+	dbB, okB := b.Database()
+	if okA && okB {
+		return dbA == dbB
+	}
+	return a == b
 }
 
 // checkRedisSave connects to the Redis a save of changes moves the next start
@@ -84,8 +100,8 @@ func (h *AdminHandler) checkRedisSave(ctx context.Context, changes map[string]st
 	if !changed {
 		return config.RedisConfig{}, nil
 	}
-	if err := pingRedis(ctx, next); err != nil {
-		slog.WarnContext(ctx, "refused a Redis settings save that Silo could not connect with", "error", err)
+	if err := probeRedis(ctx, next); err != nil {
+		slog.WarnContext(ctx, "refused a Redis settings save that Silo could not connect with", "error", logredact.SanitizeText(err.Error()))
 		return config.RedisConfig{}, &APIError{Status: http.StatusBadRequest, Code: errCodeInvalidSettings, Message: redisSaveRefusal(err)}
 	}
 	return next, nil
@@ -95,7 +111,7 @@ func (h *AdminHandler) checkRedisSave(ctx context.Context, changes map[string]st
 // checkRedisSave checked, which happens when another save changed the stored
 // settings in between.
 func (h *AdminHandler) confirmRedisSave(stored, prospective map[string]string, checked config.RedisConfig) error {
-	if next, changed := h.changedRedisConnection(stored, prospective); changed && next != checked {
+	if next, changed := h.changedRedisConnection(stored, prospective); changed && !sameRedisConnection(next, checked) {
 		return errRedisSettingsMoved
 	}
 	return nil
@@ -104,7 +120,12 @@ func (h *AdminHandler) confirmRedisSave(stored, prospective map[string]string, c
 // redisSaveRefusal explains a failed connection without quoting the error,
 // which can name hosts and addresses.
 func redisSaveRefusal(err error) string {
-	if _, refused := errors.AsType[redis.Error](err); refused {
+	_, refused := errors.AsType[redis.Error](err)
+	if refused && errors.Is(err, errRedisChannelsRefused) {
+		return "Redis refused a subscription to Silo's event channels, so the server would not start with these settings. " +
+			"If the Redis user has an ACL, grant it the channel pattern &silo:*."
+	}
+	if refused {
 		return "Redis refused the connection, so the server would not start with these settings. " +
 			"Check the database number (0 to 15 on a Redis with the default 16 databases) and the user name and password in redis.url."
 	}

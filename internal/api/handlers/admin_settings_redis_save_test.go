@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
@@ -17,9 +19,9 @@ import (
 // tests about what a save stores rather than whether Redis answers.
 func acceptRedisSaves(t *testing.T) {
 	t.Helper()
-	previous := pingRedis
-	pingRedis = func(context.Context, config.RedisConfig) error { return nil }
-	t.Cleanup(func() { pingRedis = previous })
+	previous := probeRedis
+	probeRedis = func(context.Context, config.RedisConfig) error { return nil }
+	t.Cleanup(func() { probeRedis = previous })
 }
 
 // closedRedisURL returns a redis:// URL for a local port nothing listens on.
@@ -61,7 +63,8 @@ func saveRedisSetting(t *testing.T, handler *AdminHandler, key, value string, si
 // A start that cannot connect to the Redis its settings name stops the
 // server, and the value can then no longer be corrected in the admin UI.
 func TestAdminSettingsRefuseRedisSettingsTheServerCannotStartWith(t *testing.T) {
-	redis16, _ := fakeRedisServer(t, 16)
+	redis16, _ := fakeRedisServer(t, fakeRedis{databases: 16})
+	aclDenied, _ := fakeRedisServer(t, fakeRedis{denyChannels: true})
 	unreachable := closedRedisURL(t)
 	for _, tc := range []struct {
 		name       string
@@ -80,6 +83,12 @@ func TestAdminSettingsRefuseRedisSettingsTheServerCannotStartWith(t *testing.T) 
 			key:   "redis.url",
 			value: redis16 + "/99",
 			want:  "Redis refused the connection",
+		},
+		{
+			name:  "a Redis user whose ACL does not grant Silo's channels",
+			key:   "redis.url",
+			value: aclDenied + "/2",
+			want:  "Redis refused a subscription to Silo's event channels",
 		},
 		{
 			name:   "a redis.db the server does not have",
@@ -118,7 +127,7 @@ func TestAdminSettingsRefuseRedisSettingsTheServerCannotStartWith(t *testing.T) 
 func TestAdminSettingsSaveRedisSettingsTheServerCanStartWith(t *testing.T) {
 	t.Run("a database the server has is checked and stored", func(t *testing.T) {
 		for _, single := range []bool{false, true} {
-			redis16, checked := fakeRedisServer(t, 16)
+			redis16, checked := fakeRedisServer(t, fakeRedis{databases: 16})
 			settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": redis16 + "/3"}}
 			handler := &AdminHandler{SettingsRepo: settings}
 
@@ -154,6 +163,18 @@ func TestAdminSettingsSaveRedisSettingsTheServerCanStartWith(t *testing.T) {
 		}
 	})
 
+	// A URL saved after the row can name the row's number. Clearing the row
+	// then leaves the number in use as it is.
+	t.Run("a redis.db row the URL already names is not checked", func(t *testing.T) {
+		down := closedRedisURL(t) + "/3"
+		for _, single := range []bool{false, true} {
+			settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": down, "redis.db": "3"}}
+			if rec := saveRedisSetting(t, &AdminHandler{SettingsRepo: settings}, config.RedisDBSettingKey, "3", single); rec.Code != http.StatusOK {
+				t.Errorf("single=%v: status = %d, want 200; body=%s", single, rec.Code, rec.Body.String())
+			}
+		}
+	})
+
 	t.Run("clearing redis.url switches Redis off without a check", func(t *testing.T) {
 		for _, single := range []bool{false, true} {
 			settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": closedRedisURL(t), "redis.db": "5"}}
@@ -169,7 +190,7 @@ func TestAdminSettingsSaveRedisSettingsTheServerCanStartWith(t *testing.T) {
 
 // A batch checks the database number it stores against the URL it stores.
 func TestAdminSettingsCheckRedisURLAndDBSavedTogether(t *testing.T) {
-	redis16, checked := fakeRedisServer(t, 16)
+	redis16, checked := fakeRedisServer(t, fakeRedis{databases: 16})
 	settings := &fakeServerSettingsStore{values: map[string]string{"redis.url": closedRedisURL(t) + "/3"}}
 	body := `{"values":{"redis.url":"` + redis16 + `","redis.db":"7"}}`
 	rec := httptest.NewRecorder()
@@ -206,7 +227,7 @@ func (s *racingSettingsStore) GetAll(ctx context.Context) (map[string]string, er
 }
 
 func TestAdminSettingsRefuseRedisSaveWhenTheConnectionMovedDuringTheCheck(t *testing.T) {
-	redis16, _ := fakeRedisServer(t, 16)
+	redis16, _ := fakeRedisServer(t, fakeRedis{databases: 16})
 	for _, single := range []bool{false, true} {
 		moved := closedRedisURL(t)
 		settings := &racingSettingsStore{
@@ -223,5 +244,53 @@ func TestAdminSettingsRefuseRedisSaveWhenTheConnectionMovedDuringTheCheck(t *tes
 		if got := settings.values["redis.url"]; got != moved {
 			t.Errorf("single=%v: stored redis.url = %q, want the other save's URL left alone", single, got)
 		}
+	}
+}
+
+// A URL can turn the socket timeout off. The check still gives up when its
+// time is up, so a Redis that accepts the connection and never answers
+// cannot hold a save, or its connection, open.
+func TestRedisCheckGivesUpOnARedisThatNeverAnswers(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var (
+		mu    sync.Mutex
+		conns []net.Conn
+	)
+	t.Cleanup(func() {
+		_ = listener.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	})
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- probeRedis(ctx, config.RedisConfig{URL: "redis://" + listener.Addr().String() + "?read_timeout=-1&write_timeout=-1"})
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("the check succeeded against a Redis that never answers")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the check was still waiting 5 seconds after its context ended")
 	}
 }

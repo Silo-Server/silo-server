@@ -531,7 +531,7 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 		return connectionCheckResponse{Success: false, Message: "Redis URL is required."}
 	}
 
-	if err := pingRedis(ctx, cfg.Redis); err != nil {
+	if err := probeRedis(ctx, cfg.Redis); err != nil {
 		return connectionCheckResponse{
 			Success: false,
 			Message: fmt.Sprintf("Redis connection check failed: %v", err),
@@ -544,12 +544,20 @@ func checkRedisConnection(ctx context.Context, cfg *config.Config) connectionChe
 	}
 }
 
-// pingRedis connects to the Redis cfg names with the client Silo's services
-// use and sends a PING. Connecting selects the database number, so a number
-// the server does not have fails as well. The Redis connection check and a
+// errRedisChannelsRefused wraps the error Redis answers a subscription to the
+// event bus channels with.
+var errRedisChannelsRefused = errors.New("redis refused a subscription to Silo's event channels")
+
+// probeRedis does what a starting server needs from the Redis cfg names, with
+// the client Silo's services use: it connects, sends a PING and subscribes to
+// the event bus channels. Connecting selects the database number, so a number
+// the server does not have fails as well, and the subscription fails for a
+// user whose ACL does not grant the channels. The Redis connection check and a
 // save that changes the connection both run it.
-var pingRedis = func(ctx context.Context, cfg config.RedisConfig) error {
-	client, err := cache.NewRedisClientForRole(cfg, "checks")
+var probeRedis = func(ctx context.Context, cfg config.RedisConfig) error {
+	// The deadline client stops waiting when the check's time is up, even
+	// for a URL whose read_timeout disables the socket timeout.
+	client, err := cache.NewDeadlineRedisClientForRole(cfg, "checks")
 	if err != nil {
 		return err
 	}
@@ -560,7 +568,13 @@ var pingRedis = func(ctx context.Context, cfg config.RedisConfig) error {
 
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	return client.Ping(checkCtx).Err()
+	if err := client.Ping(checkCtx).Err(); err != nil {
+		return err
+	}
+	if err := cache.CheckEventBusChannels(checkCtx, client); err != nil {
+		return fmt.Errorf("%w: %w", errRedisChannelsRefused, err)
+	}
+	return nil
 }
 
 func checkRecommendationsEmbeddingConnection(

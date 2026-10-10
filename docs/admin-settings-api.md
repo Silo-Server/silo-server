@@ -124,22 +124,26 @@ single-server URL and for a Sentinel URL. A change needs a restart.
 
 A server that cannot connect to the Redis its stored settings name stops at its
 next start, and a stored value can then no longer be corrected in the admin UI.
-So a write that changes that connection connects to it first, with the client
-`POST /api/v2/admin/settings/check/redis` uses, and stores nothing when the
-connection fails.
+So a write that changes that connection first runs the check
+`POST /api/v2/admin/settings/check/redis` runs, and stores nothing when it
+fails. The check connects, sends a `PING` and subscribes to the event bus
+channels on the database number, which a starting server needs. It gives up
+after 10 seconds, even for a URL that turns the socket timeouts off.
 
 - The connection changes when the write leaves a different `redis.url`, or a
-  `redis.db` row that names a different number, than the stored ones. Both
+  different database number in use, than the stored settings. Both
   writes and both API versions apply the check. A write that leaves the
   connection as it is, clears `redis.url`, or runs in a process started with
   `REDIS_URL` connects to nothing.
 - Connecting selects the database number, so a number the Redis server does
   not have (16 or more on a Redis with the default 16 databases) fails the
-  same way an unreachable host does.
+  same way an unreachable host does. So does a Redis user whose ACL does not
+  grant the channels (the pattern `&silo:*`).
 - A failed connection answers a `422` validation problem on `/api/v2` and
   `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
-  the connection or could not be reached. It does not quote the client error,
-  which can name hosts and addresses; the server logs that error.
+  the connection, refused the channels, or could not be reached. It does not
+  quote the client error, which can name hosts and addresses; the server logs
+  that error with credentials masked.
 - The connection is made before the settings transaction. If another write
   changes the stored Redis settings in the meantime, the write is refused the
   same way and can be sent again.

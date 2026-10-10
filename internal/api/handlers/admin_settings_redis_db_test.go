@@ -389,13 +389,23 @@ func TestAdminSettingsClearRedisDBManagedByEnvironment(t *testing.T) {
 // database each PING used, so the check exercises the production Redis client.
 func redisCheckServer(t *testing.T) (string, <-chan int) {
 	t.Helper()
-	return fakeRedisServer(t, 0)
+	return fakeRedisServer(t, fakeRedis{})
 }
 
-// fakeRedisServer is redisCheckServer for a Redis with databases 0 to
-// databases-1, which refuses a SELECT of any other number the way Redis does.
-// With databases 0 it accepts every number.
-func fakeRedisServer(t *testing.T, databases int) (string, <-chan int) {
+// fakeRedis is the Redis fakeRedisServer plays.
+type fakeRedis struct {
+	// databases is how many databases the server has: it refuses a SELECT of
+	// any other number the way Redis does. With 0 it accepts every number.
+	databases int
+	// denyChannels refuses every SUBSCRIBE, as Redis does for a user whose
+	// ACL does not grant the channels.
+	denyChannels bool
+}
+
+// fakeRedisServer is redisCheckServer for the Redis server describes. It also
+// refuses a subscription to a channel not scoped to the selected database, so
+// a check that names the channels wrongly fails.
+func fakeRedisServer(t *testing.T, server fakeRedis) (string, <-chan int) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -450,7 +460,7 @@ func fakeRedisServer(t *testing.T, databases int) (string, <-chan int) {
 						if err != nil {
 							return
 						}
-						if databases > 0 && (n < 0 || n >= databases) {
+						if server.databases > 0 && (n < 0 || n >= server.databases) {
 							reply = "-ERR DB index is out of range\r\n"
 							break
 						}
@@ -461,6 +471,8 @@ func fakeRedisServer(t *testing.T, databases int) (string, <-chan int) {
 						default:
 						}
 						reply = "+PONG\r\n"
+					case "SUBSCRIBE":
+						reply = subscribeReply(server, db, args[1:])
 					}
 					if _, err := fmt.Fprint(conn, reply); err != nil {
 						return
@@ -470,6 +482,22 @@ func fakeRedisServer(t *testing.T, databases int) (string, <-chan int) {
 		}
 	}()
 	return "redis://" + listener.Addr().String(), checked
+}
+
+// subscribeReply answers a SUBSCRIBE of channels on database db.
+func subscribeReply(server fakeRedis, db int, channels []string) string {
+	var reply strings.Builder
+	for i, channel := range channels {
+		if server.denyChannels {
+			return "-NOPERM User default has no permissions to access the '" + channel + "' channel\r\n"
+		}
+		_, scope, _ := strings.Cut(channel, "@")
+		if want := "db" + strconv.Itoa(db); (db > 0 && scope != want) || (db == 0 && scope != "") {
+			return "-ERR channel " + channel + " is not scoped to database " + strconv.Itoa(db) + "\r\n"
+		}
+		fmt.Fprintf(&reply, "*3\r\n$9\r\nsubscribe\r\n$%d\r\n%s\r\n:%d\r\n", len(channel), channel, i+1)
+	}
+	return reply.String()
 }
 
 func TestRedisConnectionCheckUsesRedisDB(t *testing.T) {

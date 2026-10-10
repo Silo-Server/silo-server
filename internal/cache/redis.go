@@ -257,6 +257,26 @@ func redisChannel(channel string, db int) string {
 	return channel + "@db" + strconv.Itoa(db)
 }
 
+// eventBusChannels are the channels a starting server subscribes to. Redis
+// refuses a subscription that the user's ACL does not grant, and a refused
+// subscription stops the start.
+var eventBusChannels = []string{ChannelCatalog, ChannelAdmin, ChannelPlayback, ChannelLogs, ChannelEvents}
+
+// CheckEventBusChannels subscribes client to every event bus channel on its
+// database number, as a starting server does, and returns the error Redis
+// answers with. It leaves no subscription behind.
+func CheckEventBusChannels(ctx context.Context, client *redis.Client) error {
+	db := client.Options().DB
+	channels := make([]string, 0, len(eventBusChannels))
+	for _, channel := range eventBusChannels {
+		channels = append(channels, redisChannel(channel, db))
+	}
+	pubsub := client.Subscribe(ctx, channels...)
+	defer func() { _ = pubsub.Close() }()
+	_, err := pubsub.Receive(ctx)
+	return err
+}
+
 // Publish serializes the event as JSON and publishes it on the given
 // channel, scoped to the bus's database number.
 func (r *RedisEventBus) Publish(ctx context.Context, channel string, event Event) error {
