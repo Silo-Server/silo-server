@@ -261,7 +261,8 @@ func (h *PeopleHandler) RefreshPerson(ctx context.Context, userID int, id int64,
 		}
 		return limited
 	}
-	if _, err := h.visiblePerson(ctx, id, filter); err != nil {
+	person, err := h.visiblePerson(ctx, id, filter)
+	if err != nil {
 		return err
 	}
 	h.refreshQueue.Enqueue(id, person.MetadataRefreshAttemptedAt)
