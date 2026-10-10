@@ -248,3 +248,68 @@ func submitWithPluginError(t *testing.T, pluginErr error) (SubmissionResult, err
 		Segment:     MarkerKindIntro,
 	})
 }
+
+func TestReadOnlyPluginProviderIsFetchOnly(t *testing.T) {
+	client := &fakePluginMarkerClient{fetchResp: &pluginv1.FetchMarkersResponse{}}
+	inner, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
+		InstallationID: 42,
+		CapabilityID:   "public-markers",
+		DisplayName:    "Public markers",
+		PluginID:       "silo.public-markers",
+		CacheRevision:  "config-revision",
+	}, func(context.Context, int, string) (pluginMarkerClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
+	}
+	var provider Provider = NewReadOnlyPluginProvider(inner)
+	if _, ok := provider.(Submitter); ok {
+		t.Fatal("read-only plugin provider implements Submitter, so it would receive contribution jobs")
+	}
+	if _, ok := provider.(SubmissionRequirementProvider); ok {
+		t.Fatal("read-only plugin provider exposes submission requirements")
+	}
+	if _, err := provider.FetchMarkers(context.Background(), Request{Kind: ItemKindEpisode}); err != nil {
+		t.Fatalf("FetchMarkers: %v", err)
+	}
+	if client.fetchReq == nil {
+		t.Fatal("FetchMarkers was not delegated")
+	}
+	if provider.ID() != inner.ID() {
+		t.Fatalf("ID = %q, want %q", provider.ID(), inner.ID())
+	}
+	// Population keys its cache by CacheRevision, and plugin reload compares it
+	// to decide whether to refresh the runtime.
+	revisioned, ok := provider.(interface{ CacheRevision() string })
+	if !ok || revisioned.CacheRevision() != inner.CacheRevision() {
+		t.Fatalf("CacheRevision not forwarded: ok=%v", ok)
+	}
+	described, ok := provider.(DescribedProvider)
+	if !ok || described.ProviderDescription() != inner.ProviderDescription() {
+		t.Fatalf("description not forwarded: ok=%v", ok)
+	}
+}
+
+func TestPluginSupportsContributionFromMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata map[string]any
+		want     bool
+	}{
+		{name: "key absent keeps legacy submitters", metadata: map[string]any{"default_fetch_priority": 20}, want: true},
+		{name: "nil metadata", metadata: nil, want: true},
+		{name: "explicit true", metadata: map[string]any{"supports_contribution": true}, want: true},
+		{name: "explicit false", metadata: map[string]any{"supports_contribution": false}, want: false},
+		{name: "string false", metadata: map[string]any{"supports_contribution": " false "}, want: false},
+		{name: "unparseable string stays compatible", metadata: map[string]any{"supports_contribution": "nope"}, want: true},
+		{name: "wrong type stays compatible", metadata: map[string]any{"supports_contribution": 0}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PluginSupportsContributionFromMetadata(tt.metadata); got != tt.want {
+				t.Fatalf("PluginSupportsContributionFromMetadata() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

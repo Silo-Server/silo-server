@@ -213,3 +213,36 @@ func TestReloadMarkerPluginProvidersRemovesProviderOnConfigReadFailure(t *testin
 		t.Fatalf("providers = %+v, want only the healthy provider", providers)
 	}
 }
+
+func TestReloadMarkerPluginProvidersHonorsSupportsContribution(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		metadata   map[string]any
+		wantSubmit bool
+	}{
+		{name: "manifest without the key keeps submissions", metadata: nil, wantSubmit: true},
+		{name: "fetch-only manifest", metadata: map[string]any{"metadata": map[string]any{"supports_contribution": false}}, wantSubmit: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeMarkerCapabilities{
+				installations: []*plugins.Installation{{ID: 42, PluginID: "silo.public-markers", Version: "1.0.0"}},
+				capabilities: map[int][]*plugins.Capability{
+					42: {{InstallationID: 42, Type: sdkcapability.MarkerProvider, ID: "markers", Metadata: test.metadata}},
+				},
+			}
+			runtimeConfigs := &fakeMarkerRuntimeConfigs{configs: map[int][]*plugins.RuntimeConfig{}}
+			registry := markers.NewRegistry(nil)
+			resolver := markers.NewPluginResolverAdapter(&unusedMarkerPluginResolver{})
+			if err := reloadMarkerPluginProviders(context.Background(), registry, nil, store, runtimeConfigs, nil, resolver); err != nil {
+				t.Fatalf("reloadMarkerPluginProviders: %v", err)
+			}
+			providers := registry.Providers()
+			if len(providers) != 1 {
+				t.Fatalf("providers = %d, want 1", len(providers))
+			}
+			if _, ok := providers[0].(markers.Submitter); ok != test.wantSubmit {
+				t.Fatalf("provider %T implements Submitter = %v, want %v", providers[0], ok, test.wantSubmit)
+			}
+		})
+	}
+}
