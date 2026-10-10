@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { settingsRestartPending } from "@/hooks/admin/useSettingsOverview";
+import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { useBranding } from "@/hooks/useBranding";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
@@ -95,10 +97,15 @@ const BUILT_IN_OVERLAY_DEFAULTS = serializeOverlayPrefs(buildDefaultPrefs());
  */
 const KEYS = [...THEME_KEYS, ...OVERLAY_KEYS];
 
+// Artwork-storage keys that only take effect after a restart. A saved change
+// to one of them cannot flip branding.storageAvailable until then.
+const ARTWORK_STORAGE_RESTART_KEYS = ["artwork.storage_backend", "artwork.local_path"];
+
 export default function AppearanceSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const branding = useBranding();
   const restartKeys = useRestartKeys();
+  const { data: serverStatus } = useAdminServerStatus();
   const shownRatingSources = useShownRatingSources();
 
   // The CSS box shows exactly what was typed while the staged value is the
@@ -132,6 +139,8 @@ export default function AppearanceSettings() {
   // settings response so the uploads can still be gated on it.
   const s3Configured = Boolean(form.getValue("s3.public_bucket"));
   const assetStorageAvailable = branding.storageAvailable;
+  const uploadsRestartPending =
+    s3Configured || settingsRestartPending(serverStatus, ARTWORK_STORAGE_RESTART_KEYS);
 
   const overlaysEnabled = form.getValue(OVERLAYS_ENABLED_KEY) !== "false";
   const overlayPrefs = parseOverlayPrefs(
@@ -232,11 +241,11 @@ export default function AppearanceSettings() {
             <div className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                {s3Configured ? (
+                {uploadsRestartPending ? (
                   <>Restart the server to finish enabling image uploads.</>
                 ) : (
                   <>
-                    Image uploads need a public S3 bucket, set in{" "}
+                    Image uploads need artwork storage (local disk or S3), set in{" "}
                     <span className="text-foreground font-medium">Storage &amp; Database</span>{" "}
                     settings.
                   </>
