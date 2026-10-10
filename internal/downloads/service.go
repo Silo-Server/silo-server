@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -1515,6 +1516,9 @@ func (s *Service) serveLocalFile(ctx context.Context, w http.ResponseWriter, r *
 
 	w.Header().Set("Content-Disposition", attachmentDisposition(path))
 	w.Header().Set("Content-Type", playback.MimeFromExtension(path))
+	if etag := serveEntityTag(ctx, f, stat); etag != "" {
+		w.Header().Set("ETag", etag)
+	}
 
 	var reader io.ReadSeeker = f
 	if s.bandwidth != nil {
@@ -1595,9 +1599,11 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// attachmentDisposition names the saved file in the header form proxy nodes
+// use. A non-ASCII name goes out in the RFC 2231 filename* form rather than
+// as raw UTF-8 in filename, which clients may misread.
 func attachmentDisposition(path string) string {
-	filename := sanitizeFilename(filepath.Base(path))
-	return fmt.Sprintf(`attachment; filename="%s"`, filename)
+	return mime.FormatMediaType("attachment", map[string]string{"filename": sanitizeFilename(filepath.Base(path))})
 }
 
 func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r *http.Request, target *FileTarget, userID int) error {

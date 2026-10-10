@@ -257,6 +257,10 @@ type Dependencies struct {
 	ChapterThumbnailQueuer catalog.ChapterThumbnailQueuer
 	PlaybackRealtimeHub    *playback.RealtimeHub
 	OnUserSessionsRevoked  func(ctx context.Context, userID int)
+	// OnDownloadService receives the configured download service when the
+	// router builds one, so the Jellyfin-compatible listener serves its
+	// downloads under the same policy and bandwidth limiters. Optional.
+	OnDownloadService func(*downloads.Service)
 	// v2Wiring observes the sealed v2 dependency set right before
 	// apiv2.NewHandler consumes it; tests only. It is the one way to assert
 	// that a v1 handler reached the v2 listener, since NewRouter returns a
@@ -2199,6 +2203,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.UserStoreProvider != nil {
 			// delete_watched monitors skip episodes the profile has finished.
 			downloadSvc.SetProgressStores(deps.UserStoreProvider)
+		}
+		if deps.OnDownloadService != nil {
+			deps.OnDownloadService(downloadSvc)
 		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 		if jwtService != nil {

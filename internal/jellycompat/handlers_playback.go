@@ -312,6 +312,8 @@ type PlaybackHandler struct {
 	playbackStore           CompatPlaybackStore
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
+	downloads               DownloadServer       // nil refuses /Items/{id}/Download
+	accessFilter            AccessFilterResolver // the viewer's scope for downloads
 	storeProvider           userstore.UserStoreProvider
 	ScopeResolver           ScopeResolver
 	NodePlanner             nodepool.SessionPlanner

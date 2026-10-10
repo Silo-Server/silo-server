@@ -691,6 +691,8 @@ Browser/web convenience path. It is synchronous and original-only. Mobile client
 should use managed `POST /api/v2/downloads` plus `/api/v2/downloads/{id}/file`.
 `file_id` is a canonical positive decimal string; `format` may be absent, empty, or
 `original`. Duplicate and unknown query parameters return `422`.
+The Jellyfin-compatible `/Items/{id}/Download` route serves through the same
+path and rules; see [jellycompat-api.md](jellycompat-api.md).
 
 A browser navigation cannot send headers, so it opens a short-lived link
 instead. Mint one with an ordinary profile-scoped request:

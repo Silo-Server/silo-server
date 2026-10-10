@@ -3350,6 +3350,11 @@ func main() {
 			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
+	// Jellyfin-compatible downloads go through the router's download service,
+	// so they meet the same policy and share its bandwidth limiters. It stays
+	// a nil interface when the router builds no service, which refuses them.
+	var compatDownloads jellycompat.DownloadServer
+	deps.OnDownloadService = func(svc *downloads.Service) { compatDownloads = svc }
 
 	distFS, fsErr := fs.Sub(siloweb.DistFS, "dist")
 	if fsErr != nil {
@@ -3599,6 +3604,7 @@ func main() {
 				compatDeps.FileResolver = deps.FileRepo
 				compatDeps.MediaSourceOwners = deps.FileRepo
 			}
+			compatDeps.Downloads = compatDownloads
 
 			compatDeps.SubtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 
