@@ -151,8 +151,7 @@ func (s *PostgresUserStore) SetProgressAt(ctx context.Context, profileID, mediaI
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	updatedAtText := updatedAt.UTC().Format(time.RFC3339)
-	suppressed, err := s.historyIsHidden(ctx, profileID, mediaItemID, updatedAtText)
+	suppressed, err := s.historyIsHidden(ctx, profileID, mediaItemID, updatedAt.UTC())
 	if err != nil {
 		return err
 	}
@@ -189,8 +188,7 @@ func (s *PostgresUserStore) SetProgressIfNewer(ctx context.Context, profileID, m
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	updatedAtText := updatedAt.UTC().Format(time.RFC3339)
-	suppressed, err := s.historyIsHidden(ctx, profileID, mediaItemID, updatedAtText)
+	suppressed, err := s.historyIsHidden(ctx, profileID, mediaItemID, updatedAt.UTC())
 	if err != nil {
 		return false, err
 	}
@@ -1141,7 +1139,11 @@ func (s *PostgresUserStore) AddHistory(ctx context.Context, entry userstore.Watc
 	if entry.Source == "" {
 		entry.Source = userstore.WatchHistorySourceLegacy
 	}
-	suppressed, err := s.historyIsHidden(ctx, entry.ProfileID, entry.MediaItemID, entry.WatchedAt)
+	watchedAt, err := time.Parse(time.RFC3339Nano, entry.WatchedAt)
+	if err != nil {
+		return fmt.Errorf("parsing history watched_at: %w", err)
+	}
+	suppressed, err := s.historyIsHidden(ctx, entry.ProfileID, entry.MediaItemID, watchedAt)
 	if err != nil {
 		return err
 	}
@@ -1156,7 +1158,7 @@ func (s *PostgresUserStore) AddHistory(ctx context.Context, entry userstore.Watc
 		INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID,
-		entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source,
+		watchedAt, entry.DurationSeconds, entry.Completed, entry.Source,
 		string(identityJSON),
 	)
 	if err != nil {
@@ -1228,6 +1230,10 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	if entry.Source == "" {
 		entry.Source = userstore.WatchHistorySourceLegacy
 	}
+	watchedAt, err := time.Parse(time.RFC3339Nano, entry.WatchedAt)
+	if err != nil {
+		return false, fmt.Errorf("parsing imported history watched_at: %w", err)
+	}
 	identityJSON, err := json.Marshal(entry.Identity)
 	if err != nil {
 		return false, fmt.Errorf("marshaling watch identity: %w", err)
@@ -1242,20 +1248,32 @@ func (s *PostgresUserStore) AddHistoryIfMissing(ctx context.Context, entry users
 	if err := lockImportedHistory(ctx, tx, s.userID, entry.ProfileID); err != nil {
 		return false, err
 	}
+	// The watermark is compared at full precision ($5), so an import later in
+	// the same second as a removal is kept. It is stored at the whole second
+	// ($10), as imports always were, unless that second is at or before the
+	// watermark; then it keeps its precise time to stay visible. Any row in the
+	// same second counts as the same play, whichever precision it was kept at.
 	tag, err := tx.Exec(ctx, `
-
+        WITH visible AS (
+            SELECT CASE
+                WHEN hhi.hidden_before IS NULL OR $10::timestamptz > hhi.hidden_before THEN $10::timestamptz
+                ELSE $5::timestamptz
+            END AS watched_at
+            FROM (SELECT 1) seed
+            LEFT JOIN user_history_hidden_items hhi
+              ON hhi.user_id = $2 AND hhi.profile_id = $3 AND hhi.media_item_id = $4
+            WHERE hhi.hidden_before IS NULL OR $5::timestamptz > hhi.hidden_before
+        )
         INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed, source, watch_identity)
-        SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+        SELECT $1, $2, $3, $4, visible.watched_at, $6, $7, $8, $9
+        FROM visible
         WHERE NOT EXISTS (
-            SELECT 1 FROM user_history_hidden_items
-            WHERE user_id = $2 AND profile_id = $3 AND media_item_id = $4
-              AND hidden_before >= $5::timestamptz
-        ) AND NOT EXISTS (
             SELECT 1 FROM user_watch_history
             WHERE user_id = $2 AND profile_id = $3 AND media_item_id = $4
-              AND watched_at = $5::timestamptz
+              AND watched_at >= $10::timestamptz AND watched_at < $10::timestamptz + interval '1 second'
         )`,
-		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID, entry.WatchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON))
+		entry.ID, s.userID, entry.ProfileID, entry.MediaItemID, watchedAt, entry.DurationSeconds, entry.Completed, entry.Source, string(identityJSON),
+		watchedAt.Truncate(time.Second))
 	if err != nil {
 		return false, fmt.Errorf("adding missing history: %w", err)
 	}
@@ -1581,9 +1599,13 @@ func (s *PostgresUserStore) DeleteHistoryBySource(ctx context.Context, profileID
 	return nil
 }
 
+// historyIsHidden reports whether a write at watchedAt is at or before the
+// item's removal watermark. Both are compared as timestamptz, to the
+// microsecond, so a write later in the same second as a removal stays visible.
 func (s *PostgresUserStore) historyIsHidden(
 	ctx context.Context,
-	profileID, mediaItemID, watchedAt string,
+	profileID, mediaItemID string,
+	watchedAt time.Time,
 ) (bool, error) {
 	var exists bool
 	if err := s.pool.QueryRow(ctx, `
