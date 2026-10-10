@@ -55,6 +55,9 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
 
+# Autoscan event retention deletes old finished events in bounded batches and keeps recent and running ones.
+./internal/autoscan TestRepositoryPruneEventsKeepsRecentAndRunningEventsDB
+
 # Persisted failure text stays valid UTF-8 and bounded.
 ./internal/trickplay TestFinishAcceptsTruncatedUTF8ErrorDB
 

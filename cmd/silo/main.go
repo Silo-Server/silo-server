@@ -2970,6 +2970,9 @@ func main() {
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
 		maintenanceSteps = append(maintenanceSteps,
 			tasks.NewTaskHistoryCleanupTask(historyRepo, settingsRepo),
+			// Wired outside the autoscan service so events left by a disabled
+			// or unconfigured autoscan still age out.
+			tasks.NewAutoscanEventCleanupTask(autoscan.NewRepository(deps.DB, deps.SecretCipher), settingsRepo),
 			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
 			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
 			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
