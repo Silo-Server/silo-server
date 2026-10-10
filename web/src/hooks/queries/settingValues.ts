@@ -13,7 +13,7 @@ import {
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { ShortcutTarget } from "@/lib/uiCustomization";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
-import { deviceKeys, libraryKeys, sectionKeys, settingsKeys } from "./keys";
+import { deviceKeys, libraryKeys, mediaSurfaceKeys, sectionKeys, settingsKeys } from "./keys";
 
 /**
  * Typed access to the canonical settings API.
@@ -327,6 +327,37 @@ function refreshLibrariesForSetting(queryClient: ReturnType<typeof useQueryClien
   return queryClient.invalidateQueries({ queryKey: libraryKeys.all });
 }
 
+const METADATA_LANGUAGE_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+]);
+
+// The metadata language decides the localized titles and descriptions in
+// nearly every media read (catalog, home sections, search, collections,
+// people), so a change marks all of them stale rather than a hand-kept list.
+// Mounted screens refetch on their next render cycle; Home also resets its
+// observer-less load queue. Settings reads are refreshed by the caller, and the
+// client-only home signal must keep its counter.
+async function refreshLocalizedMediaForSetting(
+  queryClient: ReturnType<typeof useQueryClient>,
+  key?: string,
+) {
+  if (!key || !METADATA_LANGUAGE_KEYS.has(key)) return;
+  const [settingsRoot] = settingsKeys.all;
+  const [signalRoot] = mediaSurfaceKeys.refreshSignal();
+  // Home and library rows load through observer-less fetches that
+  // invalidation neither cancels nor refetches. Cancel them first, so a row
+  // still loading in the old language cannot land and look fresh.
+  await queryClient.cancelQueries({ queryKey: sectionKeys.all });
+  const invalidated = queryClient.invalidateQueries({
+    predicate: (query) => query.queryKey[0] !== settingsRoot && query.queryKey[0] !== signalRoot,
+  });
+  // Every entry is already marked stale; restart Home's load queue now
+  // rather than after the active refetches settle.
+  bumpHomeRefreshSignal(queryClient);
+  await invalidated;
+}
+
 /** Refreshes the reads a setting write changes, as useSetSettingValue does. */
 export function invalidateSettingValueQueries(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -337,6 +368,7 @@ export function invalidateSettingValueQueries(
     queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] }),
     refreshHomeForSetting(queryClient, key),
     refreshLibrariesForSetting(queryClient, key),
+    refreshLocalizedMediaForSetting(queryClient, key),
   ];
   // A device-scoped write changes that device's "how many things differ"
   // count, which the device list shows. Without this the badge stays stale
@@ -577,6 +609,7 @@ export function useSettingValuesRealtime() {
         qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
         void refreshHomeForSetting(qc, event.data?.key);
         void refreshLibrariesForSetting(qc, event.data?.key);
+        void refreshLocalizedMediaForSetting(qc, event.data?.key);
       },
     }),
     [qc],

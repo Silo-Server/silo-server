@@ -5,7 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { deviceKeys, libraryKeys, mediaSurfaceKeys, sectionKeys, settingsKeys } from "./keys";
+import {
+  catalogKeys,
+  deviceKeys,
+  libraryKeys,
+  mediaSurfaceKeys,
+  sectionKeys,
+  settingsKeys,
+} from "./keys";
 import { useClearSettingValue, useSetSettingValue } from "./settingValues";
 
 const v2Mock = vi.hoisted(() => vi.fn());
@@ -117,6 +124,69 @@ describe("typed setting mutations", () => {
       });
     });
     expect(queryClient.getQueryState(librariesKey)?.isInvalidated).toBe(true);
+  });
+
+  it.each([
+    SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+    SETTING_KEYS.CATALOG_METADATA_LANGUAGE_OVERRIDES,
+  ])("marks localized media stale when %s changes", async (key) => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const detailKey = catalogKeys.itemDetail("movie-1");
+    const homeKey = sectionKeys.homeItems("recent");
+    queryClient.setQueryData(detailKey, { content_id: "movie-1", overview: "English" });
+    queryClient.setQueryData(homeKey, { section: { items: [] } });
+    queryClient.setQueryData(mediaSurfaceKeys.refreshSignal(), 0);
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ key, value: "de", identity: { scope: "profile" } });
+    });
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(homeKey)?.isInvalidated).toBe(true);
+    // The home signal is bumped, not reset by its own invalidation.
+    expect(queryClient.getQueryState(mediaSurfaceKeys.refreshSignal())?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryData(mediaSurfaceKeys.refreshSignal())).toBe(1);
+  });
+
+  it("cancels a Home row still loading in the old language", async () => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const homeKey = sectionKeys.homeItems("recent");
+    let resolveRow!: (value: object) => void;
+    const loading = queryClient
+      .fetchQuery({
+        queryKey: homeKey,
+        queryFn: () => new Promise<object>((resolve) => (resolveRow = resolve)),
+      })
+      .catch(() => undefined);
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+        value: "fr",
+        identity: { scope: "profile" },
+      });
+    });
+    resolveRow({ section: { items: [{ overview: "Deutsch" }] } });
+    await loading;
+    // The old-language answer did not land as fresh data.
+    expect(queryClient.getQueryData(homeKey)).toBeUndefined();
+  });
+
+  it("keeps catalog reads cached after an unrelated setting changes", async () => {
+    v2Mock.mockResolvedValueOnce({});
+    const { queryClient, wrapper } = createHarness();
+    const detailKey = catalogKeys.itemDetail("movie-1");
+    queryClient.setQueryData(detailKey, { content_id: "movie-1" });
+    const { result } = renderHook(() => useSetSettingValue(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        key: SETTING_KEYS.UI_THEME,
+        value: "dark",
+        identity: { scope: "profile" },
+      });
+    });
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(false);
   });
 
   it("does not invalidate effective settings after a definitive rejected write", async () => {
